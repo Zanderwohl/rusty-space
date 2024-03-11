@@ -1,4 +1,4 @@
-use glam::Vec3;
+use glam::DVec3;
 use crate::body::body::{Body, BodyProperties};
 
 pub struct KeplerBody {
@@ -7,12 +7,16 @@ pub struct KeplerBody {
 }
 
 impl Body for KeplerBody {
-    fn global_position(&self) -> Vec3 {
+    fn global_position(&self) -> DVec3 {
         todo!()
     }
 
-    fn time_step(&mut self, delta: i128) {
+    fn global_position_after_time(&self, delta: f64) -> DVec3 {
         todo!()
+    }
+
+    fn mass(&self) -> f64 {
+        self.properties.mass
     }
 }
 
