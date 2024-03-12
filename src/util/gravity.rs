@@ -18,7 +18,3 @@ fn one_body_acceleration(local_gravity_mu: f64, a_to_b: DVec3) -> DVec3 {
     let directionless = -(local_gravity_mu / (distance * distance *  distance));
     directionless * a_to_b
 }
-
-fn angular_momentum(displacement: DVec3, velocity: DVec3) -> DVec3 {
-    displacement.cross(velocity)
-}
