@@ -22,7 +22,7 @@ impl Body for KeplerBody {
 
 struct KeplerElements {
     time_element: KeplerTimeElement,
-    eccentricity: i64,
+    eccentricity: f64,
     semi_major_axis_millimeters: u128,
     inclination: i64,
     longitude_of_ascending_node: i64,
