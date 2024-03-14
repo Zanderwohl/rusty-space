@@ -1,0 +1,20 @@
+use bevy::prelude::*;
+use crate::gui;
+use crate::gui::{menu, splash};
+use crate::gui::common::{DisplayQuality, Volume};
+
+
+pub(crate) fn open() {
+    App::new()
+        .add_plugins(DefaultPlugins)
+        .insert_resource(DisplayQuality::Medium)
+        .insert_resource(Volume(7))
+        .init_state::<gui::common::AppState>()
+        .add_systems(Startup, setup)
+        .add_plugins((splash::splash_plugin, menu::main::menu_plugin))
+        .run();
+}
+
+fn setup(mut commands: Commands) {
+    commands.spawn(Camera2dBundle::default());
+}

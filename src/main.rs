@@ -1,6 +1,7 @@
 mod body;
 pub mod util;
+mod gui;
 
 fn main() {
-    println!("Hello, world!");
+    gui::app::open();
 }

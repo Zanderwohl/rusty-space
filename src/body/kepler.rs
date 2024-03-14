@@ -18,6 +18,10 @@ impl Body for KeplerBody {
     fn mass(&self) -> f64 {
         self.properties.mass
     }
+
+    fn name(&self) -> &String {
+        &self.properties.name
+    }
 }
 
 struct KeplerElements {

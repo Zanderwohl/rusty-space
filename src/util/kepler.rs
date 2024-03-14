@@ -1,5 +1,3 @@
-use crate::util::common;
-
 pub mod mean_anomaly {
 
     pub fn definition(mean_anomaly_at_epoch: f64,
@@ -48,11 +46,10 @@ pub mod local {
 }
 
 mod third_law {
-    use num_traits::float::FloatConst;
     pub(crate) const FOUR_PI_SQUARED: f64 = 4.0 * std::f64::consts::PI * std::f64::consts::PI;
 
     pub(crate) fn reused_term(semi_major_axis: f64) -> f64 {
-        (FOUR_PI_SQUARED * semi_major_axis * semi_major_axis * semi_major_axis)
+        FOUR_PI_SQUARED * semi_major_axis * semi_major_axis * semi_major_axis
     }
 }
 
@@ -124,7 +121,6 @@ pub mod eccentric_anomaly {
 pub mod true_anomaly {
     use glam::DVec3;
     use crate::util::common::unit_circle_xy;
-    use crate::util::kepler::angular_motion::mean;
 
     pub fn at_time(eccentric_anomaly: f64, eccentricity: f64) -> f64 {
         let beta = eccentricity / (1.0 + unit_circle_xy(eccentricity));

@@ -1,4 +1,4 @@
-use glam::{DVec2, DVec3};
+use glam::DVec3;
 use crate::body::body::{Body, BodyProperties};
 
 
@@ -19,5 +19,9 @@ impl Body for NewtonBody {
 
     fn mass(&self) -> f64 {
         self.properties.mass
+    }
+
+    fn name(&self) -> &String {
+        &self.properties.name
     }
 }

@@ -1,4 +1,3 @@
-use std::ops::Mul;
 use glam::DVec3;
 
 /// Masses in grams, displacement in meters.
