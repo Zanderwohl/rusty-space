@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
-use bevy::{app::AppExit, prelude::*};
-use crate::gui::common::{AppState, DisplayQuality, Volume, despawn_screen, TEXT_COLOR};
+use bevy::{app::AppExit};
+use super::super::common::{AppState, DisplayQuality, Volume, despawn_screen, TEXT_COLOR};
 
 // This plugin manages the menu, with 5 different screens:
 // - a main menu with "New Game", "Settings", "Quit"

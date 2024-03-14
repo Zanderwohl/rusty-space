@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use crate::gui;
-use crate::gui::{menu, splash};
+use crate::gui::{editor, menu, splash};
 use crate::gui::common::{DisplayQuality, Volume};
 
 
@@ -11,7 +11,11 @@ pub(crate) fn open() {
         .insert_resource(Volume(7))
         .init_state::<gui::common::AppState>()
         .add_systems(Startup, setup)
-        .add_plugins((splash::splash_plugin, menu::main::menu_plugin))
+        .add_plugins((
+            splash::splash_plugin,
+            menu::main::menu_plugin,
+            editor::display::editor_plugin,
+        ))
         .run();
 }
 
