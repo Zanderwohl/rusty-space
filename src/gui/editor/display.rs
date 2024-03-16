@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use crate::gui::common;
-use crate::gui::common::text_style;
+use crate::gui::common::text;
 
-use super::super::common::{despawn_screen, DisplayQuality, AppState, Volume, TEXT_COLOR};
+use super::super::common::{despawn_screen, DisplayQuality, AppState, Volume};
 
 // This plugin will contain the game. In this case, it's just be a screen that will
 // display the current settings for 5 seconds before returning to the menu
@@ -48,7 +48,7 @@ fn editor_setup(
                     parent.spawn(
                         TextBundle::from_section(
                             "Will be back to the menu shortly...",
-                            common::text_style(),
+                            text::primary(),
                         )
                             .with_style(Style {
                                 margin: UiRect::all(Val::Px(50.0)),
@@ -67,7 +67,7 @@ fn editor_setup(
                             ),
                             TextSection::new(
                                 " - ",
-                                text_style(),
+                                text::primary(),
                             ),
                             TextSection::new(
                                 format!("volume: {:?}", *volume),

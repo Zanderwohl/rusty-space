@@ -1,4 +1,3 @@
-use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
 
 #[derive(Clone, Copy, Default, Eq, PartialEq, Debug, Hash, States)]
@@ -29,8 +28,6 @@ pub(crate) fn despawn_screen<T: Component>(to_despawn: Query<Entity, With<T>>, m
     }
 }
 
-pub const TEXT_COLOR: Color = Color::rgb(0.9, 0.9, 0.9);
-
 pub(crate) fn base_screen(mut commands: &mut Commands) -> Entity {
     commands.spawn((
         NodeBundle {
@@ -57,11 +54,25 @@ pub(crate) fn button_style() -> Style {
         ..default()
     }
 }
+pub mod text {
+    use bevy::prelude::{default, TextStyle};
+    use crate::gui::common::color::TEXT_COLOR;
 
-pub(crate) fn text_style() -> TextStyle {
-    TextStyle {
-        font_size: 40.0,
-        color: TEXT_COLOR,
-        ..default()
+    pub(crate) fn primary() -> TextStyle {
+        TextStyle {
+            font_size: 40.0,
+            color: TEXT_COLOR,
+            ..default()
+        }
     }
+}
+
+pub mod color {
+    use bevy::prelude::Color;
+
+    pub const TEXT_COLOR: Color = Color::rgb(0.9, 0.9, 0.9);
+    pub const NORMAL_BUTTON: Color = Color::rgb(0.15, 0.15, 0.15);
+    pub const HOVERED_BUTTON: Color = Color::rgb(0.25, 0.25, 0.25);
+    pub const HOVERED_PRESSED_BUTTON: Color = Color::rgb(0.25, 0.65, 0.25);
+    pub const PRESSED_BUTTON: Color = Color::rgb(0.35, 0.75, 0.35);
 }
