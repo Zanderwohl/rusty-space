@@ -1,9 +1,12 @@
-use bevy::prelude::{AlignItems, ButtonBundle, Color, Commands, default, FlexDirection, NodeBundle, Res, Style, TextBundle, Val};
+use bevy::prelude::{AlignItems, ButtonBundle, Color, Commands, Component, default, FlexDirection, NodeBundle, Res, Style, TextBundle, Val};
 use bevy::hierarchy::BuildChildren;
 use crate::gui::common;
 use crate::gui::common::{text, Volume};
 use crate::gui::common::color::NORMAL_BUTTON;
 use crate::gui::menu::main::{MenuButtonAction, OnSoundSettingsMenuScreen, SelectedOption};
+
+#[derive(Component)]
+pub struct VolumeSetting;
 
 pub fn sound_settings_menu_setup(mut commands: Commands, volume: Res<Volume>) {
     let button_style = common::button_style();
@@ -50,6 +53,7 @@ pub fn sound_settings_menu_setup(mut commands: Commands, volume: Res<Volume>) {
                                         ..default()
                                     },
                                     Volume(volume_setting),
+                                    VolumeSetting,
                                 ));
                                 if *volume == Volume(volume_setting) {
                                     entity.insert(SelectedOption);

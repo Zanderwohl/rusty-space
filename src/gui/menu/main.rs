@@ -2,9 +2,11 @@ use bevy::prelude::*;
 
 use bevy::app::AppExit;
 use crate::gui::common;
-use crate::gui::common::text;
+use crate::gui::common::{BackGlow, text};
 use crate::gui::common::color::{HOVERED_BUTTON, HOVERED_PRESSED_BUTTON, NORMAL_BUTTON, PRESSED_BUTTON};
 use crate::gui::menu::{settings, settings_display, settings_sound};
+use crate::gui::menu::settings_display::{QualitySetting, GlowSetting};
+use crate::gui::menu::settings_sound::VolumeSetting;
 use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
 
 // This plugin manages the menu, with 5 different screens:
@@ -34,7 +36,11 @@ pub fn menu_plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (setting_button::<DisplayQuality>.run_if(in_state(MenuState::SettingsDisplay)),),
+            (setting_button::<DisplayQuality, QualitySetting>.run_if(in_state(MenuState::SettingsDisplay)),),
+        )
+        .add_systems(
+            Update,
+            (setting_button::<BackGlow, GlowSetting>.run_if(in_state(MenuState::SettingsDisplay)),),
         )
         .add_systems(
             OnExit(MenuState::SettingsDisplay),
@@ -44,7 +50,7 @@ pub fn menu_plugin(app: &mut App) {
         .add_systems(OnEnter(MenuState::SettingsSound), settings_sound::sound_settings_menu_setup)
         .add_systems(
             Update,
-            setting_button::<Volume>.run_if(in_state(MenuState::SettingsSound)),
+            setting_button::<Volume, VolumeSetting>.run_if(in_state(MenuState::SettingsSound)),
         )
         .add_systems(
             OnExit(MenuState::SettingsSound),
@@ -119,15 +125,15 @@ fn button_system(
 
 // This system updates the settings when a new value for a setting is selected, and marks
 // the button as the one currently selected
-fn setting_button<T: Resource + Component + PartialEq + Copy>(
-    interaction_query: Query<(&Interaction, &T, Entity), (Changed<Interaction>, With<Button>)>,
-    mut selected_query: Query<(Entity, &mut BackgroundColor), With<SelectedOption>>,
+fn setting_button<T: Resource + Component + PartialEq + Copy, U: Component>(
+    interaction_query: Query<(&Interaction, &T, &U, Entity), (Changed<Interaction>, With<Button>)>,
+    mut selected_query: Query<(Entity, &mut BackgroundColor, &U), With<SelectedOption>>,
     mut commands: Commands,
     mut setting: ResMut<T>,
 ) {
-    for (interaction, button_setting, entity) in &interaction_query {
+    for (interaction, button_setting, setting_type, entity) in &interaction_query {
         if *interaction == Interaction::Pressed && *setting != *button_setting {
-            let (previous_button, mut previous_color) = selected_query.single_mut();
+            let (previous_button, mut previous_color, setting_type_) = selected_query.single_mut();
             *previous_color = NORMAL_BUTTON.into();
             commands.entity(previous_button).remove::<SelectedOption>();
             commands.entity(entity).insert(SelectedOption);

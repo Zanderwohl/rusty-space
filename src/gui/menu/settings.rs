@@ -1,4 +1,4 @@
-use bevy::prelude::{AlignItems, ButtonBundle, Color, Commands, default, FlexDirection, NodeBundle, Style, TextBundle};
+use bevy::prelude::{AlignItems, ButtonBundle, Color, Commands, Component, default, FlexDirection, NodeBundle, Style, TextBundle};
 use bevy::hierarchy::BuildChildren;
 use crate::gui::common;
 use crate::gui::common::color::NORMAL_BUTTON;
