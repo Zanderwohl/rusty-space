@@ -1,4 +1,6 @@
 use bevy::prelude::*;
+use crate::gui::common;
+use crate::gui::common::text_style;
 
 use super::super::common::{despawn_screen, DisplayQuality, AppState, Volume, TEXT_COLOR};
 
@@ -22,21 +24,9 @@ fn editor_setup(
     display_quality: Res<DisplayQuality>,
     volume: Res<Volume>,
 ) {
-    commands
-        .spawn((
-            NodeBundle {
-                style: Style {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    // center children
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    ..default()
-                },
-                ..default()
-            },
-            OnEditorScreen,
-        ))
+    let base_screen = common::base_screen(&mut commands);
+    commands.entity(base_screen)
+        .insert(OnEditorScreen)
         .with_children(|parent| {
             // First create a `NodeBundle` for centering what we want to display
             parent
@@ -58,11 +48,7 @@ fn editor_setup(
                     parent.spawn(
                         TextBundle::from_section(
                             "Will be back to the menu shortly...",
-                            TextStyle {
-                                font_size: 80.0,
-                                color: TEXT_COLOR,
-                                ..default()
-                            },
+                            common::text_style(),
                         )
                             .with_style(Style {
                                 margin: UiRect::all(Val::Px(50.0)),
@@ -81,11 +67,7 @@ fn editor_setup(
                             ),
                             TextSection::new(
                                 " - ",
-                                TextStyle {
-                                    font_size: 60.0,
-                                    color: TEXT_COLOR,
-                                    ..default()
-                                },
+                                text_style(),
                             ),
                             TextSection::new(
                                 format!("volume: {:?}", *volume),

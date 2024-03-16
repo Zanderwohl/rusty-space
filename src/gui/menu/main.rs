@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 
 use bevy::{app::AppExit};
+use crate::gui::common;
+use crate::gui::common::text_style;
 use super::super::common::{AppState, DisplayQuality, Volume, despawn_screen, TEXT_COLOR};
 
 // This plugin manages the menu, with 5 different screens:
@@ -159,26 +161,11 @@ fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         left: Val::Px(10.0),
         ..default()
     };
-    let button_text_style = TextStyle {
-        font_size: 40.0,
-        color: TEXT_COLOR,
-        ..default()
-    };
+    let button_text_style = text_style();
 
-    commands
-        .spawn((
-            NodeBundle {
-                style: Style {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    ..default()
-                },
-                ..default()
-            },
-            OnMainMenuScreen,
-        ))
+    let base_screen = common::base_screen(&mut commands);
+    commands.entity(base_screen)
+        .insert(OnMainMenuScreen)
         .with_children(|parent| {
             parent
                 .spawn(NodeBundle {
@@ -195,11 +182,7 @@ fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                     parent.spawn(
                         TextBundle::from_section(
                             "Exotic Matters",
-                            TextStyle {
-                                font_size: 80.0,
-                                color: TEXT_COLOR,
-                                ..default()
-                            },
+                            text_style(),
                         )
                             .with_style(Style {
                                 margin: UiRect::all(Val::Px(50.0)),
@@ -276,35 +259,12 @@ fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 }
 
 fn settings_menu_setup(mut commands: Commands) {
-    let button_style = Style {
-        width: Val::Px(200.0),
-        height: Val::Px(65.0),
-        margin: UiRect::all(Val::Px(20.0)),
-        justify_content: JustifyContent::Center,
-        align_items: AlignItems::Center,
-        ..default()
-    };
+    let button_style = common::button_style();
+    let button_text_style = text_style();
 
-    let button_text_style = TextStyle {
-        font_size: 40.0,
-        color: TEXT_COLOR,
-        ..default()
-    };
-
-    commands
-        .spawn((
-            NodeBundle {
-                style: Style {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    ..default()
-                },
-                ..default()
-            },
-            OnSettingsMenuScreen,
-        ))
+    let base_screen = common::base_screen(&mut commands);
+    commands.entity(base_screen)
+        .insert(OnSettingsMenuScreen)
         .with_children(|parent| {
             parent
                 .spawn(NodeBundle {
@@ -343,34 +303,12 @@ fn settings_menu_setup(mut commands: Commands) {
 }
 
 fn display_settings_menu_setup(mut commands: Commands, display_quality: Res<DisplayQuality>) {
-    let button_style = Style {
-        width: Val::Px(200.0),
-        height: Val::Px(65.0),
-        margin: UiRect::all(Val::Px(20.0)),
-        justify_content: JustifyContent::Center,
-        align_items: AlignItems::Center,
-        ..default()
-    };
-    let button_text_style = TextStyle {
-        font_size: 40.0,
-        color: TEXT_COLOR,
-        ..default()
-    };
+    let button_style = common::button_style();
+    let button_text_style = text_style();
 
-    commands
-        .spawn((
-            NodeBundle {
-                style: Style {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    ..default()
-                },
-                ..default()
-            },
-            OnDisplaySettingsMenuScreen,
-        ))
+    let base_screen = common::base_screen(&mut commands);
+    commands.entity(base_screen)
+        .insert(OnDisplaySettingsMenuScreen)
         .with_children(|parent| {
             parent
                 .spawn(NodeBundle {
@@ -447,34 +385,12 @@ fn display_settings_menu_setup(mut commands: Commands, display_quality: Res<Disp
 }
 
 fn sound_settings_menu_setup(mut commands: Commands, volume: Res<Volume>) {
-    let button_style = Style {
-        width: Val::Px(200.0),
-        height: Val::Px(65.0),
-        margin: UiRect::all(Val::Px(20.0)),
-        justify_content: JustifyContent::Center,
-        align_items: AlignItems::Center,
-        ..default()
-    };
-    let button_text_style = TextStyle {
-        font_size: 40.0,
-        color: TEXT_COLOR,
-        ..default()
-    };
+    let button_style = common::button_style();
+    let button_text_style = common::text_style();
 
-    commands
-        .spawn((
-            NodeBundle {
-                style: Style {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    ..default()
-                },
-                ..default()
-            },
-            OnSoundSettingsMenuScreen,
-        ))
+    let base_screen = common::base_screen(&mut commands);
+    commands.entity(base_screen)
+        .insert(OnSoundSettingsMenuScreen)
         .with_children(|parent| {
             parent
                 .spawn(NodeBundle {

@@ -1,3 +1,4 @@
+use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
 
 #[derive(Clone, Copy, Default, Eq, PartialEq, Debug, Hash, States)]
@@ -30,3 +31,37 @@ pub(crate) fn despawn_screen<T: Component>(to_despawn: Query<Entity, With<T>>, m
 
 pub const TEXT_COLOR: Color = Color::rgb(0.9, 0.9, 0.9);
 
+pub(crate) fn base_screen(mut commands: &mut Commands) -> Entity {
+    commands.spawn((
+        NodeBundle {
+            style: Style {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                // center children
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            ..default()
+        },
+    )).id()
+}
+
+pub(crate) fn button_style() -> Style {
+    Style {
+        width: Val::Px(200.0),
+        height: Val::Px(65.0),
+        margin: UiRect::all(Val::Px(20.0)),
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::Center,
+        ..default()
+    }
+}
+
+pub(crate) fn text_style() -> TextStyle {
+    TextStyle {
+        font_size: 40.0,
+        color: TEXT_COLOR,
+        ..default()
+    }
+}
