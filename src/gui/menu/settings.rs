@@ -3,7 +3,7 @@ use bevy::hierarchy::BuildChildren;
 use crate::gui::common;
 use crate::gui::common::color::NORMAL_BUTTON;
 use crate::gui::common::text;
-use crate::gui::menu::main::{MenuButtonAction, OnSettingsMenuScreen};
+use crate::gui::menu::main::MenuButtonAction;
 
 pub fn settings_menu_setup(mut commands: Commands) {
     let button_style = common::button_style();
@@ -27,6 +27,7 @@ pub fn settings_menu_setup(mut commands: Commands) {
                     for (action, text) in [
                         (MenuButtonAction::SettingsDisplay, "Display"),
                         (MenuButtonAction::SettingsSound, "Sound"),
+                        (MenuButtonAction::SettingsUITest, "UI Test"),
                         (MenuButtonAction::BackToMainMenu, "Back"),
                     ] {
                         parent
@@ -48,3 +49,7 @@ pub fn settings_menu_setup(mut commands: Commands) {
                 });
         });
 }
+
+// Tag component used to tag entities added on the settings menu screen
+#[derive(Component)]
+pub(crate) struct OnSettingsMenuScreen;

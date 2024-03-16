@@ -3,7 +3,7 @@ use bevy::hierarchy::BuildChildren;
 use crate::gui::common;
 use crate::gui::common::{text, Volume};
 use crate::gui::common::color::NORMAL_BUTTON;
-use crate::gui::menu::main::{MenuButtonAction, OnSoundSettingsMenuScreen, SelectedOption};
+use crate::gui::menu::main::{MenuButtonAction, SelectedOption};
 
 #[derive(Component)]
 pub struct VolumeSetting;
@@ -75,3 +75,7 @@ pub fn sound_settings_menu_setup(mut commands: Commands, volume: Res<Volume>) {
                 });
         });
 }
+
+// Tag component used to tag entities added on the sound settings menu screen
+#[derive(Component)]
+pub(crate) struct OnSoundSettingsMenuScreen;

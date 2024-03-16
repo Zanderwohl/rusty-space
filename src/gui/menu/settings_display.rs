@@ -1,11 +1,9 @@
 use bevy::prelude::{AlignItems, ButtonBundle, Color, Commands, Component, default, FlexDirection, NodeBundle, Res, Style, TextBundle, Val};
 use bevy::hierarchy::BuildChildren;
-use bevy::ui::ZIndex::Global;
 use crate::gui::common;
 use crate::gui::common::{BackGlow, DisplayQuality, text};
 use crate::gui::common::color::NORMAL_BUTTON;
-use crate::gui::menu::main::{MenuButtonAction, OnDisplaySettingsMenuScreen, SelectedOption};
-use crate::gui::menu::main::MenuButtonAction::BackToMainMenu;
+use crate::gui::menu::main::{MenuButtonAction, SelectedOption};
 
 #[derive(Component)]
 pub struct QualitySetting;
@@ -145,3 +143,7 @@ pub fn display_settings_menu_setup(mut commands: Commands,
                 });
         });
 }
+
+// Tag component used to tag entities added on the display settings menu screen
+#[derive(Component)]
+pub(crate) struct OnDisplaySettingsMenuScreen;

@@ -4,9 +4,11 @@ use bevy::app::AppExit;
 use crate::gui::common;
 use crate::gui::common::{BackGlow, text};
 use crate::gui::common::color::{HOVERED_BUTTON, HOVERED_PRESSED_BUTTON, NORMAL_BUTTON, PRESSED_BUTTON};
-use crate::gui::menu::{settings, settings_display, settings_sound};
-use crate::gui::menu::settings_display::{QualitySetting, GlowSetting};
-use crate::gui::menu::settings_sound::VolumeSetting;
+use crate::gui::menu::{settings, settings_display, settings_sound, settings_ui_test};
+use crate::gui::menu::settings::OnSettingsMenuScreen;
+use crate::gui::menu::settings_display::{GlowSetting, OnDisplaySettingsMenuScreen, QualitySetting};
+use crate::gui::menu::settings_sound::{OnSoundSettingsMenuScreen, VolumeSetting};
+use crate::gui::menu::settings_ui_test::OnUITestScreen;
 use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
 
 // This plugin manages the menu, with 5 different screens:
@@ -56,6 +58,14 @@ pub fn menu_plugin(app: &mut App) {
             OnExit(MenuState::SettingsSound),
             despawn_screen::<OnSoundSettingsMenuScreen>,
         )
+        .add_systems(
+            OnEnter(MenuState::SettingsUITest),
+            settings_ui_test::ui_test_menu_setup,
+        )
+        .add_systems(
+            OnExit(MenuState::SettingsUITest),
+            despawn_screen::<OnUITestScreen>,
+        )
         // Common systems to all screens that handles buttons behavior
         .add_systems(
             Update,
@@ -70,6 +80,7 @@ enum MenuState {
     Settings,
     SettingsDisplay,
     SettingsSound,
+    SettingsUITest,
     #[default]
     Disabled,
 }
@@ -77,18 +88,6 @@ enum MenuState {
 // Tag component used to tag entities added on the main menu screen
 #[derive(Component)]
 struct OnMainMenuScreen;
-
-// Tag component used to tag entities added on the settings menu screen
-#[derive(Component)]
-pub(crate) struct OnSettingsMenuScreen;
-
-// Tag component used to tag entities added on the display settings menu screen
-#[derive(Component)]
-pub(crate) struct OnDisplaySettingsMenuScreen;
-
-// Tag component used to tag entities added on the sound settings menu screen
-#[derive(Component)]
-pub(crate) struct OnSoundSettingsMenuScreen;
 
 // Tag component used to mark which setting is currently selected
 #[derive(Component)]
@@ -101,6 +100,7 @@ pub(crate) enum MenuButtonAction {
     Settings,
     SettingsDisplay,
     SettingsSound,
+    SettingsUITest,
     BackToMainMenu,
     BackToSettings,
     Quit,
@@ -286,6 +286,9 @@ fn menu_action(
                 }
                 MenuButtonAction::SettingsSound => {
                     menu_state.set(MenuState::SettingsSound);
+                }
+                MenuButtonAction::SettingsUITest => {
+                    menu_state.set(MenuState::SettingsUITest)
                 }
                 MenuButtonAction::BackToMainMenu => menu_state.set(MenuState::Main),
                 MenuButtonAction::BackToSettings => {

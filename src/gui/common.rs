@@ -62,6 +62,7 @@ pub(crate) fn button_style() -> Style {
         ..default()
     }
 }
+
 pub mod text {
     use bevy::prelude::{default, TextStyle};
     use crate::gui::common::color::TEXT_COLOR;
