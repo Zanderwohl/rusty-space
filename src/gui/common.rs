@@ -83,8 +83,8 @@ pub mod panel {
 }
 
 pub mod text {
-    use bevy::asset::{AssetServer, Handle};
-    use bevy::prelude::{Commands, Font, Res, Resource, TextStyle};
+    use bevy::asset::AssetServer;
+    use bevy::prelude::TextStyle;
     use crate::gui::common::color::TEXT_COLOR;
 
     pub(crate) fn primary(mut asset_server: AssetServer) -> TextStyle {

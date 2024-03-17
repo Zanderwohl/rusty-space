@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 
 use bevy::app::AppExit;
-use crate::gui::common;
+use crate::gui::{common, menu};
 use crate::gui::common::{BackGlow, text};
-use crate::gui::common::color::{HOVERED_BUTTON, HOVERED_PRESSED_BUTTON, NORMAL_BUTTON, PRESSED_BUTTON};
+use crate::gui::common::color::NORMAL_BUTTON;
 use crate::gui::menu::{settings, settings_display, settings_sound, settings_ui_test};
 use crate::gui::menu::settings::OnSettingsMenuScreen;
 use crate::gui::menu::settings_display::{GlowSetting, OnDisplaySettingsMenuScreen, QualitySetting};
@@ -69,13 +69,13 @@ pub fn menu_plugin(app: &mut App) {
         // Common systems to all screens that handles buttons behavior
         .add_systems(
             Update,
-            (menu_action, button_system).run_if(in_state(AppState::Menu)),
+            (menu_action, menu::common::button_system).run_if(in_state(AppState::Menu)),
         );
 }
 
 // State used for the current menu screen
 #[derive(Clone, Copy, Default, Eq, PartialEq, Debug, Hash, States)]
-enum MenuState {
+pub(crate) enum MenuState {
     Main,
     Settings,
     SettingsDisplay,
@@ -104,23 +104,6 @@ pub(crate) enum MenuButtonAction {
     BackToMainMenu,
     BackToSettings,
     Quit,
-}
-
-// This system handles changing all buttons color based on mouse interaction
-fn button_system(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, Option<&SelectedOption>),
-        (Changed<Interaction>, With<Button>),
-    >,
-) {
-    for (interaction, mut color, selected) in &mut interaction_query {
-        *color = match (*interaction, selected) {
-            (Interaction::Pressed, _) | (Interaction::None, Some(_)) => PRESSED_BUTTON.into(),
-            (Interaction::Hovered, Some(_)) => HOVERED_PRESSED_BUTTON.into(),
-            (Interaction::Hovered, None) => HOVERED_BUTTON.into(),
-            (Interaction::None, None) => NORMAL_BUTTON.into(),
-        }
-    }
 }
 
 // This system updates the settings when a new value for a setting is selected, and marks
@@ -257,7 +240,7 @@ fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         });
 }
 
-fn menu_action(
+pub(crate) fn menu_action(
     interaction_query: Query<
         (&Interaction, &MenuButtonAction),
         (Changed<Interaction>, With<Button>),
