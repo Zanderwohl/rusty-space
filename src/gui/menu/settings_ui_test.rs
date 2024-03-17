@@ -18,11 +18,7 @@ pub fn ui_test_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>
         .with_children(|parent| {
             parent
                 .spawn(NodeBundle {
-                    style: Style {
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
+                    style: common::panel::vertical(),
                     background_color: common::color::FOREGROUND.into(),
                     ..default()
                 })
@@ -52,7 +48,7 @@ pub fn ui_test_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>
                             MenuButtonAction::BackToSettings,
                         ))
                         .with_children(|parent| {
-                            parent.spawn(TextBundle::from_section("Back", button_text_style));
+                            parent.spawn(TextBundle::from_section("BACK", button_text_style));
                         });
                 });
         });

@@ -16,20 +16,16 @@ pub fn settings_menu_setup(mut commands: Commands, asset_server: Res<AssetServer
         .with_children(|parent| {
             parent
                 .spawn(NodeBundle {
-                    style: Style {
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
+                    style: common::panel::vertical(),
                     background_color: common::color::FOREGROUND.into(),
                     ..default()
                 })
                 .with_children(|parent| {
                     for (action, text) in [
-                        (MenuButtonAction::SettingsDisplay, "Display"),
-                        (MenuButtonAction::SettingsSound, "Sound"),
-                        (MenuButtonAction::SettingsUITest, "UI Test"),
-                        (MenuButtonAction::BackToMainMenu, "Back"),
+                        (MenuButtonAction::SettingsDisplay, "DISPLAY"),
+                        (MenuButtonAction::SettingsSound, "AUDIO"),
+                        (MenuButtonAction::SettingsUITest, "UI TEST"),
+                        (MenuButtonAction::BackToMainMenu, "BACK"),
                     ] {
                         parent
                             .spawn((

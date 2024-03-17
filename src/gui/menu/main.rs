@@ -172,11 +172,7 @@ fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         .with_children(|parent| {
             parent
                 .spawn(NodeBundle {
-                    style: Style {
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
+                    style: common::panel::vertical(),
                     background_color: common::color::FOREGROUND.into(),
                     ..default()
                 })
@@ -184,7 +180,7 @@ fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                     // Display the game name
                     parent.spawn(
                         TextBundle::from_section(
-                            "Exotic Matters",
+                            "EXOTIC MATTERS",
                             button_text_style.clone(),
                         )
                             .with_style(Style {
@@ -214,7 +210,7 @@ fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                                 ..default()
                             });
                             parent.spawn(TextBundle::from_section(
-                                "Start",
+                                "START",
                                 button_text_style.clone(),
                             ));
                         });
@@ -235,7 +231,7 @@ fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                                 ..default()
                             });
                             parent.spawn(TextBundle::from_section(
-                                "Settings",
+                                "SETTINGS",
                                 button_text_style.clone(),
                             ));
                         });
@@ -255,7 +251,7 @@ fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                                 image: UiImage::new(icon),
                                 ..default()
                             });
-                            parent.spawn(TextBundle::from_section("Quit", button_text_style));
+                            parent.spawn(TextBundle::from_section("QUIT", button_text_style));
                         });
                 });
         });

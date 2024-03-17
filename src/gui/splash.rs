@@ -25,7 +25,7 @@ struct OnSplashScreen;
 struct SplashTimer(Timer);
 
 fn splash_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let icon = asset_server.load("earthrise.png");
+    let icon = asset_server.load("logo.png");
     // Display the logo
     commands
         .spawn((

@@ -63,6 +63,25 @@ pub(crate) fn button_style() -> Style {
     }
 }
 
+pub mod panel {
+    use bevy::prelude::{AlignItems, default, FlexDirection, Style, Val};
+    use bevy::ui::UiRect;
+
+    pub(crate) fn vertical() -> Style {
+        Style {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            padding: UiRect {
+                left: Val::Px(10.0),
+                right: Val::Px(10.0),
+                top: Val::Px(10.0),
+                bottom: Val::Px(10.0),
+            },
+            ..default()
+        }
+    }
+}
+
 pub mod text {
     use bevy::asset::{AssetServer, Handle};
     use bevy::prelude::{Commands, Font, Res, Resource, TextStyle};

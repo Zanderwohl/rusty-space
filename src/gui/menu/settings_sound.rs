@@ -19,11 +19,7 @@ pub fn sound_settings_menu_setup(mut commands: Commands, volume: Res<Volume>, as
         .with_children(|parent| {
             parent
                 .spawn(NodeBundle {
-                    style: Style {
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
+                    style: common::panel::vertical(),
                     background_color: common::color::FOREGROUND.into(),
                     ..default()
                 })
@@ -39,7 +35,7 @@ pub fn sound_settings_menu_setup(mut commands: Commands, volume: Res<Volume>, as
                         })
                         .with_children(|parent| {
                             parent.spawn(TextBundle::from_section(
-                                "Volume",
+                                "VOLUME",
                                 button_text_style.clone(),
                             ));
                             for volume_setting in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] {
@@ -71,7 +67,7 @@ pub fn sound_settings_menu_setup(mut commands: Commands, volume: Res<Volume>, as
                             MenuButtonAction::BackToSettings,
                         ))
                         .with_children(|parent| {
-                            parent.spawn(TextBundle::from_section("Back", button_text_style));
+                            parent.spawn(TextBundle::from_section("BACK", button_text_style));
                         });
                 });
         });
