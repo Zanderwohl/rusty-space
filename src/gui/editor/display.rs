@@ -23,6 +23,7 @@ fn editor_setup(
     mut commands: Commands,
     display_quality: Res<DisplayQuality>,
     volume: Res<Volume>,
+    asset_server: Res<AssetServer>,
 ) {
     let base_screen = common::base_screen(&mut commands);
     commands.entity(base_screen)
@@ -48,7 +49,7 @@ fn editor_setup(
                     parent.spawn(
                         TextBundle::from_section(
                             "Will be back to the menu shortly...",
-                            text::primary(),
+                            text::primary(asset_server.clone()),
                         )
                             .with_style(Style {
                                 margin: UiRect::all(Val::Px(50.0)),
@@ -67,7 +68,7 @@ fn editor_setup(
                             ),
                             TextSection::new(
                                 " - ",
-                                text::primary(),
+                                text::primary(asset_server.clone()),
                             ),
                             TextSection::new(
                                 format!("volume: {:?}", *volume),

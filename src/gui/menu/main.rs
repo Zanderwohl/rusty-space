@@ -164,7 +164,7 @@ fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         left: Val::Px(10.0),
         ..default()
     };
-    let button_text_style = text::primary();
+    let button_text_style = text::primary(asset_server.clone());
 
     let base_screen = common::base_screen(&mut commands);
     commands.entity(base_screen)
@@ -177,7 +177,7 @@ fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                         align_items: AlignItems::Center,
                         ..default()
                     },
-                    background_color: Color::CRIMSON.into(),
+                    background_color: common::color::FOREGROUND.into(),
                     ..default()
                 })
                 .with_children(|parent| {
@@ -185,7 +185,7 @@ fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                     parent.spawn(
                         TextBundle::from_section(
                             "Exotic Matters",
-                            text::primary(),
+                            button_text_style.clone(),
                         )
                             .with_style(Style {
                                 margin: UiRect::all(Val::Px(50.0)),

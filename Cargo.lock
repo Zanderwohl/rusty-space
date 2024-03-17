@@ -2997,6 +2997,7 @@ dependencies = [
  "glam",
  "nalgebra",
  "num-traits",
+ "once_cell",
 ]
 
 [[package]]

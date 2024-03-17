@@ -64,24 +64,28 @@ pub(crate) fn button_style() -> Style {
 }
 
 pub mod text {
-    use bevy::prelude::{default, TextStyle};
+    use bevy::asset::{AssetServer, Handle};
+    use bevy::prelude::{Commands, Font, Res, Resource, TextStyle};
     use crate::gui::common::color::TEXT_COLOR;
 
-    pub(crate) fn primary() -> TextStyle {
+    pub(crate) fn primary(mut asset_server: AssetServer) -> TextStyle {
         TextStyle {
             font_size: 40.0,
             color: TEXT_COLOR,
-            ..default()
+            font: asset_server.load("fonts/Jost.ttf")
         }
     }
 }
 
 pub mod color {
     use bevy::prelude::Color;
+    pub const BACKGROUND: Color = Color::rgb(0.69, 0.58, 0.33);
+    pub const FOREGROUND: Color = Color::rgb(0.8, 0.73, 0.58);
+    pub const HIGHLIGHT: Color = Color::rgb(0.65, 0.65, 0.65);
 
-    pub const TEXT_COLOR: Color = Color::rgb(0.9, 0.9, 0.9);
-    pub const NORMAL_BUTTON: Color = Color::rgb(0.15, 0.15, 0.15);
-    pub const HOVERED_BUTTON: Color = Color::rgb(0.25, 0.25, 0.25);
-    pub const HOVERED_PRESSED_BUTTON: Color = Color::rgb(0.25, 0.65, 0.25);
-    pub const PRESSED_BUTTON: Color = Color::rgb(0.35, 0.75, 0.35);
+    pub const TEXT_COLOR: Color = Color::rgb(0.1, 0.1, 0.1);
+    pub const NORMAL_BUTTON: Color = Color::rgb(0.79, 0.65, 0.05);
+    pub const HOVERED_BUTTON: Color = Color::rgb(0.76, 0.69, 0.36);
+    pub const HOVERED_PRESSED_BUTTON: Color = Color::rgb(0.76, 0.69, 0.36);
+    pub const PRESSED_BUTTON: Color = Color::rgb(0.98, 0.89, 0.48);
 }

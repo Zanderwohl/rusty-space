@@ -1,3 +1,4 @@
+use bevy::asset::AssetServer;
 use bevy::prelude::{AlignItems, ButtonBundle, Color, Commands, Component, default, FlexDirection, NodeBundle, Res, Style, TextBundle, Val};
 use bevy::hierarchy::BuildChildren;
 use crate::gui::common;
@@ -8,9 +9,9 @@ use crate::gui::menu::main::{MenuButtonAction, SelectedOption};
 #[derive(Component)]
 pub struct VolumeSetting;
 
-pub fn sound_settings_menu_setup(mut commands: Commands, volume: Res<Volume>) {
+pub fn sound_settings_menu_setup(mut commands: Commands, volume: Res<Volume>, asset_server: Res<AssetServer>) {
     let button_style = common::button_style();
-    let button_text_style = text::primary();
+    let button_text_style = text::primary(asset_server.clone());
 
     let base_screen = common::base_screen(&mut commands);
     commands.entity(base_screen)
@@ -23,7 +24,7 @@ pub fn sound_settings_menu_setup(mut commands: Commands, volume: Res<Volume>) {
                         align_items: AlignItems::Center,
                         ..default()
                     },
-                    background_color: Color::CRIMSON.into(),
+                    background_color: common::color::FOREGROUND.into(),
                     ..default()
                 })
                 .with_children(|parent| {
@@ -33,7 +34,7 @@ pub fn sound_settings_menu_setup(mut commands: Commands, volume: Res<Volume>) {
                                 align_items: AlignItems::Center,
                                 ..default()
                             },
-                            background_color: Color::CRIMSON.into(),
+                            background_color: common::color::FOREGROUND.into(),
                             ..default()
                         })
                         .with_children(|parent| {
