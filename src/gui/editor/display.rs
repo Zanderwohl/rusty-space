@@ -33,62 +33,7 @@ fn editor_setup(
     commands.entity(base_screen)
         .insert(OnEditorScreen)
         .with_children(|parent| {
-            // First create a `NodeBundle` for centering what we want to display
-            parent
-                .spawn(NodeBundle {
-                    style: Style {
-                        // This will display its children in a column, from top to bottom
-                        flex_direction: FlexDirection::Column,
-                        // `align_items` will align children on the cross axis. Here the main axis is
-                        // vertical (column), so the cross axis is horizontal. This will center the
-                        // children
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    background_color: Color::BLACK.into(),
-                    ..default()
-                })
-                .with_children(|parent| {
-                    // Display two lines of text, the second one with the current settings
-                    parent.spawn(
-                        TextBundle::from_section(
-                            "Will be back to the menu shortly...",
-                            text::primary(asset_server.clone()),
-                        )
-                            .with_style(Style {
-                                margin: UiRect::all(Val::Px(50.0)),
-                                ..default()
-                            }),
-                    );
-                    parent.spawn(
-                        TextBundle::from_sections([
-                            TextSection::new(
-                                format!("quality: {:?}", *display_quality),
-                                TextStyle {
-                                    font_size: 60.0,
-                                    color: Color::BLUE,
-                                    ..default()
-                                },
-                            ),
-                            TextSection::new(
-                                " - ",
-                                text::primary(asset_server.clone()),
-                            ),
-                            TextSection::new(
-                                format!("volume: {:?}", *volume),
-                                TextStyle {
-                                    font_size: 60.0,
-                                    color: Color::GREEN,
-                                    ..default()
-                                },
-                            ),
-                        ])
-                            .with_style(Style {
-                                margin: UiRect::all(Val::Px(50.0)),
-                                ..default()
-                            }),
-                    );
-                });
+
         });
 }
 
