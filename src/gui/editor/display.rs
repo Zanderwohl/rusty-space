@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use crate::gui::common;
-use crate::gui::common::text;
 use crate::gui::editor::gui;
 
 use super::super::common::{despawn_screen, DisplayQuality, AppState, Volume};
