@@ -1,4 +1,8 @@
 use bevy::prelude::*;
+use glam::DVec3;
+use crate::body::body::{Body, BodyProperties};
+use crate::body::fixed::FixedBody;
+use crate::gui::body::graphical::Renderable;
 use crate::gui::common;
 use crate::gui::editor::gui;
 
@@ -25,6 +29,8 @@ fn editor_setup(
     display_quality: Res<DisplayQuality>,
     volume: Res<Volume>,
     asset_server: Res<AssetServer>,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<StandardMaterial>>
 ) {
     let base_screen = common::base_screen(&mut commands);
     gui::ui_setup(&mut commands, asset_server.clone());
@@ -34,6 +40,16 @@ fn editor_setup(
         .with_children(|parent| {
 
         });
+    
+    let sun = FixedBody {
+        global_position: DVec3::ZERO,
+        properties: BodyProperties {
+            mass: 0.0,
+            name: "".to_string(),
+        },
+    };
+
+    commands.spawn(sun.mesh(meshes, materials));
 }
 
 // Tick the timer, and change state when finished

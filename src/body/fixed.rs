@@ -3,8 +3,8 @@ use crate::body::body::{Body, BodyProperties};
 
 /// A body that never moves, no matter what.
 pub struct FixedBody {
-    global_position: DVec3,
-    properties: BodyProperties,
+    pub(crate) global_position: DVec3,
+    pub(crate) properties: BodyProperties,
 }
 
 impl Body for FixedBody {

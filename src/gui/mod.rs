@@ -3,3 +3,4 @@ mod common;
 pub(super) mod app;
 mod splash;
 mod editor;
+pub(crate) mod body;

@@ -1,4 +1,4 @@
 pub mod body;
 pub mod kepler;
-mod newton;
-mod fixed;
+pub mod newton;
+pub mod fixed;
