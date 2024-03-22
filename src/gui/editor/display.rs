@@ -24,13 +24,18 @@ pub fn editor_plugin(app: &mut App) {
 #[derive(Component)]
 pub(super) struct OnEditorScreen;
 
+#[derive(Component)]
+pub(super) struct MovingBody {
+    body: dyn Body,
+}
+
 fn editor_setup(
     mut commands: Commands,
     display_quality: Res<DisplayQuality>,
     volume: Res<Volume>,
     asset_server: Res<AssetServer>,
-    meshes: ResMut<Assets<Mesh>>,
-    materials: ResMut<Assets<StandardMaterial>>
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>
 ) {
     let base_screen = common::base_screen(&mut commands);
     gui::ui_setup(&mut commands, asset_server.clone());
@@ -49,7 +54,30 @@ fn editor_setup(
         },
     };
 
-    commands.spawn(sun.mesh(meshes, materials));
+    let sun2 = FixedBody {
+        global_position: DVec3::new(1.0, 1.0, 1.0),
+        properties: BodyProperties {
+            mass: 0.0,
+            name: "".to_string(),
+        },
+    };
+
+    commands.spawn((sun.mesh(&mut meshes, &mut materials), OnEditorScreen)).insert(MovingBody{
+        body: sun,
+    });
+    commands.spawn((sun2.mesh(&mut meshes, &mut materials), OnEditorScreen)).insert(MovingBody{
+        body: sun2,
+    });;
+}
+
+fn move_bodies(
+    mut query: Query<(&mut Transform, &OnEditorScreen, &MovingBody), With<StandardMaterial>>,
+) {
+    for (mut transform, _, body) in query.iter_mut() {
+        let body = &body.body;
+        let position = body.global_position();
+        transform.translation.x += 1.0;
+    }
 }
 
 // Tick the timer, and change state when finished

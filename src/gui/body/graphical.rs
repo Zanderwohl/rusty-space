@@ -1,5 +1,5 @@
 use bevy::pbr::{PbrBundle, StandardMaterial};
-use bevy::prelude::{Assets, Color, default, Mesh, ResMut, Sphere, Transform};
+use bevy::prelude::{Assets, Color, Component, default, Mesh, ResMut, Sphere, Transform};
 use glam::DVec3;
 use crate::body::body::Body;
 use crate::body::fixed::FixedBody;
@@ -8,20 +8,20 @@ pub trait Renderable {
     fn world_space(&self, scale: f64) -> DVec3;
 
     fn mesh(&self,
-            meshes: ResMut<Assets<Mesh>>,
-            materials: ResMut<Assets<StandardMaterial>>
+            meshes: &mut ResMut<Assets<Mesh>>,
+            materials: &mut ResMut<Assets<StandardMaterial>>
     ) -> PbrBundle;
 }
 
-impl Renderable for FixedBody {
+impl Renderable for dyn Body {
     fn world_space(&self, scale: f64) -> DVec3 {
         let real_position = self.global_position();
         real_position * scale
     }
 
     fn mesh(&self,
-            mut meshes: ResMut<Assets<Mesh>>,
-            mut materials: ResMut<Assets<StandardMaterial>>
+            mut meshes: &mut ResMut<Assets<Mesh>>,
+            mut materials: &mut ResMut<Assets<StandardMaterial>>
     ) -> PbrBundle {
         PbrBundle {
             mesh: meshes.add(Sphere::new(1.0)),
