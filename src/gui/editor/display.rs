@@ -29,8 +29,8 @@ fn editor_setup(
     display_quality: Res<DisplayQuality>,
     volume: Res<Volume>,
     asset_server: Res<AssetServer>,
-    meshes: ResMut<Assets<Mesh>>,
-    materials: ResMut<Assets<StandardMaterial>>
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>
 ) {
     let base_screen = common::base_screen(&mut commands);
     gui::ui_setup(&mut commands, asset_server.clone());
@@ -41,7 +41,7 @@ fn editor_setup(
 
         });
     
-    let sun = FixedBody {
+    let sun1 = FixedBody {
         global_position: DVec3::ZERO,
         properties: BodyProperties {
             mass: 0.0,
@@ -49,7 +49,16 @@ fn editor_setup(
         },
     };
 
-    commands.spawn(sun.mesh(meshes, materials));
+    let sun2 = FixedBody {
+        global_position: DVec3::new(1.0, 2.0, 0.0),
+        properties: BodyProperties {
+            mass: 0.0,
+            name: "".to_string(),
+        },
+    };
+
+    commands.spawn(sun1.mesh(&mut *meshes, &mut *materials));
+    commands.spawn(sun2.mesh(&mut *meshes, &mut *materials));
 }
 
 // Tick the timer, and change state when finished

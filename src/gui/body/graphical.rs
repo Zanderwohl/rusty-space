@@ -8,8 +8,8 @@ pub trait Renderable {
     fn world_space(&self, scale: f64) -> DVec3;
 
     fn mesh(&self,
-            meshes: ResMut<Assets<Mesh>>,
-            materials: ResMut<Assets<StandardMaterial>>
+            meshes: &mut Assets<Mesh>,
+            materials: &mut Assets<StandardMaterial>
     ) -> PbrBundle;
 }
 
@@ -20,9 +20,10 @@ impl Renderable for FixedBody {
     }
 
     fn mesh(&self,
-            mut meshes: ResMut<Assets<Mesh>>,
-            mut materials: ResMut<Assets<StandardMaterial>>
+            meshes: &mut Assets<Mesh>,
+            materials: &mut Assets<StandardMaterial>
     ) -> PbrBundle {
+        println!("Creating basic mesh.");
         PbrBundle {
             mesh: meshes.add(Sphere::new(1.0)),
             material: materials.add(Color::rgb(5.0, 2.5, 0.3)),
