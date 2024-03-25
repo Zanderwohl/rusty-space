@@ -29,7 +29,7 @@ impl Renderable for FixedBody {
         println!("Creating basic mesh.");
         PbrBundle {
             mesh: meshes.add(Sphere::new(1.0)),
-            material: materials.add(Color::rgb(5.0, 2.5, 0.3)),
+            material: materials.add(Color::rgb(5.0 * 2.0, 2.5 * 2.0, 0.3 * 2.0)),
             transform: Transform::from_xyz(0.0, 0.5, 0.0),
             ..default()
         }
