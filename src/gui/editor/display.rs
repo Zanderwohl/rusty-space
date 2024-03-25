@@ -1,7 +1,10 @@
 use bevy::prelude::*;
+use bevy::window::ExitCondition::OnAllClosed;
 use glam::DVec3;
+use crate::body;
 use crate::body::body::{Body, BodyProperties};
 use crate::body::fixed::FixedBody;
+use crate::gui::body::engine::VisibleBody;
 use crate::gui::body::graphical::Renderable;
 use crate::gui::common;
 use crate::gui::editor::gui;
@@ -17,6 +20,9 @@ pub fn editor_plugin(app: &mut App) {
         .add_systems(
             Update,
             (crate::gui::menu::common::button_system, gui::menu_action).run_if(in_state(AppState::Editor)),
+        ).add_systems(
+            Update,
+            (position_bodies).run_if(in_state(AppState::Editor)),
         );
 }
 
@@ -57,8 +63,14 @@ fn editor_setup(
         },
     };
 
-    commands.spawn(sun1.mesh(&mut *meshes, &mut *materials));
-    commands.spawn(sun2.mesh(&mut *meshes, &mut *materials));
+    commands.spawn((sun1.mesh(&mut *meshes, &mut *materials), VisibleBody, OnEditorScreen, sun1));
+    commands.spawn((sun2.mesh(&mut *meshes, &mut *materials), VisibleBody, OnEditorScreen, sun2));
+}
+
+fn position_bodies(mut query: Query<(&mut Transform, &VisibleBody, &FixedBody)>) {
+    for (mut transform, _visible, fixed_body) in query.iter_mut() {
+        transform.translation = fixed_body.world_space(1.4);
+    }
 }
 
 // Tick the timer, and change state when finished

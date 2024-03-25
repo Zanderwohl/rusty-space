@@ -1,7 +1,9 @@
+use bevy::prelude::Component;
 use glam::DVec3;
 use crate::body::body::{Body, BodyProperties};
 
 /// A body that never moves, no matter what.
+#[derive(Component)]
 pub struct FixedBody {
     pub(crate) global_position: DVec3,
     pub(crate) properties: BodyProperties,

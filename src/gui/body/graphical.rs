@@ -1,11 +1,14 @@
 use bevy::pbr::{PbrBundle, StandardMaterial};
 use bevy::prelude::{Assets, Color, default, Mesh, ResMut, Sphere, Transform};
-use glam::DVec3;
+use glam::{DVec3, Vec3};
 use crate::body::body::Body;
 use crate::body::fixed::FixedBody;
 
 pub trait Renderable {
-    fn world_space(&self, scale: f64) -> DVec3;
+    /// We must scale to a screen scale,
+    /// then reduce precision to Vec3.
+    /// This is too low for calcs but should be not too jittery for display.
+    fn world_space(&self, scale: f64) -> Vec3;
 
     fn mesh(&self,
             meshes: &mut Assets<Mesh>,
@@ -14,9 +17,9 @@ pub trait Renderable {
 }
 
 impl Renderable for FixedBody {
-    fn world_space(&self, scale: f64) -> DVec3 {
+    fn world_space(&self, scale: f64) -> Vec3 {
         let real_position = self.global_position();
-        real_position * scale
+        (real_position * scale).as_vec3()
     }
 
     fn mesh(&self,
