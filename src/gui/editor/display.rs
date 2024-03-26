@@ -1,15 +1,14 @@
 use bevy::prelude::*;
-use bevy::window::ExitCondition::OnAllClosed;
 use glam::DVec3;
-use crate::body;
-use crate::body::body::{Body, BodyProperties};
+use crate::body::body::BodyProperties;
 use crate::body::fixed::FixedBody;
 use crate::gui::body::engine::VisibleBody;
+use crate::gui::body::graphical;
 use crate::gui::body::graphical::Renderable;
 use crate::gui::common;
 use crate::gui::editor::gui;
 
-use super::super::common::{despawn_screen, DisplayQuality, AppState, Volume};
+use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
 
 // This plugin will contain the game. In this case, it's just be a screen that will
 // display the current settings for 5 seconds before returning to the menu
@@ -21,13 +20,13 @@ pub fn editor_plugin(app: &mut App) {
             Update,
             (crate::gui::menu::common::button_system, gui::menu_action).run_if(in_state(AppState::Editor)),
         ).add_systems(
-            Update,
-            (position_bodies).run_if(in_state(AppState::Editor)),
+        Update,
+        (position_bodies_fixed).run_if(in_state(AppState::Editor)),
         );
 }
 
 // Tag component used to tag entities added on the game screen
-#[derive(Component)]
+#[derive(Component, Default)]
 pub(super) struct OnEditorScreen;
 
 fn editor_setup(
@@ -63,11 +62,12 @@ fn editor_setup(
         },
     };
 
-    commands.spawn((sun1.mesh(&mut *meshes, &mut *materials), VisibleBody, OnEditorScreen, sun1));
-    commands.spawn((sun2.mesh(&mut *meshes, &mut *materials), VisibleBody, OnEditorScreen, sun2));
+    graphical::create_star_mesh::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials, sun1);
+    graphical::create_star_mesh::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials, sun2);
+
 }
 
-fn position_bodies(mut query: Query<(&mut Transform, &VisibleBody, &FixedBody)>) {
+fn position_bodies_fixed(mut query: Query<(&mut Transform, &VisibleBody, &FixedBody)>) {
     for (mut transform, _visible, fixed_body) in query.iter_mut() {
         transform.translation = fixed_body.world_space(1.4);
     }

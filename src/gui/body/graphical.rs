@@ -1,8 +1,10 @@
-use bevy::pbr::{PbrBundle, StandardMaterial};
-use bevy::prelude::{Assets, Color, default, Mesh, ResMut, Sphere, Transform};
-use glam::{DVec3, Vec3};
+use bevy::pbr::{PbrBundle, PointLight, PointLightBundle, StandardMaterial};
+use bevy::prelude::{Assets, Color, Commands, Component, default, Mesh, ResMut, Sphere, Transform};
+use glam::Vec3;
+use bevy::hierarchy::BuildChildren;
 use crate::body::body::Body;
 use crate::body::fixed::FixedBody;
+use crate::gui::body::engine::VisibleBody;
 
 pub trait Renderable {
     /// We must scale to a screen scale,
@@ -29,9 +31,23 @@ impl Renderable for FixedBody {
         println!("Creating basic mesh.");
         PbrBundle {
             mesh: meshes.add(Sphere::new(1.0)),
-            material: materials.add(Color::rgb(5.0 * 2.0, 2.5 * 2.0, 0.3 * 2.0)),
+            material: materials.add(Color::rgb(5.0 * 3.0, 2.5 * 3.0, 0.3 * 3.0)),
             transform: Transform::from_xyz(0.0, 0.5, 0.0),
             ..default()
         }
     }
+}
+
+pub fn create_star_mesh<ScreenTrait: Component + Default>(commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>, star: FixedBody) {
+    commands.spawn((star.mesh(&mut *meshes, &mut *materials), VisibleBody, ScreenTrait::default(), star))
+        .with_children(|children| {
+            children.spawn(PointLightBundle {
+                point_light: PointLight {
+                    radius: 100.0,
+                    color: Color::rgb(1.0, 0.3, 0.1),
+                    ..default()
+                },
+                ..default()
+            });
+        });
 }
