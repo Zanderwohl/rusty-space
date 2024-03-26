@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use glam::DVec3;
-use crate::body::body::BodyProperties;
+use crate::body::body::{Body, BodyProperties};
 use crate::body::fixed::FixedBody;
 use crate::gui::body::engine::VisibleBody;
 use crate::gui::body::graphical;
@@ -29,6 +29,12 @@ pub fn editor_plugin(app: &mut App) {
 #[derive(Component, Default)]
 pub(super) struct OnEditorScreen;
 
+#[derive(Component)]
+pub(crate) struct Star;
+
+#[derive(Component)]
+pub(crate) struct Planet;
+
 fn editor_setup(
     mut commands: Commands,
     display_quality: Res<DisplayQuality>,
@@ -53,6 +59,7 @@ fn editor_setup(
             name: "".to_string(),
         },
     };
+    sun1.show_as_star::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials);
 
     let sun2 = FixedBody {
         global_position: DVec3::new(1.0, 2.0, 0.0),
@@ -61,15 +68,13 @@ fn editor_setup(
             name: "".to_string(),
         },
     };
-
-    graphical::create_star_mesh::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials, sun1);
-    graphical::create_star_mesh::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials, sun2);
+    sun2.show_as_star::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials);
 
 }
 
-fn position_bodies_fixed(mut query: Query<(&mut Transform, &VisibleBody, &FixedBody)>) {
-    for (mut transform, _visible, fixed_body) in query.iter_mut() {
-        transform.translation = fixed_body.world_space(1.4);
+fn position_bodies_fixed(mut query: Query<(&mut Transform, &FixedBody)>) {
+    for (mut transform, fixed_body) in query.iter_mut() {
+        transform.translation = fixed_body.world_space(fixed_body.global_position(), 1.4);
     }
 }
 
