@@ -1,5 +1,5 @@
 use bevy::pbr::{PbrBundle, PointLight, PointLightBundle, StandardMaterial};
-use bevy::prelude::{Assets, Color, Commands, Component, default, Mesh, ResMut, Sphere, Transform};
+use bevy::prelude::{Assets, Bundle, Color, Commands, Component, default, Mesh, ResMut, Sphere, Transform};
 use glam::{DVec3, Vec3};
 use bevy::hierarchy::BuildChildren;
 use bevy::time::Fixed;
@@ -22,36 +22,33 @@ pub trait Renderable {
 /// Method of propulsion has nothing to do with being fixed or moving.
 impl Renderable for FixedBody {}
 
-impl FixedBody {
-    pub fn spawn_as_star<ScreenTrait: Component + Default>(self, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) {
-        let star_mesh = PbrBundle {
-            mesh: meshes.add(Sphere::new(1.0)),
-            material: materials.add(Color::rgb(5.0 * 3.0, 2.5 * 3.0, 0.3 * 3.0)),
-            transform: Transform::IDENTITY,
-            ..default()
-        };
-        commands.spawn((star_mesh, Star, ScreenTrait::default(), self))
-            .with_children(|children| {
-                children.spawn(PointLightBundle {
-                    point_light: PointLight {
-                        radius: 100.0,
-                        color: Color::rgb(1.0, 0.3, 0.1),
-                        ..default()
-                    },
-                    ..default()
-                });
-            });
-    }
 
-    pub fn spawn_as_planet<ScreenTrait: Component + Default>(self, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) {
-        let planet_mesh = PbrBundle {
-            mesh: meshes.add(Sphere::new(0.2)),
-            material: materials.add(Color::rgb(0.2, 0.4, 0.8)),
-            transform: Transform::IDENTITY,
-            ..default()
-        };
-        commands.spawn((planet_mesh, Star, ScreenTrait::default(), self));
-    }
+pub fn spawn_as_star<ScreenTrait: Component + Default, BodyType: Body + Bundle>(body: BodyType, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) {
+    let star_mesh = PbrBundle {
+        mesh: meshes.add(Sphere::new(1.0)),
+        material: materials.add(Color::rgb(5.0 * 3.0, 2.5 * 3.0, 0.3 * 3.0)),
+        transform: Transform::IDENTITY,
+        ..default()
+    };
+    commands.spawn((star_mesh, Star, ScreenTrait::default(), body))
+        .with_children(|children| {
+            children.spawn(PointLightBundle {
+                point_light: PointLight {
+                    radius: 100.0,
+                    color: Color::rgb(1.0, 0.3, 0.1),
+                    ..default()
+                },
+                ..default()
+            });
+        });
 }
 
-
+pub fn spawn_as_planet<ScreenTrait: Component + Default, BodyType: Body + Bundle>(body: BodyType, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) {
+    let planet_mesh = PbrBundle {
+        mesh: meshes.add(Sphere::new(0.2)),
+        material: materials.add(Color::rgb(0.2, 0.4, 0.8)),
+        transform: Transform::IDENTITY,
+        ..default()
+    };
+    commands.spawn((planet_mesh, Star, ScreenTrait::default(), body));
+}

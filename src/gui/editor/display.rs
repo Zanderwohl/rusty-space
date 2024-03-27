@@ -4,7 +4,7 @@ use crate::body::body::{Body, BodyProperties};
 use crate::body::fixed::FixedBody;
 use crate::gui::body::engine::VisibleBody;
 use crate::gui::body::graphical;
-use crate::gui::body::graphical::Renderable;
+use crate::gui::body::graphical::{Renderable, spawn_as_planet, spawn_as_star};
 use crate::gui::common;
 use crate::gui::editor::gui;
 
@@ -21,7 +21,7 @@ pub fn editor_plugin(app: &mut App) {
             (crate::gui::menu::common::button_system, gui::menu_action).run_if(in_state(AppState::Editor)),
         ).add_systems(
         Update,
-        (position_bodies_fixed).run_if(in_state(AppState::Editor)),
+        (position_bodies_fixed::<FixedBody>).run_if(in_state(AppState::Editor)),
         );
 }
 
@@ -59,7 +59,7 @@ fn editor_setup(
             name: "".to_string(),
         },
     };
-    sun1.spawn_as_star::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials);
+    spawn_as_star::<OnEditorScreen, FixedBody>(sun1, &mut commands, &mut meshes, &mut materials);
 
     let sun2 = FixedBody {
         global_position: DVec3::new(1.0, 2.0, 0.0),
@@ -77,10 +77,10 @@ fn editor_setup(
             name: "Some planet".to_string(),
         }
     };
-    planet.spawn_as_planet::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials);
+    spawn_as_planet::<OnEditorScreen, FixedBody>(planet, &mut commands, &mut meshes, &mut materials);
 }
 
-fn position_bodies_fixed(mut query: Query<(&mut Transform, &FixedBody)>) {
+fn position_bodies_fixed<BodyType: Body + Component + Renderable>(mut query: Query<(&mut Transform, &BodyType)>) {
     for (mut transform, fixed_body) in query.iter_mut() {
         transform.translation = fixed_body.world_space(fixed_body.global_position(), 1.4);
     }
