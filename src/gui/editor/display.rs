@@ -59,7 +59,7 @@ fn editor_setup(
             name: "".to_string(),
         },
     };
-    sun1.show_as_star::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials);
+    sun1.spawn_as_star::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials);
 
     let sun2 = FixedBody {
         global_position: DVec3::new(1.0, 2.0, 0.0),
@@ -68,8 +68,16 @@ fn editor_setup(
             name: "".to_string(),
         },
     };
-    sun2.show_as_star::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials);
+    // sun2.spawn_as_star::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials);
 
+    let planet = FixedBody {
+        global_position: DVec3::new(1.0, 2.0, 0.0),
+        properties: BodyProperties {
+            mass: 0.0,
+            name: "Some planet".to_string(),
+        }
+    };
+    planet.spawn_as_planet::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials);
 }
 
 fn position_bodies_fixed(mut query: Query<(&mut Transform, &FixedBody)>) {

@@ -23,11 +23,11 @@ pub trait Renderable {
 impl Renderable for FixedBody {}
 
 impl FixedBody {
-    pub fn show_as_star<ScreenTrait: Component + Default>(self, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) {
+    pub fn spawn_as_star<ScreenTrait: Component + Default>(self, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) {
         let star_mesh = PbrBundle {
             mesh: meshes.add(Sphere::new(1.0)),
             material: materials.add(Color::rgb(5.0 * 3.0, 2.5 * 3.0, 0.3 * 3.0)),
-            transform: Transform::from_xyz(0.0, 0.5, 0.0),
+            transform: Transform::IDENTITY,
             ..default()
         };
         commands.spawn((star_mesh, Star, ScreenTrait::default(), self))
@@ -41,6 +41,16 @@ impl FixedBody {
                     ..default()
                 });
             });
+    }
+
+    pub fn spawn_as_planet<ScreenTrait: Component + Default>(self, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) {
+        let planet_mesh = PbrBundle {
+            mesh: meshes.add(Sphere::new(0.2)),
+            material: materials.add(Color::rgb(0.2, 0.4, 0.8)),
+            transform: Transform::IDENTITY,
+            ..default()
+        };
+        commands.spawn((planet_mesh, Star, ScreenTrait::default(), self));
     }
 }
 
