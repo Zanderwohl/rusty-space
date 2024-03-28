@@ -5,6 +5,7 @@ use bevy::hierarchy::BuildChildren;
 use bevy::time::Fixed;
 use crate::body::body::Body;
 use crate::body::fixed::FixedBody;
+use crate::body::newton::NewtonBody;
 use crate::gui::body::engine::VisibleBody;
 use crate::gui::editor;
 use crate::gui::editor::display::Star;
@@ -21,6 +22,7 @@ pub trait Renderable {
 /// Make "renderable" for things like Star, Planet, spaceship, etc?
 /// Method of propulsion has nothing to do with being fixed or moving.
 impl Renderable for FixedBody {}
+impl Renderable for NewtonBody {}
 
 
 pub fn spawn_as_star<ScreenTrait: Component + Default, BodyType: Body + Bundle>(body: BodyType, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) {
@@ -43,7 +45,10 @@ pub fn spawn_as_star<ScreenTrait: Component + Default, BodyType: Body + Bundle>(
         });
 }
 
-pub fn spawn_as_planet<ScreenTrait: Component + Default, BodyType: Body + Bundle>(body: BodyType, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) {
+pub fn spawn_as_planet<ScreenTrait: Component + Default, BodyType: Body + Bundle>(
+    body: BodyType, commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>) {
     let planet_mesh = PbrBundle {
         mesh: meshes.add(Sphere::new(0.2)),
         material: materials.add(Color::rgb(0.2, 0.4, 0.8)),

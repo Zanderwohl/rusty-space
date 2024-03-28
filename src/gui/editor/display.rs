@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use glam::DVec3;
 use crate::body::body::{Body, BodyProperties};
 use crate::body::fixed::FixedBody;
-use crate::gui::body::engine::VisibleBody;
-use crate::gui::body::graphical;
+use crate::body::newton::NewtonBody;
+use crate::body::SimulationSettings;
 use crate::gui::body::graphical::{Renderable, spawn_as_planet, spawn_as_star};
 use crate::gui::common;
 use crate::gui::editor::gui;
@@ -16,13 +16,37 @@ pub fn editor_plugin(app: &mut App) {
     app.add_systems(OnEnter(AppState::Editor), editor_setup)
         .add_systems(Update, editor.run_if(in_state(AppState::Editor)))
         .add_systems(OnExit(AppState::Editor), despawn_screen::<OnEditorScreen>)
+        .insert_resource(SimulationSettings {
+            gravity_constant: 1.0,
+        })
+        .insert_resource(DisplayState {
+            current_time: 0.0,
+            display_scale: 1.5,
+            body_scale: 1.0,
+        })
         .add_systems(
             Update,
             (crate::gui::menu::common::button_system, gui::menu_action).run_if(in_state(AppState::Editor)),
-        ).add_systems(
-        Update,
-        (position_bodies_fixed::<FixedBody>).run_if(in_state(AppState::Editor)),
+        )
+        .add_systems(
+            Update,
+            (position_bodies_of_type::<FixedBody>).run_if(in_state(AppState::Editor)),
+        )
+        .add_systems(
+            Update,
+            (position_bodies_of_type::<NewtonBody>).run_if(in_state(AppState::Editor)),
+        )
+        .add_systems(
+            Update,
+            handle_time.run_if(in_state(AppState::Editor)),
         );
+}
+
+#[derive(Resource, Debug, Component, PartialEq, /*Eq,*/ Clone, Copy)]
+struct DisplayState {
+    current_time: f64,
+    display_scale: f64,
+    body_scale: f32,
 }
 
 // Tag component used to tag entities added on the game screen
@@ -55,7 +79,7 @@ fn editor_setup(
     let sun1 = FixedBody {
         global_position: DVec3::ZERO,
         properties: BodyProperties {
-            mass: 0.0,
+            mass: 10.0,
             name: "".to_string(),
         },
     };
@@ -70,20 +94,28 @@ fn editor_setup(
     };
     // sun2.spawn_as_star::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials);
 
-    let planet = FixedBody {
+    let planet = NewtonBody {
         global_position: DVec3::new(1.0, 2.0, 0.0),
         properties: BodyProperties {
-            mass: 0.0,
+            mass: 1.0,
             name: "Some planet".to_string(),
         }
     };
-    spawn_as_planet::<OnEditorScreen, FixedBody>(planet, &mut commands, &mut meshes, &mut materials);
+    spawn_as_planet::<OnEditorScreen, NewtonBody>(planet, &mut commands, &mut meshes, &mut materials);
 }
 
-fn position_bodies_fixed<BodyType: Body + Component + Renderable>(mut query: Query<(&mut Transform, &BodyType)>) {
+fn position_bodies_of_type<BodyType: Body + Component + Renderable>(mut query: Query<(&mut Transform, &BodyType)>,
+    display_state: Res<DisplayState>) {
     for (mut transform, fixed_body) in query.iter_mut() {
-        transform.translation = fixed_body.world_space(fixed_body.global_position(), 1.4);
+        transform.translation = fixed_body.world_space(fixed_body.global_position(), display_state.display_scale);
+        transform.scale = Vec3::new(display_state.body_scale,
+                                    display_state.body_scale,
+                                    display_state.body_scale,);
     }
+}
+
+fn handle_time(display_state: Res<DisplayState>) {
+    println!("{}", display_state.current_time)
 }
 
 // Tick the timer, and change state when finished
