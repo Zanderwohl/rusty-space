@@ -5,6 +5,7 @@ use bevy::hierarchy::BuildChildren;
 use bevy::time::Fixed;
 use crate::body::body::Body;
 use crate::body::fixed::FixedBody;
+use crate::body::linear::LinearBody;
 use crate::body::newton::NewtonBody;
 use crate::gui::body::engine::VisibleBody;
 use crate::gui::editor;
@@ -23,6 +24,7 @@ pub trait Renderable {
 /// Method of propulsion has nothing to do with being fixed or moving.
 impl Renderable for FixedBody {}
 impl Renderable for NewtonBody {}
+impl Renderable for LinearBody {}
 
 
 pub fn spawn_as_star<ScreenTrait: Component + Default, BodyType: Body + Bundle>(body: BodyType, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) {

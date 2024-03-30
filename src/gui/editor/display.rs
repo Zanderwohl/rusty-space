@@ -3,6 +3,7 @@ use glam::DVec3;
 use crate::body::body::{Body, BodyProperties};
 use crate::body::fixed::FixedBody;
 use crate::body::newton::NewtonBody;
+use crate::body::linear::LinearBody;
 use crate::body::SimulationSettings;
 use crate::gui::body::graphical::{Renderable, spawn_as_planet, spawn_as_star};
 use crate::gui::common;
@@ -36,6 +37,10 @@ pub fn editor_plugin(app: &mut App) {
         .add_systems(
             Update,
             (position_bodies_of_type::<NewtonBody>).run_if(in_state(AppState::Editor)),
+        )
+        .add_systems(
+            Update,
+            (position_bodies_of_type::<LinearBody>).run_if(in_state(AppState::Editor)),
         )
         .add_systems(
             Update,
@@ -95,20 +100,23 @@ fn editor_setup(
     };
     // sun2.spawn_as_star::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials);
 
-    let planet = NewtonBody {
+    let planet = LinearBody {
         global_position: DVec3::new(1.0, 2.0, 0.0),
         properties: BodyProperties {
             mass: 1.0,
             name: "Some planet".to_string(),
-        }
+        },
+        velocity: DVec3::new(0.001, 0.0, 0.0),
     };
-    spawn_as_planet::<OnEditorScreen, NewtonBody>(planet, &mut commands, &mut meshes, &mut materials);
+    spawn_as_planet::<OnEditorScreen, LinearBody>(planet, &mut commands, &mut meshes, &mut materials);
 }
 
-fn position_bodies_of_type<BodyType: Body + Component + Renderable>(mut query: Query<(&mut Transform, &BodyType)>,
-    display_state: Res<DisplayState>) {
-    for (mut transform, fixed_body) in query.iter_mut() {
-        transform.translation = fixed_body.world_space(fixed_body.global_position(), display_state.display_scale);
+fn position_bodies_of_type<BodyType: Body + Component + Renderable>(
+    mut query: Query<(&mut Transform, &BodyType)>,
+    display_state: Res<DisplayState>
+) {
+    for (mut transform, body) in query.iter_mut() {
+        transform.translation = body.world_space(body.global_position_after_time(display_state.current_time), display_state.display_scale);
         transform.scale = Vec3::new(display_state.body_scale,
                                     display_state.body_scale,
                                     display_state.body_scale,);
@@ -118,16 +126,22 @@ fn position_bodies_of_type<BodyType: Body + Component + Renderable>(mut query: Q
 fn handle_time(mut display_state: ResMut<DisplayState>,
                keyboard: Res<ButtonInput<KeyCode>>,
                mut query: Query<(&mut Transform, &mut Text), With<DebugText>>) {
-    for (transform, mut text) in query.iter_mut() {
+    for (_transform, mut text) in query.iter_mut() {
         let text = &mut text.sections[0].value;
         text.clear();
         text.push_str(&*format!("Time (left/right): {}", display_state.current_time));
     }
     if keyboard.just_pressed(KeyCode::ArrowLeft) {
-        display_state.current_time -= 1.0;
+        display_state.current_time -= 100.0;
     }
     if keyboard.just_pressed(KeyCode::ArrowRight) {
-        display_state.current_time += 1.0;
+        display_state.current_time += 100.0;
+    }
+    if keyboard.pressed(KeyCode::ArrowUp) {
+        display_state.current_time += 100.0;
+    }
+    if keyboard.pressed(KeyCode::ArrowDown) {
+        display_state.current_time -= 100.0;
     }
 }
 

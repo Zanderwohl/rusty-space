@@ -4,6 +4,7 @@ pub mod body;
 pub mod kepler;
 pub mod newton;
 pub mod fixed;
+pub mod linear;
 
 #[derive(Resource, Debug, Component, PartialEq, /*Eq,*/ Clone, Copy)]
 pub struct SimulationSettings {
