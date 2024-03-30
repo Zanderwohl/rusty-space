@@ -7,6 +7,7 @@ use crate::body::SimulationSettings;
 use crate::gui::body::graphical::{Renderable, spawn_as_planet, spawn_as_star};
 use crate::gui::common;
 use crate::gui::editor::gui;
+use crate::gui::editor::gui::DebugText;
 
 use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
 
@@ -114,8 +115,20 @@ fn position_bodies_of_type<BodyType: Body + Component + Renderable>(mut query: Q
     }
 }
 
-fn handle_time(display_state: Res<DisplayState>) {
-    println!("{}", display_state.current_time)
+fn handle_time(mut display_state: ResMut<DisplayState>,
+               keyboard: Res<ButtonInput<KeyCode>>,
+               mut query: Query<(&mut Transform, &mut Text), With<DebugText>>) {
+    for (transform, mut text) in query.iter_mut() {
+        let text = &mut text.sections[0].value;
+        text.clear();
+        text.push_str(&*format!("Time (left/right): {}", display_state.current_time));
+    }
+    if keyboard.just_pressed(KeyCode::ArrowLeft) {
+        display_state.current_time -= 1.0;
+    }
+    if keyboard.just_pressed(KeyCode::ArrowRight) {
+        display_state.current_time += 1.0;
+    }
 }
 
 // Tick the timer, and change state when finished
