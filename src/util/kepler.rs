@@ -120,7 +120,7 @@ pub mod eccentric_anomaly {
 
 pub mod true_anomaly {
     use glam::DVec3;
-    use crate::util::common::unit_circle_xy;
+    use crate::util::common::{bessel_j, beta, unit_circle_xy};
 
     pub fn at_time(eccentric_anomaly: f64, eccentricity: f64) -> f64 {
         let beta = eccentricity / (1.0 + unit_circle_xy(eccentricity));
@@ -149,6 +149,32 @@ pub mod true_anomaly {
         let fourth_term = (13.0 / 12.0) * eccentricity * eccentricity * eccentricity * f64::sin(3.0 * mean_anomaly);
         first_term + second_term + third_term + fourth_term
     }
+
+    pub fn fourier_expansion(mean_anomaly: f64, eccentricity: f64, iterations: usize) -> f64 {
+        let mut v = mean_anomaly;
+        for k in 1..(iterations + 1) {
+            let k_ = k as f64;
+            let fore_term = 2.0 / k_;
+            let rear_term = f64::sin(k_ * mean_anomaly);
+            let middle_term = {
+                let mut sum = 0.0;
+                for n in 0..iterations {
+                    let n = n as f64;
+                    sum += bessel_j(n, -(k_ * eccentricity), beta(k_ + n))
+                }
+                sum
+            } + {
+                let mut sum = 0.0;
+                for n in 1..iterations {
+                    let n = -(n as f64);
+                    sum += bessel_j(n, -(k_ * eccentricity), beta(k_ + n))
+                }
+                sum
+            };
+            v += fore_term * middle_term * rear_term;
+        }
+        v
+    }
 }
 
 pub mod period {
@@ -164,5 +190,13 @@ pub mod gravitational_parameter {
 
     pub fn third_law(period: f64, semi_major_axis: f64) -> f64 {
         reused_term(semi_major_axis) / (period * period)
+    }
+}
+
+pub mod radius {
+    pub fn from_true_anomaly(semi_major_axis: f64, eccentricity: f64, true_anomaly: f64) -> f64 {
+        let numerator = 1.0 - (eccentricity * eccentricity);
+        let denominator = 1.0 + eccentricity * f64::cos(true_anomaly);
+        (semi_major_axis * numerator) / denominator
     }
 }

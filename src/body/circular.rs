@@ -3,14 +3,13 @@ use glam::DVec3;
 use crate::body::body::{Body, BodyProperties};
 
 #[derive(Component)]
-pub struct NewtonBody {
-    pub(crate) global_position: DVec3,
+pub struct CircularBody {
     pub(crate) properties: BodyProperties,
 }
 
-impl Body for NewtonBody {
+impl Body for CircularBody {
     fn global_position(&self) -> DVec3 {
-        self.global_position
+        self.global_position_after_time(0.0)
     }
 
     fn global_position_after_time(&self, delta: f64) -> DVec3 {
