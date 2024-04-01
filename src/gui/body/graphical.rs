@@ -1,9 +1,10 @@
 use bevy::pbr::{PbrBundle, PointLight, PointLightBundle, StandardMaterial};
-use bevy::prelude::{Assets, Bundle, Color, Commands, Component, default, Mesh, ResMut, Sphere, Transform};
+use bevy::prelude::{Assets, Bundle, Color, Commands, Component, default, Entity, Mesh, ResMut, Sphere, Transform};
 use glam::{DVec3, Vec3};
 use bevy::hierarchy::BuildChildren;
 use bevy::time::Fixed;
 use crate::body::body::Body;
+use crate::body::circular::CircularBody;
 use crate::body::fixed::FixedBody;
 use crate::body::linear::LinearBody;
 use crate::body::newton::NewtonBody;
@@ -25,9 +26,10 @@ pub trait Renderable {
 impl Renderable for FixedBody {}
 impl Renderable for NewtonBody {}
 impl Renderable for LinearBody {}
+impl Renderable for CircularBody {}
 
 
-pub fn spawn_as_star<ScreenTrait: Component + Default, BodyType: Body + Bundle>(body: BodyType, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) {
+pub fn spawn_as_star<ScreenTrait: Component + Default, BodyType: Body + Bundle>(body: BodyType, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {
     let star_mesh = PbrBundle {
         mesh: meshes.add(Sphere::new(1.0)),
         material: materials.add(Color::rgb(5.0 * 3.0, 2.5 * 3.0, 0.3 * 3.0)),
@@ -44,7 +46,7 @@ pub fn spawn_as_star<ScreenTrait: Component + Default, BodyType: Body + Bundle>(
                 },
                 ..default()
             });
-        });
+        }).id()
 }
 
 pub fn spawn_as_planet<ScreenTrait: Component + Default, BodyType: Body + Bundle>(

@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use glam::DVec3;
 use crate::body::body::{Body, BodyProperties};
+use crate::body::circular::CircularBody;
 use crate::body::fixed::FixedBody;
 use crate::body::newton::NewtonBody;
 use crate::body::linear::LinearBody;
@@ -41,6 +42,10 @@ pub fn editor_plugin(app: &mut App) {
         .add_systems(
             Update,
             (position_bodies_of_type::<LinearBody>).run_if(in_state(AppState::Editor)),
+        )
+        .add_systems(
+            Update,
+            (position_bodies_of_type::<CircularBody>).run_if(in_state(AppState::Editor)),
         )
         .add_systems(
             Update,
@@ -89,7 +94,7 @@ fn editor_setup(
             name: "".to_string(),
         },
     };
-    spawn_as_star::<OnEditorScreen, FixedBody>(sun1, &mut commands, &mut meshes, &mut materials);
+    let sun_id = spawn_as_star::<OnEditorScreen, FixedBody>(sun1, &mut commands, &mut meshes, &mut materials);
 
     let sun2 = FixedBody {
         global_position: DVec3::new(1.0, 2.0, 0.0),
@@ -100,15 +105,15 @@ fn editor_setup(
     };
     // sun2.spawn_as_star::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials);
 
-    let planet = LinearBody {
-        global_position: DVec3::new(1.0, 2.0, 0.0),
+    let planet = CircularBody {
         properties: BodyProperties {
             mass: 1.0,
             name: "Some planet".to_string(),
         },
-        velocity: DVec3::new(0.001, 0.0, 0.0),
+        radius: 10.0,
+        parent: sun_id,
     };
-    spawn_as_planet::<OnEditorScreen, LinearBody>(planet, &mut commands, &mut meshes, &mut materials);
+    spawn_as_planet::<OnEditorScreen, CircularBody>(planet, &mut commands, &mut meshes, &mut materials);
 }
 
 fn position_bodies_of_type<BodyType: Body + Component + Renderable>(

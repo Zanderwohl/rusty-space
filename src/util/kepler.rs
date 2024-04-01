@@ -181,7 +181,7 @@ pub mod period {
     use crate::util::kepler::third_law::reused_term;
     pub fn third_law(semi_major_axis: f64, gravitational_parameter: f64) -> f64 {
         let x = reused_term(semi_major_axis) / gravitational_parameter;
-        f64::sqrt(x)
+        x.sqrt()
     }
 }
 
