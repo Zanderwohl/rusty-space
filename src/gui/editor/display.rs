@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use bevy::prelude::*;
 use glam::DVec3;
 use crate::body::body::{Body, BodyProperties};
@@ -110,8 +111,7 @@ fn editor_setup(
             mass: 1.0,
             name: "Some planet".to_string(),
         },
-        radius: 10.0,
-        parent: sun_id,
+        radius: 3.0,
     };
     spawn_as_planet::<OnEditorScreen, CircularBody>(planet, &mut commands, &mut meshes, &mut materials);
 }
@@ -124,7 +124,7 @@ fn position_bodies_of_type<BodyType: Body + Component + Renderable>(
         transform.translation = body.world_space(body.global_position_after_time(display_state.current_time), display_state.display_scale);
         transform.scale = Vec3::new(display_state.body_scale,
                                     display_state.body_scale,
-                                    display_state.body_scale,);
+                                    display_state.body_scale, );
     }
 }
 

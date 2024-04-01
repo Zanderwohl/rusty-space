@@ -1,5 +1,6 @@
 use glam::DVec3;
 
+#[bevy_trait_query::queryable]
 pub trait Body {
     fn global_position(&self) -> DVec3;
 

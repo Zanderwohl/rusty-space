@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use bevy::pbr::{PbrBundle, PointLight, PointLightBundle, StandardMaterial};
 use bevy::prelude::{Assets, Bundle, Color, Commands, Component, default, Entity, Mesh, ResMut, Sphere, Transform};
 use glam::{DVec3, Vec3};

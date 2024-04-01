@@ -27,7 +27,7 @@ pub mod true_anomaly {
     pub fn at_time(time: f64, radius: f64, mu: f64) -> f64 {
         let period = period::definition(radius, mu);
         let time = time % period;
-        time / period
+        (time / period) * 2.0 * std::f64::consts::PI
     }
 }
 
@@ -35,6 +35,6 @@ pub mod position {
     use glam::DVec3;
 
     pub fn from_true_anomaly(radius: f64, true_anomaly: f64) -> DVec3 {
-        DVec3::new(f64::sin(true_anomaly) * radius, 0.0, f64::cos(true_anomaly) * radius)
+        DVec3::new(f64::cos(true_anomaly) * radius, 0.0, f64::sin(true_anomaly) * radius)
     }
 }
