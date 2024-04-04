@@ -1,6 +1,8 @@
+use bevy::prelude::Component;
 use glam::DVec3;
 use crate::body::body::{Body, BodyProperties};
 
+#[derive(Component)]
 pub struct KeplerBody {
     properties: BodyProperties,
     elements: KeplerElements,

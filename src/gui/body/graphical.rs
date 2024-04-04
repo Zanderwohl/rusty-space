@@ -13,6 +13,7 @@ use crate::gui::body::engine::VisibleBody;
 use crate::gui::editor;
 use crate::gui::editor::display::Star;
 
+#[bevy_trait_query::queryable]
 pub trait Renderable {
     /// We must scale to a screen scale,
     /// then reduce precision to Vec3.

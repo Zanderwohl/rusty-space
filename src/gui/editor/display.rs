@@ -1,9 +1,11 @@
 use std::sync::Arc;
 use bevy::prelude::*;
+use bevy_trait_query::{One, RegisterExt};
 use glam::DVec3;
 use crate::body::body::{Body, BodyProperties};
 use crate::body::circular::CircularBody;
 use crate::body::fixed::FixedBody;
+use crate::body::kepler::KeplerBody;
 use crate::body::newton::NewtonBody;
 use crate::body::linear::LinearBody;
 use crate::body::SimulationSettings;
@@ -17,7 +19,13 @@ use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
 // This plugin will contain the game. In this case, it's just be a screen that will
 // display the current settings for 5 seconds before returning to the menu
 pub fn editor_plugin(app: &mut App) {
-    app.add_systems(OnEnter(AppState::Editor), editor_setup)
+    app
+        .register_component_as::<dyn Body, FixedBody>()
+        .register_component_as::<dyn Body, CircularBody>()
+        .register_component_as::<dyn Body, LinearBody>()
+        .register_component_as::<dyn Body, NewtonBody>()
+        .register_component_as::<dyn Body, KeplerBody>()
+        .add_systems(OnEnter(AppState::Editor), editor_setup)
         .add_systems(Update, editor.run_if(in_state(AppState::Editor)))
         .add_systems(OnExit(AppState::Editor), despawn_screen::<OnEditorScreen>)
         .insert_resource(SimulationSettings {
@@ -34,19 +42,7 @@ pub fn editor_plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (position_bodies_of_type::<FixedBody>).run_if(in_state(AppState::Editor)),
-        )
-        .add_systems(
-            Update,
-            (position_bodies_of_type::<NewtonBody>).run_if(in_state(AppState::Editor)),
-        )
-        .add_systems(
-            Update,
-            (position_bodies_of_type::<LinearBody>).run_if(in_state(AppState::Editor)),
-        )
-        .add_systems(
-            Update,
-            (position_bodies_of_type::<CircularBody>).run_if(in_state(AppState::Editor)),
+            (position_bodies_of_type).run_if(in_state(AppState::Editor)),
         )
         .add_systems(
             Update,
@@ -116,12 +112,13 @@ fn editor_setup(
     spawn_as_planet::<OnEditorScreen, CircularBody>(planet, &mut commands, &mut meshes, &mut materials);
 }
 
-fn position_bodies_of_type<BodyType: Body + Component + Renderable>(
-    mut query: Query<(&mut Transform, &BodyType)>,
+fn position_bodies_of_type(
+    mut query: Query<(&mut Transform, One<&dyn Body>)>,
     display_state: Res<DisplayState>
 ) {
     for (mut transform, body) in query.iter_mut() {
-        transform.translation = body.world_space(body.global_position_after_time(display_state.current_time), display_state.display_scale);
+        let world_position = (body.global_position_after_time(display_state.current_time) * display_state.display_scale).as_vec3();
+        transform.translation = world_position;
         transform.scale = Vec3::new(display_state.body_scale,
                                     display_state.body_scale,
                                     display_state.body_scale, );

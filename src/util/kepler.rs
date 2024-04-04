@@ -30,7 +30,7 @@ pub mod local {
         }
     }
 
-    pub mod distance {
+    pub mod radius {
         pub fn from_elements1(focal_parameter: f64, eccentricity: f64, true_anomaly: f64) -> f64 {
             let numerator = focal_parameter * eccentricity;
             let denominator = 1.0 + eccentricity * f64::cos(true_anomaly);
@@ -190,13 +190,5 @@ pub mod gravitational_parameter {
 
     pub fn third_law(period: f64, semi_major_axis: f64) -> f64 {
         reused_term(semi_major_axis) / (period * period)
-    }
-}
-
-pub mod radius {
-    pub fn from_true_anomaly(semi_major_axis: f64, eccentricity: f64, true_anomaly: f64) -> f64 {
-        let numerator = 1.0 - (eccentricity * eccentricity);
-        let denominator = 1.0 + eccentricity * f64::cos(true_anomaly);
-        (semi_major_axis * numerator) / denominator
     }
 }
