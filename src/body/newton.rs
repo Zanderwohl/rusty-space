@@ -1,10 +1,11 @@
+use bevy::prelude::Component;
 use glam::DVec3;
 use crate::body::body::{Body, BodyProperties};
 
-
+#[derive(Component)]
 pub struct NewtonBody {
-    global_position: DVec3,
-    properties: BodyProperties,
+    pub(crate) global_position: DVec3,
+    pub(crate) properties: BodyProperties,
 }
 
 impl Body for NewtonBody {
@@ -14,7 +15,7 @@ impl Body for NewtonBody {
 
     fn global_position_after_time(&self, delta: f64) -> DVec3 {
         let granularity: f64 = 1.0;
-        todo!()
+        DVec3::ZERO
     }
 
     fn mass(&self) -> f64 {

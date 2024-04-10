@@ -1,6 +1,6 @@
 use bevy::app::AppExit;
 use bevy::asset::AssetServer;
-use bevy::prelude::{AlignItems, BackgroundColor, BuildChildren, Button, ButtonBundle, Changed, Commands, Component, default, EventWriter, Interaction, JustifyContent, NextState, NodeBundle, Query, Res, ResMut, Style, TextBundle, Val, With};
+use bevy::prelude::{AlignItems, BackgroundColor, BuildChildren, Button, ButtonBundle, Changed, Commands, Component, default, EventWriter, Interaction, JustifyContent, NextState, NodeBundle, PositionType, Query, Res, ResMut, Style, TextBundle, TextStyle, Val, With};
 use crate::gui::common;
 use crate::gui::common::AppState;
 use crate::gui::editor::display::OnEditorScreen;
@@ -9,15 +9,17 @@ use crate::gui::editor::display::OnEditorScreen;
 struct OnEditorUI;
 
 #[derive(Component)]
+pub struct DebugText;
+
+#[derive(Component)]
 pub(crate) enum GUIButtonAction {
     BackToMainMenu,
 }
 
-
 pub(super) fn ui_setup(commands: &mut Commands, asset_server: AssetServer) {
     commands
         .spawn((
-            NodeBundle {
+            NodeBundle { // The main UI area
                 style: Style {
                     width: Val::Percent(100.0),
                     height: Val::Percent(100.0),
@@ -41,8 +43,26 @@ pub(super) fn ui_setup(commands: &mut Commands, asset_server: AssetServer) {
                     GUIButtonAction::BackToMainMenu,
                 ))
                 .with_children(|parent| {
-                    parent.spawn(TextBundle::from_section("Back", common::text::primary(asset_server).clone()));
+                    parent.spawn(TextBundle::from_section("Back", common::text::primary(asset_server.clone()).clone()));
                 });
+            parent
+                .spawn((
+                    TextBundle::from_section(
+                        "Time handler not started.",
+                        TextStyle {
+                            font: asset_server.load("fonts/Jost.ttf"),
+                            font_size: 26.0,
+                            ..default()
+                        },
+                    )
+                        .with_style(Style {
+                            position_type: PositionType::Absolute,
+                            bottom: Val::Px(10.0),
+                            left: Val::Px(10.0),
+                            ..default()
+                        }),
+                    DebugText
+                ));
         });
 }
 

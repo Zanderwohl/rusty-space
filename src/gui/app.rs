@@ -20,6 +20,7 @@ pub(crate) fn open() {
                 close_when_requested: true,
             })
         )
+        .insert_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))
         .add_systems(Startup, set_window_icon)
         .add_systems(Startup, setup)
         .insert_resource(DisplayQuality::Medium)

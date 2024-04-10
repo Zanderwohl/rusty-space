@@ -1,5 +1,6 @@
 use glam::DVec3;
 
+#[bevy_trait_query::queryable]
 pub trait Body {
     fn global_position(&self) -> DVec3;
 
@@ -8,6 +9,10 @@ pub trait Body {
     fn mass(&self) -> f64;
 
     fn name(&self) -> &String;
+
+    fn mu(&self) -> f64 {
+        self.mass() * 6.6743015e-11f64
+    }
 }
 
 pub struct BodyProperties {
