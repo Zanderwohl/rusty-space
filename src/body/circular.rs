@@ -22,7 +22,7 @@ impl Body for CircularBody {
         let mu = 0.1;
         let v = util::circular::true_anomaly::at_time(delta, self.radius, mu);
         let local_pos = util::circular::position::from_true_anomaly(self.radius, v);
-        println!("{}", parent_location + local_pos);
+        // println!("{}", parent_location + local_pos);
         parent_location + local_pos
     }
 
