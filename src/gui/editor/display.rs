@@ -33,8 +33,10 @@ pub fn editor_plugin(app: &mut App) {
         })
         .insert_resource(DisplayState {
             current_time: 0.0,
-            display_scale: 1.5,
+            time_scale: 1.0,
+            distance_scale: 1.5,
             body_scale: 1.0,
+            playing: false,
         })
         .add_systems(
             Update,
@@ -53,8 +55,10 @@ pub fn editor_plugin(app: &mut App) {
 #[derive(Resource, Debug, Component, PartialEq, /*Eq,*/ Clone, Copy)]
 struct DisplayState {
     current_time: f64,
-    display_scale: f64,
+    time_scale: f64,
+    distance_scale: f64,
     body_scale: f32,
+    playing: bool,
 }
 
 // Tag component used to tag entities added on the game screen
@@ -116,8 +120,9 @@ fn position_bodies_of_type(
     display_state: Res<DisplayState>
 ) {
     for (mut transform, body) in query.iter_mut() {
-        let world_position = (body.global_position_after_time(display_state.current_time) * display_state.display_scale).as_vec3();
-        transform.translation = world_position;
+        let world_position = (body.global_position_after_time(display_state.current_time) * display_state.distance_scale).as_vec3();
+        let converted_position = bevy::prelude::Vec3::new(world_position.x, world_position.y, world_position.z);
+        transform.translation = converted_position;
         transform.scale = Vec3::new(display_state.body_scale,
                                     display_state.body_scale,
                                     display_state.body_scale, );
@@ -126,25 +131,34 @@ fn position_bodies_of_type(
 
 fn handle_time(mut display_state: ResMut<DisplayState>,
                keyboard: Res<ButtonInput<KeyCode>>,
-               mut query: Query<(&mut Transform, &mut Text), With<DebugText>>) {
+               mut query: Query<(&mut Transform, &mut Text), With<DebugText>>,
+               time: Res<Time>,) {
     for (_transform, mut text) in query.iter_mut() {
         let text = &mut text.sections[0].value;
         text.clear();
+        text.push_str(&*format!("{}\n", if display_state.playing { "Playing" } else { "Paused" }));
+        text.push_str(&*format!("Time Scale ([/]): {:.1}\n", display_state.time_scale));
         text.push_str(&*format!("Time (left/right): {}\n", display_state.current_time));
         text.push_str(&*format!("Object scale (i/o): {:.1}\n", display_state.body_scale));
-        text.push_str(&*format!("Distance scale (k/l): {:.1}", display_state.display_scale));
+        text.push_str(&*format!("Distance scale (k/l): {:.1}", display_state.distance_scale));
     }
     if keyboard.just_pressed(KeyCode::ArrowLeft) {
-        display_state.current_time -= 100.0;
+        display_state.current_time -= 1.0 * display_state.time_scale;
     }
     if keyboard.just_pressed(KeyCode::ArrowRight) {
-        display_state.current_time += 100.0;
+        display_state.current_time += 1.0 * display_state.time_scale;
+    }
+    if keyboard.just_pressed(KeyCode::BracketLeft) {
+        display_state.time_scale -= 0.1;
+    }
+    if keyboard.just_pressed(KeyCode::BracketRight) {
+        display_state.time_scale += 0.1;
     }
     if keyboard.pressed(KeyCode::ArrowUp) {
-        display_state.current_time += 100.0;
+        display_state.current_time += 1.0 * display_state.time_scale;
     }
     if keyboard.pressed(KeyCode::ArrowDown) {
-        display_state.current_time -= 100.0;
+        display_state.current_time -= 1.0 * display_state.time_scale;
     }
     if keyboard.just_pressed(KeyCode::KeyI) {
         display_state.body_scale -= 0.1;
@@ -153,10 +167,16 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
         display_state.body_scale += 0.1;
     }
     if keyboard.just_pressed(KeyCode::KeyK) {
-        display_state.display_scale -= 0.1;
+        display_state.distance_scale -= 0.1;
     }
     if keyboard.just_pressed(KeyCode::KeyL) {
-        display_state.display_scale += 0.1;
+        display_state.distance_scale += 0.1;
+    }
+    if keyboard.just_pressed(KeyCode::KeyP) {
+        display_state.playing = !display_state.playing;
+    }
+    if display_state.playing {
+        display_state.current_time += 10.0f64 * time.delta_seconds() as f64 * display_state.time_scale;
     }
 }
 
