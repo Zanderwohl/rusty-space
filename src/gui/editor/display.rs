@@ -81,7 +81,6 @@ fn editor_setup(
     commands.entity(base_screen)
         .insert(OnEditorScreen)
         .with_children(|parent| {
-
         });
     
     let sun1 = FixedBody {
@@ -131,7 +130,9 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
     for (_transform, mut text) in query.iter_mut() {
         let text = &mut text.sections[0].value;
         text.clear();
-        text.push_str(&*format!("Time (left/right): {}", display_state.current_time));
+        text.push_str(&*format!("Time (left/right): {}\n", display_state.current_time));
+        text.push_str(&*format!("Object scale (i/o): {:.1}\n", display_state.body_scale));
+        text.push_str(&*format!("Distance scale (k/l): {:.1}", display_state.display_scale));
     }
     if keyboard.just_pressed(KeyCode::ArrowLeft) {
         display_state.current_time -= 100.0;
@@ -144,6 +145,18 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
     }
     if keyboard.pressed(KeyCode::ArrowDown) {
         display_state.current_time -= 100.0;
+    }
+    if keyboard.just_pressed(KeyCode::KeyI) {
+        display_state.body_scale -= 0.1;
+    }
+    if keyboard.just_pressed(KeyCode::KeyO) {
+        display_state.body_scale += 0.1;
+    }
+    if keyboard.just_pressed(KeyCode::KeyK) {
+        display_state.display_scale -= 0.1;
+    }
+    if keyboard.just_pressed(KeyCode::KeyL) {
+        display_state.display_scale += 0.1;
     }
 }
 
