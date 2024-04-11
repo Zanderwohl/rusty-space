@@ -133,6 +133,17 @@ fn editor_setup(
     };
     let moon = spawn_as_planet::<OnEditorScreen, CircularBody>(moon, &mut commands, &mut meshes, &mut materials);
     commands.entity(planet).push_children(&[moon]);
+
+    let free = NewtonBody {
+        global_position: DVec3::new(3.0, 1.0, 0.0),
+        global_velocity: DVec3::ZERO,
+        properties: BodyProperties {
+            mass: 1.0,
+            name: "Free body".to_string(),
+            size: 0.8,
+        },
+    };
+    let free = spawn_as_planet::<OnEditorScreen, NewtonBody>(free, &mut commands, &mut meshes, &mut materials);
 }
 
 fn position_bodies_of_type(
@@ -149,6 +160,8 @@ fn position_bodies_of_type(
     }
 }
 
+// fn move_newton_bodies
+
 fn handle_time(mut display_state: ResMut<DisplayState>,
                keyboard: Res<ButtonInput<KeyCode>>,
                mut query: Query<(&mut Transform, &mut Text), With<DebugText>>,
@@ -156,7 +169,7 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
     for (_transform, mut text) in query.iter_mut() {
         let text = &mut text.sections[0].value;
         text.clear();
-        text.push_str(&*format!("{}\n", if display_state.playing { "Playing" } else { "Paused" }));
+        text.push_str(&*format!("{}\n", if display_state.playing { "[P]laying" } else { "[P]aused" }));
         text.push_str(&*format!("Time scale ([/]): {:.2}\n", display_state.time_step_size()));
         text.push_str(&*format!("Time (left/right): {:.2}\n", display_state.current_time));
         text.push_str(&*format!("Object scale (i/o): {:.1}\n", display_state.body_scale));
