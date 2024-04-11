@@ -11,11 +11,11 @@ pub struct LinearBody {
 }
 
 impl Body for LinearBody {
-    fn global_position(&self) -> DVec3 {
+    fn local_position(&self) -> DVec3 {
         self.global_position
     }
 
-    fn global_position_after_time(&self, delta: f64) -> DVec3 {
+    fn local_position_after_time(&self, delta: f64) -> DVec3 {
         self.global_position + (self.velocity * delta)
     }
 
@@ -25,5 +25,9 @@ impl Body for LinearBody {
 
     fn name(&self) -> &String {
         &self.properties.name
+    }
+
+    fn size(&self) -> f64 {
+        self.properties.size
     }
 }

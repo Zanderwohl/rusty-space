@@ -9,11 +9,11 @@ pub struct KeplerBody {
 }
 
 impl Body for KeplerBody {
-    fn global_position(&self) -> DVec3 {
+    fn local_position(&self) -> DVec3 {
         todo!()
     }
 
-    fn global_position_after_time(&self, delta: f64) -> DVec3 {
+    fn local_position_after_time(&self, delta: f64) -> DVec3 {
         todo!()
     }
 
@@ -23,6 +23,10 @@ impl Body for KeplerBody {
 
     fn name(&self) -> &String {
         &self.properties.name
+    }
+
+    fn size(&self) -> f64 {
+        self.properties.size
     }
 }
 

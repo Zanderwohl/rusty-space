@@ -11,11 +11,11 @@ pub struct CircularBody {
 }
 
 impl Body for CircularBody {
-    fn global_position(&self) -> DVec3 {
-        self.global_position_after_time(0.0)
+    fn local_position(&self) -> DVec3 {
+        self.local_position_after_time(0.0)
     }
 
-    fn global_position_after_time(&self, delta: f64) -> DVec3 {
+    fn local_position_after_time(&self, delta: f64) -> DVec3 {
         // let parent_location = self.parent.global_position_after_time(delta);
         // let mu = self.parent.mu();
         let parent_location = DVec3::ZERO;
@@ -32,5 +32,9 @@ impl Body for CircularBody {
 
     fn name(&self) -> &String {
         &self.properties.name
+    }
+
+    fn size(&self) -> f64 {
+        self.properties.size
     }
 }

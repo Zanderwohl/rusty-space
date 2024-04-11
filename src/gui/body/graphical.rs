@@ -54,12 +54,12 @@ pub fn spawn_as_star<ScreenTrait: Component + Default, BodyType: Body + Bundle>(
 pub fn spawn_as_planet<ScreenTrait: Component + Default, BodyType: Body + Bundle>(
     body: BodyType, commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>) {
+    materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {
     let planet_mesh = PbrBundle {
-        mesh: meshes.add(Sphere::new(0.2)),
+        mesh: meshes.add(Sphere::new(body.size() as f32)),
         material: materials.add(Color::rgb(0.2, 0.4, 0.8)),
         transform: Transform::IDENTITY,
         ..default()
     };
-    commands.spawn((planet_mesh, Star, ScreenTrait::default(), body));
+    commands.spawn((planet_mesh, Star, ScreenTrait::default(), body)).id()
 }

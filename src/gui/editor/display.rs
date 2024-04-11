@@ -61,6 +61,12 @@ struct DisplayState {
     playing: bool,
 }
 
+impl DisplayState {
+    pub fn time_step_size(&self) -> f64 {
+        self.time_scale * self.time_scale * self.time_scale
+    }
+}
+
 // Tag component used to tag entities added on the game screen
 #[derive(Component, Default)]
 pub(super) struct OnEditorScreen;
@@ -92,6 +98,7 @@ fn editor_setup(
         properties: BodyProperties {
             mass: 10.0,
             name: "".to_string(),
+            size: 1.0,
         },
     };
     let sun_id = spawn_as_star::<OnEditorScreen, FixedBody>(sun1, &mut commands, &mut meshes, &mut materials);
@@ -101,6 +108,7 @@ fn editor_setup(
         properties: BodyProperties {
             mass: 0.0,
             name: "".to_string(),
+            size: 0.2,
         },
     };
     // sun2.spawn_as_star::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials);
@@ -109,10 +117,22 @@ fn editor_setup(
         properties: BodyProperties {
             mass: 1.0,
             name: "Some planet".to_string(),
+            size: 0.2,
         },
         radius: 3.0,
     };
-    spawn_as_planet::<OnEditorScreen, CircularBody>(planet, &mut commands, &mut meshes, &mut materials);
+    let planet = spawn_as_planet::<OnEditorScreen, CircularBody>(planet, &mut commands, &mut meshes, &mut materials);
+
+    let moon = CircularBody {
+        properties: BodyProperties {
+            mass: 0.1,
+            name: "Some moon".to_string(),
+            size: 0.1,
+        },
+        radius: 0.5,
+    };
+    let moon = spawn_as_planet::<OnEditorScreen, CircularBody>(moon, &mut commands, &mut meshes, &mut materials);
+    commands.entity(planet).push_children(&[moon]);
 }
 
 fn position_bodies_of_type(
@@ -120,7 +140,7 @@ fn position_bodies_of_type(
     display_state: Res<DisplayState>
 ) {
     for (mut transform, body) in query.iter_mut() {
-        let world_position = (body.global_position_after_time(display_state.current_time) * display_state.distance_scale).as_vec3();
+        let world_position = (body.local_position_after_time(display_state.current_time) * display_state.distance_scale).as_vec3();
         let converted_position = bevy::prelude::Vec3::new(world_position.x, world_position.y, world_position.z);
         transform.translation = converted_position;
         transform.scale = Vec3::new(display_state.body_scale,
@@ -137,8 +157,8 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
         let text = &mut text.sections[0].value;
         text.clear();
         text.push_str(&*format!("{}\n", if display_state.playing { "Playing" } else { "Paused" }));
-        text.push_str(&*format!("Time Scale ([/]): {:.1}\n", display_state.time_scale));
-        text.push_str(&*format!("Time (left/right): {}\n", display_state.current_time));
+        text.push_str(&*format!("Time scale ([/]): {:.2}\n", display_state.time_step_size()));
+        text.push_str(&*format!("Time (left/right): {:.2}\n", display_state.current_time));
         text.push_str(&*format!("Object scale (i/o): {:.1}\n", display_state.body_scale));
         text.push_str(&*format!("Distance scale (k/l): {:.1}", display_state.distance_scale));
     }
@@ -149,16 +169,19 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
         display_state.current_time += 1.0 * display_state.time_scale;
     }
     if keyboard.just_pressed(KeyCode::BracketLeft) {
-        display_state.time_scale -= 0.1;
+        display_state.time_scale -= 0.2;
     }
     if keyboard.just_pressed(KeyCode::BracketRight) {
-        display_state.time_scale += 0.1;
+        display_state.time_scale += 0.2;
+    }
+    if display_state.time_scale.abs() < 0.01 {
+        display_state.time_scale = 0.0;
     }
     if keyboard.pressed(KeyCode::ArrowUp) {
-        display_state.current_time += 1.0 * display_state.time_scale;
+        display_state.current_time += 1.0 * display_state.time_step_size();
     }
     if keyboard.pressed(KeyCode::ArrowDown) {
-        display_state.current_time -= 1.0 * display_state.time_scale;
+        display_state.current_time -= 1.0 * display_state.time_step_size();
     }
     if keyboard.just_pressed(KeyCode::KeyI) {
         display_state.body_scale -= 0.1;
