@@ -9,6 +9,7 @@ use crate::body::kepler::KeplerBody;
 use crate::body::newton::NewtonBody;
 use crate::body::linear::LinearBody;
 use crate::body::SimulationSettings;
+use crate::body::universe::Universe;
 use crate::gui::body::graphical::{Renderable, spawn_as_planet, spawn_as_star};
 use crate::gui::common;
 use crate::gui::editor::gui;
@@ -38,6 +39,7 @@ pub fn editor_plugin(app: &mut App) {
             body_scale: 1.0,
             playing: false,
         })
+        .insert_resource(Universe::new())
         .add_systems(
             Update,
             (crate::gui::menu::common::button_system, gui::menu_action).run_if(in_state(AppState::Editor)),
@@ -152,7 +154,7 @@ fn position_bodies_of_type(
 ) {
     for (mut transform, body) in query.iter_mut() {
         let world_position = (body.local_position_after_time(display_state.current_time) * display_state.distance_scale).as_vec3();
-        let converted_position = bevy::prelude::Vec3::new(world_position.x, world_position.y, world_position.z);
+        let converted_position = Vec3::new(world_position.x, world_position.y, world_position.z);
         transform.translation = converted_position;
         transform.scale = Vec3::new(display_state.body_scale,
                                     display_state.body_scale,

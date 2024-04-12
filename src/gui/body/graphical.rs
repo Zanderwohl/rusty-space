@@ -11,7 +11,7 @@ use crate::body::linear::LinearBody;
 use crate::body::newton::NewtonBody;
 use crate::gui::body::engine::VisibleBody;
 use crate::gui::editor;
-use crate::gui::editor::display::Star;
+use crate::gui::editor::editor::Star;
 
 #[bevy_trait_query::queryable]
 pub trait Renderable {

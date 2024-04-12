@@ -30,7 +30,7 @@ pub(crate) fn open() {
         .add_plugins((
             splash::splash_plugin,
             menu::main::menu_plugin,
-            editor::display::editor_plugin,
+            editor::editor::editor_plugin,
         ))
         .run();
 }

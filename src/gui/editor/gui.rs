@@ -3,7 +3,7 @@ use bevy::asset::AssetServer;
 use bevy::prelude::{AlignItems, BackgroundColor, BuildChildren, Button, ButtonBundle, Changed, Commands, Component, default, EventWriter, Interaction, JustifyContent, NextState, NodeBundle, PositionType, Query, Res, ResMut, Style, TextBundle, TextStyle, Val, With};
 use crate::gui::common;
 use crate::gui::common::AppState;
-use crate::gui::editor::display::OnEditorScreen;
+use crate::gui::editor::editor::OnEditorScreen;
 
 #[derive(Component)]
 struct OnEditorUI;
