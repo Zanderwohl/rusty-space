@@ -39,6 +39,9 @@ pub fn editor_plugin(app: &mut App) {
             body_scale: 1.0,
             playing: false,
         })
+        .insert_resource(
+            Universe::default()
+        )
         .add_systems(
             Update,
             (crate::gui::menu::common::button_system, gui::menu_action).run_if(in_state(AppState::Editor)),

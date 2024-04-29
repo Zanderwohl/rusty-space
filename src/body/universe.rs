@@ -1,6 +1,8 @@
 use std::collections::HashMap;
-use bevy::math::DVec3;
-use bevy::prelude::{Has, Resource};
+use std::ops::Add;
+use glam::DVec3;
+use bevy::prelude::Resource;
+use crate::util::circular;
 
 #[derive(Resource)]
 pub struct Universe {
@@ -54,20 +56,35 @@ impl Universe {
     fn calc_origin_at_time(&self, time: f64, body: &NewBody) -> DVec3 {
         if body.parent.is_some() {
             let parent_id = body.parent.unwrap();
-            let parent = self.bodies.get(&parent_id).unwrap();
-            self.calc_origin_at_time(time, parent)
+            let parent = self.bodies.get(&parent_id).unwrap(); // If we crash here, then parent IDs aren't getting inserted/updated/deleted properly
+            let parent_origin = self.calc_origin_at_time(time, parent);
+            self.calc_position_at_time(time, parent, parent_origin)
         } else {
             DVec3::ZERO
         }
     }
 
     fn calc_position_at_time(&self, time: f64, body: &NewBody, origin: DVec3) -> DVec3 {
-
+        match &body.physics {
+            Motive::Fixed(fixed_motive) => {
+                origin + fixed_motive.local_position
+            },
+            Motive::Linear(linear_motive) => {
+                origin + linear_motive.local_velocity * time
+            },
+            Motive::StupidCircle(circular_motive) => {
+                let mu = 1.0;
+                let v = circular::true_anomaly::at_time(time, circular_motive.radius, mu);
+                let local_p = circular::position::from_true_anomaly(circular_motive.radius, v);
+                origin + local_p
+            },
+            _ => { origin }
+        }
     }
 }
 
 pub struct NewBody {
-    physics: Box<dyn Motive + Send + Sync>,
+    physics: Motive,
     name: String,
     mass: f64,
     radius: f64,
@@ -77,7 +94,7 @@ pub struct NewBody {
 impl Default for NewBody {
     fn default() -> Self {
         NewBody {
-            physics: Box::new(FixedMotive::default()),
+            physics: Motive::Fixed(FixedMotive::default()),
             name: "New body".to_string(),
             mass: 1.0,
             radius: 1.0,
@@ -87,37 +104,46 @@ impl Default for NewBody {
 }
 
 /// A Motive is a method by which a body can move.
-pub trait Motive: Send + Sync {
-    fn global_position_at_time(&self, time: f64) -> DVec3;
+enum Motive {
+    Fixed(FixedMotive),
+    Linear(LinearMotive),
+    StupidCircle(StupidCircle),
 }
 
-pub struct FixedMotive {
-    pub position: DVec3,
+struct FixedMotive {
+    local_position: DVec3,
 }
 
 impl Default for FixedMotive {
     fn default() -> Self {
         FixedMotive {
-            position: DVec3::ZERO,
+            local_position: DVec3::ZERO,
         }
     }
 }
 
-impl Motive for FixedMotive {
-    fn global_position_at_time(&self, time: f64) -> DVec3 {
-        self.position
+struct LinearMotive {
+    local_position: DVec3,
+    local_velocity: DVec3,
+}
+
+impl Default for LinearMotive {
+    fn default() -> Self {
+        LinearMotive {
+            local_position: DVec3::ZERO,
+            local_velocity: DVec3::new(1.0, 0.0, 0.0),
+        }
     }
 }
 
-pub struct CircularMotive {
+struct StupidCircle {
     radius: f64,
 }
 
-impl Motive for CircularMotive {
-    fn global_position_at_time(&self, time: f64) -> DVec3 {
-        // let parent_global_coords =
-        // circular::true_anomaly::at_time(time, self.radius, )
-        todo!()
+impl Default for StupidCircle {
+    fn default() -> Self {
+        StupidCircle {
+            radius: 1.0,
+        }
     }
 }
-
