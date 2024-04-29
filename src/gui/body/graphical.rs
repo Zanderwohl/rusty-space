@@ -1,17 +1,8 @@
-use std::sync::Arc;
 use bevy::pbr::{PbrBundle, PointLight, PointLightBundle, StandardMaterial};
-use bevy::prelude::{Assets, Bundle, Color, Commands, Component, default, Entity, Mesh, ResMut, Sphere, Transform};
+use bevy::prelude::{Assets, Color, Commands, Component, default, Entity, Mesh, ResMut, Sphere, Transform};
 use glam::{DVec3, Vec3};
 use bevy::hierarchy::BuildChildren;
-use bevy::time::Fixed;
-use crate::body::body::Body;
-use crate::body::circular::CircularBody;
-use crate::body::fixed::FixedBody;
-use crate::body::linear::LinearBody;
-use crate::body::newton::NewtonBody;
 use crate::body::universe::NewBody;
-use crate::gui::body::engine::VisibleBody;
-use crate::gui::editor;
 use crate::gui::editor::editor::{BodyId, Star};
 
 #[bevy_trait_query::queryable]
@@ -23,13 +14,6 @@ pub trait Renderable {
         (global_position * scale).as_vec3()
     }
 }
-
-/// Make "renderable" for things like Star, Planet, spaceship, etc?
-/// Method of propulsion has nothing to do with being fixed or moving.
-impl Renderable for FixedBody {}
-impl Renderable for NewtonBody {}
-impl Renderable for LinearBody {}
-impl Renderable for CircularBody {}
 
 
 pub fn spawn_as_star<ScreenTrait: Component + Default>(body_id: u32, body: &NewBody, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {

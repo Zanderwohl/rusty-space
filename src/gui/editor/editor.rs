@@ -3,12 +3,6 @@ use bevy::ecs::query::QueryData;
 use bevy::prelude::*;
 use bevy_trait_query::{One, RegisterExt};
 use glam::DVec3;
-use crate::body::body::{Body, BodyProperties};
-use crate::body::circular::CircularBody;
-use crate::body::fixed::FixedBody;
-use crate::body::kepler::KeplerBody;
-use crate::body::newton::NewtonBody;
-use crate::body::linear::LinearBody;
 use crate::body::{SimulationSettings, universe};
 use crate::body::universe::{FixedMotive, LinearMotive, NewBody, StupidCircle, Universe};
 use crate::gui::body::graphical::{Renderable, spawn_as_planet, spawn_as_star};
@@ -23,11 +17,6 @@ use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
 // display the current settings for 5 seconds before returning to the menu
 pub fn editor_plugin(app: &mut App) {
     app
-        .register_component_as::<dyn Body, FixedBody>()
-        .register_component_as::<dyn Body, CircularBody>()
-        .register_component_as::<dyn Body, LinearBody>()
-        .register_component_as::<dyn Body, NewtonBody>()
-        .register_component_as::<dyn Body, KeplerBody>()
         .add_systems(OnEnter(AppState::Editor), editor_setup)
         .add_systems(Update, editor.run_if(in_state(AppState::Editor)))
         .add_systems(OnExit(AppState::Editor), despawn_screen::<OnEditorScreen>)
@@ -179,11 +168,11 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
         text.push_str(&*format!("Object scale (i/o): {:.1}\n", display_state.body_scale));
         text.push_str(&*format!("Distance scale (k/l): {:.1}", display_state.distance_scale));
     }
-    if keyboard.just_pressed(KeyCode::ArrowLeft) {
-        display_state.current_time -= 1.0 * display_state.time_scale;
+    if keyboard.just_pressed(KeyCode::ArrowLeft) && !display_state.playing {
+        display_state.current_time -= 10.0 * time.delta_seconds() as f64 * display_state.time_step_size();
     }
-    if keyboard.just_pressed(KeyCode::ArrowRight) {
-        display_state.current_time += 1.0 * display_state.time_scale;
+    if keyboard.just_pressed(KeyCode::ArrowRight) && !display_state.playing  {
+        display_state.current_time += 10.0 * time.delta_seconds() as f64 * display_state.time_step_size();
     }
     if keyboard.just_pressed(KeyCode::BracketLeft) {
         display_state.time_scale -= 0.2;
@@ -194,11 +183,11 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
     if display_state.time_scale.abs() < 0.01 {
         display_state.time_scale = 0.0;
     }
-    if keyboard.pressed(KeyCode::ArrowUp) {
-        display_state.current_time += 1.0 * display_state.time_step_size();
+    if keyboard.pressed(KeyCode::ArrowUp) && !display_state.playing {
+        display_state.current_time += 10.0 * time.delta_seconds() as f64 * display_state.time_step_size();
     }
-    if keyboard.pressed(KeyCode::ArrowDown) {
-        display_state.current_time -= 1.0 * display_state.time_step_size();
+    if keyboard.pressed(KeyCode::ArrowDown) && !display_state.playing {
+        display_state.current_time -= 10.0 * time.delta_seconds() as f64 * display_state.time_step_size();
     }
     if keyboard.just_pressed(KeyCode::KeyI) {
         display_state.body_scale -= 0.1;
@@ -216,7 +205,7 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
         display_state.playing = !display_state.playing;
     }
     if display_state.playing {
-        display_state.current_time += 10.0f64 * time.delta_seconds() as f64 * display_state.time_scale;
+        display_state.current_time += time.delta_seconds() as f64 * display_state.time_step_size();
     }
 }
 

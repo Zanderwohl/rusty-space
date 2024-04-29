@@ -3,6 +3,8 @@ use glam::DVec3;
 use bevy::prelude::Resource;
 use crate::util::circular;
 
+const G: f64 = 6.67430e-11;
+
 #[derive(Resource)]
 pub struct Universe {
     bodies: HashMap<u32, NewBody>,
@@ -72,7 +74,9 @@ impl Universe {
                 origin + linear_motive.local_velocity * time
             },
             Motive::StupidCircle(circular_motive) => {
-                let mu = 1.0;
+                let parent_id = body.parent.unwrap(); // Uh oh! Bodies need something to orbit.
+                let parent = self.get_body(parent_id).unwrap();
+                let mu = G * parent.mass;
                 let v = circular::true_anomaly::at_time(time, circular_motive.radius, mu);
                 let local_p = circular::position::from_true_anomaly(circular_motive.radius, v);
                 origin + local_p
