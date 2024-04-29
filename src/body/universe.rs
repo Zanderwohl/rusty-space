@@ -7,7 +7,7 @@ const G: f64 = 6.67430e-11;
 
 #[derive(Resource)]
 pub struct Universe {
-    bodies: HashMap<u32, NewBody>,
+    bodies: HashMap<u32, Body>,
     counter: u32,
 }
 
@@ -25,7 +25,7 @@ impl Universe {
         Universe::default()
     }
 
-    pub fn get_body(&self, id: u32) -> Option<&NewBody> {
+    pub fn get_body(&self, id: u32) -> Option<&Body> {
         self.bodies.get(&id)
     }
 
@@ -35,7 +35,7 @@ impl Universe {
         id
     }
 
-    pub fn add_body(&mut self, body: NewBody) -> u32 {
+    pub fn add_body(&mut self, body: Body) -> u32 {
         let id = self.next_id();
         self.bodies.insert(id, body);
         id
@@ -55,7 +55,7 @@ impl Universe {
         positions
     }
 
-    pub(crate) fn calc_origin_at_time(&self, time: f64, body: &NewBody) -> DVec3 {
+    pub(crate) fn calc_origin_at_time(&self, time: f64, body: &Body) -> DVec3 {
         if let Some(parent_id) = body.parent {
             let parent = self.bodies.get(&parent_id).unwrap(); // If we crash here, then parent IDs aren't getting inserted/updated/deleted properly
             let parent_origin = self.calc_origin_at_time(time, parent);
@@ -65,7 +65,7 @@ impl Universe {
         }
     }
 
-    pub(crate) fn calc_position_at_time(&self, time: f64, body: &NewBody, origin: DVec3) -> DVec3 {
+    pub(crate) fn calc_position_at_time(&self, time: f64, body: &Body, origin: DVec3) -> DVec3 {
         match &body.physics {
             Motive::Fixed(fixed_motive) => {
                 origin + fixed_motive.local_position
@@ -86,7 +86,7 @@ impl Universe {
     }
 }
 
-pub struct NewBody {
+pub struct Body {
     pub(crate) physics: Motive,
     pub(crate) name: String,
     pub(crate) mass: f64,
@@ -94,9 +94,9 @@ pub struct NewBody {
     pub(crate) parent: Option<u32>,
 }
 
-impl Default for NewBody {
+impl Default for Body {
     fn default() -> Self {
-        NewBody {
+        Body {
             physics: Motive::Fixed(FixedMotive::default()),
             name: "New body".to_string(),
             mass: 1.0,

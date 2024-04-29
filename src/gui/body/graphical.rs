@@ -2,7 +2,7 @@ use bevy::pbr::{PbrBundle, PointLight, PointLightBundle, StandardMaterial};
 use bevy::prelude::{Assets, Color, Commands, Component, default, Entity, Mesh, ResMut, Sphere, Transform};
 use glam::{DVec3, Vec3};
 use bevy::hierarchy::BuildChildren;
-use crate::body::universe::NewBody;
+use crate::body::universe::Body;
 use crate::gui::editor::editor::{BodyId, Star};
 
 #[bevy_trait_query::queryable]
@@ -16,7 +16,7 @@ pub trait Renderable {
 }
 
 
-pub fn spawn_as_star<ScreenTrait: Component + Default>(body_id: u32, body: &NewBody, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {
+pub fn spawn_as_star<ScreenTrait: Component + Default>(body_id: u32, body: &Body, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {
     let star_mesh = PbrBundle {
         mesh: meshes.add(Sphere::new(body.radius as f32)),
         material: materials.add(Color::rgb(5.0 * 3.0, 2.5 * 3.0, 0.3 * 3.0)),
@@ -38,7 +38,7 @@ pub fn spawn_as_star<ScreenTrait: Component + Default>(body_id: u32, body: &NewB
 
 pub fn spawn_as_planet<ScreenTrait: Component + Default,>(
     body_id: u32,
-    body: &NewBody,
+    body: &Body,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {

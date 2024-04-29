@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy_trait_query::{One, RegisterExt};
 use glam::DVec3;
 use crate::body::{SimulationSettings, universe};
-use crate::body::universe::{FixedMotive, LinearMotive, NewBody, StupidCircle, Universe};
+use crate::body::universe::{FixedMotive, LinearMotive, Body, StupidCircle, Universe};
 use crate::gui::body::graphical::{Renderable, spawn_as_planet, spawn_as_star};
 use crate::gui::common;
 use crate::gui::editor::gui;
@@ -92,7 +92,7 @@ fn editor_setup(
         .with_children(|parent| {
         });
     
-    let sun_id = universe.add_body(NewBody {
+    let sun_id = universe.add_body(Body {
         name: "Sun".to_string(),
         physics: universe::Motive::Fixed(
             FixedMotive{
@@ -106,7 +106,7 @@ fn editor_setup(
     spawn_as_star::<OnEditorScreen>(sun_id, universe.get_body(sun_id).unwrap(), &mut commands, &mut meshes, &mut materials);
     // (star_mesh, Star, ScreenTrait::default(), BodyId(body_id))
 
-    let planet_id = universe.add_body(NewBody {
+    let planet_id = universe.add_body(Body {
         name: "Planet".to_string(),
         physics: universe::Motive::StupidCircle(
             StupidCircle {
@@ -119,7 +119,7 @@ fn editor_setup(
     });
     spawn_as_planet::<OnEditorScreen>(planet_id, universe.get_body(planet_id).unwrap(), &mut commands, &mut meshes, &mut materials);
 
-    let moon_id = universe.add_body(NewBody {
+    let moon_id = universe.add_body(Body {
         name: "Moon".to_string(),
         physics: universe::Motive::StupidCircle(
             StupidCircle {
