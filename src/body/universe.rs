@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::ops::Add;
 use glam::DVec3;
 use bevy::prelude::Resource;
 use crate::util::circular;
@@ -34,12 +33,13 @@ impl Universe {
         id
     }
 
-    pub fn add_body(mut self, body: NewBody) {
+    pub fn add_body(&mut self, body: NewBody) -> u32 {
         let id = self.next_id();
         self.bodies.insert(id, body);
+        id
     }
 
-    pub fn remove_body(mut self, id: u32) {
+    pub fn remove_body(&mut self, id: u32) {
         self.bodies.remove(&id);
     }
 
@@ -53,9 +53,8 @@ impl Universe {
         positions
     }
 
-    fn calc_origin_at_time(&self, time: f64, body: &NewBody) -> DVec3 {
-        if body.parent.is_some() {
-            let parent_id = body.parent.unwrap();
+    pub(crate) fn calc_origin_at_time(&self, time: f64, body: &NewBody) -> DVec3 {
+        if let Some(parent_id) = body.parent {
             let parent = self.bodies.get(&parent_id).unwrap(); // If we crash here, then parent IDs aren't getting inserted/updated/deleted properly
             let parent_origin = self.calc_origin_at_time(time, parent);
             self.calc_position_at_time(time, parent, parent_origin)
@@ -64,7 +63,7 @@ impl Universe {
         }
     }
 
-    fn calc_position_at_time(&self, time: f64, body: &NewBody, origin: DVec3) -> DVec3 {
+    pub(crate) fn calc_position_at_time(&self, time: f64, body: &NewBody, origin: DVec3) -> DVec3 {
         match &body.physics {
             Motive::Fixed(fixed_motive) => {
                 origin + fixed_motive.local_position
@@ -84,11 +83,11 @@ impl Universe {
 }
 
 pub struct NewBody {
-    physics: Motive,
-    name: String,
-    mass: f64,
-    radius: f64,
-    parent: Option<u32>,
+    pub(crate) physics: Motive,
+    pub(crate) name: String,
+    pub(crate) mass: f64,
+    pub(crate) radius: f64,
+    pub(crate) parent: Option<u32>,
 }
 
 impl Default for NewBody {
@@ -104,14 +103,14 @@ impl Default for NewBody {
 }
 
 /// A Motive is a method by which a body can move.
-enum Motive {
+pub(crate) enum Motive {
     Fixed(FixedMotive),
     Linear(LinearMotive),
     StupidCircle(StupidCircle),
 }
 
-struct FixedMotive {
-    local_position: DVec3,
+pub(crate) struct FixedMotive {
+    pub(crate) local_position: DVec3,
 }
 
 impl Default for FixedMotive {
@@ -122,9 +121,9 @@ impl Default for FixedMotive {
     }
 }
 
-struct LinearMotive {
-    local_position: DVec3,
-    local_velocity: DVec3,
+pub(crate) struct LinearMotive {
+    pub(crate) local_position: DVec3,
+    pub(crate) local_velocity: DVec3,
 }
 
 impl Default for LinearMotive {
@@ -136,8 +135,8 @@ impl Default for LinearMotive {
     }
 }
 
-struct StupidCircle {
-    radius: f64,
+pub(crate) struct StupidCircle {
+    pub(crate) radius: f64,
 }
 
 impl Default for StupidCircle {

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use bevy::ecs::query::QueryData;
 use bevy::prelude::*;
 use bevy_trait_query::{One, RegisterExt};
 use glam::DVec3;
@@ -8,12 +9,13 @@ use crate::body::fixed::FixedBody;
 use crate::body::kepler::KeplerBody;
 use crate::body::newton::NewtonBody;
 use crate::body::linear::LinearBody;
-use crate::body::SimulationSettings;
-use crate::body::universe::Universe;
+use crate::body::{SimulationSettings, universe};
+use crate::body::universe::{FixedMotive, LinearMotive, NewBody, StupidCircle, Universe};
 use crate::gui::body::graphical::{Renderable, spawn_as_planet, spawn_as_star};
 use crate::gui::common;
 use crate::gui::editor::gui;
 use crate::gui::editor::gui::DebugText;
+use crate::util::kepler::local;
 
 use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
 
@@ -48,7 +50,7 @@ pub fn editor_plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (position_bodies_of_type).run_if(in_state(AppState::Editor)),
+            (position_bodies).run_if(in_state(AppState::Editor)),
         )
         .add_systems(
             Update,
@@ -81,10 +83,14 @@ pub(crate) struct Star;
 #[derive(Component)]
 pub(crate) struct Planet;
 
+#[derive(Component)]
+pub(crate) struct BodyId(pub u32);
+
 fn editor_setup(
     mut commands: Commands,
     display_quality: Res<DisplayQuality>,
     volume: Res<Volume>,
+    mut universe: ResMut<Universe>,
     asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>
@@ -97,74 +103,68 @@ fn editor_setup(
         .with_children(|parent| {
         });
     
-    let sun1 = FixedBody {
-        global_position: DVec3::ZERO,
-        properties: BodyProperties {
-            mass: 10.0,
-            name: "".to_string(),
-            size: 1.0,
-        },
-    };
-    let sun_id = spawn_as_star::<OnEditorScreen, FixedBody>(sun1, &mut commands, &mut meshes, &mut materials);
+    let sun_id = universe.add_body(NewBody {
+        name: "Sun".to_string(),
+        physics: universe::Motive::Fixed(
+            FixedMotive{
+                local_position: DVec3::ZERO,
+            }
+        ),
+        mass: 10.0,
+        radius: 1.0,
+        parent: None,
+    });
+    spawn_as_star::<OnEditorScreen>(sun_id, universe.get_body(sun_id).unwrap(), &mut commands, &mut meshes, &mut materials);
+    // (star_mesh, Star, ScreenTrait::default(), BodyId(body_id))
 
-    let sun2 = FixedBody {
-        global_position: DVec3::new(1.0, 2.0, 0.0),
-        properties: BodyProperties {
-            mass: 0.0,
-            name: "".to_string(),
-            size: 0.2,
-        },
-    };
-    // sun2.spawn_as_star::<OnEditorScreen>(&mut commands, &mut meshes, &mut materials);
+    let planet_id = universe.add_body(NewBody {
+        name: "Planet".to_string(),
+        physics: universe::Motive::StupidCircle(
+            StupidCircle {
+                radius: 3.0,
+            }
+        ),
+        mass: 1.0,
+        radius: 0.3,
+        parent: Some(sun_id),
+    });
+    spawn_as_planet::<OnEditorScreen>(planet_id, universe.get_body(planet_id).unwrap(), &mut commands, &mut meshes, &mut materials);
 
-    let planet = CircularBody {
-        properties: BodyProperties {
-            mass: 1.0,
-            name: "Some planet".to_string(),
-            size: 0.2,
-        },
-        radius: 3.0,
-    };
-    let planet = spawn_as_planet::<OnEditorScreen, CircularBody>(planet, &mut commands, &mut meshes, &mut materials);
+    let moon_id = universe.add_body(NewBody {
+        name: "Moon".to_string(),
+        physics: universe::Motive::StupidCircle(
+            StupidCircle {
+                radius: 0.6
+            }
+        ),
+        mass: 0.1,
+        radius: 0.1,
+        parent: Some(planet_id)
+    });
+    spawn_as_planet::<OnEditorScreen>(moon_id, universe.get_body(moon_id).unwrap(), &mut commands, &mut meshes, &mut materials);
 
-    let moon = CircularBody {
-        properties: BodyProperties {
-            mass: 0.1,
-            name: "Some moon".to_string(),
-            size: 0.1,
-        },
-        radius: 0.5,
-    };
-    let moon = spawn_as_planet::<OnEditorScreen, CircularBody>(moon, &mut commands, &mut meshes, &mut materials);
-    commands.entity(planet).push_children(&[moon]);
-
-    let free = NewtonBody {
-        global_position: DVec3::new(3.0, 1.0, 0.0),
-        global_velocity: DVec3::ZERO,
-        properties: BodyProperties {
-            mass: 1.0,
-            name: "Free body".to_string(),
-            size: 0.8,
-        },
-    };
-    let free = spawn_as_planet::<OnEditorScreen, NewtonBody>(free, &mut commands, &mut meshes, &mut materials);
 }
 
-fn position_bodies_of_type(
-    mut query: Query<(&mut Transform, One<&dyn Body>)>,
-    display_state: Res<DisplayState>
+fn position_bodies(
+    universe: Res<Universe>,
+    mut query: Query<(&mut Transform, &BodyId)>,
+    display_state: Res<DisplayState>,
 ) {
-    for (mut transform, body) in query.iter_mut() {
-        let world_position = (body.local_position_after_time(display_state.current_time) * display_state.distance_scale).as_vec3();
-        let converted_position = Vec3::new(world_position.x, world_position.y, world_position.z);
-        transform.translation = converted_position;
+    let time = display_state.current_time;
+    for (mut transform, body_id) in query.iter_mut() {
+        let body = universe.get_body(body_id.0);
+        if let Some(body) = body {
+            let origin = universe.calc_origin_at_time(time, body);
+            let position = universe.calc_position_at_time(time, body, origin);
+            let position = (position * display_state.distance_scale).as_vec3();
+            transform.translation = bevy::prelude::Vec3::new(position.x, position.y, position.z)
+        }
+
         transform.scale = Vec3::new(display_state.body_scale,
                                     display_state.body_scale,
-                                    display_state.body_scale, );
+                                    display_state.body_scale,);
     }
 }
-
-// fn move_newton_bodies
 
 fn handle_time(mut display_state: ResMut<DisplayState>,
                keyboard: Res<ButtonInput<KeyCode>>,

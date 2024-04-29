@@ -9,9 +9,10 @@ use crate::body::circular::CircularBody;
 use crate::body::fixed::FixedBody;
 use crate::body::linear::LinearBody;
 use crate::body::newton::NewtonBody;
+use crate::body::universe::NewBody;
 use crate::gui::body::engine::VisibleBody;
 use crate::gui::editor;
-use crate::gui::editor::editor::Star;
+use crate::gui::editor::editor::{BodyId, Star};
 
 #[bevy_trait_query::queryable]
 pub trait Renderable {
@@ -31,14 +32,14 @@ impl Renderable for LinearBody {}
 impl Renderable for CircularBody {}
 
 
-pub fn spawn_as_star<ScreenTrait: Component + Default, BodyType: Body + Bundle>(body: BodyType, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {
+pub fn spawn_as_star<ScreenTrait: Component + Default>(body_id: u32, body: &NewBody, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {
     let star_mesh = PbrBundle {
-        mesh: meshes.add(Sphere::new(1.0)),
+        mesh: meshes.add(Sphere::new(body.radius as f32)),
         material: materials.add(Color::rgb(5.0 * 3.0, 2.5 * 3.0, 0.3 * 3.0)),
         transform: Transform::IDENTITY,
         ..default()
     };
-    commands.spawn((star_mesh, Star, ScreenTrait::default(), body))
+    commands.spawn((star_mesh, Star, ScreenTrait::default(), BodyId(body_id)))
         .with_children(|children| {
             children.spawn(PointLightBundle {
                 point_light: PointLight {
@@ -51,15 +52,17 @@ pub fn spawn_as_star<ScreenTrait: Component + Default, BodyType: Body + Bundle>(
         }).id()
 }
 
-pub fn spawn_as_planet<ScreenTrait: Component + Default, BodyType: Body + Bundle>(
-    body: BodyType, commands: &mut Commands,
+pub fn spawn_as_planet<ScreenTrait: Component + Default,>(
+    body_id: u32,
+    body: &NewBody,
+    commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {
     let planet_mesh = PbrBundle {
-        mesh: meshes.add(Sphere::new(body.size() as f32)),
+        mesh: meshes.add(Sphere::new(body.radius as f32)),
         material: materials.add(Color::rgb(0.2, 0.4, 0.8)),
         transform: Transform::IDENTITY,
         ..default()
     };
-    commands.spawn((planet_mesh, Star, ScreenTrait::default(), body)).id()
+    commands.spawn((planet_mesh, Star, ScreenTrait::default(), BodyId(body_id))).id()
 }
