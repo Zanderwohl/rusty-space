@@ -1,9 +1,9 @@
 use bevy::pbr::{PbrBundle, PointLight, PointLightBundle, StandardMaterial};
-use bevy::prelude::{Assets, Color, Commands, Component, default, Entity, Mesh, ResMut, Sphere, Transform};
+use bevy::prelude::{Assets, Color, Commands, Component, Cylinder, default, Entity, Mesh, ResMut, Sphere, Transform};
 use glam::{DVec3, Vec3};
 use bevy::hierarchy::BuildChildren;
 use crate::body::universe::Body;
-use crate::gui::editor::editor::{BodyId, Star};
+use crate::gui::editor::editor::BodyId;
 
 #[bevy_trait_query::queryable]
 pub trait Renderable {
@@ -23,7 +23,7 @@ pub fn spawn_as_star<ScreenTrait: Component + Default>(body_id: u32, body: &Body
         transform: Transform::IDENTITY,
         ..default()
     };
-    commands.spawn((star_mesh, Star, ScreenTrait::default(), BodyId(body_id)))
+    commands.spawn((star_mesh, ScreenTrait::default(), BodyId(body_id)))
         .with_children(|children| {
             children.spawn(PointLightBundle {
                 point_light: PointLight {
@@ -36,7 +36,7 @@ pub fn spawn_as_star<ScreenTrait: Component + Default>(body_id: u32, body: &Body
         }).id()
 }
 
-pub fn spawn_as_planet<ScreenTrait: Component + Default,>(
+pub fn spawn_as_planet<ScreenTrait: Component + Default>(
     body_id: u32,
     body: &Body,
     commands: &mut Commands,
@@ -48,5 +48,20 @@ pub fn spawn_as_planet<ScreenTrait: Component + Default,>(
         transform: Transform::IDENTITY,
         ..default()
     };
-    commands.spawn((planet_mesh, Star, ScreenTrait::default(), BodyId(body_id))).id()
+    commands.spawn((planet_mesh, ScreenTrait::default(), BodyId(body_id))).id()
+}
+
+pub fn spawn_as_ring_hab<ScreenTrait: Component + Default>(
+    body_id: u32,
+    body: &Body,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {
+    let ring_mesh = PbrBundle {
+        mesh: meshes.add(Cylinder::new(body.radius as f32, 0.2)),
+        material: materials.add(Color::rgb(0.2, 0.4, 0.8)),
+        transform: Transform::IDENTITY,
+        ..default()
+    };
+    commands.spawn((ring_mesh, ScreenTrait::default(), BodyId(body_id))).id()
 }

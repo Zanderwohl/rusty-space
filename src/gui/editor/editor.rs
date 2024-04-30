@@ -5,7 +5,7 @@ use bevy_trait_query::{One, RegisterExt};
 use glam::DVec3;
 use crate::body::{SimulationSettings, universe};
 use crate::body::universe::{FixedMotive, LinearMotive, Body, StupidCircle, Universe};
-use crate::gui::body::graphical::{Renderable, spawn_as_planet, spawn_as_star};
+use crate::gui::body::graphical::{spawn_as_planet, spawn_as_star, spawn_as_ring_hab};
 use crate::gui::common;
 use crate::gui::editor::gui;
 use crate::gui::editor::gui::DebugText;
@@ -67,12 +67,6 @@ impl DisplayState {
 pub(super) struct OnEditorScreen;
 
 #[derive(Component)]
-pub(crate) struct Star;
-
-#[derive(Component)]
-pub(crate) struct Planet;
-
-#[derive(Component)]
 pub(crate) struct BodyId(pub u32);
 
 fn editor_setup(
@@ -128,10 +122,20 @@ fn editor_setup(
         ),
         mass: 0.1,
         radius: 0.1,
-        parent: Some(planet_id)
+        parent: Some(planet_id),
     });
     spawn_as_planet::<OnEditorScreen>(moon_id, universe.get_body(moon_id).unwrap(), &mut commands, &mut meshes, &mut materials);
 
+    let ring_id = universe.add_body(Body {
+        name: "Ringworld".to_string(),
+        physics: universe::Motive::Fixed(FixedMotive {
+            local_position: DVec3::ZERO
+        }),
+        mass: 0.1,
+        radius: 2.0,
+        parent: Some(sun_id),
+    });
+    spawn_as_ring_hab::<OnEditorScreen>(ring_id, universe.get_body(ring_id).unwrap(), &mut commands, &mut meshes, &mut materials);
 }
 
 fn position_bodies(
@@ -190,7 +194,9 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
         display_state.current_time -= 10.0 * time.delta_seconds() as f64 * display_state.time_step_size();
     }
     if keyboard.just_pressed(KeyCode::KeyI) {
-        display_state.body_scale -= 0.1;
+        if display_state.body_scale > 0.0 {
+            display_state.body_scale -= 0.1;
+        }
     }
     if keyboard.just_pressed(KeyCode::KeyO) {
         display_state.body_scale += 0.1;
