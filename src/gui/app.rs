@@ -4,7 +4,6 @@ use crate::gui::{editor, menu, splash};
 use crate::gui::common::{BackGlow, DisplayQuality, Volume};
 use bevy::{prelude::*, winit::WinitWindows};
 use bevy::core_pipeline::{tonemapping::Tonemapping, bloom::{BloomCompositeMode, BloomSettings}};
-use bevy::sprite::MaterialMesh2dBundle;
 use winit::window::Icon;
 
 
