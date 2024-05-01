@@ -6,7 +6,7 @@ use bevy::log::info;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use num_traits::FloatConst;
-use crate::body::universe::Body;
+use crate::body::body::Body;
 use crate::gui::editor::editor::BodyId;
 
 #[bevy_trait_query::queryable]

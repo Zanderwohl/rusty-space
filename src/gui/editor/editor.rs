@@ -1,16 +1,12 @@
-use std::sync::Arc;
-use bevy::ecs::query::QueryData;
 use bevy::prelude::*;
-use bevy_trait_query::{One, RegisterExt};
 use glam::DVec3;
-use crate::body::{SimulationSettings, universe};
-use crate::body::universe::{FixedMotive, LinearMotive, Body, StupidCircle, Universe};
-use crate::gui::body::graphical::{spawn_as_planet, spawn_as_star, spawn_as_ring_hab};
+use crate::body::{body, SimulationSettings, universe};
+use crate::body::body::{Body, FixedMotive, StupidCircle};
+use crate::body::universe::Universe;
+use crate::gui::body::graphical::{spawn_as_planet, spawn_as_ring_hab, spawn_as_star};
 use crate::gui::common;
 use crate::gui::editor::gui;
 use crate::gui::editor::gui::DebugText;
-use crate::util::kepler::local;
-
 use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
 
 // This plugin will contain the game. In this case, it's just be a screen that will
@@ -88,7 +84,7 @@ fn editor_setup(
     
     let sun_id = universe.add_body(Body {
         name: "Sun".to_string(),
-        physics: universe::Motive::Fixed(
+        physics: body::Motive::Fixed(
             FixedMotive{
                 local_position: DVec3::ZERO,
             }
@@ -102,7 +98,7 @@ fn editor_setup(
 
     let planet_id = universe.add_body(Body {
         name: "Planet".to_string(),
-        physics: universe::Motive::StupidCircle(
+        physics: body::Motive::StupidCircle(
             StupidCircle {
                 radius: 3.0,
             }
@@ -115,7 +111,7 @@ fn editor_setup(
 
     let moon_id = universe.add_body(Body {
         name: "Moon".to_string(),
-        physics: universe::Motive::StupidCircle(
+        physics: body::Motive::StupidCircle(
             StupidCircle {
                 radius: 0.6
             }
@@ -128,7 +124,7 @@ fn editor_setup(
 
     let ring_id = universe.add_body(Body {
         name: "Ringworld".to_string(),
-        physics: universe::Motive::Fixed(FixedMotive {
+        physics: body::Motive::Fixed(FixedMotive {
             local_position: DVec3::new(0.0, 0.0, 0.0)
         }),
         mass: 0.1,
@@ -195,7 +191,7 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
         display_state.current_time -= 10.0 * time.delta_seconds() as f64 * display_state.time_step_size();
     }
     if keyboard.just_pressed(KeyCode::KeyI) {
-        if display_state.body_scale > 0.0 {
+        if display_state.body_scale > 0.1 {
             display_state.body_scale -= 0.1;
         }
     }
@@ -203,7 +199,9 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
         display_state.body_scale += 0.1;
     }
     if keyboard.just_pressed(KeyCode::KeyK) {
-        display_state.distance_scale -= 0.1;
+        if display_state.distance_scale > 0.1 {
+            display_state.distance_scale -= 0.1;
+        }
     }
     if keyboard.just_pressed(KeyCode::KeyL) {
         display_state.distance_scale += 0.1;
