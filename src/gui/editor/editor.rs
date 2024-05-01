@@ -129,7 +129,7 @@ fn editor_setup(
     let ring_id = universe.add_body(Body {
         name: "Ringworld".to_string(),
         physics: universe::Motive::Fixed(FixedMotive {
-            local_position: DVec3::ZERO
+            local_position: DVec3::new(0.4, 0.0, 0.0)
         }),
         mass: 0.1,
         radius: 2.0,
@@ -156,6 +156,7 @@ fn position_bodies(
         transform.scale = Vec3::new(display_state.body_scale,
                                     display_state.body_scale,
                                     display_state.body_scale,);
+        transform.rotation = Quat::from_rotation_y(time as f32);
     }
 }
 
