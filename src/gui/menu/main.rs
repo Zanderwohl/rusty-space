@@ -96,7 +96,7 @@ pub(crate) struct SelectedOption;
 // All actions that can be triggered from a button click
 #[derive(Component)]
 pub(crate) enum MenuButtonAction {
-    Play,
+    Planetarium,
     Settings,
     SettingsDisplay,
     SettingsSound,
@@ -183,7 +183,7 @@ fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                                 background_color: NORMAL_BUTTON.into(),
                                 ..default()
                             },
-                            MenuButtonAction::Play,
+                            MenuButtonAction::Planetarium,
                         ))
                         .with_children(|parent| {
                             let icon = asset_server.load("icons/play.png");
@@ -193,7 +193,7 @@ fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                                 ..default()
                             });
                             parent.spawn(TextBundle::from_section(
-                                "START",
+                                "PLANETARIUM",
                                 button_text_style.clone(),
                             ));
                         });
@@ -255,8 +255,8 @@ pub(crate) fn menu_action(
                 MenuButtonAction::Quit => {
                     app_exit_events.send(AppExit);
                 }
-                MenuButtonAction::Play => {
-                    game_state.set(AppState::Editor);
+                MenuButtonAction::Planetarium => {
+                    game_state.set(AppState::Planetarium);
                     menu_state.set(MenuState::Disabled);
                 }
                 MenuButtonAction::Settings => menu_state.set(MenuState::Settings),

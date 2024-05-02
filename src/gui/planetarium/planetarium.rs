@@ -1,4 +1,8 @@
+use bevy::core_pipeline::bloom::BloomSettings;
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
+use bevy::render::camera::RenderTarget;
+use bevy::window::WindowRef;
 use glam::DVec3;
 use crate::body::SimulationSettings;
 use crate::body::appearance::{Appearance, Planetoid, Ring, Sun};
@@ -15,9 +19,9 @@ use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
 // display the current settings for 5 seconds before returning to the menu
 pub fn planetarium_plugin(app: &mut App) {
     app
-        .add_systems(OnEnter(AppState::Editor), planetarium_setup)
-        .add_systems(Update, editor.run_if(in_state(AppState::Editor)))
-        .add_systems(OnExit(AppState::Editor), despawn_screen::<OnPlanetariumScreen>)
+        .add_systems(OnEnter(AppState::Planetarium), planetarium_setup)
+        .add_systems(Update, editor.run_if(in_state(AppState::Planetarium)))
+        .add_systems(OnExit(AppState::Planetarium), despawn_screen::<OnPlanetariumScreen>)
         .insert_resource(SimulationSettings {
             gravity_constant: 1.0,
         })
@@ -33,15 +37,15 @@ pub fn planetarium_plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (crate::gui::menu::common::button_system, gui::menu_action).run_if(in_state(AppState::Editor)),
+            (crate::gui::menu::common::button_system, gui::menu_action).run_if(in_state(AppState::Planetarium)),
         )
         .add_systems(
             Update,
-            (position_bodies).run_if(in_state(AppState::Editor)),
+            (position_bodies).run_if(in_state(AppState::Planetarium)),
         )
         .add_systems(
             Update,
-            handle_time.run_if(in_state(AppState::Editor)),
+            handle_time.run_if(in_state(AppState::Planetarium)),
         );
 }
 
@@ -149,6 +153,24 @@ fn planetarium_setup(
     for (id, body) in universe.bodies.iter() {
         spawn_bevy::<OnPlanetariumScreen>(*id, body, &mut commands, &mut meshes, &mut materials);
     }
+
+    let second_window = commands
+        .spawn(Window {
+            title: "Second Window".to_owned(),
+            ..default()
+        })
+        .id();
+    commands.spawn((Camera3dBundle {
+        camera: Camera {
+            target: RenderTarget::Window(WindowRef::Entity(second_window)),
+            hdr: true,
+            ..default()
+        },
+        tonemapping: Tonemapping::TonyMcMapface,
+        transform: Transform::from_xyz(2.5, 4.5, -9.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ..default()
+    }, BloomSettings::NATURAL)
+    );
 }
 
 fn position_bodies(
