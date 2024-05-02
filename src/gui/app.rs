@@ -1,6 +1,6 @@
 use bevy::window::ExitCondition;
 use crate::gui;
-use crate::gui::{editor, menu, splash};
+use crate::gui::{planetarium, menu, splash};
 use crate::gui::common::{BackGlow, DisplayQuality, Volume};
 use bevy::{prelude::*, winit::WinitWindows};
 use bevy::core_pipeline::{tonemapping::Tonemapping, bloom::{BloomCompositeMode, BloomSettings}};
@@ -29,7 +29,7 @@ pub(crate) fn open() {
         .add_plugins((
             splash::splash_plugin,
             menu::main::menu_plugin,
-            editor::editor::editor_plugin,
+            planetarium::planetarium::planetarium_plugin,
         ))
         .run();
 }

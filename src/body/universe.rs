@@ -6,6 +6,7 @@ use crate::body::motive::Motive;
 use crate::util::circular;
 
 const G: f64 = 6.67430e-11;
+const DEBUG_G: f64 = 6.67430e-3;
 
 #[derive(Resource)]
 pub struct Universe {
@@ -78,7 +79,7 @@ impl Universe {
             Motive::StupidCircle(circular_motive) => {
                 let parent_id = body.parent.unwrap(); // Uh oh! Bodies need something to orbit.
                 let parent = self.get_body(parent_id).unwrap();
-                let mu = G * parent.mass;
+                let mu = DEBUG_G * parent.mass;
                 let v = circular::true_anomaly::at_time(time, circular_motive.radius, mu);
                 let local_p = circular::position::from_true_anomaly(circular_motive.radius, v);
                 origin + local_p

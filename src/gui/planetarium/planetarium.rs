@@ -1,23 +1,23 @@
 use bevy::prelude::*;
 use glam::DVec3;
-use crate::body::{body, SimulationSettings};
+use crate::body::SimulationSettings;
 use crate::body::appearance::{Appearance, Planetoid, Ring, Sun};
 use crate::body::body::Body;
 use crate::body::motive::{FixedMotive, Motive, StupidCircle};
 use crate::body::universe::Universe;
-use crate::gui::body::graphical::{spawn_as_planet, spawn_as_ring_hab, spawn_as_star, spawn_bevy};
+use crate::gui::body::graphical::spawn_bevy;
 use crate::gui::common;
-use crate::gui::editor::gui;
-use crate::gui::editor::gui::DebugText;
+use crate::gui::planetarium::gui;
+use crate::gui::planetarium::gui::DebugText;
 use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
 
 // This plugin will contain the game. In this case, it's just be a screen that will
 // display the current settings for 5 seconds before returning to the menu
-pub fn editor_plugin(app: &mut App) {
+pub fn planetarium_plugin(app: &mut App) {
     app
-        .add_systems(OnEnter(AppState::Editor), editor_setup)
+        .add_systems(OnEnter(AppState::Editor), planetarium_setup)
         .add_systems(Update, editor.run_if(in_state(AppState::Editor)))
-        .add_systems(OnExit(AppState::Editor), despawn_screen::<OnEditorScreen>)
+        .add_systems(OnExit(AppState::Editor), despawn_screen::<OnPlanetariumScreen>)
         .insert_resource(SimulationSettings {
             gravity_constant: 1.0,
         })
@@ -62,12 +62,12 @@ impl DisplayState {
 
 // Tag component used to tag entities added on the game screen
 #[derive(Component, Default)]
-pub(super) struct OnEditorScreen;
+pub(super) struct OnPlanetariumScreen;
 
 #[derive(Component)]
 pub(crate) struct BodyId(pub u32);
 
-fn editor_setup(
+fn planetarium_setup(
     mut commands: Commands,
     display_quality: Res<DisplayQuality>,
     volume: Res<Volume>,
@@ -80,7 +80,7 @@ fn editor_setup(
     gui::ui_setup(&mut commands, asset_server.clone());
     
     commands.entity(base_screen)
-        .insert(OnEditorScreen)
+        .insert(OnPlanetariumScreen)
         .with_children(|parent| {
         });
     
@@ -116,7 +116,7 @@ fn editor_setup(
         parent: Some(sun_id),
     });
 
-    let moon_id = universe.add_body(Body {
+    universe.add_body(Body {
         name: "Moon".to_string(),
         physics: Motive::StupidCircle(
             StupidCircle {
@@ -131,7 +131,7 @@ fn editor_setup(
         parent: Some(planet_id),
     });
 
-    let ring_id = universe.add_body(Body {
+    universe.add_body(Body {
         name: "Ringworld".to_string(),
         physics: Motive::Fixed(FixedMotive {
             local_position: DVec3::new(0.0, 0.0, 0.0)
@@ -147,7 +147,7 @@ fn editor_setup(
     });
 
     for (id, body) in universe.bodies.iter() {
-        spawn_bevy::<OnEditorScreen>(*id, body, &mut commands, &mut meshes, &mut materials);
+        spawn_bevy::<OnPlanetariumScreen>(*id, body, &mut commands, &mut meshes, &mut materials);
     }
 }
 
@@ -169,7 +169,7 @@ fn position_bodies(
         transform.scale = Vec3::new(display_state.body_scale,
                                     display_state.body_scale,
                                     display_state.body_scale,);
-        transform.rotation = Quat::from_rotation_z(time as f32);
+        transform.rotation = Quat::from_rotation_z(time as f32 / 100.0);
     }
 }
 

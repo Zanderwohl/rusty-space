@@ -3,7 +3,7 @@ use bevy::asset::AssetServer;
 use bevy::prelude::{AlignItems, BackgroundColor, BuildChildren, Button, ButtonBundle, Changed, Commands, Component, default, EventWriter, Interaction, JustifyContent, NextState, NodeBundle, PositionType, Query, Res, ResMut, Style, TextBundle, TextStyle, Val, With};
 use crate::gui::common;
 use crate::gui::common::AppState;
-use crate::gui::editor::editor::OnEditorScreen;
+use crate::gui::planetarium::planetarium::OnPlanetariumScreen;
 
 #[derive(Component)]
 struct OnEditorUI;
@@ -30,7 +30,7 @@ pub(super) fn ui_setup(commands: &mut Commands, asset_server: AssetServer) {
                 ..default()
             },
             OnEditorUI,
-            OnEditorScreen,
+            OnPlanetariumScreen,
         ))
         .with_children(|parent| {
             parent

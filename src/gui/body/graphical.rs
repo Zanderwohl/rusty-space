@@ -8,7 +8,7 @@ use bevy::render::render_asset::RenderAssetUsages;
 use num_traits::FloatConst;
 use crate::body::appearance::{Appearance, Planetoid, Ring, Sun};
 use crate::body::body::Body;
-use crate::gui::editor::editor::BodyId;
+use crate::gui::planetarium::planetarium::BodyId;
 
 #[bevy_trait_query::queryable]
 pub trait Renderable {
