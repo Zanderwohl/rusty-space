@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 use glam::DVec3;
 use bevy::prelude::Resource;
-use crate::body::body::{Body, Motive};
+use crate::body::body::Body;
+use crate::body::motive::Motive;
 use crate::util::circular;
 
 const G: f64 = 6.67430e-11;
 
 #[derive(Resource)]
 pub struct Universe {
-    bodies: HashMap<u32, Body>,
+    pub(crate) bodies: HashMap<u32, Body>,
     counter: u32,
 }
 

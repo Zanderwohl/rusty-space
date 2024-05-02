@@ -6,6 +6,7 @@ use bevy::log::info;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use num_traits::FloatConst;
+use crate::body::appearance::{Appearance, Planetoid, Ring, Sun};
 use crate::body::body::Body;
 use crate::gui::editor::editor::BodyId;
 
@@ -19,10 +20,24 @@ pub trait Renderable {
     }
 }
 
+pub fn spawn_bevy<ScreenTrait: Component + Default>(body_id: u32, body: &Body, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {
+    match &body.appearance {
+        Appearance::Planetoid(planetoid) => {
+            spawn_as_planet::<ScreenTrait>(body_id, planetoid, commands, meshes, materials)
+        }
+        Appearance::Sun(sun) => {
+            spawn_as_star::<ScreenTrait>(body_id, sun, commands, meshes, materials)
+        }
+        Appearance::Ring(ring_hab) => {
+            spawn_as_ring_hab::<ScreenTrait>(body_id, ring_hab, commands, meshes, materials)
+        }
+    }
+}
 
-pub fn spawn_as_star<ScreenTrait: Component + Default>(body_id: u32, body: &Body, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {
+
+pub fn spawn_as_star<ScreenTrait: Component + Default>(body_id: u32, star: &Sun, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {
     let star_mesh = PbrBundle {
-        mesh: meshes.add(Sphere::new(body.radius as f32)),
+        mesh: meshes.add(Sphere::new(star.radius as f32)),
         material: materials.add(Color::rgb(5.0 * 3.0, 2.5 * 3.0, 0.3 * 3.0)),
         transform: Transform::IDENTITY,
         ..default()
@@ -42,12 +57,12 @@ pub fn spawn_as_star<ScreenTrait: Component + Default>(body_id: u32, body: &Body
 
 pub fn spawn_as_planet<ScreenTrait: Component + Default>(
     body_id: u32,
-    body: &Body,
+    planet: &Planetoid,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {
     let planet_mesh = PbrBundle {
-        mesh: meshes.add(Sphere::new(body.radius as f32)),
+        mesh: meshes.add(Sphere::new(planet.radius as f32)),
         material: materials.add(Color::rgb(0.2, 0.4, 0.8)),
         transform: Transform::IDENTITY,
         ..default()
@@ -57,111 +72,17 @@ pub fn spawn_as_planet<ScreenTrait: Component + Default>(
 
 pub fn spawn_as_ring_hab<ScreenTrait: Component + Default>(
     body_id: u32,
-    body: &Body,
+    ring: &Ring,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {
     let ring_mesh = PbrBundle {
-        mesh: meshes.add(ring_mesh(3.0, 0.1, 0.02)),
+        mesh: meshes.add(ring_mesh(ring.radius as f32, ring.width as f32, ring.thickness as f32)),
         material: materials.add(Color::rgb(0.2, 0.4, 0.8)),
         transform: Transform::IDENTITY,
         ..default()
     };
     commands.spawn((ring_mesh, ScreenTrait::default(), BodyId(body_id))).id()
-}
-
-fn dynamic_cube_mesh(radius: f32, height: f32, thickness: f32) -> Mesh {
-    let mut triangles = vec![
-        // top (facing towards +y)
-        [-0.5, 0.5, -0.5], // vertex with index 0
-        [0.5, 0.5, -0.5], // vertex with index 1
-        [0.5, 0.5, 0.5], // etc. until 23
-        [-0.5, 0.5, 0.5],
-        // bottom   (-y)
-        [-0.5, -0.5, -0.5],
-        [0.5, -0.5, -0.5],
-        [0.5, -0.5, 0.5],
-        [-0.5, -0.5, 0.5],
-        // right    (+x)
-        [0.5, -0.5, -0.5],
-        [0.5, -0.5, 0.5],
-        [0.5, 0.5, 0.5], // This vertex is at the same position as vertex with index 2, but they'll have different UV and normal
-        [0.5, 0.5, -0.5],
-        // left     (-x)
-        [-0.5, -0.5, -0.5],
-        [-0.5, -0.5, 0.5],
-        [-0.5, 0.5, 0.5],
-        [-0.5, 0.5, -0.5],
-        // back     (+z)
-        [-0.5, -0.5, 0.5],
-        [-0.5, 0.5, 0.5],
-        [0.5, 0.5, 0.5],
-        [0.5, -0.5, 0.5],
-        // forward  (-z)
-        [-0.5, -0.5, -0.5],
-        [-0.5, 0.5, -0.5],
-        [0.5, 0.5, -0.5],
-        [0.5, -0.5, -0.5],
-    ];
-    let mut uv = vec![
-        // Assigning the UV coords for the top side.
-        [0.0, 0.2], [0.0, 0.0], [1.0, 0.0], [1.0, 0.25],
-        // Assigning the UV coords for the bottom side.
-        [0.0, 0.45], [0.0, 0.25], [1.0, 0.25], [1.0, 0.45],
-        // Assigning the UV coords for the right side.
-        [1.0, 0.45], [0.0, 0.45], [0.0, 0.2], [1.0, 0.2],
-        // Assigning the UV coords for the left side.
-        [1.0, 0.45], [0.0, 0.45], [0.0, 0.2], [1.0, 0.2],
-        // Assigning the UV coords for the back side.
-        [0.0, 0.45], [0.0, 0.2], [1.0, 0.2], [1.0, 0.45],
-        // Assigning the UV coords for the forward side.
-        [0.0, 0.45], [0.0, 0.2], [1.0, 0.2], [1.0, 0.45],
-    ];
-    let mut normals = vec![
-        // Normals for the top side (towards +y)
-        [0.0, 1.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [0.0, 1.0, 0.0],
-        // Normals for the bottom side (towards -y)
-        [0.0, -1.0, 0.0],
-        [0.0, -1.0, 0.0],
-        [0.0, -1.0, 0.0],
-        [0.0, -1.0, 0.0],
-        // Normals for the right side (towards +x)
-        [1.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0],
-        // Normals for the left side (towards -x)
-        [-1.0, 0.0, 0.0],
-        [-1.0, 0.0, 0.0],
-        [-1.0, 0.0, 0.0],
-        [-1.0, 0.0, 0.0],
-        // Normals for the back side (towards +z)
-        [0.0, 0.0, 1.0],
-        [0.0, 0.0, 1.0],
-        [0.0, 0.0, 1.0],
-        [0.0, 0.0, 1.0],
-        // Normals for the forward side (towards -z)
-        [0.0, 0.0, -1.0],
-        [0.0, 0.0, -1.0],
-        [0.0, 0.0, -1.0],
-        [0.0, 0.0, -1.0],
-    ];
-    let mut indicies= vec![0,3,1 , 1,3,2, // triangles making up the top (+y) facing side.
-                                   4,5,7 , 5,6,7, // bottom (-y)
-                                   8,11,9 , 9,11,10, // right (+x)
-                                   12,13,15 , 13,14,15, // left (-x)
-                                   16,19,17 , 17,19,18, // back (+z)
-                                   20,21,23 , 21,22,23, // forward (-z)
-                                   ];
-
-    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, triangles)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-        .with_inserted_indices(Indices::U32(indicies))
 }
 
 fn ring_mesh(radius: f32, height: f32, thickness: f32) -> Mesh {

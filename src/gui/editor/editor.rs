@@ -1,9 +1,11 @@
 use bevy::prelude::*;
 use glam::DVec3;
-use crate::body::{body, SimulationSettings, universe};
-use crate::body::body::{Body, FixedMotive, StupidCircle};
+use crate::body::{body, SimulationSettings};
+use crate::body::appearance::{Appearance, Planetoid, Ring, Sun};
+use crate::body::body::Body;
+use crate::body::motive::{FixedMotive, Motive, StupidCircle};
 use crate::body::universe::Universe;
-use crate::gui::body::graphical::{spawn_as_planet, spawn_as_ring_hab, spawn_as_star};
+use crate::gui::body::graphical::{spawn_as_planet, spawn_as_ring_hab, spawn_as_star, spawn_bevy};
 use crate::gui::common;
 use crate::gui::editor::gui;
 use crate::gui::editor::gui::DebugText;
@@ -84,54 +86,69 @@ fn editor_setup(
     
     let sun_id = universe.add_body(Body {
         name: "Sun".to_string(),
-        physics: body::Motive::Fixed(
+        physics: Motive::Fixed(
             FixedMotive{
                 local_position: DVec3::ZERO,
             }
         ),
         mass: 10.0,
-        radius: 1.0,
+        appearance: Appearance::Sun(Sun {
+            radius: 1.0,
+            color: [5.0, 2.3, 0.3],
+            light: [1.0, 0.3, 0.1],
+            brightness: 3.0,
+        }),
         parent: None,
     });
-    spawn_as_star::<OnEditorScreen>(sun_id, universe.get_body(sun_id).unwrap(), &mut commands, &mut meshes, &mut materials);
-    // (star_mesh, Star, ScreenTrait::default(), BodyId(body_id))
 
     let planet_id = universe.add_body(Body {
         name: "Planet".to_string(),
-        physics: body::Motive::StupidCircle(
+        physics: Motive::StupidCircle(
             StupidCircle {
                 radius: 3.0,
             }
         ),
         mass: 1.0,
-        radius: 0.3,
+        appearance: Appearance::Planetoid(Planetoid {
+            radius: 0.3,
+            color: [0.2, 0.8, 0.4],
+        }),
         parent: Some(sun_id),
     });
-    spawn_as_planet::<OnEditorScreen>(planet_id, universe.get_body(planet_id).unwrap(), &mut commands, &mut meshes, &mut materials);
 
     let moon_id = universe.add_body(Body {
         name: "Moon".to_string(),
-        physics: body::Motive::StupidCircle(
+        physics: Motive::StupidCircle(
             StupidCircle {
                 radius: 0.6
             }
         ),
         mass: 0.1,
-        radius: 0.1,
+        appearance: Appearance::Planetoid(Planetoid {
+            radius: 0.1,
+            color: [0.4, 0.4, 0.4],
+        }),
         parent: Some(planet_id),
     });
-    spawn_as_planet::<OnEditorScreen>(moon_id, universe.get_body(moon_id).unwrap(), &mut commands, &mut meshes, &mut materials);
 
     let ring_id = universe.add_body(Body {
         name: "Ringworld".to_string(),
-        physics: body::Motive::Fixed(FixedMotive {
+        physics: Motive::Fixed(FixedMotive {
             local_position: DVec3::new(0.0, 0.0, 0.0)
         }),
         mass: 0.1,
-        radius: 2.0,
+        appearance: Appearance::Ring(Ring {
+            radius: 2.0,
+            thickness: 0.1,
+            width: 0.3,
+            wall_height: 0.1,
+        }),
         parent: Some(sun_id),
     });
-    spawn_as_ring_hab::<OnEditorScreen>(ring_id, universe.get_body(ring_id).unwrap(), &mut commands, &mut meshes, &mut materials);
+
+    for (id, body) in universe.bodies.iter() {
+        spawn_bevy::<OnEditorScreen>(*id, body, &mut commands, &mut meshes, &mut materials);
+    }
 }
 
 fn position_bodies(
