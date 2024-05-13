@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use glam::DVec3;
-use bevy::prelude::Resource;
+use bevy::prelude::{Asset, Resource, TypePath};
+use serde::{Serialize, Deserialize};
 use crate::body::body::Body;
 use crate::body::motive::Motive;
 use crate::util::circular;
@@ -8,7 +9,7 @@ use crate::util::circular;
 const G: f64 = 6.67430e-11;
 const DEBUG_G: f64 = 6.67430e-3;
 
-#[derive(Resource)]
+#[derive(Resource, Serialize, Deserialize, Debug, Asset, TypePath)]
 pub struct Universe {
     pub(crate) bodies: HashMap<u32, Body>,
     counter: u32,
@@ -38,8 +39,9 @@ impl Universe {
         id
     }
 
-    pub fn add_body(&mut self, body: Body) -> u32 {
+    pub fn add_body(&mut self, mut body: Body) -> u32 {
         let id = self.next_id();
+        body.id = Some(id);
         self.bodies.insert(id, body);
         id
     }

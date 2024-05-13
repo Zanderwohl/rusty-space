@@ -1,7 +1,10 @@
+use serde::{Serialize, Deserialize};
 use crate::body::appearance::{Appearance, Planetoid};
 use crate::body::motive::{FixedMotive, Motive};
 
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Body {
+    pub(crate) id: Option<u32>,
     pub(crate) physics: Motive,
     pub(crate) name: String,
     pub(crate) mass: f64,
@@ -12,6 +15,7 @@ pub struct Body {
 impl Default for Body {
     fn default() -> Self {
         Body {
+            id: None,
             physics: Motive::Fixed(FixedMotive::default()),
             name: "New body".to_string(),
             mass: 1.0,

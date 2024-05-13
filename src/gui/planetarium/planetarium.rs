@@ -1,12 +1,11 @@
+use std::fmt::Debug;
+use std::fs;
 use bevy::prelude::*;
-use glam::DVec3;
 use crate::body::SimulationSettings;
-use crate::body::appearance::{Appearance, Planetoid, Ring, Sun};
-use crate::body::body::Body;
-use crate::body::motive::{FixedMotive, Motive, StupidCircle};
 use crate::body::universe::Universe;
 use crate::gui::body::graphical::spawn_bevy;
 use crate::gui::common;
+use crate::gui::common::BackGlow;
 use crate::gui::planetarium::gui;
 use crate::gui::planetarium::gui::DebugText;
 use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
@@ -28,20 +27,13 @@ pub fn planetarium_plugin(app: &mut App) {
             body_scale: 1.0,
             playing: false,
         })
-        .insert_resource(
-            Universe::default()
-        )
         .add_systems(
             Update,
             (crate::gui::menu::common::button_system, gui::menu_action).run_if(in_state(AppState::Editor)),
         )
         .add_systems(
             Update,
-            (position_bodies).run_if(in_state(AppState::Editor)),
-        )
-        .add_systems(
-            Update,
-            handle_time.run_if(in_state(AppState::Editor)),
+            (position_bodies, handle_time).run_if(in_state(AppState::Editor)),
         );
 }
 
@@ -67,14 +59,15 @@ pub(super) struct OnPlanetariumScreen;
 #[derive(Component)]
 pub(crate) struct BodyId(pub u32);
 
+
 fn planetarium_setup(
     mut commands: Commands,
     display_quality: Res<DisplayQuality>,
     volume: Res<Volume>,
-    mut universe: ResMut<Universe>,
+    glow: Res<BackGlow>,
     asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let base_screen = common::base_screen(&mut commands);
     gui::ui_setup(&mut commands, asset_server.clone());
@@ -84,71 +77,14 @@ fn planetarium_setup(
         .with_children(|parent| {
         });
     
-    let sun_id = universe.add_body(Body {
-        name: "Sun".to_string(),
-        physics: Motive::Fixed(
-            FixedMotive{
-                local_position: DVec3::ZERO,
-            }
-        ),
-        mass: 10.0,
-        appearance: Appearance::Sun(Sun {
-            radius: 1.0,
-            color: [5.0, 2.3, 0.3],
-            light: [1.0, 0.3, 0.1],
-            brightness: 3.0,
-        }),
-        parent: None,
-    });
 
-    let planet_id = universe.add_body(Body {
-        name: "Planet".to_string(),
-        physics: Motive::StupidCircle(
-            StupidCircle {
-                radius: 3.0,
-            }
-        ),
-        mass: 1.0,
-        appearance: Appearance::Planetoid(Planetoid {
-            radius: 0.3,
-            color: [0.2, 0.8, 0.4],
-        }),
-        parent: Some(sun_id),
-    });
-
-    universe.add_body(Body {
-        name: "Moon".to_string(),
-        physics: Motive::StupidCircle(
-            StupidCircle {
-                radius: 0.6
-            }
-        ),
-        mass: 0.1,
-        appearance: Appearance::Planetoid(Planetoid {
-            radius: 0.1,
-            color: [0.4, 0.4, 0.4],
-        }),
-        parent: Some(planet_id),
-    });
-
-    universe.add_body(Body {
-        name: "Ringworld".to_string(),
-        physics: Motive::Fixed(FixedMotive {
-            local_position: DVec3::new(0.0, 0.0, 0.0)
-        }),
-        mass: 0.1,
-        appearance: Appearance::Ring(Ring {
-            radius: 2.0,
-            thickness: 0.1,
-            width: 0.3,
-            wall_height: 0.1,
-        }),
-        parent: Some(sun_id),
-    });
-
+    let universe_data = fs::read_to_string("assets/templates/test.yml").expect("Unable to read universe file.");
+    let universe: Universe = serde_yaml::from_str(&*universe_data).unwrap();
     for (id, body) in universe.bodies.iter() {
         spawn_bevy::<OnPlanetariumScreen>(*id, body, &mut commands, &mut meshes, &mut materials);
     }
+    commands.insert_resource(universe);
+
 }
 
 fn position_bodies(
@@ -229,6 +165,12 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
     if display_state.playing {
         display_state.current_time += time.delta_seconds() as f64 * display_state.time_step_size();
     }
+}
+
+fn show_trajectories(
+    mut universe: ResMut<Universe>,
+) {
+
 }
 
 // Tick the timer, and change state when finished

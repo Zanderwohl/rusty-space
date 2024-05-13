@@ -1,12 +1,15 @@
 use glam::DVec3;
+use serde::{Serialize, Deserialize};
 
 /// A Motive is a method by which a body can move.
+#[derive(Serialize, Deserialize, Debug)]
 pub(crate) enum Motive {
     Fixed(FixedMotive),
     Linear(LinearMotive),
     StupidCircle(StupidCircle),
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct FixedMotive {
     pub(crate) local_position: DVec3,
 }
@@ -19,6 +22,7 @@ impl Default for FixedMotive {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct LinearMotive {
     pub(crate) local_position: DVec3,
     pub(crate) local_velocity: DVec3,
@@ -33,6 +37,7 @@ impl Default for LinearMotive {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct StupidCircle {
     pub(crate) radius: f64,
 }

@@ -5,11 +5,13 @@ use crate::gui::common::{BackGlow, DisplayQuality, Volume};
 use bevy::{prelude::*, winit::WinitWindows};
 use bevy::core_pipeline::{tonemapping::Tonemapping, bloom::{BloomCompositeMode, BloomSettings}};
 use winit::window::Icon;
+use bevy_common_assets::yaml::YamlAssetPlugin;
+use crate::body::universe::Universe;
 
 
 pub(crate) fn open() {
     App::new()
-        .add_plugins(DefaultPlugins
+        .add_plugins((DefaultPlugins
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "Exotic Matters".to_string(),
@@ -17,8 +19,9 @@ pub(crate) fn open() {
                 }),
                 exit_condition: ExitCondition::OnPrimaryClosed,
                 close_when_requested: true,
-            })
-        )
+            }),
+            YamlAssetPlugin::<Universe>::new(&["yml", "yaml"])
+        ))
         .insert_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))
         .add_systems(Startup, set_window_icon)
         .add_systems(Startup, setup)

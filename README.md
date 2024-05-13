@@ -27,4 +27,4 @@ A program for course plotting and mission simulation for the Tabletop RPG Exotic
 
 ## Bug List
 
-* None yet :)
+* Planets appear to move clockwise, when they should move counter-clockwise.
