@@ -38,7 +38,7 @@ pub fn spawn_bevy<ScreenTrait: Component + Default>(body_id: u32, body: &Body, c
 pub fn spawn_as_star<ScreenTrait: Component + Default>(body_id: u32, star: &Sun, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {
     let star_mesh = PbrBundle {
         mesh: meshes.add(Sphere::new(star.radius as f32)),
-        material: materials.add(Color::rgb(5.0 * 3.0, 2.5 * 3.0, 0.3 * 3.0)),
+        material: materials.add(Color::rgb(star.color[0], star.color[1], star.color[2])),
         transform: Transform::IDENTITY,
         ..default()
     };
@@ -47,7 +47,7 @@ pub fn spawn_as_star<ScreenTrait: Component + Default>(body_id: u32, star: &Sun,
             children.spawn(PointLightBundle {
                 point_light: PointLight {
                     radius: 100.0,
-                    color: Color::rgb(1.0, 0.3, 0.1),
+                    color: Color::rgb(star.light[0], star.light[1], star.light[2]),
                     ..default()
                 },
                 ..default()
@@ -63,7 +63,7 @@ pub fn spawn_as_planet<ScreenTrait: Component + Default>(
     materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {
     let planet_mesh = PbrBundle {
         mesh: meshes.add(Sphere::new(planet.radius as f32)),
-        material: materials.add(Color::rgb(0.2, 0.4, 0.8)),
+        material: materials.add(Color::rgb(planet.color[0], planet.color[1], planet.color[2])),
         transform: Transform::IDENTITY,
         ..default()
     };

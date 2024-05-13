@@ -1,3 +1,4 @@
+use std::fs;
 use bevy::window::ExitCondition;
 use crate::gui;
 use crate::gui::{planetarium, menu, splash};
@@ -10,6 +11,7 @@ use crate::body::universe::Universe;
 
 
 pub(crate) fn open() {
+    prerequisites();
     App::new()
         .add_plugins((DefaultPlugins
             .set(WindowPlugin {
@@ -35,6 +37,12 @@ pub(crate) fn open() {
             planetarium::planetarium::planetarium_plugin,
         ))
         .run();
+}
+
+fn prerequisites() {
+    use std::fs;
+
+    fs::create_dir_all("saves").expect("Could not create 'saves' directory.");
 }
 
 fn setup(mut commands: Commands,

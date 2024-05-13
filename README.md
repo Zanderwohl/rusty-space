@@ -5,13 +5,11 @@ A program for course plotting and mission simulation for the Tabletop RPG Exotic
 ## To Do List
 
 * Add textures to objects
-* Allow Bodies to know what kind of thing they are
-* Base models off what types of things bodies say they are
 * Rotation and quaternion stuff (sadge)
 * Procedural textures for planets
 * Procedural textures for ring worlds
 * Dyson spheres
-* rings
+* rings (rings need rim walls)
 * potato asteroids
 * rosettes
 * klemperer rosettes

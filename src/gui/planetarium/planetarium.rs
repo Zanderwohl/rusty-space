@@ -14,9 +14,9 @@ use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
 // display the current settings for 5 seconds before returning to the menu
 pub fn planetarium_plugin(app: &mut App) {
     app
-        .add_systems(OnEnter(AppState::Editor), planetarium_setup)
-        .add_systems(Update, editor.run_if(in_state(AppState::Editor)))
-        .add_systems(OnExit(AppState::Editor), despawn_screen::<OnPlanetariumScreen>)
+        .add_systems(OnEnter(AppState::Planetarium), planetarium_setup)
+        .add_systems(Update, editor.run_if(in_state(AppState::Planetarium)))
+        .add_systems(OnExit(AppState::Planetarium), despawn_screen::<OnPlanetariumScreen>)
         .insert_resource(SimulationSettings {
             gravity_constant: 1.0,
         })
@@ -29,11 +29,11 @@ pub fn planetarium_plugin(app: &mut App) {
         })
         .add_systems(
             Update,
-            (crate::gui::menu::common::button_system, gui::menu_action).run_if(in_state(AppState::Editor)),
+            (crate::gui::menu::common::button_system, gui::menu_action).run_if(in_state(AppState::Planetarium)),
         )
         .add_systems(
             Update,
-            (position_bodies, handle_time).run_if(in_state(AppState::Editor)),
+            (position_bodies, handle_time).run_if(in_state(AppState::Planetarium)),
         );
 }
 
@@ -84,7 +84,6 @@ fn planetarium_setup(
         spawn_bevy::<OnPlanetariumScreen>(*id, body, &mut commands, &mut meshes, &mut materials);
     }
     commands.insert_resource(universe);
-
 }
 
 fn position_bodies(
