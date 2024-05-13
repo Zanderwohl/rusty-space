@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use bevy::prelude::*;
 
 use bevy::app::AppExit;
@@ -5,7 +6,7 @@ use crate::gui::{common, menu};
 use crate::gui::common::{BackGlow, text};
 use crate::gui::common::color::NORMAL_BUTTON;
 use crate::gui::menu::{save_select, settings, settings_display, settings_sound, settings_ui_test};
-use crate::gui::menu::save_select::OnSaveSelectScreen;
+use crate::gui::menu::save_select::{OnSaveSelectScreen, SaveEntry};
 use crate::gui::menu::settings::OnSettingsMenuScreen;
 use crate::gui::menu::settings_display::{GlowSetting, OnDisplaySettingsMenuScreen, QualitySetting};
 use crate::gui::menu::settings_sound::{OnSoundSettingsMenuScreen, VolumeSetting};
@@ -105,6 +106,7 @@ pub(crate) struct SelectedOption;
 pub(crate) enum MenuButtonAction {
     Play,
     SaveSelect,
+    LoadSave(SaveEntry),
     Settings,
     SettingsDisplay,
     SettingsSound,
@@ -133,8 +135,13 @@ fn setting_button<T: Resource + Component + PartialEq + Copy, U: Component>(
     }
 }
 
-fn menu_setup(mut menu_state: ResMut<NextState<MenuState>>) {
-    menu_state.set(MenuState::Main);
+fn menu_setup(
+    menu_state: Res<State<MenuState>>,
+    mut next_menu_state: ResMut<NextState<MenuState>>
+) {
+    if *menu_state == MenuState::Disabled {
+        next_menu_state.set(MenuState::Main);
+    }
 }
 
 fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
@@ -191,27 +198,6 @@ fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                                 background_color: NORMAL_BUTTON.into(),
                                 ..default()
                             },
-                            MenuButtonAction::Play,
-                        ))
-                        .with_children(|parent| {
-                            let icon = asset_server.load("icons/play.png");
-                            parent.spawn(ImageBundle {
-                                style: button_icon_style.clone(),
-                                image: UiImage::new(icon),
-                                ..default()
-                            });
-                            parent.spawn(TextBundle::from_section(
-                                "START",
-                                button_text_style.clone(),
-                            ));
-                        });
-                    parent
-                        .spawn((
-                            ButtonBundle {
-                                style: button_style.clone(),
-                                background_color: NORMAL_BUTTON.into(),
-                                ..default()
-                            },
                             MenuButtonAction::SaveSelect,
                         ))
                         .with_children(|parent| {
@@ -222,7 +208,7 @@ fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                                 ..default()
                             });
                             parent.spawn(TextBundle::from_section(
-                                "LOAD",
+                                "START",
                                 button_text_style.clone(),
                             ));
                         });
@@ -277,6 +263,7 @@ pub(crate) fn menu_action(
     mut app_exit_events: EventWriter<AppExit>,
     mut menu_state: ResMut<NextState<MenuState>>,
     mut game_state: ResMut<NextState<AppState>>,
+    mut save: ResMut<SaveEntry>,
 ) {
     for (interaction, menu_button_action) in &interaction_query {
         if *interaction == Interaction::Pressed {
@@ -285,6 +272,13 @@ pub(crate) fn menu_action(
                     app_exit_events.send(AppExit);
                 }
                 MenuButtonAction::Play => {
+                    game_state.set(AppState::Planetarium);
+                    menu_state.set(MenuState::Disabled);
+                }
+                MenuButtonAction::LoadSave(new_save) => {
+                    info!("{:?}", new_save);
+                    save.name = new_save.name.clone();
+                    save.path = new_save.path.clone();
                     game_state.set(AppState::Planetarium);
                     menu_state.set(MenuState::Disabled);
                 }

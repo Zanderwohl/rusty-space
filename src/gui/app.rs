@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::PathBuf;
 use bevy::window::ExitCondition;
 use crate::gui;
 use crate::gui::{planetarium, menu, splash};
@@ -8,6 +9,7 @@ use bevy::core_pipeline::{tonemapping::Tonemapping, bloom::{BloomCompositeMode, 
 use winit::window::Icon;
 use bevy_common_assets::yaml::YamlAssetPlugin;
 use crate::body::universe::Universe;
+use crate::gui::menu::save_select;
 
 
 pub(crate) fn open() {
@@ -30,6 +32,10 @@ pub(crate) fn open() {
         .insert_resource(DisplayQuality::Medium)
         .insert_resource(Volume(7))
         .insert_resource(BackGlow::Subtle)
+        .insert_resource(save_select::SaveEntry {
+            name: "New Universe".to_string(),
+            path: PathBuf::new(),
+        })
         .init_state::<gui::common::AppState>()
         .add_plugins((
             splash::splash_plugin,

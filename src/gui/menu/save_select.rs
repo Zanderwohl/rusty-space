@@ -1,9 +1,10 @@
 use std::ffi::OsStr;
 use std::fs::{DirEntry, FileType};
 use std::path::PathBuf;
-use bevy::prelude::{AssetServer, BuildChildren, ButtonBundle, Commands, Component, default, info, NodeBundle, Res, TextBundle};
+use bevy::hierarchy::ChildBuilder;
+use bevy::prelude::{AssetServer, BuildChildren, ButtonBundle, Commands, Component, default, info, NodeBundle, Res, Resource, Style, TextBundle, TextStyle, UiRect, Val};
 use crate::gui::common;
-use crate::gui::common::color::NORMAL_BUTTON;
+use crate::gui::common::color::{BACKGROUND, HIGHLIGHT, NORMAL_BUTTON};
 use crate::gui::common::text;
 use crate::gui::menu::main::MenuButtonAction;
 
@@ -40,14 +41,79 @@ pub fn save_select_setup(mut commands: Commands, asset_server: Res<AssetServer>)
                                 button_text_style.clone(),
                             ));
                         });
+                    parent
+                        .spawn(NodeBundle {
+                            style: common::panel::horizontal(),
+                            background_color: common::color::FOREGROUND.into(),
+                            ..default()
+                        }).with_children(|parent| {
+                        parent
+                            .spawn(NodeBundle {
+                                background_color: BACKGROUND.into(),
+                                style: common::panel::vertical_with_margin(),
+                                ..default()
+                            }).with_children(|parent| {
+                            parent.spawn(
+                                TextBundle::from_section(
+                                    "New",
+                                    button_text_style.clone(),
+                                )
+                                    .with_style(Style {
+                                        margin: UiRect::all(Val::Px(50.0)),
+                                        ..default()
+                                    }),
+                            );
+                            for template in templates.iter() {
+                                save_file_button(parent, &template, button_style.clone(), button_text_style.clone());
+                            }
+                        });
+                        parent
+                            .spawn(NodeBundle {
+                                background_color: HIGHLIGHT.into(),
+                                style: common::panel::vertical_with_margin(),
+                                ..default()
+                            }).with_children(|parent| {
+                            parent.spawn(
+                                TextBundle::from_section(
+                                    "Load",
+                                    button_text_style.clone(),
+                                )
+                                    .with_style(Style {
+                                        margin: UiRect::all(Val::Px(50.0)),
+                                        ..default()
+                                    }),
+                            );
+                            for save in saves.iter() {
+                                save_file_button(parent, &save, button_style.clone(), button_text_style.clone());
+                            }
+                        });
+                    });
                 });
         });
 }
 
-#[derive(Debug)]
-struct SaveEntry {
-    path: PathBuf,
-    name: String,
+fn save_file_button(parent: &mut ChildBuilder, template: &&SaveEntry, button_style: Style, text_style: TextStyle) {
+    let name = &template.name.to_uppercase();
+    parent.spawn((
+        ButtonBundle {
+            style: button_style.clone(),
+            background_color: NORMAL_BUTTON.into(),
+            ..default()
+        },
+        MenuButtonAction::LoadSave(template.clone().clone()),
+    ))
+        .with_children(|parent| {
+            parent.spawn(TextBundle::from_section(
+                name,
+                text_style.clone(),
+            ));
+        });
+}
+
+#[derive(Debug, Resource, Clone)]
+pub struct SaveEntry {
+    pub path: PathBuf,
+    pub name: String,
 }
 
 

@@ -80,6 +80,28 @@ pub mod panel {
             ..default()
         }
     }
+
+    pub(crate) fn vertical_with_margin() -> Style {
+        Style {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            padding: UiRect {
+                left: Val::Px(10.0),
+                right: Val::Px(10.0),
+                top: Val::Px(10.0),
+                bottom: Val::Px(10.0),
+            },
+            margin: UiRect::all(Val::Px(5.0)),
+            ..default()
+        }
+    }
+
+    pub(crate) fn horizontal() -> Style {
+        Style {
+            padding: UiRect::all(Val::Px(5.0)),
+            ..Default::default()
+        }
+    }
 }
 
 pub mod text {

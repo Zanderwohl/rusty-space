@@ -1,4 +1,4 @@
-use bevy::app::AppExit;
+use bevy::app::{App, AppExit};
 use bevy::asset::AssetServer;
 use bevy::prelude::{AlignItems, BackgroundColor, BuildChildren, Button, ButtonBundle, Changed, Commands, Component, default, EventWriter, Interaction, JustifyContent, NextState, NodeBundle, PositionType, Query, Res, ResMut, Style, TextBundle, TextStyle, Val, With};
 use crate::gui::common;
@@ -14,6 +14,7 @@ pub struct DebugText;
 #[derive(Component)]
 pub(crate) enum GUIButtonAction {
     BackToMainMenu,
+    BackToSaveSelect,
 }
 
 pub(super) fn ui_setup(commands: &mut Commands, asset_server: AssetServer) {
@@ -40,7 +41,7 @@ pub(super) fn ui_setup(commands: &mut Commands, asset_server: AssetServer) {
                         background_color: BackgroundColor::from(common::color::BACKGROUND),
                         ..default()
                     },
-                    GUIButtonAction::BackToMainMenu,
+                    GUIButtonAction::BackToSaveSelect,
                 ))
                 .with_children(|parent| {
                     parent.spawn(TextBundle::from_section("Back", common::text::primary(asset_server.clone()).clone()));
@@ -82,6 +83,10 @@ pub(crate) fn menu_action(
                     menu_state.set(crate::gui::menu::main::MenuState::Main);
                     game_state.set(AppState::Menu);
                 },
+                GUIButtonAction::BackToSaveSelect => {
+                    menu_state.set(crate::gui::menu::main::MenuState::SaveSelect);
+                    game_state.set(AppState::Menu);
+                }
             }
         }
     }

@@ -6,6 +6,7 @@ use crate::body::universe::Universe;
 use crate::gui::body::graphical::spawn_bevy;
 use crate::gui::common;
 use crate::gui::common::BackGlow;
+use crate::gui::menu::save_select::SaveEntry;
 use crate::gui::planetarium::gui;
 use crate::gui::planetarium::gui::DebugText;
 use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
@@ -65,6 +66,7 @@ fn planetarium_setup(
     display_quality: Res<DisplayQuality>,
     volume: Res<Volume>,
     glow: Res<BackGlow>,
+    save: Res<SaveEntry>,
     asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -78,7 +80,7 @@ fn planetarium_setup(
         });
     
 
-    let universe_data = fs::read_to_string("assets/templates/test.yml").expect("Unable to read universe file.");
+    let universe_data = fs::read_to_string(&save.path).expect("Unable to read universe file.");
     let universe: Universe = serde_yaml::from_str(&*universe_data).unwrap();
     for (id, body) in universe.bodies.iter() {
         spawn_bevy::<OnPlanetariumScreen>(*id, body, &mut commands, &mut meshes, &mut materials);

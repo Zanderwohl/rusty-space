@@ -4,4 +4,4 @@ mod settings_display;
 mod settings_sound;
 mod settings_ui_test;
 pub(super) mod common;
-mod save_select;
+pub mod save_select;
