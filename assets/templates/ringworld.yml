@@ -9,16 +9,17 @@ bodies:
     name: Sun
     mass: 10.0
     appearance: !Sun
+      intensity: 100000000.0
       radius: 1.0
       color:
-      - 5.0
-      - 2.3
-      - 7.3
+        - 1.0
+        - 0.46
+        - 0.26
       light:
-      - 1.0
-      - 0.3
-      - 0.1
-      brightness: 3.0
+        - 1.0
+        - 0.3
+        - 0.1
+      brightness: 15.0
     parent: null
   1:
     id: 1

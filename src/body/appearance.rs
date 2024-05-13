@@ -15,6 +15,7 @@ pub(crate) struct Planetoid {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct Sun {
+    pub intensity: f32,
     pub radius: f64,
     pub color: [f32; 3],
     pub light: [f32; 3],
