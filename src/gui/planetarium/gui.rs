@@ -36,7 +36,7 @@ pub fn esc_menu_plugin(app: &mut App) {
         .add_systems(OnExit(EscMenuState::Pause), despawn_screen::<OnEscMenuUI>)
         .add_systems(
             Update,
-            handle_keys,
+            (handle_keys).run_if(in_state(AppState::Planetarium)),
         );
 }
 
@@ -62,8 +62,8 @@ fn esc_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                 style: Style {
                     width: Val::Percent(100.0),
                     height: Val::Percent(100.0),
-                    align_items: AlignItems::Start,
-                    justify_content: JustifyContent::Start,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
                     ..default()
                 },
                 ..default()
@@ -73,7 +73,13 @@ fn esc_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
             OnPlanetariumScreen,
         )).with_children(|parent| {
         parent
-            .spawn((
+            .spawn(NodeBundle {
+                style: common::panel::vertical(),
+                background_color: common::color::FOREGROUND.into(),
+                ..default()
+            }).with_children(|parent| {
+            parent
+                .spawn((
                 ButtonBundle {
                     style: common::button_style(),
                     background_color: BackgroundColor::from(common::color::BACKGROUND),
@@ -81,9 +87,10 @@ fn esc_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                 },
                 GUIButtonAction::BackToSaveSelect,
             ))
-            .with_children(|parent| {
-                parent.spawn(TextBundle::from_section("BACK", common::text::primary(asset_server.clone()).clone()));
-            });
+                .with_children(|parent| {
+                    parent.spawn(TextBundle::from_section("BACK", common::text::primary(asset_server.clone()).clone()));
+                });
+        });
     });
 
 }

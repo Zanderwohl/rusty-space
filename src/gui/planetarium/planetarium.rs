@@ -8,7 +8,7 @@ use crate::gui::common;
 use crate::gui::common::BackGlow;
 use crate::gui::menu::save_select::SaveEntry;
 use crate::gui::planetarium::gui;
-use crate::gui::planetarium::gui::DebugText;
+use crate::gui::planetarium::gui::{DebugText, EscMenuState};
 use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
 
 // This plugin will contain the game. In this case, it's just be a screen that will
@@ -31,11 +31,11 @@ pub fn planetarium_plugin(app: &mut App) {
         })
         .add_systems(
             Update,
-            (crate::gui::menu::common::button_system, gui::menu_action).run_if(in_state(AppState::Planetarium)),
+            (crate::gui::menu::common::button_system, gui::menu_action).run_if(in_state(AppState::Planetarium)).run_if(in_state(AppState::Planetarium)),
         )
         .add_systems(
             Update,
-            (position_bodies, handle_time).run_if(in_state(AppState::Planetarium)),
+            (position_bodies, handle_time).run_if(in_state(AppState::Planetarium)).run_if(in_state(AppState::Planetarium)),
         );
 }
 
@@ -114,7 +114,8 @@ fn position_bodies(
 fn handle_time(mut display_state: ResMut<DisplayState>,
                keyboard: Res<ButtonInput<KeyCode>>,
                mut query: Query<(&mut Transform, &mut Text), With<DebugText>>,
-               time: Res<Time>,) {
+               time: Res<Time>,
+               app_state: Res<State<AppState>>) {
     for (_transform, mut text) in query.iter_mut() {
         let text = &mut text.sections[0].value;
         text.clear();
@@ -164,7 +165,7 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
     if keyboard.just_pressed(KeyCode::KeyP) {
         display_state.playing = !display_state.playing;
     }
-    if display_state.playing {
+    if display_state.playing{
         display_state.current_time += time.delta_seconds() as f64 * display_state.time_step_size();
     }
 }
