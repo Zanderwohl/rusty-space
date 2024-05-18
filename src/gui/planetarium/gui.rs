@@ -1,12 +1,17 @@
-use bevy::app::{App, AppExit};
+use bevy::app::{App, AppExit, Update};
 use bevy::asset::AssetServer;
-use bevy::prelude::{AlignItems, BackgroundColor, BuildChildren, Button, ButtonBundle, Changed, Commands, Component, default, EventWriter, Interaction, JustifyContent, NextState, NodeBundle, PositionType, Query, Res, ResMut, Style, TextBundle, TextStyle, Val, With};
+use bevy::input::ButtonInput;
+use bevy::prelude::{AlignItems, BackgroundColor, BuildChildren, Button, ButtonBundle, Changed, Commands, Component, default, EventWriter, in_state, Interaction, IntoSystemConfigs, JustifyContent, KeyCode, NextState, NodeBundle, OnEnter, OnExit, PositionType, Query, Reflect, Res, ResMut, State, States, Style, TextBundle, TextStyle, Val, With};
 use crate::gui::common;
-use crate::gui::common::AppState;
+use crate::gui::common::{AppState, despawn_screen};
+use crate::gui::menu::main::MenuState;
 use crate::gui::planetarium::planetarium::OnPlanetariumScreen;
 
 #[derive(Component)]
 struct OnEditorUI;
+
+#[derive(Component)]
+struct OnEscMenuUI;
 
 #[derive(Component)]
 pub struct DebugText;
@@ -15,6 +20,79 @@ pub struct DebugText;
 pub(crate) enum GUIButtonAction {
     BackToMainMenu,
     BackToSaveSelect,
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq, Debug, Hash, States)]
+pub(crate) enum EscMenuState {
+    Pause,
+    #[default]
+    Disabled,
+}
+
+pub fn esc_menu_plugin(app: &mut App) {
+    app
+        .init_state::<EscMenuState>()
+        .add_systems(OnEnter(EscMenuState::Pause), esc_menu_setup)
+        .add_systems(OnExit(EscMenuState::Pause), despawn_screen::<OnEscMenuUI>)
+        .add_systems(
+            Update,
+            (handle_keys).run_if(in_state(AppState::Planetarium)),
+        );
+}
+
+fn handle_keys(keyboard: Res<ButtonInput<KeyCode>>,
+               state: Res<State<EscMenuState>>,
+               mut next_state: ResMut<NextState<EscMenuState>>) {
+    if keyboard.just_pressed(KeyCode::Escape) {
+        match state.get() {
+            EscMenuState::Pause => {
+                next_state.set(EscMenuState::Disabled)
+            }
+            EscMenuState::Disabled => {
+                next_state.set(EscMenuState::Pause)
+            }
+        }
+    }
+}
+
+fn esc_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
+    commands
+        .spawn((
+            NodeBundle { // The main UI area
+                style: Style {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                ..default()
+            },
+            OnEscMenuUI,
+            OnEditorUI,
+            OnPlanetariumScreen,
+        )).with_children(|parent| {
+        parent
+            .spawn(NodeBundle {
+                style: common::panel::vertical(),
+                background_color: common::color::FOREGROUND.into(),
+                ..default()
+            }).with_children(|parent| {
+            parent
+                .spawn((
+                ButtonBundle {
+                    style: common::button_style(),
+                    background_color: BackgroundColor::from(common::color::BACKGROUND),
+                    ..default()
+                },
+                GUIButtonAction::BackToSaveSelect,
+            ))
+                .with_children(|parent| {
+                    parent.spawn(TextBundle::from_section("BACK", common::text::primary(asset_server.clone()).clone()));
+                });
+        });
+    });
+
 }
 
 pub(super) fn ui_setup(commands: &mut Commands, asset_server: AssetServer) {
@@ -34,18 +112,6 @@ pub(super) fn ui_setup(commands: &mut Commands, asset_server: AssetServer) {
             OnPlanetariumScreen,
         ))
         .with_children(|parent| {
-            parent
-                .spawn((
-                    ButtonBundle {
-                        style: common::button_style(),
-                        background_color: BackgroundColor::from(common::color::BACKGROUND),
-                        ..default()
-                    },
-                    GUIButtonAction::BackToSaveSelect,
-                ))
-                .with_children(|parent| {
-                    parent.spawn(TextBundle::from_section("Back", common::text::primary(asset_server.clone()).clone()));
-                });
             parent
                 .spawn((
                     TextBundle::from_section(
