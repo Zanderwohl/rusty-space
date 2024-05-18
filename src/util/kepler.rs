@@ -135,6 +135,7 @@ pub mod eccentric_anomaly {
 pub mod true_anomaly {
     use glam::DVec3;
     use crate::util::common::{bessel_j, beta, unit_circle_xy};
+    use scilib::math::bessel;
 
     pub fn at_time(eccentric_anomaly: f64, eccentricity: f64) -> f64 {
         let beta = eccentricity / (1.0 + unit_circle_xy(eccentricity));
@@ -158,36 +159,22 @@ pub mod true_anomaly {
     /// This is the Fourier expansion up to e^3
     pub fn from_mean_anomaly(mean_anomaly: f64, eccentricity: f64) -> f64 {
         let first_term = mean_anomaly;
-        let second_term = (2.0 * eccentricity - (1.0 / 4.0) * eccentricity * eccentricity * eccentricity) * f64::sin(mean_anomaly);
+        let second_term = (2.0 - (1.0 / 4.0) * eccentricity * eccentricity * eccentricity) * f64::sin(mean_anomaly);
         let third_term = (5.0 / 4.0) * eccentricity * eccentricity * eccentricity * f64::sin(2.0 * mean_anomaly);
         let fourth_term = (13.0 / 12.0) * eccentricity * eccentricity * eccentricity * f64::sin(3.0 * mean_anomaly);
         first_term + second_term + third_term + fourth_term
     }
 
     pub fn fourier_expansion(mean_anomaly: f64, eccentricity: f64, iterations: usize) -> f64 {
-        let mut v = mean_anomaly;
-        for k in 1..(iterations + 1) {
-            let k_ = k as f64;
-            let fore_term = 2.0 / k_;
-            let rear_term = f64::sin(k_ * mean_anomaly);
-            let middle_term = {
-                let mut sum = 0.0;
-                for n in 0..iterations {
-                    let n = n as f64;
-                    sum += bessel_j(n, -(k_ * eccentricity), beta(k_ + n))
-                }
-                sum
-            } + {
-                let mut sum = 0.0;
-                for n in 1..iterations {
-                    let n = -(n as f64);
-                    sum += bessel_j(n, -(k_ * eccentricity), beta(k_ + n))
-                }
-                sum
-            };
-            v += fore_term * middle_term * rear_term;
+        let mut true_anomaly = mean_anomaly;
+
+        for k in 1..=iterations {
+            let k: f64 = k as f64;
+            let term = (2.0 / k) * bessel::j_n(iterations as i32, k * eccentricity) * f64::sin(k * mean_anomaly);
+            true_anomaly += term;
         }
-        v
+
+        true_anomaly
     }
 }
 
@@ -273,15 +260,24 @@ pub mod energy {
 }
 
 pub mod in_plane {
+    use bevy::prelude::info;
     use glam::DVec3;
+    use crate::util::kepler;
+    use crate::util::kepler::angular_motion::mean;
+    use crate::util::kepler::mean_anomaly::kepler;
 
     pub fn displacement(time: f64, mu: f64, mean_anomaly_at_epoch: f64, semi_major_axis: f64, eccentricity: f64, longitude_of_periapsis: f64) -> DVec3 {
         let mean_anomaly = super::mean_anomaly::definition(mean_anomaly_at_epoch, mu, semi_major_axis, 0.0, time);
-        // let true_anomaly = kepler::true_anomaly::from_mean_anomaly(mean_anomaly, flat_kepler.eccentricity);
-        let true_anomaly = mean_anomaly;
+        let true_anomaly = kepler::true_anomaly::fourier_expansion(mean_anomaly, eccentricity, 10);
         let radius = super::local::radius::from_elements2(semi_major_axis, eccentricity, true_anomaly);
         let rotated_true_anomaly = true_anomaly + longitude_of_periapsis;
-        let local_r = DVec3::new(radius * f64::cos(rotated_true_anomaly), 0.0, radius * f64::sin(rotated_true_anomaly));
+        let local_r = DVec3::new(
+            radius * f64::cos(rotated_true_anomaly),
+            0.0,
+            radius * -f64::sin(rotated_true_anomaly)); // Ne
+        if longitude_of_periapsis == 0.0 {
+            // info!("{} @ {} -> {}", radius, rotated_true_anomaly, local_r)
+        }
         local_r
     }
 }

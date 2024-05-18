@@ -98,9 +98,9 @@ fn position_bodies(
         let body = universe.get_body(body_id.0);
         if let Some(body) = body {
             let origin = universe.calc_origin_at_time(time, body);
-            let position = universe.calc_position_at_time(time, body, origin);
-            let position = (position * display_state.distance_scale).as_vec3();
-            transform.translation = bevy::prelude::Vec3::new(position.x, position.y, position.z)
+            let position_big = universe.calc_position_at_time(time, body, origin);
+            let position = (position_big * display_state.distance_scale).as_vec3();
+            transform.translation = bevy::prelude::Vec3::new(position.x, position.y, position.z);
         }
 
         transform.scale = Vec3::new(display_state.body_scale,

@@ -1829,6 +1829,7 @@ dependencies = [
  "nalgebra",
  "num-traits",
  "once_cell",
+ "scilib",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -3525,6 +3526,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "scilib"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acf03303d83bf30bb4a4637ac7b3d9e4fa96c51e4d8960043d552e0fb4937cb3"
+dependencies = [
+ "num-complex",
 ]
 
 [[package]]
