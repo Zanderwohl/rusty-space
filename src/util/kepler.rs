@@ -169,8 +169,9 @@ pub mod true_anomaly {
         let mut true_anomaly = mean_anomaly;
 
         for k in 1..=iterations {
+            let order = k  as i32;
             let k: f64 = k as f64;
-            let term = (2.0 / k) * bessel::j_n(iterations as i32, k * eccentricity) * f64::sin(k * mean_anomaly);
+            let term = (2.0 / k) * bessel::j_n(order, eccentricity) * f64::sin(k * mean_anomaly);
             true_anomaly += term;
         }
 
@@ -268,16 +269,13 @@ pub mod in_plane {
 
     pub fn displacement(time: f64, mu: f64, mean_anomaly_at_epoch: f64, semi_major_axis: f64, eccentricity: f64, longitude_of_periapsis: f64) -> DVec3 {
         let mean_anomaly = super::mean_anomaly::definition(mean_anomaly_at_epoch, mu, semi_major_axis, 0.0, time);
-        let true_anomaly = kepler::true_anomaly::fourier_expansion(mean_anomaly, eccentricity, 10);
+        let true_anomaly = kepler::true_anomaly::fourier_expansion(mean_anomaly, eccentricity, 5);
         let radius = super::local::radius::from_elements2(semi_major_axis, eccentricity, true_anomaly);
         let rotated_true_anomaly = true_anomaly + longitude_of_periapsis;
         let local_r = DVec3::new(
             radius * f64::cos(rotated_true_anomaly),
             0.0,
             radius * -f64::sin(rotated_true_anomaly)); // Ne
-        if longitude_of_periapsis == 0.0 {
-            // info!("{} @ {} -> {}", radius, rotated_true_anomaly, local_r)
-        }
         local_r
     }
 }
