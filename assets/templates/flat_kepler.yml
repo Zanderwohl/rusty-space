@@ -1,0 +1,85 @@
+bodies:
+  0:
+    id: 0
+    physics: !Fixed
+      local_position:
+      - 0.0
+      - 0.0
+      - 0.0
+    name: Sun
+    mass: 10.0
+    appearance: !Sun
+      intensity: 100000000.0
+      radius: 1.0
+      color:
+      - 1.0
+      - 0.46
+      - 0.26
+      light:
+      - 1.0
+      - 0.3
+      - 0.1
+      brightness: 15.0
+    parent: null
+  1:
+    id: 1
+    physics: !FlatKepler
+      semi_major_axis: 10.0
+      mean_anomaly_at_epoch: 0.0
+      eccentricity: 0.75
+      longitude_of_periapsis: 0.0
+    name: Planet
+    mass: 1.0
+    appearance: !Planetoid
+      radius: 0.3
+      color:
+        - 0.2
+        - 0.8
+        - 0.4
+    parent: 0
+  2:
+    id: 2
+    physics: !StupidCircle
+      radius: 0.6
+    name: Moon
+    mass: 0.1
+    appearance: !Planetoid
+      radius: 0.1
+      color:
+      - 0.4
+      - 0.4
+      - 0.4
+    parent: 1
+  3:
+    id: 3
+    physics: !FlatKepler
+      semi_major_axis: 10.0
+      mean_anomaly_at_epoch: 3.1415926535
+      eccentricity: 0.75
+      longitude_of_periapsis: 0.0
+    name: Planet
+    mass: 1.0
+    appearance: !Planetoid
+      radius: 0.3
+      color:
+        - 0.2
+        - 0.8
+        - 0.4
+    parent: 0
+  4:
+    id: 4
+    physics: !FlatKepler
+      semi_major_axis: 10.0
+      mean_anomaly_at_epoch: 0.0
+      eccentricity: 0.75
+      longitude_of_periapsis: 3.1415926535
+    name: Planet
+    mass: 1.0
+    appearance: !Planetoid
+      radius: 0.3
+      color:
+        - 0.2
+        - 0.8
+        - 0.4
+    parent: 0
+counter: 3

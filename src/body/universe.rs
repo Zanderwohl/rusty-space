@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use glam::DVec3;
 use bevy::prelude::{Asset, Resource, TypePath};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use crate::body::body::Body;
 use crate::body::motive::Motive;
-use crate::util::circular;
+use crate::util::{circular, kepler};
 
 const G: f64 = 6.67430e-11;
 const DEBUG_G: f64 = 6.67430e-3;
@@ -82,10 +82,18 @@ impl Universe {
                 let parent_id = body.parent.unwrap(); // Uh oh! Bodies need something to orbit.
                 let parent = self.get_body(parent_id).unwrap();
                 let mu = DEBUG_G * parent.mass;
-                let v = circular::true_anomaly::at_time(time, circular_motive.radius, mu);
-                let local_p = circular::position::from_true_anomaly(circular_motive.radius, v);
-                origin + local_p
+                let nu = circular::true_anomaly::at_time(time, circular_motive.radius, mu);
+                let local_r = circular::position::from_true_anomaly(circular_motive.radius, nu);
+                origin + local_r
             },
+            Motive::FlatKepler(flat_kepler) => {
+                let parent_id = body.parent.unwrap();
+                let parent = self.get_body(parent_id).unwrap();
+                let mu = DEBUG_G * parent.mass;
+
+                let local_r = kepler::in_plane::displacement(time, mu, flat_kepler.mean_anomaly_at_epoch, flat_kepler.semi_major_axis, flat_kepler.eccentricity, flat_kepler.longitude_of_periapsis);
+                origin + local_r
+            }
             _ => { origin }
         }
     }

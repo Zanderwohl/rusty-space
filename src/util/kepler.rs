@@ -1,3 +1,6 @@
+use glam::DVec3;
+use crate::util::kepler;
+
 pub mod mean_anomaly {
 
     pub fn definition(mean_anomaly_at_epoch: f64,
@@ -42,6 +45,10 @@ pub mod local {
             let denominator = 1.0 + eccentricity * f64::cos(true_anomaly);
             semi_major_axis * (numerator / denominator)
         }
+
+        pub fn from_eccentric_anomaly(semi_major_axis: f64, eccentricity: f64, eccentric_anomaly: f64) -> f64 {
+            semi_major_axis * (1.0 - eccentricity * f64::cos(eccentric_anomaly))
+        }
     }
 }
 
@@ -69,10 +76,17 @@ pub mod semi_major_axis {
     pub fn conic_definition2(eccentricity: f64, semi_latus_rectum: f64) -> f64 {
         semi_latus_rectum / (1.0 - eccentricity * eccentricity)
     }
+
+    pub fn conic_definition3(focal_parameter: f64, eccentricity: f64) -> f64 {
+        (focal_parameter * eccentricity) / (1.0 - eccentricity * eccentricity)
+    }
 }
 
 pub mod semi_latus_rectum {
     pub fn conic_definition(semi_major_axis: f64, eccentricity: f64) -> f64 {
+        if eccentricity == 1.0 {
+            return 2.0 * semi_major_axis
+        }
         semi_major_axis * (1.0 - eccentricity * eccentricity)
     }
 }
@@ -145,7 +159,7 @@ pub mod true_anomaly {
     pub fn from_mean_anomaly(mean_anomaly: f64, eccentricity: f64) -> f64 {
         let first_term = mean_anomaly;
         let second_term = (2.0 * eccentricity - (1.0 / 4.0) * eccentricity * eccentricity * eccentricity) * f64::sin(mean_anomaly);
-        let third_term = (5.0 / 4.0) * eccentricity * eccentricity * f64::sin(2.0 * mean_anomaly);
+        let third_term = (5.0 / 4.0) * eccentricity * eccentricity * eccentricity * f64::sin(2.0 * mean_anomaly);
         let fourth_term = (13.0 / 12.0) * eccentricity * eccentricity * eccentricity * f64::sin(3.0 * mean_anomaly);
         first_term + second_term + third_term + fourth_term
     }
@@ -177,6 +191,28 @@ pub mod true_anomaly {
     }
 }
 
+pub mod apsides {
+    pub mod periapsis {
+        pub fn definition(focal_parameter: f64, eccentricity: f64) -> f64 {
+            (focal_parameter * eccentricity) / (1.0 - eccentricity)
+        }
+
+        pub fn from_parameters(semi_major_axis: f64, eccentricity: f64) -> f64 {
+            semi_major_axis * (1.0 - eccentricity)
+        }
+    }
+
+    pub mod apoapsis {
+        pub fn definition(focal_parameter: f64, eccentricity: f64) -> f64 {
+            (focal_parameter * eccentricity) / (1.0 + eccentricity)
+        }
+
+        pub fn from_parameters(semi_major_axis: f64, eccentricity: f64) -> f64 {
+            semi_major_axis * (1.0 + eccentricity)
+        }
+    }
+}
+
 pub mod period {
     use crate::util::kepler::third_law::reused_term;
     pub fn third_law(semi_major_axis: f64, gravitational_parameter: f64) -> f64 {
@@ -190,5 +226,62 @@ pub mod gravitational_parameter {
 
     pub fn third_law(period: f64, semi_major_axis: f64) -> f64 {
         reused_term(semi_major_axis) / (period * period)
+    }
+}
+
+pub mod eccentricity_vector {
+    use glam::DVec3;
+
+    pub fn definition(mu: f64, displacement: DVec3, velocity: DVec3) -> DVec3 {
+        let specific_angular_momentum = displacement.cross(velocity);
+        (1.0 / mu) * (velocity * specific_angular_momentum) - displacement.normalize()
+    }
+}
+
+pub mod energy {
+    pub mod mechanical {
+        use crate::util::kepler::energy::{kinetic, potential};
+
+        pub fn specific(velocity: f64, mu: f64, displacement: f64) -> f64 {
+            kinetic::specific(velocity) - potential::specific(mu, displacement)
+        }
+
+        pub fn definition(mass: f64, velocity: f64, mu: f64, displacement: f64) -> f64 {
+            mass * specific(velocity, mu, displacement)
+        }
+    }
+
+    pub mod kinetic {
+        pub fn specific(velocity: f64) -> f64 {
+            (velocity * velocity) / 2.0
+        }
+
+        pub fn definition(mass: f64, velocity: f64) -> f64 {
+            mass * specific(velocity)
+        }
+    }
+
+    pub mod potential {
+        pub fn specific(mu: f64, displacement: f64) -> f64 {
+            -(mu / displacement)
+        }
+
+        pub fn definition(mass: f64, mu: f64, displacement: f64) -> f64 {
+            mass * specific(mu, displacement)
+        }
+    }
+}
+
+pub mod in_plane {
+    use glam::DVec3;
+
+    pub fn displacement(time: f64, mu: f64, mean_anomaly_at_epoch: f64, semi_major_axis: f64, eccentricity: f64, longitude_of_periapsis: f64) -> DVec3 {
+        let mean_anomaly = super::mean_anomaly::definition(mean_anomaly_at_epoch, mu, semi_major_axis, 0.0, time);
+        // let true_anomaly = kepler::true_anomaly::from_mean_anomaly(mean_anomaly, flat_kepler.eccentricity);
+        let true_anomaly = mean_anomaly;
+        let radius = super::local::radius::from_elements2(semi_major_axis, eccentricity, true_anomaly);
+        let rotated_true_anomaly = true_anomaly + longitude_of_periapsis;
+        let local_r = DVec3::new(radius * f64::cos(rotated_true_anomaly), 0.0, radius * f64::sin(rotated_true_anomaly));
+        local_r
     }
 }
