@@ -274,7 +274,7 @@ pub mod in_plane {
         let local_r = DVec3::new(
             radius * f64::cos(rotated_true_anomaly),
             0.0,
-            radius * -f64::sin(rotated_true_anomaly)); // Ne
+            radius * -f64::sin(rotated_true_anomaly)); // Negative due to y->z translation
         if longitude_of_periapsis == 0.0 {
             // info!("{} @ {} -> {}", radius, rotated_true_anomaly, local_r)
         }

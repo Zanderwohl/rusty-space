@@ -15,6 +15,7 @@ use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
 // display the current settings for 5 seconds before returning to the menu
 pub fn planetarium_plugin(app: &mut App) {
     app
+        .add_plugins(gui::esc_menu_plugin)
         .add_systems(OnEnter(AppState::Planetarium), planetarium_setup)
         .add_systems(Update, editor.run_if(in_state(AppState::Planetarium)))
         .add_systems(OnExit(AppState::Planetarium), despawn_screen::<OnPlanetariumScreen>)
