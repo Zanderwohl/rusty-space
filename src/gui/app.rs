@@ -5,16 +5,18 @@ use crate::gui;
 use crate::gui::{planetarium, menu, splash};
 use crate::gui::common::{BackGlow, DisplayQuality, Volume};
 use bevy::{prelude::*, winit::WinitWindows};
-use bevy::core_pipeline::{tonemapping::Tonemapping, bloom::{BloomCompositeMode, BloomSettings}};
+use bevy::core_pipeline::{tonemapping::Tonemapping, bloom::{BloomCompositeMode, BloomSettings}, Skybox};
 use winit::window::Icon;
 use bevy_common_assets::yaml::YamlAssetPlugin;
 use crate::body::universe::Universe;
 use crate::gui::menu::save_select;
+use crate::gui::util::camera_controller::{CameraController, CameraControllerPlugin};
 
 
 pub(crate) fn open() {
     prerequisites();
     App::new()
+        .add_plugins(CameraControllerPlugin)
         .add_plugins((DefaultPlugins
             .set(WindowPlugin {
                 primary_window: Some(Window {
@@ -56,6 +58,8 @@ fn setup(mut commands: Commands,
          mut meshes: ResMut<Assets<Mesh>>,
          mut materials: ResMut<Assets<ColorMaterial>>) {
     println!("setup!");
+    //let skybox_handle = asset_server.load("skybox/skybox.png");
+
     commands.spawn((
         Camera3dBundle {
             camera: Camera {
@@ -64,9 +68,15 @@ fn setup(mut commands: Commands,
             },
             tonemapping: Tonemapping::TonyMcMapface,
             transform: Transform::from_xyz(-2.5, 4.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
+
             ..default()
         },
         BloomSettings::NATURAL,
+        /*Skybox {
+            image: skybox_handle.clone(),
+            brightness: 1000.0,
+        },*/
+        CameraController::default(),
     ));
 }
 
