@@ -89,6 +89,7 @@ pub(crate) enum MenuState {
     SettingsDisplay,
     SettingsSound,
     SettingsUITest,
+    Error,
     #[default]
     Disabled,
 }

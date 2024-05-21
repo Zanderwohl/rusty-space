@@ -39,6 +39,10 @@ impl Universe {
         id
     }
 
+    pub(crate) fn recount(&mut self) {
+        self.counter = self.bodies.len() as u32;
+    }
+
     pub fn add_body(&mut self, mut body: Body) -> u32 {
         let id = self.next_id();
         body.id = Some(id);

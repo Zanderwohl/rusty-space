@@ -2,6 +2,7 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) enum Appearance {
+    Empty,
     Planetoid(Planetoid),
     Sun(Sun),
     Ring(Ring),

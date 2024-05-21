@@ -39,6 +39,11 @@ pub fn planetarium_plugin(app: &mut App) {
         );
 }
 
+pub struct SaveItems {
+    display_state: DisplayState,
+    universe: Universe,
+}
+
 #[derive(Resource, Debug, Component, PartialEq, /*Eq,*/ Clone, Copy)]
 struct DisplayState {
     current_time: f64,
@@ -79,14 +84,31 @@ fn planetarium_setup(
         .insert(OnPlanetariumScreen)
         .with_children(|parent| {
         });
-    
 
-    let universe_data = fs::read_to_string(&save.path).expect("Unable to read universe file.");
-    let universe: Universe = serde_yaml::from_str(&*universe_data).unwrap();
-    for (id, body) in universe.bodies.iter() {
-        spawn_bevy::<OnPlanetariumScreen>(*id, body, &mut commands, &mut meshes, &mut materials);
+    let universe_data = fs::read_to_string(&save.path);
+    match universe_data {
+        Ok(universe_data) => {
+            let universe = serde_yaml::from_str::<Universe>(&*universe_data);
+            match universe {
+                Ok(mut universe) => {
+                    for (id, &body) in universe.bodies.iter() {
+                        spawn_bevy::<OnPlanetariumScreen>(*id, *body, &mut commands, &mut meshes, &mut materials);
+                    }
+                    universe.recount();
+                    commands.insert_resource(universe);
+                }
+                Err(error) => {
+                    // TODO: handle this in the GUI
+                    panic!("Couldn't read universe structure! {}", error)
+                }
+            }
+        }
+        Err(error) => {
+            // TODO: handle this in the GUI
+            panic!("Couldn't read file! {}", error)
+        }
     }
-    commands.insert_resource(universe);
+
 }
 
 fn position_bodies(

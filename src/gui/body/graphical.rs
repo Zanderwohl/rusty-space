@@ -20,16 +20,19 @@ pub trait Renderable {
     }
 }
 
-pub fn spawn_bevy<ScreenTrait: Component + Default>(body_id: u32, body: &Body, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) -> Entity {
+pub fn spawn_bevy<ScreenTrait: Component + Default>(body_id: u32, body: &Body, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) -> Option<Entity> {
     match &body.appearance {
         Appearance::Planetoid(planetoid) => {
-            spawn_as_planet::<ScreenTrait>(body_id, planetoid, commands, meshes, materials)
+            Some(spawn_as_planet::<ScreenTrait>(body_id, planetoid, commands, meshes, materials))
         }
         Appearance::Sun(sun) => {
-            spawn_as_star::<ScreenTrait>(body_id, sun, commands, meshes, materials)
+            Some(spawn_as_star::<ScreenTrait>(body_id, sun, commands, meshes, materials))
         }
         Appearance::Ring(ring_hab) => {
-            spawn_as_ring_hab::<ScreenTrait>(body_id, ring_hab, commands, meshes, materials)
+            Some(spawn_as_ring_hab::<ScreenTrait>(body_id, ring_hab, commands, meshes, materials))
+        }
+        Appearance::Empty => {
+            None
         }
     }
 }

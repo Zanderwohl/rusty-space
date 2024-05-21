@@ -10,6 +10,8 @@ use winit::window::Icon;
 use bevy_common_assets::yaml::YamlAssetPlugin;
 use crate::body::universe::Universe;
 use crate::gui::menu::save_select;
+use crate::gui::menu::save_select::SaveEntry;
+use crate::gui::planetarium::planetarium::SaveItems;
 use crate::gui::util::camera_controller::{CameraController, CameraControllerPlugin};
 
 
@@ -26,7 +28,8 @@ pub(crate) fn open() {
                 exit_condition: ExitCondition::OnPrimaryClosed,
                 close_when_requested: true,
             }),
-            YamlAssetPlugin::<Universe>::new(&["yml", "yaml"])
+            YamlAssetPlugin::<Universe>::new(&["yml", "yaml"]),
+            YamlAssetPlugin::<SaveItems>::new(&["yml", "yaml"]),
         ))
         .insert_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))
         .add_systems(Startup, set_window_icon)
