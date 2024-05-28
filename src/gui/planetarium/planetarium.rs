@@ -91,8 +91,8 @@ fn planetarium_setup(
             let universe = serde_yaml::from_str::<Universe>(&*universe_data);
             match universe {
                 Ok(mut universe) => {
-                    for (id, &body) in universe.bodies.iter() {
-                        spawn_bevy::<OnPlanetariumScreen>(*id, *body, &mut commands, &mut meshes, &mut materials);
+                    for (id, body) in universe.bodies.iter() {
+                        spawn_bevy::<OnPlanetariumScreen>(*id, body, &mut commands, &mut meshes, &mut materials);
                     }
                     universe.recount();
                     commands.insert_resource(universe);

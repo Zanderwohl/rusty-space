@@ -261,11 +261,8 @@ pub mod energy {
 }
 
 pub mod in_plane {
-    use bevy::prelude::info;
     use glam::DVec3;
     use crate::util::kepler;
-    use crate::util::kepler::angular_motion::mean;
-    use crate::util::kepler::mean_anomaly::kepler;
 
     pub fn displacement(time: f64, mu: f64, mean_anomaly_at_epoch: f64, semi_major_axis: f64, eccentricity: f64, longitude_of_periapsis: f64) -> DVec3 {
         let mean_anomaly = super::mean_anomaly::definition(mean_anomaly_at_epoch, mu, semi_major_axis, 0.0, time);

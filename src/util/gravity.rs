@@ -1,6 +1,6 @@
 use glam::DVec3;
 
-const G: f64 = 6.67430e-11;
+pub(crate) const G: f64 = 6.67430e-11;
 
 /// Masses in grams, displacement in meters.
 /// Returns force in newtons TODO: really?

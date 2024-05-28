@@ -29,7 +29,7 @@ pub(crate) fn open() {
                 close_when_requested: true,
             }),
             YamlAssetPlugin::<Universe>::new(&["yml", "yaml"]),
-            YamlAssetPlugin::<SaveItems>::new(&["yml", "yaml"]),
+            // YamlAssetPlugin::<SaveItems>::new(&["yml", "yaml"]),
         ))
         .insert_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))
         .add_systems(Startup, set_window_icon)

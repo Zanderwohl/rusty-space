@@ -26,3 +26,8 @@ A program for course plotting and mission simulation for the Tabletop RPG Exotic
 ## Bug List
 
 * Planets appear to move clockwise, when they should move counter-clockwise.
+
+## Cool Fonts
+
+* Futura
+* Berkeley Mono

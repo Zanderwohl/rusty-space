@@ -1,4 +1,5 @@
 pub mod gravity;
 pub mod kepler;
-mod common;
+pub mod common;
 pub mod circular;
+pub mod patched_conics;

@@ -65,7 +65,7 @@ impl Universe {
     }
 
     pub(crate) fn calc_origin_at_time(&self, time: f64, body: &Body) -> DVec3 {
-        if let Some(parent_id) = body.parent {
+        if let Some(parent_id) = body.defined_primary {
             let parent = self.bodies.get(&parent_id).unwrap(); // If we crash here, then parent IDs aren't getting inserted/updated/deleted properly
             let parent_origin = self.calc_origin_at_time(time, parent);
             self.calc_position_at_time(time, parent, parent_origin)
@@ -83,7 +83,7 @@ impl Universe {
                 origin + linear_motive.local_velocity * time
             },
             Motive::StupidCircle(circular_motive) => {
-                let parent_id = body.parent.unwrap(); // Uh oh! Bodies need something to orbit.
+                let parent_id = body.defined_primary.unwrap(); // Uh oh! Bodies need something to orbit.
                 let parent = self.get_body(parent_id).unwrap();
                 let mu = DEBUG_G * parent.mass;
                 let nu = circular::true_anomaly::at_time(time, circular_motive.radius, mu);
@@ -91,7 +91,7 @@ impl Universe {
                 origin + local_r
             },
             Motive::FlatKepler(flat_kepler) => {
-                let parent_id = body.parent.unwrap();
+                let parent_id = body.defined_primary.unwrap();
                 let parent = self.get_body(parent_id).unwrap();
                 let mu = DEBUG_G * parent.mass;
 
