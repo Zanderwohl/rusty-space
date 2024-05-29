@@ -129,4 +129,16 @@ impl Universe {
             DVec3::ZERO
         }
     }
+
+    pub fn get_trajectory_for(&self, body_id: u32) -> Vec<DVec3> {
+        let mut trajectory = Vec::new();
+        let mut times: Vec<u64> = self.trajectory_cache.keys().cloned().collect::<Vec<u64>>();
+        times.sort();
+        for time in times {
+            let time = bitfutz::u64::to_f64(time);
+            let position = self.get_global_position_at_time(body_id, time);
+            trajectory.push(position.clone())
+        }
+        trajectory
+    }
 }

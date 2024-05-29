@@ -19,6 +19,7 @@ pub fn planetarium_plugin(app: &mut App) {
         .add_systems(OnEnter(AppState::Planetarium), planetarium_setup)
         .add_systems(Update, editor.run_if(in_state(AppState::Planetarium)))
         .add_systems(OnExit(AppState::Planetarium), despawn_screen::<OnPlanetariumScreen>)
+        .init_gizmo_group::<OrbitalTrajectories>()
         .insert_resource(SimulationSettings {
             gravity_constant: 1.0,
         })
@@ -39,9 +40,17 @@ pub fn planetarium_plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (position_bodies, handle_time).run_if(in_state(AppState::Planetarium)),
+            (position_bodies, draw_trajectories).run_if(in_state(AppState::Planetarium)),
+        )
+        .add_systems(
+            PostUpdate,
+            (handle_time).run_if(in_state(AppState::Planetarium)),
         );
 }
+
+
+#[derive(Default, Reflect, GizmoConfigGroup)]
+struct OrbitalTrajectories;
 
 pub struct SaveItems {
     display_state: DisplayState,
@@ -137,6 +146,27 @@ fn position_bodies(
                                     display_state.body_scale,
                                     display_state.body_scale,);
         transform.rotation = Quat::from_rotation_z(time as f32 / 100.0);
+    }
+}
+
+fn draw_trajectories(
+    universe: Res<Universe>,
+    display_state: Res<DisplayState>,
+    mut trajectory_gizmos: Gizmos<OrbitalTrajectories>,
+) {
+    for (id, body) in universe.bodies.iter() {
+        let trajectory = universe.get_trajectory_for(*id);
+        for positions in trajectory.windows(2) {
+            let pos1 = positions[0].as_vec3();
+            let pos1 = bevy::prelude::Vec3::new(pos1.x, pos1.y, pos1.z) * (display_state.distance_scale as f32);
+            let pos2 = positions[1].as_vec3();
+            let pos2 = bevy::prelude::Vec3::new(pos2.x, pos2.y, pos2.z) * (display_state.distance_scale as f32);
+            trajectory_gizmos.line(
+                pos1,
+                pos2,
+                Color::BLUE,
+            );
+        }
     }
 }
 
