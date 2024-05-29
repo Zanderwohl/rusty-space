@@ -94,7 +94,6 @@ fn planetarium_setup(
                     for (id, body) in universe.bodies.iter() {
                         spawn_bevy::<OnPlanetariumScreen>(*id, body, &mut commands, &mut meshes, &mut materials);
                     }
-                    universe.recount();
                     commands.insert_resource(universe);
                 }
                 Err(error) => {

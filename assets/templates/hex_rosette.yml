@@ -20,7 +20,7 @@ bodies:
       - 0.3
       - 0.1
       brightness: 15.0
-    parent: null
+    defined_primary: null
   1:
     id: 1
     physics: !FlatKepler
@@ -36,7 +36,7 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    parent: 0
+    defined_primary: 0
   2:
     id: 2
     physics: !FlatKepler
@@ -52,7 +52,7 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    parent: 0
+    defined_primary: 0
   3:
     id: 3
     physics: !FlatKepler
@@ -68,7 +68,7 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    parent: 0
+    defined_primary: 0
   4:
     id: 4
     physics: !FlatKepler
@@ -84,7 +84,7 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    parent: 0
+    defined_primary: 0
   5:
     id: 5
     physics: !FlatKepler
@@ -100,7 +100,7 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    parent: 0
+    defined_primary: 0
   6:
     id: 6
     physics: !FlatKepler
@@ -116,5 +116,5 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    parent: 0
+    defined_primary: 0
 counter: 7

@@ -9,7 +9,7 @@ bodies:
     name: Sun
     mass: 10.0
     appearance: !Empty
-    parent: null
+    defined_primary: null
   1:
     id: 1
     physics: !FlatKepler
@@ -17,7 +17,7 @@ bodies:
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.3
       longitude_of_periapsis: 0.0
-    name: Planet
+    name: Hearth
     mass: 1.0
     appearance: !Planetoid
       radius: 0.3
@@ -25,7 +25,7 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    parent: 0
+    defined_primary: 0
   2:
     id: 2
     physics: !FlatKepler
@@ -33,7 +33,7 @@ bodies:
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.3
       longitude_of_periapsis: 1.0471975512
-    name: Planet
+    name: Nature Preserve 1
     mass: 1.0
     appearance: !Planetoid
       radius: 0.3
@@ -41,7 +41,7 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    parent: 0
+    defined_primary: 0
   3:
     id: 3
     physics: !FlatKepler
@@ -49,7 +49,7 @@ bodies:
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.3
       longitude_of_periapsis: 2.09439510239
-    name: Planet
+    name: Nature Preserve 2
     mass: 1.0
     appearance: !Planetoid
       radius: 0.3
@@ -57,7 +57,7 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    parent: 0
+    defined_primary: 0
   4:
     id: 4
     physics: !FlatKepler
@@ -65,7 +65,7 @@ bodies:
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.3
       longitude_of_periapsis: 3.14159265359
-    name: Planet
+    name: Nature Preserve 3
     mass: 1.0
     appearance: !Planetoid
       radius: 0.3
@@ -73,7 +73,7 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    parent: 0
+    defined_primary: 0
   5:
     id: 5
     physics: !FlatKepler
@@ -81,7 +81,7 @@ bodies:
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.3
       longitude_of_periapsis: 4.18879020479
-    name: Planet
+    name: Nature Preserve 4
     mass: 1.0
     appearance: !Planetoid
       radius: 0.3
@@ -89,7 +89,7 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    parent: 0
+    defined_primary: 0
   6:
     id: 6
     physics: !FlatKepler
@@ -97,7 +97,7 @@ bodies:
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.3
       longitude_of_periapsis: 5.23598775598
-    name: Planet
+    name: Nature Preserve 5
     mass: 1.0
     appearance: !Planetoid
       radius: 0.3
@@ -105,7 +105,7 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    parent: 0
+    defined_primary: 0
   7:
     id: 7
     physics: !FlatKepler
@@ -113,7 +113,7 @@ bodies:
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.0
       longitude_of_periapsis: 0.0
-    name: Sun
+    name: NP1 Sun A
     mass: 0.1
     appearance: !Sun
       intensity: 1000000.0
@@ -127,7 +127,7 @@ bodies:
         - 0.3
         - 0.1
       brightness: 10.0
-    parent: 1
+    defined_primary: 2
   8:
     id: 8
     physics: !FlatKepler
@@ -135,7 +135,7 @@ bodies:
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.0
       longitude_of_periapsis: 3.1415926435
-    name: Sun
+    name: NP1 Sun B
     mass: 0.1
     appearance: !Sun
       intensity: 1000000.0
@@ -149,7 +149,7 @@ bodies:
         - 0.3
         - 0.1
       brightness: 10.0
-    parent: 1
+    defined_primary: 2
   9:
     id: 9
     physics: !FlatKepler
@@ -157,7 +157,7 @@ bodies:
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.0
       longitude_of_periapsis: 0.0
-    name: Sun
+    name: NP2 Sun A
     mass: 0.1
     appearance: !Sun
       intensity: 1000000.0
@@ -171,7 +171,7 @@ bodies:
         - 1.0
         - 1.0
       brightness: 8.0
-    parent: 2
+    defined_primary: 3
   10:
     id: 10
     physics: !FlatKepler
@@ -179,7 +179,7 @@ bodies:
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.0
       longitude_of_periapsis: 2.09439510239
-    name: Sun
+    name: NP2 Sun B
     mass: 0.1
     appearance: !Sun
       intensity: 1000000.0
@@ -193,7 +193,7 @@ bodies:
         - 1.0
         - 1.0
       brightness: 8.0
-    parent: 2
+    defined_primary: 3
   11:
     id: 11
     physics: !FlatKepler
@@ -201,7 +201,7 @@ bodies:
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.0
       longitude_of_periapsis: 4.18879020479
-    name: Sun
+    name: NP2 Sun C
     mass: 0.1
     appearance: !Sun
       intensity: 1000000.0
@@ -215,5 +215,5 @@ bodies:
         - 1.0
         - 1.0
       brightness: 8.0
-    parent: 2
+    defined_primary: 3
 counter: 8

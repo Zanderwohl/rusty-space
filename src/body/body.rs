@@ -14,11 +14,11 @@ pub struct Body {
 }
 
 impl Body {
-    pub fn get_name(self) -> String {
+    pub fn get_name(&self) -> String {
         self.name.clone()
     }
 
-    pub fn primary(self) -> Option<u32> {
+    pub fn primary(&self) -> Option<u32> {
         if self.defined_primary.is_some() {
             return self.defined_primary
         }

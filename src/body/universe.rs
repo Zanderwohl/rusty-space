@@ -6,8 +6,9 @@ use crate::body::body::Body;
 use crate::body::motive::Motive;
 use crate::util::{circular, kepler};
 
-const G: f64 = 6.67430e-11;
 const DEBUG_G: f64 = 6.67430e-3;
+const REAL_G: f64 = 6.67430e-11;
+const G: f64 = DEBUG_G;
 
 #[derive(Resource, Serialize, Deserialize, Debug, Asset, TypePath)]
 pub struct Universe {
@@ -37,10 +38,6 @@ impl Universe {
         let id = self.counter;
         self.counter += 1;
         id
-    }
-
-    pub(crate) fn recount(&mut self) {
-        self.counter = self.bodies.len() as u32;
     }
 
     pub fn add_body(&mut self, mut body: Body) -> u32 {
@@ -85,15 +82,18 @@ impl Universe {
             Motive::StupidCircle(circular_motive) => {
                 let parent_id = body.defined_primary.unwrap(); // Uh oh! Bodies need something to orbit.
                 let parent = self.get_body(parent_id).unwrap();
-                let mu = DEBUG_G * parent.mass;
+                let mu = G * parent.mass;
                 let nu = circular::true_anomaly::at_time(time, circular_motive.radius, mu);
                 let local_r = circular::position::from_true_anomaly(circular_motive.radius, nu);
                 origin + local_r
             },
             Motive::FlatKepler(flat_kepler) => {
-                let parent_id = body.defined_primary.unwrap();
+                let id = body.id.unwrap_or(u32::MAX);
+                let message = format!("'{}' (ID {}) has no primary set. {:?}", body.get_name(), id, body);
+                let message_str = message.as_str();
+                let parent_id = body.defined_primary.expect(message_str);
                 let parent = self.get_body(parent_id).unwrap();
-                let mu = DEBUG_G * parent.mass;
+                let mu = G * parent.mass;
 
                 let local_r = kepler::in_plane::displacement(time, mu, flat_kepler.mean_anomaly_at_epoch, flat_kepler.semi_major_axis, flat_kepler.eccentricity, flat_kepler.longitude_of_periapsis);
                 origin + local_r

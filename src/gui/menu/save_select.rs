@@ -92,9 +92,9 @@ pub fn save_select_setup(mut commands: Commands, asset_server: Res<AssetServer>)
         });
 }
 
-fn save_file_button(parent: &mut ChildBuilder, template: &&SaveEntry, button_style: Style, text_style: TextStyle) {
+fn save_file_button(parent_bundle: &mut ChildBuilder, template: &&SaveEntry, button_style: Style, text_style: TextStyle) {
     let name = &template.name.to_uppercase();
-    parent.spawn((
+    parent_bundle.spawn((
         ButtonBundle {
             style: button_style.clone(),
             background_color: NORMAL_BUTTON.into(),

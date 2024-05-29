@@ -20,7 +20,7 @@ bodies:
       - 0.3
       - 0.1
       brightness: 15.0
-    parent: null
+    defined_primary: null
   1:
     id: 1
     physics: !FlatKepler
@@ -28,7 +28,7 @@ bodies:
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.5
       longitude_of_periapsis: 0.0
-    name: Planet
+    name: Planet 1
     mass: 1.0
     appearance: !Planetoid
       radius: 0.3
@@ -36,7 +36,7 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    parent: 0
+    defined_primary: 0
   2:
     id: 2
     physics: !FlatKepler
@@ -44,7 +44,7 @@ bodies:
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.5
       longitude_of_periapsis: 1.0472
-    name: Planet
+    name: Planet 2
     mass: 1.0
     appearance: !Planetoid
       radius: 0.3
@@ -52,7 +52,7 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    parent: 0
+    defined_primary: 0
   3:
     id: 3
     physics: !FlatKepler
@@ -60,7 +60,7 @@ bodies:
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.5
       longitude_of_periapsis: -1.0472
-    name: Planet
+    name: Planet 3
     mass: 1.0
     appearance: !Planetoid
       radius: 0.3
@@ -68,5 +68,5 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    parent: 0
+    defined_primary: 0
 counter: 3

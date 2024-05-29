@@ -1,6 +1,3 @@
-use glam::DVec3;
-use crate::util::kepler;
-
 pub mod mean_anomaly {
 
     pub fn definition(mean_anomaly_at_epoch: f64,
@@ -134,7 +131,7 @@ pub mod eccentric_anomaly {
 
 pub mod true_anomaly {
     use glam::DVec3;
-    use crate::util::common::{bessel_j, beta, unit_circle_xy};
+    use crate::util::common::{unit_circle_xy};
     use scilib::math::bessel;
 
     pub fn at_time(eccentric_anomaly: f64, eccentricity: f64) -> f64 {

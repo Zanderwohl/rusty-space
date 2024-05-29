@@ -20,7 +20,7 @@ bodies:
         - 0.3
         - 0.1
       brightness: 15.0
-    parent: null
+    defined_primary: null
   1:
     id: 1
     physics: !Fixed
@@ -35,5 +35,5 @@ bodies:
       thickness: 0.1
       width: 0.3
       wall_height: 0.1
-    parent: 0
+    defined_primary: 0
 counter: 2
