@@ -34,8 +34,12 @@ pub fn planetarium_plugin(app: &mut App) {
             (crate::gui::menu::common::button_system, gui::menu_action).run_if(in_state(AppState::Planetarium)).run_if(in_state(AppState::Planetarium)),
         )
         .add_systems(
+            PreUpdate,
+            (calc_for_current_time).run_if(in_state(AppState::Planetarium)),
+        )
+        .add_systems(
             Update,
-            (position_bodies, handle_time).run_if(in_state(AppState::Planetarium)).run_if(in_state(AppState::Planetarium)),
+            (position_bodies, handle_time).run_if(in_state(AppState::Planetarium)),
         );
 }
 
@@ -110,6 +114,13 @@ fn planetarium_setup(
 
 }
 
+fn calc_for_current_time(
+    mut universe: ResMut<Universe>,
+    display_state: Res<DisplayState>,
+) {
+    universe.calc_positions_at_time(display_state.current_time);
+}
+
 fn position_bodies(
     universe: Res<Universe>,
     mut query: Query<(&mut Transform, &BodyId)>,
@@ -117,13 +128,10 @@ fn position_bodies(
 ) {
     let time = display_state.current_time;
     for (mut transform, body_id) in query.iter_mut() {
-        let body = universe.get_body(body_id.0);
-        if let Some(body) = body {
-            let origin = universe.calc_origin_at_time(time, body);
-            let position_big = universe.calc_position_at_time(time, body, origin);
-            let position = (position_big * display_state.distance_scale).as_vec3();
-            transform.translation = bevy::prelude::Vec3::new(position.x, position.y, position.z);
-        }
+        let position_big = universe.get_global_position_at_time(body_id.0, time);
+        let position = (position_big * display_state.distance_scale).as_vec3();
+        transform.translation = bevy::prelude::Vec3::new(position.x, position.y, position.z);
+
 
         transform.scale = Vec3::new(display_state.body_scale,
                                     display_state.body_scale,
