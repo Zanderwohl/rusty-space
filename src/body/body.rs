@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use glam::DVec3;
 use serde::{Serialize, Deserialize};
 use crate::body::appearance::{Appearance, Planetoid};
 use crate::body::motive::{FixedMotive, Motive};
@@ -37,7 +39,7 @@ impl Default for Body {
             appearance: Appearance::Planetoid(Planetoid {
                 radius: 1.0,
                 color: [0.3, 0.3, 0.3],
-            })
+            }),
         }
     }
 }
