@@ -19,7 +19,7 @@ impl Body {
     }
 
     pub fn primary(self) -> Option<u32> {
-        if !self.defined_primary {
+        if self.defined_primary.is_some() {
             return self.defined_primary
         }
         None // TODO: get non-defined primaries; i.e. for Newton bodies
