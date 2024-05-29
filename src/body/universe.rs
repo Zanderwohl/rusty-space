@@ -47,8 +47,8 @@ impl Universe {
         id
     }
 
-    pub fn remove_body(&mut self, id: u32) {
-        self.bodies.remove(&id);
+    pub fn remove_body(&mut self, _id: u32) {
+        todo!("Removing will need to give children to their primary's primary with ref frame changes")
     }
 
     pub fn calc_positions_at_time(&self, time: f64) -> HashMap<u32, DVec3> {
