@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::fs;
 use bevy::prelude::*;
 use crate::body::SimulationSettings;
-use crate::body::universe::Universe;
+use crate::body::universe::{TrajectoryMode, Universe};
 use crate::gui::body::graphical::spawn_bevy;
 use crate::gui::common;
 use crate::gui::common::BackGlow;
@@ -29,6 +29,8 @@ pub fn planetarium_plugin(app: &mut App) {
             distance_scale: 1.5,
             body_scale: 1.0,
             playing: false,
+            trajectory_mode: TrajectoryMode::Global,
+            trajectory_display: TrajectoryDisplay::All,
         })
         .add_systems(
             Update,
@@ -57,6 +59,14 @@ pub struct SaveItems {
     universe: Universe,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum TrajectoryDisplay {
+    None,
+    FocusedOnly,
+    FocusedAscendingPrimaries,
+    All,
+}
+
 #[derive(Resource, Debug, Component, PartialEq, /*Eq,*/ Clone, Copy)]
 struct DisplayState {
     current_time: f64,
@@ -64,6 +74,8 @@ struct DisplayState {
     distance_scale: f64,
     body_scale: f32,
     playing: bool,
+    trajectory_mode: TrajectoryMode,
+    trajectory_display: TrajectoryDisplay,
 }
 
 impl DisplayState {
@@ -154,19 +166,36 @@ fn draw_trajectories(
     display_state: Res<DisplayState>,
     mut trajectory_gizmos: Gizmos<OrbitalTrajectories>,
 ) {
-    for (id, body) in universe.bodies.iter() {
-        let trajectory = universe.get_trajectory_for(*id);
-        for positions in trajectory.windows(2) {
-            let pos1 = positions[0].as_vec3();
-            let pos1 = bevy::prelude::Vec3::new(pos1.x, pos1.y, pos1.z) * (display_state.distance_scale as f32);
-            let pos2 = positions[1].as_vec3();
-            let pos2 = bevy::prelude::Vec3::new(pos2.x, pos2.y, pos2.z) * (display_state.distance_scale as f32);
-            trajectory_gizmos.line(
-                pos1,
-                pos2,
-                Color::BLUE,
-            );
+    let display = display_state.trajectory_display;
+    let mode = display_state.trajectory_mode;
+    let scale = display_state.distance_scale as f32;
+    match display {
+        TrajectoryDisplay::None => {}
+        TrajectoryDisplay::FocusedOnly => {
+            let temp_focused: u32 = 7;
+            display_single_trajectory(&universe, display_state.current_time, scale, &mut trajectory_gizmos, &temp_focused, mode);
         }
+        TrajectoryDisplay::FocusedAscendingPrimaries => {}
+        TrajectoryDisplay::All => {
+            for id in universe.bodies.keys() {
+                display_single_trajectory(&universe, display_state.current_time, scale, &mut trajectory_gizmos, id, mode);
+            }
+        }
+    }
+}
+
+fn display_single_trajectory(universe: &Res<Universe>, time: f64, scale: f32, trajectory_gizmos: &mut Gizmos<OrbitalTrajectories>, id: &u32, mode: TrajectoryMode) {
+    let trajectory = universe.get_trajectory_for(*id, time, mode);
+    for positions in trajectory.windows(2) {
+        let pos1 = positions[0].as_vec3();
+        let pos1 = bevy::prelude::Vec3::new(pos1.x, pos1.y, pos1.z) * scale;
+        let pos2 = positions[1].as_vec3();
+        let pos2 = bevy::prelude::Vec3::new(pos2.x, pos2.y, pos2.z) * scale;
+        trajectory_gizmos.line(
+            pos1,
+            pos2,
+            Color::BLUE,
+        );
     }
 }
 
@@ -182,7 +211,9 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
         text.push_str(&*format!("Time scale ([/]): {:.2}\n", display_state.time_step_size()));
         text.push_str(&*format!("Time (left/right): {:.2}\n", display_state.current_time));
         text.push_str(&*format!("Object scale (i/o): {:.1}\n", display_state.body_scale));
-        text.push_str(&*format!("Distance scale (k/l): {:.1}", display_state.distance_scale));
+        text.push_str(&*format!("Distance scale (k/l): {:.1}\n", display_state.distance_scale));
+        text.push_str(&*format!("Trajectory display: (,): {:?}\n", display_state.trajectory_display));
+        text.push_str(&*format!("Trajectory mode: (.): {:?}", display_state.trajectory_mode));
     }
     if keyboard.just_pressed(KeyCode::ArrowLeft) && !display_state.playing {
         display_state.current_time -= 10.0 * time.delta_seconds() as f64 * display_state.time_step_size();
@@ -223,6 +254,21 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
     }
     if keyboard.just_pressed(KeyCode::KeyP) {
         display_state.playing = !display_state.playing;
+    }
+    if keyboard.just_pressed(KeyCode::Comma) {
+        display_state.trajectory_display = match display_state.trajectory_display {
+            TrajectoryDisplay::None => { TrajectoryDisplay::FocusedOnly }
+            TrajectoryDisplay::FocusedOnly => { TrajectoryDisplay::All }
+            TrajectoryDisplay::FocusedAscendingPrimaries => { TrajectoryDisplay::All }
+            TrajectoryDisplay::All => { TrajectoryDisplay::FocusedOnly }
+        }
+    }
+    if keyboard.just_pressed(KeyCode::Period) {
+        display_state.trajectory_mode = match display_state.trajectory_mode {
+            TrajectoryMode::Global => { TrajectoryMode::LocalToEachPrimary }
+            TrajectoryMode::LocalToEachPrimary => { TrajectoryMode::Global }
+            TrajectoryMode::LocalToCurrentPrimary => { TrajectoryMode::Global }
+        }
     }
     if display_state.playing{
         display_state.current_time += time.delta_seconds() as f64 * display_state.time_step_size();

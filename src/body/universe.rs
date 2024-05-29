@@ -130,15 +130,36 @@ impl Universe {
         }
     }
 
-    pub fn get_trajectory_for(&self, body_id: u32) -> Vec<DVec3> {
+    pub fn get_trajectory_for(&self, body_id: u32, current_time: f64, mode: TrajectoryMode) -> Vec<DVec3> {
         let mut trajectory = Vec::new();
         let mut times: Vec<u64> = self.trajectory_cache.keys().cloned().collect::<Vec<u64>>();
         times.sort();
         for time in times {
             let time = bitfutz::u64::to_f64(time);
-            let position = self.get_global_position_at_time(body_id, time);
+            let position = match mode {
+                TrajectoryMode::Global => { self.get_global_position_at_time(body_id, time) }
+                _ => {
+                    let current_primary_position = match self.bodies.get(&body_id) {
+                        None => { DVec3::ZERO }
+                        Some(body) => match body.defined_primary {
+                                None => { DVec3::ZERO }
+                                Some(parent_id) => {
+                                    self.get_global_position_at_time(parent_id, current_time)
+                                }
+                        }
+                    };
+                    self.get_local_position_at_time(body_id, time) + current_primary_position
+                }
+            };
             trajectory.push(position.clone())
         }
         trajectory
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TrajectoryMode {
+    Global,
+    LocalToEachPrimary,
+    LocalToCurrentPrimary,
 }
