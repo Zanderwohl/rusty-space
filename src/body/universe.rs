@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use bevy::log::info;
 use glam::DVec3;
 use bevy::prelude::{Asset, Resource, TypePath};
 use serde::{Deserialize, Serialize};
@@ -82,7 +83,20 @@ impl Universe {
         }
     }
 
+    /// will overstep end_time if time_step is not an exact multiple
+    pub fn calc_compound_positions_span(&mut self, start_time: f64, end_time: f64, time_step: f64) {
+        let mut current_time = start_time;
+        while current_time< end_time {
+            self.calc_positions_at_time(current_time);
+            current_time += time_step;
+        }
+        self.calc_positions_at_time(end_time);
+    }
+
     pub fn calc_positions_at_time(&mut self, time: f64) -> Arc<HashMap<u32, DVec3>> {
+        if let Some(cached) = self.trajectory_cache.get(&bitfutz::f64::to_u64(time)) {
+            return cached.clone();
+        }
         let mut positions: HashMap<u32, DVec3> = HashMap::new();
         for body_id in self.bodies.keys().cloned().collect::<Vec<u32>>() {
             let body_position = self.calc_local_position_at_time(body_id, time);

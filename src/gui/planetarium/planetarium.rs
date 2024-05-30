@@ -26,6 +26,7 @@ pub fn planetarium_plugin(app: &mut App) {
         })
         .insert_resource(DisplayState {
             current_time: 0.0,
+            last_time: 0.0,
             time_scale: 10.0,
             time_quantum: 1.0,
             distance_scale: 1.5,
@@ -73,6 +74,7 @@ enum TrajectoryDisplay {
 #[derive(Resource, Debug, Component, PartialEq, /*Eq,*/ Clone, Copy)]
 struct DisplayState {
     current_time: f64,
+    last_time: f64,
     time_scale: f64,
     time_quantum: f64,
     distance_scale: f64,
@@ -99,6 +101,7 @@ pub(crate) struct BodyId(pub u32);
 
 fn planetarium_setup(
     mut commands: Commands,
+    display_state: Res<DisplayState>,
     display_quality: Res<DisplayQuality>,
     volume: Res<Volume>,
     glow: Res<BackGlow>,
@@ -124,6 +127,7 @@ fn planetarium_setup(
                     for (id, body) in universe.bodies.iter() {
                         spawn_bevy::<OnPlanetariumScreen>(*id, body, &mut commands, &mut meshes, &mut materials);
                     }
+                    universe.calc_positions_at_time(display_state.current_time);
                     commands.insert_resource(universe);
                 }
                 Err(error) => {
@@ -144,7 +148,7 @@ fn calc_for_current_time(
     mut universe: ResMut<Universe>,
     display_state: Res<DisplayState>,
 ) {
-    universe.calc_positions_at_time(display_state.current_time);
+    universe.calc_compound_positions_span(display_state.last_time, display_state.current_time, display_state.time_quantum);
 }
 
 fn position_bodies(
@@ -298,6 +302,7 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
         }
     }
     if display_state.playing{
+        display_state.last_time = display_state.current_time;
         display_state.current_time += time.delta_seconds() as f64 * display_state.time_step_size();
     }
 }
