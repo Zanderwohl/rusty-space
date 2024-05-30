@@ -27,6 +27,7 @@ pub(crate) enum EscMenuState {
     Pause,
     #[default]
     Disabled,
+    DoingSomethingElse(u32), // level. If it's 0, you can switch to Disabled.
 }
 
 pub fn esc_menu_plugin(app: &mut App) {
@@ -50,6 +51,13 @@ fn handle_keys(keyboard: Res<ButtonInput<KeyCode>>,
             }
             EscMenuState::Disabled => {
                 next_state.set(EscMenuState::Pause)
+            }
+            EscMenuState::DoingSomethingElse(level) => {
+                if *level <= 0 {
+                    next_state.set(EscMenuState::Disabled);
+                } else {
+                    next_state.set(EscMenuState::DoingSomethingElse(level - 1))
+                }
             }
         }
     }

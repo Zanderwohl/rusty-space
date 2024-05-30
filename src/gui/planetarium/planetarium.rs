@@ -31,6 +31,7 @@ pub fn planetarium_plugin(app: &mut App) {
             playing: false,
             trajectory_mode: TrajectoryMode::Global,
             trajectory_display: TrajectoryDisplay::All,
+            focused: None,
         })
         .add_systems(
             Update,
@@ -76,6 +77,7 @@ struct DisplayState {
     playing: bool,
     trajectory_mode: TrajectoryMode,
     trajectory_display: TrajectoryDisplay,
+    focused: Option<u32>,
 }
 
 impl DisplayState {
@@ -171,9 +173,12 @@ fn draw_trajectories(
     let scale = display_state.distance_scale as f32;
     match display {
         TrajectoryDisplay::None => {}
-        TrajectoryDisplay::FocusedOnly => {
-            let temp_focused: u32 = 7;
-            display_single_trajectory(&universe, display_state.current_time, scale, &mut trajectory_gizmos, &temp_focused, mode);
+        TrajectoryDisplay::FocusedOnly => match display_state.focused {
+            None => {}
+            Some(body_id) => {
+                display_single_trajectory(&universe, display_state.current_time, scale, &mut trajectory_gizmos, &body_id, mode);
+
+            }
         }
         TrajectoryDisplay::FocusedAscendingPrimaries => {}
         TrajectoryDisplay::All => {
@@ -203,7 +208,18 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
                keyboard: Res<ButtonInput<KeyCode>>,
                mut query: Query<(&mut Transform, &mut Text), With<DebugText>>,
                time: Res<Time>,
+               universe: Res<Universe>,
                app_state: Res<State<AppState>>) {
+    let (focused, focused_name) = match display_state.focused {
+        None => { (None, "Nothing".to_string()) }
+        Some(body_id) => {
+            if let Some(body) = universe.bodies.get(&body_id) {
+                (Some(body_id), body.get_name())
+            } else {
+                (None, "Nothing".to_string())
+            }
+        }
+    };
     for (_transform, mut text) in query.iter_mut() {
         let text = &mut text.sections[0].value;
         text.clear();
@@ -213,7 +229,8 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
         text.push_str(&*format!("Object scale (i/o): {:.1}\n", display_state.body_scale));
         text.push_str(&*format!("Distance scale (k/l): {:.1}\n", display_state.distance_scale));
         text.push_str(&*format!("Trajectory display: (,): {:?}\n", display_state.trajectory_display));
-        text.push_str(&*format!("Trajectory mode: (.): {:?}", display_state.trajectory_mode));
+        text.push_str(&*format!("Trajectory mode: (.): {:?}\n", display_state.trajectory_mode));
+        text.push_str(&*format!("Focused (z,x): {}", focused_name));
     }
     if keyboard.just_pressed(KeyCode::ArrowLeft) && !display_state.playing {
         display_state.current_time -= 10.0 * time.delta_seconds() as f64 * display_state.time_step_size();
@@ -254,6 +271,12 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
     }
     if keyboard.just_pressed(KeyCode::KeyP) {
         display_state.playing = !display_state.playing;
+    }
+    if keyboard.just_pressed(KeyCode::KeyX) {
+        display_state.focused = None;
+    }
+    if keyboard.just_pressed(KeyCode::KeyZ) {
+        display_state.focused = Some(7);
     }
     if keyboard.just_pressed(KeyCode::Comma) {
         display_state.trajectory_display = match display_state.trajectory_display {
