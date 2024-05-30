@@ -298,12 +298,6 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
     }
 }
 
-fn show_trajectories(
-    mut universe: ResMut<Universe>,
-) {
-
-}
-
 // Tick the timer, and change state when finished
 fn editor(
     time: Res<Time>,
