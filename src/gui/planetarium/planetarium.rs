@@ -198,7 +198,7 @@ fn draw_trajectories(
 
 fn display_single_trajectory(universe: &Res<Universe>, time: f64, scale: f32, trajectory_gizmos: &mut Gizmos<OrbitalTrajectories>, id: &u32, mode: TrajectoryMode) {
     let trajectory = universe.get_trajectory_for(*id, time, mode);
-    const WINDOW_SIZE: usize = 10;
+    const WINDOW_SIZE: usize = 2;
     for positions in OverlappingChunks::new(&trajectory, WINDOW_SIZE) {
         let pos1 = positions[0].as_vec3();
         let pos1 = bevy::prelude::Vec3::new(pos1.x, pos1.y, pos1.z) * scale;

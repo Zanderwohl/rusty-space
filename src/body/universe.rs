@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::body::body::Body;
 use crate::body::motive::Motive;
 use crate::util::{bitfutz, circular, kepler};
+use crate::util::overlapping_chunks::last_n_items;
 
 const DEBUG_G: f64 = 6.67430e-3;
 const REAL_G: f64 = 6.67430e-11;
@@ -86,9 +87,22 @@ impl Universe {
     /// will overstep end_time if time_step is not an exact multiple
     pub fn calc_compound_positions_span(&mut self, start_time: f64, end_time: f64, time_step: f64) {
         let mut current_time = start_time;
+        let temp = self.trajectory_cache.len();
         while current_time< end_time {
             self.calc_positions_at_time(current_time);
             current_time += time_step;
+        }
+        info!("{}\t->\t{}\t{}", temp, self.trajectory_cache.len(), self.trajectory_cache.len() - temp);
+        if(self.trajectory_cache.len() > 5000) {
+            let times: Vec<u64> = self.trajectory_cache.keys().cloned().collect::<Vec<u64>>();
+            let times = last_n_items(times, 3000);
+            let mut new_map = HashMap::new();
+            for time in times {
+                if let Some(item) = self.trajectory_cache.remove(&time) {
+                    new_map.insert(time, item);
+                }
+            }
+            self.trajectory_cache = new_map;
         }
         self.calc_positions_at_time(end_time);
     }
@@ -148,8 +162,8 @@ impl Universe {
         let mut trajectory = Vec::new();
         let mut times: Vec<u64> = self.trajectory_cache.keys().cloned().collect::<Vec<u64>>();
         times.sort();
-        for time in times {
-            let time = bitfutz::u64::to_f64(time);
+        for time in times.iter() {
+            let time = bitfutz::u64::to_f64(*time);
             let position = match mode {
                 TrajectoryMode::Global => { self.get_global_position_at_time(body_id, time) }
                 _ => {
@@ -165,7 +179,7 @@ impl Universe {
                     self.get_local_position_at_time(body_id, time) + current_primary_position
                 }
             };
-            trajectory.push(position.clone())
+            trajectory.push(position.clone());
         }
         trajectory
     }

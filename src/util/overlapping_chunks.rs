@@ -31,3 +31,17 @@ impl<'a, T> Iterator for OverlappingChunks<'a, T> {
         Some(chunk)
     }
 }
+
+pub fn last_n_items<I>(iter: I, n: usize) -> Vec<I::Item>
+    where
+        I: IntoIterator,
+        I::Item: Clone,
+{
+    let items: Vec<I::Item> = iter.into_iter().collect();
+    let len = items.len();
+    if len <= n {
+        items
+    } else {
+        items[len - n..].to_vec()
+    }
+}
