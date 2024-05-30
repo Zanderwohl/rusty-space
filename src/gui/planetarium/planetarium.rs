@@ -9,6 +9,7 @@ use crate::gui::common::BackGlow;
 use crate::gui::menu::save_select::SaveEntry;
 use crate::gui::planetarium::gui;
 use crate::gui::planetarium::gui::{DebugText, EscMenuState};
+use crate::util::overlapping_chunks::OverlappingChunks;
 use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
 
 // This plugin will contain the game. In this case, it's just be a screen that will
@@ -25,7 +26,8 @@ pub fn planetarium_plugin(app: &mut App) {
         })
         .insert_resource(DisplayState {
             current_time: 0.0,
-            time_scale: 1.0,
+            time_scale: 10.0,
+            time_quantum: 1.0,
             distance_scale: 1.5,
             body_scale: 1.0,
             playing: false,
@@ -72,6 +74,7 @@ enum TrajectoryDisplay {
 struct DisplayState {
     current_time: f64,
     time_scale: f64,
+    time_quantum: f64,
     distance_scale: f64,
     body_scale: f32,
     playing: bool,
@@ -191,10 +194,11 @@ fn draw_trajectories(
 
 fn display_single_trajectory(universe: &Res<Universe>, time: f64, scale: f32, trajectory_gizmos: &mut Gizmos<OrbitalTrajectories>, id: &u32, mode: TrajectoryMode) {
     let trajectory = universe.get_trajectory_for(*id, time, mode);
-    for positions in trajectory.windows(2) {
+    const WINDOW_SIZE: usize = 10;
+    for positions in OverlappingChunks::new(&trajectory, WINDOW_SIZE) {
         let pos1 = positions[0].as_vec3();
         let pos1 = bevy::prelude::Vec3::new(pos1.x, pos1.y, pos1.z) * scale;
-        let pos2 = positions[1].as_vec3();
+        let pos2 = positions[positions.len() - 1].as_vec3();
         let pos2 = bevy::prelude::Vec3::new(pos2.x, pos2.y, pos2.z) * scale;
         trajectory_gizmos.line(
             pos1,

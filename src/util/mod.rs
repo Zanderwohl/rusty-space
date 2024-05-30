@@ -4,3 +4,4 @@ pub mod common;
 pub mod circular;
 pub mod patched_conics;
 pub mod bitfutz;
+pub mod overlapping_chunks;
