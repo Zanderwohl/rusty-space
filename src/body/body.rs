@@ -1,14 +1,13 @@
-use std::collections::HashMap;
-use glam::DVec3;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use crate::body::appearance::{Appearance, Planetoid};
-use crate::body::motive::{FixedMotive, Motive};
+use crate::body::motive::MotiveTypes;
+use crate::body::motive::fixed::FixedMotive;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Body {
     /// ID in Body's universe. Assigned by Universe. Should be unique, can change with saves/loads.
     pub(crate) id: Option<u32>,
-    pub(crate) physics: Motive,
+    pub(crate) physics: MotiveTypes,
     pub(crate) name: String,
     pub(crate) mass: f64,
     pub(crate) appearance: Appearance,
@@ -32,7 +31,7 @@ impl Default for Body {
     fn default() -> Self {
         Body {
             id: None,
-            physics: Motive::Fixed(FixedMotive::default()),
+            physics: MotiveTypes::Fixed(FixedMotive::default()),
             name: "New body".to_string(),
             mass: 1.0,
             defined_primary: None,

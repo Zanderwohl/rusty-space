@@ -5,7 +5,7 @@ use glam::DVec3;
 use bevy::prelude::{Asset, Resource, TypePath};
 use serde::{Deserialize, Serialize};
 use crate::body::body::Body;
-use crate::body::motive::Motive;
+use crate::body::motive::MotiveTypes;
 use crate::util::{bitfutz, circular, kepler};
 use crate::util::overlapping_chunks::last_n_items;
 
@@ -126,13 +126,13 @@ impl Universe {
         let body = self.bodies.get(&body_id);
         if let Some(mut body) = body {
             match &body.physics {
-                Motive::Fixed(fixed_motive) => {
+                MotiveTypes::Fixed(fixed_motive) => {
                     fixed_motive.local_position
                 },
-                Motive::Linear(linear_motive) => {
+                MotiveTypes::Linear(linear_motive) => {
                     linear_motive.local_velocity * time
                 },
-                Motive::StupidCircle(circular_motive) => {
+                MotiveTypes::StupidCircle(circular_motive) => {
                     let parent_id = body.defined_primary.unwrap(); // Uh oh! Bodies need something to orbit.
                     let parent = self.get_body(parent_id).unwrap();
                     let mu = G * parent.mass;
@@ -140,7 +140,7 @@ impl Universe {
                     let local_r = circular::position::from_true_anomaly(circular_motive.radius, nu);
                     local_r
                 },
-                Motive::FlatKepler(flat_kepler) => {
+                MotiveTypes::FlatKepler(flat_kepler) => {
                     let id = body.id.unwrap_or(u32::MAX);
                     let message = format!("'{}' (ID {}) has no primary set. {:?}", body.get_name(), id, body);
                     let message_str = message.as_str();
