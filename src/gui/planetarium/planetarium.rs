@@ -8,7 +8,7 @@ use crate::gui::common;
 use crate::gui::common::BackGlow;
 use crate::gui::menu::save_select::SaveEntry;
 use crate::gui::planetarium::gui;
-use crate::gui::planetarium::gui::{DebugText, EscMenuState};
+use crate::gui::planetarium::gui::{DebugText};
 use crate::util::overlapping_chunks::OverlappingChunks;
 use super::super::common::{AppState, despawn_screen, DisplayQuality, Volume};
 
@@ -158,7 +158,7 @@ fn position_bodies(
 ) {
     let time = display_state.current_time;
     for (mut transform, body_id) in query.iter_mut() {
-        let position_big = universe.get_global_position_at_time(body_id.0, time);
+        let position_big = universe.cached_global_position_at_time(body_id.0, time);
         let position = (position_big * display_state.distance_scale).as_vec3();
         transform.translation = bevy::prelude::Vec3::new(position.x, position.y, position.z);
 

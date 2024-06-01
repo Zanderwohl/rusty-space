@@ -1,9 +1,6 @@
 use glam::DVec3;
-use std::sync::Arc;
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::body::motive::Motive;
-use crate::util::bitfutz;
 use crate::util::time_map::TimeMap;
 
 #[derive(Serialize, Deserialize, Debug)]

@@ -1,8 +1,7 @@
-use std::ffi::OsStr;
-use std::fs::{DirEntry, FileType};
+use std::fs::{DirEntry};
 use std::path::PathBuf;
 use bevy::hierarchy::ChildBuilder;
-use bevy::prelude::{AssetServer, BuildChildren, ButtonBundle, Commands, Component, default, info, NodeBundle, Res, Resource, Style, TextBundle, TextStyle, UiRect, Val};
+use bevy::prelude::{AssetServer, BuildChildren, ButtonBundle, Commands, Component, default, NodeBundle, Res, Resource, Style, TextBundle, TextStyle, UiRect, Val};
 use crate::gui::common;
 use crate::gui::common::color::{BACKGROUND, HIGHLIGHT, NORMAL_BUTTON};
 use crate::gui::common::text;

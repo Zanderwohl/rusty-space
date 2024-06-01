@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::slice::Iter;
 use crate::util::bitfutz;
 

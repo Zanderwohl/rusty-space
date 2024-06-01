@@ -36,7 +36,7 @@ pub(crate) fn despawn_screen<T: Component>(to_despawn: Query<Entity, With<T>>, m
     }
 }
 
-pub(crate) fn base_screen(mut commands: &mut Commands) -> Entity {
+pub(crate) fn base_screen(commands: &mut Commands) -> Entity {
     commands.spawn((
         NodeBundle {
             style: Style {
@@ -109,7 +109,7 @@ pub mod text {
     use bevy::prelude::TextStyle;
     use crate::gui::common::color::TEXT_COLOR;
 
-    pub(crate) fn primary(mut asset_server: AssetServer) -> TextStyle {
+    pub(crate) fn primary(asset_server: AssetServer) -> TextStyle {
         TextStyle {
             font_size: 40.0,
             color: TEXT_COLOR,

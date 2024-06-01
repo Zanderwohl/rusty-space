@@ -1,5 +1,5 @@
 use bevy::pbr::{PbrBundle, PointLight, PointLightBundle, StandardMaterial};
-use bevy::prelude::{Assets, Color, Commands, Component, Cylinder, default, Entity, Mesh, ResMut, Sphere, Transform};
+use bevy::prelude::{Assets, Color, Commands, Component, default, Entity, Mesh, ResMut, Sphere, Transform};
 use glam::{DVec3, Vec3};
 use bevy::hierarchy::BuildChildren;
 use bevy::log::info;

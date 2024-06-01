@@ -1,5 +1,5 @@
 use bevy::asset::AssetServer;
-use bevy::prelude::{AlignItems, ButtonBundle, Color, Commands, Component, default, FlexDirection, NodeBundle, Res, Style, TextBundle, Val};
+use bevy::prelude::{AlignItems, ButtonBundle, Commands, Component, default, NodeBundle, Res, Style, TextBundle, Val};
 use bevy::hierarchy::BuildChildren;
 use crate::gui::common;
 use crate::gui::common::{BackGlow, DisplayQuality, text};

@@ -1,17 +1,14 @@
-use std::fs;
 use std::path::PathBuf;
 use bevy::window::ExitCondition;
 use crate::gui;
 use crate::gui::{planetarium, menu, splash};
 use crate::gui::common::{BackGlow, DisplayQuality, Volume};
 use bevy::{prelude::*, winit::WinitWindows};
-use bevy::core_pipeline::{tonemapping::Tonemapping, bloom::{BloomCompositeMode, BloomSettings}, Skybox};
+use bevy::core_pipeline::{tonemapping::Tonemapping, bloom::{BloomCompositeMode, BloomSettings}};
 use winit::window::Icon;
 use bevy_common_assets::yaml::YamlAssetPlugin;
 use crate::body::universe::Universe;
 use crate::gui::menu::save_select;
-use crate::gui::menu::save_select::SaveEntry;
-use crate::gui::planetarium::planetarium::SaveItems;
 use crate::gui::util::camera_controller::{CameraController, CameraControllerPlugin};
 
 
