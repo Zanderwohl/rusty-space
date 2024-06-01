@@ -27,7 +27,7 @@ pub fn planetarium_plugin(app: &mut App) {
         .insert_resource(DisplayState {
             current_time: 0.0,
             last_time: 0.0,
-            time_scale: 10.0,
+            time_scale: 1.0,
             time_quantum: 1.0,
             distance_scale: 1.5,
             body_scale: 1.0,
@@ -128,6 +128,7 @@ fn planetarium_setup(
                         spawn_bevy::<OnPlanetariumScreen>(*id, body, &mut commands, &mut meshes, &mut materials);
                     }
                     universe.calc_positions_at_time(display_state.current_time);
+                    universe.give_motives_info();
                     commands.insert_resource(universe);
                 }
                 Err(error) => {
@@ -148,7 +149,11 @@ fn calc_for_current_time(
     mut universe: ResMut<Universe>,
     display_state: Res<DisplayState>,
 ) {
-    universe.calc_compound_positions_span(display_state.last_time, display_state.current_time, display_state.time_quantum);
+    let time_a = display_state.last_time;
+    let time_b = display_state.current_time;
+    if time_a != time_b {
+        universe.calc_compound_positions_span(time_a, time_b, display_state.time_quantum);
+    }
 }
 
 fn position_bodies(
@@ -218,6 +223,7 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
                time: Res<Time>,
                universe: Res<Universe>,
                app_state: Res<State<AppState>>) {
+    display_state.last_time = display_state.current_time;
     let (focused, focused_name) = match display_state.focused {
         None => { (None, "Nothing".to_string()) }
         Some(body_id) => {
@@ -301,8 +307,10 @@ fn handle_time(mut display_state: ResMut<DisplayState>,
             TrajectoryMode::LocalToCurrentPrimary => { TrajectoryMode::Global }
         }
     }
-    if display_state.playing{
-        display_state.last_time = display_state.current_time;
+    if keyboard.just_pressed(KeyCode::Backquote) {
+        info!("{:?}", universe)
+    }
+    if display_state.playing {
         display_state.current_time += time.delta_seconds() as f64 * display_state.time_step_size();
     }
 }

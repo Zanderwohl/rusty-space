@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use crate::body::appearance::{Appearance, Planetoid};
-use crate::body::motive::MotiveTypes;
+use crate::body::motive::{Motive, MotiveTypes};
 use crate::body::motive::fixed::FixedMotive;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -11,7 +11,6 @@ pub struct Body {
     pub(crate) name: String,
     pub(crate) mass: f64,
     pub(crate) appearance: Appearance,
-    pub(crate) defined_primary: Option<u32>,
 }
 
 impl Body {
@@ -20,10 +19,25 @@ impl Body {
     }
 
     pub fn primary(&self) -> Option<u32> {
-        if self.defined_primary.is_some() {
-            return self.defined_primary
+        self.motive_ref().defined_primary()
+    }
+
+    pub fn motive_ref(&self) -> Box<&dyn Motive> {
+        match &self.physics {
+            MotiveTypes::Fixed(fixed_motive) => Box::new(fixed_motive),
+            MotiveTypes::Linear(linear_motive) => Box::new(linear_motive),
+            MotiveTypes::StupidCircle(stupid_circle) => Box::new(stupid_circle),
+            MotiveTypes::FlatKepler(flat_kepler) => Box::new(flat_kepler),
         }
-        None // TODO: get non-defined primaries; i.e. for Newton bodies
+    }
+
+    pub fn motive_mut(&mut self) -> Box<&mut dyn Motive> {
+        match &mut self.physics {
+            MotiveTypes::Fixed(ref mut fixed_motive) => Box::new(fixed_motive),
+            MotiveTypes::Linear(ref mut linear_motive) => Box::new(linear_motive),
+            MotiveTypes::StupidCircle(ref mut stupid_circle) => Box::new(stupid_circle),
+            MotiveTypes::FlatKepler(ref mut flat_kepler) => Box::new(flat_kepler),
+        }
     }
 }
 
@@ -34,7 +48,6 @@ impl Default for Body {
             physics: MotiveTypes::Fixed(FixedMotive::default()),
             name: "New body".to_string(),
             mass: 1.0,
-            defined_primary: None,
             appearance: Appearance::Planetoid(Planetoid {
                 radius: 1.0,
                 color: [0.3, 0.3, 0.3],

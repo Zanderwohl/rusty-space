@@ -1,6 +1,8 @@
 use glam::DVec3;
 
-pub(crate) const G: f64 = 6.67430e-11;
+const DEBUG_G: f64 = 6.67430e-8;
+const REAL_G: f64 = 6.67430e-11;
+pub(crate) const G: f64 = DEBUG_G;
 
 /// Masses in grams, displacement in meters.
 /// Returns force in newtons TODO: really?
