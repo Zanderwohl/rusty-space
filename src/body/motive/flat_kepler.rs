@@ -13,7 +13,7 @@ pub(crate) struct FlatKepler {
     pub(crate) longitude_of_periapsis: f64,
     primary: u32,
     #[serde(skip)]
-    primary_mass: f64, // This MUST be instantiated at some point.
+    pub(crate) primary_mass: f64, // This MUST be instantiated at some point.
     #[serde(skip)]
     trajectory_cache: TimeMap<DVec3>,
 }
@@ -42,6 +42,12 @@ impl FlatKepler {
         let mu = G * self.primary_mass;
         kepler::period::third_law(self.semi_major_axis, mu)
     }
+
+    fn calculate_local_position_at_time_helper(&self, time: f64) -> DVec3 {
+        let mu = G * self.primary_mass;
+        let local_r = kepler::in_plane::displacement(time, mu, self.mean_anomaly_at_epoch, self.semi_major_axis, self.eccentricity, self.longitude_of_periapsis);
+        local_r
+    }
 }
 
 impl Motive for FlatKepler {
@@ -65,7 +71,10 @@ impl Motive for FlatKepler {
 
     fn cached_local_position_at_time(&self, time: f64) -> Option<DVec3> {
         match self.trajectory_cache.get(time) {
-            None => None,
+            None => {
+                let position = self.calculate_local_position_at_time_helper(time);
+                Some(position)
+            },
             Some(value) => {
                 Some(*value)
             }

@@ -59,7 +59,11 @@ impl Universe {
                             circle.primary_mass = *mass;
                         }
                     }
-                    MotiveTypes::FlatKepler(ref mut flat_kepler) => {}
+                    MotiveTypes::FlatKepler(ref mut flat_kepler) => {
+                        if let Some(mass) = body_info.get(&primary) {
+                            flat_kepler.primary_mass = *mass;
+                        }
+                    }
                     _ => {}
                 }
             }

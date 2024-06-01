@@ -9,7 +9,7 @@ use crate::util::time_map::TimeMap;
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct StupidCircle {
     pub(crate) radius: f64,
-    pub(crate) primary: u32,
+    primary: u32,
     #[serde(skip)]
     pub(crate) primary_mass: f64, // This MUST be instantiated at some point.
     #[serde(skip)]
