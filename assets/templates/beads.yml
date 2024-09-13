@@ -24,6 +24,7 @@ bodies:
   1:
     id: 1
     physics: !FlatKepler
+      primary: 0
       semi_major_axis: 10.0
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.5
@@ -36,10 +37,10 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    defined_primary: 0
   2:
     id: 2
     physics: !FlatKepler
+      primary: 0
       semi_major_axis: 10.0
       mean_anomaly_at_epoch: 1.0471975512
       eccentricity: 0.5
@@ -52,10 +53,10 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    defined_primary: 0
   3:
     id: 3
     physics: !FlatKepler
+      primary: 0
       semi_major_axis: 10.0
       mean_anomaly_at_epoch: 2.09439510239
       eccentricity: 0.5
@@ -68,10 +69,10 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    defined_primary: 0
   4:
     id: 4
     physics: !FlatKepler
+      primary: 0
       semi_major_axis: 10.0
       mean_anomaly_at_epoch: 3.14159265359
       eccentricity: 0.5
@@ -84,10 +85,10 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    defined_primary: 0
   5:
     id: 5
     physics: !FlatKepler
+      primary: 0
       semi_major_axis: 10.0
       mean_anomaly_at_epoch: 4.18879020479
       eccentricity: 0.5
@@ -100,10 +101,10 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    defined_primary: 0
   6:
     id: 6
     physics: !FlatKepler
+      primary: 0
       semi_major_axis: 10.0
       mean_anomaly_at_epoch: 5.23598775598
       eccentricity: 0.5
@@ -116,5 +117,4 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    defined_primary: 0
 counter: 3

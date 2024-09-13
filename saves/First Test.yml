@@ -20,10 +20,10 @@ bodies:
       - 0.3
       - 0.1
       brightness: 15.0
-    defined_primary: null
   1:
     id: 1
     physics: !StupidCircle
+      primary: 0
       radius: 3.0
     name: Planet
     mass: 1.0
@@ -33,11 +33,11 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    defined_primary: 0
   2:
     id: 2
     physics: !StupidCircle
       radius: 0.6
+      primary: 1
     name: Moon
     mass: 0.1
     appearance: !Planetoid
@@ -46,5 +46,4 @@ bodies:
       - 0.4
       - 0.4
       - 0.4
-    defined_primary: 1
 counter: 3

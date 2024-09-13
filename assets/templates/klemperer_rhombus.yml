@@ -20,10 +20,10 @@ bodies:
       - 0.3
       - 0.1
       brightness: 15.0
-    defined_primary: null
   1:
     id: 1
     physics: !FlatKepler
+      primary: 0
       semi_major_axis: 10.0
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.5
@@ -36,10 +36,10 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    defined_primary: 0
   2:
     id: 2
     physics: !FlatKepler
+      primary: 0
       semi_major_axis: 10.0
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.5
@@ -52,10 +52,10 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    defined_primary: 0
   3:
     id: 3
     physics: !FlatKepler
+      primary: 0
       semi_major_axis: 10.0
       mean_anomaly_at_epoch: 0.0
       eccentricity: 0.5
@@ -68,5 +68,4 @@ bodies:
         - 0.2
         - 0.8
         - 0.4
-    defined_primary: 0
 counter: 3

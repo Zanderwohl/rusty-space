@@ -1,6 +1,5 @@
 [package]
 name = "exotic-matters"
-identifier = "com.zandy.exoticmatters"
 version = "0.1.0"
 edition = "2021"
 description = "The plotting and trajectory tool for the TTRPG Exotic Matters"
