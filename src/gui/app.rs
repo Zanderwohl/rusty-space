@@ -5,6 +5,7 @@ use crate::gui::{planetarium, menu, splash};
 use crate::gui::common::{BackGlow, DisplayQuality, Volume};
 use bevy::{prelude::*, winit::WinitWindows};
 use bevy::core_pipeline::{tonemapping::Tonemapping, bloom::{BloomCompositeMode, BloomSettings}};
+use bevy_common_assets::toml::TomlAssetPlugin;
 use winit::window::Icon;
 use bevy_common_assets::yaml::YamlAssetPlugin;
 use crate::body::universe::Universe;
@@ -26,6 +27,7 @@ pub(crate) fn open() {
                 close_when_requested: true,
             }),
             YamlAssetPlugin::<Universe>::new(&["yml", "yaml"]),
+            TomlAssetPlugin::<Universe>::new(&["toml"]),
             // YamlAssetPlugin::<SaveItems>::new(&["yml", "yaml"]),
         ))
         .insert_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))

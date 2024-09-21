@@ -8,6 +8,12 @@ authors = ["Alexader Lowry <zander@zanderlowry.com"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
+
 [dependencies]
 nalgebra = "0.32.5"
 glam = { version = "0.27.0", features = ["serde"] }
@@ -20,5 +26,5 @@ bevy-trait-query = "0.5.1"
 serde = { version = "1.0.201", features = ["derive"] }
 serde_json = "1.0.117"
 serde_yaml = "0.9.33"
-bevy_common_assets = { version = "0.10.0", features = ["yaml"] }
+bevy_common_assets = { version = "0.10.0", features = ["yaml", "toml"] }
 scilib = "1.0.0"
