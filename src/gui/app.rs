@@ -1,13 +1,13 @@
 use std::path::PathBuf;
-use bevy::app::Plugin;
 use bevy::color::Color;
 use bevy::core::FrameCount;
 use bevy::DefaultPlugins;
-use bevy::prelude::{App, AppExtStates, Camera2d, ClearColor, Commands, PluginGroup, Res, Single, Startup, States, SystemSet, Update, Window, WindowPlugin};
+use bevy::prelude::{App, AppExtStates, Camera3d, ClearColor, Commands, PluginGroup, Res, Single, Startup, States, Update, Window, WindowPlugin};
 use bevy::window::{ExitCondition, PresentMode};
 use bevy_egui::EguiPlugin;
-use crate::gui::menu::{ui_example_system, MenuPlugin};
+use crate::gui::menu::MenuPlugin;
 use crate::gui::settings;
+use crate::gui::splash::SplashPlugin;
 use crate::gui::util::ensure_folders;
 
 pub fn run() {
@@ -28,10 +28,12 @@ pub fn run() {
                 exit_condition: ExitCondition::OnPrimaryClosed,
                 close_when_requested: true,
             }))
-        .insert_state(AppState::MainMenu)
+        .add_systems(Startup, common_setup)
+        .insert_state(AppState::Splash)
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(EguiPlugin)
         .insert_resource(settings)
+        .add_plugins(SplashPlugin)
         .add_plugins(MenuPlugin)
         .add_systems(Update, (
             make_visible,
@@ -60,4 +62,12 @@ pub fn make_visible(mut window: Single<&mut Window>, frames: Res<FrameCount>) {
     if frames.0 == 3 {
         window.visible = true;
     }
+}
+
+pub fn common_setup(mut commands: Commands) {
+    commands
+        .spawn((
+            Camera3d::default()
+            ))
+    ;
 }
