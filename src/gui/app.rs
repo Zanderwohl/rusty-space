@@ -1,13 +1,16 @@
 use std::path::PathBuf;
 use bevy::app::Plugin;
+use bevy::color::Color;
 use bevy::core::FrameCount;
 use bevy::DefaultPlugins;
-use bevy::prelude::{App, Camera2d, Commands, PluginGroup, Res, Single, Startup, SystemSet, Update, Window, WindowPlugin};
+use bevy::prelude::{App, AppExtStates, Camera2d, ClearColor, Commands, PluginGroup, Res, Single, Startup, States, SystemSet, Update, Window, WindowPlugin};
 use bevy::window::{ExitCondition, PresentMode};
+use bevy_egui::EguiPlugin;
+use crate::gui::menu::{ui_example_system, MenuPlugin};
 use crate::gui::settings;
 use crate::gui::util::ensure_folders;
 
-pub fn open() {
+pub fn run() {
     init();
     let settings = settings::load();
 
@@ -25,9 +28,21 @@ pub fn open() {
                 exit_condition: ExitCondition::OnPrimaryClosed,
                 close_when_requested: true,
             }))
+        .insert_state(AppState::MainMenu)
+        .insert_resource(ClearColor(Color::BLACK))
+        .add_plugins(EguiPlugin)
         .insert_resource(settings)
-        .add_systems(Update, make_visible)
+        .add_plugins(MenuPlugin)
+        .add_systems(Update, (
+            make_visible,
+        ))
         .run();
+}
+
+#[derive(States, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum AppState {
+    Splash,
+    MainMenu,
 }
 
 pub fn init() {
