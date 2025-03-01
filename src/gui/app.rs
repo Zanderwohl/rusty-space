@@ -66,8 +66,6 @@ pub fn make_visible(mut window: Single<&mut Window>, frames: Res<FrameCount>) {
 
 pub fn common_setup(mut commands: Commands) {
     commands
-        .spawn((
-            Camera3d::default()
-            ))
+        .spawn(Camera3d::default())
     ;
 }
