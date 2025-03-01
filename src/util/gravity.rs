@@ -1,4 +1,4 @@
-use glam::DVec3;
+use bevy::math::DVec3;
 
 const DEBUG_G: f64 = 6.67430e-8;
 const REAL_G: f64 = 6.67430e-11;

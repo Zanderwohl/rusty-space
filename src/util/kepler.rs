@@ -23,7 +23,7 @@ pub mod angular_motion {
 
 pub mod local {
     pub mod angular_momentum {
-        use glam::DVec3;
+        use bevy::math::DVec3;
 
         pub fn specific(displacement: DVec3, velocity: DVec3) -> DVec3 {
             displacement.cross(velocity)
@@ -107,7 +107,7 @@ pub mod eccentricity {
     }
 
     pub mod vector {
-        use glam::DVec3;
+        use bevy::math::DVec3;
         use crate::util::kepler::local;
 
         pub fn definition(local_position: DVec3, local_velocity: DVec3, gravitational_parameter: f64) -> DVec3 {
@@ -130,7 +130,7 @@ pub mod eccentric_anomaly {
 }
 
 pub mod true_anomaly {
-    use glam::DVec3;
+    use bevy::math::DVec3;
     use crate::util::common::{unit_circle_xy};
     use scilib::math::bessel;
 
@@ -215,7 +215,7 @@ pub mod gravitational_parameter {
 }
 
 pub mod eccentricity_vector {
-    use glam::DVec3;
+    use bevy::math::DVec3;
 
     pub fn definition(mu: f64, displacement: DVec3, velocity: DVec3) -> DVec3 {
         let specific_angular_momentum = displacement.cross(velocity);
@@ -258,7 +258,7 @@ pub mod energy {
 }
 
 pub mod in_plane {
-    use glam::DVec3;
+    use bevy::math::DVec3;
     use crate::util::kepler;
 
     pub fn displacement(time: f64, mu: f64, mean_anomaly_at_epoch: f64, semi_major_axis: f64, eccentricity: f64, longitude_of_periapsis: f64) -> DVec3 {
