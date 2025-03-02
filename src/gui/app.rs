@@ -5,7 +5,7 @@ use bevy::DefaultPlugins;
 use bevy::prelude::{App, AppExtStates, Camera3d, ClearColor, Commands, PluginGroup, Res, Single, Startup, States, Update, Window, WindowPlugin};
 use bevy::window::{ExitCondition, PresentMode};
 use bevy_egui::EguiPlugin;
-use crate::gui::menu::MenuPlugin;
+use crate::gui::menu::{close_when_requested, MenuPlugin};
 use crate::gui::planetarium::Planetarium;
 use crate::gui::settings;
 use crate::gui::splash::SplashPlugin;
@@ -27,9 +27,10 @@ pub fn run() {
                     ..Default::default()
                 }),
                 exit_condition: ExitCondition::OnPrimaryClosed,
-                close_when_requested: true,
+                close_when_requested: false,
             }))
         .add_systems(Startup, common_setup)
+        .add_systems(Update, close_when_requested)
         .insert_state(AppState::Splash)
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(EguiPlugin)

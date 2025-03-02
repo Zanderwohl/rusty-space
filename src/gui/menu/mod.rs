@@ -1,8 +1,11 @@
 pub(crate) mod settings;
 
+use std::fs;
+use std::ops::Deref;
 use bevy::app::AppExit;
-use bevy::prelude::{in_state, App, AppExtStates, Condition, EventWriter, IntoSystemConfigs, NextState, Plugin, Res, ResMut, Resource, State, States, SystemSet, Update};
+use bevy::prelude::{in_state, App, AppExtStates, Commands, Condition, Entity, EventReader, EventWriter, IntoSystemConfigs, NextState, Plugin, Query, Res, ResMut, Resource, State, States, SystemSet, Update, With};
 use bevy::prelude::IntoSystemSetConfigs;
+use bevy::window::{ClosingWindow, WindowCloseRequested};
 use bevy_egui::{egui, EguiContexts};
 use crate::gui::app::AppState;
 use crate::gui::settings::Settings;
@@ -157,11 +160,33 @@ pub fn settings_menu(
     });
 }
 
-pub fn quit_system(
+pub fn quit_system (
     ui_state: Res<UiState>,
     mut exit: EventWriter<AppExit>
 ) {
     if ui_state.quit_requested {
         exit.send(AppExit::Success);
     }
+}
+
+/// Copied and modified from https://docs.rs/bevy_window/0.15.3/src/bevy_window/system.rs.html#42-58
+pub fn close_when_requested(
+    mut commands: Commands,
+    mut closed: EventReader<WindowCloseRequested>,
+    closing: Query<Entity, With<ClosingWindow>>,
+    settings: Res<Settings>,
+) {
+    // This was inserted by us on the last frame so now we can despawn the window
+    for window in closing.iter() {
+        commands.entity(window).despawn();
+    }
+    // Mark the window as closing so we can despawn it on the next frame
+    for event in closed.read() {
+        // When spamming the window close button on windows (other platforms too probably)
+        // we may receive a `WindowCloseRequested` for a window we've just despawned in the above
+        // loop.
+        commands.entity(event.window).try_insert(ClosingWindow);
+    }
+
+    let _ = fs::write("data/settings.toml", toml::to_string_pretty(settings.deref()).unwrap());
 }
