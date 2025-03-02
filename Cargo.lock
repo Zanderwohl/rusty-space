@@ -2209,7 +2209,9 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_egui",
+ "lazy_static",
  "num-traits",
+ "regex",
  "scilib",
  "serde",
  "toml",
