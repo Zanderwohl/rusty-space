@@ -129,6 +129,13 @@ fn planetarium_ui(
 
             ui.separator();
     });
+
+    // Start collapsed: https://github.com/emilk/egui/pull/5661
+    egui::Window::new("Settings")
+        .vscroll(true)
+        .show(ctx, |ui| {
+            crate::gui::menu::settings::settings_panel(&mut settings, ui);
+        });
 }
 
 fn advance_time(mut sim_time: ResMut<SimTime>, time: Res<Time>) {

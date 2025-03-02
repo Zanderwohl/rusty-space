@@ -1,11 +1,11 @@
-mod settings;
+pub(crate) mod settings;
 
 use bevy::app::AppExit;
 use bevy::prelude::{in_state, App, AppExtStates, Condition, EventWriter, IntoSystemConfigs, NextState, Plugin, Res, ResMut, Resource, State, States, SystemSet, Update};
 use bevy::prelude::IntoSystemSetConfigs;
 use bevy_egui::{egui, EguiContexts};
 use crate::gui::app::AppState;
-use crate::gui::settings::{DisplayGlow, DisplayQuality, Settings};
+use crate::gui::settings::Settings;
 
 #[derive(Resource)]
 pub struct UiState {
@@ -151,32 +151,8 @@ pub fn settings_menu(
             ui.heading("Settings");
 
             ui.separator();
-            ui.vertical(|ui| {
-                ui.heading("Display");
-                egui::ComboBox::from_label("Quality")
-                    .selected_text(format!("{:?}", settings.display.quality))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut settings.display.quality, DisplayQuality::Low, "Low");
-                        ui.selectable_value(&mut settings.display.quality, DisplayQuality::Medium, "Medium");
-                        ui.selectable_value(&mut settings.display.quality, DisplayQuality::High, "High");
-                    });
-                egui::ComboBox::from_label("Glow")
-                    .selected_text(format!("{:?}", settings.display.glow))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut settings.display.glow, DisplayGlow::None, "None");
-                        ui.selectable_value(&mut settings.display.glow, DisplayGlow::Subtle, "Subtle");
-                        ui.selectable_value(&mut settings.display.glow, DisplayGlow::VFD, "VFD");
-                        ui.selectable_value(&mut settings.display.glow, DisplayGlow::Defcon, "DEFCON");
-                    });
-            });
 
-            ui.separator();
-            ui.vertical(|ui| {
-                ui.heading("Sound");
-
-                ui.checkbox(&mut settings.sound.mute, "Mute");
-                ui.add(egui::Slider::new(&mut settings.sound.volume, 0..=100).text("Volume"));
-            });
+            settings::settings_panel(&mut settings, ui);
         });
     });
 }
