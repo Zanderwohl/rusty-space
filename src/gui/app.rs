@@ -29,12 +29,12 @@ pub fn run() {
                 exit_condition: ExitCondition::OnPrimaryClosed,
                 close_when_requested: false,
             }))
+        .insert_resource(settings)
         .add_systems(Startup, common_setup)
         .add_systems(Update, close_when_requested)
         .insert_state(AppState::Splash)
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(EguiPlugin)
-        .insert_resource(settings)
         .add_plugins(SplashPlugin)
         .add_plugins(MenuPlugin)
         .add_plugins(Planetarium)
