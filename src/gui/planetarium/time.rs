@@ -7,6 +7,7 @@ pub struct SimTime {
     pub step: f64,
     pub gui_speed: f64,
     pub playing: bool,
+    pub seconds_only: bool,
 }
 
 impl Default for SimTime {
@@ -17,6 +18,7 @@ impl Default for SimTime {
             step: 0.1,
             gui_speed: 1.0,
             playing: false,
+            seconds_only: false,
         }
     }
 }

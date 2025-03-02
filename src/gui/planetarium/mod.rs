@@ -9,6 +9,7 @@ use crate::gui::app::AppState;
 use crate::gui::menu::{MenuState, UiState};
 use crate::gui::planetarium::time::SimTime;
 use crate::gui::settings::Settings;
+use crate::util::format::seconds_to_naive_date;
 
 pub mod time;
 mod display;
@@ -69,7 +70,11 @@ fn planetarium_ui(
                        time.playing = true;
                    }
                }
-                ui.label(format!("Time: {:.1}s", time.time))
+                if time.seconds_only {
+                    ui.label(format!("Time: {:.1}s", time.time));
+                } else {
+                    ui.label(format!("Time: {}", seconds_to_naive_date(time.time.round() as i64)));
+                }
             });
             let gui_speed_current = time.gui_speed;
             let gui_speed_step = {
@@ -80,7 +85,11 @@ fn planetarium_ui(
                 step
             };
             ui.horizontal(|ui| {
-                ui.label(format!("Simulation speed: {:.1}s / s", gui_speed_current));
+                if time.seconds_only {
+                    ui.label(format!("Simulation speed: {:.1}s / s", gui_speed_current));
+                } else {
+                    ui.label(format!("Simulation speed: {} / s", seconds_to_naive_date(gui_speed_current.round() as i64)));
+                }
             });
             ui.horizontal(|ui| {
                 if ui.button("<<").clicked() { time.gui_speed /= 10.0}
@@ -113,6 +122,9 @@ fn planetarium_ui(
                 );
                 if ui.button(">").clicked() { time.gui_speed += gui_speed_step }
                 if ui.button(">>").clicked() { time.gui_speed *= 10.0 }
+            });
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut time.seconds_only, "Display as seconds");
             });
 
             ui.separator();
