@@ -5,13 +5,62 @@ use crate::gui::util::ensure_toml;
 
 #[derive(Serialize, Deserialize, Debug, Resource)]
 pub struct Settings {
-    foo: bool,
+    pub display: DisplaySettings,
+    pub sound: SoundSettings,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            foo: true,
+            display: DisplaySettings::default(),
+            sound: SoundSettings::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+pub struct DisplaySettings {
+    pub quality: DisplayQuality,
+    pub glow: DisplayGlow,
+}
+
+impl Default for DisplaySettings {
+    fn default() -> Self {
+        Self {
+            quality: DisplayQuality::default(),
+            glow: DisplayGlow::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, Default, PartialEq)]
+pub enum DisplayQuality {
+    Low,
+    #[default]
+    Medium,
+    High,
+}
+
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, Default, PartialEq)]
+pub enum DisplayGlow {
+    None,
+    #[default]
+    Subtle,
+    VFD,
+    Defcon,
+}
+
+#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+pub struct SoundSettings {
+    pub mute: bool,
+    pub volume: i32,
+}
+
+impl Default for SoundSettings {
+    fn default() -> Self {
+        Self {
+            mute: false,
+            volume: 50,
         }
     }
 }
