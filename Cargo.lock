@@ -2213,6 +2213,7 @@ dependencies = [
  "scilib",
  "serde",
  "toml",
+ "uuid",
 ]
 
 [[package]]

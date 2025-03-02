@@ -6,6 +6,7 @@ use bevy::prelude::{App, AppExtStates, Camera3d, ClearColor, Commands, PluginGro
 use bevy::window::{ExitCondition, PresentMode};
 use bevy_egui::EguiPlugin;
 use crate::gui::menu::MenuPlugin;
+use crate::gui::planetarium::Planetarium;
 use crate::gui::settings;
 use crate::gui::splash::SplashPlugin;
 use crate::gui::util::ensure_folders;
@@ -35,6 +36,7 @@ pub fn run() {
         .insert_resource(settings)
         .add_plugins(SplashPlugin)
         .add_plugins(MenuPlugin)
+        .add_plugins(Planetarium)
         .add_systems(Update, (
             make_visible,
         ))
@@ -45,6 +47,7 @@ pub fn run() {
 pub enum AppState {
     Splash,
     MainMenu,
+    Planetarium,
 }
 
 pub fn init() {
