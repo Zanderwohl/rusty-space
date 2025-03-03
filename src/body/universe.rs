@@ -3,80 +3,150 @@ use bevy::math::DVec3;
 use serde::{Deserialize, Serialize};
 
 pub struct UniverseFile {
-    file: Option<PathBuf>,
-    contents: UniverseFileContents,
+    pub file: Option<PathBuf>,
+    pub contents: UniverseFileContents,
+}
+
+#[derive(Debug)]
+pub enum UniverseWriteError {
+    TOML(toml::ser::Error),
+    IO(std::io::Error),
+}
+
+impl UniverseFile {
+    pub fn has_file(&self) -> bool {
+        self.file.is_some()
+    }
+
+    pub fn save(&self) -> Result<(), UniverseWriteError> {
+        if self.file.is_none() {
+            return Err(UniverseWriteError::IO(std::io::Error::new(std::io::ErrorKind::Other, "File not found.")));
+        }
+        let contents = toml::to_string_pretty(&self.contents);
+        if contents.is_err() {
+            return Err(UniverseWriteError::TOML(contents.unwrap_err()));
+        }
+        let contents = contents.unwrap();
+        let file_path = self.file.as_ref().unwrap();
+        let file_result = std::fs::write(file_path, contents);
+        if file_result.is_err() {
+            let err = file_result.unwrap_err();
+            return Err(UniverseWriteError::IO(err));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct UniverseFileContents {
-    time: UniverseFileTime,
-    bodies: Vec<SomeBody>
+    pub time: UniverseFileTime,
+    pub bodies: Vec<SomeBody>
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct UniverseFileTime {
-    time: f64,
+    pub time: f64,
 }
 
 #[derive(Serialize, Deserialize)]
 pub enum SomeBody {
     FixedEntry(FixedEntry),
-    MajorNewtonEntry(NewtonEntry),
-    MajorKeplerEntry(KeplerEntry),
+    NewtonEntry(NewtonEntry),
+    KeplerEntry(KeplerEntry),
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct BodyInfo {
-    name: Option<String>,
-    id: String,
-    mass: f64,
-    major: bool,
+    pub name: Option<String>,
+    pub id: String,
+    pub mass: f64,
+    pub major: bool,
+    pub designation: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct FixedEntry {
-    info: BodyInfo,
-    position: DVec3,
+    pub info: BodyInfo,
+    pub position: DVec3,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct NewtonEntry {
-    info: BodyInfo,
-    position: DVec3,
-    velocity: DVec3,
+    pub info: BodyInfo,
+    pub position: DVec3,
+    pub velocity: DVec3,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct KeplerEntry {
-    info: BodyInfo,
-    primary_id: String,
+    pub info: BodyInfo,
+    pub primary_id: String,
+    pub params: KeplerParams,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct KeplerParams {
     pub shape: KeplerShapeParams,
     pub rotation: KeplerRotationParams,
+    pub epoch: KeplerEpochParams,
 }
 
 #[derive(Serialize, Deserialize)]
 pub enum KeplerShapeParams {
-    Standard(StandardKeplerShapeParams),
+    EccentricitySMA(EccentricitySMAParams),
+    Apsides(ApsidesParams),
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct StandardKeplerShapeParams {
-    eccentricity: f64,
-    semi_major_axis: f64,
+pub struct EccentricitySMAParams {
+    pub eccentricity: f64,
+    pub semi_major_axis: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ApsidesParams {
+    pub periapsis: f64,
+    pub apoapsis: f64,
 }
 
 #[derive(Serialize, Deserialize)]
 pub enum KeplerRotationParams {
-    Standard(StandardKeplerRotationParams),
+    EulerAngles(KeplerEulerAngleParams),
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct StandardKeplerRotationParams {
+pub struct KeplerEulerAngleParams {
     pub inclination: f64,
-    pub longitude_of_ascending_node: f64,
+    pub longitude_of_ascending_node: f64, // "Right ascension of ascending node"
     pub argument_of_periapsis: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum KeplerEpochParams {
+    MeanAnomaly(TrueAnomalyAtEpochParams),
+    TimeAtPeriapsisPassage(PeriapsisTimeParams),
+    TrueAnomaly(TrueAnomalyAtEpochParams),
+    J2000(MeanAnomalyAtJ2000),
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct MeanAnomalyAtEpochParams {
+    pub epoch: f64,
+    pub mean_anomaly: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PeriapsisTimeParams {
+    pub time: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct TrueAnomalyAtEpochParams {
+    pub epoch: f64,
+    pub mean_anomaly: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct MeanAnomalyAtJ2000 {
+    pub mean_anomaly: f64,
 }

@@ -1,7 +1,8 @@
 use bevy::prelude::{Component, Resource};
 
 pub mod motive;
-mod universe;
+pub mod universe;
+pub mod solar_system;
 
 #[derive(Resource, Debug, Component, PartialEq, /*Eq,*/ Clone, Copy)]
 pub struct SimulationSettings {

@@ -5,6 +5,7 @@ use bevy::DefaultPlugins;
 use bevy::prelude::{App, AppExtStates, Camera3d, ClearColor, Commands, PluginGroup, Res, Single, Startup, States, Update, Window, WindowPlugin};
 use bevy::window::{ExitCondition, PresentMode};
 use bevy_egui::EguiPlugin;
+use crate::body::solar_system::write_temp_system_file;
 use crate::gui::menu::{close_when_requested, MenuPlugin};
 use crate::gui::planetarium::Planetarium;
 use crate::gui::settings;
@@ -14,6 +15,7 @@ use crate::gui::util::ensure_folders;
 pub fn run() {
     init();
     let settings = settings::load();
+    write_temp_system_file();
 
     App::new()
         .add_plugins(DefaultPlugins
