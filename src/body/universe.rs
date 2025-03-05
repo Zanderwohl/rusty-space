@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use bevy::math::DVec3;
+use bevy::utils::HashMap;
 use serde::{Deserialize, Serialize};
 
 pub struct UniverseFile {
@@ -40,7 +41,7 @@ impl UniverseFile {
 #[derive(Serialize, Deserialize)]
 pub struct UniverseFileContents {
     pub time: UniverseFileTime,
-    pub bodies: Vec<SomeBody>
+    pub bodies: Vec<SomeBody>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -53,6 +54,7 @@ pub enum SomeBody {
     FixedEntry(FixedEntry),
     NewtonEntry(NewtonEntry),
     KeplerEntry(KeplerEntry),
+    CompoundEntry(PatchedConicsEntry),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -80,12 +82,12 @@ pub struct NewtonEntry {
 #[derive(Serialize, Deserialize)]
 pub struct KeplerEntry {
     pub info: BodyInfo,
-    pub primary_id: String,
     pub params: KeplerParams,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct KeplerParams {
+    pub primary_id: String,
     pub shape: KeplerShapeParams,
     pub rotation: KeplerRotationParams,
     pub epoch: KeplerEpochParams,
@@ -149,4 +151,10 @@ pub struct TrueAnomalyAtEpochParams {
 #[derive(Serialize, Deserialize)]
 pub struct MeanAnomalyAtJ2000 {
     pub mean_anomaly: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PatchedConicsEntry {
+    info: BodyInfo,
+    route: HashMap<u64, KeplerParams>,
 }

@@ -34,8 +34,8 @@ pub fn solar_system() -> UniverseFile {
                         major: true,
                         designation: None,
                     },
-                    primary_id: "sol".to_string(),
                     params: KeplerParams {
+                        primary_id: "sol".to_string(),
                         shape: KeplerShapeParams::EccentricitySMA(EccentricitySMAParams {
                             eccentricity: 0.205630,
                             semi_major_axis: 5.791e7,
@@ -58,8 +58,8 @@ pub fn solar_system() -> UniverseFile {
                         major: true,
                         designation: None,
                     },
-                    primary_id: "sol".to_string(),
                     params: KeplerParams {
+                        primary_id: "sol".to_string(),
                         shape: KeplerShapeParams::EccentricitySMA(EccentricitySMAParams {
                             eccentricity: 0.006772,
                             semi_major_axis: 1.0821e8, // 108,210,000
@@ -82,8 +82,8 @@ pub fn solar_system() -> UniverseFile {
                         major: true,
                         designation: None,
                     },
-                    primary_id: "sol".to_string(),
                     params: KeplerParams {
+                        primary_id: "sol".to_string(),
                         shape: KeplerShapeParams::EccentricitySMA(EccentricitySMAParams {
                             eccentricity: 0.0167086,
                             semi_major_axis: 1.49598023e8, // 149,598,023
@@ -106,8 +106,8 @@ pub fn solar_system() -> UniverseFile {
                         major: true,
                         designation: None,
                     },
-                    primary_id: "sol".to_string(),
                     params: KeplerParams {
+                        primary_id: "sol".to_string(),
                         shape: KeplerShapeParams::EccentricitySMA(EccentricitySMAParams {
                             eccentricity: 0.0934,
                             semi_major_axis: 2.27939366e8, // 227,939,366
@@ -130,8 +130,8 @@ pub fn solar_system() -> UniverseFile {
                         major: true,
                         designation: Some("1 Ceres".into()),
                     },
-                    primary_id: "sol".to_string(),
                     params: KeplerParams {
+                        primary_id: "sol".to_string(),
                         shape: KeplerShapeParams::EccentricitySMA(EccentricitySMAParams {
                             eccentricity: 0.0785,
                             semi_major_axis: 4.14e8, // 414,000,000
@@ -154,8 +154,8 @@ pub fn solar_system() -> UniverseFile {
                         major: true,
                         designation: Some("Earth I".into()),
                     },
-                    primary_id: "earth".to_string(),
                     params: KeplerParams {
+                        primary_id: "earth".to_string(),
                         shape: KeplerShapeParams::EccentricitySMA(EccentricitySMAParams {
                             eccentricity: 0.0549,
                             semi_major_axis: 3.84399e5,
