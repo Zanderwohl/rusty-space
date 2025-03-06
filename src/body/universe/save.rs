@@ -10,7 +10,7 @@ use crate::body::motive::newton_motive::NewtonMotive;
 use crate::body::universe::{Major, Minor};
 
 pub struct UniverseFile {
-    pub file: Option<PathBuf>,
+    pub(crate) file: Option<PathBuf>,
     pub contents: UniverseFileContents,
 }
 

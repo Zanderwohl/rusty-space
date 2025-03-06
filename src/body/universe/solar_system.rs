@@ -12,7 +12,7 @@ use crate::gui::util::ensure_folders;
 
 pub fn solar_system() -> UniverseFile {
     let solar_system = UniverseFile {
-        file: None,
+        file: Some(PathBuf::from("data/templates/tiny_system.toml")),
         contents: UniverseFileContents {
             version: "0.0".into(),
             time: UniverseFileTime {
@@ -189,13 +189,12 @@ pub fn write_temp_system_file() {
     let mut solar_system = solar_system();
     let path = PathBuf::from("data/templates");
     ensure_folders(&[&path]).expect("Folders couldn't be made");
-    solar_system.file = Some(PathBuf::from("data/templates/solar_system.toml"));
     solar_system.save().expect("Failed to save system");
 }
 
 pub fn tiny_system() -> UniverseFile {
     let solar_system = UniverseFile {
-        file: None,
+        file: Some(PathBuf::from("data/templates/tiny_system.toml")),
         contents: UniverseFileContents {
             version: "0.0".into(),
             time: UniverseFileTime {
@@ -297,6 +296,5 @@ pub fn write_tiny_system_file() {
     let mut solar_system = tiny_system();
     let path = PathBuf::from("data/templates");
     ensure_folders(&[&path]).expect("Folders couldn't be made");
-    solar_system.file = Some(PathBuf::from("data/templates/tiny_system.toml"));
     solar_system.save().expect("Failed to save system");
 }

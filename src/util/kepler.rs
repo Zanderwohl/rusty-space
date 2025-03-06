@@ -77,6 +77,10 @@ pub mod semi_major_axis {
     pub fn conic_definition3(focal_parameter: f64, eccentricity: f64) -> f64 {
         (focal_parameter * eccentricity) / (1.0 - eccentricity * eccentricity)
     }
+
+    pub fn radii(periapsis: f64, apoapsis: f64) -> f64 {
+        (periapsis + apoapsis) / 2.0
+    }
 }
 
 pub mod semi_latus_rectum {
@@ -106,6 +110,10 @@ pub mod eccentricity {
         f64::sqrt(1.0 - semi_latus_rectum / semi_major_axis)
     }
 
+    pub fn radii(periapsis: f64, apoapsis: f64) -> f64 {
+        (apoapsis - periapsis) / (apoapsis + periapsis)
+    }
+
     pub mod vector {
         use bevy::math::DVec3;
         use crate::util::kepler::local;
@@ -115,6 +123,32 @@ pub mod eccentricity {
             let term2 = local_position.normalize();
             term1 - term2
         }
+    }
+}
+
+pub mod semi_parameter {
+    use crate::util::common::unit_circle_xy;
+
+    pub fn definition(semi_major_axis: f64, eccentricity: f64) -> f64 {
+        semi_major_axis * unit_circle_xy(eccentricity)
+    }
+}
+
+pub mod periapsis {
+    use crate::util::common;
+    use crate::util::kepler::semi_parameter;
+
+    pub fn definition(semi_major_axis: f64, eccentricity: f64) -> f64 {
+        semi_parameter::definition(semi_major_axis, eccentricity) / (1.0 + eccentricity)
+    }
+}
+
+pub mod apoapsis {
+    use crate::util::kepler::semi_parameter;
+
+    pub fn definition(semi_major_axis: f64, eccentricity: f64) -> Option<f64> {
+        if eccentricity >= 1.0 { return None; }
+        Some(semi_parameter::definition(semi_major_axis, eccentricity) / (1.0 - eccentricity))
     }
 }
 
