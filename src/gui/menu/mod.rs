@@ -68,9 +68,8 @@ impl Plugin for MenuPlugin {
 
 pub fn main_menu(
     mut contexts: EguiContexts,
-    mut settings: ResMut<Settings>,
+    settings: Res<Settings>,
     mut ui_state: ResMut<UiState>,
-    mut menu_state: Res<State<MenuState>>,
     mut next_menu: ResMut<NextState<MenuState>>,
 ) {
     let ctx = contexts.ctx_mut();
@@ -152,7 +151,6 @@ pub fn planetarium_menu(
     mut contexts: EguiContexts,
     mut settings: ResMut<Settings>,
     mut ui_state: ResMut<UiState>,
-    mut menu_state: Res<State<MenuState>>,
     mut next_menu: ResMut<NextState<MenuState>>,
     mut next_app_state: ResMut<NextState<AppState>>,
     files: Res<PlanetariumFiles>,
