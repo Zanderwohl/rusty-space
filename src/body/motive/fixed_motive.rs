@@ -1,9 +1,7 @@
-use bevy::math::DVec3;
 use bevy::prelude::Component;
-use serde::{Deserialize, Serialize};
+use bevy::math::DVec3;
 
-#[derive(Component, Serialize, Deserialize)]
+#[derive(Component)]
 pub struct FixedMotive {
-    origin_id: Option<String>,
-    position: DVec3,
+    pub position: DVec3,
 }

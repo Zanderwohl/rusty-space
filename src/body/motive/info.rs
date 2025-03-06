@@ -1,34 +1,31 @@
-use bevy::prelude::Component;
+use bevy::math::DVec3;
 use serde::{Deserialize, Serialize};
+use bevy::prelude::Component;
 use uuid::Uuid;
 
-#[derive(Component, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Component)]
 pub struct BodyInfo {
-    pub name: String,
+    pub name: Option<String>,
     pub id: String,
+    pub mass: f64,
+    pub major: bool,
+    pub designation: Option<String>,
     #[serde(skip, default = "Uuid::new_v4")]
     pub uuid: Uuid,
+    #[serde(skip, default = "DVec3::default")]
+    pub last_step_position: DVec3,
 }
 
-/*
-/// Basically, this manual implementation allows for a default uuid.
-impl<'de> Deserialize<'de> for BodyInfo {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        pub struct Repr {
-            pub name: String,
-            pub id: String,
+impl Default for BodyInfo {
+    fn default() -> Self {
+        Self {
+            name: None,
+            id: "[DO NOT USE DEFAULT ID]".into(),
+            mass: 0.0,
+            major: false,
+            designation: None,
+            uuid: Uuid::from_u128(0u128),
+            last_step_position: DVec3::default(),
         }
-
-        let s = Repr::deserialize(deserializer)?;
-        Ok(BodyInfo {
-            name: s.name,
-            id: s.id,
-            uuid: Uuid::new_v4(),
-        })
     }
-}*/
+}

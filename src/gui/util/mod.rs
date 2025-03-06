@@ -8,7 +8,7 @@ pub fn ensure_folder(path: &PathBuf) -> Result<(), std::io::Error> {
 
 pub fn ensure_folders(paths: &[&PathBuf]) -> Result<(), std::io::Error> {
     for path in paths {
-        ensure_folder(path)?;
+        let _ = ensure_folder(path);
     }
     Ok(())
 }

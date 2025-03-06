@@ -1,5 +1,5 @@
 mod menu;
-mod planetarium;
+pub mod planetarium;
 pub(crate) mod body;
 pub mod util;
 pub mod app;

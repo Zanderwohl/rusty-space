@@ -1,10 +1,8 @@
-use bevy::math::DVec3;
 use bevy::prelude::Component;
-use serde::{Deserialize, Serialize};
+use bevy::math::DVec3;
 
-#[derive(Component, Serialize, Deserialize)]
+#[derive(Component)]
 pub struct NewtonMotive {
-    position: DVec3,
-    velocity: DVec3,
-    acceleration: DVec3,
+    pub position: DVec3,
+    pub velocity: DVec3,
 }

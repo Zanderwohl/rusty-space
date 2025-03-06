@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use bevy::math::DVec3;
-use crate::body::universe::{BodyInfo, EccentricitySMAParams, FixedEntry, KeplerEntry, KeplerEpochParams, KeplerEulerAngleParams, KeplerParams, KeplerRotationParams, KeplerShapeParams, MeanAnomalyAtJ2000, SomeBody, UniverseFile, UniverseFileContents, UniverseFileTime};
+use crate::body::motive::info::BodyInfo;
+use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerRotation, KeplerShape, MeanAnomalyAtJ2000};
+use crate::body::universe::save::{FixedEntry, KeplerEntry, SomeBody, UniverseFile, UniverseFileContents, UniverseFileTime};
 use crate::gui::util::ensure_folders;
 // Mass: Kg
 // Distance: Km
@@ -12,6 +14,7 @@ pub fn solar_system() -> UniverseFile {
     let solar_system = UniverseFile {
         file: None,
         contents: UniverseFileContents {
+            version: "0.0".into(),
             time: UniverseFileTime {
                 time: 2451544.500000 // Midnight 2000 January 1 00:00
             },
@@ -23,6 +26,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.988416e30,
                         major: true,
                         designation: None,
+                        ..Default::default()
                     },
                     position: DVec3::ZERO,
                 }), // Sun
@@ -33,19 +37,20 @@ pub fn solar_system() -> UniverseFile {
                         mass: 3.3011e23,
                         major: true,
                         designation: None,
+                        ..Default::default()
                     },
-                    params: KeplerParams {
+                    params: KeplerMotive {
                         primary_id: "sol".to_string(),
-                        shape: KeplerShapeParams::EccentricitySMA(EccentricitySMAParams {
+                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.205630,
                             semi_major_axis: 5.791e7,
                         }),
-                        rotation: KeplerRotationParams::EulerAngles(KeplerEulerAngleParams {
+                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
                             inclination: 7.005,
                             longitude_of_ascending_node: 48.331,
                             argument_of_periapsis: 29.124,
                         }),
-                        epoch: KeplerEpochParams::J2000(MeanAnomalyAtJ2000 {
+                        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
                             mean_anomaly: 174.796,
                         })
                     },
@@ -57,19 +62,20 @@ pub fn solar_system() -> UniverseFile {
                         mass: 4.8675e24,
                         major: true,
                         designation: None,
+                        ..Default::default()
                     },
-                    params: KeplerParams {
+                    params: KeplerMotive {
                         primary_id: "sol".to_string(),
-                        shape: KeplerShapeParams::EccentricitySMA(EccentricitySMAParams {
+                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.006772,
                             semi_major_axis: 1.0821e8, // 108,210,000
                         }),
-                        rotation: KeplerRotationParams::EulerAngles(KeplerEulerAngleParams {
+                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
                             inclination: 3.39458,
                             longitude_of_ascending_node: 76.680,
                             argument_of_periapsis: 54.884,
                         }),
-                        epoch: KeplerEpochParams::J2000(MeanAnomalyAtJ2000 {
+                        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
                             mean_anomaly: 50.115,
                         }),
                     },
@@ -81,19 +87,20 @@ pub fn solar_system() -> UniverseFile {
                         mass: 5.972168e24,
                         major: true,
                         designation: None,
+                        ..Default::default()
                     },
-                    params: KeplerParams {
+                    params: KeplerMotive {
                         primary_id: "sol".to_string(),
-                        shape: KeplerShapeParams::EccentricitySMA(EccentricitySMAParams {
+                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.0167086,
                             semi_major_axis: 1.49598023e8, // 149,598,023
                         }),
-                        rotation: KeplerRotationParams::EulerAngles(KeplerEulerAngleParams {
+                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
                             inclination: 0.00005, // haha, the J2000 ecliptic is nonzero
                             longitude_of_ascending_node: -11.26064,
                             argument_of_periapsis: 114.20783,
                         }),
-                        epoch: KeplerEpochParams::J2000(MeanAnomalyAtJ2000 {
+                        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
                             mean_anomaly: 358.617,
                         }),
                     },
@@ -105,19 +112,20 @@ pub fn solar_system() -> UniverseFile {
                         mass: 6.4171,
                         major: true,
                         designation: None,
+                        ..Default::default()
                     },
-                    params: KeplerParams {
+                    params: KeplerMotive {
                         primary_id: "sol".to_string(),
-                        shape: KeplerShapeParams::EccentricitySMA(EccentricitySMAParams {
+                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.0934,
                             semi_major_axis: 2.27939366e8, // 227,939,366
                         }),
-                        rotation: KeplerRotationParams::EulerAngles(KeplerEulerAngleParams {
+                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
                             inclination: 1.850,
                             longitude_of_ascending_node: 49.57854,
                             argument_of_periapsis: 286.5,
                         }),
-                        epoch: KeplerEpochParams::J2000(MeanAnomalyAtJ2000 {
+                        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
                             mean_anomaly: 19.412,
                         }),
                     },
@@ -129,19 +137,20 @@ pub fn solar_system() -> UniverseFile {
                         mass: 6.4171,
                         major: true,
                         designation: Some("1 Ceres".into()),
+                        ..Default::default()
                     },
-                    params: KeplerParams {
+                    params: KeplerMotive {
                         primary_id: "sol".to_string(),
-                        shape: KeplerShapeParams::EccentricitySMA(EccentricitySMAParams {
+                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.0785,
                             semi_major_axis: 4.14e8, // 414,000,000
                         }),
-                        rotation: KeplerRotationParams::EulerAngles(KeplerEulerAngleParams {
+                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
                             inclination: 10.6,
                             longitude_of_ascending_node: 80.3,
                             argument_of_periapsis: 73.6,
                         }),
-                        epoch: KeplerEpochParams::J2000(MeanAnomalyAtJ2000 {
+                        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
                             mean_anomaly: 291.4,
                         }),
                     },
@@ -153,19 +162,20 @@ pub fn solar_system() -> UniverseFile {
                         mass: 6.4171,
                         major: true,
                         designation: Some("Earth I".into()),
+                        ..Default::default()
                     },
-                    params: KeplerParams {
+                    params: KeplerMotive {
                         primary_id: "earth".to_string(),
-                        shape: KeplerShapeParams::EccentricitySMA(EccentricitySMAParams {
+                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.0549,
                             semi_major_axis: 3.84399e5,
                         }),
-                        rotation: KeplerRotationParams::EulerAngles(KeplerEulerAngleParams { // TODO: Precession https://en.wikipedia.org/wiki/Orbit_of_the_Moon#Precession
+                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles { // TODO: Precession https://en.wikipedia.org/wiki/Orbit_of_the_Moon#Precession
                             inclination: 5.145,
                             longitude_of_ascending_node: 0.0,
                             argument_of_periapsis: 0.0,
                         }),
-                        epoch: KeplerEpochParams::J2000(MeanAnomalyAtJ2000 {
+                        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
                             mean_anomaly: 0.0,
                         }),
                     },
@@ -187,6 +197,7 @@ pub fn tiny_system() -> UniverseFile {
     let solar_system = UniverseFile {
         file: None,
         contents: UniverseFileContents {
+            version: "0.0".into(),
             time: UniverseFileTime {
                 time: 2451544.500000 // Midnight 2000 January 1 00:00
             },
@@ -198,6 +209,7 @@ pub fn tiny_system() -> UniverseFile {
                         mass: 1.988416e30,
                         major: true,
                         designation: None,
+                        ..Default::default()
                     },
                     position: DVec3::ZERO,
                 }), // Sun
@@ -208,19 +220,20 @@ pub fn tiny_system() -> UniverseFile {
                         mass: 4.8675e24,
                         major: true,
                         designation: None,
+                        ..Default::default()
                     },
-                    params: KeplerParams {
+                    params: KeplerMotive {
                         primary_id: "sol".to_string(),
-                        shape: KeplerShapeParams::EccentricitySMA(EccentricitySMAParams {
+                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.006772,
                             semi_major_axis: 1.0821e8, // 108,210,000
                         }),
-                        rotation: KeplerRotationParams::EulerAngles(KeplerEulerAngleParams {
+                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
                             inclination: 3.39458,
                             longitude_of_ascending_node: 76.680,
                             argument_of_periapsis: 54.884,
                         }),
-                        epoch: KeplerEpochParams::J2000(MeanAnomalyAtJ2000 {
+                        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
                             mean_anomaly: 50.115,
                         }),
                     },
@@ -232,19 +245,20 @@ pub fn tiny_system() -> UniverseFile {
                         mass: 5.972168e24,
                         major: true,
                         designation: None,
+                        ..Default::default()
                     },
-                    params: KeplerParams {
+                    params: KeplerMotive {
                         primary_id: "sol".to_string(),
-                        shape: KeplerShapeParams::EccentricitySMA(EccentricitySMAParams {
+                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.0167086,
                             semi_major_axis: 1.49598023e8, // 149,598,023
                         }),
-                        rotation: KeplerRotationParams::EulerAngles(KeplerEulerAngleParams {
+                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
                             inclination: 0.00005, // haha, the J2000 ecliptic is nonzero
                             longitude_of_ascending_node: -11.26064,
                             argument_of_periapsis: 114.20783,
                         }),
-                        epoch: KeplerEpochParams::J2000(MeanAnomalyAtJ2000 {
+                        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
                             mean_anomaly: 358.617,
                         }),
                     },
@@ -256,19 +270,20 @@ pub fn tiny_system() -> UniverseFile {
                         mass: 6.4171,
                         major: true,
                         designation: Some("Earth I".into()),
+                        ..Default::default()
                     },
-                    params: KeplerParams {
+                    params: KeplerMotive {
                         primary_id: "earth".to_string(),
-                        shape: KeplerShapeParams::EccentricitySMA(EccentricitySMAParams {
+                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.0549,
                             semi_major_axis: 3.84399e5,
                         }),
-                        rotation: KeplerRotationParams::EulerAngles(KeplerEulerAngleParams { // TODO: Precession https://en.wikipedia.org/wiki/Orbit_of_the_Moon#Precession
+                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles { // TODO: Precession https://en.wikipedia.org/wiki/Orbit_of_the_Moon#Precession
                             inclination: 5.145,
                             longitude_of_ascending_node: 0.0,
                             argument_of_periapsis: 0.0,
                         }),
-                        epoch: KeplerEpochParams::J2000(MeanAnomalyAtJ2000 {
+                        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
                             mean_anomaly: 0.0,
                         }),
                     },
