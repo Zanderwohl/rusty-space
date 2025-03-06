@@ -77,6 +77,22 @@ impl KeplerMotive {
     pub fn mean_angular_motion(&self, gravitational_parameter: f64) -> f64 {
         angular_motion::mean(gravitational_parameter, self.semi_major_axis())
     }
+
+    pub fn mean_anomaly(&self, time: f64) -> f64 {
+        todo!()
+    }
+
+    pub fn true_anomaly(&self, time: f64) -> f64 {
+        todo!()
+    }
+
+    pub fn radius_from_primary(&self, time: f64) -> f64 {
+        todo!()
+    }
+
+    pub fn eccentric_anomaly(&self, time: f64) -> f64 {
+        todo!()
+    }
 }
 
 #[derive(Serialize, Deserialize)]

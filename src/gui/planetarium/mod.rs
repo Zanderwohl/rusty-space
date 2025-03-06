@@ -57,7 +57,7 @@ fn planetarium_ui(
                 }
 
                 ui.disable();
-                ui.button("Save");
+                let _ = ui.button("Save");
             });
             ui.separator();
             ui.horizontal(|ui| {
