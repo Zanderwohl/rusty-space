@@ -1,7 +1,7 @@
 use bevy::prelude::ResMut;
 use bevy_egui::egui;
 use bevy_egui::egui::Ui;
-use crate::gui::settings::{DisplayGlow, DisplayQuality, Settings};
+use crate::gui::settings::{DisplayGlow, DisplayQuality, Settings, UiTheme};
 
 pub fn settings_panel(mut settings: &mut ResMut<Settings>, ui: &mut Ui) {
     ui.vertical(|ui| {
@@ -29,5 +29,17 @@ pub fn settings_panel(mut settings: &mut ResMut<Settings>, ui: &mut Ui) {
 
         ui.checkbox(&mut settings.sound.mute, "Mute");
         ui.add(egui::Slider::new(&mut settings.sound.volume, 0..=100).text("Volume"));
+    });
+
+    ui.separator();
+    ui.vertical(|ui| {
+        ui.heading("User Interface");
+            
+        egui::ComboBox::from_label("Theme")
+            .selected_text(format!("{:?}", settings.ui.theme))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut settings.ui.theme, UiTheme::Light, "Light");
+                ui.selectable_value(&mut settings.ui.theme, UiTheme::Dark, "Dark");
+            });
     });
 }

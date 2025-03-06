@@ -10,7 +10,7 @@ use bevy::window::{ClosingWindow, WindowCloseRequested};
 use bevy_egui::{egui, EguiContexts};
 use bevy_egui::egui::Ui;
 use crate::gui::app::AppState;
-use crate::gui::settings::Settings;
+use crate::gui::settings::{Settings, UiTheme};
 
 #[derive(Resource)]
 pub struct UiState {
@@ -73,20 +73,36 @@ pub fn main_menu(
     mut next_menu: ResMut<NextState<MenuState>>,
 ) {
     let ctx = contexts.ctx_mut();
+    
+    match settings.ui.theme {
+        UiTheme::Light => ctx.set_visuals(egui::Visuals::light()),
+        UiTheme::Dark => ctx.set_visuals(egui::Visuals::dark()),
+    }
 
     egui::CentralPanel::default().show(ctx, |ui| {
         ui.vertical_centered(|ui| {
             ui.heading("Exotic Matters");
+            
+            // Add some spacing after the heading
+            ui.add_space(20.0);
 
-            if ui.button("Planetarium").clicked() {
+            let button_width = 200.0;
+            let button_height = 40.0;
+
+            if ui.add_sized([button_width, button_height], egui::Button::new("Planetarium")).clicked() {
                 next_menu.set(MenuState::Planetarium)
             }
+            
+            // Add spacing between buttons
+            ui.add_space(10.0);
 
-            if ui.button("Settings").clicked() {
+            if ui.add_sized([button_width, button_height], egui::Button::new("Settings")).clicked() {
                 next_menu.set(MenuState::Settings)
             }
+            
+            ui.add_space(10.0);
 
-            if ui.button("Quit").clicked() {
+            if ui.add_sized([button_width, button_height], egui::Button::new("Quit")).clicked() {
                 ui_state.quit_requested = true;
             }
         });
@@ -156,41 +172,78 @@ pub fn planetarium_menu(
     files: Res<PlanetariumFiles>,
 ) {
     let ctx = contexts.ctx_mut();
+    
+    match settings.ui.theme {
+        UiTheme::Light => ctx.set_visuals(egui::Visuals::light()),
+        UiTheme::Dark => ctx.set_visuals(egui::Visuals::dark()),
+    }
 
     egui::CentralPanel::default().show(ctx, |ui| {
-        if ui.button("Back").clicked() {
-            next_menu.set(MenuState::Home)
-        }
-
-        if ui.button("Planetarium").clicked() {
-            next_app_state.set(AppState::Planetarium)
-        }
+        // Top button bar
+        ui.horizontal(|ui| {
+            let button_height = 40.0;
+            
+            if ui.add_sized([120.0, button_height], egui::Button::new("Back")).clicked() {
+                next_menu.set(MenuState::Home)
+            }
+            
+            ui.add_space(10.0);
+            
+            if ui.add_sized([120.0, button_height], egui::Button::new("Planetarium")).clicked() {
+                next_app_state.set(AppState::Planetarium)
+            }
+        });
+        
+        ui.add_space(20.0);
 
         ui.vertical_centered(|ui| {
             ui.heading("Planetarium Select");
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.heading("Create from Template");
-                    ui.allocate_space(ui.available_size() / 2.0);
-                    egui::ScrollArea::vertical()
-                        .id_salt("planetarium-template-list")
-                        .auto_shrink([true, false])
-                        .show(ui, |ui| {
-                            display_saves_list(&files.templates, ui);
-                        })
+            ui.add_space(20.0);
+        });
+
+        // Two column layout
+        ui.columns(2, |columns| {
+            // Left column - Templates
+            egui::Frame::none()
+                .fill(if ctx.style().visuals.dark_mode {
+                    egui::Color32::from_gray(40)
+                } else {
+                    egui::Color32::from_gray(240)
+                })
+                .inner_margin(10.0)
+                .show(&mut columns[0], |ui| {
+                    ui.vertical(|ui| {
+                        ui.heading("Create from Template");
+                        ui.add_space(10.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("planetarium-template-list")
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                display_saves_list(&files.templates, ui);
+                            });
+                    });
                 });
-                ui.separator();
-                ui.vertical(|ui| {
-                    ui.heading("Load from File");
-                    ui.allocate_space(ui.available_size());
-                    egui::ScrollArea::vertical()
-                        .id_salt("planetarium-save-list")
-                        .auto_shrink([true, false])
-                        .show(ui, |ui| {
-                            display_saves_list(&files.saves, ui);
-                        })
+
+            // Right column - Saves
+            egui::Frame::none()
+                .fill(if ctx.style().visuals.dark_mode {
+                    egui::Color32::from_gray(40)
+                } else {
+                    egui::Color32::from_gray(240)
+                })
+                .inner_margin(10.0)
+                .show(&mut columns[1], |ui| {
+                    ui.vertical(|ui| {
+                        ui.heading("Load from File");
+                        ui.add_space(10.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("planetarium-save-list")
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                display_saves_list(&files.saves, ui);
+                            });
+                    });
                 });
-            })
         });
     });
 }
@@ -223,6 +276,11 @@ pub fn settings_menu(
     mut next_app_state: ResMut<NextState<AppState>>
 ) {
     let ctx = contexts.ctx_mut();
+    
+    match settings.ui.theme {
+        UiTheme::Light => ctx.set_visuals(egui::Visuals::light()),
+        UiTheme::Dark => ctx.set_visuals(egui::Visuals::dark()),
+    }
 
     egui::CentralPanel::default().show(ctx, |ui| {
         if ui.button("Back").clicked() {

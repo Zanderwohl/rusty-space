@@ -7,6 +7,7 @@ use crate::gui::util::ensure_toml;
 pub struct Settings {
     pub display: DisplaySettings,
     pub sound: SoundSettings,
+    pub ui: UiSettings,
 }
 
 impl Default for Settings {
@@ -14,6 +15,7 @@ impl Default for Settings {
         Self {
             display: DisplaySettings::default(),
             sound: SoundSettings::default(),
+            ui: UiSettings::default(),
         }
     }
 }
@@ -71,4 +73,24 @@ pub fn load() -> Settings {
             println!("Startup error: {}", message);
             std::process::exit(1);
         })
+}
+
+#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+pub struct UiSettings {
+    pub theme: UiTheme,
+}
+
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, Default, PartialEq)]
+pub enum UiTheme {
+    #[default]
+    Light,
+    Dark,
+}
+
+impl Default for UiSettings {
+    fn default() -> Self {
+        Self {
+            theme: UiTheme::default(),
+        }
+    }
 }

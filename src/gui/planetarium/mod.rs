@@ -8,7 +8,7 @@ use regex::Regex;
 use crate::gui::app::AppState;
 use crate::gui::menu::{MenuState, UiState};
 use crate::gui::planetarium::time::SimTime;
-use crate::gui::settings::Settings;
+use crate::gui::settings::{Settings, UiTheme};
 use crate::util::format::seconds_to_naive_date;
 
 pub mod time;
@@ -46,6 +46,11 @@ fn planetarium_ui(
     mut time: ResMut<SimTime>,
 ) {
     let ctx = contexts.ctx_mut();
+    
+    match settings.ui.theme {
+        UiTheme::Light => ctx.set_visuals(egui::Visuals::light()),
+        UiTheme::Dark => ctx.set_visuals(egui::Visuals::dark()),
+    }
 
     egui::Window::new("Controls")
         .vscroll(true)
