@@ -2,11 +2,13 @@ pub(crate) mod settings;
 
 use std::fs;
 use std::ops::Deref;
+use std::path::PathBuf;
 use bevy::app::AppExit;
-use bevy::prelude::{in_state, App, AppExtStates, Commands, Condition, Entity, EventReader, EventWriter, IntoSystemConfigs, NextState, Plugin, Query, Res, ResMut, Resource, State, States, SystemSet, Update, With};
+use bevy::prelude::{in_state, info, App, AppExtStates, Commands, Condition, Entity, EventReader, EventWriter, IntoSystemConfigs, NextState, OnEnter, OnExit, Plugin, Query, Res, ResMut, Resource, State, States, SystemSet, Update, With};
 use bevy::prelude::IntoSystemSetConfigs;
 use bevy::window::{ClosingWindow, WindowCloseRequested};
 use bevy_egui::{egui, EguiContexts};
+use bevy_egui::egui::Ui;
 use crate::gui::app::AppState;
 use crate::gui::settings::Settings;
 
@@ -51,10 +53,13 @@ impl Plugin for MenuPlugin {
                 SettingsMenuSet.run_if(in_state(AppState::MainMenu).and(in_state(MenuState::Settings))),
                 ))
             .init_resource::<UiState>()
+            .init_resource::<PlanetariumFiles>()
+            .add_systems(OnEnter(MenuState::Planetarium), load_planetarium_files)
+            .add_systems(OnEnter(AppState::MainMenu), load_planetarium_files.run_if(in_state(MenuState::Planetarium)))
             .add_systems(Update, (
                 (main_menu,).in_set(MainMenuSet),
                 (planetarium_menu,).in_set(PlanetariumMenuSet),
-                (settings_menu).in_set(SettingsMenuSet),
+                (settings_menu,).in_set(SettingsMenuSet),
                 quit_system,
             ))
         ;
@@ -89,13 +94,68 @@ pub fn main_menu(
     });
 }
 
+#[derive(Resource)]
+pub struct PlanetariumFiles {
+    templates: Vec<SaveFileMeta>,
+    saves: Vec<SaveFileMeta>,
+}
+
+impl Default for PlanetariumFiles {
+    fn default() -> Self {
+        Self {
+            templates: vec![],
+            saves: vec![],
+        }
+    }
+}
+
+pub struct SaveFileMeta {
+    path: PathBuf,
+    file_name: String,
+}
+
+pub fn load_planetarium_files(mut files: ResMut<PlanetariumFiles>) {
+    files.templates.clear();
+    files.saves.clear();
+
+    let template_files = fs::read_dir("data/templates").unwrap();
+    let save_files = fs::read_dir("data/saves").unwrap();
+
+    for file in template_files {
+        let file = file.unwrap();
+        if file.path().is_file() {
+            let path = file.path();
+            let path2 = path.clone();
+            let name = path2.file_name().unwrap().to_str().unwrap();
+            files.templates.push(SaveFileMeta {
+                path,
+                file_name: name.to_string(),
+            })
+        }
+    }
+    for file in save_files {
+        let file = file.unwrap();
+        if file.path().is_file() {
+            let path = file.path();
+            let path2 = path.clone();
+            let name = path2.file_name().unwrap().to_str().unwrap();
+            files.templates.push(SaveFileMeta {
+                path,
+                file_name: name.to_string(),
+            })
+        }
+    }
+    info!("{}, {}", files.templates.len(), files.saves.len());
+}
+
 pub fn planetarium_menu(
     mut contexts: EguiContexts,
     mut settings: ResMut<Settings>,
     mut ui_state: ResMut<UiState>,
     mut menu_state: Res<State<MenuState>>,
     mut next_menu: ResMut<NextState<MenuState>>,
-    mut next_app_state: ResMut<NextState<AppState>>
+    mut next_app_state: ResMut<NextState<AppState>>,
+    files: Res<PlanetariumFiles>,
 ) {
     let ctx = contexts.ctx_mut();
 
@@ -118,6 +178,7 @@ pub fn planetarium_menu(
                         .id_salt("planetarium-template-list")
                         .auto_shrink([true, false])
                         .show(ui, |ui| {
+                            display_saves_list(&files.templates, ui);
                         })
                 });
                 ui.separator();
@@ -128,11 +189,31 @@ pub fn planetarium_menu(
                         .id_salt("planetarium-save-list")
                         .auto_shrink([true, false])
                         .show(ui, |ui| {
+                            display_saves_list(&files.saves, ui);
                         })
                 });
             })
         });
     });
+}
+
+fn display_saves_list(
+    saves: &Vec<SaveFileMeta>,
+    ui: &mut Ui,
+) {
+    for (idx, save) in saves.iter().enumerate() {
+        ui.horizontal(|ui| {
+            ui.label(&save.file_name);
+
+            if ui.button("Load").clicked() {
+
+            }
+        });
+
+        if idx < saves.len() - 1 {
+            ui.separator();
+        }
+    }
 }
 
 pub fn settings_menu(

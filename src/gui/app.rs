@@ -5,7 +5,7 @@ use bevy::DefaultPlugins;
 use bevy::prelude::{App, AppExtStates, Camera3d, ClearColor, Commands, PluginGroup, Res, Single, Startup, States, Update, Window, WindowPlugin};
 use bevy::window::{ExitCondition, PresentMode};
 use bevy_egui::EguiPlugin;
-use crate::body::solar_system::write_temp_system_file;
+use crate::body::solar_system::{write_temp_system_file, write_tiny_system_file};
 use crate::gui::menu::{close_when_requested, MenuPlugin};
 use crate::gui::planetarium::Planetarium;
 use crate::gui::settings;
@@ -16,6 +16,7 @@ pub fn run() {
     init();
     let settings = settings::load();
     write_temp_system_file();
+    write_tiny_system_file();
 
     App::new()
         .add_plugins(DefaultPlugins
@@ -57,6 +58,8 @@ pub fn init() {
     ensure_folders(
         &[
             &PathBuf::from("data"),
+            &PathBuf::from("data/templates"),
+            &PathBuf::from("data/saves"),
         ])
         .unwrap_or_else(|message| {
             println!("Client startup error: {}", message);
