@@ -254,7 +254,7 @@ fn display_saves_list(
 ) {
     for (idx, save) in saves.iter().enumerate() {
         // Card frame for each item
-        egui::Frame::none()
+        egui::Frame::new()
             .fill(if ui.style().visuals.dark_mode {
                 egui::Color32::from_gray(50)
             } else {
