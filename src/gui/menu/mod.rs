@@ -201,7 +201,6 @@ pub fn planetarium_menu(
             ui.add_space(20.0);
         });
 
-        // Two column layout
         ui.columns(2, |columns| {
             // Left column - Templates
             egui::Frame::none()
@@ -219,13 +218,13 @@ pub fn planetarium_menu(
                             .id_salt("planetarium-template-list")
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                display_saves_list(&files.templates, ui);
+                                display_saves_list(&files.templates, ui, "Create");
                             });
                     });
                 });
 
             // Right column - Saves
-            egui::Frame::none()
+            egui::Frame::new()
                 .fill(if ctx.style().visuals.dark_mode {
                     egui::Color32::from_gray(40)
                 } else {
@@ -240,7 +239,7 @@ pub fn planetarium_menu(
                             .id_salt("planetarium-save-list")
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                display_saves_list(&files.saves, ui);
+                                display_saves_list(&files.saves, ui, "Load");
                             });
                     });
                 });
@@ -251,18 +250,34 @@ pub fn planetarium_menu(
 fn display_saves_list(
     saves: &Vec<SaveFileMeta>,
     ui: &mut Ui,
+    load_label: &str,
 ) {
     for (idx, save) in saves.iter().enumerate() {
-        ui.horizontal(|ui| {
-            ui.label(&save.file_name);
-
-            if ui.button("Load").clicked() {
-
-            }
-        });
-
+        // Card frame for each item
+        egui::Frame::none()
+            .fill(if ui.style().visuals.dark_mode {
+                egui::Color32::from_gray(50)
+            } else {
+                egui::Color32::from_gray(250)
+            })
+            .inner_margin(egui::vec2(10.0, 8.0))
+            .outer_margin(egui::vec2(0.0, 2.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    // Expand label to take available width
+                    ui.add(egui::Label::new(&save.file_name))
+                        .on_hover_text(&save.file_name);
+                    
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add_sized([60.0, 24.0], egui::Button::new(load_label)).clicked() {
+                            // Load functionality here
+                        }
+                    });
+                });
+            });
+            
         if idx < saves.len() - 1 {
-            ui.separator();
+            ui.add_space(2.0);
         }
     }
 }
