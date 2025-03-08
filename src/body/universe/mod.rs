@@ -18,6 +18,16 @@ pub struct Universe {
     name_to_id: HashMap<String, String>,
 }
 
+impl Default for Universe {
+    fn default() -> Self {
+        Self {
+            path: None,
+            id_to_name: HashMap::new(),
+            name_to_id: HashMap::new(),
+        }
+    }
+}
+
 #[derive(Component)]
 pub struct Major;
 

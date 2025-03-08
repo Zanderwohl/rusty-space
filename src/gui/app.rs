@@ -6,6 +6,7 @@ use bevy::prelude::{App, AppExtStates, Camera3d, ClearColor, Commands, PluginGro
 use bevy::window::{ExitCondition, PresentMode};
 use bevy_egui::EguiPlugin;
 use crate::body::universe::solar_system::{write_temp_system_file, write_tiny_system_file};
+use crate::body::universe::Universe;
 use crate::gui::menu::{close_when_requested, MenuPlugin};
 use crate::gui::planetarium::Planetarium;
 use crate::gui::settings;
@@ -33,6 +34,7 @@ pub fn run() {
                 close_when_requested: false,
             }))
         .insert_resource(settings)
+        .init_resource::<Universe>()
         .add_systems(Startup, common_setup)
         .add_systems(Update, close_when_requested)
         .insert_state(AppState::Splash)

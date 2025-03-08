@@ -5,4 +5,4 @@ pub mod util;
 pub mod app;
 mod settings;
 mod splash;
-mod common;
+pub mod common;

@@ -7,6 +7,7 @@ use crate::body::motive::fixed_motive::FixedMotive;
 use crate::body::motive::info::BodyInfo;
 use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::motive::newton_motive::NewtonMotive;
+use crate::body::SimulationObject;
 use crate::body::universe::{Major, Minor};
 
 pub struct UniverseFile {
@@ -79,6 +80,7 @@ impl FixedEntry {
         if info.major {
             commands
                 .spawn((
+                    SimulationObject,
                     Transform::default(),
                     // TODO: Mesh
                     info,
@@ -88,6 +90,7 @@ impl FixedEntry {
         } else {
             commands
                 .spawn((
+                    SimulationObject,
                     Transform::default(),
                     // TODO: Mesh
                     info,
@@ -115,6 +118,7 @@ impl NewtonEntry {
         if info.major {
             commands
                 .spawn((
+                    SimulationObject,
                     Transform::default(),
                     // TODO: Mesh
                     info,
@@ -124,6 +128,7 @@ impl NewtonEntry {
         } else {
             commands
                 .spawn((
+                    SimulationObject,
                     Transform::default(),
                     // TODO: Mesh
                     info,
@@ -147,6 +152,7 @@ impl KeplerEntry {
         if info.major {
             commands
                 .spawn((
+                    SimulationObject,
                     Transform::default(),
                     // TODO: Mesh
                     info,
@@ -156,6 +162,7 @@ impl KeplerEntry {
         } else {
             commands
                 .spawn((
+                    SimulationObject,
                     Transform::default(),
                     // TODO: Mesh
                     info,

@@ -11,6 +11,7 @@ use bevy_egui::{egui, EguiContexts};
 use bevy_egui::egui::Ui;
 use crate::gui::app::AppState;
 use crate::gui::settings::{Settings, UiTheme};
+use crate::body::universe::Universe;
 
 #[derive(Resource)]
 pub struct UiState {
@@ -170,6 +171,7 @@ pub fn planetarium_menu(
     mut next_menu: ResMut<NextState<MenuState>>,
     mut next_app_state: ResMut<NextState<AppState>>,
     files: Res<PlanetariumFiles>,
+    mut universe: ResMut<Universe>,
 ) {
     let ctx = contexts.ctx_mut();
     
@@ -218,7 +220,7 @@ pub fn planetarium_menu(
                             .id_salt("planetarium-template-list")
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                display_saves_list(&files.templates, ui, "Create");
+                                display_saves_list(&files.templates, ui, "Create", &mut universe);
                             });
                     });
                 });
@@ -239,7 +241,7 @@ pub fn planetarium_menu(
                             .id_salt("planetarium-save-list")
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                display_saves_list(&files.saves, ui, "Load");
+                                display_saves_list(&files.saves, ui, "Load", &mut universe);
                             });
                     });
                 });
@@ -251,6 +253,7 @@ fn display_saves_list(
     saves: &Vec<SaveFileMeta>,
     ui: &mut Ui,
     load_label: &str,
+    universe: &mut ResMut<Universe>,
 ) {
     for (idx, save) in saves.iter().enumerate() {
         // Card frame for each item

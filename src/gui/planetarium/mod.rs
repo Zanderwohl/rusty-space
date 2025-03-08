@@ -1,5 +1,5 @@
 use bevy::app::{App, Update};
-use bevy::prelude::{in_state, info, Commands, IntoSystemSetConfigs, NextState, Plugin, Res, ResMut, Startup, SystemSet, Time};
+use bevy::prelude::{in_state, info, Commands, IntoSystemSetConfigs, NextState, Plugin, Res, ResMut, Startup, SystemSet, Time, OnExit};
 use bevy::prelude::IntoSystemConfigs;
 use bevy_egui::{egui, EguiContexts};
 use lazy_static::lazy_static;
@@ -10,6 +10,7 @@ use crate::gui::menu::{MenuState, UiState};
 use crate::gui::planetarium::time::SimTime;
 use crate::gui::settings::{Settings, UiTheme};
 use crate::util::format::seconds_to_naive_date;
+use crate::body::unload_simulation_objects;
 
 pub mod time;
 mod display;
@@ -29,6 +30,7 @@ impl Plugin for Planetarium {
             .add_systems(Update, (
                 (planetarium_ui, advance_time).in_set(PlanetariumUISet),
             ))
+            .add_systems(OnExit(AppState::Planetarium), unload_simulation_objects)
         ;
     }
 }
