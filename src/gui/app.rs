@@ -60,6 +60,8 @@ pub fn init() {
     ensure_folders(
         &[
             &PathBuf::from("data"),
+            &PathBuf::from("data/templates"),
+            &PathBuf::from("data/saves"),
         ])
         .unwrap_or_else(|message| {
             println!("Client startup error: {}", message);
