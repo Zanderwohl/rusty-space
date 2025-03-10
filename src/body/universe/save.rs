@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use bevy::math::DVec3;
 use bevy::prelude::{Commands, Transform};
 use bevy::utils::HashMap;
+use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use crate::body::motive::fixed_motive::FixedMotive;
 use crate::body::motive::info::BodyInfo;
@@ -9,6 +10,7 @@ use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::motive::newton_motive::NewtonMotive;
 use crate::body::SimulationObject;
 use crate::body::universe::{Major, Minor};
+
 
 pub struct UniverseFile {
     pub(crate) file: Option<PathBuf>,
