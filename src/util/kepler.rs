@@ -37,10 +37,18 @@ pub mod local {
             numerator / denominator
         }
 
-        pub fn from_elements2(semi_major_axis: f64, eccentricity: f64, true_anomaly: f64) -> f64 {
+        pub fn from_elements2(semi_major_axis: f64, eccentricity: f64, true_anomaly: f64) -> Option<f64> {
             let numerator = 1.0 - eccentricity * eccentricity;
             let denominator = 1.0 + eccentricity * f64::cos(true_anomaly);
-            semi_major_axis * (numerator / denominator)
+            if denominator == 0.0 {
+                None
+            } else {
+                Some(semi_major_axis * (numerator / denominator))
+            }
+        }
+
+        pub fn from_elements2_infallible(semi_major_axis: f64, eccentricity: f64, true_anomaly: f64) -> f64 {
+            from_elements2(eccentricity, semi_major_axis, true_anomaly).unwrap_or(f64::INFINITY)
         }
 
         pub fn from_eccentric_anomaly(semi_major_axis: f64, eccentricity: f64, eccentric_anomaly: f64) -> f64 {
@@ -288,22 +296,5 @@ pub mod energy {
         pub fn definition(mass: f64, mu: f64, displacement: f64) -> f64 {
             mass * specific(mu, displacement)
         }
-    }
-}
-
-pub mod in_plane {
-    use bevy::math::DVec3;
-    use crate::util::kepler;
-
-    pub fn displacement(time: f64, mu: f64, mean_anomaly_at_epoch: f64, semi_major_axis: f64, eccentricity: f64, longitude_of_periapsis: f64) -> DVec3 {
-        let mean_anomaly = super::mean_anomaly::definition(mean_anomaly_at_epoch, mu, semi_major_axis, 0.0, time);
-        let true_anomaly = kepler::true_anomaly::fourier_expansion(mean_anomaly, eccentricity, 10);
-        let radius = super::local::radius::from_elements2(semi_major_axis, eccentricity, true_anomaly);
-        let rotated_true_anomaly = true_anomaly + longitude_of_periapsis;
-        let local_r = DVec3::new(
-            radius * f64::cos(rotated_true_anomaly),
-            0.0,
-            radius * -f64::sin(rotated_true_anomaly)); // Negative due to y->z translation
-        local_r
     }
 }

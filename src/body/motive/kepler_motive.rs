@@ -92,7 +92,7 @@ impl KeplerMotive {
         true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), self.shape.eccentricity(), EXPANSION_ITERATIONS)
     }
 
-    pub fn radius_from_primary(&self, time: f64, gravitational_parameter: f64) -> f64 {
+    pub fn radius_from_primary(&self, time: f64, gravitational_parameter: f64) -> Option<f64> {
         let ecc = self.shape.eccentricity();
         let ta = true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), ecc, EXPANSION_ITERATIONS);
         local::radius::from_elements2(self.shape.semi_major_axis(), ecc, ta)
@@ -107,20 +107,20 @@ impl KeplerMotive {
     /// +P (+x) points to periapsis
     /// +Q (+y) points toward motion at periapsis, normal to P
     /// +W (+z) normal to the other 2 according to RHR
-    pub fn displacement_pqw(&self, time: f64, gravitational_parameter: f64) -> DVec3 {
-        let rad = self.radius_from_primary(time, gravitational_parameter);
+    pub fn displacement_pqw(&self, time: f64, gravitational_parameter: f64) -> Option<DVec3> {
+        let rad = self.radius_from_primary(time, gravitational_parameter)?;
         let ta = true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), self.shape.eccentricity(), EXPANSION_ITERATIONS);
-        DVec3::new(rad * ta.cos(), rad * ta.sin(), 0.0)
+        Some(DVec3::new(rad * ta.cos(), rad * ta.sin(), 0.0))
     }
 
-    pub fn displacement(&self, time: f64, gravitational_parameter: f64) -> DVec3 {
-        let perifocal_displacement = self.displacement_pqw(time, gravitational_parameter);
+    pub fn displacement(&self, time: f64, gravitational_parameter: f64) -> Option<DVec3> {
+        let perifocal_displacement = self.displacement_pqw(time, gravitational_parameter)?;
 
         let rot_arg_peri = DMat3::from_rotation_z(self.argument_of_periapsis().to_radians());
         let rot_inc = DMat3::from_rotation_x(self.inclination().to_radians());
         let rot_long_asc_node = DMat3::from_rotation_z(self.longitude_of_ascending_node_infallible());
 
-        rot_long_asc_node * rot_inc * rot_arg_peri * perifocal_displacement
+        Some(rot_long_asc_node * rot_inc * rot_arg_peri * perifocal_displacement)
     }
 }
 
