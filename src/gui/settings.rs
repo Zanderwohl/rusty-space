@@ -5,9 +5,14 @@ use crate::gui::util::ensure_toml;
 
 #[derive(Serialize, Deserialize, Debug, Resource)]
 pub struct Settings {
+    #[serde(default)]
     pub display: DisplaySettings,
+    #[serde(default)]
     pub sound: SoundSettings,
+    #[serde(default)]
     pub ui: UiSettings,
+    #[serde(default)]
+    pub windows: WindowSelections,
 }
 
 impl Default for Settings {
@@ -16,13 +21,16 @@ impl Default for Settings {
             display: DisplaySettings::default(),
             sound: SoundSettings::default(),
             ui: UiSettings::default(),
+            windows: WindowSelections::default(),
         }
     }
 }
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 pub struct DisplaySettings {
+    #[serde(default)]
     pub quality: DisplayQuality,
+    #[serde(default)]
     pub glow: DisplayGlow,
 }
 
@@ -54,15 +62,25 @@ pub enum DisplayGlow {
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 pub struct SoundSettings {
+    #[serde(default = "default_mute")]
     pub mute: bool,
+    #[serde(default = "default_volume")]
     pub volume: i32,
+}
+
+fn default_mute() -> bool {
+    false
+}
+
+fn default_volume() -> i32 {
+    50
 }
 
 impl Default for SoundSettings {
     fn default() -> Self {
         Self {
-            mute: false,
-            volume: 50,
+            mute: default_mute(),
+            volume: default_volume(),
         }
     }
 }
@@ -77,6 +95,7 @@ pub fn load() -> Settings {
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 pub struct UiSettings {
+    #[serde(default = "default_theme")]
     pub theme: UiTheme,
 }
 
@@ -87,10 +106,46 @@ pub enum UiTheme {
     Dark,
 }
 
+fn default_theme() -> UiTheme {
+    UiTheme::Dark
+}
+
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
-            theme: UiTheme::default(),
+            theme: default_theme(),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+pub struct WindowSelections {
+    #[serde(default = "default_false")]
+    pub spin: bool,
+    #[serde(skip)]
+    pub spin_data: SpinData,
+}
+
+impl Default for WindowSelections {
+    fn default() -> Self {
+        Self {
+            spin: default_false(),
+            spin_data: SpinData::default(),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct SpinData {
+    pub radius: f64,
+    pub rpm: f64,
+    pub vertical_velocity: f64,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_false() -> bool {
+    false
 }
