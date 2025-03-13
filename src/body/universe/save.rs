@@ -1,9 +1,10 @@
 use std::path::PathBuf;
 use bevy::math::DVec3;
-use bevy::prelude::{Commands, Transform};
+use bevy::prelude::{Assets, Commands, Image, Mesh, ResMut, StandardMaterial, Transform};
 use bevy::utils::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::body::appearance::Appearance;
+use crate::body::appearance::AssetCache;
 use crate::body::motive::fixed_motive::FixedMotive;
 use crate::body::motive::info::BodyInfo;
 use crate::body::motive::kepler_motive::KeplerMotive;
@@ -75,17 +76,27 @@ pub struct FixedEntry {
 }
 
 impl FixedEntry {
-    pub fn spawn(self, mut commands: &mut Commands) {
+    pub fn spawn(
+        self,
+        mut commands: &mut Commands,
+        mut cache: ResMut<AssetCache>,
+        mut meshes: ResMut<Assets<Mesh>>,
+        mut materials: ResMut<Assets<StandardMaterial>>,
+        mut images: ResMut<Assets<Image>>,
+    ) {
         let info = self.info;
         let motive = FixedMotive {
             position: self.position,
         };
+        let (mesh, material) = self.appearance.pbr_bundle(&mut cache, &mut meshes, &mut materials, images);
+
         if info.major {
             commands
                 .spawn((
                     SimulationObject,
                     Transform::default(),
-                    // TODO: Mesh
+                    mesh,
+                    material,
                     info,
                     motive,
                     Major,
@@ -95,7 +106,8 @@ impl FixedEntry {
                 .spawn((
                     SimulationObject,
                     Transform::default(),
-                    // TODO: Mesh
+                    mesh,
+                    material,
                     info,
                     motive,
                     Minor,
@@ -113,18 +125,28 @@ pub struct NewtonEntry {
 }
 
 impl NewtonEntry {
-    pub fn spawn(self, mut commands: &mut Commands) {
+    pub fn spawn(
+        self,
+        mut commands: &mut Commands,
+        mut cache: ResMut<AssetCache>,
+        mut meshes: ResMut<Assets<Mesh>>,
+        mut materials: ResMut<Assets<StandardMaterial>>,
+        mut images: ResMut<Assets<Image>>,
+    ) {
         let info = self.info;
         let motive = NewtonMotive {
             position: self.position,
             velocity: self.velocity,
         };
+        let (mesh, material) = self.appearance.pbr_bundle(&mut cache, &mut meshes, &mut materials, images);
+
         if info.major {
             commands
                 .spawn((
                     SimulationObject,
                     Transform::default(),
-                    // TODO: Mesh
+                    mesh,
+                    material,
                     info,
                     motive,
                     Major,
@@ -134,7 +156,8 @@ impl NewtonEntry {
                 .spawn((
                     SimulationObject,
                     Transform::default(),
-                    // TODO: Mesh
+                    mesh,
+                    material,
                     info,
                     motive,
                     Minor,
@@ -151,15 +174,25 @@ pub struct KeplerEntry {
 }
 
 impl KeplerEntry {
-    pub fn spawn(self, mut commands: &mut Commands) {
+    pub fn spawn(
+        self,
+        mut commands: &mut Commands,
+        mut cache: ResMut<AssetCache>,
+        mut meshes: ResMut<Assets<Mesh>>,
+        mut materials: ResMut<Assets<StandardMaterial>>,
+        mut images: ResMut<Assets<Image>>,
+    ) {
         let info = self.info;
         let motive = self.params;
+        let (mesh, material) = self.appearance.pbr_bundle(&mut cache, &mut meshes, &mut materials, images);
+
         if info.major {
             commands
                 .spawn((
                     SimulationObject,
                     Transform::default(),
-                    // TODO: Mesh
+                    mesh,
+                    material,
                     info,
                     motive,
                     Major,
@@ -169,7 +202,8 @@ impl KeplerEntry {
                 .spawn((
                     SimulationObject,
                     Transform::default(),
-                    // TODO: Mesh
+                    mesh,
+                    material,
                     info,
                     motive,
                     Major,
@@ -186,7 +220,14 @@ pub struct PatchedConicsEntry {
 }
 
 impl PatchedConicsEntry {
-    pub fn spawn(self, mut commands: &mut Commands) {
+    pub fn spawn(
+        self,
+        mut commands: &mut Commands,
+        mut cache: ResMut<AssetCache>,
+        mut meshes: ResMut<Assets<Mesh>>,
+        mut materials: ResMut<Assets<StandardMaterial>>,
+        mut images: ResMut<Assets<Image>>,
+    ) {
         todo!()
     }
 }
