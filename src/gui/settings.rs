@@ -124,6 +124,8 @@ pub struct WindowSelections {
     pub spin: bool,
     #[serde(skip)]
     pub spin_data: SpinData,
+    #[serde(default = "default_false")]
+    pub body_edit: bool,
 }
 
 impl Default for WindowSelections {
@@ -131,6 +133,7 @@ impl Default for WindowSelections {
         Self {
             spin: default_false(),
             spin_data: SpinData::default(),
+            body_edit: default_false(),
         }
     }
 }

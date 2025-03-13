@@ -15,6 +15,7 @@ pub mod time;
 mod display;
 mod spin;
 mod controls;
+mod body_edit;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 struct PlanetariumUISet;
@@ -70,6 +71,10 @@ fn planetarium_ui(
 
     if settings.windows.spin {
         spin::spin_gravity_calculator(&mut settings, ctx);
+    }
+
+    if settings.windows.body_edit {
+        body_edit::body_edit_window(&mut settings, ctx);
     }
 }
 
