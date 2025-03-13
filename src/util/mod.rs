@@ -6,3 +6,4 @@ pub mod patched_conics;
 pub mod bitfutz;
 pub mod overlapping_chunks;
 pub mod time_map;
+pub mod minkowski;
