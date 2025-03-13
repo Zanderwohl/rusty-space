@@ -59,7 +59,7 @@ fn planetarium_ui(
     egui::Window::new("Controls")
         .vscroll(true)
         .show(ctx, |ui| {
-            controls::planetarium_controls(next_app_state, next_menu_state, &mut time, ui);
+            controls::planetarium_controls(next_app_state, next_menu_state, &mut time, ui, ui_state);
     });
 
     // Start collapsed: https://github.com/emilk/egui/pull/5661

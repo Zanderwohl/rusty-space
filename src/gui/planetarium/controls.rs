@@ -1,18 +1,30 @@
-use bevy::prelude::{NextState, ResMut};
+use bevy::prelude::{NextState, Res, ResMut};
 use bevy_egui::egui;
 use bevy_egui::egui::Ui;
 use num_traits::Pow;
 use crate::gui::app::AppState;
-use crate::gui::menu::MenuState;
+use crate::gui::menu::{MenuState, UiState};
 use crate::gui::planetarium::SCI_RE;
 use crate::gui::planetarium::time::SimTime;
 use crate::util::format::seconds_to_naive_date;
 
-pub fn planetarium_controls(mut next_app_state: ResMut<NextState<AppState>>, mut next_menu_state: ResMut<NextState<MenuState>>, mut time: &mut ResMut<SimTime>, ui: &mut Ui) {
+pub fn planetarium_controls(
+    mut next_app_state: ResMut<NextState<AppState>>,
+    mut next_menu_state: ResMut<NextState<MenuState>>,
+    mut time: &mut ResMut<SimTime>,
+    ui: &mut Ui,
+    mut ui_state: ResMut<UiState>,
+) {
+    if ui.button("Quit to Main Menu").clicked() {
+        // TODO: Some kind of save nag
+        ui_state.current_save = None;
+        next_app_state.set(AppState::MainMenu);
+        next_menu_state.set(MenuState::Planetarium);
+    }
     ui.horizontal(|ui| {
-        if ui.button("Quit to Main Menu").clicked() {
-            next_app_state.set(AppState::MainMenu);
-            next_menu_state.set(MenuState::Planetarium);
+        match &ui_state.current_save {
+            None => { ui.label("New Universe"); },
+            Some(file) => { ui.label(file.file_name.clone()); }
         }
 
         ui.disable();
