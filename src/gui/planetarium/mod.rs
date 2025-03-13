@@ -5,6 +5,7 @@ use bevy_egui::{egui, EguiContexts};
 use lazy_static::lazy_static;
 use num_traits::{FloatConst, Pow};
 use regex::Regex;
+use crate::body::appearance::AssetCache;
 use crate::gui::app::AppState;
 use crate::gui::menu::{MenuState, UiState};
 use crate::gui::planetarium::time::SimTime;
@@ -26,6 +27,7 @@ impl Plugin for Planetarium {
     fn build(&self, app: &mut App) {
         app
             .init_resource::<SimTime>()
+            .init_resource::<AssetCache>()
             .configure_sets(Update, (
                 PlanetariumUISet.run_if(in_state(AppState::Planetarium)),
             ))

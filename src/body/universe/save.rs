@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use bevy::math::DVec3;
 use bevy::prelude::{Commands, Transform};
 use bevy::utils::HashMap;
-use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
+use crate::body::appearance::Appearance;
 use crate::body::motive::fixed_motive::FixedMotive;
 use crate::body::motive::info::BodyInfo;
 use crate::body::motive::kepler_motive::KeplerMotive;
@@ -71,6 +71,7 @@ pub enum SomeBody {
 pub struct FixedEntry {
     pub info: BodyInfo,
     pub position: DVec3,
+    pub appearance: Appearance,
 }
 
 impl FixedEntry {
@@ -108,6 +109,7 @@ pub struct NewtonEntry {
     pub info: BodyInfo,
     pub position: DVec3,
     pub velocity: DVec3,
+    pub appearance: Appearance,
 }
 
 impl NewtonEntry {
@@ -145,6 +147,7 @@ impl NewtonEntry {
 pub struct KeplerEntry {
     pub info: BodyInfo,
     pub params: KeplerMotive,
+    pub appearance: Appearance,
 }
 
 impl KeplerEntry {
@@ -179,6 +182,7 @@ impl KeplerEntry {
 pub struct PatchedConicsEntry {
     pub info: BodyInfo,
     pub route: HashMap<u64, KeplerMotive>,
+    pub appearance: Appearance,
 }
 
 impl PatchedConicsEntry {

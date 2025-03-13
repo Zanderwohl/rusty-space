@@ -159,7 +159,7 @@ pub fn load_planetarium_files(mut files: ResMut<PlanetariumFiles>) {
             let path = file.path();
             let path2 = path.clone();
             let name = path2.file_name().unwrap().to_str().unwrap();
-            files.templates.push(SaveFileMeta {
+            files.saves.push(SaveFileMeta {
                 path,
                 file_name: name.to_string(),
             })

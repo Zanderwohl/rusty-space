@@ -4,6 +4,7 @@ use crate::gui::common::despawn_screen;
 
 pub mod motive;
 pub mod universe;
+pub mod appearance;
 
 #[derive(Resource, Debug, Component, PartialEq, /*Eq,*/ Clone, Copy)]
 pub struct SimulationSettings {

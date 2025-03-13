@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use bevy::math::DVec3;
+use crate::body::appearance::Appearance;
 use crate::body::motive::info::BodyInfo;
 use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerRotation, KeplerShape, MeanAnomalyAtJ2000};
 use crate::body::universe::save::{FixedEntry, KeplerEntry, SomeBody, UniverseFile, UniverseFileContents, UniverseFileTime};
@@ -12,7 +13,7 @@ use crate::gui::util::ensure_folders;
 
 pub fn solar_system() -> UniverseFile {
     let solar_system = UniverseFile {
-        file: Some(PathBuf::from("data/templates/tiny_system.toml")),
+        file: Some(PathBuf::from("data/templates/solar_system.toml")),
         contents: UniverseFileContents {
             version: "0.0".into(),
             time: UniverseFileTime {
@@ -29,6 +30,7 @@ pub fn solar_system() -> UniverseFile {
                         ..Default::default()
                     },
                     position: DVec3::ZERO,
+                    appearance: Appearance::Empty,
                 }), // Sun
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -54,6 +56,7 @@ pub fn solar_system() -> UniverseFile {
                             mean_anomaly: 174.796,
                         })
                     },
+                    appearance: Appearance::Empty,
                 }), // Mercury
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -79,6 +82,7 @@ pub fn solar_system() -> UniverseFile {
                             mean_anomaly: 50.115,
                         }),
                     },
+                    appearance: Appearance::Empty,
                 }), // Venus
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -104,6 +108,7 @@ pub fn solar_system() -> UniverseFile {
                             mean_anomaly: 358.617,
                         }),
                     },
+                    appearance: Appearance::Empty,
                 }), // Earth
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -129,6 +134,7 @@ pub fn solar_system() -> UniverseFile {
                             mean_anomaly: 19.412,
                         }),
                     },
+                    appearance: Appearance::Empty,
                 }), // Mars
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -154,6 +160,7 @@ pub fn solar_system() -> UniverseFile {
                             mean_anomaly: 291.4,
                         }),
                     },
+                    appearance: Appearance::Empty,
                 }), // Ceres
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -179,6 +186,7 @@ pub fn solar_system() -> UniverseFile {
                             mean_anomaly: 0.0,
                         }),
                     },
+                    appearance: Appearance::Empty,
                 }), // Luna
             ] },
     };
@@ -211,6 +219,7 @@ pub fn tiny_system() -> UniverseFile {
                         ..Default::default()
                     },
                     position: DVec3::ZERO,
+                    appearance: Appearance::Empty,
                 }), // Sun
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -236,6 +245,7 @@ pub fn tiny_system() -> UniverseFile {
                             mean_anomaly: 50.115,
                         }),
                     },
+                    appearance: Appearance::Empty,
                 }), // Venus
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -261,6 +271,7 @@ pub fn tiny_system() -> UniverseFile {
                             mean_anomaly: 358.617,
                         }),
                     },
+                    appearance: Appearance::Empty,
                 }), // Earth
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -286,6 +297,7 @@ pub fn tiny_system() -> UniverseFile {
                             mean_anomaly: 0.0,
                         }),
                     },
+                    appearance: Appearance::Empty,
                 }), // Luna
             ] },
     };
