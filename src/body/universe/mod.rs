@@ -13,7 +13,7 @@ pub mod solar_system;
 
 #[derive(Resource)]
 pub struct Universe {
-    path: Option<PathBuf>,
+    pub path: Option<PathBuf>,
     id_to_name: HashMap<String, String>,
     name_to_id: HashMap<String, String>,
 }
@@ -36,8 +36,7 @@ pub struct Minor;
 
 impl Universe {
     pub fn from_file(
-        file: UniverseFile,
-        mut commands: &mut Commands,
+        file: &UniverseFile,
     ) -> (Self, SimTime) {
         let universe = Self {
             path: file.file.clone(),
@@ -49,15 +48,6 @@ impl Universe {
             time: file.contents.time.time,
             ..SimTime::default()
         };
-
-        for body in file.contents.bodies.into_iter() {
-            match body {
-                SomeBody::FixedEntry(fixed) => fixed.spawn(commands),
-                SomeBody::NewtonEntry(newton) => newton.spawn(commands),
-                SomeBody::KeplerEntry(kepler) => kepler.spawn(commands),
-                SomeBody::CompoundEntry(compound) => compound.spawn(commands),
-            };
-        }
 
         (universe, time)
     }

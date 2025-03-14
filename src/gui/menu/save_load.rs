@@ -34,7 +34,7 @@ pub fn planetarium_menu(
             ui.add_space(10.0);
 
             if ui.add_sized([120.0, button_height], egui::Button::new("Planetarium")).clicked() {
-                next_app_state.set(AppState::Planetarium)
+                next_app_state.set(AppState::PlanetariumLoading)
             }
         });
 
@@ -118,7 +118,7 @@ fn display_saves_list(
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.add_sized([60.0, 24.0], egui::Button::new(load_label)).clicked() {
                             ui_state.current_save = Some((*save).clone());
-                            next_app_state.set(AppState::Planetarium)
+                            next_app_state.set(AppState::PlanetariumLoading)
                         }
                     });
                 });

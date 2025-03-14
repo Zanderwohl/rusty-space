@@ -22,7 +22,7 @@ impl Appearance {
                       cache: &mut ResMut<AssetCache>,
                       meshes: &mut Assets<Mesh>,
                       materials: &mut Assets<StandardMaterial>,
-                      mut images: ResMut<Assets<Image>>,
+                      mut images: &mut ResMut<Assets<Image>>,
     ) -> (Mesh3d, MeshMaterial3d<StandardMaterial>) {
         match self {
             Appearance::Empty => self.empty(cache, meshes, materials, images),
@@ -34,7 +34,7 @@ impl Appearance {
                  cache: &mut ResMut<AssetCache>,
                  meshes: &mut Assets<Mesh>,
                  materials: &mut Assets<StandardMaterial>,
-                 mut images: ResMut<Assets<Image>>,
+                 mut images: &mut ResMut<Assets<Image>>,
     ) -> (Mesh3d, MeshMaterial3d<StandardMaterial>) {
         let material_handle = cache.materials.entry("debug_uv".into()).or_insert_with(|| {
             materials.add(StandardMaterial {
@@ -67,7 +67,7 @@ impl DebugBall {
                       cache: &mut ResMut<AssetCache>,
                       meshes: &mut Assets<Mesh>,
                       materials: &mut Assets<StandardMaterial>,
-                      mut images: ResMut<Assets<Image>>,
+                      mut images: &mut ResMut<Assets<Image>>,
     ) -> (Mesh3d, MeshMaterial3d<StandardMaterial>) {
         let color = Color::srgb_u8(self.r, self.g, self.b);
         let mesh_key = format!("icosphere_{}", self.radius);

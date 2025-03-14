@@ -54,6 +54,7 @@ pub enum AppState {
     Splash,
     MainMenu,
     Planetarium,
+    PlanetariumLoading,
 }
 
 pub fn init() {

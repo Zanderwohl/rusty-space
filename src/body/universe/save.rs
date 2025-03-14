@@ -18,6 +18,18 @@ pub struct UniverseFile {
     pub contents: UniverseFileContents,
 }
 
+impl UniverseFile {
+    pub(crate) fn load_from_path(path: &PathBuf) -> Option<Self> {
+        let file_path = path.clone();
+        let string = std::fs::read_to_string(path).unwrap(); // TODO: Handle errors? Or do we just assume we'd never call this with a bath path..?
+        let contents: UniverseFileContents = toml::from_str(&string).unwrap(); // TODO: Handle errors.
+        Some(Self {
+            file: Some(file_path),
+            contents,
+        })
+    }
+}
+
 #[derive(Debug)]
 pub enum UniverseWriteError {
     TOML(toml::ser::Error),
@@ -68,6 +80,24 @@ pub enum SomeBody {
     CompoundEntry(PatchedConicsEntry),
 }
 
+impl SomeBody {
+    pub fn spawn(
+        self,
+        commands: &mut Commands,
+        cache: &mut ResMut<AssetCache>,
+        meshes: &mut ResMut<Assets<Mesh>>,
+        materials: &mut ResMut<Assets<StandardMaterial>>,
+        images: &mut ResMut<Assets<Image>>,
+    ) {
+        match self {
+            SomeBody::FixedEntry(entry) => entry.spawn(commands, cache, meshes, materials, images),
+            SomeBody::NewtonEntry(entry) => entry.spawn(commands, cache, meshes, materials, images),
+            SomeBody::KeplerEntry(entry) => entry.spawn(commands, cache, meshes, materials, images),
+            SomeBody::CompoundEntry(entry) => entry.spawn(commands, cache, meshes, materials, images),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct FixedEntry {
     pub info: BodyInfo,
@@ -79,10 +109,10 @@ impl FixedEntry {
     pub fn spawn(
         self,
         mut commands: &mut Commands,
-        mut cache: ResMut<AssetCache>,
-        mut meshes: ResMut<Assets<Mesh>>,
-        mut materials: ResMut<Assets<StandardMaterial>>,
-        mut images: ResMut<Assets<Image>>,
+        mut cache: &mut ResMut<AssetCache>,
+        mut meshes: &mut ResMut<Assets<Mesh>>,
+        mut materials: &mut ResMut<Assets<StandardMaterial>>,
+        mut images: &mut ResMut<Assets<Image>>,
     ) {
         let info = self.info;
         let motive = FixedMotive {
@@ -128,10 +158,10 @@ impl NewtonEntry {
     pub fn spawn(
         self,
         mut commands: &mut Commands,
-        mut cache: ResMut<AssetCache>,
-        mut meshes: ResMut<Assets<Mesh>>,
-        mut materials: ResMut<Assets<StandardMaterial>>,
-        mut images: ResMut<Assets<Image>>,
+        mut cache: &mut ResMut<AssetCache>,
+        mut meshes: &mut ResMut<Assets<Mesh>>,
+        mut materials: &mut ResMut<Assets<StandardMaterial>>,
+        mut images: &mut ResMut<Assets<Image>>,
     ) {
         let info = self.info;
         let motive = NewtonMotive {
@@ -177,14 +207,14 @@ impl KeplerEntry {
     pub fn spawn(
         self,
         mut commands: &mut Commands,
-        mut cache: ResMut<AssetCache>,
-        mut meshes: ResMut<Assets<Mesh>>,
-        mut materials: ResMut<Assets<StandardMaterial>>,
-        mut images: ResMut<Assets<Image>>,
+        mut cache: &mut ResMut<AssetCache>,
+        mut meshes: &mut ResMut<Assets<Mesh>>,
+        mut materials: &mut ResMut<Assets<StandardMaterial>>,
+        mut images: &mut ResMut<Assets<Image>>,
     ) {
         let info = self.info;
         let motive = self.params;
-        let (mesh, material) = self.appearance.pbr_bundle(&mut cache, &mut meshes, &mut materials, images);
+        let (mesh, material) = self.appearance.pbr_bundle(&mut cache, &mut meshes, &mut materials, &mut images);
 
         if info.major {
             commands
@@ -223,10 +253,10 @@ impl PatchedConicsEntry {
     pub fn spawn(
         self,
         mut commands: &mut Commands,
-        mut cache: ResMut<AssetCache>,
-        mut meshes: ResMut<Assets<Mesh>>,
-        mut materials: ResMut<Assets<StandardMaterial>>,
-        mut images: ResMut<Assets<Image>>,
+        mut cache: &mut ResMut<AssetCache>,
+        mut meshes: &mut ResMut<Assets<Mesh>>,
+        mut materials: &mut ResMut<Assets<StandardMaterial>>,
+        mut images: &mut ResMut<Assets<Image>>,
     ) {
         todo!()
     }

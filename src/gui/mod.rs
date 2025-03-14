@@ -1,4 +1,4 @@
-mod menu;
+pub mod menu;
 pub mod planetarium;
 pub(crate) mod body;
 pub mod util;
