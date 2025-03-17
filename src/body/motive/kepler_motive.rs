@@ -298,7 +298,18 @@ impl KeplerEpoch {
     }
 
     pub fn mean_anomaly_at_epoch(&self) -> f64 {
-        todo!()
+        match self {
+            KeplerEpoch::MeanAnomaly(mean_anomaly) => {
+                mean_anomaly.mean_anomaly
+            }
+            KeplerEpoch::TimeAtPeriapsisPassage(_) => {
+                todo!()
+            }
+            KeplerEpoch::TrueAnomaly(_) => { todo!() }
+            KeplerEpoch::J2000(j2000) => {
+                j2000.mean_anomaly
+            }
+        }
     }
 }
 

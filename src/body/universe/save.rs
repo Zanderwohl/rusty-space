@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use bevy::math::DVec3;
-use bevy::prelude::{Assets, Commands, Image, Mesh, ResMut, StandardMaterial, Transform};
+use bevy::prelude::{info, Assets, Commands, Image, Mesh, ResMut, Resource, StandardMaterial, Transform};
 use bevy::utils::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::body::appearance::Appearance;
@@ -64,12 +64,26 @@ impl UniverseFile {
 pub struct UniverseFileContents {
     pub version: String,
     pub time: UniverseFileTime,
+    pub physics: UniversePhysics,
     pub bodies: Vec<SomeBody>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct UniverseFileTime {
     pub time: f64,
+}
+
+#[derive(Resource, Serialize, Deserialize)]
+pub struct UniversePhysics {
+    pub gravitational_constant: f64,
+}
+
+impl Default for UniversePhysics {
+    fn default() -> Self {
+        Self {
+            gravitational_constant: 6.6743015e-11,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -212,6 +226,7 @@ impl KeplerEntry {
         mut materials: &mut ResMut<Assets<StandardMaterial>>,
         mut images: &mut ResMut<Assets<Image>>,
     ) {
+        info!("Spawning KeplerEntry {:?}", self.info.name);
         let info = self.info;
         let motive = self.params;
         let (mesh, material) = self.appearance.pbr_bundle(&mut cache, &mut meshes, &mut materials, &mut images);

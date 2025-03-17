@@ -1,20 +1,22 @@
-use std::fs::File;
-use std::io::{BufReader, Read};
+use std::io::Read;
 use bevy::app::{App, Update};
-use bevy::prelude::{in_state, Assets, Commands, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Plugin, Res, ResMut, StandardMaterial, SystemSet, Time};
+use bevy::prelude::{in_state, Assets, Commands, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Plugin, Query, Res, ResMut, StandardMaterial, SystemSet, Time, Transform};
 use bevy::prelude::IntoSystemConfigs;
 use bevy_egui::{egui, EguiContexts};
 use lazy_static::lazy_static;
 use num_traits::{FloatConst, Pow};
 use regex::Regex;
 use crate::body::appearance::AssetCache;
-use crate::body::universe::save::UniverseFile;
+use crate::body::universe::save::{UniverseFile, UniversePhysics};
 use crate::body::universe::Universe;
 use crate::gui::app::AppState;
 use crate::gui::menu::{MenuState, UiState};
 use crate::gui::planetarium::time::SimTime;
 use crate::gui::settings::{Settings, UiTheme};
-use crate::body::unload_simulation_objects;
+use crate::body::{unload_simulation_objects, SimulationObject};
+use bevy_flycam::prelude::*;
+use crate::body::motive::info::BodyInfo;
+use crate::body::motive::kepler_motive::KeplerMotive;
 
 pub mod time;
 mod display;
@@ -34,15 +36,17 @@ impl Plugin for Planetarium {
     fn build(&self, app: &mut App) {
         app
             .init_resource::<SimTime>()
+            .init_resource::<UniversePhysics>()
             .init_resource::<AssetCache>()
             .configure_sets(Update, (
                 PlanetariumUISet.run_if(in_state(AppState::Planetarium)),
                 PlanetariumLoadingSet.run_if(in_state(AppState::PlanetariumLoading)),
             ))
             .add_systems(Update, (
-                (planetarium_ui, advance_time).in_set(PlanetariumUISet),
+                (planetarium_ui, advance_time, calculate_kepler.before(position_bodies), position_bodies).in_set(PlanetariumUISet),
                 (load_assets).in_set(PlanetariumLoadingSet),
             ))
+            .add_plugins(NoCameraPlayerPlugin) // TODO: Get real camera solution
             .add_systems(OnExit(AppState::Planetarium), unload_simulation_objects)
         ;
     }
@@ -96,6 +100,30 @@ fn advance_time(mut sim_time: ResMut<SimTime>, time: Res<Time>) {
     }
 }
 
+pub fn calculate_kepler(
+    mut sim_time: ResMut<SimTime>,
+    mut kepler_bodies: Query<(&SimulationObject, &mut BodyInfo, &KeplerMotive)>,
+    physics: Res<UniversePhysics>,
+) {
+    let mu = physics.gravitational_constant;
+    let time = sim_time.time;
+    for (_, mut info, motive) in kepler_bodies.iter_mut() {
+        let position = motive.displacement(time, mu);
+        if let Some(position) = position {
+            info.current_position = position;
+        }
+    }
+}
+
+pub fn position_bodies(
+    mut sim_time: ResMut<SimTime>,
+    mut bodies: Query<(&SimulationObject, &mut Transform, &BodyInfo)>,
+) {
+    for (_, mut transform, body_info) in bodies.iter_mut() {
+        transform.translation = body_info.current_position.as_vec3() / 1e6;
+    }
+}
+
 fn load_assets(
     mut commands: Commands,
     mut ui_state: ResMut<UiState>,
@@ -105,6 +133,8 @@ fn load_assets(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut universe: ResMut<Universe>,
+    mut physics: ResMut<UniversePhysics>,
+    mut sim_time: ResMut<SimTime>,
 ) {
     if ui_state.current_save.is_none() {
         next_app_state.set(AppState::Planetarium);
@@ -116,10 +146,16 @@ fn load_assets(
 
     let universe_file: Option<UniverseFile> = UniverseFile::load_from_path(&path);
     if let Some(universe_file) = universe_file {
-        let (new_universe, sim_time) = Universe::from_file(&universe_file);
+        let (new_universe, mut sim_time) = Universe::from_file(&universe_file);
         universe.path = new_universe.path.clone();
         let version = universe_file.contents.version; // TODO: Support multiple file format versions?
-        let time = universe_file.contents.time; // TODO: What.
+
+        let time = universe_file.contents.time; // TODO: Remember to set the time.
+        sim_time.playing = false;
+        sim_time.time = time.time;
+
+        physics.gravitational_constant = universe_file.contents.physics.gravitational_constant;
+
         let bodies = universe_file.contents.bodies;
         for body in bodies {
             body.spawn(&mut commands, &mut cache, &mut meshes, &mut materials, &mut images);
