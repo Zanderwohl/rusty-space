@@ -3,7 +3,7 @@ use bevy::math::DVec3;
 use crate::body::appearance::Appearance;
 use crate::body::motive::info::BodyInfo;
 use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerRotation, KeplerShape, MeanAnomalyAtJ2000};
-use crate::body::universe::save::{FixedEntry, KeplerEntry, SomeBody, UniverseFile, UniverseFileContents, UniverseFileTime, UniversePhysics};
+use crate::body::universe::save::{FixedEntry, KeplerEntry, SomeBody, UniverseFile, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings};
 use crate::gui::util::ensure_folders;
 // Mass: Kg
 // Distance: Km
@@ -22,6 +22,7 @@ pub fn solar_system() -> UniverseFile {
             physics: UniversePhysics {
                 gravitational_constant: 6.6743015e-11,
             },
+            view: ViewSettings::default(),
             bodies: vec![
                 SomeBody::FixedEntry(FixedEntry {
                     info: BodyInfo {
@@ -214,6 +215,7 @@ pub fn tiny_system() -> UniverseFile {
             physics: UniversePhysics {
                 gravitational_constant: 6.6743015e-11,
             },
+            view: ViewSettings::default(),
             bodies: vec![
                 SomeBody::FixedEntry(FixedEntry {
                     info: BodyInfo {

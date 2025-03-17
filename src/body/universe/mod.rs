@@ -52,6 +52,11 @@ impl Universe {
         (universe, time)
     }
 
+    pub fn clear_all(&mut self) {
+        self.id_to_name = HashMap::new();
+        self.name_to_id = HashMap::new();
+    }
+
     pub fn insert<T: AsRef<str> + Clone>(&mut self, name: T, id: T) {
         let id = id.as_ref().to_string();
         let name = name.as_ref().to_string();

@@ -64,6 +64,7 @@ impl UniverseFile {
 pub struct UniverseFileContents {
     pub version: String,
     pub time: UniverseFileTime,
+    pub view: ViewSettings,
     pub physics: UniversePhysics,
     pub bodies: Vec<SomeBody>,
 }
@@ -82,6 +83,21 @@ impl Default for UniversePhysics {
     fn default() -> Self {
         Self {
             gravitational_constant: 6.6743015e-11,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Resource)]
+pub struct ViewSettings {
+    pub distance_scale: f64,
+    pub body_scale: f64,
+}
+
+impl Default for ViewSettings {
+    fn default() -> Self {
+        Self {
+            distance_scale: 1e-6,
+            body_scale: 1.0,
         }
     }
 }
@@ -108,6 +124,24 @@ impl SomeBody {
             SomeBody::NewtonEntry(entry) => entry.spawn(commands, cache, meshes, materials, images),
             SomeBody::KeplerEntry(entry) => entry.spawn(commands, cache, meshes, materials, images),
             SomeBody::CompoundEntry(entry) => entry.spawn(commands, cache, meshes, materials, images),
+        }
+    }
+
+    pub fn id(&self) -> String {
+        match self {
+            SomeBody::FixedEntry(entry) => (&entry.info.id).clone(),
+            SomeBody::NewtonEntry(entry) => (&entry.info.id).clone(),
+            SomeBody::KeplerEntry(entry) => (&entry.info.id).clone(),
+            SomeBody::CompoundEntry(entry) => (&entry.info.id).clone(),
+        }
+    }
+
+    pub fn name(&self) -> String {
+        match self {
+            SomeBody::FixedEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
+            SomeBody::NewtonEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
+            SomeBody::KeplerEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
+            SomeBody::CompoundEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
         }
     }
 }

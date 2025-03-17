@@ -7,7 +7,7 @@ use lazy_static::lazy_static;
 use num_traits::{FloatConst, Pow};
 use regex::Regex;
 use crate::body::appearance::AssetCache;
-use crate::body::universe::save::{UniverseFile, UniversePhysics};
+use crate::body::universe::save::{UniverseFile, UniversePhysics, ViewSettings};
 use crate::body::universe::Universe;
 use crate::gui::app::AppState;
 use crate::gui::menu::{MenuState, UiState};
@@ -37,6 +37,7 @@ impl Plugin for Planetarium {
         app
             .init_resource::<SimTime>()
             .init_resource::<UniversePhysics>()
+            .init_resource::<ViewSettings>()
             .init_resource::<AssetCache>()
             .configure_sets(Update, (
                 PlanetariumUISet.run_if(in_state(AppState::Planetarium)),
@@ -118,9 +119,18 @@ pub fn calculate_kepler(
 pub fn position_bodies(
     mut sim_time: ResMut<SimTime>,
     mut bodies: Query<(&SimulationObject, &mut Transform, &BodyInfo)>,
+    view_settings: Res<ViewSettings>,
 ) {
     for (_, mut transform, body_info) in bodies.iter_mut() {
-        transform.translation = body_info.current_position.as_vec3() / 1e6;
+        // Convert from z-axis-up to y-axis-up coordinate system
+        // In z-axis-up: (x, y, z) where z is up
+        // In y-axis-up: (x, z, -y) where y is up
+        let position = body_info.current_position.as_vec3();
+        transform.translation = bevy::math::Vec3::new(
+            position.x,
+            position.z,
+            -position.y
+        ) * view_settings.distance_scale as f32; // Scale factor
     }
 }
 
@@ -148,9 +158,10 @@ fn load_assets(
     if let Some(universe_file) = universe_file {
         let (new_universe, mut sim_time) = Universe::from_file(&universe_file);
         universe.path = new_universe.path.clone();
+        universe.clear_all();
         let version = universe_file.contents.version; // TODO: Support multiple file format versions?
 
-        let time = universe_file.contents.time; // TODO: Remember to set the time.
+        let time = universe_file.contents.time;
         sim_time.playing = false;
         sim_time.time = time.time;
 
@@ -158,6 +169,9 @@ fn load_assets(
 
         let bodies = universe_file.contents.bodies;
         for body in bodies {
+            let id = body.id();
+            let name = body.name();
+            universe.insert(name, id);
             body.spawn(&mut commands, &mut cache, &mut meshes, &mut materials, &mut images);
         }
     }
