@@ -1,3 +1,5 @@
+pub mod debug;
+
 use std::fs;
 use std::path::PathBuf;
 use serde::de::DeserializeOwned;

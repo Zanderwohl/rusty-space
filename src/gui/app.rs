@@ -12,6 +12,7 @@ use crate::gui::menu::{close_when_requested, MenuPlugin};
 use crate::gui::planetarium::Planetarium;
 use crate::gui::settings;
 use crate::gui::splash::SplashPlugin;
+use crate::gui::util::debug::DebugPlugin;
 use crate::gui::util::ensure_folders;
 
 pub fn run() {
@@ -41,6 +42,7 @@ pub fn run() {
         .insert_state(AppState::Splash)
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(EguiPlugin)
+        .add_plugins(DebugPlugin)
         .add_plugins(SplashPlugin)
         .add_plugins(MenuPlugin)
         .add_plugins(Planetarium)

@@ -1,6 +1,6 @@
 use bevy::math::DVec3;
 use bevy::prelude::{Commands, Component, Entity, Query, Resource, With};
-use crate::gui::common::despawn_screen;
+use crate::gui::common::despawn_entities_with;
 
 pub mod motive;
 pub mod universe;
@@ -18,5 +18,5 @@ pub fn unload_simulation_objects(
     mut commands: Commands,
     simulation_objects: Query<Entity, With<SimulationObject>>,
 ) {
-    despawn_screen::<SimulationObject>(simulation_objects, commands);
+    despawn_entities_with::<SimulationObject>(simulation_objects, commands);
 }

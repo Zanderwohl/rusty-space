@@ -3,7 +3,7 @@ use bevy::prelude::{in_state, AssetServer, BuildChildren, ChildBuild, Commands, 
 use bevy::time::TimerMode;
 use bevy::ui::{AlignContent, AlignSelf, JustifyContent, JustifySelf};
 use crate::gui::app::AppState;
-use crate::gui::common::despawn_screen;
+use crate::gui::common::despawn_entities_with;
 
 #[derive(Component)]
 struct SplashScreen;
@@ -15,7 +15,7 @@ impl Plugin for SplashPlugin {
         app
             .add_systems(OnEnter(AppState::Splash), splash_setup)
             .add_systems(Update, countdown.run_if(in_state(AppState::Splash)))
-            .add_systems(OnExit(AppState::Splash), despawn_screen::<SplashScreen>)
+            .add_systems(OnExit(AppState::Splash), despawn_entities_with::<SplashScreen>)
         ;
     }
 }
