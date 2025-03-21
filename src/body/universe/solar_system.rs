@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use bevy::math::DVec3;
-use crate::body::appearance::Appearance;
+use crate::body::appearance::{Appearance, DebugBall};
 use crate::body::motive::info::BodyInfo;
 use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerRotation, KeplerShape, MeanAnomalyAtJ2000};
 use crate::body::universe::save::{FixedEntry, KeplerEntry, SomeBody, UniverseFile, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings};
@@ -32,7 +32,12 @@ pub fn solar_system() -> UniverseFile {
                         ..Default::default()
                     },
                     position: DVec3::ZERO,
-                    appearance: Appearance::Empty,
+                    appearance: Appearance::DebugBall(DebugBall {
+                        radius: 6.957e8,
+                        r: 219,
+                        g: 222,
+                        b: 35,
+                    }),
                 }), // Sun
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -58,7 +63,12 @@ pub fn solar_system() -> UniverseFile {
                             mean_anomaly: 174.796,
                         })
                     },
-                    appearance: Appearance::Empty,
+                    appearance: Appearance::DebugBall(DebugBall {
+                        radius: 2439.7 * 1000.0, // meters
+                        r: 145,
+                        g: 145,
+                        b: 145,
+                    }),
                 }), // Mercury
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -84,7 +94,12 @@ pub fn solar_system() -> UniverseFile {
                             mean_anomaly: 50.115,
                         }),
                     },
-                    appearance: Appearance::Empty,
+                    appearance: Appearance::DebugBall(DebugBall {
+                        radius: 6051.8 * 1000.0,
+                        r: 224,
+                        g: 224,
+                        b: 224,
+                    }),
                 }), // Venus
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -110,7 +125,12 @@ pub fn solar_system() -> UniverseFile {
                             mean_anomaly: 358.617,
                         }),
                     },
-                    appearance: Appearance::Empty,
+                    appearance: Appearance::DebugBall(DebugBall{
+                        radius: 6371.0 * 1000.0,
+                        r: 59,
+                        g: 179,
+                        b: 75
+                    }),
                 }), // Earth
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -136,7 +156,12 @@ pub fn solar_system() -> UniverseFile {
                             mean_anomaly: 19.412,
                         }),
                     },
-                    appearance: Appearance::Empty,
+                    appearance: Appearance::DebugBall(DebugBall {
+                        radius: 3389.5 * 1000.0,
+                        r: 242,
+                        g: 66,
+                        b: 17,
+                    }),
                 }), // Mars
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -162,7 +187,12 @@ pub fn solar_system() -> UniverseFile {
                             mean_anomaly: 291.4,
                         }),
                     },
-                    appearance: Appearance::Empty,
+                    appearance: Appearance::DebugBall(DebugBall {
+                        radius: 966.2 * 1000.0,
+                        r: 145,
+                        g: 107,
+                        b: 54
+                    }),
                 }), // Ceres
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -188,7 +218,12 @@ pub fn solar_system() -> UniverseFile {
                             mean_anomaly: 0.0,
                         }),
                     },
-                    appearance: Appearance::Empty,
+                    appearance: Appearance::DebugBall(DebugBall {
+                        radius: 1737.4 * 100.0,
+                        r: 87,
+                        g: 87,
+                        b: 87,
+                    }),
                 }), // Luna
             ] },
     };

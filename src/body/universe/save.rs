@@ -91,13 +91,15 @@ impl Default for UniversePhysics {
 pub struct ViewSettings {
     pub distance_scale: f64,
     pub body_scale: f64,
+    pub show_labels: bool,
 }
 
 impl Default for ViewSettings {
     fn default() -> Self {
         Self {
             distance_scale: 1e-9,
-            body_scale: 1.0,
+            body_scale: 1e-9,
+            show_labels: true,
         }
     }
 }

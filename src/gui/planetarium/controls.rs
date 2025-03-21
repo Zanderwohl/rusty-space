@@ -1,11 +1,13 @@
-use bevy::prelude::{NextState, Res, ResMut};
+use bevy::prelude::{NextState, ResMut};
 use bevy_egui::egui;
 use bevy_egui::egui::Ui;
 use num_traits::Pow;
+use crate::body::universe::save::ViewSettings;
 use crate::gui::app::AppState;
 use crate::gui::menu::{MenuState, UiState};
 use crate::gui::planetarium::SCI_RE;
 use crate::gui::planetarium::time::SimTime;
+use crate::util::format;
 use crate::util::format::seconds_to_naive_date;
 
 pub fn planetarium_controls(
@@ -14,6 +16,7 @@ pub fn planetarium_controls(
     mut time: &mut ResMut<SimTime>,
     ui: &mut Ui,
     mut ui_state: ResMut<UiState>,
+    mut view_settings: ResMut<ViewSettings>,
 ) {
     if ui.button("Quit to Main Menu").clicked() {
         // TODO: Some kind of save nag
@@ -70,11 +73,7 @@ pub fn planetarium_controls(
             .range(f64::MIN..=f64::MAX)
             .fixed_decimals(1)
             .custom_formatter(|n, range| {
-                let s = format!("{n:e}");
-                let a = s.split("e").collect::<Vec<&str>>();
-                let mantissa = a[0].parse::<f64>().unwrap();
-                let exponent = a[1].parse::<i64>().unwrap();
-                format!("{:.3} x 10 ^ {}", mantissa, exponent)
+                format::sci_not(n)
             })
             .custom_parser(|s| {
                 if !SCI_RE.is_match(s) {
@@ -99,4 +98,22 @@ pub fn planetarium_controls(
     });
 
     ui.separator();
+
+    // View settings
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut view_settings.show_labels, "Show labels");
+    });
+    ui.horizontal(|ui| {
+        ui.label("Distance Scale");
+        if ui.button("-").clicked() { view_settings.distance_scale /= 10.0 }
+        ui.label(format::sci_not(view_settings.distance_scale));
+        if ui.button("+").clicked() { view_settings.distance_scale *= 10.0 }
+    });
+    ui.horizontal(|ui| {
+        ui.label("Body Scale");
+        if ui.button("-").clicked() { view_settings.body_scale /= 10.0 }
+        ui.label(format::sci_not(view_settings.body_scale));
+        if ui.button("+").clicked() { view_settings.body_scale *= 10.0 }
+    });
 }

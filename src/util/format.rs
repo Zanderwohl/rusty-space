@@ -25,3 +25,11 @@ pub fn seconds_to_naive_date(total_seconds: i64) -> String {
     }
     format!("{}{}y {}d {}h {}m {}s", sign, remaining_years, days, hours, mins, secs)
 }
+
+pub fn sci_not(n: f64) -> String {
+    let s = format!("{n:e}");
+    let a = s.split("e").collect::<Vec<&str>>();
+    let mantissa = a[0].parse::<f64>().unwrap();
+    let exponent = a[1].parse::<i64>().unwrap();
+    format!("{:.3} x 10 ^ {}", mantissa, exponent)
+}

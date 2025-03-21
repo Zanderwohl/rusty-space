@@ -18,6 +18,18 @@ pub struct BodyInfo {
     pub last_step_position: DVec3,
 }
 
+impl BodyInfo {
+    pub fn display_name(&self) -> String {
+        if let Some(name) = &self.name {
+            return name.clone()
+        }
+        if let Some(name) = &self.designation {
+            return name.clone()
+        }
+        (&self.id).clone()
+    }
+}
+
 impl Default for BodyInfo {
     fn default() -> Self {
         Self {

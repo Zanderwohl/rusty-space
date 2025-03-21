@@ -1,8 +1,9 @@
 use std::io::Read;
 use bevy::app::{App, Update};
-use bevy::math::DVec3;
-use bevy::prelude::{in_state, Assets, Commands, Entity, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Plugin, Query, Res, ResMut, StandardMaterial, SystemSet, Time, Transform, Without};
+use bevy::math::{DVec3, Vec2};
+use bevy::prelude::{in_state, Assets, Camera, Camera3d, Commands, Entity, GlobalTransform, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Plugin, Query, Res, ResMut, StandardMaterial, SystemSet, Time, Transform, Without};
 use bevy::prelude::IntoSystemConfigs;
+use bevy::render::camera::ViewportConversionError;
 use bevy_egui::{egui, EguiContexts};
 use lazy_static::lazy_static;
 use num_traits::{FloatConst, Pow};
@@ -10,7 +11,7 @@ use regex::Regex;
 use crate::body::appearance::AssetCache;
 use crate::body::universe::save::{UniverseFile, UniversePhysics, ViewSettings};
 use crate::body::universe::Universe;
-use crate::gui::app::AppState;
+use crate::gui::app::{AppState, PlanetariumCamera};
 use crate::gui::menu::{MenuState, UiState};
 use crate::gui::planetarium::time::SimTime;
 use crate::gui::settings::{Settings, UiTheme};
@@ -47,7 +48,7 @@ impl Plugin for Planetarium {
                 PlanetariumLoadingSet.run_if(in_state(AppState::PlanetariumLoading)),
             ))
             .add_systems(Update, (
-                (planetarium_ui, advance_time, calculate_kepler.before(position_bodies), position_bodies).in_set(PlanetariumUISet),
+                (planetarium_ui, advance_time, calculate_kepler.before(position_bodies), position_bodies, label_bodies).in_set(PlanetariumUISet),
                 (load_assets).in_set(PlanetariumLoadingSet),
             ))
             .add_plugins(NoCameraPlayerPlugin) // TODO: Get real camera solution
@@ -67,6 +68,7 @@ fn planetarium_ui(
     mut next_app_state: ResMut<NextState<AppState>>,
     mut next_menu_state: ResMut<NextState<MenuState>>,
     mut time: ResMut<SimTime>,
+    mut view_settings: ResMut<ViewSettings>,
 ) {
     let ctx = contexts.ctx_mut();
     
@@ -78,7 +80,7 @@ fn planetarium_ui(
     egui::Window::new("Controls")
         .vscroll(true)
         .show(ctx, |ui| {
-            controls::planetarium_controls(next_app_state, next_menu_state, &mut time, ui, ui_state);
+            controls::planetarium_controls(next_app_state, next_menu_state, &mut time, ui, ui_state, view_settings);
     });
 
     // Start collapsed: https://github.com/emilk/egui/pull/5661
@@ -104,7 +106,7 @@ fn advance_time(mut sim_time: ResMut<SimTime>, time: Res<Time>) {
     }
 }
 
-pub fn calculate_kepler(
+fn calculate_kepler(
     mut sim_time: ResMut<SimTime>,
     mut kepler_bodies: Query<(&KeplerMotive, &mut BodyInfo)>,
     fixed_bodies: Query<(&SimulationObject, &BodyInfo), Without<KeplerMotive>>,
@@ -133,7 +135,7 @@ pub fn calculate_kepler(
     }
 }
 
-pub fn position_bodies(
+fn position_bodies(
     mut sim_time: ResMut<SimTime>,
     mut bodies: Query<(&SimulationObject, &mut Transform, &BodyInfo)>,
     view_settings: Res<ViewSettings>,
@@ -148,6 +150,41 @@ pub fn position_bodies(
             position.z,
             -position.y
         ) * view_settings.distance_scale as f32; // Scale factor
+
+        transform.scale = bevy::math::Vec3::splat(view_settings.body_scale as f32);
+    }
+}
+
+fn label_bodies(
+    view_settings: Res<ViewSettings>,
+    mut contexts: EguiContexts,
+    cameras: Query<(&Camera, &Camera3d, &PlanetariumCamera, &GlobalTransform)>,
+    bodies: Query<(&SimulationObject, &mut Transform, &BodyInfo)>,
+) {
+    if !view_settings.show_labels {
+        return;
+    }
+
+    let ctx = contexts.ctx_mut();
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("body_labels")));
+
+    for (camera, camera3d, _, camera_transform) in &cameras {
+        for (_, mut transform, body_info) in bodies.iter() {
+            let position = transform.translation;
+            let view_pos = camera.world_to_viewport(camera_transform, position);
+            match view_pos {
+                Ok(pos) => {
+                    painter.text(
+                        egui::pos2(pos.x, pos.y),
+                        egui::Align2::CENTER_BOTTOM,
+                        body_info.display_name(),
+                        egui::FontId::proportional(14.0),
+                        egui::Color32::WHITE,
+                    );
+                }
+                Err(_) => {}
+            }
+        }
     }
 }
 

@@ -74,7 +74,7 @@ impl DebugBall {
         let material_key = format!("color_{:02x}{:02x}{:02x}", self.r, self.g, self.b);
 
         let mesh_handle = cache.meshes.entry(mesh_key.clone()).or_insert_with(|| {
-            meshes.add(Sphere::default().mesh().ico(5).unwrap())
+            meshes.add(Sphere::new(self.radius as f32).mesh().ico(5).unwrap())
         }).clone();
 
         let material_handle = cache.materials.entry(material_key.clone()).or_insert_with(|| {

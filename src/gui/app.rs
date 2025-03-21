@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use bevy::color::Color;
 use bevy::core::FrameCount;
 use bevy::DefaultPlugins;
-use bevy::prelude::{default, App, AppExtStates, Camera3d, Camera3dBundle, ClearColor, Commands, PluginGroup, Res, Single, Startup, States, Transform, Update, Window, WindowPlugin};
+use bevy::prelude::{default, App, AppExtStates, Camera3d, Camera3dBundle, ClearColor, Commands, Component, PluginGroup, Res, Single, Startup, States, Transform, Update, Window, WindowPlugin};
 use bevy::window::{ExitCondition, PresentMode};
 use bevy_egui::EguiPlugin;
 use bevy_flycam::FlyCam;
@@ -79,12 +79,16 @@ pub fn make_visible(mut window: Single<&mut Window>, frames: Res<FrameCount>) {
     }
 }
 
+#[derive(Component)]
+pub struct PlanetariumCamera;
+
 pub fn common_setup(mut commands: Commands) {
     commands.spawn((
         Camera3dBundle {
             transform: Transform::from_xyz(-5.0, 2.0, 0.5),
             ..default()
         },
-        FlyCam
+        FlyCam,
+        PlanetariumCamera,
     ));
 }
