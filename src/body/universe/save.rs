@@ -71,7 +71,7 @@ pub struct UniverseFileContents {
 
 #[derive(Serialize, Deserialize)]
 pub struct UniverseFileTime {
-    pub time: f64,
+    pub time_julian_days: f64, // In Julian Days
 }
 
 #[derive(Resource, Serialize, Deserialize)]
@@ -82,7 +82,7 @@ pub struct UniversePhysics {
 impl Default for UniversePhysics {
     fn default() -> Self {
         Self {
-            gravitational_constant: 6.6743015e-11,
+            gravitational_constant: 6.6743015e-11, // Standard G in m³ kg⁻¹ s⁻²
         }
     }
 }
@@ -96,7 +96,7 @@ pub struct ViewSettings {
 impl Default for ViewSettings {
     fn default() -> Self {
         Self {
-            distance_scale: 1e-6,
+            distance_scale: 1e-9,
             body_scale: 1.0,
         }
     }

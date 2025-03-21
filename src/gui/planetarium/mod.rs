@@ -1,6 +1,7 @@
 use std::io::Read;
 use bevy::app::{App, Update};
-use bevy::prelude::{in_state, Assets, Commands, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Plugin, Query, Res, ResMut, StandardMaterial, SystemSet, Time, Transform};
+use bevy::math::DVec3;
+use bevy::prelude::{in_state, Assets, Commands, Entity, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Plugin, Query, Res, ResMut, StandardMaterial, SystemSet, Time, Transform, Without};
 use bevy::prelude::IntoSystemConfigs;
 use bevy_egui::{egui, EguiContexts};
 use lazy_static::lazy_static;
@@ -17,6 +18,8 @@ use crate::body::{unload_simulation_objects, SimulationObject};
 use bevy_flycam::prelude::*;
 use crate::body::motive::info::BodyInfo;
 use crate::body::motive::kepler_motive::KeplerMotive;
+
+const J2000_JD: f64 = 2451545.0;
 
 pub mod time;
 mod display;
@@ -96,22 +99,36 @@ fn planetarium_ui(
 
 fn advance_time(mut sim_time: ResMut<SimTime>, time: Res<Time>) {
     if sim_time.playing {
-        sim_time.previous_time = sim_time.time;
-        sim_time.time += sim_time.gui_speed * time.delta_secs_f64();
+        sim_time.previous_time = sim_time.time_seconds;
+        sim_time.time_seconds += sim_time.gui_speed * time.delta_secs_f64();
     }
 }
 
 pub fn calculate_kepler(
     mut sim_time: ResMut<SimTime>,
-    mut kepler_bodies: Query<(&SimulationObject, &mut BodyInfo, &KeplerMotive)>,
+    mut kepler_bodies: Query<(&KeplerMotive, &mut BodyInfo)>,
+    fixed_bodies: Query<(&SimulationObject, &BodyInfo), Without<KeplerMotive>>,
     physics: Res<UniversePhysics>,
 ) {
-    let mu = physics.gravitational_constant;
-    let time = sim_time.time;
-    for (_, mut info, motive) in kepler_bodies.iter_mut() {
+    // First collect all body IDs and masses into a HashMap to avoid borrow conflicts
+    let mut body_masses: std::collections::HashMap<String, (f64, DVec3)> = std::collections::HashMap::new();
+    for (_, info) in fixed_bodies.iter() {
+        body_masses.insert(info.id.clone(), (info.mass, info.current_position));
+    }
+    for (_, info) in kepler_bodies.iter() {
+        body_masses.insert(info.id.clone(), (info.mass, info.current_position));
+    }
+
+    let time = sim_time.time_seconds;
+    for (motive, mut info) in kepler_bodies.iter_mut() {
+        let (primary_mass, primary_position) = body_masses.get(&motive.primary_id)
+            .copied()
+            .expect("Missing body info");
+            
+        let mu = physics.gravitational_constant * primary_mass;
         let position = motive.displacement(time, mu);
         if let Some(position) = position {
-            info.current_position = position;
+            info.current_position = primary_position + position;
         }
     }
 }
@@ -161,9 +178,9 @@ fn load_assets(
         universe.clear_all();
         let version = universe_file.contents.version; // TODO: Support multiple file format versions?
 
-        let time = universe_file.contents.time;
+        let time = (universe_file.contents.time.time_julian_days - J2000_JD) * 86400.0; // Convert Julian Days to seconds
+        sim_time.time_seconds = time;
         sim_time.playing = false;
-        sim_time.time = time.time;
 
         physics.gravitational_constant = universe_file.contents.physics.gravitational_constant;
 

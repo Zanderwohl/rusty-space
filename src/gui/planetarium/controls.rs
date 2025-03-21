@@ -42,9 +42,9 @@ pub fn planetarium_controls(
             }
         }
         if time.seconds_only {
-            ui.label(format!("Time: {:.1}s", time.time));
+            ui.label(format!("Time: {:.1}s", time.time_seconds));
         } else {
-            ui.label(format!("Time: {}", seconds_to_naive_date(time.time.round() as i64)));
+            ui.label(format!("Time: {}", seconds_to_naive_date(time.time_seconds.round() as i64)));
         }
     });
     let gui_speed_current = time.gui_speed;

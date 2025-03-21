@@ -45,7 +45,7 @@ impl Universe {
         };
 
         let time = SimTime {
-            time: file.contents.time.time,
+            time_seconds: file.contents.time.time_julian_days,
             ..SimTime::default()
         };
 

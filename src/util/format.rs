@@ -1,5 +1,3 @@
-
-
 pub fn seconds_to_naive_date(total_seconds: i64) -> String {
     let negative = total_seconds < 0;
     let sign = if negative { "-" } else { "" };
@@ -20,10 +18,10 @@ pub fn seconds_to_naive_date(total_seconds: i64) -> String {
     if remaining_days <= 0 {
         return format!("{}{}h {}m {}s", sign, hours, mins, secs);
     }
-    let days = remaining_hours % 365;
-    let remaining_years = (remaining_days - days) / 365;
+    let days = remaining_days % 365;
+    let remaining_years = (remaining_days as i128 - days as i128) / 365i128;
     if remaining_years <= 0 {
         return format!("{}{}d {}h {}m {}s", sign, days, hours, mins, secs);
     }
-    format!("{}{}y {}h {}m {}s", sign, days, hours, mins, secs)
+    format!("{}{}y {}d {}h {}m {}s", sign, remaining_years, days, hours, mins, secs)
 }

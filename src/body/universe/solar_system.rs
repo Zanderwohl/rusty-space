@@ -17,11 +17,9 @@ pub fn solar_system() -> UniverseFile {
         contents: UniverseFileContents {
             version: "0.0".into(),
             time: UniverseFileTime {
-                time: 2451544.500000 // Midnight 2000 January 1 00:00
+                time_julian_days: 2451544.500000 // Midnight 2000 January 1 00:00
             },
-            physics: UniversePhysics {
-                gravitational_constant: 6.6743015e-11,
-            },
+            physics: UniversePhysics::default(),
             view: ViewSettings::default(),
             bodies: vec![
                 SomeBody::FixedEntry(FixedEntry {
@@ -49,7 +47,7 @@ pub fn solar_system() -> UniverseFile {
                         primary_id: "sol".to_string(),
                         shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.205630,
-                            semi_major_axis: 5.791e7,
+                            semi_major_axis: 5.791e7 * 1000.0, // Convert km to m
                         }),
                         rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
                             inclination: 7.005,
@@ -75,7 +73,7 @@ pub fn solar_system() -> UniverseFile {
                         primary_id: "sol".to_string(),
                         shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.006772,
-                            semi_major_axis: 1.0821e8, // 108,210,000
+                            semi_major_axis: 1.0821e8 * 1000.0, // Convert km to m
                         }),
                         rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
                             inclination: 3.39458,
@@ -101,7 +99,7 @@ pub fn solar_system() -> UniverseFile {
                         primary_id: "sol".to_string(),
                         shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.0167086,
-                            semi_major_axis: 1.49598023e8, // 149,598,023
+                            semi_major_axis: 1.49598023e8 * 1000.0, // Convert km to m
                         }),
                         rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
                             inclination: 0.00005, // haha, the J2000 ecliptic is nonzero
@@ -127,7 +125,7 @@ pub fn solar_system() -> UniverseFile {
                         primary_id: "sol".to_string(),
                         shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.0934,
-                            semi_major_axis: 2.27939366e8, // 227,939,366
+                            semi_major_axis: 2.27939366e8 * 1000.0, // Convert km to m
                         }),
                         rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
                             inclination: 1.850,
@@ -153,7 +151,7 @@ pub fn solar_system() -> UniverseFile {
                         primary_id: "sol".to_string(),
                         shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.0785,
-                            semi_major_axis: 4.14e8, // 414,000,000
+                            semi_major_axis: 4.14e8 * 1000.0, // Convert km to m
                         }),
                         rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
                             inclination: 10.6,
@@ -179,7 +177,7 @@ pub fn solar_system() -> UniverseFile {
                         primary_id: "earth".to_string(),
                         shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.0549,
-                            semi_major_axis: 3.84399e5,
+                            semi_major_axis: 3.84399e5 * 1000.0, // Convert km to m
                         }),
                         rotation: KeplerRotation::EulerAngles(KeplerEulerAngles { // TODO: Precession https://en.wikipedia.org/wiki/Orbit_of_the_Moon#Precession
                             inclination: 5.145,
@@ -210,11 +208,9 @@ pub fn tiny_system() -> UniverseFile {
         contents: UniverseFileContents {
             version: "0.0".into(),
             time: UniverseFileTime {
-                time: 2451544.500000 // Midnight 2000 January 1 00:00
+                time_julian_days: 2451544.500000 // Midnight 2000 January 1 00:00
             },
-            physics: UniversePhysics {
-                gravitational_constant: 6.6743015e-11,
-            },
+            physics: UniversePhysics::default(),
             view: ViewSettings::default(),
             bodies: vec![
                 SomeBody::FixedEntry(FixedEntry {
@@ -242,7 +238,7 @@ pub fn tiny_system() -> UniverseFile {
                         primary_id: "sol".to_string(),
                         shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.006772,
-                            semi_major_axis: 1.0821e8, // 108,210,000
+                            semi_major_axis: 1.0821e8 * 1000.0, // Convert km to m
                         }),
                         rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
                             inclination: 3.39458,
@@ -268,7 +264,7 @@ pub fn tiny_system() -> UniverseFile {
                         primary_id: "sol".to_string(),
                         shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.0167086,
-                            semi_major_axis: 1.49598023e8, // 149,598,023
+                            semi_major_axis: 1.49598023e8 * 1000.0, // Convert km to m
                         }),
                         rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
                             inclination: 0.00005, // haha, the J2000 ecliptic is nonzero
@@ -294,7 +290,7 @@ pub fn tiny_system() -> UniverseFile {
                         primary_id: "earth".to_string(),
                         shape: KeplerShape::EccentricitySMA(EccentricitySMA {
                             eccentricity: 0.0549,
-                            semi_major_axis: 3.84399e5,
+                            semi_major_axis: 3.84399e5 * 1000.0, // Convert km to m
                         }),
                         rotation: KeplerRotation::EulerAngles(KeplerEulerAngles { // TODO: Precession https://en.wikipedia.org/wiki/Orbit_of_the_Moon#Precession
                             inclination: 5.145,

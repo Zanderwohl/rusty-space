@@ -84,7 +84,7 @@ impl KeplerMotive {
     pub fn mean_anomaly(&self, time: f64, gravitational_parameter: f64) -> f64 {
         let mean_anomaly_at_epoch = self.epoch.mean_anomaly_at_epoch();
         let sma = self.shape.semi_major_axis();
-        let epoch_time = self.epoch.epoch();
+        let epoch_time = self.epoch.epoch_seconds_since_j2000();
         mean_anomaly::definition(mean_anomaly_at_epoch, gravitational_parameter, sma, epoch_time, time)
     }
 
@@ -282,19 +282,24 @@ pub enum KeplerEpoch {
 }
 
 impl KeplerEpoch {
-    pub fn epoch(&self) -> f64 {
+    pub fn epoch_julian_day(&self) -> f64 {
         match self {
             KeplerEpoch::MeanAnomaly(maae) => {
-                maae.epoch
+                maae.epoch_julian_day
             }
             KeplerEpoch::TimeAtPeriapsisPassage(_) => {
                 todo!()
             }
             KeplerEpoch::TrueAnomaly(taae) => {
-                taae.epoch
+                taae.epoch_julian_day
             }
-            KeplerEpoch::J2000(_) => { 0.0 }
+            KeplerEpoch::J2000(_) => { 2451544.500000 }
         }
+    }
+
+    pub fn epoch_seconds_since_j2000(&self) -> f64 {
+        let epoch_jd = self.epoch_julian_day();
+        (epoch_jd - J2000_JD) * 86400.0  // Convert Julian days to seconds
     }
 
     pub fn mean_anomaly_at_epoch(&self) -> f64 {
@@ -315,18 +320,18 @@ impl KeplerEpoch {
 
 #[derive(Serialize, Deserialize)]
 pub struct MeanAnomalyAtEpoch {
-    pub epoch: f64,
+    pub epoch_julian_day: f64,
     pub mean_anomaly: f64,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct PeriapsisTime {
-    pub time: f64,
+    pub time_julian_day: f64,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct TrueAnomalyAtEpoch {
-    pub epoch: f64,
+    pub epoch_julian_day: f64,
     pub true_anomaly: f64,
 }
 
