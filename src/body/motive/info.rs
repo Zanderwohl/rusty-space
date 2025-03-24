@@ -16,6 +16,8 @@ pub struct BodyInfo {
     pub current_position: DVec3,
     #[serde(skip, default = "DVec3::default")]
     pub last_step_position: DVec3,
+    #[serde(default = "Vec::new")]
+    pub tags: Vec<String>,
 }
 
 impl BodyInfo {
@@ -41,6 +43,7 @@ impl Default for BodyInfo {
             uuid: Uuid::from_u128(0u128),
             current_position: DVec3::default(),
             last_step_position: DVec3::default(),
+            tags: vec![],
         }
     }
 }

@@ -1,9 +1,10 @@
 use std::io::Read;
 use bevy::app::{App, Update};
 use bevy::math::{DVec3, Vec2};
-use bevy::prelude::{in_state, Assets, Camera, Camera3d, Commands, Entity, GlobalTransform, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Plugin, Query, Res, ResMut, StandardMaterial, SystemSet, Time, Transform, Without};
+use bevy::prelude::{in_state, info, Assets, Camera, Camera3d, Commands, Entity, GlobalTransform, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Plugin, Query, Res, ResMut, StandardMaterial, SystemSet, Time, Transform, Without};
 use bevy::prelude::IntoSystemConfigs;
 use bevy::render::camera::ViewportConversionError;
+use bevy::utils::HashMap;
 use bevy_egui::{egui, EguiContexts};
 use lazy_static::lazy_static;
 use num_traits::{FloatConst, Pow};
@@ -12,7 +13,7 @@ use crate::body::appearance::AssetCache;
 use crate::body::universe::save::{UniverseFile, UniversePhysics, ViewSettings};
 use crate::body::universe::Universe;
 use crate::gui::app::{AppState, PlanetariumCamera};
-use crate::gui::menu::{MenuState, UiState};
+use crate::gui::menu::{MenuState, TagState, UiState};
 use crate::gui::planetarium::time::SimTime;
 use crate::gui::settings::{Settings, UiTheme};
 use crate::body::{unload_simulation_objects, SimulationObject};
@@ -140,6 +141,9 @@ fn position_bodies(
     mut bodies: Query<(&SimulationObject, &mut Transform, &BodyInfo)>,
     view_settings: Res<ViewSettings>,
 ) {
+    let distance_scale = view_settings.distance_scale as f32;
+    let body_scale = view_settings.body_scale as f32;
+
     for (_, mut transform, body_info) in bodies.iter_mut() {
         // Convert from z-axis-up to y-axis-up coordinate system
         // In z-axis-up: (x, y, z) where z is up
@@ -149,9 +153,9 @@ fn position_bodies(
             position.x,
             position.z,
             -position.y
-        ) * view_settings.distance_scale as f32; // Scale factor
+        ) * distance_scale; // Scale factor
 
-        transform.scale = bevy::math::Vec3::splat(view_settings.body_scale as f32);
+        transform.scale = bevy::math::Vec3::splat(body_scale);
     }
 }
 
@@ -170,6 +174,10 @@ fn label_bodies(
 
     for (camera, camera3d, _, camera_transform) in &cameras {
         for (_, mut transform, body_info) in bodies.iter() {
+            if !view_settings.body_in_any_visible_tag(&body_info.id) {
+                continue;
+            }
+
             let position = transform.translation;
             let view_pos = camera.world_to_viewport(camera_transform, position);
             match view_pos {
@@ -191,6 +199,7 @@ fn label_bodies(
 fn load_assets(
     mut commands: Commands,
     mut ui_state: ResMut<UiState>,
+    mut view_settings: ResMut<ViewSettings>,
     mut next_app_state: ResMut<NextState<AppState>>,
     mut cache: ResMut<AssetCache>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -220,11 +229,16 @@ fn load_assets(
         sim_time.playing = false;
 
         physics.gravitational_constant = universe_file.contents.physics.gravitational_constant;
+        view_settings.tags = HashMap::<String, TagState>::new();
 
         let bodies = universe_file.contents.bodies;
         for body in bodies {
             let id = body.id();
             let name = body.name();
+            for tag in body.tags() {
+                view_settings.tags.entry(tag.clone()).or_insert(TagState::default()).members.push(id.clone());
+            }
+            info!("{:?}", view_settings);
             universe.insert(name, id);
             body.spawn(&mut commands, &mut cache, &mut meshes, &mut materials, &mut images);
         }

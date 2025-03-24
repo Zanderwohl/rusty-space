@@ -29,6 +29,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.988416e30,
                         major: true,
                         designation: None,
+                        tags: vec!["Star".into()],
                         ..Default::default()
                     },
                     position: DVec3::ZERO,
@@ -46,6 +47,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 3.3011e23,
                         major: true,
                         designation: None,
+                        tags: vec!["Planet".into(), "Major Planet".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -77,6 +79,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 4.8675e24,
                         major: true,
                         designation: None,
+                        tags: vec!["Planet".into(), "Major Planet".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -108,6 +111,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 5.972168e24,
                         major: true,
                         designation: None,
+                        tags: vec!["Planet".into(), "Major Planet".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -139,6 +143,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 6.4171,
                         major: true,
                         designation: None,
+                        tags: vec!["Planet".into(), "Major Planet".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -170,6 +175,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 6.4171,
                         major: true,
                         designation: Some("1 Ceres".into()),
+                        tags: vec!["Planet".into(), "Minor Planet".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -201,6 +207,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 6.4171,
                         major: true,
                         designation: Some("Earth I".into()),
+                        tags: vec!["Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {

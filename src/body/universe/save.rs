@@ -11,7 +11,7 @@ use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::motive::newton_motive::NewtonMotive;
 use crate::body::SimulationObject;
 use crate::body::universe::{Major, Minor};
-
+use crate::gui::menu::TagState;
 
 pub struct UniverseFile {
     pub(crate) file: Option<PathBuf>,
@@ -87,20 +87,37 @@ impl Default for UniversePhysics {
     }
 }
 
-#[derive(Serialize, Deserialize, Resource)]
+#[derive(Serialize, Deserialize, Resource, Debug)]
 pub struct ViewSettings {
     pub distance_scale: f64,
+    pub logarithmic_distance_scale: bool,
     pub body_scale: f64,
+    pub logarithmic_body_scale: bool,
     pub show_labels: bool,
+    pub tags: HashMap<String, TagState>,
 }
 
 impl Default for ViewSettings {
     fn default() -> Self {
         Self {
             distance_scale: 1e-9,
+            logarithmic_body_scale: false,
             body_scale: 1e-9,
+            logarithmic_distance_scale: false,
             show_labels: true,
+            tags: HashMap::new(),
         }
+    }
+}
+
+impl ViewSettings {
+    pub fn body_in_any_visible_tag<T:AsRef<str> + ToString>(&self, body_id: T) -> bool {
+        for tag in self.tags.values() {
+            if tag.shown && tag.members.contains(&body_id.to_string()) {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -144,6 +161,15 @@ impl SomeBody {
             SomeBody::NewtonEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
             SomeBody::KeplerEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
             SomeBody::CompoundEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
+        }
+    }
+
+    pub fn tags(&self) -> &Vec<String> {
+        match self {
+            SomeBody::FixedEntry(entry) => &entry.info.tags,
+            SomeBody::NewtonEntry(entry) => &entry.info.tags,
+            SomeBody::KeplerEntry(entry) => &entry.info.tags,
+            SomeBody::CompoundEntry(entry) => &entry.info.tags,
         }
     }
 }

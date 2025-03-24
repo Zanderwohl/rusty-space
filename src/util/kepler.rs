@@ -143,7 +143,6 @@ pub mod semi_parameter {
 }
 
 pub mod periapsis {
-    use crate::util::common;
     use crate::util::kepler::semi_parameter;
 
     pub fn definition(semi_major_axis: f64, eccentricity: f64) -> f64 {

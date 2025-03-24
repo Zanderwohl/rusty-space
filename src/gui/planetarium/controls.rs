@@ -99,21 +99,30 @@ pub fn planetarium_controls(
 
     ui.separator();
 
-    // View settings
+    // Scale controls
     ui.separator();
     ui.horizontal(|ui| {
-        ui.checkbox(&mut view_settings.show_labels, "Show labels");
-    });
-    ui.horizontal(|ui| {
         ui.label("Distance Scale");
+        // ui.checkbox(&mut view_settings.logarithmic_distance_scale, "Logarithmic");
         if ui.button("-").clicked() { view_settings.distance_scale /= 10.0 }
+
+
         ui.label(format::sci_not(view_settings.distance_scale));
         if ui.button("+").clicked() { view_settings.distance_scale *= 10.0 }
     });
     ui.horizontal(|ui| {
         ui.label("Body Scale");
+        // ui.checkbox(&mut view_settings.logarithmic_body_scale, "Logarithmic");
         if ui.button("-").clicked() { view_settings.body_scale /= 10.0 }
         ui.label(format::sci_not(view_settings.body_scale));
         if ui.button("+").clicked() { view_settings.body_scale *= 10.0 }
     });
+
+    // View settings
+    ui.separator();
+    ui.label("Show Labels");
+    ui.checkbox(&mut view_settings.show_labels, "All");
+    for (tag_name, tag_state) in &mut view_settings.tags {
+        ui.checkbox(&mut tag_state.shown, tag_name);
+    }
 }

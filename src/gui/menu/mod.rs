@@ -7,9 +7,12 @@ use std::path::PathBuf;
 use bevy::app::AppExit;
 use bevy::prelude::{in_state, info, App, AppExtStates, Commands, Condition, Entity, EventReader, EventWriter, IntoSystemConfigs, NextState, OnEnter, OnExit, Plugin, Query, Res, ResMut, Resource, State, States, SystemSet, Update, With};
 use bevy::prelude::IntoSystemSetConfigs;
+use bevy::text::cosmic_text::ttf_parser::Tag;
+use bevy::utils::HashMap;
 use bevy::window::{ClosingWindow, WindowCloseRequested};
 use bevy_egui::{egui, EguiContexts};
 use bevy_egui::egui::Ui;
+use serde::{Deserialize, Serialize};
 use crate::gui::app::AppState;
 use crate::gui::settings::{Settings, UiTheme};
 use crate::body::universe::Universe;
@@ -18,6 +21,21 @@ use crate::body::universe::Universe;
 pub struct UiState {
     pub quit_requested: bool,
     pub current_save: Option<SaveFileMeta>,
+}
+
+#[derive(Serialize, Deserialize, Resource, Debug)]
+pub struct TagState {
+    pub shown: bool,
+    pub members: Vec<String>,
+}
+
+impl Default for TagState {
+    fn default() -> Self {
+        Self {
+            shown: false,
+            members: Vec::new(),
+        }
+    }
 }
 
 impl Default for UiState {
