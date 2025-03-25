@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use bevy::math::DVec3;
-use bevy::prelude::{info, Assets, Commands, Image, Mesh, ResMut, Resource, StandardMaterial, Transform};
+use bevy::prelude::{info, Assets, Commands, Entity, Image, Mesh, ResMut, Resource, StandardMaterial, Transform};
 use bevy::utils::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::body::appearance::Appearance;
@@ -137,7 +137,7 @@ impl SomeBody {
         meshes: &mut ResMut<Assets<Mesh>>,
         materials: &mut ResMut<Assets<StandardMaterial>>,
         images: &mut ResMut<Assets<Image>>,
-    ) {
+    )  -> Entity {
         match self {
             SomeBody::FixedEntry(entry) => entry.spawn(commands, cache, meshes, materials, images),
             SomeBody::NewtonEntry(entry) => entry.spawn(commands, cache, meshes, materials, images),
@@ -189,7 +189,7 @@ impl FixedEntry {
         mut meshes: &mut ResMut<Assets<Mesh>>,
         mut materials: &mut ResMut<Assets<StandardMaterial>>,
         mut images: &mut ResMut<Assets<Image>>,
-    ) {
+    ) -> Entity {
         let info = self.info;
         let motive = FixedMotive {
             position: self.position,
@@ -206,7 +206,7 @@ impl FixedEntry {
                     info,
                     motive,
                     Major,
-                ));
+                )).id()
         } else {
             commands
                 .spawn((
@@ -217,7 +217,7 @@ impl FixedEntry {
                     info,
                     motive,
                     Minor,
-                ));
+                )).id()
         }
     }
 }
@@ -238,7 +238,7 @@ impl NewtonEntry {
         mut meshes: &mut ResMut<Assets<Mesh>>,
         mut materials: &mut ResMut<Assets<StandardMaterial>>,
         mut images: &mut ResMut<Assets<Image>>,
-    ) {
+    ) -> Entity {
         let info = self.info;
         let motive = NewtonMotive {
             position: self.position,
@@ -256,7 +256,7 @@ impl NewtonEntry {
                     info,
                     motive,
                     Major,
-                ));
+                )).id()
         } else {
             commands
                 .spawn((
@@ -267,7 +267,7 @@ impl NewtonEntry {
                     info,
                     motive,
                     Minor,
-                ));
+                )).id()
         }
     }
 }
@@ -287,7 +287,7 @@ impl KeplerEntry {
         mut meshes: &mut ResMut<Assets<Mesh>>,
         mut materials: &mut ResMut<Assets<StandardMaterial>>,
         mut images: &mut ResMut<Assets<Image>>,
-    ) {
+    ) -> Entity {
         info!("Spawning KeplerEntry {:?}", self.info.name);
         let info = self.info;
         let motive = self.params;
@@ -303,7 +303,7 @@ impl KeplerEntry {
                     info,
                     motive,
                     Major,
-                ));
+                )).id()
         } else {
             commands
                 .spawn((
@@ -314,7 +314,7 @@ impl KeplerEntry {
                     info,
                     motive,
                     Major,
-                ));
+                )).id()
         }
     }
 }
@@ -334,7 +334,7 @@ impl PatchedConicsEntry {
         mut meshes: &mut ResMut<Assets<Mesh>>,
         mut materials: &mut ResMut<Assets<StandardMaterial>>,
         mut images: &mut ResMut<Assets<Image>>,
-    ) {
+    ) -> Entity {
         todo!()
     }
 }

@@ -29,7 +29,7 @@ pub fn run() {
                     name: Some("exotic-matters.app".into()),
                     present_mode: PresentMode::AutoVsync,
                     prevent_default_event_handling: true,
-                    visible: false,
+                    visible: true,
                     ..Default::default()
                 }),
                 exit_condition: ExitCondition::OnPrimaryClosed,

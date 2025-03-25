@@ -1,5 +1,5 @@
+use bevy_egui::{egui, EguiContexts};
 use bevy::prelude::{NextState, ResMut};
-use bevy_egui::egui;
 use bevy_egui::egui::Ui;
 use num_traits::Pow;
 use crate::body::universe::save::ViewSettings;
@@ -7,15 +7,39 @@ use crate::gui::app::AppState;
 use crate::gui::menu::{MenuState, UiState};
 use crate::gui::planetarium::SCI_RE;
 use crate::gui::planetarium::time::SimTime;
+use crate::gui::settings::{Settings, UiTheme};
 use crate::util::format;
 use crate::util::format::seconds_to_naive_date;
+
+pub fn control_window(
+    mut contexts: EguiContexts,
+    mut settings: ResMut<Settings>,
+    mut ui_state: ResMut<UiState>,
+    mut next_app_state: ResMut<NextState<AppState>>,
+    mut next_menu_state: ResMut<NextState<MenuState>>,
+    mut time: ResMut<SimTime>,
+    mut view_settings: ResMut<ViewSettings>,
+) {
+    let ctx = contexts.ctx_mut();
+    
+    match settings.ui.theme {
+        UiTheme::Light => ctx.set_visuals(egui::Visuals::light()),
+        UiTheme::Dark => ctx.set_visuals(egui::Visuals::dark()),
+    }
+
+    egui::Window::new("Controls")
+        .vscroll(true)
+        .show(ctx, |ui| {
+            planetarium_controls(next_app_state, next_menu_state, &mut time, ui, &mut ui_state, view_settings);
+    });
+}
 
 pub fn planetarium_controls(
     mut next_app_state: ResMut<NextState<AppState>>,
     mut next_menu_state: ResMut<NextState<MenuState>>,
     mut time: &mut ResMut<SimTime>,
     ui: &mut Ui,
-    mut ui_state: ResMut<UiState>,
+    mut ui_state: &mut ResMut<UiState>,
     mut view_settings: ResMut<ViewSettings>,
 ) {
     if ui.button("Quit to Main Menu").clicked() {

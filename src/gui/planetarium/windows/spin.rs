@@ -1,8 +1,25 @@
 use bevy::prelude::ResMut;
-use bevy_egui::egui;
+use bevy_egui::{egui, EguiContexts};
 use bevy_egui::egui::Context;
 use num_traits::FloatConst;
-use crate::gui::settings::Settings;
+use crate::gui::settings::{Settings, UiTheme};
+
+pub fn spin_window(
+
+    mut settings: ResMut<Settings>,
+    mut contexts: EguiContexts,
+) {
+    let ctx = contexts.ctx_mut();
+
+    match settings.ui.theme {
+        UiTheme::Light => ctx.set_visuals(egui::Visuals::light()),
+        UiTheme::Dark => ctx.set_visuals(egui::Visuals::dark()),
+    }
+
+    if settings.windows.spin {
+        spin_gravity_calculator(&mut settings, ctx);
+    }
+}
 
 pub fn spin_gravity_calculator(mut settings: &mut ResMut<Settings>, ctx: &mut Context) {
     egui::Window::new("Spin Gravity Calculator")

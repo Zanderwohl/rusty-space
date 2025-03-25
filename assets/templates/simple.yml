@@ -23,8 +23,11 @@ bodies:
       brightness: 15.0
   1:
     id: 1
-    physics: !StupidCircle
-      radius: 10.0
+    physics: !FlatKepler
+      semi_major_axis: 10.0
+      mean_anomaly_at_epoch: 0.0
+      eccentricity: 0.0
+      longitude_of_periapsis: 0.0
       primary: 0
     name: Earth
     mass: 10000.0
@@ -36,8 +39,11 @@ bodies:
         - 0.4
   2:
     id: 2
-    physics: !StupidCircle
-      radius: 0.5
+    physics: !FlatKepler
+      semi_major_axis: 0.5
+      mean_anomaly_at_epoch: 0.0
+      eccentricity: 0.0
+      longitude_of_periapsis: 0.0
       primary: 1
     name: Moon
     mass: 100.0
@@ -90,15 +96,31 @@ bodies:
   5:
     id: 5
     physics: !FlatKepler
-      semi_major_axis: 3.0
-      mean_anomaly_at_epoch: 0.0
-      eccentricity: 0.5
+      semi_major_axis: 20.0
+      mean_anomaly_at_epoch: 3.1415926535
+      eccentricity: 0.9
+      longitude_of_periapsis: 3.1415926535
+      primary: 0
+    name: Comet
+    mass: 1.0
+    appearance: !Planetoid
+      radius: 0.1
+      color:
+        - 0.0
+        - 0.5
+        - 0.7
+  6:
+    id: 6
+    physics: !FlatKepler
+      semi_major_axis: 20.0
+      mean_anomaly_at_epoch: 3.1415926535
+      eccentricity: 0.9
       longitude_of_periapsis: 0.0
       primary: 0
     name: Comet
     mass: 1.0
     appearance: !Planetoid
-      radius: 0.5
+      radius: 0.1
       color:
         - 0.0
         - 0.5

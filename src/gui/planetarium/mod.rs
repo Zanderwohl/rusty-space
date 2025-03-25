@@ -15,19 +15,20 @@ use crate::body::universe::Universe;
 use crate::gui::app::{AppState, PlanetariumCamera};
 use crate::gui::menu::{MenuState, TagState, UiState};
 use crate::gui::planetarium::time::SimTime;
-use crate::gui::settings::{Settings, UiTheme};
+use crate::gui::settings::{Settings, UiSettings, UiTheme};
 use crate::body::{unload_simulation_objects, SimulationObject};
 use bevy_flycam::prelude::*;
 use crate::body::motive::info::BodyInfo;
 use crate::body::motive::kepler_motive::KeplerMotive;
+use windows::body_edit::body_edit_window;
+use crate::gui::planetarium::windows::settings::settings_window;
+use crate::gui::planetarium::windows::spin::spin_window;
 
 const J2000_JD: f64 = 2451545.0;
 
 pub mod time;
 mod display;
-mod spin;
-mod controls;
-mod body_edit;
+mod windows;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 struct PlanetariumUISet;
@@ -49,7 +50,16 @@ impl Plugin for Planetarium {
                 PlanetariumLoadingSet.run_if(in_state(AppState::PlanetariumLoading)),
             ))
             .add_systems(Update, (
-                (planetarium_ui, advance_time, calculate_kepler.before(position_bodies), position_bodies, label_bodies).in_set(PlanetariumUISet),
+                (
+                    windows::controls::control_window,
+                    body_edit_window,
+                    settings_window,
+                    spin_window,
+                    advance_time,
+                    calculate_kepler.before(position_bodies),
+                    position_bodies,
+                    label_bodies,
+                ).in_set(PlanetariumUISet),
                 (load_assets).in_set(PlanetariumLoadingSet),
             ))
             .add_plugins(NoCameraPlayerPlugin) // TODO: Get real camera solution
@@ -60,44 +70,6 @@ impl Plugin for Planetarium {
 
 lazy_static! {
     static ref SCI_RE: Regex = Regex::new(r"\d?\.\d+\s?x\s?10\s?\^\s?\d+").unwrap();
-}
-
-fn planetarium_ui(
-    mut contexts: EguiContexts,
-    mut settings: ResMut<Settings>,
-    mut ui_state: ResMut<UiState>,
-    mut next_app_state: ResMut<NextState<AppState>>,
-    mut next_menu_state: ResMut<NextState<MenuState>>,
-    mut time: ResMut<SimTime>,
-    mut view_settings: ResMut<ViewSettings>,
-) {
-    let ctx = contexts.ctx_mut();
-    
-    match settings.ui.theme {
-        UiTheme::Light => ctx.set_visuals(egui::Visuals::light()),
-        UiTheme::Dark => ctx.set_visuals(egui::Visuals::dark()),
-    }
-
-    egui::Window::new("Controls")
-        .vscroll(true)
-        .show(ctx, |ui| {
-            controls::planetarium_controls(next_app_state, next_menu_state, &mut time, ui, ui_state, view_settings);
-    });
-
-    // Start collapsed: https://github.com/emilk/egui/pull/5661
-    egui::Window::new("Settings")
-        .vscroll(true)
-        .show(ctx, |ui| {
-            crate::gui::menu::settings::settings_panel(&mut settings, ui);
-        });
-
-    if settings.windows.spin {
-        spin::spin_gravity_calculator(&mut settings, ctx);
-    }
-
-    if settings.windows.body_edit {
-        body_edit::body_edit_window(&mut settings, ctx);
-    }
 }
 
 fn advance_time(mut sim_time: ResMut<SimTime>, time: Res<Time>) {
