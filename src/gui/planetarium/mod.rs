@@ -142,7 +142,7 @@ fn label_bodies(
     }
 
     let ctx = contexts.ctx_mut();
-    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("body_labels")));
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("body_labels")));
 
     for (camera, camera3d, _, camera_transform) in &cameras {
         for (_, mut transform, body_info) in bodies.iter() {
