@@ -1,5 +1,5 @@
 use bevy::asset::RenderAssetUsages;
-use bevy::prelude::{default, Assets, Color, Handle, Image, Mesh, Mesh3d, MeshMaterial3d, Meshable, PbrBundle, ResMut, Resource, Sphere, StandardMaterial, Transform, Vec3};
+use bevy::prelude::{default, Assets, Color, Component, Handle, Image, Mesh, Mesh3d, MeshMaterial3d, Meshable, ResMut, Resource, Sphere, StandardMaterial};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::utils::HashMap;
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,7 @@ pub struct AssetCache {
     pub materials: HashMap<String, Handle<StandardMaterial>>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Component)]
 pub enum Appearance {
     #[default]
     Empty,
@@ -18,6 +18,13 @@ pub enum Appearance {
 }
 
 impl Appearance {
+    pub fn radius(&self) -> f64 {
+        match self {
+            Appearance::Empty => 1.0,
+            Appearance::DebugBall(DebugBall { radius, .. }) => *radius,
+        }
+    }
+
     pub fn pbr_bundle(&self,
                       cache: &mut ResMut<AssetCache>,
                       meshes: &mut Assets<Mesh>,
@@ -74,7 +81,7 @@ impl DebugBall {
         let material_key = format!("color_{:02x}{:02x}{:02x}", self.r, self.g, self.b);
 
         let mesh_handle = cache.meshes.entry(mesh_key.clone()).or_insert_with(|| {
-            meshes.add(Sphere::new(self.radius as f32).mesh().ico(5).unwrap())
+            meshes.add(Sphere::new(1.0f32).mesh().ico(5).unwrap())
         }).clone();
 
         let material_handle = cache.materials.entry(material_key.clone()).or_insert_with(|| {

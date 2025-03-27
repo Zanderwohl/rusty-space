@@ -127,20 +127,31 @@ pub fn planetarium_controls(
     ui.separator();
     ui.horizontal(|ui| {
         ui.label("Distance Scale");
-        // ui.checkbox(&mut view_settings.logarithmic_distance_scale, "Logarithmic");
+        ui.checkbox(&mut view_settings.logarithmic_distance_scale, "Logarithmic");
         if ui.button("-").clicked() { view_settings.distance_scale /= 10.0 }
-
 
         ui.label(format::sci_not(view_settings.distance_scale));
         if ui.button("+").clicked() { view_settings.distance_scale *= 10.0 }
     });
+    if view_settings.logarithmic_distance_scale {
+        ui.add(egui::Slider::new(&mut view_settings.logarithmic_distance_base, 2.0..=30.0)
+            .text("Logarithmic Base")
+            .step_by(1.0)
+        );
+    }
     ui.horizontal(|ui| {
         ui.label("Body Scale");
-        // ui.checkbox(&mut view_settings.logarithmic_body_scale, "Logarithmic");
+        ui.checkbox(&mut view_settings.logarithmic_body_scale, "Logarithmic");
         if ui.button("-").clicked() { view_settings.body_scale /= 10.0 }
         ui.label(format::sci_not(view_settings.body_scale));
         if ui.button("+").clicked() { view_settings.body_scale *= 10.0 }
     });
+    if view_settings.logarithmic_body_scale {
+        ui.add(egui::Slider::new(&mut view_settings.logarithmic_body_base, 2.0..=1000.0)
+            .text("Logarithmic Base")
+            .step_by(1.0)
+        );
+    }
 
     // View settings
     ui.separator();

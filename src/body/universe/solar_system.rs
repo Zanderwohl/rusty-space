@@ -226,7 +226,7 @@ pub fn solar_system() -> UniverseFile {
                         }),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
-                        radius: 1737.4 * 100.0,
+                        radius: 1737.4 * 1000.0,
                         r: 87,
                         g: 87,
                         b: 87,

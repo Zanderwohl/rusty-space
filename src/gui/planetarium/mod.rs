@@ -9,7 +9,7 @@ use bevy_egui::{egui, EguiContexts};
 use lazy_static::lazy_static;
 use num_traits::{FloatConst, Pow};
 use regex::Regex;
-use crate::body::appearance::AssetCache;
+use crate::body::appearance::{Appearance, AssetCache};
 use crate::body::universe::save::{UniverseFile, UniversePhysics, ViewSettings};
 use crate::body::universe::Universe;
 use crate::gui::app::{AppState, PlanetariumCamera};
@@ -23,6 +23,7 @@ use crate::body::motive::kepler_motive::KeplerMotive;
 use windows::body_edit::body_edit_window;
 use crate::gui::planetarium::windows::settings::settings_window;
 use crate::gui::planetarium::windows::spin::spin_window;
+use crate::util::mappings;
 
 const J2000_JD: f64 = 2451545.0;
 
@@ -110,13 +111,18 @@ fn calculate_kepler(
 
 fn position_bodies(
     mut sim_time: ResMut<SimTime>,
-    mut bodies: Query<(&SimulationObject, &mut Transform, &BodyInfo)>,
+    mut bodies: Query<(&SimulationObject, &mut Transform, &BodyInfo, &Appearance)>,
     view_settings: Res<ViewSettings>,
 ) {
-    let distance_scale = view_settings.distance_scale as f32;
-    let body_scale = view_settings.body_scale as f32;
+    let distance_scale = if view_settings.logarithmic_distance_scale {
+        let n = mappings::log_scale(view_settings.distance_scale, view_settings.logarithmic_distance_base) as f32;
+        // info!("{} -> {}", view_settings.distance_scale, n);
+        n
+    } else {
+        view_settings.distance_scale as f32
+    };
 
-    for (_, mut transform, body_info) in bodies.iter_mut() {
+    for (_, mut transform, body_info, appearance) in bodies.iter_mut() {
         // Convert from z-axis-up to y-axis-up coordinate system
         // In z-axis-up: (x, y, z) where z is up
         // In y-axis-up: (x, z, -y) where y is up
@@ -127,6 +133,11 @@ fn position_bodies(
             -position.y
         ) * distance_scale; // Scale factor
 
+        let body_scale = if view_settings.logarithmic_body_scale {
+            mappings::log_scale(appearance.radius(), view_settings.logarithmic_body_base) * view_settings.body_scale
+        } else {
+            (appearance.radius() * view_settings.body_scale)
+        } as f32;
         transform.scale = bevy::math::Vec3::splat(body_scale);
     }
 }
@@ -146,7 +157,7 @@ fn label_bodies(
 
     for (camera, camera3d, _, camera_transform) in &cameras {
         for (_, mut transform, body_info) in bodies.iter() {
-            if !view_settings.body_in_any_visible_tag(&body_info.id) {
+            if !view_settings.show_labels && !view_settings.body_in_any_visible_tag(&body_info.id) {
                 continue;
             }
 
