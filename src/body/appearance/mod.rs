@@ -1,6 +1,6 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::color::LinearRgba;
-use bevy::prelude::{default, Assets, Color, Component, Handle, Image, Mesh, Mesh3d, MeshMaterial3d, Meshable, PointLight, ResMut, Resource, Sphere, StandardMaterial};
+use bevy::prelude::{default, info, Assets, Color, Component, Handle, Image, Mesh, Mesh3d, MeshMaterial3d, Meshable, PointLight, ResMut, Resource, Sphere, StandardMaterial};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::utils::HashMap;
 use serde::{Deserialize, Serialize};
@@ -148,7 +148,9 @@ impl StarBall {
     ) -> (Mesh3d, MeshMaterial3d<StandardMaterial>) {
         let color = Color::srgb(self.color.r as f32 / 255.0, self.color.g as f32 / 255.0, self.color.b as f32 / 255.0);
         let mesh_key = format!("icosphere_{}", self.radius);
-        let material_key = format!("color_{:02x}{:02x}{:02x}", self.color.r, self.color.g, self.color.b);
+        let material_key = format!("color_{:02x}{:02x}{:02x}_{:03x}:{:03x}:{:03x}", self.color.r, self.color.g, self.color.b, self.light.r, self.light.g, self.light.b);
+        info!("-----------------");
+        info!("Creating material for a star: {} ({}, {}, {})", material_key, self.light.r as f32 / 255.0, self.light.g as f32 / 255.0, self.light.b as f32 / 255.0);
 
         let mesh_handle = cache.meshes.entry(mesh_key.clone()).or_insert_with(|| {
             meshes.add(Sphere::new(1.0f32).mesh().ico(5).unwrap())
@@ -156,7 +158,7 @@ impl StarBall {
 
         let material_handle = cache.materials.entry(material_key.clone()).or_insert_with(|| {
             materials.add(StandardMaterial {
-                base_color: color,
+                // base_color: color,
                 emissive: LinearRgba::rgb(
                     self.light.r as f32 / 255.0,
                     self.light.g as f32 / 255.0,

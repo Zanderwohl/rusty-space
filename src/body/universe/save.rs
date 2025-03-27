@@ -296,7 +296,7 @@ impl KeplerEntry {
         mut materials: &mut ResMut<Assets<StandardMaterial>>,
         mut images: &mut ResMut<Assets<Image>>,
     ) -> Entity {
-        info!("Spawning KeplerEntry {:?}", self.info.name);
+        // info!("Spawning KeplerEntry {:?}", self.info.name);
         let info = self.info;
         let motive = self.params;
         let (mesh, material) = self.appearance.pbr_bundle(&mut cache, &mut meshes, &mut materials, &mut images);

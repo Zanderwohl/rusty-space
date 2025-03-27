@@ -147,10 +147,6 @@ fn label_bodies(
     cameras: Query<(&Camera, &Camera3d, &PlanetariumCamera, &GlobalTransform)>,
     bodies: Query<(&SimulationObject, &mut Transform, &BodyInfo)>,
 ) {
-    if !view_settings.show_labels {
-        return;
-    }
-
     let ctx = contexts.ctx_mut();
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("body_labels")));
 
@@ -220,7 +216,7 @@ fn load_assets(
             for tag in body.tags() {
                 view_settings.tags.entry(tag.clone()).or_insert(TagState::default()).members.push(id.clone());
             }
-            info!("{:?}", view_settings);
+            // info!("{:?}", view_settings);
             universe.insert(name, id);
             body.spawn(&mut commands, &mut cache, &mut meshes, &mut materials, &mut images);
         }

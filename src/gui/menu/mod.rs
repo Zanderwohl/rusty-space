@@ -183,7 +183,7 @@ pub fn load_planetarium_files(mut files: ResMut<PlanetariumFiles>) {
             })
         }
     }
-    info!("{}, {}", files.templates.len(), files.saves.len());
+    // info!("{}, {}", files.templates.len(), files.saves.len());
 }
 
 pub fn settings_menu(

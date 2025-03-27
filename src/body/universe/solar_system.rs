@@ -34,13 +34,18 @@ pub fn solar_system() -> UniverseFile {
                         ..Default::default()
                     },
                     position: DVec3::ZERO,
-                    appearance: Appearance::DebugBall(DebugBall {
+                    appearance: Appearance::Star(StarBall {
                         radius: 6.957e8,
                         color: AppearanceColor {
                             r: 219,
                             g: 222,
                             b: 35,
-                        }
+                        },
+                        light: AppearanceColor {
+                            r: 219 * 14,
+                            g: 222 * 14,
+                            b: 35 * 14,
+                        },
                     }),
                 }), // Sun
                 SomeBody::KeplerEntry(KeplerEntry {
@@ -68,17 +73,12 @@ pub fn solar_system() -> UniverseFile {
                             mean_anomaly: 174.796,
                         })
                     },
-                    appearance: Appearance::Star(StarBall {
+                    appearance: Appearance::DebugBall(DebugBall {
                         radius: 2439.7 * 1000.0, // meters
                         color: AppearanceColor {
                             r: 145,
                             g: 145,
                             b: 145,
-                        },
-                        light: AppearanceColor {
-                            r: 1000,
-                            g: 0,
-                            b: 0,
                         },
                     }),
                 }), // Mercury
