@@ -1,11 +1,14 @@
 use std::path::PathBuf;
+use bevy::app::Plugin;
 use bevy::color::Color;
 use bevy::core::FrameCount;
+use bevy::core_pipeline::bloom::Bloom;
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::DefaultPlugins;
-use bevy::prelude::{default, App, AppExtStates, Camera3d, Camera3dBundle, ClearColor, Commands, Component, PluginGroup, Res, Single, Startup, States, Transform, Update, Window, WindowPlugin};
+use bevy::prelude::{default, App, AppExtStates, Camera, Camera3d, ClearColor, Commands, Component, PluginGroup, Res, Single, Startup, States, Transform, Update, Vec3, Window, WindowPlugin};
 use bevy::window::{ExitCondition, PresentMode};
+use bevy_egui::egui::Key::D;
 use bevy_egui::EguiPlugin;
-use bevy_flycam::FlyCam;
 use crate::body::universe::solar_system::{write_temp_system_file, write_tiny_system_file};
 use crate::body::universe::Universe;
 use crate::gui::menu::{close_when_requested, MenuPlugin};
@@ -14,6 +17,7 @@ use crate::gui::settings;
 use crate::gui::splash::SplashPlugin;
 use crate::gui::util::debug::DebugPlugin;
 use crate::gui::util::ensure_folders;
+use crate::gui::util::freecam::{FlyCam, FreeCam};
 
 pub fn run() {
     init();
@@ -46,6 +50,7 @@ pub fn run() {
         .add_plugins(SplashPlugin)
         .add_plugins(MenuPlugin)
         .add_plugins(Planetarium)
+        .add_plugins(FreeCam)
         .add_systems(Update, (
             make_visible,
         ))
@@ -84,11 +89,17 @@ pub struct PlanetariumCamera;
 
 pub fn common_setup(mut commands: Commands) {
     commands.spawn((
-        Camera3dBundle {
-            transform: Transform::from_xyz(-5.0, 2.0, 0.5),
-            ..default()
+        Camera3d {
+            ..Default::default()
         },
+        Camera {
+            hdr: true,
+            ..Default::default()
+        },
+        Transform::from_xyz(20., 2.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
         FlyCam,
         PlanetariumCamera,
+        Bloom::NATURAL,
+        Tonemapping::TonyMcMapface,
     ));
 }

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
+use bevy::app::App;
 use bevy::math::DVec3;
-use crate::body::appearance::{Appearance, DebugBall};
+use crate::body::appearance::{Appearance, AppearanceColor, DebugBall, StarBall};
 use crate::body::motive::info::BodyInfo;
 use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerRotation, KeplerShape, MeanAnomalyAtJ2000};
 use crate::body::universe::save::{FixedEntry, KeplerEntry, SomeBody, UniverseFile, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings};
@@ -35,9 +36,11 @@ pub fn solar_system() -> UniverseFile {
                     position: DVec3::ZERO,
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 6.957e8,
-                        r: 219,
-                        g: 222,
-                        b: 35,
+                        color: AppearanceColor {
+                            r: 219,
+                            g: 222,
+                            b: 35,
+                        }
                     }),
                 }), // Sun
                 SomeBody::KeplerEntry(KeplerEntry {
@@ -65,11 +68,18 @@ pub fn solar_system() -> UniverseFile {
                             mean_anomaly: 174.796,
                         })
                     },
-                    appearance: Appearance::DebugBall(DebugBall {
+                    appearance: Appearance::Star(StarBall {
                         radius: 2439.7 * 1000.0, // meters
-                        r: 145,
-                        g: 145,
-                        b: 145,
+                        color: AppearanceColor {
+                            r: 145,
+                            g: 145,
+                            b: 145,
+                        },
+                        light: AppearanceColor {
+                            r: 1000,
+                            g: 0,
+                            b: 0,
+                        },
                     }),
                 }), // Mercury
                 SomeBody::KeplerEntry(KeplerEntry {
@@ -99,9 +109,11 @@ pub fn solar_system() -> UniverseFile {
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 6051.8 * 1000.0,
-                        r: 224,
-                        g: 224,
-                        b: 224,
+                        color: AppearanceColor {
+                            r: 224,
+                            g: 224,
+                            b: 224,
+                        },
                     }),
                 }), // Venus
                 SomeBody::KeplerEntry(KeplerEntry {
@@ -131,9 +143,11 @@ pub fn solar_system() -> UniverseFile {
                     },
                     appearance: Appearance::DebugBall(DebugBall{
                         radius: 6371.0 * 1000.0,
-                        r: 59,
-                        g: 179,
-                        b: 75
+                        color: AppearanceColor {
+                            r: 59,
+                            g: 179,
+                            b: 75
+                        },
                     }),
                 }), // Earth
                 SomeBody::KeplerEntry(KeplerEntry {
@@ -163,9 +177,11 @@ pub fn solar_system() -> UniverseFile {
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 3389.5 * 1000.0,
-                        r: 242,
-                        g: 66,
-                        b: 17,
+                        color: AppearanceColor {
+                            r: 242,
+                            g: 66,
+                            b: 17,
+                        },
                     }),
                 }), // Mars
                 SomeBody::KeplerEntry(KeplerEntry {
@@ -195,9 +211,11 @@ pub fn solar_system() -> UniverseFile {
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 966.2 * 1000.0,
-                        r: 145,
-                        g: 107,
-                        b: 54
+                        color: AppearanceColor {
+                            r: 145,
+                            g: 107,
+                            b: 54,
+                        },
                     }),
                 }), // Ceres
                 SomeBody::KeplerEntry(KeplerEntry {
@@ -227,9 +245,11 @@ pub fn solar_system() -> UniverseFile {
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 1737.4 * 1000.0,
-                        r: 87,
-                        g: 87,
-                        b: 87,
+                        color: AppearanceColor {
+                            r: 87,
+                            g: 87,
+                            b: 87,
+                        },
                     }),
                 }), // Luna
             ] },

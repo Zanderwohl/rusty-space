@@ -63,7 +63,6 @@ impl Plugin for Planetarium {
                 ).in_set(PlanetariumUISet),
                 (load_assets).in_set(PlanetariumLoadingSet),
             ))
-            .add_plugins(NoCameraPlayerPlugin) // TODO: Get real camera solution
             .add_systems(OnExit(AppState::Planetarium), unload_simulation_objects)
         ;
     }

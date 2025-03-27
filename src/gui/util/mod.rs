@@ -1,4 +1,5 @@
 pub mod debug;
+pub mod freecam;
 
 use std::fs;
 use std::path::PathBuf;
