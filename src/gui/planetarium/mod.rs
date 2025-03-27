@@ -85,18 +85,19 @@ fn calculate_kepler(
     fixed_bodies: Query<(&SimulationObject, &BodyInfo), Without<KeplerMotive>>,
     physics: Res<UniversePhysics>,
 ) {
+    info!("Calculating kepler for {} bodies", kepler_bodies.iter().count());
     // First collect all body IDs and masses into a HashMap to avoid borrow conflicts
-    let mut body_masses: std::collections::HashMap<String, (f64, DVec3)> = std::collections::HashMap::new();
+    let mut bodies_prev_frame: std::collections::HashMap<String, (f64, DVec3)> = std::collections::HashMap::new();
     for (_, info) in fixed_bodies.iter() {
-        body_masses.insert(info.id.clone(), (info.mass, info.current_position));
+        bodies_prev_frame.insert(info.id.clone(), (info.mass, info.current_position));
     }
     for (_, info) in kepler_bodies.iter() {
-        body_masses.insert(info.id.clone(), (info.mass, info.current_position));
+        bodies_prev_frame.insert(info.id.clone(), (info.mass, info.current_position));
     }
 
     let time = sim_time.time_seconds;
     for (motive, mut info) in kepler_bodies.iter_mut() {
-        let (primary_mass, primary_position) = body_masses.get(&motive.primary_id)
+        let (primary_mass, primary_position) = bodies_prev_frame.get(&motive.primary_id)
             .copied()
             .expect("Missing body info");
             

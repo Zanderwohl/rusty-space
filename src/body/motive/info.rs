@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use bevy::prelude::Component;
 use uuid::Uuid;
 
-#[derive(Serialize, Deserialize, Component)]
+#[derive(Serialize, Deserialize, Component, Clone)]
 pub struct BodyInfo {
     pub name: Option<String>,
     pub id: String,

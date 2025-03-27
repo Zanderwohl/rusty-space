@@ -142,12 +142,58 @@ impl SomeBody {
         materials: &mut ResMut<Assets<StandardMaterial>>,
         images: &mut ResMut<Assets<Image>>,
     )  -> Entity {
-        match self {
-            SomeBody::FixedEntry(entry) => entry.spawn(commands, cache, meshes, materials, images),
-            SomeBody::NewtonEntry(entry) => entry.spawn(commands, cache, meshes, materials, images),
-            SomeBody::KeplerEntry(entry) => entry.spawn(commands, cache, meshes, materials, images),
-            SomeBody::CompoundEntry(entry) => entry.spawn(commands, cache, meshes, materials, images),
+        let mut entity = commands.spawn((
+            SimulationObject,
+            Transform::default(),
+        ));
+
+        let (info, appearance) = match self {
+            SomeBody::FixedEntry(entry) => {
+                entity.insert(FixedMotive {
+                    position: entry.position,
+                });
+                (entry.info, entry.appearance)
+            },
+            SomeBody::NewtonEntry(entry) => {
+                entity.insert(NewtonMotive {
+                    position: entry.position,
+                    velocity: entry.velocity,
+                });
+                (entry.info, entry.appearance)
+            },
+            SomeBody::KeplerEntry(entry) => {
+                entity.insert(entry.params);
+                (entry.info, entry.appearance)
+            },
+            SomeBody::CompoundEntry(entry) => {
+                // TODO: Insert when patched conics are implemented.
+                (entry.info, entry.appearance)
+            },
+        };
+
+        if info.major {
+            entity.insert(Major);
+        } else {
+            entity.insert(Minor);
         }
+        entity.insert(info);
+
+        match &appearance {
+            Appearance::Empty => {}
+            Appearance::DebugBall(debug_ball) => {
+                let (mesh, material) = debug_ball.pbr_bundle(cache, meshes, materials, images);
+                entity.insert(mesh);
+                entity.insert(material);
+            }
+            Appearance::Star(star_ball) => {
+                let (mesh, material) = star_ball.pbr_bundle(cache, meshes, materials, images);
+                entity.insert(mesh);
+                entity.insert(material);
+            }
+        }
+        entity.insert(appearance);
+
+        entity.id()
     }
 
     pub fn id(&self) -> String {
@@ -185,99 +231,12 @@ pub struct FixedEntry {
     pub appearance: Appearance,
 }
 
-impl FixedEntry {
-    pub fn spawn(
-        self,
-        mut commands: &mut Commands,
-        mut cache: &mut ResMut<AssetCache>,
-        mut meshes: &mut ResMut<Assets<Mesh>>,
-        mut materials: &mut ResMut<Assets<StandardMaterial>>,
-        mut images: &mut ResMut<Assets<Image>>,
-    ) -> Entity {
-        let info = self.info;
-        let motive = FixedMotive {
-            position: self.position,
-        };
-        let (mesh, material) = self.appearance.pbr_bundle(&mut cache, &mut meshes, &mut materials, images);
-
-        if info.major {
-            commands
-                .spawn((
-                    SimulationObject,
-                    Transform::default(),
-                    mesh,
-                    self.appearance,
-                    material,
-                    info,
-                    motive,
-                    Major,
-                )).id()
-        } else {
-            commands
-                .spawn((
-                    SimulationObject,
-                    Transform::default(),
-                    mesh,
-                    self.appearance,
-                    material,
-                    info,
-                    motive,
-                    Minor,
-                )).id()
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct NewtonEntry {
     pub info: BodyInfo,
     pub position: DVec3,
     pub velocity: DVec3,
     pub appearance: Appearance,
-}
-
-impl NewtonEntry {
-    pub fn spawn(
-        self,
-        mut commands: &mut Commands,
-        mut cache: &mut ResMut<AssetCache>,
-        mut meshes: &mut ResMut<Assets<Mesh>>,
-        mut materials: &mut ResMut<Assets<StandardMaterial>>,
-        mut images: &mut ResMut<Assets<Image>>,
-    ) -> Entity {
-        let info = self.info;
-        let motive = NewtonMotive {
-            position: self.position,
-            velocity: self.velocity,
-        };
-        let (mesh, material) = self.appearance.pbr_bundle(&mut cache, &mut meshes, &mut materials, images);
-
-        if info.major {
-            commands
-                .spawn((
-                    SimulationObject,
-                    Transform::default(),
-                    mesh,
-                    self.appearance,
-                    material,
-                    info,
-                    motive,
-                    Major,
-                )).id()
-        } else {
-            commands
-                .spawn((
-                    SimulationObject,
-                    Transform::default(),
-                    mesh,
-                    self.appearance,
-                    material,
-                    info,
-                    motive,
-                    Minor,
-                )).id()
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -287,64 +246,9 @@ pub struct KeplerEntry {
     pub appearance: Appearance,
 }
 
-impl KeplerEntry {
-    pub fn spawn(
-        self,
-        mut commands: &mut Commands,
-        mut cache: &mut ResMut<AssetCache>,
-        mut meshes: &mut ResMut<Assets<Mesh>>,
-        mut materials: &mut ResMut<Assets<StandardMaterial>>,
-        mut images: &mut ResMut<Assets<Image>>,
-    ) -> Entity {
-        // info!("Spawning KeplerEntry {:?}", self.info.name);
-        let info = self.info;
-        let motive = self.params;
-        let (mesh, material) = self.appearance.pbr_bundle(&mut cache, &mut meshes, &mut materials, &mut images);
-
-        if info.major {
-            commands
-                .spawn((
-                    SimulationObject,
-                    Transform::default(),
-                    mesh,
-                    self.appearance,
-                    material,
-                    info,
-                    motive,
-                    Major,
-                )).id()
-        } else {
-            commands
-                .spawn((
-                    SimulationObject,
-                    Transform::default(),
-                    mesh,
-                    self.appearance,
-                    material,
-                    info,
-                    motive,
-                    Major,
-                )).id()
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct PatchedConicsEntry {
     pub info: BodyInfo,
     pub route: HashMap<u64, KeplerMotive>,
     pub appearance: Appearance,
-}
-
-impl PatchedConicsEntry {
-    pub fn spawn(
-        self,
-        mut commands: &mut Commands,
-        mut cache: &mut ResMut<AssetCache>,
-        mut meshes: &mut ResMut<Assets<Mesh>>,
-        mut materials: &mut ResMut<Assets<StandardMaterial>>,
-        mut images: &mut ResMut<Assets<Image>>,
-    ) -> Entity {
-        todo!()
-    }
 }

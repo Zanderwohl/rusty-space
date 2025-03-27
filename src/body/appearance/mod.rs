@@ -11,7 +11,7 @@ pub struct AssetCache {
     pub materials: HashMap<String, Handle<StandardMaterial>>,
 }
 
-#[derive(Serialize, Deserialize, Default, Component)]
+#[derive(Serialize, Deserialize, Default, Component, Clone)]
 pub enum Appearance {
     #[default]
     Empty,
@@ -19,7 +19,7 @@ pub enum Appearance {
     Star(StarBall),
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct AppearanceColor {
     pub(crate) r: u16,
     pub(crate) g: u16,
@@ -72,7 +72,7 @@ impl Appearance {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct DebugBall {
     pub radius: f64,
     pub color: AppearanceColor,
@@ -132,7 +132,7 @@ fn uv_debug_texture() -> Image {
     )
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct StarBall {
     pub radius: f64,
     pub color: AppearanceColor,
