@@ -360,7 +360,7 @@ pub fn solar_system() -> UniverseFile {
                     info: BodyInfo {
                         name: Some("Sedna".into()),
                         id: "Sedna".to_string(),
-                        mass: 2.0e21,
+                        mass: 2.0e21, // Estimate from https://www.rasc.ca/asteroid/90377
                         major: true,
                         designation: Some("90377 Sedna".into()),
                         uuid: Default::default(),
