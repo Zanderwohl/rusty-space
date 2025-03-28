@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use bevy::math::DVec3;
 use crate::body::appearance::{Appearance, AppearanceColor, DebugBall, StarBall};
 use crate::body::motive::info::BodyInfo;
-use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerRotation, KeplerShape, MeanAnomalyAtJ2000};
+use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerRotation, KeplerShape, MeanAnomalyAtEpoch, MeanAnomalyAtJ2000};
 use crate::body::universe::save::{FixedEntry, KeplerEntry, SomeBody, UniverseFile, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings};
 use crate::gui::util::ensure_folders;
 // Mass: Kg
@@ -253,6 +253,144 @@ pub fn solar_system() -> UniverseFile {
                         },
                     }),
                 }), // Luna
+                SomeBody::KeplerEntry(KeplerEntry {
+                    info: BodyInfo {
+                        name: Some("Jupiter".into()),
+                        id: "Jupiter".to_string(),
+                        mass: 1.8982e27,
+                        major: true,
+                        designation: None,
+                        uuid: Default::default(),
+                        tags: vec!["Planet".into(), "Major Planet".into()],
+                    },
+                    params: KeplerMotive {
+                        primary_id: "sol".to_string(),
+                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
+                            eccentricity: 0.0489,
+                            semi_major_axis: 7.78479e11,
+                        }),
+                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
+                            inclination: 1.303,
+                            longitude_of_ascending_node:100.464,
+                            argument_of_periapsis: 273.867,
+                        }),
+                        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
+                            mean_anomaly: 20.020,
+                        }),
+                    },
+                    appearance: Appearance::DebugBall(DebugBall {
+                        radius: 69911.1 * 1000.0,
+                        color: AppearanceColor {
+                            r: 0xb0,
+                            g: 0x7f,
+                            b: 0x35,
+                        },
+                    }),
+                }), // Jupiter
+                // TODO: Jovian Moons
+                SomeBody::KeplerEntry(KeplerEntry {
+                    info: BodyInfo {
+                        name: Some("Uranus".into()),
+                        id: "Uranus".to_string(),
+                        mass: 8.681e25,
+                        major: true,
+                        designation: None,
+                        uuid: Default::default(),
+                        tags: vec!["Planet".into(), "Major Planet".into()],
+                    },
+                    params: KeplerMotive {
+                        primary_id: "sol".to_string(),
+                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
+                            eccentricity: 0.04717,
+                            semi_major_axis: 2.870972e12,
+                        }),
+                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
+                            inclination: 0.773,
+                            longitude_of_ascending_node: 74.006,
+                            argument_of_periapsis: 96.998857,
+                        }),
+                        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
+                            mean_anomaly: 142.2386,
+                        }),
+                    },
+                    appearance: Appearance::DebugBall(DebugBall {
+                        radius: 25362.0 * 1000.0,
+                        color: AppearanceColor {
+                            r: 60,
+                            g: 186,
+                            b: 180,
+                        },
+                    }),
+                }), // Uranus
+                SomeBody::KeplerEntry(KeplerEntry {
+                    info: BodyInfo {
+                        name: Some("Neptune".into()),
+                        id: "Neptune".to_string(),
+                        mass: 1.02409e26,
+                        major: true,
+                        designation: None,
+                        uuid: Default::default(),
+                        tags: vec!["Planet".into(), "Major Planet".into()],
+                    },
+                    params: KeplerMotive {
+                        primary_id: "sol".to_string(),
+                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
+                            eccentricity: 0.008678,
+                            semi_major_axis: 4.5e12,
+                        }),
+                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
+                            inclination: 1.77,
+                            longitude_of_ascending_node: 131.783,
+                            argument_of_periapsis: 273.187,
+                        }),
+                        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
+                            mean_anomaly: 259.883,
+                        }),
+                    },
+                    appearance: Appearance::DebugBall(DebugBall {
+                        radius: 24622.0 * 1000.0,
+                        color: AppearanceColor {
+                            r: 60,
+                            g: 186,
+                            b: 180,
+                        },
+                    }),
+                }), // Neptune
+                SomeBody::KeplerEntry(KeplerEntry {
+                    info: BodyInfo {
+                        name: Some("Sedna".into()),
+                        id: "Sedna".to_string(),
+                        mass: 2.0e21,
+                        major: true,
+                        designation: Some("90377 Sedna".into()),
+                        uuid: Default::default(),
+                        tags: vec!["Planet".into(), "Minor Planet".into()],
+                    },
+                    params: KeplerMotive {
+                        primary_id: "sol".to_string(),
+                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
+                            eccentricity: 0.8496,
+                            semi_major_axis: 76e12,
+                        }),
+                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
+                            inclination: 11.9307,
+                            longitude_of_ascending_node: 144.248,
+                            argument_of_periapsis: 311.352,
+                        }),
+                        epoch: KeplerEpoch::MeanAnomaly(MeanAnomalyAtEpoch {
+                            epoch_julian_day: 2458900.5,
+                            mean_anomaly: 358.117,
+                        }),
+                    },
+                    appearance: Appearance::DebugBall(DebugBall {
+                        radius: 906.0 * 1000.0,
+                        color: AppearanceColor {
+                            r: 200,
+                            g: 200,
+                            b: 200,
+                        },
+                    }),
+                }), // Neptune
             ] },
     };
     solar_system
