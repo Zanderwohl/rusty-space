@@ -12,12 +12,27 @@ pub struct BodyInfo {
     pub designation: Option<String>,
     #[serde(skip, default = "Uuid::new_v4")]
     pub uuid: Uuid,
-    #[serde(skip, default = "DVec3::default")]
-    pub current_position: DVec3,
-    #[serde(skip, default = "DVec3::default")]
-    pub last_step_position: DVec3,
     #[serde(default = "Vec::new")]
     pub tags: Vec<String>,
+}
+
+#[derive(Component)]
+pub struct BodyState {
+    pub current_position: DVec3,
+    pub last_step_position: DVec3,
+    pub current_local_position: Option<DVec3>,
+    pub current_primary_position: Option<DVec3>,
+}
+
+impl Default for BodyState {
+    fn default() -> Self {
+        Self {
+            current_position: DVec3::ZERO,
+            last_step_position: DVec3::ZERO,
+            current_local_position: None,
+            current_primary_position: None,
+        }
+    }
 }
 
 impl BodyInfo {
@@ -25,8 +40,8 @@ impl BodyInfo {
         if let Some(name) = &self.name {
             return name.clone()
         }
-        if let Some(name) = &self.designation {
-            return name.clone()
+        if let Some(designation) = &self.designation {
+            return designation.clone()
         }
         (&self.id).clone()
     }
@@ -41,8 +56,6 @@ impl Default for BodyInfo {
             major: false,
             designation: None,
             uuid: Uuid::from_u128(0u128),
-            current_position: DVec3::default(),
-            last_step_position: DVec3::default(),
             tags: vec![],
         }
     }

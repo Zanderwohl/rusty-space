@@ -1,5 +1,5 @@
+use std::default::Default;
 use std::path::PathBuf;
-use bevy::app::App;
 use bevy::math::DVec3;
 use crate::body::appearance::{Appearance, AppearanceColor, DebugBall, StarBall};
 use crate::body::motive::info::BodyInfo;
@@ -46,7 +46,7 @@ pub fn solar_system() -> UniverseFile {
                             g: 255 * 14,
                             b: 255 * 14,
                         },
-                        intensity: 5000.0,
+                        intensity: 10000.0,
                     }),
                 }), // Sun
                 SomeBody::KeplerEntry(KeplerEntry {
@@ -72,7 +72,7 @@ pub fn solar_system() -> UniverseFile {
                         }),
                         epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
                             mean_anomaly: 174.796,
-                        })
+                        }),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2439.7 * 1000.0, // meters

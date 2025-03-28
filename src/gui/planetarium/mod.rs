@@ -18,7 +18,7 @@ use crate::gui::planetarium::time::SimTime;
 use crate::gui::settings::{Settings, UiSettings, UiTheme};
 use crate::body::{unload_simulation_objects, SimulationObject};
 use bevy_flycam::prelude::*;
-use crate::body::motive::info::BodyInfo;
+use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::kepler_motive::KeplerMotive;
 use windows::body_edit::body_edit_window;
 use crate::body::motive::fixed_motive::FixedMotive;
@@ -81,31 +81,31 @@ fn advance_time(mut sim_time: ResMut<SimTime>, time: Res<Time>) {
 }
 
 fn calculate_fixed(
-    mut fixed_bodies: Query<(&mut BodyInfo, &FixedMotive)>,
+    mut fixed_bodies: Query<(&mut BodyState, &BodyInfo, &FixedMotive)>,
 ) {
-    for (mut info, motive) in fixed_bodies.iter_mut() {
-        info.current_position = motive.position;
-        info.last_step_position = motive.position;
+    for (mut state, info, motive) in fixed_bodies.iter_mut() {
+        state.current_position = motive.position;
+        state.last_step_position = motive.position;
     }
 }
 
 fn calculate_kepler(
     mut sim_time: ResMut<SimTime>,
-    mut kepler_bodies: Query<(&KeplerMotive, &mut BodyInfo)>,
-    fixed_bodies: Query<(&SimulationObject, &BodyInfo), Without<KeplerMotive>>,
+    mut kepler_bodies: Query<(&mut KeplerMotive, &BodyInfo, &mut BodyState)>,
+    fixed_bodies: Query<(&SimulationObject, &BodyInfo, &BodyState), Without<KeplerMotive>>,
     physics: Res<UniversePhysics>,
 ) {
     // First collect all body IDs and masses into a HashMap to avoid borrow conflicts
     let mut bodies_prev_frame: std::collections::HashMap<String, (f64, DVec3)> = std::collections::HashMap::new();
-    for (_, info) in fixed_bodies.iter() {
-        bodies_prev_frame.insert(info.id.clone(), (info.mass, info.current_position));
+    for (_, info, state) in fixed_bodies.iter() {
+        bodies_prev_frame.insert(info.id.clone(), (info.mass, state.current_position));
     }
-    for (_, info) in kepler_bodies.iter() {
-        bodies_prev_frame.insert(info.id.clone(), (info.mass, info.current_position));
+    for (_, info, state) in kepler_bodies.iter() {
+        bodies_prev_frame.insert(info.id.clone(), (info.mass, state.current_position));
     }
 
     let time = sim_time.time_seconds;
-    for (motive, mut info) in kepler_bodies.iter_mut() {
+    for (mut motive, info, mut state) in kepler_bodies.iter_mut() {
         let (primary_mass, primary_position) = bodies_prev_frame.get(&motive.primary_id)
             .copied()
             .expect("Missing body info");
@@ -113,14 +113,16 @@ fn calculate_kepler(
         let mu = physics.gravitational_constant * primary_mass;
         let position = motive.displacement(time, mu);
         if let Some(position) = position {
-            info.current_position = primary_position + position;
+            state.current_position = primary_position + position;
+            state.current_local_position = Some(position);
+            state.current_primary_position = Some(primary_position);
         }
     }
 }
 
 fn position_bodies(
     mut sim_time: ResMut<SimTime>,
-    mut bodies: Query<(&SimulationObject, &mut Transform, &BodyInfo, &Appearance)>,
+    mut bodies: Query<(&SimulationObject, &mut Transform, &BodyInfo, &BodyState, &Appearance)>,
     view_settings: Res<ViewSettings>,
 ) {
     let distance_scale = if view_settings.logarithmic_distance_scale {
@@ -131,16 +133,33 @@ fn position_bodies(
         view_settings.distance_scale as f32
     };
 
-    for (_, mut transform, body_info, appearance) in bodies.iter_mut() {
+    for (_, mut transform, info, state, appearance) in bodies.iter_mut() {
         // Convert from z-axis-up to y-axis-up coordinate system
         // In z-axis-up: (x, y, z) where z is up
         // In y-axis-up: (x, z, -y) where y is up
-        let position = body_info.current_position.as_vec3();
-        transform.translation = bevy::math::Vec3::new(
-            position.x,
-            position.z,
-            -position.y
-        ) * distance_scale; // Scale factor
+        // TODO: I doubt any of this works for moonmoons.
+        if !view_settings.logarithmic_distance_scale || state.current_local_position.is_none() || state.current_primary_position.is_none() {
+            let position = state.current_position.as_vec3();  // Use calculated position *unless* we are doing logarithmic distance scale current object has a primary.
+            transform.translation = bevy::math::Vec3::new(
+                position.x,
+                position.z,
+                -position.y
+            ) * distance_scale; // Scale factor
+        } else {
+            let local_position = state.current_local_position.unwrap().as_vec3();
+            let primary_position = state.current_primary_position.unwrap().as_vec3();
+            let adjusted_primary_position = bevy::math::Vec3::new(
+                primary_position.x,
+                primary_position.z,
+                -primary_position.y
+            ) * distance_scale; // Scale factor
+            let adjusted_local_position = bevy::math::Vec3::new(
+                local_position.x,
+                local_position.z,
+                -local_position.y
+            ) * distance_scale;
+            transform.translation = adjusted_primary_position + adjusted_local_position;
+        };
 
         let body_scale = if view_settings.logarithmic_body_scale {
             mappings::log_scale(appearance.radius(), view_settings.logarithmic_body_base) * view_settings.body_scale
@@ -160,7 +179,7 @@ fn label_bodies(
     let ctx = contexts.ctx_mut();
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("body_labels")));
 
-    for (camera, camera3d, _, camera_transform) in &cameras {
+    for (camera, _, _, camera_transform) in &cameras {
         for (_, mut transform, body_info) in bodies.iter() {
             if !view_settings.show_labels && !view_settings.body_in_any_visible_tag(&body_info.id) {
                 continue;

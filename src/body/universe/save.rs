@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::body::appearance::Appearance;
 use crate::body::appearance::AssetCache;
 use crate::body::motive::fixed_motive::FixedMotive;
-use crate::body::motive::info::BodyInfo;
+use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::motive::newton_motive::NewtonMotive;
 use crate::body::SimulationObject;
@@ -146,6 +146,7 @@ impl SomeBody {
         let mut entity = commands.spawn((
             SimulationObject,
             Transform::default(),
+            BodyState::default(),
         ));
 
         let (info, appearance) = match self {
