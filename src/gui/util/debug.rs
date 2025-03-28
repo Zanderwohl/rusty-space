@@ -3,8 +3,6 @@ use iyes_perf_ui::PerfUiPlugin;
 use bevy::prelude::{AppExtStates, Commands, Component, KeyCode, NextState, OnEnter, Res, ResMut, State, States};
 use iyes_perf_ui::entries::{PerfUiFixedTimeEntries, PerfUiFramerateEntries, PerfUiWindowEntries};
 use bevy::input::ButtonInput;
-use bevy::log::info;
-use bevy::transform::systems;
 use crate::gui::common;
 
 pub struct DebugPlugin;

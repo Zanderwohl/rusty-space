@@ -145,10 +145,6 @@ pub struct SpinData {
     pub vertical_velocity: f64,
 }
 
-fn default_true() -> bool {
-    true
-}
-
 fn default_false() -> bool {
     false
 }

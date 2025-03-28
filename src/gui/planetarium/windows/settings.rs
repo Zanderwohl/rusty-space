@@ -1,6 +1,5 @@
-use bevy::prelude::{Res, ResMut};
+use bevy::prelude::{ResMut};
 use bevy_egui::{egui, EguiContexts};
-use crate::body::universe::Universe;
 use crate::gui::menu::UiState;
 use crate::gui::settings::{Settings, UiTheme};
 

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use bevy::math::DVec3;
 use bevy::prelude::{info, Assets, Commands, Entity, Image, Mesh, ResMut, Resource, StandardMaterial, Transform};
+use bevy::render::view::NoFrustumCulling;
 use bevy::utils::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::body::appearance::Appearance;
@@ -186,9 +187,11 @@ impl SomeBody {
                 entity.insert(material);
             }
             Appearance::Star(star_ball) => {
-                let (mesh, material) = star_ball.pbr_bundle(cache, meshes, materials, images);
+                let (mesh, material, light) = star_ball.pbr_bundle(cache, meshes, materials, images);
                 entity.insert(mesh);
                 entity.insert(material);
+                entity.insert(light);
+                entity.insert(NoFrustumCulling);
             }
         }
         entity.insert(appearance);

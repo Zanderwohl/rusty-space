@@ -1,13 +1,11 @@
 use std::path::PathBuf;
-use bevy::app::Plugin;
 use bevy::color::Color;
 use bevy::core::FrameCount;
 use bevy::core_pipeline::bloom::Bloom;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::DefaultPlugins;
-use bevy::prelude::{default, App, AppExtStates, Camera, Camera3d, ClearColor, Commands, Component, PluginGroup, Res, Single, Startup, States, Transform, Update, Vec3, Window, WindowPlugin};
+use bevy::prelude::{AmbientLight, App, AppExtStates, Camera, Camera3d, ClearColor, Commands, Component, PluginGroup, Res, ResMut, Single, Startup, States, Transform, Update, Vec3, Window, WindowPlugin};
 use bevy::window::{ExitCondition, PresentMode};
-use bevy_egui::egui::Key::D;
 use bevy_egui::EguiPlugin;
 use crate::body::universe::solar_system::{write_temp_system_file, write_tiny_system_file};
 use crate::body::universe::Universe;
@@ -87,7 +85,12 @@ pub fn make_visible(mut window: Single<&mut Window>, frames: Res<FrameCount>) {
 #[derive(Component)]
 pub struct PlanetariumCamera;
 
-pub fn common_setup(mut commands: Commands) {
+pub fn common_setup(
+    mut commands: Commands,
+    mut ambient_light: ResMut<AmbientLight>
+) {
+    ambient_light.brightness = 0.1;
+
     commands.spawn((
         Camera3d {
             ..Default::default()
@@ -101,5 +104,6 @@ pub fn common_setup(mut commands: Commands) {
         PlanetariumCamera,
         Bloom::NATURAL,
         Tonemapping::TonyMcMapface,
+
     ));
 }

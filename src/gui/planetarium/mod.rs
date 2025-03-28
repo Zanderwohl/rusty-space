@@ -21,6 +21,7 @@ use bevy_flycam::prelude::*;
 use crate::body::motive::info::BodyInfo;
 use crate::body::motive::kepler_motive::KeplerMotive;
 use windows::body_edit::body_edit_window;
+use crate::body::motive::fixed_motive::FixedMotive;
 use crate::gui::planetarium::windows::settings::settings_window;
 use crate::gui::planetarium::windows::spin::spin_window;
 use crate::util::mappings;
@@ -79,13 +80,21 @@ fn advance_time(mut sim_time: ResMut<SimTime>, time: Res<Time>) {
     }
 }
 
+fn calculate_fixed(
+    mut fixed_bodies: Query<(&mut BodyInfo, &FixedMotive)>,
+) {
+    for (mut info, motive) in fixed_bodies.iter_mut() {
+        info.current_position = motive.position;
+        info.last_step_position = motive.position;
+    }
+}
+
 fn calculate_kepler(
     mut sim_time: ResMut<SimTime>,
     mut kepler_bodies: Query<(&KeplerMotive, &mut BodyInfo)>,
     fixed_bodies: Query<(&SimulationObject, &BodyInfo), Without<KeplerMotive>>,
     physics: Res<UniversePhysics>,
 ) {
-    info!("Calculating kepler for {} bodies", kepler_bodies.iter().count());
     // First collect all body IDs and masses into a HashMap to avoid borrow conflicts
     let mut bodies_prev_frame: std::collections::HashMap<String, (f64, DVec3)> = std::collections::HashMap::new();
     for (_, info) in fixed_bodies.iter() {

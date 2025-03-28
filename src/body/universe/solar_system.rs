@@ -42,10 +42,11 @@ pub fn solar_system() -> UniverseFile {
                             b: 35,
                         },
                         light: AppearanceColor {
-                            r: 219 * 14,
-                            g: 222 * 14,
-                            b: 35 * 14,
+                            r: 255 * 14,
+                            g: 255 * 14,
+                            b: 255 * 14,
                         },
+                        intensity: 5000.0,
                     }),
                 }), // Sun
                 SomeBody::KeplerEntry(KeplerEntry {

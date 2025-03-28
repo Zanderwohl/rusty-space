@@ -21,9 +21,9 @@ pub enum Appearance {
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct AppearanceColor {
-    pub(crate) r: u16,
-    pub(crate) g: u16,
-    pub(crate) b: u16,
+    pub r: u16,
+    pub g: u16,
+    pub b: u16,
 }
 
 impl Appearance {
@@ -33,42 +33,6 @@ impl Appearance {
             Appearance::DebugBall(DebugBall { radius, .. }) => *radius,
             Appearance::Star(StarBall { radius, ..}) => *radius,
         }
-    }
-
-    pub fn pbr_bundle(&self,
-                      cache: &mut ResMut<AssetCache>,
-                      meshes: &mut Assets<Mesh>,
-                      materials: &mut Assets<StandardMaterial>,
-                      mut images: &mut ResMut<Assets<Image>>,
-    ) -> (Mesh3d, MeshMaterial3d<StandardMaterial>) {
-        match self {
-            Appearance::Empty => self.empty(cache, meshes, materials, images),
-            Appearance::DebugBall(debug_ball) => debug_ball.pbr_bundle(cache, meshes, materials, images),
-            Appearance::Star(star_ball) => star_ball.pbr_bundle(cache, meshes, materials, images),
-        }
-    }
-
-    pub fn empty(&self,
-                 cache: &mut ResMut<AssetCache>,
-                 meshes: &mut Assets<Mesh>,
-                 materials: &mut Assets<StandardMaterial>,
-                 mut images: &mut ResMut<Assets<Image>>,
-    ) -> (Mesh3d, MeshMaterial3d<StandardMaterial>) {
-        let material_handle = cache.materials.entry("debug_uv".into()).or_insert_with(|| {
-            materials.add(StandardMaterial {
-                base_color_texture: Some(images.add(uv_debug_texture())),
-                ..default()
-            })
-        }).clone();
-
-        let mesh_handle = cache.meshes.entry("debug_ico_1".into()).or_insert_with(|| {
-            meshes.add(Sphere::default().mesh().ico(5).unwrap())
-        }).clone();
-
-        (
-            Mesh3d(mesh_handle),
-            MeshMaterial3d(material_handle),
-        )
     }
 }
 
@@ -94,7 +58,12 @@ impl DebugBall {
         }).clone();
 
         let material_handle = cache.materials.entry(material_key.clone()).or_insert_with(|| {
-            materials.add(StandardMaterial { base_color: color, ..Default::default() })
+            materials.add(StandardMaterial {
+                base_color: color,
+                metallic: 0.0,
+                perceptual_roughness: 1.0,
+                ..Default::default()
+            })
         }).clone();
 
         (
@@ -137,6 +106,7 @@ pub struct StarBall {
     pub radius: f64,
     pub color: AppearanceColor,
     pub light: AppearanceColor,
+    pub intensity: f32,
 }
 
 impl StarBall {
@@ -145,7 +115,7 @@ impl StarBall {
                       meshes: &mut Assets<Mesh>,
                       materials: &mut Assets<StandardMaterial>,
                       mut images: &mut ResMut<Assets<Image>>,
-    ) -> (Mesh3d, MeshMaterial3d<StandardMaterial>) {
+    ) -> (Mesh3d, MeshMaterial3d<StandardMaterial>, PointLight) {
         let color = Color::srgb(self.color.r as f32 / 255.0, self.color.g as f32 / 255.0, self.color.b as f32 / 255.0);
         let mesh_key = format!("icosphere_{}", self.radius);
         let material_key = format!("color_{:02x}{:02x}{:02x}_{:03x}:{:03x}:{:03x}", self.color.r, self.color.g, self.color.b, self.light.r, self.light.g, self.light.b);
@@ -158,7 +128,7 @@ impl StarBall {
 
         let material_handle = cache.materials.entry(material_key.clone()).or_insert_with(|| {
             materials.add(StandardMaterial {
-                // base_color: color,
+                base_color: color,
                 emissive: LinearRgba::rgb(
                     self.light.r as f32 / 255.0,
                     self.light.g as f32 / 255.0,
@@ -168,9 +138,21 @@ impl StarBall {
             })
         }).clone();
 
+        // TODO: Adjust the light for scale changes
+        let light_color = Color::srgb(self.light.r as f32 / 255.0, self.light.g as f32 / 255.0, self.light.b as f32 / 255.0);
+        let light = PointLight {
+            color: light_color,
+            intensity: self.intensity,
+            range: 10000.0,
+            radius: 0.1,
+            shadows_enabled: true,
+            ..Default::default()
+        };
+
         (
             Mesh3d(mesh_handle),
             MeshMaterial3d(material_handle),
+            light
         )
     }
 }
