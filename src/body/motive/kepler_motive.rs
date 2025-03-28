@@ -49,19 +49,18 @@ impl KeplerMotive {
     }
 
     pub fn apoapsis_vec_pqw(&self) -> Option<DVec3> {
-        let rad = self.shape.apoapsis()?;
-        Some(DVec3::new(-rad, 0.0, 0.0))
+        self.shape.apoapsis().map(|apoapsis| DVec3::new(-apoapsis, 0.0, 0.0))
     }
 
     pub fn periapsis_vec(&self) -> DVec3 {
         let perifocal_displacement = self.periapsis_vec_pqw();
-        let rotated = self.perifocal_to_mine(perifocal_displacement);
+        let rotated = self.perifocal_to_reference(perifocal_displacement);
 
         rotated
     }
     pub fn apoapsis_vec(&self) -> Option<DVec3> {
         let perifocal_displacement = self.apoapsis_vec_pqw()?;
-        let rotated = self.perifocal_to_mine(perifocal_displacement);
+        let rotated = self.perifocal_to_reference(perifocal_displacement);
 
         Some(rotated)
     }
@@ -140,12 +139,12 @@ impl KeplerMotive {
 
     pub fn displacement(&self, time: f64, gravitational_parameter: f64) -> Option<DVec3> {
         let perifocal_displacement = self.displacement_pqw(time, gravitational_parameter)?;
-        let rotated = self.perifocal_to_mine(perifocal_displacement);
+        let rotated = self.perifocal_to_reference(perifocal_displacement);
 
         Some(rotated)
     }
 
-    fn perifocal_to_mine(&self, perifocal_displacement: DVec3) -> DVec3 {
+    fn perifocal_to_reference(&self, perifocal_displacement: DVec3) -> DVec3 {
         let rot_arg_peri = DMat3::from_rotation_z(self.argument_of_periapsis().to_radians());
         let rot_inc = DMat3::from_rotation_x(self.inclination().to_radians());
         let rot_long_asc_node = DMat3::from_rotation_z(self.longitude_of_ascending_node_infallible());
