@@ -1,7 +1,7 @@
 use std::io::Read;
 use bevy::app::{App, Update};
 use bevy::math::{DVec3, Vec2};
-use bevy::prelude::{in_state, info, Assets, Camera, Camera3d, Commands, Entity, GlobalTransform, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Plugin, Query, Res, ResMut, StandardMaterial, SystemSet, Time, Transform, Without};
+use bevy::prelude::{in_state, info, Added, Assets, Camera, Camera3d, Changed, Commands, Entity, GlobalTransform, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Or, Plugin, Query, Res, ResMut, StandardMaterial, SystemSet, Time, Transform, Without};
 use bevy::prelude::IntoSystemConfigs;
 use bevy::render::camera::ViewportConversionError;
 use bevy::utils::HashMap;
@@ -81,11 +81,21 @@ fn advance_time(mut sim_time: ResMut<SimTime>, time: Res<Time>) {
 }
 
 fn calculate_fixed(
-    mut fixed_bodies: Query<(&mut BodyState, &BodyInfo, &FixedMotive)>,
+    mut fixed_bodies: Query<(&mut BodyState, &BodyInfo, &FixedMotive),
+        (Or<(Changed<FixedMotive>, Added<FixedMotive>)>)>,
 ) {
     for (mut state, info, motive) in fixed_bodies.iter_mut() {
         state.current_position = motive.position;
         state.last_step_position = motive.position;
+    }
+}
+
+fn kepler_trajectory(
+    mut kepler_bodies: Query<(&mut BodyState, &BodyInfo, &KeplerMotive),
+        (Or<(Changed<KeplerMotive>, Added<KeplerMotive>)>)>,
+) {
+    for (mut state, info, motive) in kepler_bodies.iter_mut() {
+        
     }
 }
 

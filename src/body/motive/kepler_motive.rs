@@ -39,12 +39,32 @@ impl KeplerMotive {
         self.shape.semi_parameter()
     }
 
-    pub fn apoapsis(&self) -> f64 {
+    pub fn apoapsis(&self) -> Option<f64> {
         self.shape.apoapsis()
     }
 
-    pub fn periapsis_vec(&self) -> DVec3 { todo!() }
-    pub fn apoapsis_vec(&self) -> DVec3 { todo!() }
+    pub fn periapsis_vec_pqw(&self) -> DVec3 {
+        let rad = self.shape.periapsis();
+        DVec3::new(rad, 0.0, 0.0)
+    }
+
+    pub fn apoapsis_vec_pqw(&self) -> Option<DVec3> {
+        let rad = self.shape.apoapsis()?;
+        Some(DVec3::new(-rad, 0.0, 0.0))
+    }
+
+    pub fn periapsis_vec(&self) -> DVec3 {
+        let perifocal_displacement = self.periapsis_vec_pqw();
+        let rotated = self.perifocal_to_mine(perifocal_displacement);
+
+        rotated
+    }
+    pub fn apoapsis_vec(&self) -> Option<DVec3> {
+        let perifocal_displacement = self.apoapsis_vec_pqw()?;
+        let rotated = self.perifocal_to_mine(perifocal_displacement);
+
+        Some(rotated)
+    }
 
     pub fn inclination(&self) -> f64 {
         self.rotation.inclination()
@@ -92,10 +112,15 @@ impl KeplerMotive {
         true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), self.shape.eccentricity(), EXPANSION_ITERATIONS)
     }
 
-    pub fn radius_from_primary(&self, time: f64, gravitational_parameter: f64) -> Option<f64> {
+    pub fn radius_from_primary_at_time(&self, time: f64, gravitational_parameter: f64) -> Option<f64> {
         let ecc = self.shape.eccentricity();
         let ta = true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), ecc, EXPANSION_ITERATIONS);
         local::radius::from_elements2(self.shape.semi_major_axis(), ecc, ta)
+    }
+
+    pub fn radius_from_primary_at_true_anomaly(&self, true_anomaly: f64) -> Option<f64> {
+        let ecc = self.shape.eccentricity();
+        local::radius::from_elements2(self.shape.semi_major_axis(), ecc, true_anomaly)
     }
 
     pub fn eccentric_anomaly(&self, time: f64, gravitational_parameter: f64) -> f64 {
@@ -108,19 +133,24 @@ impl KeplerMotive {
     /// +Q (+y) points toward motion at periapsis, normal to P
     /// +W (+z) normal to the other 2 according to RHR
     pub fn displacement_pqw(&self, time: f64, gravitational_parameter: f64) -> Option<DVec3> {
-        let rad = self.radius_from_primary(time, gravitational_parameter)?;
+        let rad = self.radius_from_primary_at_time(time, gravitational_parameter)?;
         let ta = true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), self.shape.eccentricity(), EXPANSION_ITERATIONS);
         Some(DVec3::new(rad * ta.cos(), rad * ta.sin(), 0.0))
     }
 
     pub fn displacement(&self, time: f64, gravitational_parameter: f64) -> Option<DVec3> {
         let perifocal_displacement = self.displacement_pqw(time, gravitational_parameter)?;
+        let rotated = self.perifocal_to_mine(perifocal_displacement);
 
+        Some(rotated)
+    }
+
+    fn perifocal_to_mine(&self, perifocal_displacement: DVec3) -> DVec3 {
         let rot_arg_peri = DMat3::from_rotation_z(self.argument_of_periapsis().to_radians());
         let rot_inc = DMat3::from_rotation_x(self.inclination().to_radians());
         let rot_long_asc_node = DMat3::from_rotation_z(self.longitude_of_ascending_node_infallible());
 
-        Some(rot_long_asc_node * rot_inc * rot_arg_peri * perifocal_displacement)
+        rot_long_asc_node * rot_inc * rot_arg_peri * perifocal_displacement
     }
 }
 
@@ -173,12 +203,12 @@ impl KeplerShape {
         }
     }
 
-    fn apoapsis(&self) -> f64 {
+    fn apoapsis(&self) -> Option<f64> {
         match self {
             KeplerShape::EccentricitySMA(esma) => {
-                apoapsis::definition(esma.semi_major_axis, esma.eccentricity).unwrap_or(f64::INFINITY)
+                apoapsis::definition(esma.semi_major_axis, esma.eccentricity)
             }
-            KeplerShape::Apsides(apsides) => apsides.apoapsis,
+            KeplerShape::Apsides(apsides) => Some(apsides.apoapsis),
         }
     }
 
@@ -231,7 +261,7 @@ impl KeplerRotation {
     pub fn inclination(&self) -> f64 {
         match self {
             KeplerRotation::EulerAngles(ea) => ea.inclination,
-            KeplerRotation::FlatAngles(flat) => 0.0,
+            KeplerRotation::FlatAngles(_) => 0.0,
         }
     }
 
@@ -257,8 +287,6 @@ impl KeplerRotation {
             KeplerRotation::FlatAngles(flat) => flat.longitude_of_periapsis,
         }
     }
-
-
 }
 
 #[derive(Serialize, Deserialize)]
@@ -287,8 +315,8 @@ impl KeplerEpoch {
             KeplerEpoch::MeanAnomaly(maae) => {
                 maae.epoch_julian_day
             }
-            KeplerEpoch::TimeAtPeriapsisPassage(_) => {
-                todo!()
+            KeplerEpoch::TimeAtPeriapsisPassage(tapp) => {
+                tapp.time_julian_day
             }
             KeplerEpoch::TrueAnomaly(taae) => {
                 taae.epoch_julian_day
@@ -308,7 +336,7 @@ impl KeplerEpoch {
                 mean_anomaly.mean_anomaly
             }
             KeplerEpoch::TimeAtPeriapsisPassage(_) => {
-                todo!()
+                0.0
             }
             KeplerEpoch::TrueAnomaly(_) => { todo!() }
             KeplerEpoch::J2000(j2000) => {

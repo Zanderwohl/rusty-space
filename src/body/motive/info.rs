@@ -22,6 +22,7 @@ pub struct BodyState {
     pub last_step_position: DVec3,
     pub current_local_position: Option<DVec3>,
     pub current_primary_position: Option<DVec3>,
+    pub trajectory: Option<Vec<DVec3>>,
 }
 
 impl Default for BodyState {
@@ -31,6 +32,7 @@ impl Default for BodyState {
             last_step_position: DVec3::ZERO,
             current_local_position: None,
             current_primary_position: None,
+            trajectory: None,
         }
     }
 }
