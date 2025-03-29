@@ -5,7 +5,7 @@ use std::fs;
 use std::ops::Deref;
 use std::path::PathBuf;
 use bevy::app::AppExit;
-use bevy::prelude::{in_state, App, AppExtStates, Commands, Condition, Entity, EventReader, EventWriter, IntoSystemConfigs, NextState, OnEnter, OnExit, Plugin, Query, Res, ResMut, Resource, State, States, SystemSet, Update, With};
+use bevy::prelude::{in_state, App, AppExtStates, Commands, Condition, Entity, EventReader, EventWriter, IntoSystemConfigs, NextState, OnEnter, Plugin, Query, Res, ResMut, Resource, States, SystemSet, Update, With};
 use bevy::prelude::IntoSystemSetConfigs;
 use bevy::window::{ClosingWindow, WindowCloseRequested};
 use bevy_egui::{egui, EguiContexts};
@@ -185,10 +185,7 @@ pub fn load_planetarium_files(mut files: ResMut<PlanetariumFiles>) {
 pub fn settings_menu(
     mut contexts: EguiContexts,
     mut settings: ResMut<Settings>,
-    mut ui_state: ResMut<UiState>,
-    mut menu_state: Res<State<MenuState>>,
     mut next_menu: ResMut<NextState<MenuState>>,
-    mut next_app_state: ResMut<NextState<AppState>>
 ) {
     let ctx = contexts.ctx_mut();
     

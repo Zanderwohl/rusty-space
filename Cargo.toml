@@ -25,8 +25,6 @@ scilib = "1.0.0"
 bevy = "0.15.3"
 bevy_egui = "0.33.0"
 iyes_perf_ui = "0.4.0"
-bevy_flycam = "*"
-
 serde = { version = "1.0.215", features = ["derive"] }
 toml = "0.8.20"
 uuid = { version = "1.12.1", features = ["v4"] }

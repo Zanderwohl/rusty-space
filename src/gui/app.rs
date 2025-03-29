@@ -7,7 +7,7 @@ use bevy::DefaultPlugins;
 use bevy::prelude::{AmbientLight, App, AppExtStates, Camera, Camera3d, ClearColor, Commands, Component, PluginGroup, Res, ResMut, Single, Startup, States, Transform, Update, Vec3, Window, WindowPlugin};
 use bevy::window::{ExitCondition, PresentMode};
 use bevy_egui::EguiPlugin;
-use crate::body::universe::solar_system::{write_temp_system_file, write_tiny_system_file};
+use crate::body::universe::solar_system::{write_temp_system_file, write_earth_moon_file};
 use crate::body::universe::Universe;
 use crate::gui::menu::{close_when_requested, MenuPlugin};
 use crate::gui::planetarium::PlanetariumUI;
@@ -21,7 +21,7 @@ pub fn run() {
     init();
     let settings = settings::load();
     write_temp_system_file();
-    write_tiny_system_file();
+    write_earth_moon_file();
 
     App::new()
         .add_plugins(DefaultPlugins

@@ -399,7 +399,7 @@ pub fn solar_system() -> UniverseFile {
 }
 
 pub fn write_temp_system_file() {
-    let mut solar_system = solar_system();
+    let solar_system = solar_system();
     let path = PathBuf::from("data/templates");
     ensure_folders(&[&path]).expect("Folders couldn't be made");
     solar_system.save().expect("Failed to save system");
@@ -546,8 +546,8 @@ pub fn earth_moon() -> UniverseFile {
     solar_system
 }
 
-pub fn write_tiny_system_file() {
-    let mut solar_system = earth_moon();
+pub fn write_earth_moon_file() {
+    let solar_system = earth_moon();
     let path = PathBuf::from("data/templates");
     ensure_folders(&[&path]).expect("Folders couldn't be made");
     solar_system.save().expect("Failed to save system");

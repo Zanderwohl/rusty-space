@@ -1,4 +1,3 @@
-use std::io::Read;
 use bevy::app::{App, Update};
 use bevy::pbr::PointLight;
 use bevy::prelude::{in_state, Added, Assets, Camera, Camera3d, Changed, Commands, DetectChanges, GlobalTransform, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Or, Plugin, Query, Res, ResMut, StandardMaterial, SystemSet, Transform};
@@ -6,7 +5,7 @@ use bevy::prelude::IntoSystemConfigs;
 use bevy::utils::HashMap;
 use bevy_egui::{egui, EguiContexts};
 use lazy_static::lazy_static;
-use num_traits::{FloatConst, Pow};
+use num_traits::Pow;
 use regex::Regex;
 use crate::body::appearance::{Appearance, AssetCache};
 use crate::body::universe::save::{UniverseFile, UniversePhysics, ViewSettings};
@@ -14,8 +13,7 @@ use crate::body::universe::Universe;
 use crate::gui::app::{AppState, PlanetariumCamera};
 use crate::gui::menu::{TagState, UiState};
 use crate::gui::planetarium::time::SimTime;
-use crate::body::{universe, unload_simulation_objects, SimulationObject, SimulationSettings};
-use bevy_flycam::prelude::*;
+use crate::body::{universe, unload_simulation_objects, SimulationObject};
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::motive::{fixed_motive, kepler_motive, newton_motive};
@@ -25,7 +23,6 @@ use crate::util::mappings;
 const J2000_JD: f64 = 2451545.0;
 
 pub mod time;
-mod display;
 mod windows;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -90,7 +87,7 @@ fn adjust_lights(
     }
 
     // TODO: better scaling factor, and log scaling
-    for (body, mut light, appearance) in lights.iter_mut() {
+    for (_, mut light, appearance) in lights.iter_mut() {
         match appearance {
             Appearance::Star(star_ball) => {
                 light.range = star_ball.intensity * (1e9 * (view_settings.distance_scale as f32)).pow(2.0);
@@ -102,7 +99,7 @@ fn adjust_lights(
 
 fn kepler_trajectory(
     mut kepler_bodies: Query<(&mut BodyState, &BodyInfo, &KeplerMotive),
-        (Or<(Changed<KeplerMotive>, Added<KeplerMotive>)>)>,
+        Or<(Changed<KeplerMotive>, Added<KeplerMotive>)>>,
 ) {
     return; // TODO: Write function to calculate kepler bodies' trajectories
     for (mut state, info, motive) in kepler_bodies.iter_mut() {
@@ -123,7 +120,7 @@ fn position_bodies(
         view_settings.distance_scale as f32
     };
 
-    for (_, mut transform, info, state, appearance) in bodies.iter_mut() {
+    for (_, mut transform, _, state, appearance) in bodies.iter_mut() {
         // Convert from z-axis-up to y-axis-up coordinate system
         // In z-axis-up: (x, y, z) where z is up
         // In y-axis-up: (x, z, -y) where y is up
@@ -154,7 +151,7 @@ fn position_bodies(
         let body_scale = if view_settings.logarithmic_body_scale {
             mappings::log_scale(appearance.radius(), view_settings.logarithmic_body_base) * view_settings.body_scale
         } else {
-            (appearance.radius() * view_settings.body_scale)
+            appearance.radius() * view_settings.body_scale
         } as f32;
         transform.scale = bevy::math::Vec3::splat(body_scale);
     }

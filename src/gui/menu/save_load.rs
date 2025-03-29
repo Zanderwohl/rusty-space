@@ -47,7 +47,7 @@ pub fn planetarium_menu(
 
         ui.columns(2, |columns| {
             // Left column - Templates
-            egui::Frame::none()
+            egui::Frame::new()
                 .fill(if ctx.style().visuals.dark_mode {
                     egui::Color32::from_gray(40)
                 } else {

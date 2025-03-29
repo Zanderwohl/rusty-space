@@ -14,6 +14,6 @@ pub fn bound_circle<T: Float>(value: T, max: T) -> T {
     (value + max) % max
 }
 
-pub fn bound_degrees<T: Float>(value: T, min: T) -> T {
-    bound_circle(min, T::from(360.0).unwrap())
+pub fn bound_degrees<T: Float>(value: T) -> T {
+    bound_circle(value, T::from(360.0).unwrap())
 }

@@ -231,7 +231,7 @@ impl KeplerShape {
             KeplerShape::EccentricitySMA(esma) => {
                 semi_parameter::definition(esma.semi_major_axis, esma.eccentricity)
             }
-            KeplerShape::Apsides(apsides) => {
+            KeplerShape::Apsides(_) => {
                 let sma = self.semi_major_axis();
                 let ecc = self.eccentricity();
                 semi_parameter::definition(sma, ecc)
@@ -244,7 +244,7 @@ impl KeplerShape {
             KeplerShape::EccentricitySMA(esma) => {
                 semi_latus_rectum::conic_definition(esma.semi_major_axis, esma.eccentricity)
             }
-            KeplerShape::Apsides(apsides) => {
+            KeplerShape::Apsides(_) => {
                 let sma = self.semi_major_axis();
                 let ecc = self.eccentricity();
                 semi_latus_rectum::conic_definition(sma, ecc)
@@ -430,7 +430,7 @@ pub fn calculate(
     }
 
     let time = sim_time.time_seconds;
-    for (mut motive, info, mut state) in kepler_bodies.iter_mut() {
+    for (mut motive, _, mut state) in kepler_bodies.iter_mut() {
         let (primary_mass, primary_position) = bodies_prev_frame.get(&motive.primary_id)
             .copied()
             .expect("Missing body info");
