@@ -10,7 +10,7 @@ use bevy_egui::EguiPlugin;
 use crate::body::universe::solar_system::{write_temp_system_file, write_tiny_system_file};
 use crate::body::universe::Universe;
 use crate::gui::menu::{close_when_requested, MenuPlugin};
-use crate::gui::planetarium::Planetarium;
+use crate::gui::planetarium::PlanetariumUI;
 use crate::gui::settings;
 use crate::gui::splash::SplashPlugin;
 use crate::gui::util::debug::DebugPlugin;
@@ -47,7 +47,7 @@ pub fn run() {
         .add_plugins(DebugPlugin)
         .add_plugins(SplashPlugin)
         .add_plugins(MenuPlugin)
-        .add_plugins(Planetarium)
+        .add_plugins(PlanetariumUI)
         .add_plugins(FreeCam)
         .add_systems(Update, (
             make_visible,

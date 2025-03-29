@@ -32,11 +32,14 @@ mod windows;
 struct PlanetariumUISet;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+struct PlanetariumSimulationSet;
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 struct PlanetariumLoadingSet;
 
-pub struct Planetarium;
+pub struct PlanetariumUI;
 
-impl Plugin for Planetarium {
+impl Plugin for PlanetariumUI {
     fn build(&self, app: &mut App) {
         app
             .init_resource::<SimTime>()
@@ -46,6 +49,7 @@ impl Plugin for Planetarium {
             .init_resource::<BodyInfoState>()
             .configure_sets(Update, (
                 PlanetariumUISet.run_if(in_state(AppState::Planetarium)),
+                PlanetariumSimulationSet.run_if(in_state(AppState::Planetarium)),
                 PlanetariumLoadingSet.run_if(in_state(AppState::PlanetariumLoading)),
             ))
             .add_systems(Update, (
@@ -55,14 +59,17 @@ impl Plugin for Planetarium {
                     windows::body_info::body_info_window,
                     windows::settings::settings_window,
                     windows::spin::spin_window,
-                    universe::advance_time.before(fixed_motive::calculate).before(kepler_motive::calculate).before(newton_motive::calculate),
+
+                    adjust_lights,
+                    position_bodies.after(fixed_motive::calculate).after(kepler_motive::calculate).after(newton_motive::calculate),
+                    label_bodies,
+                ).in_set(PlanetariumUISet),
+                (
+                    universe::advance_time,
                     fixed_motive::calculate.before(position_bodies),
                     kepler_motive::calculate.before(position_bodies),
                     newton_motive::calculate.after(kepler_motive::calculate).after(fixed_motive::calculate).before(position_bodies),
-                    adjust_lights,
-                    position_bodies,
-                    label_bodies,
-                ).in_set(PlanetariumUISet),
+                ).in_set(PlanetariumSimulationSet),
                 (load_assets).in_set(PlanetariumLoadingSet),
             ))
             .add_systems(OnExit(AppState::Planetarium), unload_simulation_objects)
