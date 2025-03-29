@@ -6,9 +6,9 @@ pub(crate) const G: f64 = DEBUG_G;
 
 /// Masses in grams, displacement in meters.
 /// Returns force in newtons TODO: really?
-pub fn newton_gravity(mass_a: f64, mass_b: f64, a_to_b: DVec3) -> DVec3 {
+pub fn newton_gravity(gravitational_constant: f64, mass_a: f64, mass_b: f64, a_to_b: &DVec3) -> DVec3 {
     let distance = a_to_b.length();
-    let directionless = -(G * (mass_a * mass_b)) / (distance * distance * distance);
+    let directionless = -(gravitational_constant * (mass_a * mass_b)) / (distance * distance * distance);
     directionless * a_to_b
 }
 

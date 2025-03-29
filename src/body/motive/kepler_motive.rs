@@ -1,6 +1,11 @@
-use bevy::math::{DVec2, DVec3, DMat3};
+use bevy::math::{DMat3, DVec3};
 use serde::{Deserialize, Serialize};
-use bevy::prelude::{Component};
+use bevy::prelude::{Component, Query, Res, ResMut, Without};
+use bevy_egui::egui::Ui;
+use crate::body::motive::info::{BodyInfo, BodyState};
+use crate::body::SimulationObject;
+use crate::body::universe::save::UniversePhysics;
+use crate::gui::planetarium::time::SimTime;
 use crate::util::kepler::{angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
 use crate::util::mappings;
 
@@ -152,6 +157,14 @@ impl KeplerMotive {
         let rot_long_asc_node = DMat3::from_rotation_z(self.longitude_of_ascending_node_infallible((time_seconds / JD_SECONDS) - self.epoch.epoch_julian_day()));
 
         rot_long_asc_node * rot_inc * rot_arg_peri * perifocal_displacement
+    }
+
+    pub fn display(&self, ui: &mut Ui) {
+        ui.label("Shape");
+
+        ui.label("Rotation");
+
+        ui.label("Epoch");
     }
 }
 
@@ -399,4 +412,35 @@ pub struct TrueAnomalyAtEpoch {
 #[derive(Serialize, Deserialize)]
 pub struct MeanAnomalyAtJ2000 {
     pub mean_anomaly: f64,
+}
+
+pub fn calculate(
+    mut sim_time: ResMut<SimTime>,
+    mut kepler_bodies: Query<(&mut KeplerMotive, &BodyInfo, &mut BodyState)>,
+    fixed_bodies: Query<(&SimulationObject, &BodyInfo, &BodyState), Without<KeplerMotive>>,
+    physics: Res<UniversePhysics>,
+) {
+    // First collect all body IDs and masses into a HashMap to avoid borrow conflicts
+    let mut bodies_prev_frame: std::collections::HashMap<String, (f64, DVec3)> = std::collections::HashMap::new();
+    for (_, info, state) in fixed_bodies.iter() {
+        bodies_prev_frame.insert(info.id.clone(), (info.mass, state.current_position));
+    }
+    for (_, info, state) in kepler_bodies.iter() {
+        bodies_prev_frame.insert(info.id.clone(), (info.mass, state.current_position));
+    }
+
+    let time = sim_time.time_seconds;
+    for (mut motive, info, mut state) in kepler_bodies.iter_mut() {
+        let (primary_mass, primary_position) = bodies_prev_frame.get(&motive.primary_id)
+            .copied()
+            .expect("Missing body info");
+
+        let mu = physics.gravitational_constant * primary_mass;
+        let position = motive.displacement(time, mu);
+        if let Some(position) = position {
+            state.current_position = primary_position + position;
+            state.current_local_position = Some(position);
+            state.current_primary_position = Some(primary_position);
+        }
+    }
 }

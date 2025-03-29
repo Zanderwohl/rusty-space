@@ -4,7 +4,7 @@ use bevy::math::DVec3;
 use crate::body::appearance::{Appearance, AppearanceColor, DebugBall, StarBall};
 use crate::body::motive::info::BodyInfo;
 use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerPrecessingEulerAngles, KeplerRotation, KeplerShape, MeanAnomalyAtEpoch, MeanAnomalyAtJ2000};
-use crate::body::universe::save::{FixedEntry, KeplerEntry, SomeBody, UniverseFile, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings};
+use crate::body::universe::save::{FixedEntry, KeplerEntry, NewtonEntry, SomeBody, UniverseFile, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings};
 use crate::gui::util::ensure_folders;
 // Mass: Kg
 // Distance: Km
@@ -416,7 +416,7 @@ pub fn earth_moon() -> UniverseFile {
             physics: UniversePhysics::default(),
             view: ViewSettings::default(),
             bodies: vec![
-                SomeBody::FixedEntry(FixedEntry {
+                /*SomeBody::FixedEntry(FixedEntry {
                     info: BodyInfo {
                         name: Some("Sol".into()),
                         id: "sol".to_string(),
@@ -441,7 +441,7 @@ pub fn earth_moon() -> UniverseFile {
                         },
                         intensity: 10000.0,
                     }),
-                }), // Sun
+                }), // Sun*/
                 SomeBody::FixedEntry(FixedEntry {
                     info: BodyInfo {
                         name: Some("Earth".into()),
@@ -462,7 +462,7 @@ pub fn earth_moon() -> UniverseFile {
                         },
                     }),
                 }), // Earth
-                SomeBody::KeplerEntry(KeplerEntry {
+                /*SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
                         name: Some("Luna".into()),
                         id: "luna".to_string(),
@@ -497,7 +497,49 @@ pub fn earth_moon() -> UniverseFile {
                             b: 87,
                         },
                     }),
-                }), // Luna
+                }),*/ // Luna
+                SomeBody::NewtonEntry(NewtonEntry {
+                    info: BodyInfo {
+                        name: Some("Newtonian Test Body A".into()),
+                        id: "NTB-A".to_string(),
+                        mass: 1000.0,
+                        major: false,
+                        designation: Some("TB-A".into()),
+                        uuid: Default::default(),
+                        tags: vec!["Test Body".into()],
+                    },
+                    position: DVec3::new(384400.0 * 1000.0, 0.0, 0.0),
+                    velocity: DVec3::new(1.5e3, 0.0, 0.0),
+                    appearance: Appearance::DebugBall(DebugBall {
+                        radius: 100.0,
+                        color: AppearanceColor {
+                            r: 255,
+                            g: 0,
+                            b: 0,
+                        },
+                    }),
+                }), // Test Newtonian Body A
+                SomeBody::NewtonEntry(NewtonEntry {
+                    info: BodyInfo {
+                        name: Some("Newtonian Test Body B".into()),
+                        id: "NTB-B".to_string(),
+                        mass: 1000.0,
+                        major: false,
+                        designation: Some("TB-B".into()),
+                        uuid: Default::default(),
+                        tags: vec!["Test Body".into()],
+                    },
+                    position: DVec3::new(384400.0 * 1000.0, 0.0, 0.0),
+                    velocity: DVec3::new(0.0, 0.0, 0.0),
+                    appearance: Appearance::DebugBall(DebugBall {
+                        radius: 100.0,
+                        color: AppearanceColor {
+                            r: 255,
+                            g: 0,
+                            b: 0,
+                        },
+                    }),
+                }), // Test Newtonian Body B
             ]
         },
     };

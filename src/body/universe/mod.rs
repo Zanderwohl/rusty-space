@@ -1,14 +1,11 @@
 use std::default::Default;
 use std::path::PathBuf;
-use bevy::prelude::{Commands, Component, Resource, Transform};
+use bevy::prelude::{Component, Res, ResMut, Resource, Time};
 use bevy::utils::hashbrown::hash_map::Iter;
 use bevy::utils::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::body::motive::newton_motive::NewtonMotive;
-use crate::body::universe::save::{SomeBody, UniverseFile};
+use crate::body::universe::save::UniverseFile;
 use crate::gui::planetarium::time::SimTime;
-use crate::util::kepler::mean_anomaly::kepler;
-
 pub mod save;
 pub mod solar_system;
 
@@ -89,5 +86,12 @@ impl Universe {
 
     pub fn get_by_name<T: AsRef<str>>(&self, name: T) -> Option<&String> {
         self.name_to_id.get(name.as_ref())
+    }
+}
+
+pub fn advance_time(mut sim_time: ResMut<SimTime>, time: Res<Time>) {
+    if sim_time.playing {
+        sim_time.previous_time = sim_time.time_seconds;
+        sim_time.time_seconds += sim_time.gui_speed * time.delta_secs_f64();
     }
 }

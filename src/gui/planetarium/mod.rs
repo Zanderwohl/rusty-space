@@ -1,10 +1,8 @@
 use std::io::Read;
 use bevy::app::{App, Update};
-use bevy::math::{DVec3, Vec2};
 use bevy::pbr::PointLight;
-use bevy::prelude::{in_state, info, Added, Assets, Camera, Camera3d, Changed, Commands, DetectChanges, Entity, GlobalTransform, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Or, Plugin, Query, Res, ResMut, StandardMaterial, SystemSet, Time, Transform, Without};
+use bevy::prelude::{in_state, Added, Assets, Camera, Camera3d, Changed, Commands, DetectChanges, GlobalTransform, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Or, Plugin, Query, Res, ResMut, StandardMaterial, SystemSet, Transform};
 use bevy::prelude::IntoSystemConfigs;
-use bevy::render::camera::ViewportConversionError;
 use bevy::utils::HashMap;
 use bevy_egui::{egui, EguiContexts};
 use lazy_static::lazy_static;
@@ -14,18 +12,14 @@ use crate::body::appearance::{Appearance, AssetCache};
 use crate::body::universe::save::{UniverseFile, UniversePhysics, ViewSettings};
 use crate::body::universe::Universe;
 use crate::gui::app::{AppState, PlanetariumCamera};
-use crate::gui::menu::{MenuState, TagState, UiState};
+use crate::gui::menu::{TagState, UiState};
 use crate::gui::planetarium::time::SimTime;
-use crate::gui::settings::{Settings, UiSettings, UiTheme};
-use crate::body::{unload_simulation_objects, SimulationObject};
+use crate::body::{universe, unload_simulation_objects, SimulationObject};
 use bevy_flycam::prelude::*;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::kepler_motive::KeplerMotive;
-use windows::body_edit::body_edit_window;
-use crate::body::motive::fixed_motive::FixedMotive;
-use crate::gui::planetarium::windows::body_info::{body_info_window, BodyInfoState};
-use crate::gui::planetarium::windows::settings::settings_window;
-use crate::gui::planetarium::windows::spin::spin_window;
+use crate::body::motive::{fixed_motive, kepler_motive, newton_motive};
+use crate::gui::planetarium::windows::body_info::{BodyInfoState};
 use crate::util::mappings;
 
 const J2000_JD: f64 = 2451545.0;
@@ -57,14 +51,15 @@ impl Plugin for Planetarium {
             .add_systems(Update, (
                 (
                     windows::controls::control_window,
-                    body_edit_window,
-                    body_info_window,
-                    settings_window,
-                    spin_window,
-                    advance_time,
+                    windows::body_edit::body_edit_window,
+                    windows::body_info::body_info_window,
+                    windows::settings::settings_window,
+                    windows::spin::spin_window,
+                    universe::advance_time.before(fixed_motive::calculate).before(kepler_motive::calculate).before(newton_motive::calculate),
+                    fixed_motive::calculate.before(position_bodies),
+                    kepler_motive::calculate.before(position_bodies),
+                    newton_motive::calculate.after(kepler_motive::calculate).after(fixed_motive::calculate).before(position_bodies),
                     adjust_lights,
-                    calculate_fixed.before(position_bodies),
-                    calculate_kepler.before(position_bodies),
                     position_bodies,
                     label_bodies,
                 ).in_set(PlanetariumUISet),
@@ -77,13 +72,6 @@ impl Plugin for Planetarium {
 
 lazy_static! {
     static ref SCI_RE: Regex = Regex::new(r"\d?\.\d+\s?x\s?10\s?\^\s?\d+").unwrap();
-}
-
-fn advance_time(mut sim_time: ResMut<SimTime>, time: Res<Time>) {
-    if sim_time.playing {
-        sim_time.previous_time = sim_time.time_seconds;
-        sim_time.time_seconds += sim_time.gui_speed * time.delta_secs_f64();
-    }
 }
 
 fn adjust_lights(
@@ -105,53 +93,13 @@ fn adjust_lights(
     }
 }
 
-fn calculate_fixed(
-    mut fixed_bodies: Query<(&mut BodyState, &BodyInfo, &FixedMotive),
-        (Or<(Changed<FixedMotive>, Added<FixedMotive>)>)>,
-) {
-    for (mut state, info, motive) in fixed_bodies.iter_mut() {
-        state.current_position = motive.position;
-        state.last_step_position = motive.position;
-    }
-}
-
 fn kepler_trajectory(
     mut kepler_bodies: Query<(&mut BodyState, &BodyInfo, &KeplerMotive),
         (Or<(Changed<KeplerMotive>, Added<KeplerMotive>)>)>,
 ) {
+    return; // TODO: Write function to calculate kepler bodies' trajectories
     for (mut state, info, motive) in kepler_bodies.iter_mut() {
         
-    }
-}
-
-fn calculate_kepler(
-    mut sim_time: ResMut<SimTime>,
-    mut kepler_bodies: Query<(&mut KeplerMotive, &BodyInfo, &mut BodyState)>,
-    fixed_bodies: Query<(&SimulationObject, &BodyInfo, &BodyState), Without<KeplerMotive>>,
-    physics: Res<UniversePhysics>,
-) {
-    // First collect all body IDs and masses into a HashMap to avoid borrow conflicts
-    let mut bodies_prev_frame: std::collections::HashMap<String, (f64, DVec3)> = std::collections::HashMap::new();
-    for (_, info, state) in fixed_bodies.iter() {
-        bodies_prev_frame.insert(info.id.clone(), (info.mass, state.current_position));
-    }
-    for (_, info, state) in kepler_bodies.iter() {
-        bodies_prev_frame.insert(info.id.clone(), (info.mass, state.current_position));
-    }
-
-    let time = sim_time.time_seconds;
-    for (mut motive, info, mut state) in kepler_bodies.iter_mut() {
-        let (primary_mass, primary_position) = bodies_prev_frame.get(&motive.primary_id)
-            .copied()
-            .expect("Missing body info");
-            
-        let mu = physics.gravitational_constant * primary_mass;
-        let position = motive.displacement(time, mu);
-        if let Some(position) = position {
-            state.current_position = primary_position + position;
-            state.current_local_position = Some(position);
-            state.current_primary_position = Some(primary_position);
-        }
     }
 }
 

@@ -136,21 +136,17 @@ fn body_state_section(ui: &mut Ui, state: &BodyState) {
 
 fn fixed_motive_section(ui: &mut Ui, motive: &FixedMotive) {
     ui.label("Fixed Body");
-    
-    ui.vertical(|ui| {
-        ui.label("Displacement from fixed global origin:");
-        ui.label(format!("x: {} m", crate::util::format::sci_not(motive.position.x)));
-        ui.label(format!("y: {} m", crate::util::format::sci_not(motive.position.y)));
-        ui.label(format!("z: {} m", crate::util::format::sci_not(motive.position.z)));
-    });
+    motive.display(ui);
 }
 
 fn kepler_motive_section(ui: &mut Ui, motive: &KeplerMotive) {
-    ui.label("Kepler Body");
+    ui.label("Keplerian Body");
+    motive.display(ui);
 }
 
 fn newton_motive_section(ui: &mut Ui, motive: &NewtonMotive) {
-    ui.label("Newton Body");
+    ui.label("Newtonian Body");
+    motive.display(ui);
 }
 
 fn body_select_dropdown(universe: Res<Universe>, mut body_info_state: &mut ResMut<BodyInfoState>, ui: &mut Ui, mut body_options: Vec<(String, String)>) {

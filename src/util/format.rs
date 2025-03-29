@@ -27,8 +27,15 @@ pub fn seconds_to_naive_date(total_seconds: i64) -> String {
 }
 
 pub fn sci_not(n: f64) -> String {
+    if n.is_nan() {
+        return "[NaN]".to_string();
+    }
+
     let s = format!("{n:e}");
     let a = s.split("e").collect::<Vec<&str>>();
+    if a.len() != 2 {
+        panic!("sci_not failed with the values (n = {}) resulting in (a = {:?}).", n, a);
+    }
     let mantissa = a[0].parse::<f64>().unwrap();
     let exponent = a[1].parse::<i64>().unwrap();
     format!("{:.3} x 10 ^ {}", mantissa, exponent)

@@ -5,6 +5,7 @@ pub mod motive;
 pub mod universe;
 pub mod appearance;
 
+
 #[derive(Resource, Debug, Component, PartialEq, /*Eq,*/ Clone, Copy)]
 pub struct SimulationSettings {
     pub gravity_constant: f64,
