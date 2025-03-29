@@ -14,7 +14,7 @@ use crate::body::universe::Universe;
 use crate::gui::app::{AppState, PlanetariumCamera};
 use crate::gui::menu::{TagState, UiState};
 use crate::gui::planetarium::time::SimTime;
-use crate::body::{universe, unload_simulation_objects, SimulationObject};
+use crate::body::{universe, unload_simulation_objects, SimulationObject, SimulationSettings};
 use bevy_flycam::prelude::*;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::kepler_motive::KeplerMotive;

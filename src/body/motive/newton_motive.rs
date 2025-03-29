@@ -2,11 +2,12 @@ use bevy::prelude::{Component, Query, Res, Without};
 use bevy::math::DVec3;
 use bevy_egui::egui::Ui;
 use crate::body::motive::info::{BodyInfo, BodyState};
+use crate::body::SimulationSettings;
 use crate::body::universe::{Major, Minor};
+use crate::body::universe::save::UniversePhysics;
 use crate::gui::planetarium::time::SimTime;
 use crate::util::format::sci_not;
 use crate::util::gravity;
-use crate::util::gravity::G;
 
 #[derive(Component)]
 pub struct NewtonMotive {
@@ -32,6 +33,7 @@ pub fn calculate(
     mut newton_bodies: Query<(&mut BodyState, &BodyInfo, &mut NewtonMotive, Option<&Major>, Option<&Minor>)>,
     mut other_bodies: Query<(&mut BodyState, &BodyInfo, &Major,), (Without<NewtonMotive>)>,
     sim_time: Res<SimTime>,
+    sim_settings: Res<UniversePhysics>,
 ) {
     let mut major_bodies_prev_frame: std::collections::HashMap<String, (f64, DVec3)> = std::collections::HashMap::new();
     for (state, info, _, major, _) in newton_bodies.iter() {
@@ -46,11 +48,10 @@ pub fn calculate(
     let delta_time = sim_time.time_seconds - sim_time.previous_time;
     for (mut state, info, mut motive, _, _) in newton_bodies.iter_mut() {
         if delta_time.abs() >= f64::EPSILON {
-            let delta_v: DVec3 = major_bodies_prev_frame.iter().map(|(_, (other_mass, pos))| {
-                let this_to_other: DVec3 = motive.position -  *pos;
-                let g = gravity::newton_gravity(G, info.mass, *other_mass, &this_to_other);
+            let delta_v: DVec3 = major_bodies_prev_frame.iter().map(|(_, (other_mass, other_displacement))| {
+                let g = gravity::newton_gravity_yeet(sim_settings.gravitational_constant, info.mass, motive.position, *other_mass, other_displacement);
                 if g.is_nan() {
-                    panic!("NaN velocity: (G = {}, g = {}, m = {}, M = {}, a->b = {})", G, g, info.mass, *other_mass, this_to_other);
+                    panic!("NaN velocity: (G = {}, g = {}, m = {}, M = {}, a->b = {}->{})", sim_settings.gravitational_constant, g, info.mass, *other_mass, motive.position, other_displacement);
                 }
                 g
             }).sum();

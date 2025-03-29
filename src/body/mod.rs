@@ -6,9 +6,17 @@ pub mod universe;
 pub mod appearance;
 
 
-#[derive(Resource, Debug, Component, PartialEq, /*Eq,*/ Clone, Copy)]
+#[derive(Resource, Debug, PartialEq, /*Eq,*/ Clone, Copy)]
 pub struct SimulationSettings {
     pub gravity_constant: f64,
+}
+
+impl Default for SimulationSettings {
+    fn default() -> Self {
+        Self {
+            gravity_constant: scilib::constant::G,
+        }
+    }
 }
 
 #[derive(Component)]
