@@ -1,7 +1,8 @@
 use std::io::Read;
 use bevy::app::{App, Update};
 use bevy::math::{DVec3, Vec2};
-use bevy::prelude::{in_state, info, Added, Assets, Camera, Camera3d, Changed, Commands, Entity, GlobalTransform, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Or, Plugin, Query, Res, ResMut, StandardMaterial, SystemSet, Time, Transform, Without};
+use bevy::pbr::PointLight;
+use bevy::prelude::{in_state, info, Added, Assets, Camera, Camera3d, Changed, Commands, DetectChanges, Entity, GlobalTransform, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Or, Plugin, Query, Res, ResMut, StandardMaterial, SystemSet, Time, Transform, Without};
 use bevy::prelude::IntoSystemConfigs;
 use bevy::render::camera::ViewportConversionError;
 use bevy::utils::HashMap;
@@ -58,6 +59,8 @@ impl Plugin for Planetarium {
                     settings_window,
                     spin_window,
                     advance_time,
+                    adjust_lights,
+                    calculate_fixed.before(position_bodies),
                     calculate_kepler.before(position_bodies),
                     position_bodies,
                     label_bodies,
@@ -77,6 +80,25 @@ fn advance_time(mut sim_time: ResMut<SimTime>, time: Res<Time>) {
     if sim_time.playing {
         sim_time.previous_time = sim_time.time_seconds;
         sim_time.time_seconds += sim_time.gui_speed * time.delta_secs_f64();
+    }
+}
+
+fn adjust_lights(
+    mut lights: Query<(&BodyInfo, &mut PointLight, &Appearance)>,
+    view_settings: Res<ViewSettings>,
+) {
+    if !view_settings.is_changed() {
+        return;
+    }
+
+    // TODO: better scaling factor, and log scaling
+    for (body, mut light, appearance) in lights.iter_mut() {
+        match appearance {
+            Appearance::Star(star_ball) => {
+                light.range = star_ball.intensity * (1e9 * (view_settings.distance_scale as f32)).pow(2.0);
+            }
+            _ => {} // This probably won't happen but if it does, it's not worth a crash.
+        }
     }
 }
 

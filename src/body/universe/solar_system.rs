@@ -405,9 +405,9 @@ pub fn write_temp_system_file() {
     solar_system.save().expect("Failed to save system");
 }
 
-pub fn tiny_system() -> UniverseFile {
+pub fn earth_moon() -> UniverseFile {
     let solar_system = UniverseFile {
-        file: Some(PathBuf::from("data/templates/tiny_system.toml")),
+        file: Some(PathBuf::from("data/templates/earth_moon.toml")),
         contents: UniverseFileContents {
             version: "0.0".into(),
             time: UniverseFileTime {
@@ -423,62 +423,44 @@ pub fn tiny_system() -> UniverseFile {
                         mass: 1.988416e30,
                         major: true,
                         designation: None,
+                        tags: vec!["Star".into()],
                         ..Default::default()
                     },
-                    position: DVec3::ZERO,
-                    appearance: Appearance::Empty,
+                    position: DVec3::new(0.0, 1.49598023e8 * 1000.0, 0.0),
+                    appearance: Appearance::Star(StarBall {
+                        radius: 6.957e8,
+                        color: AppearanceColor {
+                            r: 219,
+                            g: 222,
+                            b: 35,
+                        },
+                        light: AppearanceColor {
+                            r: 255 * 14,
+                            g: 255 * 14,
+                            b: 255 * 14,
+                        },
+                        intensity: 10000.0,
+                    }),
                 }), // Sun
-                SomeBody::KeplerEntry(KeplerEntry {
-                    info: BodyInfo {
-                        name: Some("Venus".into()),
-                        id: "venus".to_string(),
-                        mass: 4.8675e24,
-                        major: true,
-                        designation: None,
-                        ..Default::default()
-                    },
-                    params: KeplerMotive {
-                        primary_id: "sol".to_string(),
-                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
-                            eccentricity: 0.006772,
-                            semi_major_axis: 1.0821e8 * 1000.0, // Convert km to m
-                        }),
-                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
-                            inclination: 3.39458,
-                            longitude_of_ascending_node: 76.680,
-                            argument_of_periapsis: 54.884,
-                        }),
-                        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
-                            mean_anomaly: 50.115,
-                        }),
-                    },
-                    appearance: Appearance::Empty,
-                }), // Venus
-                SomeBody::KeplerEntry(KeplerEntry {
+                SomeBody::FixedEntry(FixedEntry {
                     info: BodyInfo {
                         name: Some("Earth".into()),
                         id: "earth".to_string(),
                         mass: 5.972168e24,
                         major: true,
                         designation: None,
+                        tags: vec!["Planet".into(), "Major Planet".into()],
                         ..Default::default()
                     },
-                    params: KeplerMotive {
-                        primary_id: "sol".to_string(),
-                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
-                            eccentricity: 0.0167086,
-                            semi_major_axis: 1.49598023e8 * 1000.0, // Convert km to m
-                        }),
-                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
-                            inclination: 0.00005, // haha, the J2000 ecliptic is nonzero
-                            longitude_of_ascending_node: -11.26064,
-                            argument_of_periapsis: 114.20783,
-                        }),
-                        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
-                            mean_anomaly: 358.617,
-                        }),
-                    },
-                    appearance: Appearance::Empty,
+                    position: DVec3::ZERO,
+                    appearance: Appearance::DebugBall(DebugBall{
+                        radius: 6371.0 * 1000.0,
+                        color: AppearanceColor {
+                            r: 59,
+                            g: 179,
+                            b: 75
+                        },
+                    }),
                 }), // Earth
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -487,32 +469,43 @@ pub fn tiny_system() -> UniverseFile {
                         mass: 6.4171,
                         major: true,
                         designation: Some("Earth I".into()),
+                        tags: vec!["Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
                         primary_id: "earth".to_string(),
                         shape: KeplerShape::EccentricitySMA(EccentricitySMA {
-                            eccentricity: 0.0549,
-                            semi_major_axis: 3.84399e5 * 1000.0, // Convert km to m
+                            eccentricity: 0.05490,
+                            semi_major_axis: 384400.0 * 1000.0, // Convert km to m
                         }),
-                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles { // TODO: Precession https://en.wikipedia.org/wiki/Orbit_of_the_Moon#Precession
-                            inclination: 5.145,
-                            longitude_of_ascending_node: 0.0,
-                            argument_of_periapsis: 0.0,
+                        rotation: KeplerRotation::PrecessingEulerAngles(KeplerPrecessingEulerAngles { // TODO: Precession https://en.wikipedia.org/wiki/Orbit_of_the_Moon#Precession
+                            inclination: 5.240010829674768e0,
+                            longitude_of_ascending_node: 1.239837028145578e2,
+                            argument_of_periapsis: 3.081359034620368e2,
+                            apsidal_precession_period: 3231.50,
+                            nodal_precession_period: 6798.38,
                         }),
                         epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
-                            mean_anomaly: 0.0,
+                            mean_anomaly: 1.407402571142365e02,
                         }),
                     },
-                    appearance: Appearance::Empty,
+                    appearance: Appearance::DebugBall(DebugBall {
+                        radius: 1737.4 * 1000.0,
+                        color: AppearanceColor {
+                            r: 87,
+                            g: 87,
+                            b: 87,
+                        },
+                    }),
                 }), // Luna
-            ] },
+            ]
+        },
     };
     solar_system
 }
 
 pub fn write_tiny_system_file() {
-    let mut solar_system = tiny_system();
+    let mut solar_system = earth_moon();
     let path = PathBuf::from("data/templates");
     ensure_folders(&[&path]).expect("Folders couldn't be made");
     solar_system.save().expect("Failed to save system");
