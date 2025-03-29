@@ -23,6 +23,7 @@ use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::kepler_motive::KeplerMotive;
 use windows::body_edit::body_edit_window;
 use crate::body::motive::fixed_motive::FixedMotive;
+use crate::gui::planetarium::windows::body_info::{body_info_window, BodyInfoState};
 use crate::gui::planetarium::windows::settings::settings_window;
 use crate::gui::planetarium::windows::spin::spin_window;
 use crate::util::mappings;
@@ -48,6 +49,7 @@ impl Plugin for Planetarium {
             .init_resource::<UniversePhysics>()
             .init_resource::<ViewSettings>()
             .init_resource::<AssetCache>()
+            .init_resource::<BodyInfoState>()
             .configure_sets(Update, (
                 PlanetariumUISet.run_if(in_state(AppState::Planetarium)),
                 PlanetariumLoadingSet.run_if(in_state(AppState::PlanetariumLoading)),
@@ -56,6 +58,7 @@ impl Plugin for Planetarium {
                 (
                     windows::controls::control_window,
                     body_edit_window,
+                    body_info_window,
                     settings_window,
                     spin_window,
                     advance_time,

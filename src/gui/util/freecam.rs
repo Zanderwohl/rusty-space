@@ -1,6 +1,7 @@
 use bevy::input::mouse::MouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
+use crate::gui::app::AppState;
 
 /// Mouse sensitivity and movement speed
 #[derive(Resource)]
@@ -39,7 +40,7 @@ impl Default for KeyBindings {
             move_right: KeyCode::KeyD,
             move_ascend: KeyCode::Space,
             move_descend: KeyCode::ShiftLeft,
-            toggle_grab_cursor: KeyCode::Escape,
+            toggle_grab_cursor: KeyCode::Backquote,
         }
     }
 }
@@ -50,7 +51,13 @@ impl Default for KeyBindings {
 pub struct FlyCam;
 
 /// Grabs/ungrabs mouse cursor
-fn toggle_grab_cursor(window: &mut Window) {
+fn toggle_grab_cursor(
+    window: &mut Window,
+    app_state: Res<State<AppState>>,
+) {
+    if app_state.ne(&AppState::Planetarium) {
+        return;
+    }
     match window.cursor_options.grab_mode {
         CursorGrabMode::None => {
             window.cursor_options.grab_mode = CursorGrabMode::Confined;
@@ -147,10 +154,11 @@ fn cursor_grab(
     keys: Res<ButtonInput<KeyCode>>,
     key_bindings: Res<KeyBindings>,
     mut primary_window: Query<&mut Window, With<PrimaryWindow>>,
+    state: Res<State<AppState>>,
 ) {
     if let Ok(mut window) = primary_window.get_single_mut() {
         if keys.just_pressed(key_bindings.toggle_grab_cursor) {
-            toggle_grab_cursor(&mut window);
+            toggle_grab_cursor(&mut window, state);
         }
     } else {
         warn!("Primary window not found for `cursor_grab`!");
@@ -161,13 +169,14 @@ fn cursor_grab(
 fn initial_grab_on_flycam_spawn(
     mut primary_window: Query<&mut Window, With<PrimaryWindow>>,
     query_added: Query<Entity, Added<FlyCam>>,
+    state: Res<State<AppState>>,
 ) {
     if query_added.is_empty() {
         return;
     }
 
     if let Ok(window) = &mut primary_window.get_single_mut() {
-        toggle_grab_cursor(window);
+        toggle_grab_cursor(window, state);
     } else {
         warn!("Primary window not found for `initial_grab_cursor`!");
     }

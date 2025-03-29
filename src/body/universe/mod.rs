@@ -1,6 +1,7 @@
 use std::default::Default;
 use std::path::PathBuf;
 use bevy::prelude::{Commands, Component, Resource, Transform};
+use bevy::utils::hashbrown::hash_map::Iter;
 use bevy::utils::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::body::motive::newton_motive::NewtonMotive;
@@ -76,5 +77,17 @@ impl Universe {
         if let Some(name) = self.id_to_name.get(id.as_ref()) {
             self.name_to_id.remove(name);
         }
+    }
+
+    pub fn id_to_name_iter(&self) -> Iter<'_, String, String> {
+        self.id_to_name.iter()
+    }
+
+    pub fn get_by_id<T: AsRef<str>>(&self, id: T) -> Option<&String> {
+        self.id_to_name.get(id.as_ref())
+    }
+
+    pub fn get_by_name<T: AsRef<str>>(&self, name: T) -> Option<&String> {
+        self.name_to_id.get(name.as_ref())
     }
 }
