@@ -50,7 +50,7 @@ pub fn calculate(
                 let this_to_other: DVec3 = motive.position -  *pos;
                 let g = gravity::newton_gravity(G, info.mass, *other_mass, &this_to_other);
                 if g.is_nan() {
-                    panic!("NaN velocity: (G = {}, g = {}, m = {}, M = {}, a->b = {}", G, g, info.mass, *other_mass, this_to_other);
+                    panic!("NaN velocity: (G = {}, g = {}, m = {}, M = {}, a->b = {})", G, g, info.mass, *other_mass, this_to_other);
                 }
                 g
             }).sum();
