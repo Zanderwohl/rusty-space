@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use bevy::math::DVec3;
 use crate::body::appearance::{Appearance, AppearanceColor, DebugBall, StarBall};
 use crate::body::motive::info::BodyInfo;
-use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerRotation, KeplerShape, MeanAnomalyAtEpoch, MeanAnomalyAtJ2000};
+use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerPrecessingEulerAngles, KeplerRotation, KeplerShape, MeanAnomalyAtEpoch, MeanAnomalyAtJ2000};
 use crate::body::universe::save::{FixedEntry, KeplerEntry, SomeBody, UniverseFile, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings};
 use crate::gui::util::ensure_folders;
 // Mass: Kg
@@ -232,16 +232,18 @@ pub fn solar_system() -> UniverseFile {
                     params: KeplerMotive {
                         primary_id: "earth".to_string(),
                         shape: KeplerShape::EccentricitySMA(EccentricitySMA {
-                            eccentricity: 0.0549,
-                            semi_major_axis: 3.84399e5 * 1000.0, // Convert km to m
+                            eccentricity: 0.05490,
+                            semi_major_axis: 384400.0 * 1000.0, // Convert km to m
                         }),
-                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles { // TODO: Precession https://en.wikipedia.org/wiki/Orbit_of_the_Moon#Precession
-                            inclination: 5.145,
-                            longitude_of_ascending_node: 0.0,
-                            argument_of_periapsis: 0.0,
+                        rotation: KeplerRotation::PrecessingEulerAngles(KeplerPrecessingEulerAngles { // TODO: Precession https://en.wikipedia.org/wiki/Orbit_of_the_Moon#Precession
+                            inclination: 5.240010829674768e0,
+                            longitude_of_ascending_node: 1.239837028145578e2,
+                            argument_of_periapsis: 3.081359034620368e2,
+                            apsidal_precession_period: 3231.50,
+                            nodal_precession_period: 6798.38,
                         }),
                         epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
-                            mean_anomaly: 0.0,
+                            mean_anomaly: 1.407402571142365e02,
                         }),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
