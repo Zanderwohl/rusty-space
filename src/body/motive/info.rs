@@ -1,7 +1,9 @@
 use bevy::math::DVec3;
 use serde::{Deserialize, Serialize};
 use bevy::prelude::Component;
+use bevy::utils::HashMap;
 use uuid::Uuid;
+use crate::util::time_map::TimeMap;
 
 #[derive(Serialize, Deserialize, Component, Clone)]
 pub struct BodyInfo {
@@ -22,7 +24,7 @@ pub struct BodyState {
     pub last_step_position: DVec3,
     pub current_local_position: Option<DVec3>,
     pub current_primary_position: Option<DVec3>,
-    pub trajectory: Option<Vec<DVec3>>,
+    pub trajectory: Option<TimeMap<DVec3>>,
 }
 
 impl Default for BodyState {

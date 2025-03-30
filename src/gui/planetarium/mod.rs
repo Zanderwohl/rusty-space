@@ -1,4 +1,5 @@
 use bevy::app::{App, Update};
+use bevy::math::DVec3;
 use bevy::pbr::PointLight;
 use bevy::prelude::{in_state, Added, Assets, Camera, Camera3d, Changed, Commands, DetectChanges, GlobalTransform, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Or, Plugin, Query, Res, ResMut, StandardMaterial, SystemSet, Transform};
 use bevy::prelude::IntoSystemConfigs;
@@ -97,27 +98,18 @@ fn adjust_lights(
     }
 }
 
-fn kepler_trajectory(
-    mut kepler_bodies: Query<(&mut BodyState, &BodyInfo, &KeplerMotive),
-        Or<(Changed<KeplerMotive>, Added<KeplerMotive>)>>,
-) {
-    return; // TODO: Write function to calculate kepler bodies' trajectories
-    for (mut state, info, motive) in kepler_bodies.iter_mut() {
-        
-    }
-}
-
 fn position_bodies(
     mut sim_time: ResMut<SimTime>,
     mut bodies: Query<(&SimulationObject, &mut Transform, &BodyInfo, &BodyState, &Appearance)>,
     view_settings: Res<ViewSettings>,
 ) {
+    // TODO: Move the origin to the main camera.
     let distance_scale = if view_settings.logarithmic_distance_scale {
-        let n = mappings::log_scale(view_settings.distance_scale, view_settings.logarithmic_distance_base) as f32;
+        let n = mappings::log_scale(view_settings.distance_scale, view_settings.logarithmic_distance_base);
         // info!("{} -> {}", view_settings.distance_scale, n);
         n
     } else {
-        view_settings.distance_scale as f32
+        view_settings.distance_scale
     };
 
     for (_, mut transform, _, state, appearance) in bodies.iter_mut() {
@@ -125,28 +117,29 @@ fn position_bodies(
         // In z-axis-up: (x, y, z) where z is up
         // In y-axis-up: (x, z, -y) where y is up
         // TODO: I doubt any of this works for moonmoons.
-        if !view_settings.logarithmic_distance_scale || state.current_local_position.is_none() || state.current_primary_position.is_none() {
-            let position = state.current_position.as_vec3();  // Use calculated position *unless* we are doing logarithmic distance scale current object has a primary.
-            transform.translation = bevy::math::Vec3::new(
+        let global_position: DVec3 = if !view_settings.logarithmic_distance_scale || state.current_local_position.is_none() || state.current_primary_position.is_none() {
+            let position = state.current_position;  // Use calculated position *unless* we are doing logarithmic distance scale and current object has a primary.
+            DVec3::new(
                 position.x,
                 position.z,
                 -position.y
-            ) * distance_scale; // Scale factor
+            ) * distance_scale // Scale factor
         } else {
-            let local_position = state.current_local_position.unwrap().as_vec3();
-            let primary_position = state.current_primary_position.unwrap().as_vec3();
-            let adjusted_primary_position = bevy::math::Vec3::new(
+            let local_position = state.current_local_position.unwrap();
+            let primary_position = state.current_primary_position.unwrap();
+            let adjusted_primary_position = DVec3::new(
                 primary_position.x,
                 primary_position.z,
                 -primary_position.y
             ) * distance_scale; // Scale factor
-            let adjusted_local_position = bevy::math::Vec3::new(
+            let adjusted_local_position = DVec3::new(
                 local_position.x,
                 local_position.z,
                 -local_position.y
             ) * distance_scale;
-            transform.translation = adjusted_primary_position + adjusted_local_position;
+            adjusted_primary_position + adjusted_local_position
         };
+        transform.translation = global_position.as_vec3();
 
         let body_scale = if view_settings.logarithmic_body_scale {
             mappings::log_scale(appearance.radius(), view_settings.logarithmic_body_base) * view_settings.body_scale

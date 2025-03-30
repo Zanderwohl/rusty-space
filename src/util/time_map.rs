@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::slice::Iter;
+use bevy::math::DVec3;
+use num_traits::Float;
 use crate::util::bitfutz;
 
 #[derive(Debug, Clone)]
@@ -7,11 +9,30 @@ pub struct TimeMap<V>
 {
     map: HashMap<u64, V>,
     time_keys: SortedTimes,
+    periodicity: Option<Periodicity>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Periodicity {
+    interval_start: f64,
+    interval_size: f64,
 }
 
 impl<V: Clone> Default for TimeMap<V> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+trait Interpolate {
+    fn interpolate(&self, other: &Self, t: f64) -> Self;
+}
+
+impl Interpolate for DVec3 {
+    fn interpolate(&self, other: &Self, t: f64) -> Self
+    {
+        let t: f64 = t.into();
+        self.lerp(*other, t)
     }
 }
 
@@ -21,6 +42,7 @@ impl<V: Clone> TimeMap<V>
         Self {
             map: HashMap::new(),
             time_keys: SortedTimes::new(),
+            periodicity: None,
         }
     }
 
@@ -53,66 +75,80 @@ impl<V: Clone> TimeMap<V>
         Self {
             map,
             time_keys: restricted_times,
+            periodicity: self.periodicity.clone(),
+        }
+    }
+
+    pub fn is_periodic(&self) -> bool {
+        self.periodicity.is_some()
+    }
+
+    pub fn range_one_period(&self) -> Option<TimeMap<V>> {
+        match &self.periodicity {
+            None => None,
+            Some(periodicity) => {
+                Some(self.range(periodicity.interval_start, periodicity.interval_start + periodicity.interval_size))
+            }
         }
     }
 }
 
 #[derive(Debug, Clone)]
 struct SortedTimes {
-    vec: Vec<f64>,
+    in_order: Vec<f64>,
 }
 
 impl SortedTimes {
     pub fn as_vec(&self) -> Vec<f64> {
-        self.vec.clone()
+        self.in_order.clone()
     }
 }
 
 impl SortedTimes {
     pub fn new() -> Self {
         Self{
-            vec: Vec::new()
+            in_order: Vec::new()
         }
     }
 
     pub fn insert(&mut self, value: f64) {
-        match self.vec.binary_search_by(|other| other.partial_cmp(&value).unwrap()) {
+        match self.in_order.binary_search_by(|other| other.partial_cmp(&value).unwrap()) {
             Ok(_) => {},
-            Err(pos) => self.vec.insert(pos, value),
+            Err(pos) => self.in_order.insert(pos, value),
         }
     }
 
     pub fn get(&self, index: usize) -> Option<&f64> {
-        self.vec.get(index)
+        self.in_order.get(index)
     }
 
     pub fn len(&self) -> usize {
-        self.vec.len()
+        self.in_order.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.vec.is_empty()
+        self.in_order.is_empty()
     }
 
     pub fn remove(&mut self, index: usize) -> Option<f64> {
-        if index < self.vec.len() {
-            Some(self.vec.remove(index))
+        if index < self.in_order.len() {
+            Some(self.in_order.remove(index))
         } else {
             None
         }
     }
 
     pub fn range(&self, start: f64, end: f64) -> SortedTimes {
-        let values = self.vec.iter()
+        let values = self.in_order.iter()
             .filter(|&&x| x >= start && x <= end)
             .cloned()
             .collect();
         Self {
-            vec: values,
+            in_order: values,
         }
     }
 
     pub fn iter(&self) -> Iter<'_, f64> {
-        self.vec.iter()
+        self.in_order.iter()
     }
 }

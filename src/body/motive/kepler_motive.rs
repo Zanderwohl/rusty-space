@@ -1,6 +1,7 @@
 use bevy::math::{DMat3, DVec3};
 use serde::{Deserialize, Serialize};
-use bevy::prelude::{Component, Query, Res, ResMut, Without};
+use bevy::prelude::{Added, Changed, Component, Or, Query, Res, ResMut, Without};
+use bevy::utils::HashMap;
 use bevy_egui::egui::Ui;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::SimulationObject;
@@ -8,6 +9,7 @@ use crate::body::universe::save::UniversePhysics;
 use crate::gui::planetarium::time::SimTime;
 use crate::util::kepler::{angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
 use crate::util::mappings;
+use crate::util::time_map::TimeMap;
 
 #[derive(Serialize, Deserialize, Component)]
 pub struct KeplerMotive {
@@ -442,5 +444,15 @@ pub fn calculate(
             state.current_local_position = Some(position);
             state.current_primary_position = Some(primary_position);
         }
+    }
+}
+
+fn kepler_trajectory(
+    mut kepler_bodies: Query<(&mut BodyState, &BodyInfo, &KeplerMotive),
+        Or<(Changed<KeplerMotive>, Added<KeplerMotive>)>>,
+) {
+    for (mut state, info, motive) in kepler_bodies.iter_mut() {
+        state.trajectory = Some(TimeMap::new());
+
     }
 }
