@@ -23,7 +23,7 @@ pub mod angular_motion {
 
 pub mod local {
     pub mod angular_momentum {
-        use glam::DVec3;
+        use bevy::math::DVec3;
 
         pub fn specific(displacement: DVec3, velocity: DVec3) -> DVec3 {
             displacement.cross(velocity)
@@ -37,10 +37,18 @@ pub mod local {
             numerator / denominator
         }
 
-        pub fn from_elements2(semi_major_axis: f64, eccentricity: f64, true_anomaly: f64) -> f64 {
+        pub fn from_elements2(semi_major_axis: f64, eccentricity: f64, true_anomaly: f64) -> Option<f64> {
             let numerator = 1.0 - eccentricity * eccentricity;
             let denominator = 1.0 + eccentricity * f64::cos(true_anomaly);
-            semi_major_axis * (numerator / denominator)
+            if denominator == 0.0 {
+                None
+            } else {
+                Some(semi_major_axis * (numerator / denominator))
+            }
+        }
+
+        pub fn from_elements2_infallible(semi_major_axis: f64, eccentricity: f64, true_anomaly: f64) -> f64 {
+            from_elements2(eccentricity, semi_major_axis, true_anomaly).unwrap_or(f64::INFINITY)
         }
 
         pub fn from_eccentric_anomaly(semi_major_axis: f64, eccentricity: f64, eccentric_anomaly: f64) -> f64 {
@@ -77,6 +85,10 @@ pub mod semi_major_axis {
     pub fn conic_definition3(focal_parameter: f64, eccentricity: f64) -> f64 {
         (focal_parameter * eccentricity) / (1.0 - eccentricity * eccentricity)
     }
+
+    pub fn radii(periapsis: f64, apoapsis: f64) -> f64 {
+        (periapsis + apoapsis) / 2.0
+    }
 }
 
 pub mod semi_latus_rectum {
@@ -106,8 +118,12 @@ pub mod eccentricity {
         f64::sqrt(1.0 - semi_latus_rectum / semi_major_axis)
     }
 
+    pub fn radii(periapsis: f64, apoapsis: f64) -> f64 {
+        (apoapsis - periapsis) / (apoapsis + periapsis)
+    }
+
     pub mod vector {
-        use glam::DVec3;
+        use bevy::math::DVec3;
         use crate::util::kepler::local;
 
         pub fn definition(local_position: DVec3, local_velocity: DVec3, gravitational_parameter: f64) -> DVec3 {
@@ -115,6 +131,31 @@ pub mod eccentricity {
             let term2 = local_position.normalize();
             term1 - term2
         }
+    }
+}
+
+pub mod semi_parameter {
+    use crate::util::common::unit_circle_xy;
+
+    pub fn definition(semi_major_axis: f64, eccentricity: f64) -> f64 {
+        semi_major_axis * unit_circle_xy(eccentricity)
+    }
+}
+
+pub mod periapsis {
+    use crate::util::kepler::semi_parameter;
+
+    pub fn definition(semi_major_axis: f64, eccentricity: f64) -> f64 {
+        semi_parameter::definition(semi_major_axis, eccentricity) / (1.0 + eccentricity)
+    }
+}
+
+pub mod apoapsis {
+    use crate::util::kepler::semi_parameter;
+
+    pub fn definition(semi_major_axis: f64, eccentricity: f64) -> Option<f64> {
+        if eccentricity >= 1.0 { return None; }
+        Some(semi_parameter::definition(semi_major_axis, eccentricity) / (1.0 - eccentricity))
     }
 }
 
@@ -130,7 +171,7 @@ pub mod eccentric_anomaly {
 }
 
 pub mod true_anomaly {
-    use glam::DVec3;
+    use bevy::math::DVec3;
     use crate::util::common::{unit_circle_xy};
     use scilib::math::bessel;
 
@@ -215,7 +256,7 @@ pub mod gravitational_parameter {
 }
 
 pub mod eccentricity_vector {
-    use glam::DVec3;
+    use bevy::math::DVec3;
 
     pub fn definition(mu: f64, displacement: DVec3, velocity: DVec3) -> DVec3 {
         let specific_angular_momentum = displacement.cross(velocity);
@@ -254,22 +295,5 @@ pub mod energy {
         pub fn definition(mass: f64, mu: f64, displacement: f64) -> f64 {
             mass * specific(mu, displacement)
         }
-    }
-}
-
-pub mod in_plane {
-    use glam::DVec3;
-    use crate::util::kepler;
-
-    pub fn displacement(time: f64, mu: f64, mean_anomaly_at_epoch: f64, semi_major_axis: f64, eccentricity: f64, longitude_of_periapsis: f64) -> DVec3 {
-        let mean_anomaly = super::mean_anomaly::definition(mean_anomaly_at_epoch, mu, semi_major_axis, 0.0, time);
-        let true_anomaly = kepler::true_anomaly::fourier_expansion(mean_anomaly, eccentricity, 10);
-        let radius = super::local::radius::from_elements2(semi_major_axis, eccentricity, true_anomaly);
-        let rotated_true_anomaly = true_anomaly + longitude_of_periapsis;
-        let local_r = DVec3::new(
-            radius * f64::cos(rotated_true_anomaly),
-            0.0,
-            radius * -f64::sin(rotated_true_anomaly)); // Negative due to y->z translation
-        local_r
     }
 }

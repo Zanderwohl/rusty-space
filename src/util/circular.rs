@@ -32,7 +32,7 @@ pub mod true_anomaly {
 }
 
 pub mod position {
-    use glam::DVec3;
+    use bevy::math::DVec3;
 
     pub fn from_true_anomaly(radius: f64, true_anomaly: f64) -> DVec3 {
         DVec3::new(f64::cos(true_anomaly) * radius, 0.0, f64::sin(true_anomaly) * radius)

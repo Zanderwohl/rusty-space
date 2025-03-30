@@ -1,14 +1,19 @@
-use glam::DVec3;
+use bevy::math::DVec3;
 
-const DEBUG_G: f64 = 6.67430e-8;
-const REAL_G: f64 = 6.67430e-11;
-pub(crate) const G: f64 = DEBUG_G;
+
+// TODO: Rename better to differentiate functions
+pub fn newton_gravity_yeet(gravitational_constant: f64, mass_a: f64, displacement_a: DVec3, mass_b: f64, displacement_b: &DVec3) -> DVec3 {
+    let a_to_b = displacement_a - displacement_b;
+    let distance = a_to_b.length();
+    let directionless = -(gravitational_constant * (mass_a * mass_b)) / (distance * distance * distance);
+    directionless * a_to_b
+}
 
 /// Masses in grams, displacement in meters.
 /// Returns force in newtons TODO: really?
-pub fn newton_gravity(mass_a: f64, mass_b: f64, a_to_b: DVec3) -> DVec3 {
+pub fn newton_gravity(gravitational_constant: f64, mass_a: f64, mass_b: f64, a_to_b: &DVec3) -> DVec3 {
     let distance = a_to_b.length();
-    let directionless = -(G * (mass_a * mass_b)) / (distance * distance * distance);
+    let directionless = -(gravitational_constant * (mass_a * mass_b)) / (distance * distance * distance);
     directionless * a_to_b
 }
 

@@ -1,7 +1,8 @@
-mod menu;
-mod common;
-pub(super) mod app;
-mod splash;
-mod planetarium;
+pub mod menu;
+pub mod planetarium;
 pub(crate) mod body;
-mod util;
+pub mod util;
+pub mod app;
+mod settings;
+mod splash;
+pub mod common;
