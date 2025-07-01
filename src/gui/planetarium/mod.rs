@@ -3,7 +3,7 @@ use bevy::app::{App, Update};
 use bevy::math::DVec3;
 use bevy::pbr::PointLight;
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts};
+use bevy_egui::{egui, EguiContexts, EguiContextPass};
 use lazy_static::lazy_static;
 use num_traits::Pow;
 use regex::Regex;
@@ -15,7 +15,6 @@ use crate::gui::menu::{TagState, UiState};
 use crate::gui::planetarium::time::SimTime;
 use crate::body::{universe, unload_simulation_objects, SimulationObject};
 use crate::body::motive::info::{BodyInfo, BodyState};
-use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::motive::{fixed_motive, kepler_motive, newton_motive};
 use crate::gui::planetarium::windows::body_info::{BodyInfoState};
 use crate::util::mappings;
@@ -49,7 +48,7 @@ impl Plugin for PlanetariumUI {
                 PlanetariumSimulationSet.run_if(in_state(AppState::Planetarium)),
                 PlanetariumLoadingSet.run_if(in_state(AppState::PlanetariumLoading)),
             ))
-            .add_systems(Update, (
+            .add_systems(EguiContextPass, (
                 (
                     windows::controls::control_window,
                     windows::body_edit::body_edit_window,
@@ -57,9 +56,13 @@ impl Plugin for PlanetariumUI {
                     windows::settings::settings_window,
                     windows::spin::spin_window,
 
+                    label_bodies,
+                    ).in_set(PlanetariumUISet),
+                ))
+            .add_systems(Update, (
+                (
                     adjust_lights,
                     position_bodies.after(fixed_motive::calculate).after(kepler_motive::calculate).after(newton_motive::calculate),
-                    label_bodies,
                 ).in_set(PlanetariumUISet),
                 (
                     universe::advance_time,

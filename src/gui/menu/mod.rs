@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use bevy::app::AppExit;
 use bevy::prelude::*;
 use bevy::window::{ClosingWindow, WindowCloseRequested};
-use bevy_egui::{egui, EguiContexts};
+use bevy_egui::{egui, EguiContexts, EguiContextPass};
 use serde::{Deserialize, Serialize};
 use crate::gui::app::AppState;
 use crate::gui::settings::{Settings, UiTheme};
@@ -73,12 +73,12 @@ impl Plugin for MenuPlugin {
             .init_resource::<PlanetariumFiles>()
             .add_systems(OnEnter(MenuState::Planetarium), load_planetarium_files)
             .add_systems(OnEnter(AppState::MainMenu), load_planetarium_files.run_if(in_state(MenuState::Planetarium)))
-            .add_systems(Update, (
+            .add_systems(EguiContextPass, (
                 (main_menu,).in_set(MainMenuSet),
                 (save_load::planetarium_menu,).in_set(PlanetariumMenuSet),
                 (settings_menu,).in_set(SettingsMenuSet),
-                quit_system,
             ))
+            .add_systems(Update, quit_system)
         ;
     }
 }
