@@ -3,7 +3,7 @@ use bevy::app::{App, Update};
 use bevy::math::DVec3;
 use bevy::pbr::PointLight;
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts, EguiContextPass};
+use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use lazy_static::lazy_static;
 use num_traits::Pow;
 use regex::Regex;
@@ -48,7 +48,7 @@ impl Plugin for PlanetariumUI {
                 PlanetariumSimulationSet.run_if(in_state(AppState::Planetarium)),
                 PlanetariumLoadingSet.run_if(in_state(AppState::PlanetariumLoading)),
             ))
-            .add_systems(EguiContextPass, (
+            .add_systems(EguiPrimaryContextPass, (
                 (
                     windows::controls::control_window,
                     windows::body_edit::body_edit_window,
@@ -57,7 +57,7 @@ impl Plugin for PlanetariumUI {
                     windows::spin::spin_window,
 
                     label_bodies,
-                    ).in_set(PlanetariumUISet),
+                    ).run_if(in_state(AppState::Planetarium)),
                 ))
             .add_systems(Update, (
                 (
