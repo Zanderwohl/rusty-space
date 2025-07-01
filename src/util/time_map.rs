@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::slice::Iter;
 use bevy::math::DVec3;
-use num_traits::Float;
 use crate::util::bitfutz;
 
 #[derive(Debug, Clone)]

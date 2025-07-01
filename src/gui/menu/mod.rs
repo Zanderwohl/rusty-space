@@ -51,24 +51,10 @@ pub enum MenuState {
     Settings,
 }
 
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-struct MainMenuSet;
-
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-struct PlanetariumMenuSet;
-
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-struct SettingsMenuSet;
-
 impl Plugin for MenuPlugin {
     fn build (&self, app: &mut App) {
         app
             .insert_state(MenuState::Home)
-            .configure_sets(Update, (
-                MainMenuSet.run_if(in_state(AppState::MainMenu).and(in_state(MenuState::Home))),
-                PlanetariumMenuSet.run_if(in_state(AppState::MainMenu).and(in_state(MenuState::Planetarium))),
-                SettingsMenuSet.run_if(in_state(AppState::MainMenu).and(in_state(MenuState::Settings))),
-                ))
             .init_resource::<UiState>()
             .init_resource::<PlanetariumFiles>()
             .add_systems(OnEnter(MenuState::Planetarium), load_planetarium_files)
@@ -217,7 +203,7 @@ pub fn quit_system (
     mut exit: EventWriter<AppExit>
 ) {
     if ui_state.quit_requested {
-        exit.send(AppExit::Success);
+        exit.write(AppExit::Success);
     }
 }
 
