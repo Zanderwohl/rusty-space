@@ -15,7 +15,9 @@ pub fn planetarium_menu(
     files: Res<PlanetariumFiles>,
     mut universe: ResMut<Universe>,
 ) {
-    let ctx = contexts.ctx_mut();
+    let ctx = contexts.try_ctx_mut();
+    if ctx.is_none() { return; }
+    let ctx = ctx.unwrap();
 
     match settings.ui.theme {
         UiTheme::Light => ctx.set_visuals(egui::Visuals::light()),

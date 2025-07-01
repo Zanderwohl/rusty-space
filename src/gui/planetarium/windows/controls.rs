@@ -20,7 +20,9 @@ pub fn control_window(
     mut time: ResMut<SimTime>,
     mut view_settings: ResMut<ViewSettings>,
 ) {
-    let ctx = contexts.ctx_mut();
+    let ctx = contexts.try_ctx_mut();
+    if ctx.is_none() { return; }
+    let ctx = ctx.unwrap();
     
     match settings.ui.theme {
         UiTheme::Light => ctx.set_visuals(egui::Visuals::light()),

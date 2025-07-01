@@ -9,7 +9,9 @@ pub fn spin_window(
     mut settings: ResMut<Settings>,
     mut contexts: EguiContexts,
 ) {
-    let ctx = contexts.ctx_mut();
+    let ctx = contexts.try_ctx_mut();
+    if ctx.is_none() { return; }
+    let ctx = ctx.unwrap();
 
     match settings.ui.theme {
         UiTheme::Light => ctx.set_visuals(egui::Visuals::light()),

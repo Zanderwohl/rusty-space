@@ -30,7 +30,9 @@ pub fn body_info_window(
     mut contexts: EguiContexts,
     mut body_info_state: ResMut<BodyInfoState>,
 ) {
-    let ctx = contexts.ctx_mut();
+    let ctx = contexts.try_ctx_mut();
+    if ctx.is_none() { return; }
+    let ctx = ctx.unwrap();
 
     match settings.ui.theme {
         UiTheme::Light => ctx.set_visuals(egui::Visuals::light()),
