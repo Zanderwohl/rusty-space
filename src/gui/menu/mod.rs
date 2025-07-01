@@ -5,8 +5,7 @@ use std::fs;
 use std::ops::Deref;
 use std::path::PathBuf;
 use bevy::app::AppExit;
-use bevy::prelude::{in_state, App, AppExtStates, Commands, Condition, Entity, EventReader, EventWriter, IntoSystemConfigs, NextState, OnEnter, Plugin, Query, Res, ResMut, Resource, States, SystemSet, Update, With};
-use bevy::prelude::IntoSystemSetConfigs;
+use bevy::prelude::*;
 use bevy::window::{ClosingWindow, WindowCloseRequested};
 use bevy_egui::{egui, EguiContexts};
 use serde::{Deserialize, Serialize};
@@ -90,8 +89,8 @@ pub fn main_menu(
     mut ui_state: ResMut<UiState>,
     mut next_menu: ResMut<NextState<MenuState>>,
 ) {
-    let ctx = contexts.try_ctx_mut();
-    if ctx.is_none() { return; }
+    let ctx = contexts.ctx_mut();
+    if ctx.is_err() { return; }
     let ctx = ctx.unwrap();
     
     match settings.ui.theme {
@@ -189,8 +188,8 @@ pub fn settings_menu(
     mut settings: ResMut<Settings>,
     mut next_menu: ResMut<NextState<MenuState>>,
 ) {
-    let ctx = contexts.try_ctx_mut();
-    if ctx.is_none() { return; }
+    let ctx = contexts.ctx_mut();
+    if ctx.is_err() { return; }
     let ctx = ctx.unwrap();
     
     match settings.ui.theme {

@@ -1,8 +1,8 @@
+use std::collections::HashMap;
 use bevy::asset::RenderAssetUsages;
 use bevy::color::LinearRgba;
-use bevy::prelude::{default, info, Assets, Color, Component, Handle, Image, Mesh, Mesh3d, MeshMaterial3d, Meshable, PointLight, ResMut, Resource, Sphere, StandardMaterial};
+use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy::utils::HashMap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Resource, Default)]

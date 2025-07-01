@@ -1,4 +1,4 @@
-use bevy::prelude::ResMut;
+use bevy::prelude::*;
 use bevy_egui::egui;
 use bevy_egui::egui::Ui;
 use crate::gui::settings::{DisplayGlow, DisplayQuality, Settings, UiTheme};

@@ -1,4 +1,4 @@
-use bevy::prelude::{Query, Res, ResMut, Resource};
+use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use bevy_egui::egui::Ui;
 use crate::body::motive::fixed_motive::FixedMotive;
@@ -30,8 +30,8 @@ pub fn body_info_window(
     mut contexts: EguiContexts,
     mut body_info_state: ResMut<BodyInfoState>,
 ) {
-    let ctx = contexts.try_ctx_mut();
-    if ctx.is_none() { return; }
+    let ctx = contexts.ctx_mut();
+    if ctx.is_err() { return; }
     let ctx = ctx.unwrap();
 
     match settings.ui.theme {

@@ -1,4 +1,4 @@
-use bevy::prelude::{Res, ResMut};
+use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use crate::body::universe::Universe;
 use crate::gui::menu::UiState;
@@ -10,8 +10,8 @@ pub fn body_edit_window(
     universe: Res<Universe>,
     mut contexts: EguiContexts,
 ) {
-    let ctx = contexts.try_ctx_mut();
-    if ctx.is_none() { return; }
+    let ctx = contexts.ctx_mut();
+    if ctx.is_err() { return; }
     let ctx = ctx.unwrap();
 
     match settings.ui.theme {

@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use bevy::prelude::Resource;
+use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use crate::gui::util::ensure_toml;
 

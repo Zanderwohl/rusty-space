@@ -1,9 +1,8 @@
+use std::collections::HashMap;
 use bevy::app::{App, Update};
 use bevy::math::DVec3;
 use bevy::pbr::PointLight;
-use bevy::prelude::{in_state, Added, Assets, Camera, Camera3d, Changed, Commands, DetectChanges, GlobalTransform, Image, IntoSystemSetConfigs, Mesh, NextState, OnExit, Or, Plugin, Query, Res, ResMut, StandardMaterial, SystemSet, Transform};
-use bevy::prelude::IntoSystemConfigs;
-use bevy::utils::HashMap;
+use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use lazy_static::lazy_static;
 use num_traits::Pow;
@@ -156,8 +155,8 @@ fn label_bodies(
     cameras: Query<(&Camera, &Camera3d, &PlanetariumCamera, &GlobalTransform)>,
     bodies: Query<(&SimulationObject, &mut Transform, &BodyInfo)>,
 ) {
-    let ctx = contexts.try_ctx_mut();
-    if ctx.is_none() { return; }
+    let ctx = contexts.ctx_mut();
+    if ctx.is_err() { return; }
     let ctx = ctx.unwrap();
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("body_labels")));
 

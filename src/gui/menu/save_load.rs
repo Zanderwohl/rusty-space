@@ -1,5 +1,5 @@
 use bevy_egui::{egui, EguiContexts};
-use bevy::prelude::{NextState, Res, ResMut};
+use bevy::prelude::*;
 use bevy_egui::egui::Ui;
 use crate::body::universe::Universe;
 use crate::gui::app::AppState;
@@ -15,8 +15,8 @@ pub fn planetarium_menu(
     files: Res<PlanetariumFiles>,
     mut universe: ResMut<Universe>,
 ) {
-    let ctx = contexts.try_ctx_mut();
-    if ctx.is_none() { return; }
+    let ctx = contexts.ctx_mut();
+    if ctx.is_err() { return; }
     let ctx = ctx.unwrap();
 
     match settings.ui.theme {

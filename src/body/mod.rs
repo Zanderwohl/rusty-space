@@ -1,4 +1,4 @@
-use bevy::prelude::{Commands, Component, Entity, Query, Resource, With};
+use bevy::prelude::*;
 use crate::gui::common::despawn_entities_with;
 
 pub mod motive;

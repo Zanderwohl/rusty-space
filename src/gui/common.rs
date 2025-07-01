@@ -1,4 +1,4 @@
-use bevy::prelude::{Commands, Component, DespawnRecursiveExt, Entity, Query, With};
+use bevy::prelude::*;
 
 pub fn despawn_entities_with<T: Component>(to_despawn: Query<Entity, With<T>>, mut commands: Commands) {
     for entity in &to_despawn {

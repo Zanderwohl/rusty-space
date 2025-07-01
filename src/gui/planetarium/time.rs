@@ -1,4 +1,4 @@
-use bevy::prelude::Resource;
+use bevy::prelude::*;
 
 #[derive(Resource)]
 pub struct SimTime {

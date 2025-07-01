@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 use bevy::color::Color;
-use bevy::core::FrameCount;
 use bevy::core_pipeline::bloom::Bloom;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::DefaultPlugins;
-use bevy::prelude::{AmbientLight, App, AppExtStates, Camera, Camera3d, ClearColor, Commands, Component, PluginGroup, Res, ResMut, Single, Startup, States, Transform, Update, Vec3, Window, WindowPlugin};
+use bevy::diagnostic::FrameCount;
+use bevy::prelude::*;
 use bevy::window::{ExitCondition, PresentMode};
 use bevy_egui::EguiPlugin;
 use crate::body::universe::solar_system::{write_temp_system_file, write_earth_moon_file};
@@ -43,7 +43,7 @@ pub fn run() {
         .add_systems(Update, close_when_requested)
         .insert_state(AppState::Splash)
         .insert_resource(ClearColor(Color::BLACK))
-        .add_plugins(EguiPlugin)
+        .add_plugins(EguiPlugin::default())
         .add_plugins(DebugPlugin)
         .add_plugins(SplashPlugin)
         .add_plugins(MenuPlugin)

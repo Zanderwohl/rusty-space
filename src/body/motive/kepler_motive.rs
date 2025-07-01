@@ -1,7 +1,7 @@
 use bevy::math::{DMat3, DVec3};
 use serde::{Deserialize, Serialize};
-use bevy::prelude::{Added, Changed, Component, Or, Query, Res, ResMut, Without};
-use bevy::utils::HashMap;
+use bevy::prelude::*;
+use std::collections::HashMap;
 use bevy_egui::egui::Ui;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::SimulationObject;

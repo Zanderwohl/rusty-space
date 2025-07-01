@@ -1,6 +1,6 @@
 use bevy::app::{App, Plugin, Update};
 use iyes_perf_ui::PerfUiPlugin;
-use bevy::prelude::{AppExtStates, Commands, Component, KeyCode, NextState, OnEnter, Res, ResMut, State, States};
+use bevy::prelude::*;
 use iyes_perf_ui::entries::{PerfUiFixedTimeEntries, PerfUiFramerateEntries, PerfUiWindowEntries};
 use bevy::input::ButtonInput;
 use crate::gui::common;
@@ -14,7 +14,7 @@ impl Plugin for DebugPlugin {
     fn build(&self, app: &mut App) {
         app
             .insert_state(DebugState::Off)
-            .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin)
+            .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin { max_history_length: 100, smoothing_factor: 2.0 / 101.0})
             .add_plugins(PerfUiPlugin)
             .add_systems(OnEnter(DebugState::Off), common::despawn_recursive_entities_with::<DebugUI>)
             .add_systems(OnEnter(DebugState::AllPerf), add_all_perf)

@@ -1,4 +1,4 @@
-use bevy::prelude::ResMut;
+use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use bevy_egui::egui::Context;
 use num_traits::FloatConst;
@@ -9,8 +9,8 @@ pub fn spin_window(
     mut settings: ResMut<Settings>,
     mut contexts: EguiContexts,
 ) {
-    let ctx = contexts.try_ctx_mut();
-    if ctx.is_none() { return; }
+    let ctx = contexts.ctx_mut();
+    if ctx.is_err() { return; }
     let ctx = ctx.unwrap();
 
     match settings.ui.theme {

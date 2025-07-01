@@ -1,4 +1,4 @@
-use bevy::prelude::{ResMut};
+use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use crate::gui::menu::UiState;
 use crate::gui::settings::{Settings, UiTheme};
@@ -9,8 +9,8 @@ pub fn settings_window(
     mut ui_state: ResMut<UiState>,
     mut contexts: EguiContexts,
 ) {
-    let ctx = contexts.try_ctx_mut();
-    if ctx.is_none() { return; }
+    let ctx = contexts.ctx_mut();
+    if ctx.is_err() { return; }
     let ctx = ctx.unwrap();
 
     match settings.ui.theme {

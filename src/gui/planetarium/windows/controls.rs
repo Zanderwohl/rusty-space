@@ -1,5 +1,5 @@
 use bevy_egui::{egui, EguiContexts};
-use bevy::prelude::{NextState, ResMut};
+use bevy::prelude::*;
 use bevy_egui::egui::Ui;
 use num_traits::Pow;
 use crate::body::universe::save::ViewSettings;
@@ -20,8 +20,8 @@ pub fn control_window(
     mut time: ResMut<SimTime>,
     mut view_settings: ResMut<ViewSettings>,
 ) {
-    let ctx = contexts.try_ctx_mut();
-    if ctx.is_none() { return; }
+    let ctx = contexts.ctx_mut();
+    if ctx.is_err() { return; }
     let ctx = ctx.unwrap();
     
     match settings.ui.theme {
