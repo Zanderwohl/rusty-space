@@ -3,5 +3,5 @@ mod gui;
 mod body;
 
 fn main() {
-    gui::app::open();
+    gui::app::run();
 }

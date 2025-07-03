@@ -1,0 +1,96 @@
+2025-03-29T18:46:35.155882Z  INFO bevy_diagnostic::system_information_diagnostics_plugin::internal: SystemInfo { os: "MacOS 15.3.2 ", kernel: "24.3.0", cpu: "Apple M3 Pro", core_count: "11", memory: "18.0 GiB" }
+2025-03-29T18:46:35.243408Z  INFO bevy_render::renderer: AdapterInfo { name: "Apple M3 Pro", vendor: 0, device: 0, device_type: IntegratedGpu, driver: "", driver_info: "", backend: Metal }
+2025-03-29T18:46:37.414582Z  WARN bevy_state::app: State exotic_matters::gui::util::debug::DebugState is already initialized.
+2025-03-29T18:46:37.522236Z  INFO bevy_winit::system: Creating new window "Exotic Matters" (0v1#4294967296)
+2025-03-29 14:46:37.697 exotic-matters[95085:3929311] +[IMKClient subclass]: chose IMKClient_Modern
+2025-03-29 14:46:37.697 exotic-matters[95085:3929311] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+2025-03-29T19:07:50.752042Z  INFO bevy_winit::system: Monitor removed 4v1#4294967300
+2025-03-29T19:07:50.752079Z  INFO bevy_winit::system: Monitor removed 5v1#4294967301
+
+thread 'main' panicked at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/core-foundation-0.9.4/src/uuid.rs:27:1:
+Attempted to create a NULL object.
+stack backtrace:
+   0: std::panicking::begin_panic
+             at /rustc/4d91de4e48198da2e33413efdcd9cd2cc0c46688/library/std/src/panicking.rs:764:5
+   1: <core_foundation::uuid::CFUUID as core_foundation::base::TCFType>::wrap_under_create_rule
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/core-foundation-0.9.4/src/lib.rs:110:17
+   2: winit::platform_impl::macos::monitor::MonitorHandle::uuid
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/monitor.rs:110:13
+   3: <winit::platform_impl::macos::monitor::MonitorHandle as core::cmp::PartialEq>::eq
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/monitor.rs:139
+   4: <winit::monitor::MonitorHandle as core::cmp::PartialEq>::eq
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/monitor.rs:102:24
+   5: core::cmp::impls::<impl core::cmp::PartialEq<&B> for &A>::eq
+             at /Users/zandy/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/cmp.rs:1818:13
+   6: bevy_winit::system::create_monitors
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_winit-0.15.3/src/system.rs:157:16
+   7: <bevy_winit::state::WinitAppRunnerState<T> as winit::application::ApplicationHandler<T>>::about_to_wait
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_winit-0.15.3/src/state.rs:453:9
+   8: winit::platform_impl::macos::event_loop::map_user_event::{{closure}}
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/event_loop.rs:174:22
+   9: <alloc::boxed::Box<F,A> as core::ops::function::FnMut<Args>>::call_mut
+             at /Users/zandy/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/src/rust/library/alloc/src/boxed.rs:2000:9
+  10: winit::platform_impl::macos::event_handler::EventHandler::handle_event
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/event_handler.rs:125:17
+  11: winit::platform_impl::macos::app_state::ApplicationDelegate::handle_event
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/app_state.rs:322:9
+  12: winit::platform_impl::macos::app_state::ApplicationDelegate::cleared
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/app_state.rs:390:9
+  13: winit::platform_impl::macos::observer::control_flow_end_handler::{{closure}}
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/observer.rs:84:21
+  14: winit::platform_impl::macos::observer::control_flow_handler::{{closure}}
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/observer.rs:46:9
+  15: std::panicking::try::do_call
+             at /Users/zandy/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panicking.rs:584:40
+  16: std::panicking::try
+             at /Users/zandy/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panicking.rs:547:19
+  17: std::panic::catch_unwind
+             at /Users/zandy/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panic.rs:358:14
+  18: winit::platform_impl::macos::event_loop::stop_app_on_panic
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/event_loop.rs:432:11
+  19: winit::platform_impl::macos::observer::control_flow_handler
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/observer.rs:44:5
+  20: winit::platform_impl::macos::observer::control_flow_end_handler
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/observer.rs:79:9
+  21: <unknown>
+  22: <unknown>
+  23: <unknown>
+  24: <unknown>
+  25: <unknown>
+  26: <unknown>
+  27: <unknown>
+  28: <unknown>
+  29: <unknown>
+  30: <unknown>
+  31: winit::platform_impl::macos::event_loop::EventLoop<T>::run_on_demand::{{closure}}::{{closure}}
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/event_loop.rs:303:26
+  32: objc2::rc::autorelease::autoreleasepool
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/objc2-0.5.2/src/rc/autorelease.rs:438:15
+  33: winit::platform_impl::macos::event_loop::EventLoop<T>::run_on_demand::{{closure}}
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/event_loop.rs:289:13
+  34: winit::platform_impl::macos::event_handler::EventHandler::set
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/event_handler.rs:98:9
+  35: winit::platform_impl::macos::app_state::ApplicationDelegate::set_event_handler
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/app_state.rs:191:9
+  36: winit::platform_impl::macos::event_loop::EventLoop<T>::run_on_demand
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/event_loop.rs:288:9
+  37: winit::platform_impl::macos::event_loop::EventLoop<T>::run
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/platform_impl/macos/event_loop.rs:275:9
+  38: winit::event_loop::EventLoop<T>::run_app
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.9/src/event_loop.rs:265:9
+  39: bevy_winit::state::winit_runner
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_winit-0.15.3/src/state.rs:877:34
+  40: core::ops::function::FnOnce::call_once{{vtable.shim}}
+  41: <alloc::boxed::Box<F,A> as core::ops::function::FnOnce<Args>>::call_once
+             at /Users/zandy/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/src/rust/library/alloc/src/boxed.rs:1993:9
+  42: bevy_app::app::App::run
+             at /Users/zandy/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_app-0.15.3/src/app.rs:170:9
+  43: exotic_matters::gui::app::run
+             at ./src/gui/app.rs:26:5
+  44: exotic_matters::main
+             at ./src/main.rs:6:5
+  45: core::ops::function::FnOnce::call_once
+             at /Users/zandy/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+
+Process finished with exit code 101

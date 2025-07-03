@@ -25,7 +25,6 @@ pub fn hill(instantaneous_r_to_primary: f64, eccentricity: f64, body_mass: f64, 
 }
 
 /// This is probably useless but it was easy to implement so *smile*
-pub fn black_hole(mass: f64, velocity_dispersion: f64) -> f64 {
-    use crate::util::gravity::G;
-    (G * mass) / (velocity_dispersion * velocity_dispersion)
+pub fn black_hole(gravitational_constant: f64, mass: f64, velocity_dispersion: f64) -> f64 {
+    (gravitational_constant * mass) / (velocity_dispersion * velocity_dispersion)
 }

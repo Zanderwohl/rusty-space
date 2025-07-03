@@ -1,52 +1,53 @@
-use bevy::asset::AssetServer;
-use bevy::prelude::{ButtonBundle, Commands, Component, default, NodeBundle, Res, TextBundle};
-use bevy::hierarchy::BuildChildren;
-use crate::gui::common;
-use crate::gui::common::color::NORMAL_BUTTON;
-use crate::gui::common::text;
-use crate::gui::menu::main::MenuButtonAction;
+use bevy::prelude::*;
+use bevy_egui::egui;
+use bevy_egui::egui::Ui;
+use crate::gui::settings::{DisplayGlow, DisplayQuality, Settings, UiTheme};
 
-pub fn settings_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let button_style = common::button_style();
-    let button_text_style = text::primary(asset_server.clone());
+pub fn settings_panel(mut settings: &mut ResMut<Settings>, ui: &mut Ui) {
+    ui.vertical(|ui| {
+        ui.heading("Display");
+        egui::ComboBox::from_label("Quality")
+            .selected_text(format!("{:?}", settings.display.quality))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut settings.display.quality, DisplayQuality::Low, "Low");
+                ui.selectable_value(&mut settings.display.quality, DisplayQuality::Medium, "Medium");
+                ui.selectable_value(&mut settings.display.quality, DisplayQuality::High, "High");
+            });
+        egui::ComboBox::from_label("Glow")
+            .selected_text(format!("{:?}", settings.display.glow))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut settings.display.glow, DisplayGlow::None, "None");
+                ui.selectable_value(&mut settings.display.glow, DisplayGlow::Subtle, "Subtle");
+                ui.selectable_value(&mut settings.display.glow, DisplayGlow::VFD, "VFD");
+                ui.selectable_value(&mut settings.display.glow, DisplayGlow::Defcon, "DEFCON");
+            });
+    });
 
-    let base_screen = common::base_screen(&mut commands);
-    commands.entity(base_screen)
-        .insert(OnSettingsMenuScreen)
-        .with_children(|parent| {
-            parent
-                .spawn(NodeBundle {
-                    style: common::panel::vertical(),
-                    background_color: common::color::FOREGROUND.into(),
-                    ..default()
-                })
-                .with_children(|parent| {
-                    for (action, text) in [
-                        (MenuButtonAction::SettingsDisplay, "DISPLAY"),
-                        (MenuButtonAction::SettingsSound, "AUDIO"),
-                        (MenuButtonAction::SettingsUITest, "UI TEST"),
-                        (MenuButtonAction::BackToMainMenu, "BACK"),
-                    ] {
-                        parent
-                            .spawn((
-                                ButtonBundle {
-                                    style: button_style.clone(),
-                                    background_color: NORMAL_BUTTON.into(),
-                                    ..default()
-                                },
-                                action,
-                            ))
-                            .with_children(|parent| {
-                                parent.spawn(TextBundle::from_section(
-                                    text,
-                                    button_text_style.clone(),
-                                ));
-                            });
-                    }
-                });
-        });
+    ui.separator();
+    ui.vertical(|ui| {
+        ui.heading("Sound");
+
+        ui.checkbox(&mut settings.sound.mute, "Mute");
+        ui.add(egui::Slider::new(&mut settings.sound.volume, 0..=100).text("Volume"));
+    });
+
+    ui.separator();
+    ui.vertical(|ui| {
+        ui.heading("User Interface");
+            
+        egui::ComboBox::from_label("Theme")
+            .selected_text(format!("{:?}", settings.ui.theme))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut settings.ui.theme, UiTheme::Light, "Light");
+                ui.selectable_value(&mut settings.ui.theme, UiTheme::Dark, "Dark");
+            });
+    });
+
+    ui.separator();
+    ui.vertical(|ui| {
+        ui.heading("Windows");
+        ui.checkbox(&mut settings.windows.spin, "Spin Gravity Calculator");
+        ui.checkbox(&mut settings.windows.body_edit, "Body Edit");
+        ui.checkbox(&mut settings.windows.body_info, "Body Info");
+    });
 }
-
-// Tag component used to tag entities added on the settings menu screen
-#[derive(Component)]
-pub(crate) struct OnSettingsMenuScreen;

@@ -1,59 +1,51 @@
-use common::AppState;
+use bevy::app::App;
 use bevy::prelude::*;
-use crate::gui::common::despawn_screen;
+use bevy::time::TimerMode;
+use bevy::ui::{AlignContent, AlignSelf, JustifyContent, JustifySelf};
+use crate::gui::app::AppState;
+use crate::gui::common::despawn_entities_with;
 
-use super::common;
+#[derive(Component)]
+struct SplashScreen;
 
-// This plugin will display a splash screen with Bevy logo for 1 second before switching to the menu
-pub fn splash_plugin(app: &mut App) {
-    // As this plugin is managing the splash screen, it will focus on the state `GameState::Splash`
-    app
-        // When entering the state, spawn everything needed for this screen
-        .add_systems(OnEnter(AppState::Splash), splash_setup)
-        // While in this state, run the `countdown` system
-        .add_systems(Update, countdown.run_if(in_state(AppState::Splash)))
-        // When exiting the state, despawn everything that was spawned for this screen
-        .add_systems(OnExit(AppState::Splash), despawn_screen::<OnSplashScreen>);
+pub struct SplashPlugin;
+
+impl Plugin for SplashPlugin {
+    fn build(&self, app: &mut App) {
+        app
+            .add_systems(OnEnter(AppState::Splash), splash_setup)
+            .add_systems(Update, countdown.run_if(in_state(AppState::Splash)))
+            .add_systems(OnExit(AppState::Splash), despawn_entities_with::<SplashScreen>)
+        ;
+    }
 }
 
-// Tag component used to tag entities added on the splash screen
-#[derive(Component)]
-struct OnSplashScreen;
-
-// Newtype to use a `Timer` for this screen as a resource
 #[derive(Resource, Deref, DerefMut)]
 struct SplashTimer(Timer);
 
 fn splash_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let icon = asset_server.load("logo.png");
-    // Display the logo
+
     commands
-        .spawn((
-            NodeBundle {
-                style: Style {
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    ..default()
-                },
-                ..default()
-            },
-            OnSplashScreen,
-        ))
+        .spawn((Node {
+            align_content: AlignContent::Center,
+            justify_content: JustifyContent::Center,
+            width: Val::Percent(50.0),
+            height: Val::Percent(50.0),
+            align_self: AlignSelf::Center,
+            justify_self: JustifySelf::Center,
+            ..Default::default()
+        },
+        SplashScreen))
         .with_children(|parent| {
-            parent.spawn(ImageBundle {
-                style: Style {
-                    // This will set the logo to be 200px wide, and auto adjust its height
-                    width: Val::Percent(50.0),
-                    ..default()
-                },
-                image: UiImage::new(icon),
-                ..default()
+            parent.spawn(ImageNode {
+                image: icon,
+                ..Default::default()
             });
-        });
-    // Insert the timer as a resource
-    commands.insert_resource(SplashTimer(Timer::from_seconds(2.0, TimerMode::Once)));
+        })
+    ;
+
+    commands.insert_resource(SplashTimer(Timer::from_seconds(0.5, TimerMode::Once)))
 }
 
 // Tick the timer, and change state when finished
@@ -63,6 +55,6 @@ fn countdown(
     mut timer: ResMut<SplashTimer>,
 ) {
     if timer.tick(time.delta()).finished() {
-        game_state.set(AppState::Menu);
+        game_state.set(AppState::MainMenu);
     }
 }
