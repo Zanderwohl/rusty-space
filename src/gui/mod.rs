@@ -6,3 +6,4 @@ pub mod app;
 mod settings;
 mod splash;
 pub mod common;
+pub mod horizons;

@@ -3,9 +3,10 @@ use serde::{Deserialize, Serialize};
 use bevy::prelude::*;
 use std::collections::HashMap;
 use bevy_egui::egui::Ui;
+use num_traits::FloatConst;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::SimulationObject;
-use crate::body::universe::save::UniversePhysics;
+use crate::body::universe::save::{UniversePhysics, ViewSettings};
 use crate::gui::planetarium::time::SimTime;
 use crate::util::kepler::{angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
 use crate::util::mappings;
@@ -447,12 +448,19 @@ pub fn calculate(
     }
 }
 
-fn kepler_trajectory(
+pub fn calculate_trajectory(
     mut kepler_bodies: Query<(&mut BodyState, &BodyInfo, &KeplerMotive),
         Or<(Changed<KeplerMotive>, Added<KeplerMotive>)>>,
+    physics: Res<UniversePhysics>,
+    view_settings: Res<ViewSettings>,
 ) {
     for (mut state, info, motive) in kepler_bodies.iter_mut() {
         state.trajectory = Some(TimeMap::new());
-
+        let period = motive.period(physics.gravitational_constant);
+        for i in 0..=view_settings.trajectory_resolution {
+            let time = (i as f64 / view_settings.trajectory_resolution as f64) * period;
+            let true_anomaly = motive.true_anomaly(time, physics.gravitational_constant);
+        }
+        // motive.true_anomaly()
     }
 }

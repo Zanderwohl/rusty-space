@@ -69,6 +69,7 @@ impl Plugin for PlanetariumUI {
                     fixed_motive::calculate.before(position_bodies),
                     kepler_motive::calculate.before(position_bodies),
                     newton_motive::calculate.after(kepler_motive::calculate).after(fixed_motive::calculate).before(position_bodies),
+                    kepler_motive::calculate_trajectory,
                 ).in_set(PlanetariumSimulationSet),
                 (load_assets).in_set(PlanetariumLoadingSet),
             ))

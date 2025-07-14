@@ -98,6 +98,7 @@ pub struct ViewSettings {
     pub logarithmic_body_base: f64,
     pub show_labels: bool,
     pub tags: HashMap<String, TagState>,
+    pub trajectory_resolution: usize,
 }
 
 impl Default for ViewSettings {
@@ -111,6 +112,7 @@ impl Default for ViewSettings {
             logarithmic_distance_base: 10.0,
             show_labels: true,
             tags: HashMap::new(),
+            trajectory_resolution: 120,
         }
     }
 }

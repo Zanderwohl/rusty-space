@@ -392,7 +392,7 @@ pub fn solar_system() -> UniverseFile {
                             b: 200,
                         },
                     }),
-                }), // Neptune
+                }), // Sedna
             ] },
     };
     solar_system
