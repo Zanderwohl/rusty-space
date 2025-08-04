@@ -19,10 +19,11 @@ use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::{fixed_motive, kepler_motive, newton_motive};
 use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::gui::planetarium::windows::body_info::{BodyInfoState};
+use crate::gui::settings::{DisplayGlow, DisplaySettings, Settings};
 use crate::util::bevystuff::GlamVec;
+use crate::util::jd::{J2000_JD, JD_SECONDS};
 use crate::util::mappings;
-
-const J2000_JD: f64 = 2451545.0;
+use crate::util::time_map::Periodicity;
 
 pub mod time;
 mod windows;
@@ -122,10 +123,10 @@ fn position_bodies(
     for (_, mut transform, _, state, appearance) in bodies.iter_mut() {
         // TODO: I doubt any of this works for moonmoons.
         let global_position: Vec3 = if !view_settings.logarithmic_distance_scale || state.current_local_position.is_none() || state.current_primary_position.is_none() {
-            state.current_position.as_bevy_scale(distance_scale)  // Use calculated position *unless* we are doing logarithmic distance scale and current object has a primary.
+            state.current_position.as_bevy_scaled(distance_scale)  // Use calculated position *unless* we are doing logarithmic distance scale and current object has a primary.
         } else {
-            let local_position = state.current_local_position.unwrap().as_bevy_scale(distance_scale);
-            let primary_position = state.current_primary_position.unwrap().as_bevy_scale(distance_scale);
+            let local_position = state.current_local_position.unwrap().as_bevy_scaled(distance_scale);
+            let primary_position = state.current_primary_position.unwrap().as_bevy_scaled(distance_scale);
             primary_position + local_position
         };
         transform.translation = global_position;
@@ -143,6 +144,8 @@ fn render_trajectories(
     bodies: Query<(&BodyState, &BodyInfo)>,
     mut gizmos: Gizmos,
     view_settings: Res<ViewSettings>,
+    settings: Res<Settings>,
+    mut sim_time: ResMut<SimTime>,
 ) {
     let distance_scale = if view_settings.logarithmic_distance_scale {
         let n = mappings::log_scale(view_settings.distance_scale, view_settings.logarithmic_distance_base);
@@ -151,11 +154,66 @@ fn render_trajectories(
         view_settings.distance_scale
     };
 
-    let color = Srgba::new(1.0, 0.0, 0.0, 1.0);
+    let (min_brightness, max_brightness) = match settings.display.glow {
+        DisplayGlow::None => { (0.1, 1.0) }
+        DisplayGlow::Subtle => { (0.25, 1.2) }
+        DisplayGlow::VFD => { (1.0, 4.0) }
+        DisplayGlow::Defcon => { (0.2, 10.0) }
+    };
+
+    let mut color = Srgba::new(1.0, 0.0, 0.0, 1.0);
     for (state, info) in bodies.iter() {
         if let Some(trajectory) = &state.trajectory {
-            for ((t1, d1), (t2, d2)) in trajectory.iter().tuple_windows() {
-                gizmos.line(d1.as_bevy_scale(distance_scale), d2.as_bevy_scale(distance_scale), color);
+            let len = trajectory.len();
+            let frac = match trajectory.periodicity() {
+                None => 0.0,
+                Some(periodicity) => {
+                    let frac = periodicity.cycle_fraction(sim_time.time_seconds);
+                    if info.id == "mercury" {
+                        info!("Body: {}, Time: {}, frac: {}", info.display_name(), sim_time.time_seconds, frac);
+                    }
+                    frac
+                }
+            };
+
+            for (idx, ((t1, d1), (t2, d2))) in trajectory.iter().tuple_windows().enumerate() {
+                // Calculate the fractional position of this trajectory segment
+                let segment_frac = idx as f32 / len as f32;
+                let next_segment_frac = (idx + 1) as f32 / len as f32;
+                
+                // Check if planet is currently within this segment
+                let planet_in_segment = if next_segment_frac > segment_frac {
+                    frac as f32 >= segment_frac && (frac as f32) < next_segment_frac
+                } else {
+                    // Handle wraparound case
+                    frac as f32 >= segment_frac || (frac as f32) < next_segment_frac
+                };
+                
+                let brightness_factor = if planet_in_segment {
+                    // Smooth fade within current segment based on planet's position within it
+                    let progress_through_segment = if next_segment_frac > segment_frac {
+                        (frac as f32 - segment_frac) / (next_segment_frac - segment_frac)
+                    } else {
+                        // Handle wraparound
+                        if frac as f32 >= segment_frac {
+                            (frac as f32 - segment_frac) / (1.0 - segment_frac + next_segment_frac)
+                        } else {
+                            (frac as f32 + 1.0 - segment_frac) / (1.0 - segment_frac + next_segment_frac)
+                        }
+                    };
+                    progress_through_segment // Fade from 0.0 to 1.0 as planet moves through segment
+                } else {
+                    // Use sharp discontinuity for all other segments
+                    let forward_offset = (segment_frac - frac as f32 + 1.0) % 1.0;
+                    if forward_offset <= 0.5 {
+                        0.0  // Dark ahead of planet
+                    } else {
+                        (forward_offset - 0.5) * 2.0  // Brightens as we go behind planet (trail)
+                    }
+                };
+                
+                color = Srgba::new(0.0, 1.0, 0.0, min_brightness.lerp(max_brightness, brightness_factor));
+                gizmos.line(d1.as_bevy_scaled(distance_scale), d2.as_bevy_scaled(distance_scale), color);
             }
         }
     }
@@ -224,7 +282,7 @@ fn load_assets(
         universe.clear_all();
         let version = universe_file.contents.version; // TODO: Support multiple file format versions?
 
-        let time = (universe_file.contents.time.time_julian_days - J2000_JD) * 86400.0; // Convert Julian Days to seconds
+        let time = (universe_file.contents.time.time_julian_days - J2000_JD) * JD_SECONDS; // Convert Julian Days to seconds
         sim_time.time_seconds = time;
         sim_time.playing = false;
 

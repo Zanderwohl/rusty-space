@@ -8,8 +8,9 @@ use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::SimulationObject;
 use crate::body::universe::save::{UniversePhysics, ViewSettings};
 use crate::gui::planetarium::time::SimTime;
+use crate::util::jd::{seconds_since_j2000, J2000_JD, JD_SECONDS};
 use crate::util::kepler::{angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
-use crate::util::mappings;
+use crate::util::{jd, mappings};
 use crate::util::time_map::TimeMap;
 
 #[derive(Serialize, Deserialize, Component)]
@@ -20,8 +21,6 @@ pub struct KeplerMotive {
     pub epoch: KeplerEpoch,
 }
 
-const J2000_JD: f64 = 2451545.0;
-const JD_SECONDS: f64 = 24.0 * 60. * 60.0;
 const EXPANSION_ITERATIONS: usize = 10;
 
 impl KeplerMotive {
@@ -37,8 +36,17 @@ impl KeplerMotive {
         self.shape.eccentricity()
     }
 
+    pub fn is_open(&self) -> bool {
+        self.eccentricity() >= 1.0
+    }
+
     pub fn periapsis(&self) -> f64 {
         self.shape.periapsis()
+    }
+
+    pub fn time_at_periapsis_passage(&self, gravitational_parameter: f64) -> f64 {
+        let period = self.period(gravitational_parameter);
+        self.epoch.time_at_periapsis_passage_seconds(period)
     }
 
     pub fn semi_latus_rectum(&self) -> f64 {
@@ -361,36 +369,47 @@ pub enum KeplerEpoch {
 impl KeplerEpoch {
     pub fn epoch_julian_day(&self) -> f64 {
         match self {
-            KeplerEpoch::MeanAnomaly(maae) => {
-                maae.epoch_julian_day
-            }
-            KeplerEpoch::TimeAtPeriapsisPassage(tapp) => {
-                tapp.time_julian_day
-            }
-            KeplerEpoch::TrueAnomaly(taae) => {
-                taae.epoch_julian_day
-            }
-            KeplerEpoch::J2000(_) => { 2451544.500000 }
+            KeplerEpoch::MeanAnomaly(maae) => maae.epoch_julian_day,
+            KeplerEpoch::TimeAtPeriapsisPassage(tapp) => tapp.time_julian_day,
+            KeplerEpoch::TrueAnomaly(taae) => taae.epoch_julian_day,
+            KeplerEpoch::J2000(_) => J2000_JD,
         }
     }
 
     pub fn epoch_seconds_since_j2000(&self) -> f64 {
         let epoch_jd = self.epoch_julian_day();
-        (epoch_jd - J2000_JD) * 86400.0  // Convert Julian days to seconds
+        jd::seconds_since_j2000(epoch_jd)
     }
 
+    /// This refers to the internal epoch of this particular orbit description.
+    /// Most orbits should share the same epoch, but they might not.
     pub fn mean_anomaly_at_epoch(&self) -> f64 {
         match self {
-            KeplerEpoch::MeanAnomaly(mean_anomaly) => {
-                mean_anomaly.mean_anomaly
-            }
-            KeplerEpoch::TimeAtPeriapsisPassage(_) => {
-                0.0
-            }
+            KeplerEpoch::MeanAnomaly(mean_anomaly) => mean_anomaly.mean_anomaly,
+            KeplerEpoch::TimeAtPeriapsisPassage(_) => 0.0,
             KeplerEpoch::TrueAnomaly(_) => { todo!() }
-            KeplerEpoch::J2000(j2000) => {
-                j2000.mean_anomaly
+            KeplerEpoch::J2000(j2000) => j2000.mean_anomaly,
+        }
+    }
+
+    pub fn time_at_periapsis_passage_seconds(&self, period_seconds: f64) -> f64 {
+        let raw_time = match self {
+            KeplerEpoch::MeanAnomaly(mean_anomaly) => {
+                seconds_since_j2000(mean_anomaly.epoch_julian_day) - period_seconds * (mean_anomaly.mean_anomaly / std::f64::consts::TAU)
             }
+            KeplerEpoch::TimeAtPeriapsisPassage(tapp) => seconds_since_j2000(tapp.time_julian_day),
+            KeplerEpoch::TrueAnomaly(true_anomaly) => { todo!() }
+            KeplerEpoch::J2000(j2000) => {
+                -period_seconds * (j2000.mean_anomaly / (std::f64::consts::TAU))
+            }
+        };
+        
+        // Ensure we return the first periapsis passage at or after J2000 (>= 0.0)
+        if raw_time < 0.0 {
+            let periods_to_add = (-raw_time / period_seconds).ceil();
+            raw_time + (periods_to_add * period_seconds)
+        } else {
+            raw_time
         }
     }
 }
@@ -451,18 +470,43 @@ pub fn calculate(
 pub fn calculate_trajectory(
     mut kepler_bodies: Query<(&mut BodyState, &BodyInfo, &KeplerMotive),
         Or<(Changed<KeplerMotive>, Added<KeplerMotive>)>>,
+    other_bodies: Query<(&SimulationObject, &BodyInfo, &BodyState), Without<KeplerMotive>>,
     physics: Res<UniversePhysics>,
     view_settings: Res<ViewSettings>,
 ) {
+    // First collect all body masses into a HashMap
+    let mut body_masses: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    for (_, info, _) in kepler_bodies.iter() {
+        body_masses.insert(info.id.clone(), info.mass);
+    }
+    for (_, info, _) in other_bodies.iter() {
+        body_masses.insert(info.id.clone(), info.mass);
+    }
+
     for (mut state, info, motive) in kepler_bodies.iter_mut() {
-        state.trajectory = Some(TimeMap::new());
-        let period = motive.period(physics.gravitational_constant);
         info!("Caching trajectory for {}", info.display_name());
+        
+        let primary_mass = body_masses.get(&motive.primary_id)
+            .copied()
+            .expect("Missing primary body mass");
+        let mu = physics.gravitational_constant * primary_mass;
+        
+        state.trajectory = Some(TimeMap::new());
+        let map = state.trajectory.as_mut().unwrap();
+        let period = motive.period(mu);
+
+        let periapsis_time = motive.time_at_periapsis_passage(mu);
+        
+        if !motive.is_open() {
+            map.set_periodicity(periapsis_time, period);
+        }
+
         for i in 0..=view_settings.trajectory_resolution {
-            let time = (i as f64 / view_settings.trajectory_resolution as f64) * period;
-            let displacement = motive.displacement(time, physics.gravitational_constant);
-            if let Some(displacement) = displacement && let Some(map) = state.trajectory.as_mut() {
-                map.insert(time, displacement);
+            let relative_time = (i as f64 / view_settings.trajectory_resolution as f64) * period;
+            let absolute_time = periapsis_time + relative_time;
+            let displacement = motive.displacement(absolute_time, mu);
+            if let Some(displacement) = displacement {
+                map.insert(relative_time, displacement); // Store using relative time as key
             }
         }
     }

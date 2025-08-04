@@ -13,8 +13,26 @@ pub struct TimeMap<V>
 
 #[derive(Debug, Clone)]
 pub struct Periodicity {
-    interval_start: f64,
-    interval_size: f64,
+    pub interval_start: f64,
+    pub interval_size: f64,
+}
+
+impl Periodicity {
+    /// Returns the fraction (0.0 to 1.0) of the way through the current cycle
+    /// for the given time (seconds since J2000)
+    pub fn cycle_fraction(&self, time: f64) -> f64 {
+        let elapsed = time - self.interval_start;
+        let position_in_cycle = elapsed % self.interval_size;
+        
+        // Ensure result is always positive (handle negative modulo)
+        let normalized_position = if position_in_cycle < 0.0 {
+            position_in_cycle + self.interval_size
+        } else {
+            position_in_cycle
+        };
+        
+        normalized_position / self.interval_size
+    }
 }
 
 impl<V: Clone> Default for TimeMap<V> {
@@ -43,6 +61,10 @@ impl<V: Clone> TimeMap<V>
             time_keys: SortedTimes::new(),
             periodicity: None,
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.time_keys.len()
     }
 
     pub fn insert(&mut self, time: f64, item: V) {
@@ -80,6 +102,17 @@ impl<V: Clone> TimeMap<V>
 
     pub fn is_periodic(&self) -> bool {
         self.periodicity.is_some()
+    }
+
+    pub fn set_periodicity(&mut self, interval_start: f64, interval_size: f64) {
+        self.periodicity = Some(Periodicity {
+            interval_start,
+            interval_size,
+        });
+    }
+
+    pub fn periodicity(&self) -> Option<&Periodicity> {
+        self.periodicity.as_ref()
     }
 
     pub fn range_one_period(&self) -> Option<TimeMap<V>> {

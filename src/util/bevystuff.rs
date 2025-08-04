@@ -8,7 +8,7 @@ pub trait GlamVec {
     // In y-axis-up: (x, z, -y) where y is up
     fn as_bevy(&self) -> Vec3;
 
-    fn as_bevy_scale(&self, scale: f64) -> Vec3;
+    fn as_bevy_scaled(&self, scale: f64) -> Vec3;
 }
 
 impl GlamVec for DVec3 {
@@ -20,7 +20,7 @@ impl GlamVec for DVec3 {
         Vec3::new(v.x, v.z, -v.y)
     }
 
-    fn as_bevy_scale(&self, scale: f64) -> Vec3 {
+    fn as_bevy_scaled(&self, scale: f64) -> Vec3 {
         (self * scale).as_bevy()
     }
 }
