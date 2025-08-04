@@ -168,11 +168,7 @@ fn render_trajectories(
             let frac = match trajectory.periodicity() {
                 None => 0.0,
                 Some(periodicity) => {
-                    let frac = periodicity.cycle_fraction(sim_time.time_seconds);
-                    if info.id == "mercury" {
-                        info!("Body: {}, Time: {}, frac: {}", info.display_name(), sim_time.time_seconds, frac);
-                    }
-                    frac
+                    periodicity.cycle_fraction(sim_time.time_seconds)
                 }
             };
 
