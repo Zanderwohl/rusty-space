@@ -457,10 +457,13 @@ pub fn calculate_trajectory(
     for (mut state, info, motive) in kepler_bodies.iter_mut() {
         state.trajectory = Some(TimeMap::new());
         let period = motive.period(physics.gravitational_constant);
+        info!("Caching trajectory for {}", info.display_name());
         for i in 0..=view_settings.trajectory_resolution {
             let time = (i as f64 / view_settings.trajectory_resolution as f64) * period;
-            let true_anomaly = motive.true_anomaly(time, physics.gravitational_constant);
+            let displacement = motive.displacement(time, physics.gravitational_constant);
+            if let Some(displacement) = displacement && let Some(map) = state.trajectory.as_mut() {
+                map.insert(time, displacement);
+            }
         }
-        // motive.true_anomaly()
     }
 }

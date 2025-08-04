@@ -2912,6 +2912,7 @@ dependencies = [
  "bevy_egui",
  "eframe",
  "http",
+ "itertools 0.14.0",
  "iyes_perf_ui",
  "lazy_static",
  "num-traits",

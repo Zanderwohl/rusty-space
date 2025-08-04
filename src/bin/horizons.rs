@@ -74,9 +74,7 @@ impl eframe::App for Horizons {
             let send_button = ui.add_enabled(!self.is_fetching, egui::Button::new("Send"));
 
             if send_button.clicked() {
-                if self.url_cache.is_none() {
-                    self.url_cache = Some(format!("{}", self.request));
-                }
+                self.url_cache = Some(format!("{}", self.request));
                 let url = self.url_cache.as_ref().unwrap().clone();
                 let (tx, rx) = mpsc::channel();
                 self.response_receiver = Some(rx);
@@ -104,4 +102,3 @@ impl eframe::App for Horizons {
         });
     }
 }
-

@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use std::collections::HashMap;
 use bevy::app::{App, Update};
 use bevy::math::DVec3;
@@ -16,6 +17,7 @@ use crate::gui::planetarium::time::SimTime;
 use crate::body::{universe, unload_simulation_objects, SimulationObject};
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::{fixed_motive, kepler_motive, newton_motive};
+use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::gui::planetarium::windows::body_info::{BodyInfoState};
 use crate::util::mappings;
 
@@ -63,6 +65,7 @@ impl Plugin for PlanetariumUI {
                 (
                     adjust_lights,
                     position_bodies.after(fixed_motive::calculate).after(kepler_motive::calculate).after(newton_motive::calculate),
+                    render_trajectories,
                 ).in_set(PlanetariumUISet),
                 (
                     universe::advance_time,
@@ -150,6 +153,38 @@ fn position_bodies(
             appearance.radius() * view_settings.body_scale
         } as f32;
         transform.scale = bevy::math::Vec3::splat(body_scale);
+    }
+}
+
+fn render_trajectories(
+    bodies: Query<(&BodyState, &BodyInfo)>,
+    mut gizmos: Gizmos,
+    view_settings: Res<ViewSettings>,
+) {
+    let distance_scale = if view_settings.logarithmic_distance_scale {
+        let n = mappings::log_scale(view_settings.distance_scale, view_settings.logarithmic_distance_base);
+        n
+    } else {
+        view_settings.distance_scale
+    };
+
+    let color = Srgba::new(1.0, 0.0, 0.0, 1.0);
+    for (state, info) in bodies.iter() {
+        if let Some(trajectory) = &state.trajectory {
+            for ((t1, d1), (t2, d2)) in trajectory.iter().tuple_windows() {
+                let d1 = DVec3::new(
+                    d1.x,
+                    d1.z,
+                    -d1.y
+                ) * distance_scale;
+                let d2 = DVec3::new(
+                    d2.x,
+                    d2.z,
+                    -d2.y
+                ) * distance_scale;
+                gizmos.line(d1.as_vec3(), d2.as_vec3(), color);
+            }
+        }
     }
 }
 

@@ -90,6 +90,13 @@ impl<V: Clone> TimeMap<V>
             }
         }
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (f64, &V)> {
+        self.time_keys.in_order
+            .iter()
+            .map(|f| bitfutz::f64::to_u64(*f))
+            .filter_map(move |k| self.map.get(&k).map(|v| (bitfutz::u64::to_f64(k), v)))
+    }
 }
 
 #[derive(Debug, Clone)]
