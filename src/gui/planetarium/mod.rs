@@ -19,6 +19,7 @@ use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::{fixed_motive, kepler_motive, newton_motive};
 use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::gui::planetarium::windows::body_info::{BodyInfoState};
+use crate::util::bevystuff::GlamVec;
 use crate::util::mappings;
 
 const J2000_JD: f64 = 2451545.0;
@@ -119,33 +120,15 @@ fn position_bodies(
     };
 
     for (_, mut transform, _, state, appearance) in bodies.iter_mut() {
-        // Convert from z-axis-up to y-axis-up coordinate system
-        // In z-axis-up: (x, y, z) where z is up
-        // In y-axis-up: (x, z, -y) where y is up
         // TODO: I doubt any of this works for moonmoons.
-        let global_position: DVec3 = if !view_settings.logarithmic_distance_scale || state.current_local_position.is_none() || state.current_primary_position.is_none() {
-            let position = state.current_position;  // Use calculated position *unless* we are doing logarithmic distance scale and current object has a primary.
-            DVec3::new(
-                position.x,
-                position.z,
-                -position.y
-            ) * distance_scale // Scale factor
+        let global_position: Vec3 = if !view_settings.logarithmic_distance_scale || state.current_local_position.is_none() || state.current_primary_position.is_none() {
+            state.current_position.as_bevy_scale(distance_scale)  // Use calculated position *unless* we are doing logarithmic distance scale and current object has a primary.
         } else {
-            let local_position = state.current_local_position.unwrap();
-            let primary_position = state.current_primary_position.unwrap();
-            let adjusted_primary_position = DVec3::new(
-                primary_position.x,
-                primary_position.z,
-                -primary_position.y
-            ) * distance_scale; // Scale factor
-            let adjusted_local_position = DVec3::new(
-                local_position.x,
-                local_position.z,
-                -local_position.y
-            ) * distance_scale;
-            adjusted_primary_position + adjusted_local_position
+            let local_position = state.current_local_position.unwrap().as_bevy_scale(distance_scale);
+            let primary_position = state.current_primary_position.unwrap().as_bevy_scale(distance_scale);
+            primary_position + local_position
         };
-        transform.translation = global_position.as_vec3();
+        transform.translation = global_position;
 
         let body_scale = if view_settings.logarithmic_body_scale {
             mappings::log_scale(appearance.radius(), view_settings.logarithmic_body_base) * view_settings.body_scale
@@ -172,17 +155,7 @@ fn render_trajectories(
     for (state, info) in bodies.iter() {
         if let Some(trajectory) = &state.trajectory {
             for ((t1, d1), (t2, d2)) in trajectory.iter().tuple_windows() {
-                let d1 = DVec3::new(
-                    d1.x,
-                    d1.z,
-                    -d1.y
-                ) * distance_scale;
-                let d2 = DVec3::new(
-                    d2.x,
-                    d2.z,
-                    -d2.y
-                ) * distance_scale;
-                gizmos.line(d1.as_vec3(), d2.as_vec3(), color);
+                gizmos.line(d1.as_bevy_scale(distance_scale), d2.as_bevy_scale(distance_scale), color);
             }
         }
     }
