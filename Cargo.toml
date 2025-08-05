@@ -45,6 +45,10 @@ features = [
 eframe = "0.32.0"
 url = "2.5.4"
 
+# Top-level Cargo.toml
+[profile.dev.package.objc2]
+debug-assertions = false
+
 [[bin]]
 name = "exotic-matters"
 path = "src/bin/exotic_matters.rs"
