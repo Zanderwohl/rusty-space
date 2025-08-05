@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::slice::Iter;
 use bevy::math::DVec3;
+use bevy::prelude::{FloatExt, Vec3};
 use crate::util::bitfutz;
 
 #[derive(Debug, Clone)]
-pub struct TimeMap<V>
+pub struct TimeMap<V: Lerpable>
 {
     map: HashMap<u64, V>,
     time_keys: SortedTimes,
@@ -15,6 +16,34 @@ pub struct TimeMap<V>
 pub struct Periodicity {
     pub interval_start: f64,
     pub interval_size: f64,
+}
+
+pub trait Lerpable {
+    fn lerp__(&self, rhs: &Self, t: f64) -> Self;
+}
+
+impl Lerpable for f64 {
+    fn lerp__(&self, rhs: &Self, t: f64) -> Self {
+        self.lerp(*rhs, t)
+    }
+}
+
+impl Lerpable for f32 {
+    fn lerp__(&self, rhs: &Self, t: f64) -> Self {
+        self.lerp(*rhs, t as f32)
+    }
+}
+
+impl Lerpable for Vec3 {
+    fn lerp__(&self, rhs: &Self, t: f64) -> Self {
+        self.lerp(*rhs, t as f32)
+    }
+}
+
+impl Lerpable for DVec3 {
+    fn lerp__(&self, rhs: &Self, t: f64) -> Self {
+        self.lerp(*rhs, t)
+    }
 }
 
 impl Periodicity {
@@ -35,25 +64,13 @@ impl Periodicity {
     }
 }
 
-impl<V: Clone> Default for TimeMap<V> {
+impl<V: Clone + Lerpable> Default for TimeMap<V> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-trait Interpolate {
-    fn interpolate(&self, other: &Self, t: f64) -> Self;
-}
-
-impl Interpolate for DVec3 {
-    fn interpolate(&self, other: &Self, t: f64) -> Self
-    {
-        let t: f64 = t.into();
-        self.lerp(*other, t)
-    }
-}
-
-impl<V: Clone> TimeMap<V>
+impl<V: Clone + Lerpable> TimeMap<V>
 {
     pub fn new() -> Self {
         Self {
@@ -75,6 +92,20 @@ impl<V: Clone> TimeMap<V>
     pub fn get(&self, time: f64) -> Option<&V> {
         let key = bitfutz::f64::to_u64(time);
         self.map.get(&key)
+    }
+
+    pub fn get_lerp(&self, time: f64) -> Option<V> {
+        if let Some(item) = self.get(time) {
+            return Some(item.clone());
+        }
+
+        if let Some((a, b)) = self.time_keys.get_pair_that_surrounds(time) {
+            let t = (time - a) / (b - a);
+            let value = self.get(a)?.lerp__(self.get(b)?, t);
+            return Some(value);
+        }
+
+        return None;
     }
 
     pub fn times(&self) -> Vec<f64> {
@@ -159,6 +190,31 @@ impl SortedTimes {
 
     pub fn get(&self, index: usize) -> Option<&f64> {
         self.in_order.get(index)
+    }
+
+    pub fn get_pair_that_surrounds(&self, value: f64) -> Option<(f64, f64)> {
+        if self.in_order.len() < 2 { // If too short, we can't really interpolate anything
+            return None;
+        }
+
+        if value < self.in_order[0] || value > self.in_order[self.in_order.len() - 1] { // outside bounds
+            return None;
+        }
+
+        // Binary search for the insertion point where value would go
+        let insertion_point = self.in_order.partition_point(|&x| x <= value);
+
+        if insertion_point == 0 {
+            // This shouldn't happen given our bounds check
+            None
+        } else if insertion_point == self.in_order.len() {
+            // value equals the last element, return last two values
+            let len = self.in_order.len();
+            Some((self.in_order[len-2], self.in_order[len-1]))
+        } else {
+            // Normal case: value is between two elements
+            Some((self.in_order[insertion_point-1], self.in_order[insertion_point]))
+        }
     }
 
     pub fn len(&self) -> usize {

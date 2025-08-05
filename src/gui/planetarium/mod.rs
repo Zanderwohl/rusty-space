@@ -141,7 +141,7 @@ fn position_bodies(
 }
 
 fn render_trajectories(
-    bodies: Query<(&BodyState, &BodyInfo)>,
+    bodies: Query<(&BodyState, &BodyInfo, Option<&KeplerMotive>)>,
     mut gizmos: Gizmos,
     view_settings: Res<ViewSettings>,
     settings: Res<Settings>,
@@ -162,7 +162,7 @@ fn render_trajectories(
     };
 
     let mut color = Srgba::new(1.0, 0.0, 0.0, 1.0);
-    for (state, info) in bodies.iter() {
+    for (state, info, kepler_motive) in bodies.iter() {
         if let Some(trajectory) = &state.trajectory {
             let len = trajectory.len();
             let frac = match trajectory.periodicity() {
@@ -172,7 +172,29 @@ fn render_trajectories(
                 }
             };
 
+            // TODO: this doesn't track for the future.
+            let primary_d: Option<Vec<DVec3>> = kepler_motive
+                .map(|m| {
+                    let id = &m.primary_id;
+                    bodies.iter().find(|(_, info, _)| { &info.id == id })
+                })
+                .flatten()
+                .map(|(primary_state, _, _)| {
+                    if primary_state.trajectory.is_none() { return None; }
+                    let primary_trajectory = primary_state.trajectory.as_ref().unwrap();
+                    trajectory.iter().map(|(t, _)| {
+                        // primary_trajectory.get_lerp(t)
+                        Some(primary_state.current_position)
+                    }).collect()
+                })
+                .flatten();
+
             for (idx, ((t1, d1), (t2, d2))) in trajectory.iter().tuple_windows().enumerate() {
+                let (d1, d2) = match &primary_d {
+                    None => (d1.clone(), d2.clone()),
+                    Some(primary_d) => (d1 + primary_d[idx], d2 + primary_d[idx + 1])
+                };
+
                 // Calculate the fractional position of this trajectory segment
                 let segment_frac = idx as f32 / len as f32;
                 let next_segment_frac = (idx + 1) as f32 / len as f32;
