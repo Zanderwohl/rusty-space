@@ -396,6 +396,76 @@ pub fn solar_system() -> UniverseFile {
                 }), // Neptune
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
+                        name: Some("Eris".into()),
+                        id: "eris".to_string(),
+                        mass: 1.6466e22,
+                        major: true,
+                        designation: Some("136199 Eris".into()),
+                        uuid: Default::default(),
+                        tags: vec!["Planet".into(), "Minor Planet".into()],
+                    },
+                    params: KeplerMotive {
+                        primary_id: "sol".to_string(),
+                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
+                            eccentricity: 0.43568,
+                            semi_major_axis: 10.180e12,
+                        }),
+                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
+                            inclination: 43.822,
+                            longitude_of_ascending_node: 36.046,
+                            argument_of_periapsis: 150.714,
+                        }),
+                        epoch: KeplerEpoch::MeanAnomaly(MeanAnomalyAtEpoch {
+                            epoch_julian_day: 2460800.5,
+                            mean_anomaly: 211.032,
+                        }),
+                    },
+                    appearance: Appearance::DebugBall(DebugBall {
+                        radius: 2326.0 * 1000.0,
+                        color: AppearanceColor {
+                            r: 200,
+                            g: 200,
+                            b: 200,
+                        },
+                    }),
+                }), // Eris
+                SomeBody::KeplerEntry(KeplerEntry {
+                    info: BodyInfo {
+                        name: Some("Dysnomia".into()),
+                        id: "dysnomia".to_string(),
+                        mass: 8.2e19,
+                        major: true,
+                        designation: Some("136199 Eris I".into()),
+                        uuid: Default::default(),
+                        tags: vec!["Moon".into()],
+                    },
+                    params: KeplerMotive {
+                        primary_id: "eris".to_string(),
+                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
+                            eccentricity: 0.0062,
+                            semi_major_axis: 37273.0 * 1000.0,
+                        }),
+                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
+                            inclination: 61.59,
+                            longitude_of_ascending_node: 126.17,
+                            argument_of_periapsis: 180.83,
+                        }),
+                        epoch: KeplerEpoch::MeanAnomaly(MeanAnomalyAtEpoch {
+                            epoch_julian_day: 2453979.0,
+                            mean_anomaly: 0.0 // TODO: Find this?
+                        }),
+                    },
+                    appearance: Appearance::DebugBall(DebugBall {
+                        radius: 615.0 * 1000.0,
+                        color: AppearanceColor {
+                            r: 200,
+                            g: 200,
+                            b: 200,
+                        },
+                    })
+                }), // Dysnomia
+                SomeBody::KeplerEntry(KeplerEntry {
+                    info: BodyInfo {
                         name: Some("Sedna".into()),
                         id: "Sedna".to_string(),
                         mass: 2.0e21, // Estimate from https://www.rasc.ca/asteroid/90377
