@@ -189,7 +189,7 @@ pub fn solar_system() -> UniverseFile {
                     info: BodyInfo {
                         name: Some("Ceres".into()),
                         id: "1-ceres".to_string(),
-                        mass: 6.4171,
+                        mass: 9.3839e20,
                         major: true,
                         designation: Some("1 Ceres".into()),
                         tags: vec!["Planet".into(), "Minor Planet".into()],
@@ -221,9 +221,45 @@ pub fn solar_system() -> UniverseFile {
                 }), // Ceres
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
+                        name: Some("Vesta".into()),
+                        id: "4-vesta".to_string(),
+                        mass: 6.4171,
+                        major: true,
+                        designation: Some("4 Vesta".into()),
+                        tags: vec!["Planet".into(), "Minor Planet".into()],
+                        ..Default::default()
+                    },
+                    params: KeplerMotive {
+                        primary_id: "sol".to_string(),
+                        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
+                            eccentricity: 0.0894,
+                            semi_major_axis: 3.84e8 * 1000.0, // Convert km to m
+                        }),
+                        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
+                            inclination: 7.1422,
+                            longitude_of_ascending_node: 103.71,
+                            argument_of_periapsis: 151.66,
+                        }),
+                        epoch: KeplerEpoch::MeanAnomaly(MeanAnomalyAtEpoch {
+                            epoch_julian_day: 2453300.5,
+                            mean_anomaly: 169.4,
+
+                        }),
+                    },
+                    appearance: Appearance::DebugBall(DebugBall {
+                        radius: 1737.4 * 1000.0,
+                        color: AppearanceColor {
+                            r: 145,
+                            g: 107,
+                            b: 54,
+                        },
+                    }),
+                }), // Vesta
+                SomeBody::KeplerEntry(KeplerEntry {
+                    info: BodyInfo {
                         name: Some("Luna".into()),
                         id: "luna".to_string(),
-                        mass: 6.4171,
+                        mass: 7.346e22,
                         major: true,
                         designation: Some("Earth I".into()),
                         tags: vec!["Moon".into()],
