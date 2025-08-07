@@ -1,7 +1,10 @@
 use bevy::input::mouse::MouseMotion;
+use bevy::math::DVec3;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use crate::gui::app::AppState;
+use crate::gui::planetarium::camera::CameraAction;
+use crate::gui::planetarium::PlanetariumCamera;
 
 /// Mouse sensitivity and movement speed
 #[derive(Resource)]
@@ -48,7 +51,9 @@ impl Default for KeyBindings {
 /// Used in queries when you want flycams and not other cameras
 /// A marker component used in queries when you want flycams and not other cameras
 #[derive(Component)]
-pub struct FlyCam;
+pub struct Freecam {
+    pub position: DVec3,
+}
 
 /// Grabs/ungrabs mouse cursor
 fn toggle_grab_cursor(
@@ -77,40 +82,42 @@ fn player_move(
     primary_window: Query<&Window, With<PrimaryWindow>>,
     settings: Res<MovementSettings>,
     key_bindings: Res<KeyBindings>,
-    mut query: Query<(&FlyCam, &mut Transform)>, //    mut query: Query<&mut Transform, With<FlyCam>>,
+    mut query: Query<(&mut Freecam, &Transform, &PlanetariumCamera)>, //    mut query: Query<&mut Transform, With<FlyCam>>,
 ) {
-    if let Ok(window) = primary_window.get_single() {
-        for (_camera, mut transform) in query.iter_mut() {
-            let mut velocity = Vec3::ZERO;
-            let local_z = transform.local_z();
-            let forward = -Vec3::new(local_z.x, 0., local_z.z);
-            let right = Vec3::new(local_z.z, 0., -local_z.x);
+    if let Ok(window) = primary_window.single() {
+        for (mut freecam, transform, pcam) in query.iter_mut() {
+            if pcam.action == CameraAction::Free {
+                let mut velocity = DVec3::ZERO;
+                let local_z = transform.local_z().as_vec3().as_dvec3();
+                let forward = -DVec3::new(local_z.x, 0., local_z.z);
+                let right = DVec3::new(local_z.z, 0., -local_z.x);
 
-            for key in keys.get_pressed() {
-                match window.cursor_options.grab_mode {
-                    CursorGrabMode::None => (),
-                    _ => {
-                        let key = *key;
-                        if key == key_bindings.move_forward {
-                            velocity += forward;
-                        } else if key == key_bindings.move_backward {
-                            velocity -= forward;
-                        } else if key == key_bindings.move_left {
-                            velocity -= right;
-                        } else if key == key_bindings.move_right {
-                            velocity += right;
-                        } else if key == key_bindings.move_ascend {
-                            velocity += Vec3::Y;
-                        } else if key == key_bindings.move_descend {
-                            velocity -= Vec3::Y;
+                for key in keys.get_pressed() {
+                    match window.cursor_options.grab_mode {
+                        CursorGrabMode::None => (),
+                        _ => {
+                            let key = *key;
+                            if key == key_bindings.move_forward {
+                                velocity += forward;
+                            } else if key == key_bindings.move_backward {
+                                velocity -= forward;
+                            } else if key == key_bindings.move_left {
+                                velocity -= right;
+                            } else if key == key_bindings.move_right {
+                                velocity += right;
+                            } else if key == key_bindings.move_ascend {
+                                velocity += DVec3::Y;
+                            } else if key == key_bindings.move_descend {
+                                velocity -= DVec3::Y;
+                            }
                         }
                     }
                 }
+
+                velocity = velocity.normalize_or_zero();
+
+                freecam.position += velocity * ((time.delta_secs() * settings.speed) as f64);
             }
-
-            velocity = velocity.normalize_or_zero();
-
-            transform.translation += velocity * time.delta_secs() * settings.speed
         }
     } else {
         warn!("Primary window not found for `player_move`!");
@@ -122,27 +129,29 @@ fn player_look(
     settings: Res<MovementSettings>,
     primary_window: Query<&Window, With<PrimaryWindow>>,
     mut state: EventReader<MouseMotion>,
-    mut query: Query<&mut Transform, With<FlyCam>>,
+    mut query: Query<(&mut Transform, &PlanetariumCamera), With<Freecam>>,
 ) {
-    if let Ok(window) = primary_window.get_single() {
-        for mut transform in query.iter_mut() {
+    if let Ok(window) = primary_window.single() {
+        for (mut transform, pcam) in query.iter_mut() {
             for ev in state.read() {
-                let (mut yaw, mut pitch, _) = transform.rotation.to_euler(EulerRot::YXZ);
-                match window.cursor_options.grab_mode {
-                    CursorGrabMode::None => (),
-                    _ => {
-                        // Using smallest of height or width ensures equal vertical and horizontal sensitivity
-                        let window_scale = window.height().min(window.width());
-                        pitch -= (settings.sensitivity * ev.delta.y * window_scale).to_radians();
-                        yaw -= (settings.sensitivity * ev.delta.x * window_scale).to_radians();
+                if pcam.action == CameraAction::Free {
+                    let (mut yaw, mut pitch, _) = transform.rotation.to_euler(EulerRot::YXZ);
+                    match window.cursor_options.grab_mode {
+                        CursorGrabMode::None => (),
+                        _ => {
+                            // Using smallest of height or width ensures equal vertical and horizontal sensitivity
+                            let window_scale = window.height().min(window.width());
+                            pitch -= (settings.sensitivity * ev.delta.y * window_scale).to_radians();
+                            yaw -= (settings.sensitivity * ev.delta.x * window_scale).to_radians();
+                        }
                     }
+
+                    pitch = pitch.clamp(-1.54, 1.54);
+
+                    // Order is important to prevent unintended roll
+                    transform.rotation =
+                        Quat::from_axis_angle(Vec3::Y, yaw) * Quat::from_axis_angle(Vec3::X, pitch);
                 }
-
-                pitch = pitch.clamp(-1.54, 1.54);
-
-                // Order is important to prevent unintended roll
-                transform.rotation =
-                    Quat::from_axis_angle(Vec3::Y, yaw) * Quat::from_axis_angle(Vec3::X, pitch);
             }
         }
     } else {
@@ -156,7 +165,7 @@ fn cursor_grab(
     mut primary_window: Query<&mut Window, With<PrimaryWindow>>,
     state: Res<State<AppState>>,
 ) {
-    if let Ok(mut window) = primary_window.get_single_mut() {
+    if let Ok(mut window) = primary_window.single_mut() {
         if keys.just_pressed(key_bindings.toggle_grab_cursor) {
             toggle_grab_cursor(&mut window, state);
         }
@@ -168,14 +177,14 @@ fn cursor_grab(
 // Grab cursor when an entity with FlyCam is added
 fn initial_grab_on_flycam_spawn(
     mut primary_window: Query<&mut Window, With<PrimaryWindow>>,
-    query_added: Query<Entity, Added<FlyCam>>,
+    query_added: Query<Entity, Added<Freecam>>,
     state: Res<State<AppState>>,
 ) {
     if query_added.is_empty() {
         return;
     }
 
-    if let Ok(window) = &mut primary_window.get_single_mut() {
+    if let Ok(window) = &mut primary_window.single_mut() {
         toggle_grab_cursor(window, state);
     } else {
         warn!("Primary window not found for `initial_grab_cursor`!");

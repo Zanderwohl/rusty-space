@@ -1,13 +1,16 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use bevy_egui::egui::Ui;
+use crate::body::appearance::Appearance;
 use crate::body::motive::fixed_motive::FixedMotive;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::motive::newton_motive::NewtonMotive;
 use crate::body::universe::Universe;
 use crate::gui::menu::UiState;
+use crate::gui::planetarium::camera::GoTo;
 use crate::gui::settings::{Settings, UiTheme};
+use crate::util::bevystuff::GlamVec;
 
 #[derive(Resource)]
 pub struct BodyInfoState {
@@ -26,9 +29,10 @@ pub fn body_info_window(
     mut settings: ResMut<Settings>,
     mut ui_state: ResMut<UiState>,
     universe: Res<Universe>,
-    bodies: Query<(&BodyInfo, &BodyState, Option<&FixedMotive>, Option<&KeplerMotive>, Option<&NewtonMotive>)>,
+    bodies: Query<(Entity, &BodyInfo, &BodyState, Option<&FixedMotive>, Option<&KeplerMotive>, Option<&NewtonMotive>)>,
     mut contexts: EguiContexts,
     mut body_info_state: ResMut<BodyInfoState>,
+    mut go_to: EventWriter<GoTo>,
 ) {
     let ctx = contexts.ctx_mut();
     if ctx.is_err() { return; }
@@ -53,15 +57,21 @@ pub fn body_info_window(
 
                 
                 // Get the body using the BodyInfo.id from bodies query
-                let selected_body = bodies.iter().filter(|(info, state, fixed_motive, kepler_motive, newton_motive)| {
+                let selected_body = bodies.iter().filter(|(e, info, state, fixed_motive, kepler_motive, newton_motive)| {
                     if body_info_state.current_body_id.is_none() { return false; }
                     <std::string::String as AsRef<str>>::as_ref(&info.id) == body_info_state.current_body_id.as_ref().unwrap()
                 }).collect::<Vec<_>>();
 
                 let selected_body = selected_body.get(0);
                 match selected_body {
-                    Some((info, state, fixed_motive, kepler_motive, newton_motive)) => {
-                        display_body_info(ui, info, state, *fixed_motive, *kepler_motive, *newton_motive);
+                    Some((e, info, state, fixed_motive, kepler_motive, newton_motive)) => {
+                        if ui.button("Go to").clicked() {
+                            go_to.write(GoTo {
+                                entity: e.entity(),
+                            });
+                        }
+
+                        display_body_info(ui, info, state, *fixed_motive, *kepler_motive, *newton_motive)
                     }
                     None => {
                         ui.label("No body selected.");

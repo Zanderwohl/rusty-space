@@ -11,22 +11,24 @@ use regex::Regex;
 use crate::body::appearance::{Appearance, AssetCache};
 use crate::body::universe::save::{UniverseFile, UniversePhysics, ViewSettings};
 use crate::body::universe::Universe;
-use crate::gui::app::{AppState, PlanetariumCamera};
+use crate::gui::app::{AppState};
 use crate::gui::menu::{TagState, UiState};
 use crate::gui::planetarium::time::SimTime;
 use crate::body::{universe, unload_simulation_objects, SimulationObject};
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::{fixed_motive, kepler_motive, newton_motive};
 use crate::body::motive::kepler_motive::KeplerMotive;
+pub(crate) use crate::gui::planetarium::camera::{PlanetariumCamera, PlanetariumCameraPlugin};
 use crate::gui::planetarium::windows::body_info::{BodyInfoState};
-use crate::gui::settings::{DisplayGlow, DisplaySettings, Settings};
+use crate::gui::settings::{DisplayGlow, Settings};
+use crate::gui::util::freecam::{FreeCam, Freecam};
 use crate::util::bevystuff::GlamVec;
 use crate::util::jd::{J2000_JD, JD_SECONDS};
 use crate::util::mappings;
-use crate::util::time_map::Periodicity;
 
 pub mod time;
 mod windows;
+pub(crate) mod camera;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 struct PlanetariumUISet;
@@ -52,6 +54,7 @@ impl Plugin for PlanetariumUI {
                 PlanetariumSimulationSet.run_if(in_state(AppState::Planetarium)),
                 PlanetariumLoadingSet.run_if(in_state(AppState::PlanetariumLoading)),
             ))
+            .add_plugins(PlanetariumCameraPlugin)
             .add_systems(EguiPrimaryContextPass, (
                 (
                     windows::controls::control_window,
@@ -80,6 +83,8 @@ impl Plugin for PlanetariumUI {
             ))
             .add_systems(OnExit(AppState::Planetarium), unload_simulation_objects)
         ;
+
+
     }
 }
 
@@ -109,6 +114,7 @@ fn adjust_lights(
 fn position_bodies(
     mut sim_time: ResMut<SimTime>,
     mut bodies: Query<(&SimulationObject, &mut Transform, &BodyInfo, &BodyState, &Appearance)>,
+    camera: Query<&Freecam, With<PlanetariumCamera>>,
     view_settings: Res<ViewSettings>,
 ) {
     // TODO: Move the origin to the main camera.
@@ -120,16 +126,18 @@ fn position_bodies(
         view_settings.distance_scale
     };
 
+    let freecam = camera.single().unwrap();
+
     for (_, mut transform, _, state, appearance) in bodies.iter_mut() {
         // TODO: I doubt any of this works for moonmoons.
-        let global_position: Vec3 = if !view_settings.logarithmic_distance_scale || state.current_local_position.is_none() || state.current_primary_position.is_none() {
-            state.current_position.as_bevy_scaled(distance_scale)  // Use calculated position *unless* we are doing logarithmic distance scale and current object has a primary.
+        let global_position: DVec3 = if !view_settings.logarithmic_distance_scale || state.current_local_position.is_none() || state.current_primary_position.is_none() {
+            state.current_position  // Use calculated position *unless* we are doing logarithmic distance scale and current object has a primary.
         } else {
-            let local_position = state.current_local_position.unwrap().as_bevy_scaled(distance_scale);
-            let primary_position = state.current_primary_position.unwrap().as_bevy_scaled(distance_scale);
+            let local_position = state.current_local_position.unwrap();
+            let primary_position = state.current_primary_position.unwrap();
             primary_position + local_position
         };
-        transform.translation = global_position;
+        transform.translation = global_position.as_bevy_scaled_cheated(distance_scale, freecam.position);
 
         let body_scale = if view_settings.logarithmic_body_scale {
             mappings::log_scale(appearance.radius(), view_settings.logarithmic_body_base) * view_settings.body_scale
@@ -145,6 +153,7 @@ fn render_trajectories(
     mut gizmos: Gizmos,
     view_settings: Res<ViewSettings>,
     settings: Res<Settings>,
+    camera: Query<&Freecam, With<PlanetariumCamera>>,
     mut sim_time: ResMut<SimTime>,
 ) {
     let distance_scale = if view_settings.logarithmic_distance_scale {
@@ -153,6 +162,8 @@ fn render_trajectories(
     } else {
         view_settings.distance_scale
     };
+
+    let freecam = camera.single().unwrap();
 
     let (min_brightness, max_brightness) = match settings.display.glow {
         DisplayGlow::None => { (0.1, 1.0) }
@@ -231,7 +242,7 @@ fn render_trajectories(
                 };
                 
                 color = Srgba::new(0.0, 1.0, 0.0, min_brightness.lerp(max_brightness, brightness_factor));
-                gizmos.line(d1.as_bevy_scaled(distance_scale), d2.as_bevy_scaled(distance_scale), color);
+                gizmos.line(d1.as_bevy_scaled_cheated(distance_scale, freecam.position), d2.as_bevy_scaled_cheated(distance_scale, freecam.position), color);
             }
         }
     }

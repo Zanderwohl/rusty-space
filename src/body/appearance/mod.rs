@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use bevy::asset::RenderAssetUsages;
 use bevy::color::LinearRgba;
+use bevy::math::DVec3;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,10 @@ impl Appearance {
             Appearance::DebugBall(DebugBall { radius, .. }) => *radius,
             Appearance::Star(StarBall { radius, ..}) => *radius,
         }
+    }
+
+    pub fn nearby(&self) -> f64 {
+        self.radius() * 3.0
     }
 }
 
