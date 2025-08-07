@@ -141,12 +141,11 @@ impl StarBall {
             })
         }).clone();
 
-        // TODO: Adjust the light for scale changes
         let light_color = Color::srgb(self.light.r as f32 / 255.0, self.light.g as f32 / 255.0, self.light.b as f32 / 255.0);
         let light = PointLight {
             color: light_color,
             intensity: self.intensity,
-            range: 10000.0,
+            range: 1e14 * 1e-9,
             radius: 0.1,
             shadows_enabled: true,
             ..Default::default()

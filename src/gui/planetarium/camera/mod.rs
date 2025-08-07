@@ -85,12 +85,14 @@ fn handle_gotos (
             let camera_to_obj = (obj_pos - start_pos).normalize();
             let nearby_distance = appearance.nearby();
             let end_pos = obj_pos - (camera_to_obj * nearby_distance);
+
+            let end_pos = end_pos.as_bevy_scaled_dvec(view_settings.distance_scale);
+            let look_at_rot = look_at(obj_pos.as_bevy_scaled_dvec(view_settings.distance_scale), freecam.position, DVec3::Y);
+            let end_rot = look_at_rot.as_quat();
             
             // Update camera position
-            freecam.position = end_pos.as_bevy_scaled_dvec(view_settings.distance_scale); // TODO: log scales
-
-            let look_at_rot = look_at(obj_pos.as_bevy_scaled_dvec(view_settings.distance_scale), freecam.position, DVec3::Y);
-            cam_t.rotation = look_at_rot.as_quat();
+            freecam.position = end_pos;
+            cam_t.rotation = end_rot;
 
             /*pcam.action = CameraAction::Goto(GoToInProgress {
                 progress: 0.0,

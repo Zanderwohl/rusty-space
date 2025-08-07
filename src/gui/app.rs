@@ -90,7 +90,7 @@ pub fn common_setup(
     mut commands: Commands,
     mut ambient_light: ResMut<AmbientLight>
 ) {
-    ambient_light.brightness = 0.1;
+    ambient_light.brightness = 1.0;
 
     let rotation = Transform::from_xyz(20., 2.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y).rotation;
 

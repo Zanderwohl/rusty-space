@@ -100,11 +100,26 @@ fn adjust_lights(
         return;
     }
 
-    // TODO: better scaling factor, and log scaling
+    let distance_scale = if view_settings.logarithmic_distance_scale {
+        mappings::log_scale(view_settings.distance_scale, view_settings.logarithmic_distance_base)
+    } else {
+        view_settings.distance_scale
+    };
+
+    // Calculate the scaled solar system edge distance (1e14m * distance_scale)
+    let scaled_solar_system_edge = 1e14 * distance_scale;
+    
     for (_, mut light, appearance) in lights.iter_mut() {
         match appearance {
             Appearance::Star(star_ball) => {
-                light.range = star_ball.intensity * (1e9 * (view_settings.distance_scale as f32)).pow(2.0);
+                // Set range to reach the scaled solar system edge
+                light.range = scaled_solar_system_edge as f32;
+                
+                // Scale intensity to maintain consistent illumination at the solar system edge
+                // Using inverse square law: to maintain same illumination when distance scales by factor S,
+                // intensity must scale by S^2
+                let intensity_scale_factor = distance_scale * distance_scale;
+                light.intensity = star_ball.intensity * (intensity_scale_factor as f32);
             }
             _ => {} // This probably won't happen but if it does, it's not worth a crash.
         }
