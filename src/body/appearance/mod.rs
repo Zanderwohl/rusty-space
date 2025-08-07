@@ -65,7 +65,7 @@ impl DebugBall {
         let material_handle = cache.materials.entry(material_key.clone()).or_insert_with(|| {
             materials.add(StandardMaterial {
                 base_color: color,
-                metallic: 0.0,
+                metallic: 0.1,
                 perceptual_roughness: 1.0,
                 ..Default::default()
             })

@@ -152,7 +152,7 @@ fn position_bodies(
             let primary_position = state.current_primary_position.unwrap();
             primary_position + local_position
         };
-        transform.translation = global_position.as_bevy_scaled_cheated(distance_scale, freecam.position);
+        transform.translation = global_position.as_bevy_scaled_cheated(distance_scale, freecam.bevy_pos);
 
         let body_scale = if view_settings.logarithmic_body_scale {
             mappings::log_scale(appearance.radius(), view_settings.logarithmic_body_base) * view_settings.body_scale
@@ -257,7 +257,7 @@ fn render_trajectories(
                 };
                 
                 color = Srgba::new(0.0, 1.0, 0.0, min_brightness.lerp(max_brightness, brightness_factor));
-                gizmos.line(d1.as_bevy_scaled_cheated(distance_scale, freecam.position), d2.as_bevy_scaled_cheated(distance_scale, freecam.position), color);
+                gizmos.line(d1.as_bevy_scaled_cheated(distance_scale, freecam.bevy_pos), d2.as_bevy_scaled_cheated(distance_scale, freecam.bevy_pos), color);
             }
         }
     }

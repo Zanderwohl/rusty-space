@@ -109,7 +109,7 @@ pub fn common_setup(
             far: 1000.0,
         }),
         Transform::from_rotation(rotation),
-        Freecam { position: DVec3::new(20., 2., 0.) },
+        Freecam { bevy_pos: DVec3::new(20., 2., 0.) },
         PlanetariumCamera::new(),
         Bloom::NATURAL,
         Tonemapping::TonyMcMapface,

@@ -16,7 +16,7 @@ pub struct MovementSettings {
 impl Default for MovementSettings {
     fn default() -> Self {
         Self {
-            sensitivity: 0.00012,
+            sensitivity: 0.0000012,
             speed: 12.,
         }
     }
@@ -52,7 +52,7 @@ impl Default for KeyBindings {
 /// A marker component used in queries when you want flycams and not other cameras
 #[derive(Component)]
 pub struct Freecam {
-    pub position: DVec3,
+    pub bevy_pos: DVec3,
 }
 
 /// Grabs/ungrabs mouse cursor
@@ -116,7 +116,7 @@ fn player_move(
 
                 velocity = velocity.normalize_or_zero();
 
-                freecam.position += velocity * ((time.delta_secs() * settings.speed) as f64);
+                freecam.bevy_pos += velocity * ((time.delta_secs() * settings.speed) as f64);
             }
         }
     } else {
@@ -141,8 +141,8 @@ fn player_look(
                         _ => {
                             // Using smallest of height or width ensures equal vertical and horizontal sensitivity
                             let window_scale = window.height().min(window.width());
-                            pitch -= (settings.sensitivity * ev.delta.y * window_scale).to_radians();
-                            yaw -= (settings.sensitivity * ev.delta.x * window_scale).to_radians();
+                            pitch -= (settings.sensitivity * ev.delta.y * window_scale);
+                            yaw -= (settings.sensitivity * ev.delta.x * window_scale);
                         }
                     }
 
