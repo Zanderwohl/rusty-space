@@ -92,10 +92,6 @@ fn handle_gotos (
             let end_pos = end_pos.as_bevy_scaled_dvec(view_settings.distance_scale);
             let look_at_rot = look_at(obj_pos.as_bevy_scaled_dvec(view_settings.distance_scale), freecam.position, DVec3::Y);
             let end_rot = look_at_rot.as_quat();
-            
-            // Update camera position
-            // freecam.position = end_pos;
-            // cam_t.rotation = end_rot;
 
             pcam.action = CameraAction::Goto(GoToInProgress {
                 progress: 0.0,
