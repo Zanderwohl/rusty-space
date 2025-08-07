@@ -128,6 +128,9 @@ fn run_goto (
                 freecam.position = mid_pos;
                 cam_t.rotation = mis_rot;
                 if (frac - 1.0).abs() <= f64::epsilon() {
+                    // Ensure that the final position is correct.
+                    freecam.position = goto.end_pos;
+                    cam_t.rotation = goto.end_rot;
                     done = true;
                 }
             }
