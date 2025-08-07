@@ -1,7 +1,8 @@
 use bevy::app::App;
 use bevy::input::keyboard::Key::DVR;
 use bevy::math::{DMat3, DQuat, DVec3};
-use bevy::prelude::{in_state, Component, Entity, Event, EventReader, IntoScheduleConfigs, Plugin, Quat, Query, Res, Transform, Update, Vec3, With, Without};
+use bevy::prelude::*;
+use num_traits::Float;
 use url::Position;
 use crate::body::appearance::Appearance;
 use crate::body::motive::info::BodyState;
@@ -18,7 +19,8 @@ impl Plugin for PlanetariumCameraPlugin {
             .add_plugins(FreeCam)
             .add_event::<GoTo>()
             .add_systems(Update, (
-                handle_gotos
+                handle_gotos,
+                run_goto,
                 ).run_if(in_state(AppState::Planetarium)))
         ;
     }
@@ -60,10 +62,10 @@ pub struct GoTo {
 pub struct GoToInProgress {
     progress: f64,
     start_pos: DVec3,
-    current_pos: DVec3,
     end_pos: DVec3,
     start_rot: Quat,
     end_rot: Quat,
+    start_time: f64,
 }
 
 fn handle_gotos (
@@ -71,6 +73,7 @@ fn handle_gotos (
     mut camera: Query<(&mut Transform, &mut PlanetariumCamera, &mut Freecam)>,
     bodies: Query<(&BodyState, &Appearance), Without<PlanetariumCamera>>,
     view_settings: Res<ViewSettings>,
+    time: Res<Time>,
 ) {
     if let Ok((mut cam_t, mut pcam, mut freecam)) = camera.single_mut() {
         for event in go_tos.read() {
@@ -91,12 +94,48 @@ fn handle_gotos (
             let end_rot = look_at_rot.as_quat();
             
             // Update camera position
-            freecam.position = end_pos;
-            cam_t.rotation = end_rot;
+            // freecam.position = end_pos;
+            // cam_t.rotation = end_rot;
 
-            /*pcam.action = CameraAction::Goto(GoToInProgress {
+            pcam.action = CameraAction::Goto(GoToInProgress {
                 progress: 0.0,
-            })*/
+                start_pos,
+                end_pos,
+                start_rot,
+                end_rot,
+                start_time: time.elapsed().as_secs_f64(),
+            });
+        }
+    }
+}
+
+fn run_goto (
+    mut camera: Query<(&mut Transform, &mut PlanetariumCamera, &mut Freecam)>,
+    view_settings: Res<ViewSettings>,
+    time: Res<Time>,
+) {
+    let animation_time = 2.0;
+    let now = time.elapsed().as_secs_f64();
+    let mut done = false;
+
+    if let Ok((mut cam_t, mut pcam, mut freecam)) = camera.single_mut() {
+        match &mut pcam.action {
+            CameraAction::Goto(goto) => {
+                let frac = f64::min(1.0, (now - goto.start_time) / animation_time);
+
+                let mid_pos = goto.start_pos.lerp(goto.end_pos, frac);
+                let mis_rot = goto.start_rot.slerp(goto.end_rot, frac as f32);
+                freecam.position = mid_pos;
+                cam_t.rotation = mis_rot;
+                if (frac - 1.0).abs() <= f64::epsilon() {
+                    done = true;
+                }
+            }
+            _ => {}
+        }
+
+        if done {
+            pcam.action = CameraAction::Free;
         }
     }
 }
