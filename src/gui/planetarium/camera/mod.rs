@@ -98,11 +98,9 @@ fn handle_gotos (
             
             // Then, move to the nearby distance from the object
             // Calculate the direction from object to camera (opposite of look direction)
-            let camera_to_obj = (obj_pos - start_pos).normalize();
             let nearby_distance = appearance.nearby() * view_settings.distance_scale;
-            let (altitude, azimuth) = alt_az_in_bevy(fcam.bevy_pos, obj_pos.as_bevy_scaled_dvec(view_settings.distance_scale));
+            let (altitude, azimuth) = alt_az_in_bevy(obj_pos.as_bevy_scaled_dvec(view_settings.distance_scale), fcam.bevy_pos);
 
-            let end_pos = obj_pos - (camera_to_obj * nearby_distance);
             pcam.action = CameraAction::Goto(GoToInProgress {
                 start_pos,
                 start_rot,
@@ -205,13 +203,13 @@ fn revolve_around(
                                 window.cursor_options.visible = true;
                             }
 
-                            let bevy_center = state.current_position.as_bevy_scaled_dvec(view_settings.distance_scale);
+                            let body_pos_in_bevy = state.current_position.as_bevy_scaled_dvec(view_settings.distance_scale);
                             let offset = local_to_object_in_bevy(revolve.altitude, revolve.azimuth, revolve.bevy_distance);
-                            let bevy_pos = (bevy_center + offset);
+                            let camera_pos_in_bevy = body_pos_in_bevy + offset;
 
-                            fcam.bevy_pos = bevy_pos;
-                            if offset.is_finite() && bevy_center.is_finite() && bevy_center != bevy_pos { // Guard against degenerate zero-length looking vectors
-                                let look_at_rot = look_at(bevy_center, fcam.bevy_pos, DVec3::Y);
+                            fcam.bevy_pos = camera_pos_in_bevy;
+                            if offset.is_finite() && body_pos_in_bevy.is_finite() && body_pos_in_bevy != camera_pos_in_bevy { // Guard against degenerate zero-length looking vectors
+                                let look_at_rot = look_at(body_pos_in_bevy, fcam.bevy_pos, DVec3::Y);
                                 cam_t.rotation = look_at_rot.as_quat();
                             }
                         }
@@ -238,7 +236,7 @@ fn alt_az_in_bevy(observer: DVec3, observed: DVec3) -> (f64, f64) {
     let diff = observed - observer;
     let r = diff.length();
     let altitude = (diff.y / r).asin();
-    let azimuth = diff.z.atan2(diff.x).rem_euclid(TAU);
+    let azimuth = diff.x.atan2(diff.z).rem_euclid(TAU);
     (altitude, azimuth)
 }
 
