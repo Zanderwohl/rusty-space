@@ -1,13 +1,13 @@
 use std::f64::consts::{PI, TAU};
 use bevy::app::App;
-use bevy::ecs::query::QueryEntityError;
 use bevy::input::mouse::MouseMotion;
 use bevy::math::{DMat3, DQuat, DVec3};
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
+use bevy_egui::EguiContexts;
 use num_traits::Float;
 use crate::body::appearance::Appearance;
-use crate::body::motive::info::{BodyInfo, BodyState};
+use crate::body::motive::info::BodyState;
 use crate::body::universe::save::ViewSettings;
 use crate::gui::app::AppState;
 use crate::gui::util::freecam::{Freecam, FreeCam, MovementSettings};
@@ -177,7 +177,15 @@ fn revolve_around(
     mut primary_window: Query<(&mut Window), With<PrimaryWindow>>,
     view_settings: Res<ViewSettings>,
     entities: Query<(Entity, &BodyState, &Transform), Without<Freecam>>,
+    mut egui_ctx: EguiContexts,
 ) {
+    if let Ok(ctx) = egui_ctx.ctx_mut() {
+        if ctx.wants_pointer_input() {  // If hovering over an egui window,
+            return;                     // Don't rotate around! It grabs the mouse :(
+        }
+    }
+
+
     if let Ok(mut window) = primary_window.single_mut() {
         for (mut cam_t, mut pcam, mut fcam) in camera.iter_mut() {
 
