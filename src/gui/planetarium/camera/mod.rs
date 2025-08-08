@@ -8,8 +8,10 @@ use bevy_egui::EguiContexts;
 use num_traits::Float;
 use crate::body::appearance::Appearance;
 use crate::body::motive::info::BodyState;
+use crate::body::motive::newton_motive;
 use crate::body::universe::save::ViewSettings;
 use crate::gui::app::AppState;
+use crate::gui::planetarium::position_bodies;
 use crate::gui::util::freecam::{Freecam, FreeCam, MovementSettings};
 use crate::util::bevystuff::GlamVec;
 
@@ -23,7 +25,11 @@ impl Plugin for PlanetariumCameraPlugin {
             .add_systems(Update, (
                 handle_gotos,
                 run_goto,
-                revolve_around,
+                // Camera position changes must happen *before* bodies are rendered
+                // to avoid jerking, because their rendered positions are relative to the camera,
+                // but after all bodies have moved in the sim if the camera is located relative
+                // to a simulated body.
+                revolve_around.before(position_bodies).after(newton_motive::calculate),
                 ).run_if(in_state(AppState::Planetarium)))
         ;
     }
