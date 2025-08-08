@@ -66,10 +66,11 @@ pub struct GoTo {
 
 pub struct GoToInProgress {
     start_pos: DVec3,
-    end_pos: DVec3,
     start_rot: Quat,
-    end_rot: Quat,
     start_time: f64,
+    end_distance: f64,
+    end_altitude: f64,
+    end_azimuth: f64,
     entity: Entity,
 }
 
@@ -87,9 +88,9 @@ fn handle_gotos (
     view_settings: Res<ViewSettings>,
     time: Res<Time>,
 ) {
-    if let Ok((mut cam_t, mut pcam, mut freecam)) = camera.single_mut() {
+    if let Ok((mut cam_t, mut pcam, mut fcam)) = camera.single_mut() {
         for event in go_tos.read() {
-            let start_pos = freecam.bevy_pos;
+            let start_pos = fcam.bevy_pos;
             let start_rot = cam_t.rotation;
 
             let (entity, state, appearance) = bodies.get(event.entity).unwrap();
@@ -98,20 +99,18 @@ fn handle_gotos (
             // Then, move to the nearby distance from the object
             // Calculate the direction from object to camera (opposite of look direction)
             let camera_to_obj = (obj_pos - start_pos).normalize();
-            let nearby_distance = appearance.nearby();
+            let nearby_distance = appearance.nearby() * view_settings.distance_scale;
+            let (altitude, azimuth) = alt_az_in_bevy(fcam.bevy_pos, obj_pos.as_bevy_scaled_dvec(view_settings.distance_scale));
+
             let end_pos = obj_pos - (camera_to_obj * nearby_distance);
-
-            let end_pos = end_pos.as_bevy_scaled_dvec(view_settings.distance_scale);
-            let look_at_rot = look_at(obj_pos.as_bevy_scaled_dvec(view_settings.distance_scale), freecam.bevy_pos, DVec3::Y);
-            let end_rot = look_at_rot.as_quat();
-
             pcam.action = CameraAction::Goto(GoToInProgress {
                 start_pos,
-                end_pos,
                 start_rot,
-                end_rot,
                 start_time: time.elapsed().as_secs_f64(),
                 entity,
+                end_distance: nearby_distance,
+                end_altitude: altitude,
+                end_azimuth: azimuth,
             });
         }
     }
@@ -119,7 +118,7 @@ fn handle_gotos (
 
 fn run_goto (
     mut camera: Query<(&mut Transform, &mut PlanetariumCamera, &mut Freecam)>,
-    bodies: Query<(Entity, &BodyState), Without<PlanetariumCamera>>,
+    bodies: Query<&BodyState, Without<PlanetariumCamera>>,
     time: Res<Time>,
     view_settings: Res<ViewSettings>,
 ) {
@@ -127,31 +126,40 @@ fn run_goto (
     let now = time.elapsed().as_secs_f64();
     let mut next_action = None;
 
-    if let Ok((mut cam_t, mut pcam, mut freecam)) = camera.single_mut() {
+    if let Ok((mut cam_t, mut pcam, mut fcam)) = camera.single_mut() {
         match &mut pcam.action {
             CameraAction::Goto(goto) => {
-                let frac = f64::min(1.0, (now - goto.start_time) / animation_time);
+                if let Ok(body_state) = bodies.get(goto.entity) {
+                    // How far are we in the go-to travel?
+                    let frac = f64::min(1.0, (now - goto.start_time) / animation_time);
 
-                let mid_pos = goto.start_pos.lerp(goto.end_pos, frac);
-                let mis_rot = goto.start_rot.slerp(goto.end_rot, frac as f32);
-                freecam.bevy_pos = mid_pos;
-                cam_t.rotation = mis_rot;
-                if (frac - 1.0).abs() <= f64::epsilon() {
-                    // Ensure that the final position is correct.
-                    freecam.bevy_pos = goto.end_pos;
-                    cam_t.rotation = goto.end_rot;
+                    // get current position
+                    let body_pos_in_bevy = body_state.current_position.as_bevy_scaled_dvec(view_settings.distance_scale);
 
-                    if let Ok((_, body_state)) = bodies.get(goto.entity) {
-                        let bevy_distance = (body_state.current_position.as_bevy_scaled_dvec(view_settings.distance_scale)).distance(freecam.bevy_pos);
+                    // Set new end position based on object's current location
+                    let offset = local_to_object_in_bevy(goto.end_altitude, goto.end_azimuth, goto.end_distance);
+                    let final_pos = body_pos_in_bevy + offset;
+
+                    // Set new target rotation based on where the body is now.
+                    let look_at_rot = look_at(body_pos_in_bevy, final_pos, DVec3::Y);
+
+                    // Lerp between where we started and the current target position
+                    let mid_pos = goto.start_pos.lerp(final_pos, frac);
+                    let mid_rot = goto.start_rot.slerp(look_at_rot.as_quat(), frac as f32);
+                    fcam.bevy_pos = mid_pos;
+                    cam_t.rotation = mid_rot;
+
+                    // Transition control back to user
+                    if (frac - 1.0).abs() <= f64::epsilon() {
                         next_action = Some(CameraAction::RevolveAround(RevolveAround {
                             entity: goto.entity,
-                            bevy_distance,
-                            altitude: 0.0,
-                            azimuth: 0.0,
+                            bevy_distance: goto.end_distance,
+                            altitude: goto.end_altitude,
+                            azimuth: goto.end_azimuth,
                         }));
-                    } else {
-                        next_action = Some(CameraAction::Free);
                     }
+                } else {
+                    next_action = Some(CameraAction::Free);
                 }
             }
             _ => {}
@@ -174,53 +182,64 @@ fn revolve_around(
 ) {
     if let Ok(mut window) = primary_window.single_mut() {
         for (mut cam_t, mut pcam, mut fcam) in camera.iter_mut() {
-            for ev in mouse.read() {
-                match &mut pcam.action {
-                    CameraAction::RevolveAround(revolve) => {
-                        if mouse_buttons.pressed(MouseButton::Left) {
-                            window.cursor_options.grab_mode = CursorGrabMode::Confined;
-                            window.cursor_options.visible = false;
-                            match entities.get(revolve.entity) {
-                                Ok((entity, state, transform)) => {
-                                    let window_scale = window.height().min(window.width());
 
+            match &mut pcam.action {
+                CameraAction::RevolveAround(revolve) => {
+
+                    match entities.get(revolve.entity) {
+                        Ok((entity, state, transform)) => {
+                            let window_scale = window.height().min(window.width());
+
+                            if mouse_buttons.pressed(MouseButton::Left) {
+                                window.cursor_options.grab_mode = CursorGrabMode::Confined;
+                                window.cursor_options.visible = false;
+                                for ev in mouse.read() {
                                     revolve.azimuth -= (ev.delta.x.clamp(-1000.0, 1000.0) * window_scale * settings.sensitivity) as f64;
                                     revolve.azimuth = revolve.azimuth.rem_euclid(TAU);
                                     revolve.altitude += (ev.delta.y.clamp(-1000.0, 1000.0) * window_scale * settings.sensitivity) as f64;
                                     const ALT_LIMIT: f64 = PI / 2.0 - 0.001; // ~0.057° margin
                                     revolve.altitude = revolve.altitude.clamp(-ALT_LIMIT, ALT_LIMIT);
-
-                                    let bevy_center = state.current_position.as_bevy_scaled_dvec(view_settings.distance_scale);
-                                    let cos_alt = revolve.altitude.cos();
-                                    let x = revolve.bevy_distance * cos_alt * revolve.azimuth.sin();
-                                    let z = revolve.bevy_distance * cos_alt * revolve.azimuth.cos();
-                                    let y = revolve.bevy_distance * revolve.altitude.sin();
-                                    let offset = DVec3::new(x, y, z);
-
-                                    if offset.is_finite() {
-                                        let bevy_pos = (bevy_center + offset);
-
-                                        fcam.bevy_pos = bevy_pos;
-                                        if bevy_center.is_finite() && bevy_center != bevy_pos { // Guard against degenerate zero-length looking vectors
-                                            let look_at_rot = look_at(bevy_center, fcam.bevy_pos, DVec3::Y);
-                                            cam_t.rotation = look_at_rot.as_quat();
-                                        }
-                                    }
                                 }
-                                Err(_) => {
-                                    pcam.action = CameraAction::Free;
-                                }
+                            } else {
+                                window.cursor_options.grab_mode = CursorGrabMode::None;
+                                window.cursor_options.visible = true;
                             }
-                        } else {
-                            window.cursor_options.grab_mode = CursorGrabMode::None;
-                            window.cursor_options.visible = true;
+
+                            let bevy_center = state.current_position.as_bevy_scaled_dvec(view_settings.distance_scale);
+                            let offset = local_to_object_in_bevy(revolve.altitude, revolve.azimuth, revolve.bevy_distance);
+                            let bevy_pos = (bevy_center + offset);
+
+                            fcam.bevy_pos = bevy_pos;
+                            if offset.is_finite() && bevy_center.is_finite() && bevy_center != bevy_pos { // Guard against degenerate zero-length looking vectors
+                                let look_at_rot = look_at(bevy_center, fcam.bevy_pos, DVec3::Y);
+                                cam_t.rotation = look_at_rot.as_quat();
+                            }
+                        }
+                        Err(_) => {
+                            pcam.action = CameraAction::Free;
                         }
                     }
-                    _ => {}
                 }
+                _ => {}
             }
         }
     }
+}
+
+fn local_to_object_in_bevy(altitude: f64, azimuth: f64, bevy_distance: f64) -> DVec3 {
+    let cos_alt = altitude.cos();
+    let x = bevy_distance * cos_alt * azimuth.sin();
+    let z = bevy_distance * cos_alt * azimuth.cos();
+    let y = bevy_distance * altitude.sin();
+    DVec3::new(x, y, z)
+}
+
+fn alt_az_in_bevy(observer: DVec3, observed: DVec3) -> (f64, f64) {
+    let diff = observed - observer;
+    let r = diff.length();
+    let altitude = (diff.y / r).asin();
+    let azimuth = diff.z.atan2(diff.x).rem_euclid(TAU);
+    (altitude, azimuth)
 }
 
 fn look_at(from: DVec3, to: DVec3, up: DVec3) -> DQuat {
