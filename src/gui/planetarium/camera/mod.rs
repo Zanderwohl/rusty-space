@@ -179,13 +179,6 @@ fn revolve_around(
     entities: Query<(Entity, &BodyState, &Transform), Without<Freecam>>,
     mut egui_ctx: EguiContexts,
 ) {
-    if let Ok(ctx) = egui_ctx.ctx_mut() {
-        if ctx.wants_pointer_input() {  // If hovering over an egui window,
-            return;                     // Don't rotate around! It grabs the mouse :(
-        }
-    }
-
-
     if let Ok(mut window) = primary_window.single_mut() {
         for (mut cam_t, mut pcam, mut fcam) in camera.iter_mut() {
 
@@ -197,14 +190,20 @@ fn revolve_around(
                             let window_scale = window.height().min(window.width());
 
                             if mouse_buttons.pressed(MouseButton::Left) {
-                                window.cursor_options.grab_mode = CursorGrabMode::Confined;
-                                window.cursor_options.visible = false;
-                                for ev in mouse.read() {
-                                    revolve.azimuth -= (ev.delta.x.clamp(-1000.0, 1000.0) * window_scale * settings.sensitivity) as f64;
-                                    revolve.azimuth = revolve.azimuth.rem_euclid(TAU);
-                                    revolve.altitude += (ev.delta.y.clamp(-1000.0, 1000.0) * window_scale * settings.sensitivity) as f64;
-                                    const ALT_LIMIT: f64 = PI / 2.0 - 0.001; // ~0.057° margin
-                                    revolve.altitude = revolve.altitude.clamp(-ALT_LIMIT, ALT_LIMIT);
+                                if let Ok(ctx) = egui_ctx.ctx_mut() && ctx.wants_pointer_input() && ctx.wants_pointer_input() {
+                                    // If hovering over an egui window, don't rotate around! It grabs the mouse :(
+                                    window.cursor_options.grab_mode = CursorGrabMode::None;
+                                    window.cursor_options.visible = true;
+                                } else {
+                                    window.cursor_options.grab_mode = CursorGrabMode::Confined;
+                                    window.cursor_options.visible = false;
+                                    for ev in mouse.read() {
+                                        revolve.azimuth -= (ev.delta.x.clamp(-1000.0, 1000.0) * window_scale * settings.sensitivity) as f64;
+                                        revolve.azimuth = revolve.azimuth.rem_euclid(TAU);
+                                        revolve.altitude += (ev.delta.y.clamp(-1000.0, 1000.0) * window_scale * settings.sensitivity) as f64;
+                                        const ALT_LIMIT: f64 = PI / 2.0 - 0.001; // ~0.057° margin
+                                        revolve.altitude = revolve.altitude.clamp(-ALT_LIMIT, ALT_LIMIT);
+                                    }
                                 }
                             } else {
                                 window.cursor_options.grab_mode = CursorGrabMode::None;
