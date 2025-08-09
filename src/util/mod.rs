@@ -9,3 +9,4 @@ pub mod format;
 pub mod mappings;
 pub mod bevystuff;
 pub mod jd;
+pub mod ease;

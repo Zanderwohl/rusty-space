@@ -12,8 +12,9 @@ use crate::body::motive::newton_motive;
 use crate::body::universe::save::ViewSettings;
 use crate::gui::app::AppState;
 use crate::gui::planetarium::position_bodies;
-use crate::gui::util::freecam::{Freecam, FreeCam, MovementSettings};
+use crate::gui::util::freecam::{FreeCam, Freecam, MovementSettings};
 use crate::util::bevystuff::GlamVec;
+use crate::util::ease;
 
 pub struct PlanetariumCameraPlugin;
 
@@ -136,7 +137,7 @@ fn run_goto (
                 if let Ok(body_state) = bodies.get(goto.entity) {
                     // How far are we in the go-to travel?
                     let frac = f64::min(1.0, (now - goto.start_time) / animation_time);
-                    let frac = ease_in_out_circ(frac);
+                    let frac = ease::f64::circ(frac);
 
                     // get current position
                     let body_pos_in_bevy = body_state.current_position.as_bevy_scaled_dvec(view_settings.distance_scale);
@@ -262,12 +263,4 @@ fn look_at(from: DVec3, to: DVec3, up: DVec3) -> DQuat {
     let rot_matrix = DMat3::from_cols(right, up, forward);
 
     DQuat::from_mat3(&rot_matrix)
-}
-
-fn ease_in_out_circ(t: f64) -> f64 {
-    if t < 0.5 {
-        (1.0 - (1.0 - (2.0 * t).powi(2)).sqrt()) / 2.0
-    } else {
-        ((1.0 - (-2.0 * t + 2.0).powi(2)).sqrt() + 1.0) / 2.0
-    }
 }
