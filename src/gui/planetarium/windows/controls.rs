@@ -157,10 +157,21 @@ pub fn planetarium_controls(
 
     // View settings
     ui.separator();
-    ui.label("Show Labels");
-    ui.checkbox(&mut view_settings.show_labels, "All");
+    ui.label("Show/Hide");
+
+    ui.horizontal(|ui| {
+        ui.label("All");
+        ui.checkbox(&mut view_settings.show_labels, "");
+        ui.checkbox(&mut view_settings.show_trajectories, "");
+    });
+
     for (tag_name, tag_state) in &mut view_settings.tags {
-        ui.checkbox(&mut tag_state.shown, tag_name);
+        ui.horizontal(|ui| {
+            ui.label(tag_name);
+            ui.checkbox(&mut tag_state.shown, "");
+            ui.checkbox(&mut tag_state.trajectory, "");
+
+        });
     }
 }
 

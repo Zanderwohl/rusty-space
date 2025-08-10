@@ -21,6 +21,7 @@ pub struct UiState {
 #[derive(Serialize, Deserialize, Resource, Debug)]
 pub struct TagState {
     pub shown: bool,
+    pub trajectory: bool,
     pub members: Vec<String>,
 }
 
@@ -28,6 +29,7 @@ impl Default for TagState {
     fn default() -> Self {
         Self {
             shown: false,
+            trajectory: false,
             members: Vec::new(),
         }
     }

@@ -13,7 +13,6 @@ pub struct Settings {
     pub ui: UiSettings,
     #[serde(default)]
     pub windows: WindowSelections,
-
 }
 
 impl Default for Settings {
@@ -129,6 +128,8 @@ pub struct WindowSelections {
     pub body_edit: bool,
     #[serde(default = "default_false")]
     pub body_info: bool,
+    #[serde(default = "default_false")]
+    pub grid: bool,
 }
 
 impl Default for WindowSelections {
@@ -138,6 +139,7 @@ impl Default for WindowSelections {
             spin_data: SpinData::default(),
             body_edit: default_false(),
             body_info: default_false(),
+            grid: default_false(),
         }
     }
 }

@@ -97,6 +97,7 @@ pub struct ViewSettings {
     pub logarithmic_body_scale: bool,
     pub logarithmic_body_base: f64,
     pub show_labels: bool,
+    pub show_trajectories: bool,
     pub tags: HashMap<String, TagState>,
     pub trajectory_resolution: usize,
 }
@@ -111,6 +112,7 @@ impl Default for ViewSettings {
             logarithmic_distance_scale: false,
             logarithmic_distance_base: 10.0,
             show_labels: true,
+            show_trajectories: true,
             tags: HashMap::new(),
             trajectory_resolution: 120,
         }
@@ -121,6 +123,15 @@ impl ViewSettings {
     pub fn body_in_any_visible_tag<T:AsRef<str> + ToString>(&self, body_id: T) -> bool {
         for tag in self.tags.values() {
             if tag.shown && tag.members.contains(&body_id.to_string()) {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn body_in_any_trajectory_tag<T:AsRef<str> + ToString>(&self, body_id: T) -> bool {
+        for tag in self.tags.values() {
+            if tag.trajectory && tag.members.contains(&body_id.to_string()) {
                 return true;
             }
         }
