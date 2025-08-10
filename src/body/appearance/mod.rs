@@ -111,10 +111,19 @@ pub struct StarBall {
     pub radius: f64,
     pub color: AppearanceColor,
     pub light: AppearanceColor,
-    pub intensity: f32,
+    pub absolute_magnitude: f32,
 }
 
 impl StarBall {
+    pub fn intensity(&self) -> f32 {
+        // Convert absolute magnitude to luminous flux (lumens) relative to the Sun
+        // Bevy's PointLight intensity is in lumens for physically based falloff
+        const SUN_ABSOLUTE_MAGNITUDE: f64 = 4.83;
+        const SUN_LUMINOUS_FLUX_LM: f64 = 3.5e28; // approximate photopic luminous flux of the Sun
+        let m = self.absolute_magnitude as f64;
+        let luminosity_ratio = 10f64.powf(0.4 * (SUN_ABSOLUTE_MAGNITUDE - m));
+        (SUN_LUMINOUS_FLUX_LM * luminosity_ratio) as f32
+    }
     pub fn pbr_bundle(&self,
                       cache: &mut ResMut<AssetCache>,
                       meshes: &mut Assets<Mesh>,
@@ -142,9 +151,10 @@ impl StarBall {
         }).clone();
 
         let light_color = Color::srgb(self.light.r as f32 / 255.0, self.light.g as f32 / 255.0, self.light.b as f32 / 255.0);
+        // Initialize intensity for the default scale (1e-9). It will be updated dynamically.
         let light = PointLight {
             color: light_color,
-            intensity: self.intensity,
+            intensity: self.intensity() * (1e-9f32 * 1e-9f32),
             range: 1e14 * 1e-9,
             radius: 0.1,
             shadows_enabled: true,

@@ -46,7 +46,7 @@ pub fn solar_system() -> UniverseFile {
                             g: 255 * 14,
                             b: 255 * 14,
                         },
-                        intensity: 1e7,
+                        absolute_magnitude: 4.83,
                     }),
                 }), // Sun
                 SomeBody::KeplerEntry(KeplerEntry {

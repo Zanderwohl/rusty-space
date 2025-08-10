@@ -62,6 +62,7 @@ impl Plugin for PlanetariumUI {
                     windows::body_info::body_info_window,
                     windows::settings::settings_window,
                     windows::spin::spin_window,
+                    windows::camera::camera_window,
 
                     label_bodies,
                     ).run_if(in_state(AppState::Planetarium)),
@@ -119,7 +120,7 @@ fn adjust_lights(
                 // Using inverse square law: to maintain same illumination when distance scales by factor S,
                 // intensity must scale by S^2
                 let intensity_scale_factor = distance_scale * distance_scale;
-                light.intensity = star_ball.intensity * (intensity_scale_factor as f32);
+                light.intensity = star_ball.intensity() * (intensity_scale_factor as f32);
             }
             _ => {} // This probably won't happen but if it does, it's not worth a crash.
         }
