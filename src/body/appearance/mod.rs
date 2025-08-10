@@ -35,10 +35,6 @@ impl Appearance {
             Appearance::Star(StarBall { radius, ..}) => *radius,
         }
     }
-
-    pub fn nearby(&self) -> f64 {
-        self.radius() * 3.0
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]

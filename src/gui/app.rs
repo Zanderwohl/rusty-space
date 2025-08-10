@@ -14,6 +14,7 @@ use crate::body::universe::solar_system::{write_temp_system_file, write_earth_mo
 use crate::body::universe::Universe;
 use crate::gui::menu::{close_when_requested, MenuPlugin};
 use crate::gui::planetarium::{PlanetariumCamera, PlanetariumUI};
+use crate::gui::post_process::PostProcessPlugin;
 use crate::gui::settings;
 use crate::gui::splash::SplashPlugin;
 use crate::gui::util::debug::DebugPlugin;
@@ -51,6 +52,7 @@ pub fn run() {
         .add_plugins(SplashPlugin)
         .add_plugins(MenuPlugin)
         .add_plugins(PlanetariumUI)
+        //.add_plugins(PostProcessPlugin)
         .add_systems(Update, (
             make_visible,
         ))

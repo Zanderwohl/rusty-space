@@ -70,7 +70,7 @@ impl Plugin for PlanetariumUI {
             .add_systems(Update, (
                 (
                     adjust_lights,
-                    scale_distant_objects.after(position_bodies),
+                    // scale_distant_objects.after(position_bodies),
                     position_bodies.after(fixed_motive::calculate).after(kepler_motive::calculate).after(newton_motive::calculate),
                     trajectory::render_trajectories,
                 ).in_set(PlanetariumUISet),
@@ -183,6 +183,8 @@ fn position_bodies(
         };
         transform.translation = global_position.as_bevy_scaled_cheated(distance_scale, freecam.bevy_pos);
 
+        //let body_scale = view_settings.body_scale_factor(appearance.radius());
+        //transform.scale = Vec3::splat(body_scale);
         let body_scale = if view_settings.logarithmic_body_scale {
             mappings::log_scale(appearance.radius(), view_settings.logarithmic_body_base) * view_settings.body_scale
         } else {

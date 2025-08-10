@@ -105,7 +105,8 @@ fn handle_gotos (
             
             // Then, move to the nearby distance from the object
             // Calculate the direction from object to camera (opposite of look direction)
-            let nearby_distance = appearance.nearby() * view_settings.distance_factor();
+            // info!("Radius: {}", appearance.radius(), view_settings.body_scale_factor(appearance.radius()));
+            let nearby_distance = 3f64 * view_settings.body_scale_factor(appearance.radius()) as f64;
             let (altitude, azimuth) = alt_az_in_bevy(obj_pos.as_bevy_scaled_dvec(view_settings.distance_factor()), fcam.bevy_pos);
 
             pcam.action = CameraAction::Goto(GoToInProgress {

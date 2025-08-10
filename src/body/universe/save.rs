@@ -146,6 +146,15 @@ impl ViewSettings {
             self.distance_scale
         }
     }
+    
+    pub fn body_scale_factor(&self, radius: f64) -> f32 {
+        let n = if self.logarithmic_body_scale {
+            mappings::log_scale(radius, self.logarithmic_body_base) * self.body_scale
+        } else {
+            radius * self.body_scale
+        } as f32;
+        n
+    }
 }
 
 #[derive(Serialize, Deserialize)]
