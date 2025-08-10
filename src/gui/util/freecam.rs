@@ -192,8 +192,8 @@ fn initial_grab_on_flycam_spawn(
 }
 
 /// Same as [`PlayerPlugin`] but does not spawn a camera
-pub struct FreeCam;
-impl Plugin for FreeCam {
+pub struct FreeCamPlugin;
+impl Plugin for FreeCamPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MovementSettings>()
             .init_resource::<KeyBindings>()

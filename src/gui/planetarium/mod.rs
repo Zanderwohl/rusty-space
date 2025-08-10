@@ -20,7 +20,7 @@ use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::{fixed_motive, kepler_motive, newton_motive};
 pub(crate) use crate::gui::planetarium::camera::{PlanetariumCamera, PlanetariumCameraPlugin};
 use crate::gui::planetarium::windows::body_info::BodyInfoState;
-use crate::gui::util::freecam::Freecam;
+use crate::gui::util::freecam::{FreeCamPlugin, Freecam};
 use crate::util::bevystuff::GlamVec;
 use crate::util::jd::{J2000_JD, JD_SECONDS};
 use crate::util::mappings;
@@ -70,6 +70,7 @@ impl Plugin for PlanetariumUI {
             .add_systems(Update, (
                 (
                     adjust_lights,
+                    scale_starballs.after(position_bodies),
                     position_bodies.after(fixed_motive::calculate).after(kepler_motive::calculate).after(newton_motive::calculate),
                     trajectory::render_trajectories,
                 ).in_set(PlanetariumUISet),
@@ -123,6 +124,43 @@ fn adjust_lights(
                 light.intensity = star_ball.intensity() * (intensity_scale_factor as f32);
             }
             _ => {} // This probably won't happen but if it does, it's not worth a crash.
+        }
+    }
+}
+
+fn scale_starballs(
+    camera: Query<&mut Freecam, With<Camera>>,
+    mut stars: Query<(&mut Transform, &Appearance)>,
+    view_settings: Res<ViewSettings>,
+) {
+    const MIN_ANGULAR_SIZE: f64 = f64::to_radians(0.1);
+
+    let camera = camera.single().unwrap();
+    for (mut transform, appearance) in stars.iter_mut() {
+        let star_pos = transform.translation;
+        let cam_pos = camera.bevy_pos.as_vec3();
+        let dist = star_pos.distance(cam_pos) as f64;
+
+        match appearance {
+            Appearance::Star(star_ball) => {
+                let rad = star_ball.radius * view_settings.body_scale;
+                let angular_size = (rad * 2.0) / dist;
+
+                if angular_size < MIN_ANGULAR_SIZE {
+                    let ratio = MIN_ANGULAR_SIZE / angular_size;
+                    transform.scale *= ratio as f32;
+                }
+            }
+            Appearance::DebugBall(debug_ball) => {
+                let rad = debug_ball.radius * view_settings.body_scale;
+                let angular_size = (rad * 2.0) / dist;
+
+                if angular_size < MIN_ANGULAR_SIZE {
+                    let ratio = MIN_ANGULAR_SIZE / angular_size;
+                    transform.scale *= ratio as f32;
+                }
+            }
+            Appearance::Empty => {}
         }
     }
 }

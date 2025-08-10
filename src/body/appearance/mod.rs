@@ -117,13 +117,23 @@ pub struct StarBall {
 impl StarBall {
     pub fn intensity(&self) -> f32 {
         // Convert absolute magnitude to luminous flux (lumens) relative to the Sun
-        // Bevy's PointLight intensity is in lumens for physically based falloff
         const SUN_ABSOLUTE_MAGNITUDE: f64 = 4.83;
-        const SUN_LUMINOUS_FLUX_LM: f64 = 3.5e28; // approximate photopic luminous flux of the Sun
+        const SUN_LUMINOUS_FLUX_LM: f64 = 3.5e28;
         let m = self.absolute_magnitude as f64;
         let luminosity_ratio = 10f64.powf(0.4 * (SUN_ABSOLUTE_MAGNITUDE - m));
         (SUN_LUMINOUS_FLUX_LM * luminosity_ratio) as f32
     }
+
+    pub fn emissive_luminance(&self) -> f32 {
+        // Approximate solar surface luminance in nits (cd/m^2), scaled by absolute magnitude
+        // L_sun ≈ 1.8e9 nits at the photosphere
+        const SUN_ABSOLUTE_MAGNITUDE: f64 = 4.83;
+        const SUN_SURFACE_LUMINANCE_NITS: f64 = 1.83e9;
+        let m = self.absolute_magnitude as f64;
+        let luminosity_ratio = 10f64.powf(0.4 * (SUN_ABSOLUTE_MAGNITUDE - m));
+        (SUN_SURFACE_LUMINANCE_NITS * luminosity_ratio) as f32
+    }
+    
     pub fn pbr_bundle(&self,
                       cache: &mut ResMut<AssetCache>,
                       meshes: &mut Assets<Mesh>,
@@ -139,12 +149,13 @@ impl StarBall {
         }).clone();
 
         let material_handle = cache.materials.entry(material_key.clone()).or_insert_with(|| {
+            let e = self.emissive_luminance();
             materials.add(StandardMaterial {
                 base_color: color,
                 emissive: LinearRgba::rgb(
-                    self.light.r as f32 / 255.0,
-                    self.light.g as f32 / 255.0,
-                    self.light.b as f32 / 255.0,
+                    (self.light.r as f32 / 255.0) * e,
+                    (self.light.g as f32 / 255.0) * e,
+                    (self.light.b as f32 / 255.0) * e,
                 ),
                 ..Default::default()
             })

@@ -12,7 +12,7 @@ use crate::body::motive::newton_motive;
 use crate::body::universe::save::ViewSettings;
 use crate::gui::app::AppState;
 use crate::gui::planetarium::position_bodies;
-use crate::gui::util::freecam::{FreeCam, Freecam, MovementSettings};
+use crate::gui::util::freecam::{FreeCamPlugin, Freecam, MovementSettings};
 use crate::util::bevystuff::GlamVec;
 use crate::util::ease;
 
@@ -21,7 +21,7 @@ pub struct PlanetariumCameraPlugin;
 impl Plugin for PlanetariumCameraPlugin {
     fn build(&self, app: &mut App) {
         app
-            .add_plugins(FreeCam)
+            .add_plugins(FreeCamPlugin)
             .add_event::<GoTo>()
             .add_systems(Update, (
                 handle_gotos,
