@@ -1,5 +1,5 @@
 use bevy::core_pipeline::tonemapping::Tonemapping;
-use bevy::prelude::{Camera3d, Mut, Query, ResMut, Single, Transform};
+use bevy::prelude::*;
 use bevy::render::view::ColorGrading;
 use bevy_egui::{egui, EguiContexts};
 use bevy_egui::egui::Context;

@@ -7,3 +7,4 @@ mod settings;
 mod splash;
 pub mod common;
 pub mod horizons;
+mod post_process;

@@ -1,7 +1,5 @@
 
 use bevy::math::{Vec3, DVec3};
-use bevy::prelude::info;
-use num_traits::ToPrimitive;
 
 pub trait GlamVec {
     // Convert from z-axis-up to y-axis-up coordinate system

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::slice::Iter;
 use bevy::math::DVec3;
-use bevy::prelude::{FloatExt, Vec3};
+use bevy::prelude::*;
 use crate::util::bitfutz;
 
 #[derive(Debug, Clone)]

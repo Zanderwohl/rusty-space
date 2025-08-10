@@ -1,4 +1,4 @@
-use bevy::prelude::{Gizmos, Query, Res, ResMut, With};
+use bevy::prelude::*;
 use bevy::color::Srgba;
 use bevy::math::{DVec3, FloatExt};
 use itertools::Itertools;

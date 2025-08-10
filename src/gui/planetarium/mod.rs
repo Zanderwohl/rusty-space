@@ -70,7 +70,7 @@ impl Plugin for PlanetariumUI {
             .add_systems(Update, (
                 (
                     adjust_lights,
-                    scale_starballs.after(position_bodies),
+                    scale_distant_objects.after(position_bodies),
                     position_bodies.after(fixed_motive::calculate).after(kepler_motive::calculate).after(newton_motive::calculate),
                     trajectory::render_trajectories,
                 ).in_set(PlanetariumUISet),
@@ -124,7 +124,7 @@ fn adjust_lights(
     }
 }
 
-fn scale_starballs(
+fn scale_distant_objects(
     camera: Query<&mut Freecam, With<Camera>>,
     mut stars: Query<(&mut Transform, &Appearance)>,
     view_settings: Res<ViewSettings>,
