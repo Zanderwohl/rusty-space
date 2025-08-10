@@ -13,6 +13,7 @@ use crate::body::motive::newton_motive::NewtonMotive;
 use crate::body::SimulationObject;
 use crate::body::universe::{Major, Minor};
 use crate::gui::menu::TagState;
+use crate::util::mappings;
 
 pub struct UniverseFile {
     pub(crate) file: Option<PathBuf>,
@@ -136,6 +137,14 @@ impl ViewSettings {
             }
         }
         false
+    }
+    
+    pub fn distance_factor(&self) -> f64 {
+        if self.logarithmic_distance_scale {
+            mappings::log_scale(self.distance_scale, self.logarithmic_distance_base)
+        } else {
+            self.distance_scale
+        }
     }
 }
 

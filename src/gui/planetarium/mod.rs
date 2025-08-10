@@ -102,11 +102,7 @@ fn adjust_lights(
         return;
     }
 
-    let distance_scale = if view_settings.logarithmic_distance_scale {
-        mappings::log_scale(view_settings.distance_scale, view_settings.logarithmic_distance_base)
-    } else {
-        view_settings.distance_scale
-    };
+    let distance_scale = view_settings.distance_factor();
 
     // Calculate the scaled solar system edge distance (1e14m * distance_scale)
     let scaled_solar_system_edge = 1e14 * distance_scale;
@@ -172,13 +168,7 @@ fn position_bodies(
     view_settings: Res<ViewSettings>,
 ) {
     // TODO: Move the origin to the main camera.
-    let distance_scale = if view_settings.logarithmic_distance_scale {
-        let n = mappings::log_scale(view_settings.distance_scale, view_settings.logarithmic_distance_base);
-        // info!("{} -> {}", view_settings.distance_scale, n);
-        n
-    } else {
-        view_settings.distance_scale
-    };
+    let distance_scale = view_settings.distance_factor();
 
     let freecam = camera.single().unwrap();
 

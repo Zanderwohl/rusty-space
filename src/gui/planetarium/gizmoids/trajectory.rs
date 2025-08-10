@@ -20,12 +20,7 @@ pub fn render_trajectories(
     camera: Query<&Freecam, With<PlanetariumCamera>>,
     mut sim_time: ResMut<SimTime>,
 ) {
-    let distance_scale = if view_settings.logarithmic_distance_scale {
-        let n = mappings::log_scale(view_settings.distance_scale, view_settings.logarithmic_distance_base);
-        n
-    } else {
-        view_settings.distance_scale
-    };
+    let distance_scale = view_settings.distance_factor();
 
     let freecam = camera.single().unwrap();
 

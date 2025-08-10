@@ -105,8 +105,8 @@ fn handle_gotos (
             
             // Then, move to the nearby distance from the object
             // Calculate the direction from object to camera (opposite of look direction)
-            let nearby_distance = appearance.nearby() * view_settings.distance_scale;
-            let (altitude, azimuth) = alt_az_in_bevy(obj_pos.as_bevy_scaled_dvec(view_settings.distance_scale), fcam.bevy_pos);
+            let nearby_distance = appearance.nearby() * view_settings.distance_factor();
+            let (altitude, azimuth) = alt_az_in_bevy(obj_pos.as_bevy_scaled_dvec(view_settings.distance_factor()), fcam.bevy_pos);
 
             pcam.action = CameraAction::Goto(GoToInProgress {
                 start_pos,
@@ -140,7 +140,7 @@ fn run_goto (
                     let frac = ease::f64::circ(frac);
 
                     // get current position
-                    let body_pos_in_bevy = body_state.current_position.as_bevy_scaled_dvec(view_settings.distance_scale);
+                    let body_pos_in_bevy = body_state.current_position.as_bevy_scaled_dvec(view_settings.distance_factor());
 
                     // Set new end position based on object's current location
                     let offset = local_to_object_in_bevy(goto.end_altitude, goto.end_azimuth, goto.end_distance);
@@ -218,7 +218,7 @@ fn revolve_around(
                                 window.cursor_options.visible = true;
                             }
 
-                            let body_pos_in_bevy = state.current_position.as_bevy_scaled_dvec(view_settings.distance_scale);
+                            let body_pos_in_bevy = state.current_position.as_bevy_scaled_dvec(view_settings.distance_factor());
                             let offset = local_to_object_in_bevy(revolve.altitude, revolve.azimuth, revolve.bevy_distance);
                             let camera_pos_in_bevy = body_pos_in_bevy + offset;
 
