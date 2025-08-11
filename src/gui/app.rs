@@ -2,6 +2,7 @@ use std::f32::consts::PI;
 use std::path::PathBuf;
 use bevy::color::Color;
 use bevy::core_pipeline::bloom::Bloom;
+use bevy::core_pipeline::post_process::ChromaticAberration;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::DefaultPlugins;
 use bevy::diagnostic::FrameCount;
@@ -14,6 +15,7 @@ use crate::body::universe::solar_system::{write_temp_system_file, write_earth_mo
 use crate::body::universe::Universe;
 use crate::gui::menu::{close_when_requested, MenuPlugin};
 use crate::gui::planetarium::{PlanetariumCamera, PlanetariumUI};
+use crate::gui::post_process::{update_post_process_settings, PostProcessSettings};
 use crate::gui::settings;
 use crate::gui::splash::SplashPlugin;
 use crate::gui::util::debug::DebugPlugin;
@@ -54,6 +56,14 @@ pub fn run() {
         .add_systems(Update, (
             make_visible,
         ))
+
+        .init_resource::<PostProcessSettings>()
+        .add_systems(
+            Update,
+            update_post_process_settings
+                .run_if(resource_changed::<PostProcessSettings>)
+        )
+
         .run();
 }
 
@@ -113,5 +123,6 @@ pub fn common_setup(
         PlanetariumCamera::new(),
         Bloom::NATURAL,
         Tonemapping::TonyMcMapface,
+        ChromaticAberration::default(),
     ));
 }
