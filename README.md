@@ -14,10 +14,14 @@ plus [a book](books/ExoticMatters-Rulebook.pdf) containing the rules for play.
 **Both are incomplete right now!**
 Neither are completely workable yet.
 
+![The inner solar system, orbiting with accelerated time along green trajectory lines.](readme/solar_system_01.gif)
+
 ## Building the program
 
 Assuming you have cargo and Rust (>=1.89.0) installed: `cargo run --bin exotic_matters --release`.
 First-time compilation will take several minutes: about 15 minutes on my M3 Mac, and 30 minutes on my Ryzen 7.
+
+![Camera sweeps from a green ball Earth out to Dysnomia, a small moon of Eris at the edge of the solar system.](readme/to_eris.gif)
 
 ## To Do List
 
