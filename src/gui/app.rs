@@ -123,6 +123,6 @@ pub fn common_setup(
         PlanetariumCamera::new(),
         Bloom::NATURAL,
         Tonemapping::TonyMcMapface,
-        ChromaticAberration::default(),
+        // ChromaticAberration::default(),
     ));
 }

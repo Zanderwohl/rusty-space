@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use bevy::color::Srgba;
 use bevy::math::{DVec3, FloatExt};
+use bevy::render::view::ColorGrading;
 use itertools::Itertools;
+use num_traits::Pow;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::universe::save::ViewSettings;
@@ -10,7 +12,6 @@ use crate::gui::planetarium::time::SimTime;
 use crate::gui::settings::{DisplayGlow, Settings};
 use crate::gui::util::freecam::Freecam;
 use crate::util::bevystuff::GlamVec;
-use crate::util::mappings;
 
 pub fn render_trajectories(
     bodies: Query<(&BodyState, &BodyInfo, Option<&KeplerMotive>)>,
@@ -18,11 +19,13 @@ pub fn render_trajectories(
     view_settings: Res<ViewSettings>,
     settings: Res<Settings>,
     camera: Query<&Freecam, With<PlanetariumCamera>>,
-    mut sim_time: ResMut<SimTime>,
+    sim_time: Res<SimTime>,
+    color_grading: Single<&ColorGrading>,
 ) {
     let distance_scale = view_settings.distance_factor();
 
-    let freecam = camera.single().unwrap();
+    let fcam = camera.single().unwrap();
+    let exposure = color_grading.global.exposure;
 
     let (min_brightness, max_brightness) = match settings.display.glow {
         DisplayGlow::None => { (0.1, 1.0) }
@@ -30,6 +33,9 @@ pub fn render_trajectories(
         DisplayGlow::VFD => { (1.0, 4.0) }
         DisplayGlow::Defcon => { (0.2, 10.0) }
     };
+    let exposure_adjust = 2f32.pow(-exposure);
+    let min_brightness = min_brightness * exposure_adjust;
+    let max_brightness = max_brightness * exposure_adjust;
 
     let mut color = Srgba::new(1.0, 0.0, 0.0, 1.0);
     for (state, info, kepler_motive) in bodies.iter() {
@@ -104,7 +110,7 @@ pub fn render_trajectories(
                 };
                 
                 color = Srgba::new(0.0, 1.0, 0.0, min_brightness.lerp(max_brightness, brightness_factor));
-                gizmos.line(d1.as_bevy_scaled_cheated(distance_scale, freecam.bevy_pos), d2.as_bevy_scaled_cheated(distance_scale, freecam.bevy_pos), color);
+                gizmos.line(d1.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos), d2.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos), color);
             }
         }
     }
