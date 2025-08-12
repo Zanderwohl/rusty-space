@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use std::collections::HashMap;
 use bevy::app::{App, Update};
 use bevy::math::DVec3;
@@ -6,7 +5,6 @@ use bevy::pbr::PointLight;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use lazy_static::lazy_static;
-use num_traits::Pow;
 use regex::Regex;
 use gizmoids::trajectory;
 use crate::body::appearance::{Appearance, AssetCache};
@@ -20,7 +18,7 @@ use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::{fixed_motive, kepler_motive, newton_motive};
 pub(crate) use crate::gui::planetarium::camera::{PlanetariumCamera, PlanetariumCameraPlugin};
 use crate::gui::planetarium::windows::body_info::BodyInfoState;
-use crate::gui::util::freecam::{FreeCamPlugin, Freecam};
+use crate::gui::util::freecam::{Freecam};
 use crate::util::bevystuff::GlamVec;
 use crate::util::jd::{J2000_JD, JD_SECONDS};
 use crate::util::mappings;
@@ -162,7 +160,6 @@ fn scale_distant_objects(
 }
 
 fn position_bodies(
-    mut sim_time: ResMut<SimTime>,
     mut bodies: Query<(&SimulationObject, &mut Transform, &BodyInfo, &BodyState, &Appearance)>,
     camera: Query<&Freecam, With<PlanetariumCamera>>,
     view_settings: Res<ViewSettings>,
@@ -190,7 +187,7 @@ fn position_bodies(
         } else {
             appearance.radius() * view_settings.body_scale
         } as f32;
-        transform.scale = bevy::math::Vec3::splat(body_scale);
+        transform.scale = Vec3::splat(body_scale);
     }
 }
 
@@ -206,7 +203,7 @@ fn label_bodies(
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("body_labels")));
 
     for (camera, _, _, camera_transform) in &cameras {
-        for (_, mut transform, body_info) in bodies.iter() {
+        for (_, transform, body_info) in bodies.iter() {
             if !view_settings.show_labels && !view_settings.body_in_any_visible_tag(&body_info.id) {
                 continue;
             }

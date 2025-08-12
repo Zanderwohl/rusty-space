@@ -11,8 +11,6 @@ pub struct BodyInfo {
     pub mass: f64,
     pub major: bool,
     pub designation: Option<String>,
-    #[serde(skip, default = "Uuid::new_v4")]
-    pub uuid: Uuid,
     #[serde(default = "Vec::new")]
     pub tags: Vec<String>,
 }
@@ -58,7 +56,6 @@ impl Default for BodyInfo {
             mass: 0.0,
             major: false,
             designation: None,
-            uuid: Uuid::from_u128(0u128),
             tags: vec![],
         }
     }

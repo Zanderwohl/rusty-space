@@ -298,7 +298,6 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.8982e27,
                         major: true,
                         designation: None,
-                        uuid: Default::default(),
                         tags: vec!["Planet".into(), "Major Planet".into()],
                     },
                     params: KeplerMotive {
@@ -333,7 +332,6 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.681e25,
                         major: true,
                         designation: None,
-                        uuid: Default::default(),
                         tags: vec!["Planet".into(), "Major Planet".into()],
                     },
                     params: KeplerMotive {
@@ -367,7 +365,6 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.02409e26,
                         major: true,
                         designation: None,
-                        uuid: Default::default(),
                         tags: vec!["Planet".into(), "Major Planet".into()],
                     },
                     params: KeplerMotive {
@@ -401,7 +398,6 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.6466e22,
                         major: true,
                         designation: Some("136199 Eris".into()),
-                        uuid: Default::default(),
                         tags: vec!["Planet".into(), "Minor Planet".into()],
                     },
                     params: KeplerMotive {
@@ -436,7 +432,6 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.2e19,
                         major: true,
                         designation: Some("136199 Eris I".into()),
-                        uuid: Default::default(),
                         tags: vec!["Moon".into()],
                     },
                     params: KeplerMotive {
@@ -471,7 +466,6 @@ pub fn solar_system() -> UniverseFile {
                         mass: 2.0e21, // Estimate from https://www.rasc.ca/asteroid/90377
                         major: true,
                         designation: Some("90377 Sedna".into()),
-                        uuid: Default::default(),
                         tags: vec!["Planet".into(), "Minor Planet".into()],
                     },
                     params: KeplerMotive {
@@ -611,7 +605,6 @@ pub fn earth_moon() -> UniverseFile {
                         mass: 1000.0,
                         major: false,
                         designation: Some("TB-A".into()),
-                        uuid: Default::default(),
                         tags: vec!["Test Body".into()],
                     },
                     position: DVec3::new(384400.0 * 1000.0, 0.0, 0.0),
@@ -632,7 +625,6 @@ pub fn earth_moon() -> UniverseFile {
                         mass: 1000.0,
                         major: false,
                         designation: Some("TB-B".into()),
-                        uuid: Default::default(),
                         tags: vec!["Test Body".into()],
                     },
                     position: DVec3::new(384400.0 * 1000.0, 0.0, 0.0),
