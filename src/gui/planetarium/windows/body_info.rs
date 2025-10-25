@@ -32,7 +32,7 @@ pub fn body_info_window(
     bodies: Query<(Entity, &BodyInfo, &BodyState, Option<&FixedMotive>, Option<&KeplerMotive>, Option<&NewtonMotive>)>,
     mut contexts: EguiContexts,
     mut body_info_state: ResMut<BodyInfoState>,
-    mut go_to: EventWriter<GoTo>,
+    mut go_to: MessageWriter<GoTo>,
 ) {
     let ctx = contexts.ctx_mut();
     if ctx.is_err() { return; }

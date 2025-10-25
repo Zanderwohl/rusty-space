@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use bevy::math::DVec3;
 use bevy::prelude::*;
-use bevy::render::view::NoFrustumCulling;
 use std::collections::HashMap;
+use bevy::camera::visibility::NoFrustumCulling;
 use serde::{Deserialize, Serialize};
 use crate::body::appearance::Appearance;
 use crate::body::appearance::AssetCache;

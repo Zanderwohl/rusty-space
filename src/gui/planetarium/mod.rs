@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use bevy::app::{App, Update};
 use bevy::math::DVec3;
-use bevy::pbr::PointLight;
+use bevy::light::PointLight;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use lazy_static::lazy_static;

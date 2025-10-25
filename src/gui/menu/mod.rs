@@ -202,7 +202,7 @@ pub fn settings_menu(
 
 pub fn quit_system (
     ui_state: Res<UiState>,
-    mut exit: EventWriter<AppExit>
+    mut exit: MessageWriter<AppExit>
 ) {
     if ui_state.quit_requested {
         exit.write(AppExit::Success);
@@ -212,7 +212,7 @@ pub fn quit_system (
 /// Copied and modified from https://docs.rs/bevy_window/0.15.3/src/bevy_window/system.rs.html#42-58
 pub fn close_when_requested(
     mut commands: Commands,
-    mut closed: EventReader<WindowCloseRequested>,
+    mut closed: MessageReader<WindowCloseRequested>,
     closing: Query<Entity, With<ClosingWindow>>,
     settings: Res<Settings>,
 ) {

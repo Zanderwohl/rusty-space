@@ -25,6 +25,10 @@ First-time compilation will take several minutes: about 15 minutes on my M3 Mac,
 
 ## To Do List
 
+* Shader to see light shine off distant objects
+  * Sometimes objects are smaller than a pixel, so their bloom disappears suddenly or flickers
+  * Screenspace shader that gets coordinates of objects and angles to light sources
+    * phase angle?
 * Add textures to objects
 * Rotation and quaternion stuff (sadge)
 * Procedural textures for planets

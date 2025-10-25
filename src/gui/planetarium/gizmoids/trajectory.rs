@@ -18,13 +18,12 @@ pub fn render_trajectories(
     mut gizmos: Gizmos,
     view_settings: Res<ViewSettings>,
     settings: Res<Settings>,
-    camera: Query<&Freecam, With<PlanetariumCamera>>,
+    fcam: Single<&Freecam, With<PlanetariumCamera>>,
     sim_time: Res<SimTime>,
     color_grading: Single<&ColorGrading>,
 ) {
     let distance_scale = view_settings.distance_factor();
 
-    let fcam = camera.single().unwrap();
     let exposure = color_grading.global.exposure;
 
     let (min_brightness, max_brightness) = match settings.display.glow {

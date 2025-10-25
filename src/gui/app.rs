@@ -1,14 +1,14 @@
 use std::f32::consts::PI;
 use std::path::PathBuf;
 use bevy::color::Color;
-use bevy::core_pipeline::bloom::Bloom;
-use bevy::core_pipeline::post_process::ChromaticAberration;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::DefaultPlugins;
 use bevy::diagnostic::FrameCount;
 use bevy::input::keyboard::Key::DVR;
 use bevy::math::DVec3;
+use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
+use bevy::render::view::Hdr;
 use bevy::window::{ExitCondition, PresentMode};
 use bevy_egui::EguiPlugin;
 use crate::body::universe::solar_system::{write_temp_system_file, write_earth_moon_file};
@@ -39,6 +39,7 @@ pub fn run() {
                     visible: true,
                     ..Default::default()
                 }),
+                primary_cursor_options: None,
                 exit_condition: ExitCondition::OnPrimaryClosed,
                 close_when_requested: false,
             }))
@@ -109,9 +110,9 @@ pub fn common_setup(
             ..Default::default()
         },
         Camera {
-            hdr: true,
             ..Default::default()
         },
+        Hdr,
         Projection::Perspective(PerspectiveProjection {
             fov: PI / 2.0,
             aspect_ratio: 1.0,

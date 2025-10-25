@@ -3,7 +3,7 @@ use bevy::app::App;
 use bevy::input::mouse::MouseMotion;
 use bevy::math::{DMat3, DQuat, DVec3};
 use bevy::prelude::*;
-use bevy::window::{CursorGrabMode, PrimaryWindow};
+use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use bevy_egui::EguiContexts;
 use num_traits::Float;
 use crate::body::appearance::Appearance;
@@ -22,7 +22,7 @@ impl Plugin for PlanetariumCameraPlugin {
     fn build(&self, app: &mut App) {
         app
             .add_plugins(FreeCamPlugin)
-            .add_event::<GoTo>()
+            .add_message::<GoTo>()
             .add_systems(Update, (
                 handle_gotos,
                 run_goto,
@@ -66,7 +66,7 @@ impl PartialEq for CameraAction {
     }
 }
 
-#[derive(Event)]
+#[derive(Message)]
 pub struct GoTo {
     pub entity: Entity,
 }
@@ -89,7 +89,7 @@ pub struct RevolveAround {
 }
 
 fn handle_gotos (
-    mut go_tos: EventReader<GoTo>,
+    mut go_tos: MessageReader<GoTo>,
     mut camera: Query<(&mut Transform, &mut PlanetariumCamera, &mut Freecam)>,
     bodies: Query<(Entity, &BodyState, &Appearance), Without<PlanetariumCamera>>,
     view_settings: Res<ViewSettings>,
@@ -181,14 +181,14 @@ fn run_goto (
 fn revolve_around(
     settings: Res<MovementSettings>,
     mut camera: Query<(&mut Transform, &mut PlanetariumCamera, &mut Freecam)>,
-    mut mouse: EventReader<MouseMotion>,
+    mut mouse: MessageReader<MouseMotion>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
-    mut primary_window: Query<(&mut Window), With<PrimaryWindow>>,
+    mut primary_window: Query<(&mut Window, &mut CursorOptions), With<PrimaryWindow>>,
     view_settings: Res<ViewSettings>,
     entities: Query<(Entity, &BodyState, &Transform), Without<Freecam>>,
     mut egui_ctx: EguiContexts,
 ) {
-    if let Ok(mut window) = primary_window.single_mut() {
+    if let Ok((mut window, mut cursor_options)) = primary_window.single_mut() {
         for (mut cam_t, mut pcam, mut fcam) in camera.iter_mut() {
 
             match &mut pcam.action {
@@ -201,11 +201,11 @@ fn revolve_around(
                             if mouse_buttons.pressed(MouseButton::Left) {
                                 if let Ok(ctx) = egui_ctx.ctx_mut() && ctx.wants_pointer_input() && ctx.wants_pointer_input() {
                                     // If hovering over an egui window, don't rotate around! It grabs the mouse :(
-                                    window.cursor_options.grab_mode = CursorGrabMode::None;
-                                    window.cursor_options.visible = true;
+                                    cursor_options.grab_mode = CursorGrabMode::None;
+                                    cursor_options.visible = true;
                                 } else {
-                                    window.cursor_options.grab_mode = CursorGrabMode::Confined;
-                                    window.cursor_options.visible = false;
+                                    cursor_options.grab_mode = CursorGrabMode::Confined;
+                                    cursor_options.visible = false;
                                     for ev in mouse.read() {
                                         revolve.azimuth -= (ev.delta.x.clamp(-1000.0, 1000.0) * window_scale * settings.sensitivity) as f64;
                                         revolve.azimuth = revolve.azimuth.rem_euclid(TAU);
@@ -215,8 +215,8 @@ fn revolve_around(
                                     }
                                 }
                             } else {
-                                window.cursor_options.grab_mode = CursorGrabMode::None;
-                                window.cursor_options.visible = true;
+                                cursor_options.grab_mode = CursorGrabMode::None;
+                                cursor_options.visible = true;
                             }
 
                             let body_pos_in_bevy = state.current_position.as_bevy_scaled_dvec(view_settings.distance_factor());

@@ -1,10 +1,8 @@
 //! Demonstrates Bevy's built-in postprocessing features.
 //!
 //! Currently, this simply consists of chromatic aberration.
-
-use bevy::{
-    core_pipeline::post_process::ChromaticAberration, prelude::*,
-};
+use bevy::post_process::effect_stack::ChromaticAberration;
+use bevy::prelude::*;
 
 /// The number of units per frame to add to or subtract from intensity when the
 /// arrow keys are held.
