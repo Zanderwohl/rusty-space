@@ -5,7 +5,6 @@ use num_traits::Pow;
 use crate::body::universe::save::ViewSettings;
 use crate::gui::app::AppState;
 use crate::gui::menu::{MenuState, UiState};
-use crate::gui::planetarium::SCI_RE;
 use crate::gui::planetarium::time::SimTime;
 use crate::gui::settings::{Settings, UiTheme};
 use crate::util::format;
@@ -15,10 +14,10 @@ pub fn control_window(
     mut contexts: EguiContexts,
     mut settings: ResMut<Settings>,
     mut ui_state: ResMut<UiState>,
-    mut next_app_state: ResMut<NextState<AppState>>,
-    mut next_menu_state: ResMut<NextState<MenuState>>,
+    next_app_state: ResMut<NextState<AppState>>,
+    next_menu_state: ResMut<NextState<MenuState>>,
     mut time: ResMut<SimTime>,
-    mut view_settings: ResMut<ViewSettings>,
+    view_settings: ResMut<ViewSettings>,
 ) {
     let ctx = contexts.ctx_mut();
     if ctx.is_err() { return; }
@@ -39,9 +38,9 @@ pub fn control_window(
 pub fn planetarium_controls(
     mut next_app_state: ResMut<NextState<AppState>>,
     mut next_menu_state: ResMut<NextState<MenuState>>,
-    mut time: &mut ResMut<SimTime>,
+    time: &mut ResMut<SimTime>,
     ui: &mut Ui,
-    mut ui_state: &mut ResMut<UiState>,
+    ui_state: &mut ResMut<UiState>,
     mut view_settings: ResMut<ViewSettings>,
 ) {
     if ui.button("Quit to Main Menu").clicked() {
@@ -98,23 +97,8 @@ pub fn planetarium_controls(
             .speed(gui_speed_step)
             .range(f64::MIN..=f64::MAX)
             .fixed_decimals(1)
-            .custom_formatter(|n, range| {
-                format::sci_not(n)
-            })
-            .custom_parser(|s| {
-                if !SCI_RE.is_match(s) {
-                    return None;
-                }
-                let s: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-                let a = s.split("x").collect::<Vec<&str>>();
-                let mantissa = a[0].parse::<f64>().ok()?;
-                let b = a[1].split("^").collect::<Vec<&str>>();
-                let exponent = b[1].parse::<i64>().ok()?;
-
-                let result = mantissa * (10.0f64.pow(exponent as f64));
-
-                return Some(result);
-            })
+            .custom_formatter(|n, range| format::sci_not(n))
+            .custom_parser(|s| format::sci_not_parser(s))
         );
         if ui.button(">").clicked() { time.gui_speed += gui_speed_step }
         if ui.button(">>").clicked() { time.gui_speed *= 10.0 }
@@ -174,5 +158,3 @@ pub fn planetarium_controls(
         });
     }
 }
-
-

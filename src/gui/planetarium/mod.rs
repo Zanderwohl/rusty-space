@@ -88,10 +88,6 @@ impl Plugin for PlanetariumUI {
     }
 }
 
-lazy_static! {
-    static ref SCI_RE: Regex = Regex::new(r"\d?\.\d+\s?x\s?10\s?\^\s?\d+").unwrap();
-}
-
 fn adjust_lights(
     mut lights: Query<(&BodyInfo, &mut PointLight, &Appearance)>,
     view_settings: Res<ViewSettings>,
