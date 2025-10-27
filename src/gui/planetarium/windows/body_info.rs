@@ -54,7 +54,6 @@ pub fn body_info_window(
                 body_options.sort_by(|a, b| a.0.cmp(&b.0));
 
                 body_select_dropdown(universe, &mut body_info_state, ui, body_options);
-
                 
                 // Get the body using the BodyInfo.id from bodies query
                 let selected_body = bodies.iter().filter(|(e, info, state, fixed_motive, kepler_motive, newton_motive)| {
@@ -161,7 +160,7 @@ fn newton_motive_section(ui: &mut Ui, motive: &NewtonMotive) {
     motive.display(ui);
 }
 
-fn body_select_dropdown(universe: Res<Universe>, mut body_info_state: &mut ResMut<BodyInfoState>, ui: &mut Ui, mut body_options: Vec<(String, String)>) {
+pub(crate) fn body_select_dropdown(universe: Res<Universe>, mut body_info_state: &mut ResMut<BodyInfoState>, ui: &mut Ui, mut body_options: Vec<(String, String)>) {
     egui::ComboBox::from_label("Body")
         .selected_text(
             body_info_state.current_body_id
