@@ -57,10 +57,17 @@ pub fn body_edit_window(
     }
 }
 
-fn body_info_section(ui: &mut egui::Ui, info: &BodyInfo) {
+fn body_info_section(ui: &mut egui::Ui, info: &mut BodyInfo) {
     ui.horizontal(|ui| {
         ui.label("Name:");
         ui.label(info.display_name());
+    });
+    
+    let mass = &mut info.mass;
+    ui.horizontal(|ui| {
+        ui.label("Mass:");
+        stepper(ui, "", mass);
+        ui.label("kg");
     });
 }
 
