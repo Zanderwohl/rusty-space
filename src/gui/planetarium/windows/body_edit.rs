@@ -65,23 +65,27 @@ fn body_info_section(ui: &mut egui::Ui, info: &BodyInfo) {
 }
 
 fn fixed_motive_section(ui: &mut egui::Ui, fixed_motive: &mut FixedMotive) {
+    ui.heading("Fixed Position");
     ui.vertical(|ui| {
-        {
-            let x = &mut fixed_motive.position.x;
-            slider(ui, "x", x);
-        }
-        {
-            let y = &mut fixed_motive.position.y;
-            slider(ui, "y", y);
-        }
-        {
-            let z = &mut fixed_motive.position.z;
-            slider(ui, "z", z);
-        }
+        let x = &mut fixed_motive.position.x;
+        ui.horizontal(|ui| {
+            stepper(ui, "x", x);
+            ui.label("m");
+        });
+        let y = &mut fixed_motive.position.y;
+        ui.horizontal(|ui| {
+            stepper(ui, "y", y);
+            ui.label("m");
+        });
+        let z = &mut fixed_motive.position.z;
+        ui.horizontal(|ui| {
+            stepper(ui, "z", z);
+            ui.label("m");
+        });
     });
 }
 
-fn slider<S: AsRef<str>>(ui: &mut egui::Ui, label: S, mut value: &mut f64) {
+fn stepper<S: AsRef<str>>(ui: &mut egui::Ui, label: S, mut value: &mut f64) {
     ui.horizontal(|ui| {
        ui.label(label.as_ref());
         if ui.button("<<").clicked() { *value /= 10.0; }
