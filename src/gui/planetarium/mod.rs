@@ -39,6 +39,17 @@ struct PlanetariumLoadingSet;
 
 pub struct PlanetariumUI;
 
+#[derive(Message)]
+pub struct CalculateTrajectory {
+    pub selection: BodySelection,
+}
+
+pub enum BodySelection {
+    All,
+    Tag(String),
+    IDs(Vec<String>),
+}
+
 impl Plugin for PlanetariumUI {
     fn build(&self, app: &mut App) {
         app
@@ -47,6 +58,7 @@ impl Plugin for PlanetariumUI {
             .init_resource::<ViewSettings>()
             .init_resource::<AssetCache>()
             .init_resource::<BodyInfoState>()
+            .add_message::<CalculateTrajectory>()
             .configure_sets(Update, (
                 PlanetariumUISet.run_if(in_state(AppState::Planetarium)),
                 PlanetariumSimulationSet.run_if(in_state(AppState::Planetarium)),
@@ -81,11 +93,16 @@ impl Plugin for PlanetariumUI {
                 ).in_set(PlanetariumSimulationSet),
                 (load_assets).in_set(PlanetariumLoadingSet),
             ))
+            .add_systems(OnExit(AppState::PlanetariumLoading), initial_trajectories)
             .add_systems(OnExit(AppState::Planetarium), unload_simulation_objects)
         ;
 
 
     }
+}
+
+fn initial_trajectories(mut calcs: MessageWriter<CalculateTrajectory>) {
+    calcs.write(CalculateTrajectory { selection: BodySelection::All });
 }
 
 fn adjust_lights(

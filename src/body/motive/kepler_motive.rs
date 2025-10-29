@@ -7,6 +7,7 @@ use num_traits::FloatConst;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::SimulationObject;
 use crate::body::universe::save::{UniversePhysics, ViewSettings};
+use crate::gui::planetarium::{BodySelection, CalculateTrajectory};
 use crate::gui::planetarium::time::SimTime;
 use crate::util::jd::{seconds_since_j2000, J2000_JD, JD_SECONDS};
 use crate::util::kepler::{angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
@@ -468,12 +469,14 @@ pub fn calculate(
 }
 
 pub fn calculate_trajectory(
-    mut kepler_bodies: Query<(&mut BodyState, &BodyInfo, &KeplerMotive),
-        Or<(Changed<KeplerMotive>, Added<KeplerMotive>)>>,
+    mut calcs: MessageReader<CalculateTrajectory>,
+    mut kepler_bodies: Query<(&mut BodyState, &BodyInfo, &KeplerMotive)>,
     other_bodies: Query<(&SimulationObject, &BodyInfo, &BodyState), Without<KeplerMotive>>,
     physics: Res<UniversePhysics>,
     view_settings: Res<ViewSettings>,
 ) {
+    if calcs.is_empty() { return; }
+
     // First collect all body masses into a HashMap
     let mut body_masses: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
     for (_, info, _) in kepler_bodies.iter() {
@@ -483,30 +486,39 @@ pub fn calculate_trajectory(
         body_masses.insert(info.id.clone(), info.mass);
     }
 
-    for (mut state, info, motive) in kepler_bodies.iter_mut() {
-        info!("Caching trajectory for {}", info.display_name());
-        
-        let primary_mass = body_masses.get(&motive.primary_id)
-            .copied()
-            .expect("Missing primary body mass");
-        let mu = physics.gravitational_constant * primary_mass;
-        
-        state.trajectory = Some(TimeMap::new());
-        let map = state.trajectory.as_mut().unwrap();
-        let period = motive.period(mu);
+    for calc in calcs.read() {
+        for (mut state, info, motive) in kepler_bodies.iter_mut() {
+            let do_this = match &calc.selection {
+                BodySelection::All => true,
+                BodySelection::Tag(tag) => info.tags.contains(tag),
+                BodySelection::IDs(ids) => ids.contains(&info.id),
+            };
+            if !do_this { continue; }
 
-        let periapsis_time = motive.time_at_periapsis_passage(mu);
-        
-        if !motive.is_open() {
-            map.set_periodicity(periapsis_time, period);
-        }
+            info!("Caching trajectory for {}", info.display_name());
 
-        for i in 0..=view_settings.trajectory_resolution {
-            let relative_time = (i as f64 / view_settings.trajectory_resolution as f64) * period;
-            let absolute_time = periapsis_time + relative_time;
-            let displacement = motive.displacement(absolute_time, mu);
-            if let Some(displacement) = displacement {
-                map.insert(relative_time, displacement); // Store using relative time as key
+            let primary_mass = body_masses.get(&motive.primary_id)
+                .copied()
+                .expect("Missing primary body mass");
+            let mu = physics.gravitational_constant * primary_mass;
+
+            state.trajectory = Some(TimeMap::new());
+            let map = state.trajectory.as_mut().unwrap();
+            let period = motive.period(mu);
+
+            let periapsis_time = motive.time_at_periapsis_passage(mu);
+
+            if !motive.is_open() {
+                map.set_periodicity(periapsis_time, period);
+            }
+
+            for i in 0..=view_settings.trajectory_resolution {
+                let relative_time = (i as f64 / view_settings.trajectory_resolution as f64) * period;
+                let absolute_time = periapsis_time + relative_time;
+                let displacement = motive.displacement(absolute_time, mu);
+                if let Some(displacement) = displacement {
+                    map.insert(relative_time, displacement); // Store using relative time as key
+                }
             }
         }
     }

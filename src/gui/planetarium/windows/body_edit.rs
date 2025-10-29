@@ -1,16 +1,14 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
-use num_traits::Pow;
 use crate::body::motive::fixed_motive::FixedMotive;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::motive::newton_motive::NewtonMotive;
 use crate::body::universe::Universe;
+use crate::gui::common;
 use crate::gui::menu::UiState;
 use crate::gui::planetarium::windows::body_info::BodyInfoState;
 use crate::gui::settings::{Settings, UiTheme};
-use crate::util::format;
-
 pub fn body_edit_window(
     mut settings: ResMut<Settings>,
     mut ui_state: ResMut<UiState>,
@@ -51,6 +49,12 @@ pub fn body_edit_window(
                         if let Some(fixed_motive) = fixed_motive.as_mut() {
                             fixed_motive_section(ui, fixed_motive.as_mut())
                         }
+                        if let Some(kepler_motive) = kepler_motive.as_mut() {
+                            kepler_motive_section(ui, kepler_motive.as_mut())
+                        }
+                        if let Some(newton_motive) = newton_motive.as_mut() {
+                            newton_motive_section(ui, newton_motive.as_mut())
+                        }
                     }
                 }
             });
@@ -62,64 +66,68 @@ fn body_info_section(ui: &mut egui::Ui, info: &mut BodyInfo) {
         ui.label("Name:");
         ui.label(info.display_name());
     });
-    
+
     let mass = &mut info.mass;
     ui.horizontal(|ui| {
         ui.label("Mass:");
-        stepper(ui, "", mass);
+        common::stepper(ui, "", mass);
         ui.label("kg");
     });
 }
 
-fn fixed_motive_section(ui: &mut egui::Ui, fixed_motive: &mut FixedMotive) {
+fn fixed_motive_section(ui: &mut egui::Ui, motive: &mut FixedMotive) {
     ui.heading("Fixed Position");
     ui.vertical(|ui| {
-        let x = &mut fixed_motive.position.x;
+        let x = &mut motive.position.x;
         ui.horizontal(|ui| {
-            stepper(ui, "x", x);
+            common::stepper(ui, "x", x);
             ui.label("m");
         });
-        let y = &mut fixed_motive.position.y;
+        let y = &mut motive.position.y;
         ui.horizontal(|ui| {
-            stepper(ui, "y", y);
+            common::stepper(ui, "y", y);
             ui.label("m");
         });
-        let z = &mut fixed_motive.position.z;
+        let z = &mut motive.position.z;
         ui.horizontal(|ui| {
-            stepper(ui, "z", z);
+            common::stepper(ui, "z", z);
             ui.label("m");
         });
     });
 }
 
-fn stepper<S: AsRef<str>>(ui: &mut egui::Ui, label: S, mut value: &mut f64) {
+fn kepler_motive_section(ui: &mut egui::Ui, motive: &mut KeplerMotive) {
+    ui.heading("Keplerian Body");
+}
+
+fn newton_motive_section(ui: &mut egui::Ui, motive: &mut NewtonMotive) {
+    ui.heading("Newtonian Body");
+
+    ui.heading("Position");
     ui.horizontal(|ui| {
-       ui.label(label.as_ref());
-        if ui.button("<<").clicked() { *value /= 10.0; }
-        if ui.button("<").clicked() { *value = bump_decimal(*value, -1.0); }
-        ui.add(egui::DragValue::new(value)
-            .speed(0.01)
-            .range(f64::MIN..=f64::MAX)
-            .fixed_decimals(1)
-            .custom_formatter(|n, range| format::sci_not(n))
-            .custom_parser(|s| format::sci_not_parser(s))
-        );
-        if ui.button(">").clicked() { *value = bump_decimal(*value, 1.0); }
-        if ui.button(">>").clicked() { *value *= 10.0; }
+        common::stepper(ui, "x", &mut motive.position.x);
+        ui.label("m");
     });
-}
+    ui.horizontal(|ui| {
+        common::stepper(ui, "y", &mut motive.position.y);
+        ui.label("m");
+    });
+    ui.horizontal(|ui| {
+        common::stepper(ui, "z", &mut motive.position.z);
+        ui.label("m");
+    });
 
-fn bump_decimal(x: f64, direction: f64) -> f64 {
-    if x == 0.0 { return 0.0; }
-
-    // Find order of magnitude (e.g. 3.4e5 → exp = 5)
-    let exp = x.abs().log10().floor();
-    // Find the multiplier that makes the number ~[1, 10)
-    let scale = 10f64.powf(exp);
-    let normalized = x / scale; // e.g. 3.4
-
-    // Change the first digit after the decimal (i.e. ±0.1)
-    let bumped = (normalized * 10.0 + direction).round() / 10.0;
-
-    bumped * scale.copysign(x)
+    ui.heading("Velocity");
+    ui.horizontal(|ui| {
+        common::stepper(ui, "x", &mut motive.velocity.x);
+        ui.label("m/s");
+    });
+    ui.horizontal(|ui| {
+        common::stepper(ui, "y", &mut motive.velocity.y);
+        ui.label("m/s");
+    });
+    ui.horizontal(|ui| {
+        common::stepper(ui, "z", &mut motive.velocity.z);
+        ui.label("m/s");
+    });
 }
