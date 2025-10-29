@@ -98,18 +98,9 @@ impl KeplerMotive {
         self.rotation.longitude_of_ascending_node((time_seconds / JD_SECONDS) - self.epoch.epoch_julian_day())
     }
 
-    /// Defines 0.0 inclination case as having 0.0 long of asc node
+    /// Lets 0.0 inclination case have long of asc node
     pub fn longitude_of_ascending_node_infallible(&self, time_seconds: f64) -> f64 {
-        let time_since_epoch_jd = (time_seconds / JD_SECONDS) - self.epoch.epoch_julian_day();
-        match &self.rotation {
-            KeplerRotation::EulerAngles(ea) => ea.longitude_of_ascending_node,
-            KeplerRotation::FlatAngles(_) => 0.0,
-            KeplerRotation::PrecessingEulerAngles(pea) => {
-                let deg = pea.nodal_precession_deg(time_since_epoch_jd);
-                let long = mappings::bound_circle(pea.longitude_of_ascending_node + deg, 360.0);
-                long
-            }
-        }    
+        self.rotation.longitude_of_ascending_node_infallible((time_seconds / JD_SECONDS) - self.epoch.epoch_julian_day())
     }
 
     pub fn longitude_of_periapsis(&self, time_seconds: f64) -> f64 {
@@ -304,6 +295,18 @@ impl KeplerRotation {
 
     pub fn no_inclination(&self) -> bool {
         self.inclination() < f64::EPSILON
+    }
+
+    pub fn longitude_of_ascending_node_infallible(&self, time_since_epoch_jd: f64) -> f64 {
+        match self {
+            KeplerRotation::EulerAngles(ea) => ea.longitude_of_ascending_node,
+            KeplerRotation::FlatAngles(_) => 0.0,
+            KeplerRotation::PrecessingEulerAngles(pea) => {
+                let deg = pea.nodal_precession_deg(time_since_epoch_jd);
+                let long = mappings::bound_circle(pea.longitude_of_ascending_node + deg, 360.0);
+                long
+            }
+        }
     }
 
     pub fn longitude_of_ascending_node(&self, time_since_epoch_jd: f64) -> Option<f64> {
