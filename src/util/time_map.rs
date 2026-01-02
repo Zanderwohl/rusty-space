@@ -233,12 +233,20 @@ impl SortedTimes {
     }
 
     pub fn get_at_or_before(&self, time: f64) -> Option<f64> {
-        if self.in_order.len() == 0 {
+        if self.in_order.is_empty() {
             return None;
         }
 
+        // partition_point returns the first index where x > time
+        // So insertion_point - 1 is the last index where x <= time
         let insertion_point = self.in_order.partition_point(|&x| x <= time);
-        Some(self.in_order[insertion_point])
+        
+        if insertion_point == 0 {
+            // No element is <= time, so there's nothing "at or before"
+            None
+        } else {
+            Some(self.in_order[insertion_point - 1])
+        }
     }
 
     /// Gets the index of the lowest time which is after the given time

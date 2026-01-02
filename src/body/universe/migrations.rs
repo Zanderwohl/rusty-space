@@ -137,6 +137,7 @@ pub static MIGRATIONS: &[Migration] = &[
             -- ================================================================
             CREATE TABLE IF NOT EXISTS motive_fixed (
                 motive_id INTEGER PRIMARY KEY NOT NULL,
+                primary_id TEXT,  -- NULL means relative to origin (0,0,0)
                 pos_x REAL NOT NULL,
                 pos_y REAL NOT NULL,
                 pos_z REAL NOT NULL,

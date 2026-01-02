@@ -22,18 +22,36 @@ pub enum TransitionEvent {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum MotiveSelection {
-    Fixed { position: DVec3 },
-    Newtonian { position: DVec3, velocity: DVec3 },
+    /// Fixed position relative to a parent body (or origin if primary_id is None)
+    Fixed { 
+        primary_id: Option<String>,
+        position: DVec3,
+    },
+    /// Newtonian physics - affected by gravity from Major bodies
+    Newtonian { 
+        position: DVec3, 
+        velocity: DVec3,
+    },
+    /// Keplerian orbit around a primary body
     Keplerian(KeplerMotive),
 }
 
 impl MotiveSelection {
     pub fn same_kind(&self, other: &MotiveSelection) -> bool {
         match (self, other) {
-            (MotiveSelection::Fixed { position: _ }, MotiveSelection::Fixed { position: _ }) => true,
-            (MotiveSelection::Newtonian { position: _, velocity: _}, MotiveSelection::Newtonian { position: _, velocity: _}) => true,
+            (MotiveSelection::Fixed { .. }, MotiveSelection::Fixed { .. }) => true,
+            (MotiveSelection::Newtonian { .. }, MotiveSelection::Newtonian { .. }) => true,
             (MotiveSelection::Keplerian(_), MotiveSelection::Keplerian(_)) => true,
             _ => false
+        }
+    }
+
+    /// Get the primary_id if this motive has one (Fixed with Some or Keplerian)
+    pub fn primary_id(&self) -> Option<&str> {
+        match self {
+            MotiveSelection::Fixed { primary_id, .. } => primary_id.as_deref(),
+            MotiveSelection::Keplerian(k) => Some(&k.primary_id),
+            MotiveSelection::Newtonian { .. } => None,
         }
     }
 }
@@ -64,9 +82,15 @@ impl Motive {
         })
     }
 
+    /// Create a fixed motive at the origin (no parent)
     pub fn fixed(position: DVec3) -> Self {
+        Self::fixed_with_parent(None, position)
+    }
+
+    /// Create a fixed motive relative to a parent body
+    pub fn fixed_with_parent(primary_id: Option<String>, position: DVec3) -> Self {
         let mut new = Self::new();
-        new.insert_event(0.0, TransitionEvent::Epoch, MotiveSelection::Fixed { position });
+        new.insert_event(0.0, TransitionEvent::Epoch, MotiveSelection::Fixed { primary_id, position });
         new
     }
 
@@ -117,7 +141,7 @@ impl Motive {
 
     pub fn is_fixed(&self, time: f64) -> bool {
         let (_, motive) = self.motive_at(time);
-        MotiveSelection::Fixed { position: DVec3::ZERO }.same_kind(motive)
+        MotiveSelection::Fixed { primary_id: None, position: DVec3::ZERO }.same_kind(motive)
     }
     
     pub fn is_newtonian(&self, time: f64) -> bool {

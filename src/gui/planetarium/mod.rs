@@ -15,8 +15,7 @@ use crate::gui::menu::{TagState, UiState};
 use crate::gui::planetarium::time::SimTime;
 use crate::body::{universe, unload_simulation_objects, SimulationObject};
 use crate::body::motive::info::{BodyInfo, BodyState};
-use crate::body::motive::{fixed_motive, kepler_motive, newton_motive};
-use crate::body::motive::newton_motive::NewtonMotive;
+use crate::body::motive::calculate_body_positions;
 pub(crate) use crate::gui::planetarium::camera::{PlanetariumCamera, PlanetariumCameraPlugin};
 use crate::gui::planetarium::windows::body_info::BodyInfoState;
 use crate::gui::util::freecam::{Freecam};
@@ -81,7 +80,8 @@ impl Plugin for PlanetariumUI {
             .add_systems(Update, (
                 (
                     adjust_lights,
-                    position_bodies,
+                    calculate_body_positions,
+                    position_bodies.after(calculate_body_positions),
                     trajectory::render_trajectories,
                 ).in_set(PlanetariumUISet),
                 (
@@ -96,6 +96,8 @@ impl Plugin for PlanetariumUI {
 
     }
 }
+
+// The calculate_body_positions system is imported from motive/calculate_body_positions.rs
 
 fn initial_trajectories(mut calcs: MessageWriter<CalculateTrajectory>) {
     calcs.write(CalculateTrajectory { selection: BodySelection::All });

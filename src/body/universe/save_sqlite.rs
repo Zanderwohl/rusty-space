@@ -111,8 +111,10 @@ pub fn save_to_em(path: &PathBuf, contents: &UniverseFileContents) -> Result<(),
     match (|| -> Result<(), SqliteSaveError> {
         save_physics(&conn, &contents.physics)?;
         save_time(&conn, &contents.time)?;
-        save_view_settings(&conn, &contents.view)?;
+        // Save bodies first - this creates tags from body.info.tags
         save_bodies(&conn, &contents.bodies)?;
+        // Then save view settings - this updates tag display settings (shown/trajectory)
+        save_view_settings(&conn, &contents.view)?;
         Ok(())
     })() {
         Ok(()) => {
@@ -283,19 +285,21 @@ fn load_tags(conn: &Connection) -> Result<HashMap<String, TagState>, SqliteSaveE
 }
 
 fn save_tags(conn: &Connection, tags: &HashMap<String, TagState>) -> Result<(), SqliteSaveError> {
-    // Clear existing tags
-    conn.execute("DELETE FROM tag_members", [])?;
-    conn.execute("DELETE FROM tags", [])?;
+    // Update tag display settings (shown/trajectory)
+    // Note: Tags and tag_members are already created by save_bodies from body.info.tags
+    // This function updates the display settings and can add additional tags from view settings
     
     for (name, state) in tags {
+        // Update or insert tag with display settings
         conn.execute(
-            "INSERT INTO tags (name, shown, trajectory) VALUES (?1, ?2, ?3)",
+            "INSERT OR REPLACE INTO tags (name, shown, trajectory) VALUES (?1, ?2, ?3)",
             params![name, state.shown as i32, state.trajectory as i32],
         )?;
         
+        // Add any members that might not be in body.info.tags
         for member in &state.members {
             conn.execute(
-                "INSERT INTO tag_members (tag_name, body_id) VALUES (?1, ?2)",
+                "INSERT OR IGNORE INTO tag_members (tag_name, body_id) VALUES (?1, ?2)",
                 params![name, member],
             )?;
         }
@@ -403,6 +407,20 @@ fn save_bodies(conn: &Connection, bodies: &[SomeBody]) -> Result<(), SqliteSaveE
                 info.designation,
             ],
         )?;
+        
+        // Save body's tags to tag_members
+        for tag in &info.tags {
+            // Ensure the tag exists in the tags table
+            conn.execute(
+                "INSERT OR IGNORE INTO tags (name, shown, trajectory) VALUES (?1, 1, 0)",
+                [tag],
+            )?;
+            // Add body as member of this tag
+            conn.execute(
+                "INSERT OR IGNORE INTO tag_members (tag_name, body_id) VALUES (?1, ?2)",
+                params![tag, info.id],
+            )?;
+        }
         
         // Save appearance
         save_appearance(conn, &info.id, appearance)?;
@@ -561,12 +579,12 @@ fn load_motive(conn: &Connection, body_id: &str) -> Result<Motive, SqliteSaveErr
 fn load_motive_selection(conn: &Connection, motive_id: i64, motive_type: &str) -> Result<MotiveSelection, SqliteSaveError> {
     match motive_type {
         "Fixed" => {
-            let (x, y, z): (f64, f64, f64) = conn.query_row(
-                "SELECT pos_x, pos_y, pos_z FROM motive_fixed WHERE motive_id = ?1",
+            let (primary_id, x, y, z): (Option<String>, f64, f64, f64) = conn.query_row(
+                "SELECT primary_id, pos_x, pos_y, pos_z FROM motive_fixed WHERE motive_id = ?1",
                 [motive_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )?;
-            Ok(MotiveSelection::Fixed { position: DVec3::new(x, y, z) })
+            Ok(MotiveSelection::Fixed { primary_id, position: DVec3::new(x, y, z) })
         }
         "Newtonian" => {
             let row: (f64, f64, f64, f64, f64, f64) = conn.query_row(
@@ -705,10 +723,10 @@ fn save_motive(conn: &Connection, body_id: &str, motive: &Motive) -> Result<(), 
         
         // Insert type-specific data
         match selection {
-            MotiveSelection::Fixed { position } => {
+            MotiveSelection::Fixed { primary_id, position } => {
                 conn.execute(
-                    "INSERT INTO motive_fixed (motive_id, pos_x, pos_y, pos_z) VALUES (?1, ?2, ?3, ?4)",
-                    params![motive_id, position.x, position.y, position.z],
+                    "INSERT INTO motive_fixed (motive_id, primary_id, pos_x, pos_y, pos_z) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![motive_id, primary_id, position.x, position.y, position.z],
                 )?;
             }
             MotiveSelection::Newtonian { position, velocity } => {
