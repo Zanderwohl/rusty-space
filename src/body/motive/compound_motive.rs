@@ -1,0 +1,150 @@
+use std::collections::HashMap;
+use bevy::math::DVec3;
+use bevy::prelude::Component;
+use lazy_static::lazy_static;
+use serde::{Deserialize, Serialize};
+use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerRotation, KeplerShape, MeanAnomalyAtJ2000};
+use crate::util;
+use crate::util::time_map::SortedTimes;
+
+#[derive(Component, Serialize, Deserialize, Clone)]
+pub struct Motive {
+    times: SortedTimes,
+    motives: HashMap<u64, (TransitionEvent, MotiveSelection)>
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum TransitionEvent {
+    Epoch,
+    SOIChange,
+    Impulse,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub enum MotiveSelection {
+    Fixed { position: DVec3 },
+    Newtonian { position: DVec3, velocity: DVec3 },
+    Keplerian(KeplerMotive),
+}
+
+impl MotiveSelection {
+    pub fn same_kind(&self, other: &MotiveSelection) -> bool {
+        match (self, other) {
+            (MotiveSelection::Fixed { position: _ }, MotiveSelection::Fixed { position: _ }) => true,
+            (MotiveSelection::Newtonian { position: _, velocity: _}, MotiveSelection::Newtonian { position: _, velocity: _}) => true,
+            (MotiveSelection::Keplerian(_), MotiveSelection::Keplerian(_)) => true,
+            _ => false
+        }
+    }
+}
+
+impl Motive {
+    fn new() -> Self {
+        Self {
+            times: SortedTimes::new(),
+            motives: HashMap::new()
+        }
+    }
+
+    /// Create an empty motive with no events (must add events before use)
+    pub fn empty() -> Self {
+        Self::new()
+    }
+
+    /// Check if this motive has no events
+    pub fn is_empty(&self) -> bool {
+        self.times.is_empty()
+    }
+
+    /// Iterate over all events in time order
+    pub fn iter_events(&self) -> impl Iterator<Item = (f64, &TransitionEvent, &MotiveSelection)> {
+        self.times.iter().filter_map(|time| {
+            let key = util::bitfutz::f64::to_u64(*time);
+            self.motives.get(&key).map(|(event, selection)| (*time, event, selection))
+        })
+    }
+
+    pub fn fixed(position: DVec3) -> Self {
+        let mut new = Self::new();
+        new.insert_event(0.0, TransitionEvent::Epoch, MotiveSelection::Fixed { position });
+        new
+    }
+
+    pub fn newtonian(position: DVec3, velocity: DVec3) -> Self {
+        let mut new = Self::new();
+        new.insert_event(0.0, TransitionEvent::Epoch, MotiveSelection::Newtonian { position, velocity });
+        new
+    }
+
+    pub fn keplerian(primary_id: String, shape: KeplerShape, rotation: KeplerRotation, epoch: KeplerEpoch) -> Self {
+        let mut new = Self::new();
+        new.insert_event(0.0, TransitionEvent::Epoch, MotiveSelection::Keplerian(KeplerMotive { primary_id, shape, rotation, epoch }));
+        new
+    }
+
+    pub fn insert_event(&mut self, time: f64, event: TransitionEvent, motive_selection: MotiveSelection) {
+        let key = util::bitfutz::f64::to_u64(time);
+        self.times.insert(time);
+        self.motives.insert(key, (event, motive_selection));
+    }
+
+    pub fn remove_event(&mut self, time: f64) -> bool {
+        let key = util::bitfutz::f64::to_u64(time);
+        if self.times.remove_time(time) {
+            self.motives.remove(&key);
+            true
+        } else {
+            false
+        }
+    }
+    
+    pub fn remove_all_events_after(&mut self, time: f64) {
+        let index = self.times.get_index_after(time);
+        // get rid of all events after the index
+        let drained_times = self.times.remove_after(index);
+        let keys = drained_times.iter().map(|time| util::bitfutz::f64::to_u64(*time)).collect::<Vec<u64>>();
+        for key in keys {
+            self.motives.remove(&key);
+        }
+    }
+
+    /// Invariant: There must be at least one motive.
+    pub fn motive_at(&self, time: f64) -> &(TransitionEvent, MotiveSelection) {
+        let time = self.times.get_at_or_before(time).expect("Invariant violated: CompoundMotive must have at least one motive.");
+        let key = util::bitfutz::f64::to_u64(time);
+        self.motives.get(&key).expect(format!("Invariant violated: CompoundMotive.times gave the time {}, but CompoundMotive.time motives has no such key {}.", time, key).as_ref())
+    }
+
+    pub fn is_fixed(&self, time: f64) -> bool {
+        let (_, motive) = self.motive_at(time);
+        MotiveSelection::Fixed { position: DVec3::ZERO }.same_kind(motive)
+    }
+    
+    pub fn is_newtonian(&self, time: f64) -> bool {
+        let (_, motive) = self.motive_at(time);
+        MotiveSelection::Newtonian { position: DVec3::ZERO, velocity: DVec3::ZERO}.same_kind(motive)
+    }
+    
+    pub fn is_keplerian(&self, time: f64) -> bool {
+        let (_, motive) = self.motive_at(time);
+        KEPLER_COMPARISON_EMPTY.same_kind(motive)
+    }
+}
+
+lazy_static! {
+    pub static ref KEPLER_COMPARISON_EMPTY: MotiveSelection = MotiveSelection::Keplerian(KeplerMotive {
+        primary_id: String::from(""),
+        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
+            eccentricity: 0.0,
+            semi_major_axis: 0.0,
+        }),
+        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
+            inclination: 0.0,
+            longitude_of_ascending_node: 0.0,
+            argument_of_periapsis: 0.0,
+        }),
+        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
+            mean_anomaly: 0.0,
+        }),
+    });
+}

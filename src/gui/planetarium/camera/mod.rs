@@ -30,7 +30,7 @@ impl Plugin for PlanetariumCameraPlugin {
                 // to avoid jerking, because their rendered positions are relative to the camera,
                 // but after all bodies have moved in the sim if the camera is located relative
                 // to a simulated body.
-                revolve_around.before(position_bodies).after(newton_motive::calculate),
+                revolve_around.before(position_bodies),
                 ).run_if(in_state(AppState::Planetarium)))
         ;
     }

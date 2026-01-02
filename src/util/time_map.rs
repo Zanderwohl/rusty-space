@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::slice::Iter;
 use bevy::math::DVec3;
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 use crate::util::bitfutz;
 
 #[derive(Debug, Clone)]
@@ -105,7 +106,7 @@ impl<V: Clone + Lerpable> TimeMap<V>
             return Some(value);
         }
 
-        return None;
+        None
     }
 
     pub fn times(&self) -> Vec<f64> {
@@ -163,8 +164,8 @@ impl<V: Clone + Lerpable> TimeMap<V>
     }
 }
 
-#[derive(Debug, Clone)]
-struct SortedTimes {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SortedTimes {
     in_order: Vec<f64>,
 }
 
@@ -185,6 +186,20 @@ impl SortedTimes {
         match self.in_order.binary_search_by(|other| other.partial_cmp(&value).unwrap()) {
             Ok(_) => {},
             Err(pos) => self.in_order.insert(pos, value),
+        }
+    }
+
+    pub fn has(&self, time: f64) -> bool {
+        self.in_order.binary_search_by(|other| other.partial_cmp(&time).unwrap()).is_ok()
+    }
+
+    pub fn remove_time(&mut self, time: f64) -> bool {
+        match self.in_order.binary_search_by(|other| other.partial_cmp(&time).unwrap()) {
+            Ok(pos) => {
+                self.in_order.remove(pos);
+                true
+            }
+            Err(_) => false,
         }
     }
 
@@ -217,6 +232,27 @@ impl SortedTimes {
         }
     }
 
+    pub fn get_at_or_before(&self, time: f64) -> Option<f64> {
+        if self.in_order.len() == 0 {
+            return None;
+        }
+
+        let insertion_point = self.in_order.partition_point(|&x| x <= time);
+        Some(self.in_order[insertion_point])
+    }
+
+    /// Gets the index of the lowest time which is after the given time
+    pub fn get_index_after(&self, time: f64) -> usize {
+        if self.in_order.len() == 0 || self.in_order[self.in_order.len() - 1] < time {
+            return self.in_order.len();
+        }
+        if self.in_order[0] > time {
+            return 0;
+        }
+
+        self.in_order.partition_point(|&x| x <= time)
+    }
+
     pub fn len(&self) -> usize {
         self.in_order.len()
     }
@@ -231,6 +267,10 @@ impl SortedTimes {
         } else {
             None
         }
+    }
+
+    pub fn remove_after(&mut self, index: usize) -> Vec<f64> {
+        self.in_order.drain(index..).collect::<Vec<f64>>()
     }
 
     pub fn range(&self, start: f64, end: f64) -> SortedTimes {

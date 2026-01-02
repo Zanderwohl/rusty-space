@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use bevy::prelude::*;
 use std::collections::HashMap;
 use bevy_egui::egui::Ui;
+use lazy_static::lazy_static;
 use num_traits::FloatConst;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::SimulationObject;
@@ -14,7 +15,7 @@ use crate::util::kepler::{angular_motion, apoapsis, eccentric_anomaly, eccentric
 use crate::util::{jd, mappings};
 use crate::util::time_map::TimeMap;
 
-#[derive(Serialize, Deserialize, Component)]
+#[derive(Serialize, Deserialize, Component, Clone)]
 pub struct KeplerMotive {
     pub primary_id: String,
     pub shape: KeplerShape,
@@ -180,7 +181,7 @@ impl KeplerMotive {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum KeplerShape {
     EccentricitySMA(EccentricitySMA),
     Apsides(Apsides),
@@ -265,19 +266,19 @@ impl KeplerShape {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct EccentricitySMA {
     pub eccentricity: f64,
     pub semi_major_axis: f64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Apsides {
     pub periapsis: f64,
     pub apoapsis: f64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum KeplerRotation {
     EulerAngles(KeplerEulerAngles),
     FlatAngles(KeplerFlatAngles),
@@ -338,14 +339,14 @@ impl KeplerRotation {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct KeplerEulerAngles {
     pub inclination: f64,
     pub longitude_of_ascending_node: f64, // "Right ascension of ascending node"
     pub argument_of_periapsis: f64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct KeplerPrecessingEulerAngles {
     pub inclination: f64,
     pub longitude_of_ascending_node: f64, // "Right ascension of ascending node"
@@ -366,12 +367,12 @@ impl KeplerPrecessingEulerAngles {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct KeplerFlatAngles {
     pub longitude_of_periapsis: f64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum KeplerEpoch {
     MeanAnomaly(MeanAnomalyAtEpoch),
     TimeAtPeriapsisPassage(PeriapsisTime),
@@ -427,24 +428,24 @@ impl KeplerEpoch {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct MeanAnomalyAtEpoch {
     pub epoch_julian_day: f64,
     pub mean_anomaly: f64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct PeriapsisTime {
     pub time_julian_day: f64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct TrueAnomalyAtEpoch {
     pub epoch_julian_day: f64,
     pub true_anomaly: f64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct MeanAnomalyAtJ2000 {
     pub mean_anomaly: f64,
 }

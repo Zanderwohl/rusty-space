@@ -27,7 +27,7 @@ impl NewtonMotive {
         ui.label(format!("\tz: {} m/s", sci_not(self.velocity.z)));
     }
 }
-
+/*
 pub fn calculate(
     mut newton_bodies: Query<(&mut BodyState, &BodyInfo, &mut NewtonMotive, Option<&Major>, Option<&Minor>)>,
     mut other_bodies: Query<(&mut BodyState, &BodyInfo, &Major,), Without<NewtonMotive>>,
@@ -68,3 +68,4 @@ pub fn calculate(
         state.current_position = motive.position;
     }
 }
+*/

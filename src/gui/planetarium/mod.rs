@@ -9,13 +9,14 @@ use regex::Regex;
 use gizmoids::trajectory;
 use crate::body::appearance::{Appearance, AssetCache};
 use crate::body::universe::save::{UniverseFile, UniversePhysics, ViewSettings};
-use crate::body::universe::Universe;
+use crate::body::universe::{Major, Minor, Universe};
 use crate::gui::app::AppState;
 use crate::gui::menu::{TagState, UiState};
 use crate::gui::planetarium::time::SimTime;
 use crate::body::{universe, unload_simulation_objects, SimulationObject};
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::{fixed_motive, kepler_motive, newton_motive};
+use crate::body::motive::newton_motive::NewtonMotive;
 pub(crate) use crate::gui::planetarium::camera::{PlanetariumCamera, PlanetariumCameraPlugin};
 use crate::gui::planetarium::windows::body_info::BodyInfoState;
 use crate::gui::util::freecam::{Freecam};
@@ -80,16 +81,11 @@ impl Plugin for PlanetariumUI {
             .add_systems(Update, (
                 (
                     adjust_lights,
-                    // scale_distant_objects.after(position_bodies),
-                    position_bodies.after(fixed_motive::calculate).after(kepler_motive::calculate).after(newton_motive::calculate),
+                    position_bodies,
                     trajectory::render_trajectories,
                 ).in_set(PlanetariumUISet),
                 (
                     universe::advance_time,
-                    fixed_motive::calculate.before(position_bodies),
-                    kepler_motive::calculate.before(position_bodies),
-                    newton_motive::calculate.after(kepler_motive::calculate).after(fixed_motive::calculate).before(position_bodies),
-                    kepler_motive::calculate_trajectory,
                 ).in_set(PlanetariumSimulationSet),
                 (load_assets).in_set(PlanetariumLoadingSet),
             ))
