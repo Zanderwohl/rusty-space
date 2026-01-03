@@ -172,7 +172,20 @@ pub struct UniverseFileContents {
 #[derive(Serialize, Deserialize)]
 pub struct UniverseFileTime {
     pub time_julian_days: f64, // In Julian Days
+    /// Physics time step in simulation seconds (default: 0.1)
+    #[serde(default = "default_step")]
+    pub step: f64,
+    /// GUI speed multiplier - sim seconds per real second (default: 1.0)
+    #[serde(default = "default_gui_speed")]
+    pub gui_speed: f64,
+    /// Maximum real-world time to spend on physics per frame (default: 0.016)
+    #[serde(default = "default_max_frame_time")]
+    pub max_frame_time: f64,
 }
+
+fn default_step() -> f64 { 0.1 }
+fn default_gui_speed() -> f64 { 1.0 }
+fn default_max_frame_time() -> f64 { 0.016 }
 
 #[derive(Resource, Serialize, Deserialize)]
 pub struct UniversePhysics {

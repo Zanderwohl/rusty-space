@@ -18,7 +18,10 @@ pub fn solar_system() -> UniverseFile {
         contents: UniverseFileContents {
             version: "0.0".into(),
             time: UniverseFileTime {
-                time_julian_days: 2451544.500000 // Midnight 2000 January 1 00:00
+                time_julian_days: 2451544.500000, // Midnight 2000 January 1 00:00
+                step: 0.1,
+                gui_speed: 1.0,
+                max_frame_time: 0.016,
             },
             physics: UniversePhysics::default(),
             view: ViewSettings::default(),
@@ -511,7 +514,10 @@ pub fn earth_moon() -> UniverseFile {
         contents: UniverseFileContents {
             version: "0.0".into(),
             time: UniverseFileTime {
-                time_julian_days: 2451544.500000 // Midnight 2000 January 1 00:00
+                time_julian_days: 2451544.500000, // Midnight 2000 January 1 00:00
+                step: 0.1,
+                gui_speed: 1.0,
+                max_frame_time: 0.016,
             },
             physics: UniversePhysics::default(),
             view: ViewSettings::default(),

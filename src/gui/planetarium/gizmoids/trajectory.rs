@@ -5,7 +5,7 @@ use bevy::render::view::ColorGrading;
 use itertools::Itertools;
 use num_traits::Pow;
 use crate::body::motive::info::{BodyInfo, BodyState};
-use crate::body::motive::kepler_motive::KeplerMotive;
+use crate::body::motive::{Motive, MotiveSelection};
 use crate::body::universe::save::ViewSettings;
 use crate::gui::planetarium::PlanetariumCamera;
 use crate::gui::planetarium::time::SimTime;
@@ -14,7 +14,7 @@ use crate::gui::util::freecam::Freecam;
 use crate::util::bevystuff::GlamVec;
 
 pub fn render_trajectories(
-    bodies: Query<(&BodyState, &BodyInfo, Option<&KeplerMotive>)>,
+    bodies: Query<(&BodyState, &BodyInfo, &Motive)>,
     mut gizmos: Gizmos,
     view_settings: Res<ViewSettings>,
     settings: Res<Settings>,
@@ -23,6 +23,7 @@ pub fn render_trajectories(
     color_grading: Single<&ColorGrading>,
 ) {
     let distance_scale = view_settings.distance_factor();
+    let current_time = sim_time.time_seconds;
 
     let exposure = color_grading.global.exposure;
 
@@ -37,7 +38,7 @@ pub fn render_trajectories(
     let max_brightness = max_brightness * exposure_adjust;
 
     let mut color = Srgba::new(1.0, 0.0, 0.0, 1.0);
-    for (state, info, kepler_motive) in bodies.iter() {
+    for (state, info, motive) in bodies.iter() {
         if !(view_settings.show_trajectories || view_settings.body_in_any_trajectory_tag(&info.id)) {
             continue;
         }
@@ -50,22 +51,25 @@ pub fn render_trajectories(
                 }
             };
 
+            // Get the primary_id if this is a Keplerian motive
+            let primary_id = match motive.motive_at(current_time) {
+                (_, MotiveSelection::Keplerian(k)) => Some(&k.primary_id),
+                _ => None,
+            };
+
             // TODO: this doesn't track for the future.
-            let primary_d: Option<Vec<DVec3>> = kepler_motive
-                .map(|m| {
-                    let id = &m.primary_id;
+            let primary_d: Option<Vec<DVec3>> = primary_id
+                .and_then(|id| {
                     bodies.iter().find(|(_, info, _)| { &info.id == id })
                 })
-                .flatten()
-                .map(|(primary_state, _, _)| {
+                .and_then(|(primary_state, _, _)| {
                     if primary_state.trajectory.is_none() { return None; }
-                    let primary_trajectory = primary_state.trajectory.as_ref().unwrap();
-                    trajectory.iter().map(|(t, _)| {
+                    let _primary_trajectory = primary_state.trajectory.as_ref().unwrap();
+                    Some(trajectory.iter().map(|(_t, _)| {
                         // primary_trajectory.get_lerp(t)
-                        Some(primary_state.current_position)
-                    }).collect()
-                })
-                .flatten();
+                        primary_state.current_position
+                    }).collect())
+                });
 
             for (idx, ((t1, d1), (t2, d2))) in trajectory.iter().tuple_windows().enumerate() {
                 let (d1, d2) = match &primary_d {

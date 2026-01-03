@@ -483,24 +483,23 @@ pub fn calculate(
 
 pub fn calculate_trajectory(
     mut calcs: MessageReader<CalculateTrajectory>,
-    mut kepler_bodies: Query<(&mut BodyState, &BodyInfo, &KeplerMotive)>,
-    other_bodies: Query<(&SimulationObject, &BodyInfo, &BodyState), Without<KeplerMotive>>,
+    mut bodies: Query<(&mut BodyState, &BodyInfo, &crate::body::motive::Motive)>,
     physics: Res<UniversePhysics>,
     view_settings: Res<ViewSettings>,
+    sim_time: Res<SimTime>,
 ) {
     if calcs.is_empty() { return; }
 
     // First collect all body masses into a HashMap
     let mut body_masses: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
-    for (_, info, _) in kepler_bodies.iter() {
-        body_masses.insert(info.id.clone(), info.mass);
-    }
-    for (_, info, _) in other_bodies.iter() {
+    for (_, info, _) in bodies.iter() {
         body_masses.insert(info.id.clone(), info.mass);
     }
 
+    let current_time = sim_time.time_seconds;
+
     for calc in calcs.read() {
-        for (mut state, info, motive) in kepler_bodies.iter_mut() {
+        for (mut state, info, motive) in bodies.iter_mut() {
             let do_this = match &calc.selection {
                 BodySelection::All => true,
                 BodySelection::Tag(tag) => info.tags.contains(tag),
@@ -508,27 +507,34 @@ pub fn calculate_trajectory(
             };
             if !do_this { continue; }
 
-            //info!("Caching trajectory for {}", info.display_name());
+            // Get the current motive selection
+            let (_, selection) = motive.motive_at(current_time);
+            
+            // Only calculate trajectories for Keplerian bodies
+            let kepler_motive = match selection {
+                crate::body::motive::MotiveSelection::Keplerian(k) => k,
+                _ => continue,
+            };
 
-            let primary_mass = body_masses.get(&motive.primary_id)
+            let primary_mass = body_masses.get(&kepler_motive.primary_id)
                 .copied()
                 .expect("Missing primary body mass");
             let mu = physics.gravitational_constant * primary_mass;
 
             state.trajectory = Some(TimeMap::new());
             let map = state.trajectory.as_mut().unwrap();
-            let period = motive.period(mu);
+            let period = kepler_motive.period(mu);
 
-            let periapsis_time = motive.time_at_periapsis_passage(mu);
+            let periapsis_time = kepler_motive.time_at_periapsis_passage(mu);
 
-            if !motive.is_open() {
+            if !kepler_motive.is_open() {
                 map.set_periodicity(periapsis_time, period);
             }
 
             for i in 0..=view_settings.trajectory_resolution {
                 let relative_time = (i as f64 / view_settings.trajectory_resolution as f64) * period;
                 let absolute_time = periapsis_time + relative_time;
-                let displacement = motive.displacement(absolute_time, mu);
+                let displacement = kepler_motive.displacement(absolute_time, mu);
                 if let Some(displacement) = displacement {
                     map.insert(relative_time, displacement); // Store using relative time as key
                 }

@@ -155,19 +155,31 @@ fn save_physics(conn: &Connection, physics: &UniversePhysics) -> Result<(), Sqli
 // ============================================================================
 
 fn load_time(conn: &Connection) -> Result<UniverseFileTime, SqliteSaveError> {
-    let time_julian_days: f64 = conn.query_row(
-        "SELECT time_julian_days FROM sim_time WHERE id = 1",
+    let row = conn.query_row(
+        "SELECT time_julian_days, step, gui_speed, max_frame_time FROM sim_time WHERE id = 1",
         [],
-        |row| row.get(0),
+        |row| {
+            Ok((
+                row.get::<_, f64>(0)?,
+                row.get::<_, f64>(1)?,
+                row.get::<_, f64>(2)?,
+                row.get::<_, f64>(3)?,
+            ))
+        },
     )?;
     
-    Ok(UniverseFileTime { time_julian_days })
+    Ok(UniverseFileTime {
+        time_julian_days: row.0,
+        step: row.1,
+        gui_speed: row.2,
+        max_frame_time: row.3,
+    })
 }
 
 fn save_time(conn: &Connection, time: &UniverseFileTime) -> Result<(), SqliteSaveError> {
     conn.execute(
-        "UPDATE sim_time SET time_julian_days = ?1 WHERE id = 1",
-        [time.time_julian_days],
+        "UPDATE sim_time SET time_julian_days = ?1, step = ?2, gui_speed = ?3, max_frame_time = ?4 WHERE id = 1",
+        rusqlite::params![time.time_julian_days, time.step, time.gui_speed, time.max_frame_time],
     )?;
     Ok(())
 }

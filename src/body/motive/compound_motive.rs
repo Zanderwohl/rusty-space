@@ -74,6 +74,25 @@ impl Motive {
         self.times.is_empty()
     }
 
+    /// Check if any event occurred in the time range (start, end] using binary search.
+    /// Returns true if there's at least one event with time > start AND time <= end.
+    /// This is O(log n) instead of O(n).
+    pub fn has_event_in_range(&self, start: f64, end: f64) -> bool {
+        if self.times.is_empty() {
+            return false;
+        }
+        
+        // Find the first event after start
+        let index_after_start = self.times.get_index_after(start);
+        
+        // If there's an event at that index and it's <= end, we have a match
+        if let Some(&event_time) = self.times.get(index_after_start) {
+            event_time <= end
+        } else {
+            false
+        }
+    }
+
     /// Iterate over all events in time order
     pub fn iter_events(&self) -> impl Iterator<Item = (f64, &TransitionEvent, &MotiveSelection)> {
         self.times.iter().filter_map(|time| {

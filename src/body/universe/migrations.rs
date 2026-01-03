@@ -211,6 +211,26 @@ pub static MIGRATIONS: &[Migration] = &[
             DROP TABLE IF EXISTS properties;
         "#,
     },
+    // Version 1 -> 2: Add SimTime settings (step, gui_speed, max_frame_time)
+    Migration {
+        description: "Add step, gui_speed, and max_frame_time columns to sim_time",
+        up: r#"
+            ALTER TABLE sim_time ADD COLUMN step REAL NOT NULL DEFAULT 0.1;
+            ALTER TABLE sim_time ADD COLUMN gui_speed REAL NOT NULL DEFAULT 1.0;
+            ALTER TABLE sim_time ADD COLUMN max_frame_time REAL NOT NULL DEFAULT 0.016;
+        "#,
+        down: r#"
+            -- SQLite doesn't support DROP COLUMN directly, so we recreate the table
+            CREATE TABLE sim_time_new (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                time_julian_days REAL NOT NULL DEFAULT 2451545.0
+            );
+            INSERT INTO sim_time_new (id, time_julian_days)
+                SELECT id, time_julian_days FROM sim_time;
+            DROP TABLE sim_time;
+            ALTER TABLE sim_time_new RENAME TO sim_time;
+        "#,
+    },
 ];
 
 /// Get the current program version (number of migrations available)
