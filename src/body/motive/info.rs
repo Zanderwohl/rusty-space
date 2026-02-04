@@ -19,9 +19,14 @@ pub struct BodyInfo {
 pub struct BodyState {
     pub current_position: DVec3,
     pub last_step_position: DVec3,
+    /// Current velocity for Newtonian bodies (None for Fixed/Keplerian)
+    pub current_velocity: Option<DVec3>,
     pub current_local_position: Option<DVec3>,
     pub current_primary_position: Option<DVec3>,
     pub trajectory: Option<TimeMap<DVec3>>,
+    /// Time at which the current Newtonian state was last initialized/updated
+    /// Used to detect motive transitions that require reinitialization
+    pub newtonian_init_time: Option<f64>,
 }
 
 impl Default for BodyState {
@@ -29,9 +34,11 @@ impl Default for BodyState {
         Self {
             current_position: DVec3::ZERO,
             last_step_position: DVec3::ZERO,
+            current_velocity: None,
             current_local_position: None,
             current_primary_position: None,
             trajectory: None,
+            newtonian_init_time: None,
         }
     }
 }

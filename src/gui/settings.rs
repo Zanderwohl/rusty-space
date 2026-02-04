@@ -32,6 +32,23 @@ pub struct DisplaySettings {
     pub quality: DisplayQuality,
     #[serde(default)]
     pub glow: DisplayGlow,
+    /// Minimum distance (in rendered units) for trajectory fade.
+    /// Everything closer than this is fully transparent.
+    #[serde(default = "default_trajectory_fade_min")]
+    pub trajectory_fade_min: f32,
+    /// Maximum distance (in rendered units) for trajectory fade.
+    /// Everything further than this is fully opaque.
+    /// Set both to 0.0 to disable fading.
+    #[serde(default = "default_trajectory_fade_max")]
+    pub trajectory_fade_max: f32,
+}
+
+fn default_trajectory_fade_min() -> f32 {
+    0.0
+}
+
+fn default_trajectory_fade_max() -> f32 {
+    1.5
 }
 
 impl Default for DisplaySettings {
@@ -39,6 +56,8 @@ impl Default for DisplaySettings {
         Self {
             quality: DisplayQuality::default(),
             glow: DisplayGlow::default(),
+            trajectory_fade_min: default_trajectory_fade_min(),
+            trajectory_fade_max: default_trajectory_fade_max(),
         }
     }
 }

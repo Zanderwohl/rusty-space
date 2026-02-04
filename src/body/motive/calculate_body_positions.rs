@@ -357,6 +357,11 @@ fn update_major_body_cache(
 // ============================================================================
 
 /// Calculate positions for Newtonian bodies using gravity from Major bodies.
+/// 
+/// This function handles:
+/// - Standard Newtonian integration using velocity stored in BodyState
+/// - Initialization of Newtonian state when first entering a Newtonian motive
+/// - Release transitions from Fixed to Newtonian (computing position and transforming velocity)
 fn calculate_newtonian_positions(
     bodies: &mut Query<(Entity, &BodyInfo, &Motive, &mut BodyState, Option<&Major>)>,
     graph: &PhysicsGraph,
@@ -366,16 +371,61 @@ fn calculate_newtonian_positions(
     playing: bool,
     gravitational_constant: f64,
 ) {
+    use crate::body::motive::TransitionEvent;
+    
     let effective_delta = if playing { delta_time } else { 0.0 };
     
     // Process each Newtonian body
     for &entity in &graph.newtonian_entities {
         if let Ok((_, _, motive, mut state, _)) = bodies.get_mut(entity) {
-            let (_, selection) = motive.motive_at(time);
+            let (event, selection) = motive.motive_at(time);
             
             if let MotiveSelection::Newtonian { position, velocity } = selection {
-                let mut current_pos = *position;
-                let mut current_vel = *velocity;
+                // Check if we need to initialize/reinitialize the Newtonian state
+                let needs_init = state.current_velocity.is_none() 
+                    || state.newtonian_init_time.is_none()
+                    || matches!(event, TransitionEvent::Release);
+                
+                let (mut current_pos, mut current_vel) = if needs_init {
+                    // Handle Release transition: compute position from previous Fixed motive
+                    if matches!(event, TransitionEvent::Release) {
+                        // For Release, the Newtonian velocity is LOCAL (relative to parent's frame)
+                        // We need to find the parent and transform to global coordinates
+                        
+                        // Get the previous motive (should be Fixed)
+                        let prev_motive = motive.motive_before(time);
+                        
+                        if let Some((_, MotiveSelection::Fixed { primary_id, position: fixed_pos })) = prev_motive {
+                            // Compute the global position from the Fixed motive
+                            let parent_pos = primary_id.as_ref()
+                                .and_then(|id| graph.id_to_entity.get(id))
+                                .and_then(|&pe| cache.positions.get(&pe))
+                                .copied()
+                                .unwrap_or(DVec3::ZERO);
+                            
+                            let global_pos = parent_pos + *fixed_pos;
+                            
+                            // The velocity in the Newtonian motive is the LOCAL velocity
+                            // For now, use it as-is (assumes the local frame is aligned with global)
+                            // TODO: Could add velocity transformation if parent has velocity
+                            let global_vel = *velocity;
+                            
+                            state.newtonian_init_time = Some(time);
+                            (global_pos, global_vel)
+                        } else {
+                            // Fallback: use the stored position/velocity
+                            state.newtonian_init_time = Some(time);
+                            (*position, *velocity)
+                        }
+                    } else {
+                        // Standard initialization: use stored position/velocity
+                        state.newtonian_init_time = Some(time);
+                        (*position, *velocity)
+                    }
+                } else {
+                    // Use the current state from previous integration step
+                    (state.current_position, state.current_velocity.unwrap_or(*velocity))
+                };
                 
                 if effective_delta.abs() > f64::EPSILON {
                     // Calculate gravitational acceleration from all Major bodies
@@ -394,6 +444,7 @@ fn calculate_newtonian_positions(
                 }
                 
                 state.current_position = current_pos;
+                state.current_velocity = Some(current_vel);
                 state.last_step_position = *position;
                 state.current_local_position = None;
                 state.current_primary_position = None;

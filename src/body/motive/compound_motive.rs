@@ -18,6 +18,10 @@ pub enum TransitionEvent {
     Epoch,
     SOIChange,
     Impulse,
+    /// Release a Fixed motive to Newtonian physics.
+    /// The Newtonian motive's velocity is interpreted as LOCAL velocity (relative to the parent's frame).
+    /// Position is computed from the previous Fixed motive's resolved position at transition time.
+    Release,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -156,6 +160,17 @@ impl Motive {
         let time = self.times.get_at_or_before(time).expect("Invariant violated: CompoundMotive must have at least one motive.");
         let key = util::bitfutz::f64::to_u64(time);
         self.motives.get(&key).expect(format!("Invariant violated: CompoundMotive.times gave the time {}, but CompoundMotive.time motives has no such key {}.", time, key).as_ref())
+    }
+
+    /// Get the motive that was active just before the motive at the given time.
+    /// Returns None if there is no previous motive (i.e., the motive at `time` is the first one).
+    pub fn motive_before(&self, time: f64) -> Option<&(TransitionEvent, MotiveSelection)> {
+        // First find the current motive's time
+        let current_time = self.times.get_at_or_before(time)?;
+        // Then find the motive before that time
+        let prev_time = self.times.get_before(current_time)?;
+        let key = util::bitfutz::f64::to_u64(prev_time);
+        self.motives.get(&key)
     }
 
     pub fn is_fixed(&self, time: f64) -> bool {

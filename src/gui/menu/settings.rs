@@ -21,6 +21,10 @@ pub fn settings_panel(mut settings: &mut ResMut<Settings>, ui: &mut Ui) {
                 ui.selectable_value(&mut settings.display.glow, DisplayGlow::VFD, "VFD");
                 ui.selectable_value(&mut settings.display.glow, DisplayGlow::Defcon, "DEFCON");
             });
+        ui.add(egui::Slider::new(&mut settings.display.trajectory_fade_min, 0.0..=100.0)
+            .text("Trajectory Fade Min"));
+        ui.add(egui::Slider::new(&mut settings.display.trajectory_fade_max, 0.0..=100.0)
+            .text("Trajectory Fade Max"));
     });
 
     ui.separator();

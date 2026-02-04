@@ -879,6 +879,7 @@ fn parse_transition_event(s: &str) -> Result<TransitionEvent, SqliteSaveError> {
         "Epoch" => Ok(TransitionEvent::Epoch),
         "SOIChange" => Ok(TransitionEvent::SOIChange),
         "Impulse" => Ok(TransitionEvent::Impulse),
+        "Release" => Ok(TransitionEvent::Release),
         _ => Err(SqliteSaveError::InvalidData(format!("Unknown transition event: {}", s))),
     }
 }
@@ -888,5 +889,6 @@ fn serialize_transition_event(event: &TransitionEvent) -> &'static str {
         TransitionEvent::Epoch => "Epoch",
         TransitionEvent::SOIChange => "SOIChange",
         TransitionEvent::Impulse => "Impulse",
+        TransitionEvent::Release => "Release",
     }
 }

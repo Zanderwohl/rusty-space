@@ -249,6 +249,23 @@ impl SortedTimes {
         }
     }
 
+    /// Get the time strictly before the given time (not equal to)
+    pub fn get_before(&self, time: f64) -> Option<f64> {
+        if self.in_order.is_empty() {
+            return None;
+        }
+
+        // partition_point returns the first index where x >= time
+        let insertion_point = self.in_order.partition_point(|&x| x < time);
+        
+        if insertion_point == 0 {
+            // No element is < time
+            None
+        } else {
+            Some(self.in_order[insertion_point - 1])
+        }
+    }
+
     /// Gets the index of the lowest time which is after the given time
     pub fn get_index_after(&self, time: f64) -> usize {
         if self.in_order.len() == 0 || self.in_order[self.in_order.len() - 1] < time {
