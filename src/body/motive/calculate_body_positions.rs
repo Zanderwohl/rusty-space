@@ -24,7 +24,7 @@ use crate::body::motive::{Motive, MotiveSelection};
 use crate::body::universe::Major;
 use crate::body::universe::save::UniversePhysics;
 use crate::gui::planetarium::time::{PreviousTimesIter, SimTime};
-use crate::util::gravity;
+use crate::foundations::gravity;
 
 // ============================================================================
 // Time Iterator (avoids Box<dyn Iterator> allocation)

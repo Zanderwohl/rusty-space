@@ -10,9 +10,9 @@ use crate::body::SimulationObject;
 use crate::body::universe::save::{UniversePhysics, ViewSettings};
 use crate::gui::planetarium::{BodySelection, CalculateTrajectory};
 use crate::gui::planetarium::time::SimTime;
-use crate::util::jd::{seconds_since_j2000, J2000_JD, JD_SECONDS};
-use crate::util::kepler::{angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
-use crate::util::{jd, mappings};
+use crate::foundations::time::jd::*;
+use crate::foundations::kepler::{angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
+use crate::util::{mappings};
 use crate::util::time_map::TimeMap;
 
 #[derive(Serialize, Deserialize, Component, Clone)]
@@ -96,20 +96,20 @@ impl KeplerMotive {
     }
 
     pub fn longitude_of_ascending_node(&self, time_seconds: f64) -> Option<f64> {
-        self.rotation.longitude_of_ascending_node((time_seconds / JD_SECONDS) - self.epoch.epoch_julian_day())
+        self.rotation.longitude_of_ascending_node((time_seconds / JD_SECONDS_PER_JULIAN_DAY) - self.epoch.epoch_julian_day())
     }
 
     /// Lets 0.0 inclination case have long of asc node
     pub fn longitude_of_ascending_node_infallible(&self, time_seconds: f64) -> f64 {
-        self.rotation.longitude_of_ascending_node_infallible((time_seconds / JD_SECONDS) - self.epoch.epoch_julian_day())
+        self.rotation.longitude_of_ascending_node_infallible((time_seconds / JD_SECONDS_PER_JULIAN_DAY) - self.epoch.epoch_julian_day())
     }
 
     pub fn longitude_of_periapsis(&self, time_seconds: f64) -> f64 {
-        self.rotation.longitude_of_periapsis((time_seconds / JD_SECONDS) - self.epoch.epoch_julian_day())
+        self.rotation.longitude_of_periapsis((time_seconds / JD_SECONDS_PER_JULIAN_DAY) - self.epoch.epoch_julian_day())
     }
 
     pub fn argument_of_periapsis(&self, time_seconds: f64) -> f64 {
-        self.rotation.argument_of_periapsis((time_seconds / JD_SECONDS) - self.epoch.epoch_julian_day())
+        self.rotation.argument_of_periapsis((time_seconds / JD_SECONDS_PER_JULIAN_DAY) - self.epoch.epoch_julian_day())
     }
 
     pub fn period(&self, gravitational_parameter: f64) -> f64 {
@@ -167,7 +167,7 @@ impl KeplerMotive {
     fn perifocal_to_reference(&self, perifocal_displacement: DVec3, time_seconds: f64) -> DVec3 {
         let rot_arg_peri = DMat3::from_rotation_z(self.argument_of_periapsis(time_seconds).to_radians());
         let rot_inc = DMat3::from_rotation_x(self.inclination().to_radians());
-        let rot_long_asc_node = DMat3::from_rotation_z(self.longitude_of_ascending_node_infallible((time_seconds / JD_SECONDS) - self.epoch.epoch_julian_day()).to_radians());
+        let rot_long_asc_node = DMat3::from_rotation_z(self.longitude_of_ascending_node_infallible((time_seconds / JD_SECONDS_PER_JULIAN_DAY) - self.epoch.epoch_julian_day()).to_radians());
 
         rot_long_asc_node * rot_inc * rot_arg_peri * perifocal_displacement
     }
@@ -392,7 +392,7 @@ impl KeplerEpoch {
 
     pub fn epoch_seconds_since_j2000(&self) -> f64 {
         let epoch_jd = self.epoch_julian_day();
-        jd::seconds_since_j2000(epoch_jd)
+        seconds_since_j2000(epoch_jd)
     }
 
     /// This refers to the internal epoch of this particular orbit description.

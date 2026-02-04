@@ -1,12 +1,9 @@
-pub mod gravity;
-pub mod kepler;
+
 pub mod common;
-pub mod circular;
 pub mod patched_conics;
 pub mod bitfutz;
 pub mod time_map;
 pub mod format;
 pub mod mappings;
 pub mod bevystuff;
-pub mod jd;
 pub mod ease;

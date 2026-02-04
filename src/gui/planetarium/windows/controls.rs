@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use bevy_egui::egui::Ui;
 use num_traits::Pow;
 use crate::body::universe::save::ViewSettings;
+use crate::foundations::time::jd::JD_SECONDS_PER_JULIAN_DAY;
 use crate::gui::app::AppState;
 use crate::gui::common;
 use crate::gui::menu::{MenuState, UiState};
@@ -10,7 +11,6 @@ use crate::gui::planetarium::time::SimTime;
 use crate::gui::settings::{Settings, UiTheme};
 use crate::util::format;
 use crate::util::format::seconds_to_naive_date;
-use crate::util::jd::JD_SECONDS;
 
 pub fn control_window(
     mut contexts: EguiContexts,
@@ -97,8 +97,8 @@ pub fn planetarium_controls(
         ui.checkbox(&mut time.seconds_only, "Display as seconds");
     });
     ui.horizontal(|ui| {
-        if ui.button("1 year").clicked() { time.gui_speed = JD_SECONDS * 365.2425; } // https://www.grc.nasa.gov/www/k-12/Numbers/Math/Mathematical_Thinking/calendar_calculations.htm
-        if ui.button("1 day").clicked() { time.gui_speed = JD_SECONDS; }
+        if ui.button("1 year").clicked() { time.gui_speed = JD_SECONDS_PER_JULIAN_DAY * 365.2425; } // https://www.grc.nasa.gov/www/k-12/Numbers/Math/Mathematical_Thinking/calendar_calculations.htm
+        if ui.button("1 day").clicked() { time.gui_speed = JD_SECONDS_PER_JULIAN_DAY; }
         if ui.button("1 hour").clicked() { time.gui_speed = 60.0 * 60.0; }
         if ui.button("1 minute").clicked() { time.gui_speed = 60.0; }
         if ui.button("1 second").clicked() { time.gui_speed = 1.0; }

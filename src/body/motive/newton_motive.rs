@@ -1,12 +1,7 @@
 use bevy::prelude::*;
 use bevy::math::DVec3;
 use bevy_egui::egui::Ui;
-use crate::body::motive::info::{BodyInfo, BodyState};
-use crate::body::universe::{Major, Minor};
-use crate::body::universe::save::UniversePhysics;
-use crate::gui::planetarium::time::SimTime;
 use crate::util::format::sci_not;
-use crate::util::gravity;
 
 #[derive(Component)]
 pub struct NewtonMotive {

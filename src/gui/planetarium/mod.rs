@@ -4,8 +4,6 @@ use bevy::math::DVec3;
 use bevy::light::PointLight;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
-use lazy_static::lazy_static;
-use regex::Regex;
 use gizmoids::trajectory;
 use crate::body::appearance::{Appearance, AssetCache};
 use crate::body::universe::save::{UniverseFile, UniversePhysics, ViewSettings};
@@ -17,11 +15,11 @@ use crate::body::{universe, unload_simulation_objects, SimulationObject};
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::calculate_body_positions::{self, PhysicsGraph, PositionCache};
 use crate::body::motive::kepler_motive;
+use crate::foundations::time::jd::{J2000_JD, JD_SECONDS_PER_JULIAN_DAY};
 pub(crate) use crate::gui::planetarium::camera::{PlanetariumCamera, PlanetariumCameraPlugin};
 use crate::gui::planetarium::windows::body_info::BodyInfoState;
 use crate::gui::util::freecam::{Freecam};
 use crate::util::bevystuff::GlamVec;
-use crate::util::jd::{J2000_JD, JD_SECONDS};
 use crate::util::mappings;
 
 pub mod time;
@@ -269,7 +267,7 @@ fn load_assets(
         universe.clear_all();
         let version = universe_file.contents.version; // TODO: Support multiple file format versions?
 
-        let time = (universe_file.contents.time.time_julian_days - J2000_JD) * JD_SECONDS; // Convert Julian Days to seconds
+        let time = (universe_file.contents.time.time_julian_days - J2000_JD) * JD_SECONDS_PER_JULIAN_DAY; // Convert Julian Days to seconds
         sim_time.time_seconds = time;
         sim_time.playing = false;
 
