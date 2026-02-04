@@ -1,9 +1,9 @@
-use glam::{DMat4, DQuat, DVec3, Vec3};
-use crate::reference_frame::ReferenceFrame;
+use bevy::math::{DMat4, DQuat, DVec3, Vec3};
+use crate::foundations::reference_frame::ReferenceFrame;
 
 /// Represents a transformation from Reference Frame A to Reference Frame B
 pub struct Transformation {
-    pub(in crate::reference_frame) mat: DMat4,
+    pub(in crate::foundations::reference_frame) mat: DMat4,
 }
 
 impl Transformation {

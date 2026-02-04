@@ -1,8 +1,7 @@
 use std::collections::HashMap;
-use bevy::math::{DVec3, DQuat}
-use crate::index::Index;
+use bevy::math::{DVec3, DQuat};
 use crate::foundations::reference_frame::{ReferenceFrame};
-use crate::time::Instant;
+use crate::foundations::time::Instant;
 
 /// An Observation represents standing at a location and seeing another location
 /// As such, it is an angle from a reference frame.
