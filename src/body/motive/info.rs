@@ -2,6 +2,7 @@ use bevy::math::DVec3;
 use serde::{Deserialize, Serialize};
 use bevy::prelude::*;
 use uuid::Uuid;
+use crate::foundations::time::Instant;
 use crate::util::time_map::TimeMap;
 
 #[derive(Serialize, Deserialize, Component, Clone)]
@@ -26,7 +27,7 @@ pub struct BodyState {
     pub trajectory: Option<TimeMap<DVec3>>,
     /// Time at which the current Newtonian state was last initialized/updated
     /// Used to detect motive transitions that require reinitialization
-    pub newtonian_init_time: Option<f64>,
+    pub newtonian_init_time: Option<Instant>,
 }
 
 impl Default for BodyState {

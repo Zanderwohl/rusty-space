@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 /// Stored in Seconds
 /// Accurate to 1/100th second at 1,427,104 years on either side of epoch
 /// Epoch in this program is J2000
-#[derive(Serialize, Deserialize, Clone, Copy, PartialOrd, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialOrd, PartialEq, Default)]
 pub struct Instant(f64);
 
 // The instant of the J2000 epoch in Julian Days
-const J2000_JD: f64 = 2451545.0;
+pub(crate) const J2000_JD: f64 = 2451545.0;
 
 /// The number of seconds in a Julian Day
 pub const JD_SECONDS_PER_JULIAN_DAY: f64 = 24.0 * 60.0 * 60.0;
@@ -60,16 +60,16 @@ impl TimeDelta {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct TimeLength(f64, Includes);
 
 impl TimeLength {
     pub fn period_from_julian_day(julian_day: f64) -> Self {
-        Self(Instant::from_julian_day(julian_day).0, Includes::Beginning)
+        Self(julian_day * JD_SECONDS_PER_JULIAN_DAY, Includes::Beginning)
     }
 
     pub fn from_jd(jd: f64, includes: Includes) -> Self {
-        Self(Instant::from_julian_day(jd).0, includes)
+        Self(jd * JD_SECONDS_PER_JULIAN_DAY, includes)
     }
 
     pub fn from_seconds(in_seconds: f64, includes: Includes) -> Self {
@@ -79,11 +79,15 @@ impl TimeLength {
     pub fn to_seconds(&self) -> f64 {
         self.0
     }
+
+    pub fn to_julian_days(&self) -> f64 {
+        self.0 / JD_SECONDS_PER_JULIAN_DAY
+    }
 }
 
 pub struct Span(f64, f64, Includes);
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub enum Includes {
     Beginning,
     End,

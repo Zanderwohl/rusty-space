@@ -47,7 +47,7 @@ pub fn render_trajectories(
             let frac = match trajectory.periodicity() {
                 None => 0.0,
                 Some(periodicity) => {
-                    periodicity.cycle_fraction(sim_time.time)
+                    periodicity.cycle_fraction(sim_time.time.to_j2000_seconds())
                 }
             };
 

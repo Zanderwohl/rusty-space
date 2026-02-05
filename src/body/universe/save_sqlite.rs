@@ -20,7 +20,7 @@ use crate::body::universe::save::{
     UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings,
     SomeBody, CompoundMotiveEntry,
 };
-use crate::foundations::time::Instant;
+use crate::foundations::time::{Instant, TimeLength};
 use crate::gui::menu::TagState;
 use crate::util::bitfutz;
 
@@ -578,7 +578,7 @@ fn load_motive(conn: &Connection, body_id: &str) -> Result<Motive, SqliteSaveErr
         let event = parse_transition_event(&event_str)?;
         let selection = load_motive_selection(conn, motive_id, &motive_type)?;
         
-        motive.insert_event(time_seconds, event, selection);
+        motive.insert_event(Instant::from_seconds_since_j2000(time_seconds), event, selection);
     }
     
     // If no motives were loaded, create a default fixed motive
@@ -682,8 +682,8 @@ fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, Sql
             inclination: inclination.unwrap_or(0.0),
             longitude_of_ascending_node: longitude_of_ascending_node.unwrap_or(0.0),
             argument_of_periapsis: argument_of_periapsis.unwrap_or(0.0),
-            apsidal_precession_period: apsidal_precession_period.unwrap_or(0.0),
-            nodal_precession_period: nodal_precession_period.unwrap_or(0.0),
+            apsidal_precession_period: TimeLength::period_from_julian_day(apsidal_precession_period.unwrap_or(0.0)),
+            nodal_precession_period: TimeLength::period_from_julian_day(nodal_precession_period.unwrap_or(0.0)),
         }),
         _ => return Err(SqliteSaveError::InvalidData(format!("Unknown rotation type: {}", rotation_type))),
     };
@@ -801,8 +801,8 @@ fn save_keplerian(conn: &Connection, motive_id: i64, kepler: &KeplerMotive) -> R
             Some(pea.inclination),
             Some(pea.longitude_of_ascending_node),
             Some(pea.argument_of_periapsis),
-            Some(pea.apsidal_precession_period),
-            Some(pea.nodal_precession_period),
+            Some(pea.apsidal_precession_period.to_julian_days()),
+            Some(pea.nodal_precession_period.to_julian_days()),
             None,
         ),
     };

@@ -3,6 +3,7 @@ use std::slice::Iter;
 use bevy::math::DVec3;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+use crate::foundations::time::{Instant, TimeLength};
 use crate::util::bitfutz;
 
 #[derive(Debug, Clone)]
@@ -136,10 +137,10 @@ impl<V: Clone + Lerpable> TimeMap<V>
         self.periodicity.is_some()
     }
 
-    pub fn set_periodicity(&mut self, interval_start: f64, interval_size: f64) {
+    pub fn set_periodicity(&mut self, interval_start: Instant, interval_size: TimeLength) {
         self.periodicity = Some(Periodicity {
-            interval_start,
-            interval_size,
+            interval_start: interval_start.to_j2000_seconds(),
+            interval_size: interval_size.to_seconds(),
         });
     }
 
@@ -267,7 +268,8 @@ impl SortedTimes {
     }
 
     /// Gets the index of the lowest time which is after the given time
-    pub fn get_index_after(&self, time: f64) -> usize {
+    pub fn get_index_after(&self, time: Instant) -> usize {
+        let time = time.to_j2000_seconds();
         if self.in_order.len() == 0 || self.in_order[self.in_order.len() - 1] < time {
             return self.in_order.len();
         }

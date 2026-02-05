@@ -25,7 +25,7 @@ use crate::body::universe::Major;
 use crate::body::universe::save::UniversePhysics;
 use crate::gui::planetarium::time::{PreviousTimesIter, SimTime};
 use crate::foundations::gravity;
-
+use crate::foundations::time::Instant;
 // ============================================================================
 // Time Iterator (avoids Box<dyn Iterator> allocation)
 // ============================================================================
@@ -76,7 +76,7 @@ pub struct PhysicsGraph {
     /// Map from String ID to Entity (for primary_id lookups)
     pub id_to_entity: HashMap<String, Entity>,
     /// The last simulation time the graph was built for
-    pub last_build_time: f64,
+    pub last_build_time: Instant,
     /// Whether the graph needs a full rebuild
     pub needs_rebuild: bool,
 }
@@ -97,8 +97,8 @@ impl PhysicsGraph {
     pub fn check_for_motive_changes(
         &self,
         bodies: &Query<(Entity, &BodyInfo, &Motive, &mut BodyState, Option<&Major>)>,
-        last_time: f64,
-        current_time: f64,
+        last_time: Instant,
+        current_time: Instant,
     ) -> bool {
         for (_, _, motive, _, _) in bodies.iter() {
             // Binary search: O(log n) instead of iterating all events
@@ -172,11 +172,12 @@ pub fn calculate_body_positions(
     let times_iter = if has_queued_times {
         TimeIter::Queued(sim_time.previous_times.iter())
     } else {
-        TimeIter::Single(Some(current_time))
+        TimeIter::Single(Some(current_time.to_j2000_seconds()))
     };
     
     // Process each time step
     for step_time in times_iter {
+        let step_time = Instant::from_seconds_since_j2000(step_time);
         // Check if we've exceeded our frame time budget
         if sim_time.frame_time_exceeded() {
             break;
@@ -237,7 +238,7 @@ pub fn calculate_body_positions(
 fn rebuild_physics_graph(
     graph: &mut PhysicsGraph,
     bodies: &Query<(Entity, &BodyInfo, &Motive, &mut BodyState, Option<&Major>)>,
-    time: f64,
+    time: Instant,
 ) {
     graph.clear();
     
@@ -286,7 +287,7 @@ fn calculate_hierarchical_positions(
     bodies: &mut Query<(Entity, &BodyInfo, &Motive, &mut BodyState, Option<&Major>)>,
     graph: &PhysicsGraph,
     cache: &mut PositionCache,
-    time: f64,
+    time: Instant,
     gravitational_constant: f64,
 ) {
     // Calculate positions in topological order
@@ -366,7 +367,7 @@ fn calculate_newtonian_positions(
     bodies: &mut Query<(Entity, &BodyInfo, &Motive, &mut BodyState, Option<&Major>)>,
     graph: &PhysicsGraph,
     cache: &PositionCache,
-    time: f64,
+    time: Instant,
     delta_time: f64,
     playing: bool,
     gravitational_constant: f64,

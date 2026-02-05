@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy_egui::egui::Ui;
 use num_traits::Pow;
 use crate::body::universe::save::ViewSettings;
-use crate::foundations::time::jd::JD_SECONDS_PER_JULIAN_DAY;
+use crate::foundations::time::JD_SECONDS_PER_JULIAN_DAY;
 use crate::gui::app::AppState;
 use crate::gui::common;
 use crate::gui::menu::{MenuState, UiState};
@@ -72,9 +72,9 @@ pub fn planetarium_controls(
             }
         }
         if time.seconds_only {
-            ui.label(format!("Time: {:.1}s", time.time));
+            ui.label(format!("Time: {:.1}s", time.time.to_j2000_seconds()));
         } else {
-            ui.label(format!("Time: {}", seconds_to_naive_date(time.time.round() as i64)));
+            ui.label(format!("Time: {}", seconds_to_naive_date(time.time.to_j2000_seconds().round() as i64)));
         }
     });
     let gui_speed_current = time.gui_speed;
