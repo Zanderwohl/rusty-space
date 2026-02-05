@@ -13,13 +13,14 @@ use crate::body::motive::kepler_motive::{
     KeplerMotive, KeplerShape, KeplerRotation, KeplerEpoch,
     EccentricitySMA, Apsides,
     KeplerEulerAngles, KeplerFlatAngles, KeplerPrecessingEulerAngles,
-    MeanAnomalyAtEpoch, PeriapsisTime, TrueAnomalyAtEpoch, MeanAnomalyAtJ2000,
+    MeanAnomalyAtEpoch, TrueAnomalyAtEpoch, MeanAnomalyAtJ2000,
 };
 use crate::body::motive::{Motive, MotiveSelection, TransitionEvent};
 use crate::body::universe::save::{
     UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings,
     SomeBody, CompoundMotiveEntry,
 };
+use crate::foundations::time::Instant;
 use crate::gui::menu::TagState;
 use crate::util::bitfutz;
 
@@ -690,14 +691,12 @@ fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, Sql
     // Parse epoch
     let epoch = match epoch_type.as_str() {
         "MeanAnomaly" => KeplerEpoch::MeanAnomaly(MeanAnomalyAtEpoch {
-            epoch_julian_day: epoch_julian_day.unwrap_or(2451545.0),
+            epoch: Instant::from_julian_day(epoch_julian_day.unwrap_or(2451545.0)),
             mean_anomaly: mean_anomaly.unwrap_or(0.0),
         }),
-        "TimeAtPeriapsisPassage" => KeplerEpoch::TimeAtPeriapsisPassage(PeriapsisTime {
-            time_julian_day: periapsis_time_julian_day.unwrap_or(2451545.0),
-        }),
+        "TimeAtPeriapsisPassage" => KeplerEpoch::TimeAtPeriapsisPassage(Instant::from_julian_day(periapsis_time_julian_day.unwrap_or(2451545.0))),
         "TrueAnomaly" => KeplerEpoch::TrueAnomaly(TrueAnomalyAtEpoch {
-            epoch_julian_day: epoch_julian_day.unwrap_or(2451545.0),
+            epoch: Instant::from_julian_day(epoch_julian_day.unwrap_or(2451545.0)),
             true_anomaly: true_anomaly.unwrap_or(0.0),
         }),
         "J2000" => KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
@@ -812,7 +811,7 @@ fn save_keplerian(conn: &Connection, motive_id: i64, kepler: &KeplerMotive) -> R
     let (epoch_type, epoch_julian_day, mean_anomaly, true_anomaly_val, periapsis_time_julian_day) = match &kepler.epoch {
         KeplerEpoch::MeanAnomaly(ma) => (
             "MeanAnomaly",
-            Some(ma.epoch_julian_day),
+            Some(ma.epoch.to_julian_day()),
             Some(ma.mean_anomaly),
             None,
             None,
@@ -822,11 +821,11 @@ fn save_keplerian(conn: &Connection, motive_id: i64, kepler: &KeplerMotive) -> R
             None,
             None,
             None,
-            Some(tpp.time_julian_day),
+            Some(tpp.to_julian_day()),
         ),
         KeplerEpoch::TrueAnomaly(ta) => (
             "TrueAnomaly",
-            Some(ta.epoch_julian_day),
+            Some(ta.epoch.to_julian_day()),
             None,
             Some(ta.true_anomaly),
             None,

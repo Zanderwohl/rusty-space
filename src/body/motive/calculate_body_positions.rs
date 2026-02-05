@@ -146,7 +146,7 @@ pub fn calculate_body_positions(
     // Start frame timing
     sim_time.begin_frame();
     
-    let current_time = sim_time.time_seconds;
+    let current_time = sim_time.time;
     
     // Check if we need to rebuild the graph
     // Rebuild if: first time, bodies changed, or motive events occurred
@@ -214,7 +214,7 @@ pub fn calculate_body_positions(
     }
     
     // Update time_seconds to the last time we ACTUALLY processed
-    sim_time.time_seconds = last_processed_time;
+    sim_time.time = last_processed_time;
     
     // Remove only the times we actually processed (keep remaining for next frame)
     if has_queued_times {

@@ -1,5 +1,6 @@
-use std::time::Instant;
+use std::time::Instant as StdInstant;
 use bevy::prelude::*;
+use crate::foundations::time::Instant;
 
 /// Represents a queue of simulation times to be processed.
 /// Instead of storing each time value, we store the start time and count,
@@ -141,8 +142,8 @@ impl ExactSizeIterator for PreviousTimesIter {}
 
 #[derive(Resource)]
 pub struct SimTime {
-    /// Current simulation time in seconds (relative to J2000 epoch)
-    pub time_seconds: f64,
+    /// Current simulation time
+    pub time: Instant,
     /// Queue of simulation times that need to be stepped through
     pub previous_times: PreviousTimes,
     /// Physics time step in simulation seconds
@@ -173,7 +174,7 @@ pub struct SimTime {
     /// Fraction of requested sim time that was actually simulated (1.0 = keeping up, <1.0 = falling behind)
     pub sim_time_fraction: f64,
     /// When the current frame's physics calculations started
-    pub frame_start: Option<Instant>,
+    pub frame_start: Option<StdInstant>,
     /// Number of physics steps completed this frame
     pub steps_completed: usize,
     /// Number of physics steps requested this frame
@@ -183,7 +184,7 @@ pub struct SimTime {
 impl Default for SimTime {
     fn default() -> Self {
         Self {
-            time_seconds: 0.0,
+            time: Instant::from_seconds_since_j2000(0.0),
             previous_times: PreviousTimes::new(),
             step: 0.1,
             gui_speed: 1.0,
@@ -203,7 +204,7 @@ impl Default for SimTime {
 impl SimTime {
     /// Start timing a new frame of physics calculations
     pub fn begin_frame(&mut self) {
-        self.frame_start = Some(Instant::now());
+        self.frame_start = Some(StdInstant::now());
         self.steps_completed = 0;
         self.steps_requested = self.previous_times.len().max(1);
     }

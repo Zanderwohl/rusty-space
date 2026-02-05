@@ -268,7 +268,7 @@ fn load_assets(
         let version = universe_file.contents.version; // TODO: Support multiple file format versions?
 
         let time = (universe_file.contents.time.time_julian_days - J2000_JD) * JD_SECONDS_PER_JULIAN_DAY; // Convert Julian Days to seconds
-        sim_time.time_seconds = time;
+        sim_time.time = time;
         sim_time.playing = false;
 
         physics.gravitational_constant = universe_file.contents.physics.gravitational_constant;

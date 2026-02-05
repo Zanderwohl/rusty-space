@@ -5,6 +5,7 @@ use crate::body::appearance::{Appearance, AppearanceColor, DebugBall, StarBall};
 use crate::body::motive::info::BodyInfo;
 use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerPrecessingEulerAngles, KeplerRotation, KeplerShape, MeanAnomalyAtEpoch, MeanAnomalyAtJ2000};
 use crate::body::universe::save::{FixedEntry, KeplerEntry, NewtonEntry, SomeBody, UniverseFile, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings};
+use crate::foundations::time::{Instant, TimeLength};
 use crate::gui::util::ensure_folders;
 // Mass: Kg
 // Distance: Km
@@ -244,9 +245,8 @@ pub fn solar_system() -> UniverseFile {
                             argument_of_periapsis: 151.66,
                         }),
                         epoch: KeplerEpoch::MeanAnomaly(MeanAnomalyAtEpoch {
-                            epoch_julian_day: 2453300.5,
+                            epoch: Instant::from_julian_day(2453300.5),
                             mean_anomaly: 169.4,
-
                         }),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
@@ -278,8 +278,8 @@ pub fn solar_system() -> UniverseFile {
                             inclination: 5.240010829674768e0,
                             longitude_of_ascending_node: 1.239837028145578e2,
                             argument_of_periapsis: 3.081359034620368e2,
-                            apsidal_precession_period: 3231.50,
-                            nodal_precession_period: 6798.38,
+                            apsidal_precession_period: TimeLength::period_from_julian_day(3231.50),
+                            nodal_precession_period: TimeLength::period_from_julian_day(6798.38),
                         }),
                         epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
                             mean_anomaly: 1.407402571142365e02,
@@ -415,7 +415,7 @@ pub fn solar_system() -> UniverseFile {
                             argument_of_periapsis: 150.714,
                         }),
                         epoch: KeplerEpoch::MeanAnomaly(MeanAnomalyAtEpoch {
-                            epoch_julian_day: 2460800.5,
+                            epoch: Instant::from_julian_day(2460800.5),
                             mean_anomaly: 211.032,
                         }),
                     },
@@ -449,7 +449,7 @@ pub fn solar_system() -> UniverseFile {
                             argument_of_periapsis: 180.83,
                         }),
                         epoch: KeplerEpoch::MeanAnomaly(MeanAnomalyAtEpoch {
-                            epoch_julian_day: 2453979.0,
+                            epoch: Instant::from_julian_day(2453979.0),
                             mean_anomaly: 0.0 // TODO: Find this?
                         }),
                     },
@@ -483,7 +483,7 @@ pub fn solar_system() -> UniverseFile {
                             argument_of_periapsis: 311.352,
                         }),
                         epoch: KeplerEpoch::MeanAnomaly(MeanAnomalyAtEpoch {
-                            epoch_julian_day: 2458900.5,
+                            epoch: Instant::from_julian_day(2458900.5),
                             mean_anomaly: 358.117,
                         }),
                     },

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use std::collections::HashMap;
 use crate::body::universe::save::UniverseFile;
+use crate::foundations::time::Instant;
 use crate::gui::planetarium::time::SimTime;
 
 pub mod save;
@@ -45,7 +46,7 @@ impl Universe {
         };
 
         let time = SimTime {
-            time_seconds: file.contents.time.time_julian_days,
+            time: Instant::from_julian_day(file.contents.time.time_julian_days),
             step: file.contents.time.step,
             gui_speed: file.contents.time.gui_speed,
             max_frame_time: file.contents.time.max_frame_time,
@@ -133,7 +134,7 @@ pub fn advance_time(mut sim_time: ResMut<SimTime>, time: Res<Time>) {
     
     // Get the last queued time (or current time if queue is empty)
     let last_queued_time = sim_time.previous_times.last()
-        .unwrap_or(sim_time.time_seconds);
+        .unwrap_or(sim_time.time.to_j2000_seconds());
     
     // Expand the queue by adding more steps at the end
     sim_time.previous_times.expand(last_queued_time + step, steps_to_add, step);

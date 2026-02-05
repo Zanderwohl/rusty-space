@@ -23,7 +23,7 @@ pub fn render_trajectories(
     color_grading: Single<&ColorGrading>,
 ) {
     let distance_scale = view_settings.distance_factor();
-    let current_time = sim_time.time_seconds;
+    let current_time = sim_time.time;
 
     let exposure = color_grading.global.exposure;
 
@@ -47,7 +47,7 @@ pub fn render_trajectories(
             let frac = match trajectory.periodicity() {
                 None => 0.0,
                 Some(periodicity) => {
-                    periodicity.cycle_fraction(sim_time.time_seconds)
+                    periodicity.cycle_fraction(sim_time.time)
                 }
             };
 
