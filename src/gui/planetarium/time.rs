@@ -191,7 +191,7 @@ impl Default for SimTime {
             playing: false,
             seconds_only: false,
             // Performance defaults
-            max_frame_time: 1.0 / 10.0,
+            max_frame_time: 1.0 / 50.0,
             accumulated_time: 0.0,
             sim_time_fraction: 1.0,
             frame_start: None,
