@@ -2,6 +2,7 @@ use bevy_egui::{egui, EguiContexts};
 use bevy::prelude::*;
 use bevy_egui::egui::Ui;
 use num_traits::Pow;
+use crate::body::motive::calculate_body_positions::SimulationPerformanceMetrics;
 use crate::body::universe::save::ViewSettings;
 use crate::foundations::time::JD_SECONDS_PER_JULIAN_DAY;
 use crate::gui::app::AppState;
@@ -20,6 +21,7 @@ pub fn control_window(
     next_menu_state: ResMut<NextState<MenuState>>,
     mut time: ResMut<SimTime>,
     view_settings: ResMut<ViewSettings>,
+    perf_metrics: Res<SimulationPerformanceMetrics>,
 ) {
     let ctx = contexts.ctx_mut();
     if ctx.is_err() { return; }
@@ -33,7 +35,7 @@ pub fn control_window(
     egui::Window::new("Controls")
         .vscroll(true)
         .show(ctx, |ui| {
-            planetarium_controls(next_app_state, next_menu_state, &mut time, ui, &mut ui_state, view_settings);
+            planetarium_controls(next_app_state, next_menu_state, &mut time, ui, &mut ui_state, view_settings, &perf_metrics);
     });
 }
 
@@ -44,6 +46,7 @@ pub fn planetarium_controls(
     ui: &mut Ui,
     ui_state: &mut ResMut<UiState>,
     mut view_settings: ResMut<ViewSettings>,
+    perf_metrics: &SimulationPerformanceMetrics,
 ) {
     if ui.button("Quit to Main Menu").clicked() {
         // TODO: Some kind of save nag
@@ -154,4 +157,96 @@ pub fn planetarium_controls(
 
         });
     }
+
+    // Simulation performance
+    ui.separator();
+    ui.collapsing("Simulation Performance", |ui| {
+        let step = perf_metrics.step_size;
+        let completed = perf_metrics.steps_completed;
+        let intended = perf_metrics.steps_intended;
+        let behind = completed < intended;
+        let actual = completed as f64 * step;
+        let target = intended as f64 * step;
+        ui.label(format!("Step: {step:.4}s"));
+        let sim_text = format!("Simulated: {actual:.4} / {target:.4}s");
+        if behind {
+            ui.colored_label(egui::Color32::RED, &sim_text);
+        } else {
+            ui.label(&sim_text);
+        }
+        ui.separator();
+
+        // Graph rebuild info
+        ui.label(format!("Last graph rebuild: {:.4} ms", perf_metrics.last_graph_rebuild_duration_ms));
+        let rebuild_ago = perf_metrics.current_sim_time.to_j2000_seconds()
+            - perf_metrics.last_graph_rebuild_sim_time.to_j2000_seconds();
+        ui.label(format!("Rebuild sim-time ago: {rebuild_ago:.4} s"));
+
+        ui.separator();
+
+        // Steps completed / intended
+        let steps_text = format!("Steps: {completed} / {intended}");
+        if behind {
+            ui.colored_label(egui::Color32::RED, steps_text);
+        } else {
+            ui.label(steps_text);
+        }
+
+        ui.label(format!("Avg time per step: {:.4} ms", perf_metrics.avg_time_per_step_ms));
+
+        ui.separator();
+        ui.label("Step timing (avg):");
+        ui.indent("step_timing", |ui| {
+            ui.label(format!("Hierarchical: {:.4} ms", perf_metrics.avg_hierarchical_ms));
+            ui.label(format!("Cache update: {:.4} ms", perf_metrics.avg_cache_update_ms));
+            ui.label(format!("Newtonian:    {:.4} ms", perf_metrics.avg_newtonian_ms));
+        });
+
+        ui.separator();
+        if ui.button("Snapshot").clicked() {
+            match toml::to_string_pretty(perf_metrics) {
+                Ok(content) => {
+                    let timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| {
+                            let secs = d.as_secs();
+                            let millis = d.subsec_millis();
+                            // Break epoch seconds into date/time components
+                            let days = secs / 86400;
+                            let day_secs = secs % 86400;
+                            let hours = day_secs / 3600;
+                            let mins = (day_secs % 3600) / 60;
+                            let s = day_secs % 60;
+                            // Days since 1970-01-01 to Y-M-D (simplified)
+                            let (y, m, d) = epoch_days_to_ymd(days as i64);
+                            format!("{y:04}-{m:02}-{d:02}T{hours:02}-{mins:02}-{s:02}.{millis:03}")
+                        })
+                        .unwrap_or_else(|_| "unknown".to_string());
+                    let dir = std::path::Path::new("logs/performance");
+                    if let Err(e) = std::fs::create_dir_all(dir) {
+                        eprintln!("Failed to create {}: {e}", dir.display());
+                    } else if let Err(e) = std::fs::write(dir.join(format!("{timestamp}.toml")), content) {
+                        eprintln!("Failed to write snapshot: {e}");
+                    }
+                }
+                Err(e) => eprintln!("Failed to serialize metrics: {e}"),
+            }
+        }
+    });
+}
+
+/// Convert days since Unix epoch to (year, month, day).
+fn epoch_days_to_ymd(mut days: i64) -> (i64, u32, u32) {
+    // Shift to March-based year to simplify leap year handling
+    days += 719468; // days from 0000-03-01 to 1970-01-01
+    let era = days.div_euclid(146097);
+    let doe = days.rem_euclid(146097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
 }

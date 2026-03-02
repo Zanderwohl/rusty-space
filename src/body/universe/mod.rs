@@ -109,34 +109,30 @@ pub fn advance_time(mut sim_time: ResMut<SimTime>, time: Res<Time>) {
     // Accumulate the desired time
     sim_time.accumulated_time += desired_sim_delta;
     
-    // Calculate how many FULL steps we can queue from accumulated time
-    // This prevents overshoot when step > desired_sim_delta
+    // Calculate how many FULL steps one frame's worth of sim time requires
     let full_steps = (sim_time.accumulated_time / step).floor() as usize;
     
     if full_steps == 0 {
-        // Not enough accumulated time for a full step yet - wait until next frame
         return;
     }
     
-    // Subtract the time we're actually queuing from accumulated
+    // Consume the full amount from the accumulator
     sim_time.accumulated_time -= full_steps as f64 * step;
     
-    // How many steps are already queued (unprocessed from last frame)?
+    // If speed was reduced, the queue from a faster speed may be oversized — trim it.
+    // Keeps the front (earliest steps) since those must be simulated in order.
+    sim_time.previous_times.truncate(full_steps);
+    
+    // Only add enough steps to reach full_steps total — leftovers count toward the cap.
     let already_queued = sim_time.previous_times.len();
-    
-    // Only add new steps if we need more than what's queued
-    // This handles the case where we're falling behind
-    let steps_to_add = full_steps.saturating_sub(already_queued);
-    
-    if steps_to_add == 0 {
+    if already_queued >= full_steps {
         return;
     }
+    let steps_to_add = full_steps - already_queued;
     
-    // Get the last queued time (or current time if queue is empty)
+    // Append new steps after the last queued time (or current time if queue is empty)
     let last_queued_time = sim_time.previous_times.last()
         .unwrap_or(sim_time.time.to_j2000_seconds());
-    
-    // Expand the queue by adding more steps at the end
     sim_time.previous_times.expand(last_queued_time + step, steps_to_add, step);
     
     // NOTE: We do NOT update time_seconds here.

@@ -13,7 +13,7 @@ use crate::gui::menu::{TagState, UiState};
 use crate::gui::planetarium::time::SimTime;
 use crate::body::{universe, unload_simulation_objects, SimulationObject};
 use crate::body::motive::info::{BodyInfo, BodyState};
-use crate::body::motive::calculate_body_positions::{self, PhysicsGraph, PositionCache};
+use crate::body::motive::calculate_body_positions::{self, PhysicsGraph, PositionCache, SimulationPerformanceMetrics};
 use crate::body::motive::kepler_motive;
 use crate::foundations::time::{Instant, J2000_JD, JD_SECONDS_PER_JULIAN_DAY};
 pub(crate) use crate::gui::planetarium::camera::{PlanetariumCamera, PlanetariumCameraPlugin};
@@ -59,6 +59,7 @@ impl Plugin for PlanetariumUI {
             .init_resource::<BodyInfoState>()
             .init_resource::<PhysicsGraph>()
             .init_resource::<PositionCache>()
+            .init_resource::<SimulationPerformanceMetrics>()
             .add_message::<CalculateTrajectory>()
             .configure_sets(Update, (
                 PlanetariumUISet.run_if(in_state(AppState::Planetarium)),
@@ -81,7 +82,8 @@ impl Plugin for PlanetariumUI {
             .add_systems(Update, (
                 (
                     adjust_lights,
-                    calculate_body_positions::calculate_body_positions,
+                    calculate_body_positions::calculate_body_positions
+                        .after(universe::advance_time),
                     kepler_motive::calculate_trajectory,
                     position_bodies.after(calculate_body_positions::calculate_body_positions),
                     trajectory::render_trajectories,

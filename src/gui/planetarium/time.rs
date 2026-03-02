@@ -79,6 +79,13 @@ impl PreviousTimes {
         self.count = 0;
     }
     
+    /// Truncate to at most `max` items, dropping from the tail
+    pub fn truncate(&mut self, max: usize) {
+        if self.count > max {
+            self.count = max;
+        }
+    }
+    
     /// Expand the queue by adding more steps at the end.
     /// If the queue is empty, sets the start_time.
     pub fn expand(&mut self, new_start: f64, additional_count: usize, step: f64) {

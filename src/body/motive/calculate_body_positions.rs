@@ -16,6 +16,7 @@
 //! - Uses enum iterator to avoid Box<dyn Iterator> heap allocation
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::Instant as StdInstant;
 use bevy::math::DVec3;
 use bevy::prelude::*;
 
@@ -190,6 +191,53 @@ impl PositionCache {
 }
 
 // ============================================================================
+// Performance Metrics
+// ============================================================================
+
+/// Tracks simulation performance for display in the Controls panel.
+/// Written by `calculate_body_positions`, read by the GUI.
+#[derive(Resource, serde::Serialize)]
+pub struct SimulationPerformanceMetrics {
+    /// Physics time step in simulation seconds
+    pub step_size: f64,
+    /// Duration of the most recent graph rebuild (persists across frames)
+    pub last_graph_rebuild_duration_ms: f64,
+    /// Simulation time of the last graph rebuild
+    pub last_graph_rebuild_sim_time: Instant,
+    /// Current simulation time (for computing "seconds ago")
+    pub current_sim_time: Instant,
+    /// Number of steps completed last frame
+    pub steps_completed: usize,
+    /// Number of steps intended last frame
+    pub steps_intended: usize,
+    /// Average time per step last frame (ms)
+    pub avg_time_per_step_ms: f64,
+    /// Average hierarchical position calculation time per step (ms)
+    pub avg_hierarchical_ms: f64,
+    /// Average major body cache update time per step (ms)
+    pub avg_cache_update_ms: f64,
+    /// Average Newtonian position calculation time per step (ms)
+    pub avg_newtonian_ms: f64,
+}
+
+impl Default for SimulationPerformanceMetrics {
+    fn default() -> Self {
+        Self {
+            step_size: 0.0,
+            last_graph_rebuild_duration_ms: 0.0,
+            last_graph_rebuild_sim_time: Instant::from_seconds_since_j2000(0.0),
+            current_sim_time: Instant::from_seconds_since_j2000(0.0),
+            steps_completed: 0,
+            steps_intended: 0,
+            avg_time_per_step_ms: 0.0,
+            avg_hierarchical_ms: 0.0,
+            avg_cache_update_ms: 0.0,
+            avg_newtonian_ms: 0.0,
+        }
+    }
+}
+
+// ============================================================================
 // Main System
 // ============================================================================
 
@@ -202,6 +250,7 @@ pub fn calculate_body_positions(
     physics: Res<UniversePhysics>,
     mut graph: ResMut<PhysicsGraph>,
     mut cache: ResMut<PositionCache>,
+    mut metrics: ResMut<SimulationPerformanceMetrics>,
     mut bodies: Query<(Entity, &BodyInfo, &Motive, &mut BodyState, Option<&Major>)>,
 ) {
     // Start frame timing
@@ -216,9 +265,13 @@ pub fn calculate_body_positions(
         || graph.check_for_motive_changes(&bodies, graph.last_build_time, current_time);
     
     if needs_rebuild {
+        let rebuild_start = StdInstant::now();
         rebuild_physics_graph(&mut graph, &bodies, current_time);
         graph.needs_rebuild = false;
         graph.last_build_time = current_time;
+        
+        metrics.last_graph_rebuild_duration_ms = rebuild_start.elapsed().as_secs_f64() * 1000.0;
+        metrics.last_graph_rebuild_sim_time = current_time;
         
         // Update cache capacity based on new counts from graph rebuild
         cache.reserve(graph.last_body_count, graph.last_major_count);
@@ -239,6 +292,12 @@ pub fn calculate_body_positions(
         TimeIter::Single(Some(current_time.to_j2000_seconds()))
     };
     
+    // Accumulators for per-step timing
+    let mut total_hierarchical_ns = 0u128;
+    let mut total_cache_update_ns = 0u128;
+    let mut total_newtonian_ns = 0u128;
+    let frame_step_start = StdInstant::now();
+    
     // Process each time step
     for step_time in times_iter {
         let step_time = Instant::from_seconds_since_j2000(step_time);
@@ -253,6 +312,7 @@ pub fn calculate_body_positions(
         cache.clear_major_bodies();
         
         // Phase 1: Calculate Fixed and Keplerian positions
+        let t0 = StdInstant::now();
         calculate_hierarchical_positions(
             &mut bodies,
             &graph,
@@ -260,11 +320,15 @@ pub fn calculate_body_positions(
             step_time,
             physics.gravitational_constant,
         );
+        total_hierarchical_ns += t0.elapsed().as_nanos();
         
         // Update major body positions in cache for Newtonian calculations
+        let t1 = StdInstant::now();
         update_major_body_cache(&bodies, &graph, &mut cache);
+        total_cache_update_ns += t1.elapsed().as_nanos();
         
         // Phase 2: Calculate Newtonian positions
+        let t2 = StdInstant::now();
         calculate_newtonian_positions(
             &mut bodies,
             &graph,
@@ -274,16 +338,20 @@ pub fn calculate_body_positions(
             sim_time.playing,
             physics.gravitational_constant,
         );
+        total_newtonian_ns += t2.elapsed().as_nanos();
         
         last_processed_time = step_time;
         sim_time.step_completed();
         steps_processed += 1;
     }
     
+    let total_step_time_ms = frame_step_start.elapsed().as_secs_f64() * 1000.0;
+    
     // Update time_seconds to the last time we ACTUALLY processed
     sim_time.time = last_processed_time;
     
-    // Remove only the times we actually processed (keep remaining for next frame)
+    // Drain only the steps we actually processed; keep the remainder
+    // so Newtonian bodies integrate through every timestep in order.
     if has_queued_times {
         if steps_processed >= total_steps {
             sim_time.previous_times.clear();
@@ -294,6 +362,24 @@ pub fn calculate_body_positions(
     
     // End frame and calculate performance metrics
     sim_time.end_frame();
+    
+    // Update performance metrics resource
+    metrics.step_size = sim_time.step;
+    metrics.current_sim_time = last_processed_time;
+    metrics.steps_completed = steps_processed;
+    metrics.steps_intended = if has_queued_times { total_steps } else { 1 };
+    if steps_processed > 0 {
+        let n = steps_processed as f64;
+        metrics.avg_time_per_step_ms = total_step_time_ms / n;
+        metrics.avg_hierarchical_ms = (total_hierarchical_ns as f64 / 1_000_000.0) / n;
+        metrics.avg_cache_update_ms = (total_cache_update_ns as f64 / 1_000_000.0) / n;
+        metrics.avg_newtonian_ms = (total_newtonian_ns as f64 / 1_000_000.0) / n;
+    } else {
+        metrics.avg_time_per_step_ms = 0.0;
+        metrics.avg_hierarchical_ms = 0.0;
+        metrics.avg_cache_update_ms = 0.0;
+        metrics.avg_newtonian_ms = 0.0;
+    }
 }
 
 // ============================================================================
