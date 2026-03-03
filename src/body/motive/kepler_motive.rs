@@ -158,8 +158,10 @@ impl KeplerMotive {
     /// +Q (+y) points toward motion at periapsis, normal to P
     /// +W (+z) normal to the other 2 according to RHR
     pub fn displacement_pqw(&self, time: Instant, gravitational_parameter: f64) -> Option<DVec3> {
-        let rad = self.radius_from_primary_at_time(time, gravitational_parameter)?;
-        let ta = true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), self.shape.eccentricity(), EXPANSION_ITERATIONS);
+        let ecc = self.shape.eccentricity();
+        let ta = true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), ecc, EXPANSION_ITERATIONS);
+        let rad = local::radius::from_elements2(self.shape.semi_major_axis(), ecc, ta)?;
+
         Some(DVec3::new(rad * ta.cos(), rad * ta.sin(), 0.0))
     }
 

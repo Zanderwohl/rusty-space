@@ -68,10 +68,8 @@ pub enum CachedMotiveSelection {
         position: DVec3,
     },
     Keplerian {
-        /// Cloned KeplerMotive for displacement calculation
-        kepler: crate::body::motive::kepler_motive::KeplerMotive,
-        /// Parent mass (needed for mu calculation)
-        parent_mass: f64,
+        /// Pre-computed gravitational parameter (G * parent_mass), constant across time steps
+        mu: f64,
     },
     Newtonian {
         position: DVec3,
@@ -266,7 +264,7 @@ pub fn calculate_body_positions(
     
     if needs_rebuild {
         let rebuild_start = StdInstant::now();
-        rebuild_physics_graph(&mut graph, &bodies, current_time);
+        rebuild_physics_graph(&mut graph, &bodies, current_time, physics.gravitational_constant);
         graph.needs_rebuild = false;
         graph.last_build_time = current_time;
         
@@ -318,7 +316,6 @@ pub fn calculate_body_positions(
             &graph,
             &mut cache,
             step_time,
-            physics.gravitational_constant,
         );
         total_hierarchical_ns += t0.elapsed().as_nanos();
         
@@ -391,6 +388,7 @@ fn rebuild_physics_graph(
     graph: &mut PhysicsGraph,
     bodies: &Query<(Entity, &BodyInfo, &Motive, &mut BodyState, Option<&Major>)>,
     time: Instant,
+    gravitational_constant: f64,
 ) {
     // Count bodies for pre-allocation
     let body_count = bodies.iter().len();
@@ -446,15 +444,14 @@ fn rebuild_physics_graph(
                     .and_then(|pe| graph.body_data.get(&pe))
                     .map(|d| d.mass)
                     .unwrap_or(0.0);
-                
+
                 dependencies.insert(entity, parent_entity);
                 hierarchical_bodies.insert(entity);
-                
+
                 graph.cached_motives.insert(entity, CachedMotive {
                     parent_entity,
                     selection: CachedMotiveSelection::Keplerian {
-                        kepler: kepler.clone(),
-                        parent_mass,
+                        mu: gravitational_constant * parent_mass,
                     },
                 });
             }
@@ -495,17 +492,16 @@ fn rebuild_physics_graph(
 // ============================================================================
 
 /// Calculate positions for Fixed and Keplerian bodies in dependency order.
-/// Uses cached parent/mass data but calls motive_at() fresh for each body.
+/// Uses cached parent/mu data but calls motive_at() fresh for each body.
 fn calculate_hierarchical_positions(
     bodies: &mut Query<(Entity, &BodyInfo, &Motive, &mut BodyState, Option<&Major>)>,
     graph: &PhysicsGraph,
     cache: &mut PositionCache,
     time: Instant,
-    gravitational_constant: f64,
 ) {
     // Calculate positions in topological order
     for &entity in &graph.sorted_entities {
-        // Get cached motive data for parent info
+        // Get cached motive data for parent info and pre-computed mu
         let Some(cached_motive) = graph.cached_motives.get(&entity) else { continue };
         
         // Get the body from the query - we need the motive to calculate position
@@ -526,16 +522,13 @@ fn calculate_hierarchical_positions(
                 *position
             }
             MotiveSelection::Keplerian(kepler) => {
-                // Get parent mass from cached data
-                let parent_mass = match &cached_motive.selection {
-                    CachedMotiveSelection::Keplerian { parent_mass, .. } => *parent_mass,
-                    _ => 0.0, // Shouldn't happen
+                let mu = match &cached_motive.selection {
+                    CachedMotiveSelection::Keplerian { mu } => *mu,
+                    _ => 0.0,
                 };
-                let mu = gravitational_constant * parent_mass;
                 kepler.displacement(time, mu).unwrap_or(DVec3::ZERO)
             }
             MotiveSelection::Newtonian { .. } => {
-                // Skip - handled in phase 2 (shouldn't be in sorted_entities anyway)
                 continue;
             }
         };
@@ -546,7 +539,7 @@ fn calculate_hierarchical_positions(
         state.current_position = global_position;
         state.current_local_position = Some(local_position);
         state.current_primary_position = if cached_motive.parent_entity.is_some() { 
-            Some(parent_position) 
+            Some(parent_position)
         } else { 
             None 
         };
