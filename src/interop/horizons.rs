@@ -988,6 +988,163 @@ impl EphemerisRequest {
 }
 
 // ---------------------------------------------------------------------------
+// Major body list parsing
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+pub struct MajorBody {
+    pub id: i64,
+    pub name: String,
+    pub designation: String,
+    pub aliases: String,
+    /// Pre-built lowercase string for fast substring search.
+    search_hay: String,
+}
+
+impl MajorBody {
+    pub fn matches(&self, query: &str) -> bool {
+        if query.is_empty() {
+            return true;
+        }
+        let q = query.to_ascii_lowercase();
+        self.search_hay.contains(&q)
+    }
+
+    pub fn display_label(&self) -> String {
+        let mut s = format!("{}", self.id);
+        if !self.name.is_empty() {
+            s.push_str("  ");
+            s.push_str(&self.name);
+        }
+        if !self.designation.is_empty() {
+            s.push_str("  [");
+            s.push_str(&self.designation);
+            s.push(']');
+        }
+        if !self.aliases.is_empty() {
+            s.push_str("  (");
+            s.push_str(&self.aliases);
+            s.push(')');
+        }
+        s
+    }
+}
+
+/// Build the URL for a major body list query (COMMAND='MB', JSON, no ephemeris).
+pub fn major_body_list_url() -> String {
+    encode_url(&[
+        ("format", "json".into()),
+        ("COMMAND", "'MB'".into()),
+    ])
+}
+
+/// Detect column start positions from a header line by finding each
+/// space-to-non-space transition.
+fn detect_columns(header: &str) -> Vec<usize> {
+    let bytes = header.as_bytes();
+    let mut cols = Vec::new();
+    for i in 0..bytes.len() {
+        let is_space = bytes[i] == b' ';
+        if !is_space && (i == 0 || bytes[i - 1] == b' ') {
+            cols.push(i);
+        }
+    }
+    cols
+}
+
+/// Parse the `result` string from a Horizons COMMAND='MB' JSON response
+/// into a list of `MajorBody` entries. Column positions are detected from the
+/// header line rather than hardcoded.
+pub fn parse_major_body_list(result: &str) -> Vec<MajorBody> {
+    let mut bodies: Vec<MajorBody> = Vec::new();
+    let mut cols: Vec<usize> = Vec::new();
+    let mut past_header = false;
+
+    for line in result.lines() {
+        if !past_header {
+            // The header line contains "ID#" as its first token.
+            if cols.is_empty() && line.contains("ID#") && line.contains("Name") {
+                cols = detect_columns(line);
+            }
+            // The dashes line immediately follows the header and starts the data.
+            if !cols.is_empty() && line.contains("-------") {
+                past_header = true;
+            }
+            continue;
+        }
+
+        if line.trim().is_empty()
+            || line.contains("Number of matches")
+            || line.contains("*****")
+        {
+            break;
+        }
+
+        // We expect 4 columns: ID#, Name, Designation, IAU/aliases/other.
+        // Each column starts at cols[i] and ends just before cols[i+1].
+        if cols.len() < 2 {
+            continue;
+        }
+
+        let col_end = |i: usize| -> usize {
+            if i + 1 < cols.len() { cols[i + 1] } else { line.len() }
+        };
+
+        let id_str = safe_slice(line, cols[0], col_end(0)).trim();
+        let id: i64 = match id_str.parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let name = if cols.len() > 1 {
+            safe_slice(line, cols[1], col_end(1)).trim().to_string()
+        } else {
+            String::new()
+        };
+        let designation = if cols.len() > 2 {
+            safe_slice(line, cols[2], col_end(2)).trim().to_string()
+        } else {
+            String::new()
+        };
+        let aliases = if cols.len() > 3 {
+            safe_slice(line, cols[3], col_end(3)).trim().to_string()
+        } else {
+            String::new()
+        };
+
+        let search_hay = format!(
+            "{} {} {} {}",
+            id,
+            name.to_ascii_lowercase(),
+            designation.to_ascii_lowercase(),
+            aliases.to_ascii_lowercase(),
+        );
+
+        bodies.push(MajorBody {
+            id,
+            name,
+            designation,
+            aliases,
+            search_hay,
+        });
+    }
+
+    bodies
+}
+
+fn safe_slice(s: &str, start: usize, end: usize) -> &str {
+    let len = s.len();
+    if start >= len {
+        return "";
+    }
+    let end = end.min(len);
+    // Clamp to char boundaries for safety with non-ASCII
+    let start = s.floor_char_boundary(start);
+    let end = s.floor_char_boundary(end);
+    &s[start..end]
+}
+
+// ---------------------------------------------------------------------------
 // URL encoding helpers
 // ---------------------------------------------------------------------------
 

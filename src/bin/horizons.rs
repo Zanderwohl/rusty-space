@@ -1,6 +1,6 @@
 use eframe::egui;
-use exotic_matters::gui::horizons::request_ui;
-use exotic_matters::interop::horizons::Request;
+use exotic_matters::gui::horizons::{request_ui, BodyListStatus};
+use exotic_matters::interop::horizons::{self, MajorBody, Request};
 use std::sync::mpsc;
 use std::thread;
 
@@ -16,6 +16,10 @@ fn main() {
 
 struct Horizons {
     request: Request,
+    body_list: Vec<MajorBody>,
+    body_list_status: BodyListStatus,
+    body_list_receiver: Option<mpsc::Receiver<Result<String, String>>>,
+    body_search: String,
     url_cache: Option<String>,
     api_error: Option<String>,
     result_text: Option<String>,
@@ -23,16 +27,25 @@ struct Horizons {
     is_fetching: bool,
 }
 
+
 impl Horizons {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        Self::default()
-    }
-}
+        let (tx, rx) = mpsc::channel();
+        let url = horizons::major_body_list_url();
+        thread::spawn(move || {
+            let result = match reqwest::blocking::get(&url) {
+                Ok(response) => response.text().map_err(|e| e.to_string()),
+                Err(e) => Err(e.to_string()),
+            };
+            tx.send(result).ok();
+        });
 
-impl Default for Horizons {
-    fn default() -> Self {
         Self {
             request: Request::default(),
+            body_list: Vec::new(),
+            body_list_status: BodyListStatus::Loading,
+            body_list_receiver: Some(rx),
+            body_search: String::new(),
             url_cache: None,
             api_error: None,
             result_text: None,
@@ -42,7 +55,6 @@ impl Default for Horizons {
     }
 }
 
-/// Try to extract the "result" and "error" fields from the JSON response.
 fn parse_horizons_json(body: &str) -> (Option<String>, Option<String>) {
     let mut result = None;
     let mut error = None;
@@ -51,7 +63,7 @@ fn parse_horizons_json(body: &str) -> (Option<String>, Option<String>) {
             error = Some(e.to_string());
         }
         if let Some(r) = v.get("result").and_then(|r| r.as_str()) {
-            result = Some(r.replace("\\n", "\n"));
+            result = Some(r.to_string());
         }
     }
     (result, error)
@@ -59,6 +71,33 @@ fn parse_horizons_json(body: &str) -> (Option<String>, Option<String>) {
 
 impl eframe::App for Horizons {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Poll body list fetch
+        if let Some(rx) = &self.body_list_receiver {
+            if let Ok(result) = rx.try_recv() {
+                match result {
+                    Ok(body) => {
+                        let (result_text, error) = parse_horizons_json(&body);
+                        if let Some(err) = error {
+                            self.body_list_status = BodyListStatus::Failed(err);
+                        } else if let Some(text) = result_text {
+                            self.body_list = horizons::parse_major_body_list(&text);
+                            self.body_list_status = BodyListStatus::Ready;
+                        } else {
+                            self.body_list_status =
+                                BodyListStatus::Failed("Empty response".into());
+                        }
+                    }
+                    Err(err) => {
+                        self.body_list_status = BodyListStatus::Failed(err);
+                    }
+                }
+                self.body_list_receiver = None;
+            } else {
+                ctx.request_repaint();
+            }
+        }
+
+        // Poll ephemeris request fetch
         if let Some(receiver) = &self.response_receiver {
             if let Ok(result) = receiver.try_recv() {
                 match result {
@@ -80,7 +119,13 @@ impl eframe::App for Horizons {
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            request_ui(ui, &mut self.request);
+            request_ui(
+                ui,
+                &mut self.request,
+                &self.body_list,
+                &self.body_list_status,
+                &mut self.body_search,
+            );
 
             ui.separator();
             ui.heading("URL");
@@ -94,7 +139,8 @@ impl eframe::App for Horizons {
             ui.separator();
             ui.heading("Response");
 
-            let send_button = ui.add_enabled(!self.is_fetching, egui::Button::new("Send"));
+            let send_button =
+                ui.add_enabled(!self.is_fetching, egui::Button::new("Send"));
             if send_button.clicked() {
                 let url = self.request.to_url();
                 self.url_cache = Some(url.clone());
@@ -106,9 +152,9 @@ impl eframe::App for Horizons {
 
                 thread::spawn(move || {
                     let result = match reqwest::blocking::get(&url) {
-                        Ok(response) => response
-                            .text()
-                            .map_err(|e| e.to_string()),
+                        Ok(response) => {
+                            response.text().map_err(|e| e.to_string())
+                        }
                         Err(e) => Err(e.to_string()),
                     };
                     tx.send(result).ok();
@@ -120,13 +166,18 @@ impl eframe::App for Horizons {
             }
 
             if let Some(err) = &self.api_error {
-                ui.colored_label(egui::Color32::from_rgb(220, 60, 60), format!("API Error: {}", err));
+                ui.colored_label(
+                    egui::Color32::from_rgb(220, 60, 60),
+                    format!("API Error: {}", err),
+                );
             }
 
             if let Some(text) = &self.result_text {
-                egui::ScrollArea::vertical().id_salt("horizons_response").show(ui, |ui| {
-                    ui.monospace(text);
-                });
+                egui::ScrollArea::vertical()
+                    .id_salt("horizons_response")
+                    .show(ui, |ui| {
+                        ui.monospace(text);
+                    });
             }
         });
     }

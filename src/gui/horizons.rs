@@ -2,28 +2,55 @@ use eframe::egui;
 use eframe::egui::Ui;
 use crate::interop::horizons::*;
 
-pub fn request_ui(ui: &mut Ui, request: &mut Request) {
-    egui::ScrollArea::vertical().id_salt("horizons_request").show(ui, |ui| {
-        ui.heading("Request");
-        command_ui(ui, &mut request.command);
-        ui.checkbox(&mut request.obj_data, "Include Object Data");
+const MAX_SEARCH_RESULTS: usize = 2000;
 
-        ui.separator();
-        ephemeris_ui(ui, &mut request.ephemeris);
-
-        let warnings = request.validate();
-        if !warnings.is_empty() {
-            ui.separator();
-            for w in &warnings {
-                ui.colored_label(egui::Color32::from_rgb(220, 160, 40), w);
-            }
-        }
-    });
+/// Opaque status the bin passes in; we just need to know loading/ready/failed.
+pub enum BodyListStatus {
+    Loading,
+    Ready,
+    Failed(String),
 }
 
-fn command_ui(ui: &mut Ui, command: &mut Command) {
+pub fn request_ui(
+    ui: &mut Ui,
+    request: &mut Request,
+    body_list: &[MajorBody],
+    body_list_status: &BodyListStatus,
+    body_search: &mut String,
+) {
+    egui::ScrollArea::vertical()
+        .id_salt("horizons_request")
+        .show(ui, |ui| {
+            ui.heading("Request");
+            command_ui(ui, &mut request.command, body_list, body_list_status, body_search);
+            ui.checkbox(&mut request.obj_data, "Include Object Data");
+
+            ui.separator();
+            ephemeris_ui(ui, &mut request.ephemeris);
+
+            let warnings = request.validate();
+            if !warnings.is_empty() {
+                ui.separator();
+                for w in &warnings {
+                    ui.colored_label(egui::Color32::from_rgb(220, 160, 40), w);
+                }
+            }
+        });
+}
+
+// ---------------------------------------------------------------------------
+// Target / Command selector with search
+// ---------------------------------------------------------------------------
+
+fn command_ui(
+    ui: &mut Ui,
+    command: &mut Command,
+    body_list: &[MajorBody],
+    body_list_status: &BodyListStatus,
+    body_search: &mut String,
+) {
     ui.horizontal(|ui| {
-        egui::ComboBox::from_label("Target")
+        egui::ComboBox::from_id_salt("command_type")
             .selected_text(command.label())
             .show_ui(ui, |ui| {
                 if ui.selectable_label(matches!(command, Command::MajorBody(_)), "Major Body ID").clicked() {
@@ -38,20 +65,91 @@ fn command_ui(ui: &mut Ui, command: &mut Command) {
                 if ui.selectable_label(matches!(command, Command::SmallBodyName(_)), "Small Body Name").clicked() {
                     *command = Command::SmallBodyName("Ceres".into());
                 }
-                if ui.selectable_label(matches!(command, Command::MajorBodyList), "List Major Bodies").clicked() {
-                    *command = Command::MajorBodyList;
-                }
             });
 
         match command {
-            Command::MajorBody(id) => { ui.add(egui::DragValue::new(id)); }
+            Command::MajorBody(id) => {
+                ui.add(egui::DragValue::new(id));
+                if let Some(body) = body_list.iter().find(|b| b.id == *id) {
+                    let mut hint = body.name.clone();
+                    if !body.designation.is_empty() {
+                        hint.push_str("  [");
+                        hint.push_str(&body.designation);
+                        hint.push(']');
+                    }
+                    ui.label(&hint);
+                }
+            }
             Command::SmallBodyNumber(n) => { ui.add(egui::DragValue::new(n)); }
             Command::SmallBodyDesignation(s) => { ui.text_edit_singleline(s); }
             Command::SmallBodyName(s) => { ui.text_edit_singleline(s); }
-            Command::MajorBodyList => { ui.label("(returns list)"); }
+            Command::MajorBodyList => {}
         }
     });
+
+    // Body search widget (only shown for MajorBody)
+    if matches!(command, Command::MajorBody(_)) {
+        body_search_ui(ui, command, body_list, body_list_status, body_search);
+    }
 }
+
+fn body_search_ui(
+    ui: &mut Ui,
+    command: &mut Command,
+    body_list: &[MajorBody],
+    body_list_status: &BodyListStatus,
+    search: &mut String,
+) {
+    match body_list_status {
+        BodyListStatus::Loading => {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Loading body list...");
+            });
+            return;
+        }
+        BodyListStatus::Failed(err) => {
+            ui.colored_label(
+                egui::Color32::from_rgb(220, 60, 60),
+                format!("Body list failed: {}", err),
+            );
+            return;
+        }
+        BodyListStatus::Ready => {}
+    }
+
+    ui.horizontal(|ui| {
+        ui.label("Search:");
+        ui.text_edit_singleline(search);
+    });
+
+    let filtered: Vec<&MajorBody> = body_list
+        .iter()
+        .filter(|b| b.matches(search))
+        .take(MAX_SEARCH_RESULTS)
+        .collect();
+
+    egui::ScrollArea::vertical()
+        .id_salt("body_search_results")
+        .max_height(200.0)
+        .show(ui, |ui| {
+            if filtered.is_empty() {
+                ui.label("No matches.");
+            }
+            for body in &filtered {
+                let selected = matches!(command, Command::MajorBody(id) if *id == body.id);
+                let label = body.display_label();
+                if ui.selectable_label(selected, &label).clicked() {
+                    *command = Command::MajorBody(body.id);
+                    search.clear();
+                }
+            }
+        });
+}
+
+// ---------------------------------------------------------------------------
+// Ephemeris UI
+// ---------------------------------------------------------------------------
 
 fn ephemeris_ui(ui: &mut Ui, ephemeris: &mut Option<EphemerisRequest>) {
     let mut make_ephem = ephemeris.is_some();
@@ -94,37 +192,37 @@ fn ephemeris_ui(ui: &mut Ui, ephemeris: &mut Option<EphemerisRequest>) {
 
 fn observer_ui(ui: &mut Ui, p: &mut ObserverParams) {
     ui.push_id("observer", |ui| {
-    center_ui(ui, &mut p.center);
-    time_config_ui(ui, &mut p.time);
+        center_ui(ui, &mut p.center);
+        time_config_ui(ui, &mut p.time);
 
-    ui.horizontal(|ui| {
-        ui.label("Quantities:");
-        ui.text_edit_singleline(&mut p.quantities);
-    });
+        ui.horizontal(|ui| {
+            ui.label("Quantities:");
+            ui.text_edit_singleline(&mut p.quantities);
+        });
 
-    ui.collapsing("Output Options", |ui| {
-        enum_combo(ui, "Ref Plane", &mut p.ref_plane, &[RefPlane::Ecliptic, RefPlane::Frame, RefPlane::BodyEquator], RefPlane::label);
-        enum_combo(ui, "Ref System", &mut p.ref_system, &[RefSystem::Icrf, RefSystem::B1950], RefSystem::label);
-        enum_combo(ui, "Angle Format", &mut p.ang_format, &[AngFormat::Hms, AngFormat::Deg], AngFormat::label);
-        enum_combo(ui, "Calendar Format", &mut p.cal_format, &[CalFormat::Cal, CalFormat::Jd, CalFormat::Both], CalFormat::label);
-        enum_combo(ui, "Calendar Type", &mut p.cal_type, &[CalType::Mixed, CalType::Gregorian], CalType::label);
-        enum_combo(ui, "Range Units", &mut p.range_units, &[RangeUnits::Au, RangeUnits::Km], RangeUnits::label);
-        enum_combo(ui, "Apparent", &mut p.apparent, &[Apparent::Airless, Apparent::Refracted], Apparent::label);
-        ui.checkbox(&mut p.suppress_range_rate, "Suppress range rate");
-        ui.checkbox(&mut p.extra_prec, "Extra precision");
-        ui.checkbox(&mut p.csv_format, "CSV format");
-        ui.checkbox(&mut p.r_t_s_only, "Rise/Transit/Set only");
-    });
+        ui.collapsing("Output Options", |ui| {
+            enum_combo(ui, "Ref Plane", &mut p.ref_plane, &[RefPlane::Ecliptic, RefPlane::Frame, RefPlane::BodyEquator], RefPlane::label);
+            enum_combo(ui, "Ref System", &mut p.ref_system, &[RefSystem::Icrf, RefSystem::B1950], RefSystem::label);
+            enum_combo(ui, "Angle Format", &mut p.ang_format, &[AngFormat::Hms, AngFormat::Deg], AngFormat::label);
+            enum_combo(ui, "Calendar Format", &mut p.cal_format, &[CalFormat::Cal, CalFormat::Jd, CalFormat::Both], CalFormat::label);
+            enum_combo(ui, "Calendar Type", &mut p.cal_type, &[CalType::Mixed, CalType::Gregorian], CalType::label);
+            enum_combo(ui, "Range Units", &mut p.range_units, &[RangeUnits::Au, RangeUnits::Km], RangeUnits::label);
+            enum_combo(ui, "Apparent", &mut p.apparent, &[Apparent::Airless, Apparent::Refracted], Apparent::label);
+            ui.checkbox(&mut p.suppress_range_rate, "Suppress range rate");
+            ui.checkbox(&mut p.extra_prec, "Extra precision");
+            ui.checkbox(&mut p.csv_format, "CSV format");
+            ui.checkbox(&mut p.r_t_s_only, "Rise/Transit/Set only");
+        });
 
-    ui.collapsing("Time Options", |ui| {
-        enum_combo(ui, "Time Precision", &mut p.time_digits, &[TimeDigits::Minutes, TimeDigits::Seconds, TimeDigits::FracSec], TimeDigits::label);
-        enum_combo(ui, "Time Type", &mut p.time_type, &[ObserverTimeType::Ut, ObserverTimeType::Tt], ObserverTimeType::label);
-    });
+        ui.collapsing("Time Options", |ui| {
+            enum_combo(ui, "Time Precision", &mut p.time_digits, &[TimeDigits::Minutes, TimeDigits::Seconds, TimeDigits::FracSec], TimeDigits::label);
+            enum_combo(ui, "Time Type", &mut p.time_type, &[ObserverTimeType::Ut, ObserverTimeType::Tt], ObserverTimeType::label);
+        });
 
-    ui.collapsing("Filters", |ui| {
-        ui.checkbox(&mut p.skip_daylight, "Skip daylight");
+        ui.collapsing("Filters", |ui| {
+            ui.checkbox(&mut p.skip_daylight, "Skip daylight");
+        });
     });
-    }); // push_id("observer")
 }
 
 // ---------------------------------------------------------------------------
@@ -133,29 +231,29 @@ fn observer_ui(ui: &mut Ui, p: &mut ObserverParams) {
 
 fn vectors_ui(ui: &mut Ui, p: &mut VectorsParams) {
     ui.push_id("vectors", |ui| {
-    center_ui(ui, &mut p.center);
-    time_config_ui(ui, &mut p.time);
+        center_ui(ui, &mut p.center);
+        time_config_ui(ui, &mut p.time);
 
-    ui.collapsing("Output Options", |ui| {
-        enum_combo(ui, "Ref Plane", &mut p.ref_plane, &[RefPlane::Ecliptic, RefPlane::Frame, RefPlane::BodyEquator], RefPlane::label);
-        enum_combo(ui, "Ref System", &mut p.ref_system, &[RefSystem::Icrf, RefSystem::B1950], RefSystem::label);
-        enum_combo(ui, "Units", &mut p.out_units, &[OutUnits::KmS, OutUnits::AuD, OutUnits::KmD], OutUnits::label);
-        enum_combo(ui, "Table Format", &mut p.vec_table, &[
-            VecTable::Position, VecTable::State, VecTable::StateRangeRate,
-            VecTable::PositionRangeRate, VecTable::Velocity, VecTable::RangeRateOnly,
-        ], VecTable::label);
-        enum_combo(ui, "Correction", &mut p.vec_corr, &[VecCorr::None, VecCorr::LightTime, VecCorr::LightTimeStellarAberr], VecCorr::label);
-        ui.checkbox(&mut p.vec_labels, "Vector labels");
-        ui.checkbox(&mut p.vec_delta_t, "Delta-T (TDB-UT)");
-        ui.checkbox(&mut p.csv_format, "CSV format");
-    });
+        ui.collapsing("Output Options", |ui| {
+            enum_combo(ui, "Ref Plane", &mut p.ref_plane, &[RefPlane::Ecliptic, RefPlane::Frame, RefPlane::BodyEquator], RefPlane::label);
+            enum_combo(ui, "Ref System", &mut p.ref_system, &[RefSystem::Icrf, RefSystem::B1950], RefSystem::label);
+            enum_combo(ui, "Units", &mut p.out_units, &[OutUnits::KmS, OutUnits::AuD, OutUnits::KmD], OutUnits::label);
+            enum_combo(ui, "Table Format", &mut p.vec_table, &[
+                VecTable::Position, VecTable::State, VecTable::StateRangeRate,
+                VecTable::PositionRangeRate, VecTable::Velocity, VecTable::RangeRateOnly,
+            ], VecTable::label);
+            enum_combo(ui, "Correction", &mut p.vec_corr, &[VecCorr::None, VecCorr::LightTime, VecCorr::LightTimeStellarAberr], VecCorr::label);
+            ui.checkbox(&mut p.vec_labels, "Vector labels");
+            ui.checkbox(&mut p.vec_delta_t, "Delta-T (TDB-UT)");
+            ui.checkbox(&mut p.csv_format, "CSV format");
+        });
 
-    ui.collapsing("Time Options", |ui| {
-        enum_combo(ui, "Calendar Type", &mut p.cal_type, &[CalType::Mixed, CalType::Gregorian], CalType::label);
-        enum_combo(ui, "Time Precision", &mut p.time_digits, &[TimeDigits::Minutes, TimeDigits::Seconds, TimeDigits::FracSec], TimeDigits::label);
-        enum_combo(ui, "Time Type", &mut p.time_type, &[VectorTimeType::Tdb, VectorTimeType::Ut], VectorTimeType::label);
+        ui.collapsing("Time Options", |ui| {
+            enum_combo(ui, "Calendar Type", &mut p.cal_type, &[CalType::Mixed, CalType::Gregorian], CalType::label);
+            enum_combo(ui, "Time Precision", &mut p.time_digits, &[TimeDigits::Minutes, TimeDigits::Seconds, TimeDigits::FracSec], TimeDigits::label);
+            enum_combo(ui, "Time Type", &mut p.time_type, &[VectorTimeType::Tdb, VectorTimeType::Ut], VectorTimeType::label);
+        });
     });
-    }); // push_id("vectors")
 }
 
 // ---------------------------------------------------------------------------
@@ -164,22 +262,22 @@ fn vectors_ui(ui: &mut Ui, p: &mut VectorsParams) {
 
 fn elements_ui(ui: &mut Ui, p: &mut ElementsParams) {
     ui.push_id("elements", |ui| {
-    center_ui(ui, &mut p.center);
-    time_config_ui(ui, &mut p.time);
+        center_ui(ui, &mut p.center);
+        time_config_ui(ui, &mut p.time);
 
-    ui.collapsing("Output Options", |ui| {
-        enum_combo(ui, "Ref System", &mut p.ref_system, &[RefSystem::Icrf, RefSystem::B1950], RefSystem::label);
-        enum_combo(ui, "Units", &mut p.out_units, &[OutUnits::KmS, OutUnits::AuD, OutUnits::KmD], OutUnits::label);
-        enum_combo(ui, "Tp Type", &mut p.tp_type, &[TpType::Absolute, TpType::Relative], TpType::label);
-        ui.checkbox(&mut p.elm_labels, "Element labels");
-        ui.checkbox(&mut p.csv_format, "CSV format");
-    });
+        ui.collapsing("Output Options", |ui| {
+            enum_combo(ui, "Ref System", &mut p.ref_system, &[RefSystem::Icrf, RefSystem::B1950], RefSystem::label);
+            enum_combo(ui, "Units", &mut p.out_units, &[OutUnits::KmS, OutUnits::AuD, OutUnits::KmD], OutUnits::label);
+            enum_combo(ui, "Tp Type", &mut p.tp_type, &[TpType::Absolute, TpType::Relative], TpType::label);
+            ui.checkbox(&mut p.elm_labels, "Element labels");
+            ui.checkbox(&mut p.csv_format, "CSV format");
+        });
 
-    ui.collapsing("Time Options", |ui| {
-        enum_combo(ui, "Calendar Type", &mut p.cal_type, &[CalType::Mixed, CalType::Gregorian], CalType::label);
-        enum_combo(ui, "Time Precision", &mut p.time_digits, &[TimeDigits::Minutes, TimeDigits::Seconds, TimeDigits::FracSec], TimeDigits::label);
+        ui.collapsing("Time Options", |ui| {
+            enum_combo(ui, "Calendar Type", &mut p.cal_type, &[CalType::Mixed, CalType::Gregorian], CalType::label);
+            enum_combo(ui, "Time Precision", &mut p.time_digits, &[TimeDigits::Minutes, TimeDigits::Seconds, TimeDigits::FracSec], TimeDigits::label);
+        });
     });
-    }); // push_id("elements")
 }
 
 // ---------------------------------------------------------------------------
