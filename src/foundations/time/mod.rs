@@ -2,8 +2,8 @@ use std::ops::Sub;
 use serde::{Deserialize, Serialize};
 
 /// Stored in Seconds
-/// Accurate to 1/100th second at 1,427,104 years on either side of epoch
-/// Epoch in this program is J2000
+/// Accurate to 1/100th second at 1,427,104 years on either side of epoch.
+/// Epoch in this program is J2000.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialOrd, PartialEq, Default)]
 pub struct Instant(f64);
 
