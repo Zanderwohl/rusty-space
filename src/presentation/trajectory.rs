@@ -397,8 +397,8 @@ pub fn build_trajectory_meshes(
 }
 
 /// Compute brightness for a point based on its arc distance from the transient point.
-/// The wake (where the body just was) is brightest, fading toward the path ahead.
-/// The far tail end fades to near-transparent for a comet-like appearance.
+/// Single continuous curve around the entire orbit - no discrete regimes.
+/// Just behind body = 100%, 180° behind = 50%, just ahead = ~0%.
 fn compute_brightness(
     point_frac: f32,
     transient_frac: f32,
@@ -406,39 +406,21 @@ fn compute_brightness(
     min_brightness: f32,
     max_brightness: f32,
 ) -> f32 {
-    // Determine if this point is "behind" (wake) or "ahead" of the body
-    let is_wake = if closed {
-        // For closed orbits, "wake" means the body has passed this point recently
-        // forward_dist is how far ahead this point is (0 = at body, approaching 1 = just behind)
+    if closed {
+        // forward_dist: 0 = just ahead of body, 1 = just behind body
+        // This directly maps to brightness - smooth all the way around.
         let forward_dist = (point_frac - transient_frac + 1.0) % 1.0;
-        forward_dist > 0.5  // More than halfway around = in the wake
+        min_brightness + (max_brightness - min_brightness) * forward_dist
     } else {
-        // For open orbits, wake is simply earlier indices
-        point_frac < transient_frac
-    };
-    
-    // Calculate distance along trajectory from the transient point
-    let raw_dist = if closed {
-        let forward_dist = (point_frac - transient_frac + 1.0) % 1.0;
+        // Open orbits: fade based on distance behind the body
+        let dist = (point_frac - transient_frac).abs();
+        let is_wake = point_frac < transient_frac;
         if is_wake {
-            // Distance back into the wake (0 = just passed, 0.5 = opposite side)
-            1.0 - forward_dist
+            let brightness_pct = (1.0 - dist).max(0.0);
+            min_brightness + (max_brightness - min_brightness) * brightness_pct
         } else {
-            // Distance ahead (0 = at body, 0.5 = opposite side)
-            forward_dist
+            min_brightness
         }
-    } else {
-        (point_frac - transient_frac).abs()
-    };
-    
-    if is_wake {
-        // Wake: 100% at body, linear fade to 50% at 180° (opposite side)
-        let wake_fraction = (raw_dist * 2.0).min(1.0); // 0 at body, 1 at 180°
-        let brightness_pct = 1.0 - wake_fraction * 0.5; // 1.0 → 0.5
-        min_brightness + (max_brightness - min_brightness) * brightness_pct
-    } else {
-        // Ahead: fully dim - the body hasn't been here yet
-        min_brightness
     }
 }
 
