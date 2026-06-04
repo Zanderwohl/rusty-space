@@ -4,8 +4,8 @@ use bevy::prelude::*;
 use bevy::color::Srgba;
 use bevy::math::{DVec3, FloatExt};
 use bevy::render::view::ColorGrading;
-use itertools::Itertools;
 use num_traits::Pow;
+use crate::body::appearance::Appearance;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::{Motive, MotiveSelection};
 use crate::body::universe::save::ViewSettings;
@@ -16,7 +16,7 @@ use crate::util::bevystuff::GlamVec;
 
 /// Renders trajectory lines as Bevy gizmos with brightness variation.
 pub fn render_trajectories(
-    bodies: Query<(&BodyState, &BodyInfo, &Motive)>,
+    bodies: Query<(&BodyState, &BodyInfo, &Motive, Option<&Appearance>)>,
     mut gizmos: Gizmos,
     view_settings: Res<ViewSettings>,
     settings: Res<Settings>,
@@ -40,12 +40,11 @@ pub fn render_trajectories(
     let max_brightness = max_brightness * exposure_adjust;
 
     let mut color = Srgba::new(1.0, 0.0, 0.0, 1.0);
-    for (state, info, motive) in bodies.iter() {
+    for (state, info, motive, appearance) in bodies.iter() {
         if !(view_settings.show_trajectories || view_settings.body_in_any_trajectory_tag(&info.id)) {
             continue;
         }
         if let Some(trajectory) = &state.trajectory {
-            let len = trajectory.len();
             let frac = match trajectory.periodicity() {
                 None => 0.0,
                 Some(periodicity) => {
@@ -59,22 +58,44 @@ pub fn render_trajectories(
                 _ => None,
             };
 
-            let primary_d: Option<Vec<DVec3>> = primary_id
+            // Collect trajectory points; we may insert a transient point at the
+            // body's current position so the line always passes through the body.
+            let mut points: Vec<(f64, DVec3)> = trajectory.iter().map(|(t, d)| (t, *d)).collect();
+
+            if let (Some(local_pos), Some(periodicity)) = (state.current_local_position, trajectory.periodicity()) {
+                let current_relative_time = frac * periodicity.interval_size;
+                let body_radius = appearance.map(|a| a.radius()).unwrap_or(0.0);
+
+                if let Some(seg) = points.windows(2).position(|w| {
+                    current_relative_time >= w[0].0 && current_relative_time < w[1].0
+                }) {
+                    let dist_before = (local_pos - points[seg].1).length();
+                    let dist_after = (local_pos - points[seg + 1].1).length();
+
+                    if dist_before >= body_radius && dist_after >= body_radius {
+                        points.insert(seg + 1, (current_relative_time, local_pos));
+                    }
+                }
+            }
+
+            let len = points.len();
+
+            // All trajectory displacements are relative to the primary; offset by
+            // the primary's current global position when drawing.
+            let primary_offset: Option<DVec3> = primary_id
                 .and_then(|id| {
-                    bodies.iter().find(|(_, info, _)| { &info.id == id })
+                    bodies.iter().find(|(_, info, _, _)| &info.id == id)
                 })
-                .and_then(|(primary_state, _, _)| {
+                .and_then(|(primary_state, _, _, _)| {
                     if primary_state.trajectory.is_none() { return None; }
-                    let _primary_trajectory = primary_state.trajectory.as_ref().unwrap();
-                    Some(trajectory.iter().map(|(_t, _)| {
-                        primary_state.current_position
-                    }).collect())
+                    Some(primary_state.current_position)
                 });
 
-            for (idx, ((t1, d1), (t2, d2))) in trajectory.iter().tuple_windows().enumerate() {
-                let (d1, d2) = match &primary_d {
-                    None => (d1.clone(), d2.clone()),
-                    Some(primary_d) => (d1 + primary_d[idx], d2 + primary_d[idx + 1])
+            for (idx, window) in points.windows(2).enumerate() {
+                let (d1, d2) = (window[0].1, window[1].1);
+                let (d1, d2) = match primary_offset {
+                    None => (d1, d2),
+                    Some(offset) => (d1 + offset, d2 + offset),
                 };
 
                 let segment_frac = idx as f32 / len as f32;
