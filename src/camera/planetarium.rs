@@ -1,6 +1,17 @@
 //! Planetarium camera: goto animation and revolve-around-body behavior.
 
 use std::f64::consts::{PI, TAU};
+
+/// Minimum orbit distance as a multiple of the body's visual radius.
+const ORBIT_ZOOM_MIN_RADIUS_MULT: f64 = 1.2;
+/// Maximum orbit distance in light-years.
+const ORBIT_ZOOM_MAX_LY: f64 = 1.0;
+/// Base scroll-zoom speed (fraction of distance per scroll tick at close range).
+const ORBIT_ZOOM_BASE_SPEED: f64 = 0.001;
+/// Additional speed gained per order of magnitude above min distance.
+const ORBIT_ZOOM_ACCELERATION: f64 = 0.006;
+/// One light-year in meters.
+const LIGHT_YEAR_M: f64 = 9.460_730_472_580_8e15;
 use bevy::app::App;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::math::{DMat3, DQuat, DVec3};
@@ -195,11 +206,25 @@ fn revolve_around(
                             let egui_wants_pointer = egui_ctx.ctx_mut()
                                 .map_or(false, |ctx| ctx.wants_pointer_input());
 
+                            let min_distance = ORBIT_ZOOM_MIN_RADIUS_MULT * scaled_radius;
+                            let max_distance = ORBIT_ZOOM_MAX_LY * LIGHT_YEAR_M * view_settings.distance_factor();
+
                             for ev in scroll.read() {
                                 if !egui_wants_pointer {
-                                    revolve.bevy_distance *= 1.0 - (ev.y as f64 * 0.1);
+                                    let u = (revolve.bevy_distance / min_distance).ln();
+                                    let a = ORBIT_ZOOM_BASE_SPEED;
+                                    let k = ORBIT_ZOOM_ACCELERATION / 10.0_f64.ln();
+                                    let t = ev.y as f64;
+
+                                    let u_new = if k.abs() > f64::EPSILON {
+                                        (u + a / k) * (-k * t).exp() - a / k
+                                    } else {
+                                        u - a * t
+                                    };
+
+                                    revolve.bevy_distance = min_distance * u_new.exp();
                                     revolve.bevy_distance = revolve.bevy_distance
-                                        .clamp(1.5 * scaled_radius, 100.0 * scaled_radius);
+                                        .clamp(min_distance, max_distance);
                                 }
                             }
 
