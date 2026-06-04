@@ -43,7 +43,7 @@ impl Default for KeyBindings {
             move_left: KeyCode::KeyA,
             move_right: KeyCode::KeyD,
             move_ascend: KeyCode::Space,
-            move_descend: KeyCode::ShiftLeft,
+            move_descend: KeyCode::ControlLeft,
             toggle_grab_cursor: KeyCode::Backquote,
         }
     }
@@ -56,24 +56,10 @@ pub struct Freecam {
     pub bevy_pos: DVec3,
 }
 
-/// Grabs/ungrabs mouse cursor
-fn toggle_grab_cursor(
-    cursor_options: &mut CursorOptions,
-    app_state: Res<State<AppState>>,
-) {
-    if app_state.ne(&AppState::Planetarium) {
-        return;
-    }
-    match cursor_options.grab_mode {
-        CursorGrabMode::None => {
-            cursor_options.grab_mode = CursorGrabMode::Confined;
-            cursor_options.visible = false;
-        }
-        _ => {
-            cursor_options.grab_mode = CursorGrabMode::None;
-            cursor_options.visible = true;
-        }
-    }
+/// Tracks whether the cursor grab toggle key (backquote) is active.
+#[derive(Resource, Default)]
+pub struct CursorGrabToggle {
+    pub toggled: bool,
 }
 
 /// Handles keyboard input and movement
@@ -117,7 +103,12 @@ fn player_move(
 
                 velocity = velocity.normalize_or_zero();
 
-                freecam.bevy_pos += velocity * ((time.delta_secs() * settings.speed) as f64);
+                let speed_multiplier = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+                    3.0
+                } else {
+                    1.0
+                };
+                freecam.bevy_pos += velocity * ((time.delta_secs() * settings.speed * speed_multiplier) as f64);
             }
         }
     } else {
@@ -165,13 +156,28 @@ fn player_look(
 
 fn cursor_grab(
     keys: Res<ButtonInput<KeyCode>>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
     key_bindings: Res<KeyBindings>,
+    mut grab_toggle: ResMut<CursorGrabToggle>,
     mut primary_window_cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
     state: Res<State<AppState>>,
 ) {
+    if state.ne(&AppState::Planetarium) {
+        return;
+    }
     if let Ok(mut cursor_options) = primary_window_cursor.single_mut() {
         if keys.just_pressed(key_bindings.toggle_grab_cursor) {
-            toggle_grab_cursor(&mut cursor_options, state);
+            grab_toggle.toggled = !grab_toggle.toggled;
+        }
+
+        let should_grab = grab_toggle.toggled || mouse_buttons.pressed(MouseButton::Right);
+
+        if should_grab {
+            cursor_options.grab_mode = CursorGrabMode::Confined;
+            cursor_options.visible = false;
+        } else {
+            cursor_options.grab_mode = CursorGrabMode::None;
+            cursor_options.visible = true;
         }
     } else {
         warn!("Primary window not found for `cursor_grab`!");
@@ -182,13 +188,20 @@ fn initial_grab_on_flycam_spawn(
     mut cursor_options: Query<&mut CursorOptions, With<PrimaryWindow>>,
     query_added: Query<Entity, Added<Freecam>>,
     state: Res<State<AppState>>,
+    mut grab_toggle: ResMut<CursorGrabToggle>,
 ) {
     if query_added.is_empty() {
         return;
     }
 
-    if let Ok(cursor_options) = &mut cursor_options.single_mut() {
-        toggle_grab_cursor(cursor_options, state);
+    if state.ne(&AppState::Planetarium) {
+        return;
+    }
+
+    grab_toggle.toggled = true;
+    if let Ok(mut cursor_options) = cursor_options.single_mut() {
+        cursor_options.grab_mode = CursorGrabMode::Confined;
+        cursor_options.visible = false;
     } else {
         warn!("Primary window not found for `initial_grab_cursor`!");
     }
@@ -200,6 +213,7 @@ impl Plugin for FreeCamPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MovementSettings>()
             .init_resource::<KeyBindings>()
+            .init_resource::<CursorGrabToggle>()
             .add_systems(Startup, initial_grab_on_flycam_spawn)
             .add_systems(Update, player_move)
             .add_systems(Update, player_look)

@@ -15,7 +15,7 @@ use crate::body::motive::kepler_motive;
 use crate::foundations::time::{Instant, J2000_JD, JD_SECONDS_PER_JULIAN_DAY};
 pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin};
 use crate::gui::planetarium::windows::body_info::BodyInfoState;
-use crate::presentation;
+use crate::presentation::{self, TrajectoryMaterialPlugin};
 
 mod windows;
 
@@ -48,6 +48,7 @@ impl Plugin for PlanetariumUI {
                 PlanetariumLoadingSet.run_if(in_state(AppState::PlanetariumLoading)),
             ))
             .add_plugins(PlanetariumCameraPlugin)
+            .add_plugins(TrajectoryMaterialPlugin)
             .add_systems(EguiPrimaryContextPass, (
                 (
                     windows::controls::control_window,
@@ -69,7 +70,14 @@ impl Plugin for PlanetariumUI {
                     presentation::position_bodies.after(calculate_body_positions::calculate_body_positions),
                     presentation::orient_bodies.after(presentation::position_bodies),
                     presentation::render_axes.after(presentation::orient_bodies),
-                    presentation::render_trajectories,
+                    // Trajectory mesh systems
+                    presentation::spawn_trajectory_meshes_for_bodies,
+                    presentation::rebuild_trajectory_caches
+                        .after(kepler_motive::calculate_trajectory),
+                    presentation::build_trajectory_meshes
+                        .after(presentation::position_bodies)
+                        .after(presentation::rebuild_trajectory_caches),
+                    presentation::cleanup_orphaned_trajectory_meshes,
                 ).in_set(PlanetariumUISet),
                 (
                     universe::advance_time,

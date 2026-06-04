@@ -1,23 +1,137 @@
-//! Trajectory gizmo rendering system.
+//! Trajectory rendering system using custom material and tube meshes.
+//!
+//! Replaces the old gizmo-based rendering with depth-correct tube geometry
+//! that participates in Bloom for emissive segments.
 
+use std::f32::consts::PI;
 use bevy::prelude::*;
-use bevy::color::Srgba;
-use bevy::math::{DVec3, FloatExt};
+use bevy::asset::RenderAssetUsages;
+use bevy::camera::visibility::NoFrustumCulling;
+use bevy::math::DVec3;
 use bevy::render::view::ColorGrading;
+use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use num_traits::Pow;
+
 use crate::body::appearance::Appearance;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::{Motive, MotiveSelection};
 use crate::body::universe::save::ViewSettings;
-use crate::camera::{PlanetariumCamera, Freecam};
-use crate::sim::SimTime;
+use crate::camera::{Freecam, PlanetariumCamera};
 use crate::gui::settings::{DisplayGlow, Settings};
+use crate::sim::SimTime;
 use crate::util::bevystuff::GlamVec;
 
-/// Renders trajectory lines as Bevy gizmos with brightness variation.
-pub fn render_trajectories(
-    bodies: Query<(&BodyState, &BodyInfo, &Motive, Option<&Appearance>)>,
-    mut gizmos: Gizmos,
+use super::trajectory_material::TrajectoryMaterial;
+
+/// Marker component for trajectory mesh entities.
+#[derive(Component)]
+pub struct TrajectoryMesh {
+    /// The body entity this trajectory belongs to
+    pub body_entity: Entity,
+}
+
+/// Cached trajectory data to avoid recomputing from TimeMap every frame.
+/// Only rebuilt when orbital parameters change.
+#[derive(Component, Default)]
+pub struct TrajectoryCache {
+    /// Base points as local displacements (DVec3 in simulation space).
+    /// Does NOT include the transient point or closing duplicate.
+    pub local_points: Vec<(f64, DVec3)>,
+    /// Whether this is a closed orbit (needs closing duplicate appended).
+    pub closed: bool,
+    /// Period interval size for brightness calculation (only for closed orbits)
+    pub interval_size: Option<f64>,
+    /// Period interval start for cycle fraction calculation
+    pub interval_start: Option<f64>,
+    /// The body's primary ID for looking up primary position offset
+    pub primary_id: Option<String>,
+    /// Whether the cache is valid (set to false when trajectory needs rebuild)
+    pub valid: bool,
+}
+
+/// Number of sides for the tube cross-section (6-8 is visually sufficient)
+const TUBE_SIDES: u32 = 8;
+
+/// Default tube radius in Bevy units
+const TUBE_RADIUS: f32 = 0.02;
+
+/// Spawns a trajectory mesh entity as a child of the given body entity.
+/// Called when bodies are spawned.
+pub fn spawn_trajectory_mesh(
+    commands: &mut Commands,
+    body_entity: Entity,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<TrajectoryMaterial>>,
+) -> Entity {
+    let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD);
+    let mesh_handle = meshes.add(mesh);
+    
+    let material = TrajectoryMaterial::default();
+    let material_handle = materials.add(material);
+    
+    commands.spawn((
+        Mesh3d(mesh_handle),
+        MeshMaterial3d(material_handle),
+        Transform::default(),
+        Visibility::Hidden,
+        NoFrustumCulling,
+        TrajectoryMesh { body_entity },
+        TrajectoryCache::default(),
+    )).id()
+}
+
+/// System to rebuild trajectory caches when orbital parameters change.
+/// Listens for changes to BodyState.trajectory and repopulates the cache.
+pub fn rebuild_trajectory_caches(
+    bodies: Query<(Entity, &BodyState, &Motive), Changed<BodyState>>,
+    mut trajectory_meshes: Query<(&TrajectoryMesh, &mut TrajectoryCache)>,
+) {
+    for (body_entity, state, motive) in bodies.iter() {
+        // Find the trajectory mesh for this body
+        for (traj_mesh, mut cache) in trajectory_meshes.iter_mut() {
+            if traj_mesh.body_entity != body_entity {
+                continue;
+            }
+            
+            // Only rebuild if body has a trajectory
+            let Some(trajectory) = &state.trajectory else {
+                cache.valid = false;
+                cache.local_points.clear();
+                continue;
+            };
+            
+            // Get primary_id for Keplerian motives
+            let primary_id = match motive.motive_at(crate::foundations::time::Instant::J2000) {
+                (_, MotiveSelection::Keplerian(k)) => Some(k.primary_id.clone()),
+                _ => None,
+            };
+            
+            // Collect points from TimeMap (local displacements)
+            cache.local_points = trajectory.iter().map(|(t, d)| (t, *d)).collect();
+            
+            // Set periodicity info
+            if let Some(periodicity) = trajectory.periodicity() {
+                cache.closed = true;
+                cache.interval_size = Some(periodicity.interval_size);
+                cache.interval_start = Some(periodicity.interval_start);
+            } else {
+                cache.closed = false;
+                cache.interval_size = None;
+                cache.interval_start = None;
+            }
+            
+            cache.primary_id = primary_id;
+            cache.valid = true;
+        }
+    }
+}
+
+/// Main system to build trajectory meshes each frame.
+/// Reads cached points, inserts transient point, applies transforms, computes brightness, generates tube geometry.
+pub fn build_trajectory_meshes(
+    bodies: Query<(Entity, &BodyState, &BodyInfo, &Motive, Option<&Appearance>)>,
+    mut trajectory_meshes: Query<(&TrajectoryMesh, &TrajectoryCache, &mut Visibility, &Mesh3d)>,
+    mut meshes: ResMut<Assets<Mesh>>,
     view_settings: Res<ViewSettings>,
     settings: Res<Settings>,
     fcam: Single<&Freecam, With<PlanetariumCamera>>,
@@ -25,111 +139,293 @@ pub fn render_trajectories(
     color_grading: Single<&ColorGrading>,
 ) {
     let distance_scale = view_settings.distance_factor();
-    let current_time = sim_time.time;
-
     let exposure = color_grading.global.exposure;
-
+    
+    // Brightness range based on glow settings
     let (min_brightness, max_brightness) = match settings.display.glow {
-        DisplayGlow::None => { (0.1, 1.0) }
-        DisplayGlow::Subtle => { (0.25, 1.2) }
-        DisplayGlow::VFD => { (1.0, 4.0) }
-        DisplayGlow::Defcon => { (0.2, 10.0) }
+        DisplayGlow::None => (0.1, 1.0),
+        DisplayGlow::Subtle => (0.25, 1.2),
+        DisplayGlow::VFD => (1.0, 4.0),
+        DisplayGlow::Defcon => (0.2, 10.0),
     };
     let exposure_adjust = 2f32.pow(-exposure);
     let min_brightness = min_brightness * exposure_adjust;
     let max_brightness = max_brightness * exposure_adjust;
-
-    let mut color = Srgba::new(1.0, 0.0, 0.0, 1.0);
-    for (state, info, motive, appearance) in bodies.iter() {
-        if !(view_settings.show_trajectories || view_settings.body_in_any_trajectory_tag(&info.id)) {
+    
+    for (traj_mesh, cache, mut visibility, mesh3d) in trajectory_meshes.iter_mut() {
+        // Find the body this trajectory belongs to
+        let Some((_, state, info, _motive, appearance)) = bodies.iter().find(|(e, _, _, _, _)| *e == traj_mesh.body_entity) else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        
+        // Check visibility conditions
+        let should_show = cache.valid 
+            && !cache.local_points.is_empty()
+            && (view_settings.show_trajectories || view_settings.body_in_any_trajectory_tag(&info.id));
+        
+        if !should_show {
+            *visibility = Visibility::Hidden;
             continue;
         }
-        if let Some(trajectory) = &state.trajectory {
-            let frac = match trajectory.periodicity() {
-                None => 0.0,
-                Some(periodicity) => {
-                    periodicity.cycle_fraction(sim_time.time.to_j2000_seconds())
-                }
+        
+        *visibility = Visibility::Visible;
+        
+        // Calculate cycle fraction for brightness
+        let cycle_frac = if let (Some(interval_start), Some(interval_size)) = (cache.interval_start, cache.interval_size) {
+            let elapsed = sim_time.time.to_j2000_seconds() - interval_start;
+            let position_in_cycle = elapsed % interval_size;
+            let normalized = if position_in_cycle < 0.0 {
+                position_in_cycle + interval_size
+            } else {
+                position_in_cycle
             };
-
-            // Get the primary_id if this is a Keplerian motive
-            let primary_id = match motive.motive_at(current_time) {
-                (_, MotiveSelection::Keplerian(k)) => Some(&k.primary_id),
-                _ => None,
-            };
-
-            // Collect trajectory points; we may insert a transient point at the
-            // body's current position so the line always passes through the body.
-            let mut points: Vec<(f64, DVec3)> = trajectory.iter().map(|(t, d)| (t, *d)).collect();
-
-            if let (Some(local_pos), Some(periodicity)) = (state.current_local_position, trajectory.periodicity()) {
-                let current_relative_time = frac * periodicity.interval_size;
-                let body_radius = appearance.map(|a| a.radius()).unwrap_or(0.0);
-
-                if let Some(seg) = points.windows(2).position(|w| {
-                    current_relative_time >= w[0].0 && current_relative_time < w[1].0
-                }) {
-                    let dist_before = (local_pos - points[seg].1).length();
-                    let dist_after = (local_pos - points[seg + 1].1).length();
-
-                    if dist_before >= body_radius && dist_after >= body_radius {
-                        points.insert(seg + 1, (current_relative_time, local_pos));
-                    }
-                }
-            }
-
-            let len = points.len();
-
-            // All trajectory displacements are relative to the primary; offset by
-            // the primary's current global position when drawing.
-            let primary_offset: Option<DVec3> = primary_id
-                .and_then(|id| {
-                    bodies.iter().find(|(_, info, _, _)| &info.id == id)
-                })
-                .and_then(|(primary_state, _, _, _)| {
+            normalized / interval_size
+        } else {
+            0.0
+        };
+        
+        // Get primary offset for Keplerian orbits
+        let primary_offset: Option<DVec3> = cache.primary_id.as_ref().and_then(|pid| {
+            bodies.iter()
+                .find(|(_, _, info, _, _)| &info.id == pid)
+                .and_then(|(_, primary_state, _, _, _)| {
                     if primary_state.trajectory.is_none() { return None; }
                     Some(primary_state.current_position)
-                });
-
-            for (idx, window) in points.windows(2).enumerate() {
-                let (d1, d2) = (window[0].1, window[1].1);
-                let (d1, d2) = match primary_offset {
-                    None => (d1, d2),
-                    Some(offset) => (d1 + offset, d2 + offset),
-                };
-
-                let segment_frac = idx as f32 / len as f32;
-                let next_segment_frac = (idx + 1) as f32 / len as f32;
+                })
+        });
+        
+        // Build the working point list with transient point insertion
+        let mut points: Vec<(f64, DVec3)> = cache.local_points.clone();
+        let mut transient_idx: Option<usize> = None;
+        
+        // Insert transient point (body's current local position)
+        if let (Some(local_pos), Some(interval_size)) = (state.current_local_position, cache.interval_size) {
+            let current_relative_time = cycle_frac * interval_size;
+            let body_radius = appearance.map(|a| a.radius()).unwrap_or(0.0);
+            
+            if let Some(seg) = points.windows(2).position(|w| {
+                current_relative_time >= w[0].0 && current_relative_time < w[1].0
+            }) {
+                let dist_before = (local_pos - points[seg].1).length();
+                let dist_after = (local_pos - points[seg + 1].1).length();
                 
-                let planet_in_segment = if next_segment_frac > segment_frac {
-                    frac as f32 >= segment_frac && (frac as f32) < next_segment_frac
-                } else {
-                    frac as f32 >= segment_frac || (frac as f32) < next_segment_frac
-                };
-                
-                let brightness_factor = if planet_in_segment {
-                    let progress_through_segment = if next_segment_frac > segment_frac {
-                        (frac as f32 - segment_frac) / (next_segment_frac - segment_frac)
-                    } else {
-                        if frac as f32 >= segment_frac {
-                            (frac as f32 - segment_frac) / (1.0 - segment_frac + next_segment_frac)
-                        } else {
-                            (frac as f32 + 1.0 - segment_frac) / (1.0 - segment_frac + next_segment_frac)
-                        }
-                    };
-                    progress_through_segment
-                } else {
-                    let forward_offset = (segment_frac - frac as f32 + 1.0) % 1.0;
-                    if forward_offset <= 0.5 {
-                        0.0
-                    } else {
-                        (forward_offset - 0.5) * 2.0
-                    }
-                };
-                
-                color = Srgba::new(0.0, 1.0, 0.0, min_brightness.lerp(max_brightness, brightness_factor));
-                gizmos.line(d1.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos), d2.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos), color);
+                if dist_before >= body_radius && dist_after >= body_radius {
+                    points.insert(seg + 1, (current_relative_time, local_pos));
+                    transient_idx = Some(seg + 1);
+                }
             }
+        }
+        
+        // For closed orbits, append first point to close the loop
+        if cache.closed && !points.is_empty() {
+            let first = points[0];
+            // Use a time slightly past the last point to maintain ordering
+            let close_time = points.last().map(|(t, _)| t + 0.001).unwrap_or(0.0);
+            points.push((close_time, first.1));
+        }
+        
+        if points.len() < 2 {
+            *visibility = Visibility::Hidden;
+            continue;
+        }
+        
+        // Transform points to Bevy space and compute brightness
+        let point_count = points.len();
+        let transient_frac = transient_idx.map(|i| i as f32 / point_count as f32).unwrap_or(cycle_frac as f32);
+        
+        let transformed_points: Vec<(Vec3, f32)> = points.iter().enumerate().map(|(idx, (_, pos))| {
+            // Apply primary offset
+            let world_pos = match primary_offset {
+                Some(offset) => *pos + offset,
+                None => *pos,
+            };
+            
+            // Transform to Bevy space
+            let bevy_pos = world_pos.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos);
+            
+            // Compute brightness based on distance from transient point
+            let point_frac = idx as f32 / point_count as f32;
+            let brightness = compute_brightness(
+                point_frac, 
+                transient_frac, 
+                cache.closed,
+                min_brightness,
+                max_brightness,
+            );
+            
+            (bevy_pos, brightness)
+        }).collect();
+        
+        // Generate tube mesh
+        let mesh = generate_tube_mesh(&transformed_points, TUBE_RADIUS, TUBE_SIDES);
+        
+        // Update the mesh asset
+        if let Some(mesh_asset) = meshes.get_mut(&mesh3d.0) {
+            *mesh_asset = mesh;
+        }
+    }
+}
+
+/// Compute brightness for a point based on its arc distance from the transient point.
+/// The transient point is brightest, fading in both directions with asymmetric falloff.
+fn compute_brightness(
+    point_frac: f32,
+    transient_frac: f32,
+    closed: bool,
+    min_brightness: f32,
+    max_brightness: f32,
+) -> f32 {
+    // Distance from transient point along the trajectory
+    let raw_dist = (point_frac - transient_frac).abs();
+    
+    // For closed orbits, take the shorter path around
+    let arc_dist = if closed {
+        raw_dist.min(1.0 - raw_dist)
+    } else {
+        raw_dist
+    };
+    
+    // Asymmetric falloff: wake (behind body) fades faster than ahead
+    // Determine if this point is "behind" or "ahead" of the body
+    let is_behind = if closed {
+        // For closed orbits, "behind" means the body has passed this point recently
+        let forward_dist = (point_frac - transient_frac + 1.0) % 1.0;
+        forward_dist > 0.5
+    } else {
+        point_frac < transient_frac
+    };
+    
+    // Fade rate: faster behind, slower ahead
+    let fade_rate = if is_behind { 2.0 } else { 1.5 };
+    
+    // Compute brightness: starts at max at transient, fades with distance
+    let falloff = 1.0 - (arc_dist * fade_rate).min(1.0);
+    min_brightness + (max_brightness - min_brightness) * falloff
+}
+
+/// Generate a tube mesh from a list of points with associated brightness values.
+/// Each point becomes a ring of vertices; adjacent rings are connected with triangles.
+pub fn generate_tube_mesh(points: &[(Vec3, f32)], radius: f32, sides: u32) -> Mesh {
+    if points.len() < 2 {
+        return Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD);
+    }
+    
+    let ring_count = points.len();
+    let verts_per_ring = sides as usize;
+    let total_verts = ring_count * verts_per_ring;
+    
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(total_verts);
+    let mut normals: Vec<[f32; 3]> = Vec::with_capacity(total_verts);
+    let mut colors: Vec<[f32; 4]> = Vec::with_capacity(total_verts);
+    let mut indices: Vec<u32> = Vec::with_capacity((ring_count - 1) * verts_per_ring * 6);
+    
+    for (ring_idx, (center, brightness)) in points.iter().enumerate() {
+        // Compute tangent direction (forward along the tube)
+        let tangent = if ring_idx == 0 {
+            (points[1].0 - *center).normalize_or_zero()
+        } else if ring_idx == ring_count - 1 {
+            (*center - points[ring_idx - 1].0).normalize_or_zero()
+        } else {
+            (points[ring_idx + 1].0 - points[ring_idx - 1].0).normalize_or_zero()
+        };
+        
+        // Find perpendicular vectors to form the ring plane
+        let (perp1, perp2) = perpendicular_vectors(tangent);
+        
+        // Generate ring vertices
+        for i in 0..sides {
+            let angle = (i as f32 / sides as f32) * 2.0 * PI;
+            let (sin_a, cos_a) = angle.sin_cos();
+            
+            // Position on the ring
+            let offset = perp1 * cos_a * radius + perp2 * sin_a * radius;
+            let pos = *center + offset;
+            positions.push([pos.x, pos.y, pos.z]);
+            
+            // Normal points outward from tube center
+            let normal = offset.normalize_or_zero();
+            normals.push([normal.x, normal.y, normal.z]);
+            
+            // Color: RGB is green (base color handled by material), alpha encodes brightness
+            colors.push([0.0, 1.0, 0.0, *brightness]);
+        }
+        
+        // Generate triangles connecting this ring to the next
+        if ring_idx < ring_count - 1 {
+            let base = (ring_idx * verts_per_ring) as u32;
+            let next_base = ((ring_idx + 1) * verts_per_ring) as u32;
+            
+            for i in 0..sides {
+                let i_next = (i + 1) % sides;
+                
+                // Two triangles per quad
+                // Triangle 1
+                indices.push(base + i);
+                indices.push(next_base + i);
+                indices.push(base + i_next);
+                
+                // Triangle 2
+                indices.push(base + i_next);
+                indices.push(next_base + i);
+                indices.push(next_base + i_next);
+            }
+        }
+    }
+    
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, VertexAttributeValues::Float32x4(colors));
+    mesh.insert_indices(Indices::U32(indices));
+    
+    mesh
+}
+
+/// Find two perpendicular vectors to form a plane orthogonal to the given direction.
+fn perpendicular_vectors(dir: Vec3) -> (Vec3, Vec3) {
+    // Choose a vector that's not parallel to dir
+    let not_parallel = if dir.x.abs() < 0.9 {
+        Vec3::X
+    } else {
+        Vec3::Y
+    };
+    
+    let perp1 = dir.cross(not_parallel).normalize_or_zero();
+    let perp2 = dir.cross(perp1).normalize_or_zero();
+    
+    (perp1, perp2)
+}
+
+/// System to spawn trajectory mesh entities for bodies that don't have one.
+/// Runs each frame to catch newly spawned bodies.
+pub fn spawn_trajectory_meshes_for_bodies(
+    mut commands: Commands,
+    bodies: Query<Entity, (With<BodyInfo>, Without<TrajectoryMeshLink>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<TrajectoryMaterial>>,
+) {
+    for body_entity in bodies.iter() {
+        let traj_entity = spawn_trajectory_mesh(&mut commands, body_entity, &mut meshes, &mut materials);
+        // Link the body to its trajectory mesh
+        commands.entity(body_entity).insert(TrajectoryMeshLink(traj_entity));
+    }
+}
+
+/// Component linking a body to its trajectory mesh entity.
+#[derive(Component)]
+pub struct TrajectoryMeshLink(pub Entity);
+
+/// System to clean up trajectory meshes when their parent bodies are despawned.
+pub fn cleanup_orphaned_trajectory_meshes(
+    mut commands: Commands,
+    trajectory_meshes: Query<(Entity, &TrajectoryMesh)>,
+    bodies: Query<Entity, With<BodyInfo>>,
+) {
+    for (traj_entity, traj_mesh) in trajectory_meshes.iter() {
+        // If the body no longer exists, despawn the trajectory mesh
+        if bodies.get(traj_mesh.body_entity).is_err() {
+            commands.entity(traj_entity).despawn();
         }
     }
 }
