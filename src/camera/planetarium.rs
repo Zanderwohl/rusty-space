@@ -2,7 +2,7 @@
 
 use std::f64::consts::{PI, TAU};
 use bevy::app::App;
-use bevy::input::mouse::MouseMotion;
+use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::math::{DMat3, DQuat, DVec3};
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
@@ -174,10 +174,11 @@ fn revolve_around(
     settings: Res<MovementSettings>,
     mut camera: Query<(&mut Transform, &mut PlanetariumCamera, &mut Freecam)>,
     mut mouse: MessageReader<MouseMotion>,
+    mut scroll: MessageReader<MouseWheel>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     mut primary_window: Query<(&mut Window, &mut CursorOptions), With<PrimaryWindow>>,
     view_settings: Res<ViewSettings>,
-    entities: Query<(Entity, &BodyState, &Transform), Without<Freecam>>,
+    entities: Query<(Entity, &BodyState, &Appearance, &Transform), Without<Freecam>>,
     mut egui_ctx: EguiContexts,
 ) {
     if let Ok((mut window, mut cursor_options)) = primary_window.single_mut() {
@@ -187,11 +188,23 @@ fn revolve_around(
                 CameraAction::RevolveAround(revolve) => {
 
                     match entities.get(revolve.entity) {
-                        Ok((entity, state, transform)) => {
+                        Ok((entity, state, appearance, transform)) => {
                             let window_scale = window.height().min(window.width());
+                            let scaled_radius = view_settings.body_scale_factor(appearance.radius()) as f64;
 
-                            if mouse_buttons.pressed(MouseButton::Left) {
-                                if let Ok(ctx) = egui_ctx.ctx_mut() && ctx.wants_pointer_input() && ctx.wants_pointer_input() {
+                            let egui_wants_pointer = egui_ctx.ctx_mut()
+                                .map_or(false, |ctx| ctx.wants_pointer_input());
+
+                            for ev in scroll.read() {
+                                if !egui_wants_pointer {
+                                    revolve.bevy_distance *= 1.0 - (ev.y as f64 * 0.1);
+                                    revolve.bevy_distance = revolve.bevy_distance
+                                        .clamp(1.5 * scaled_radius, 100.0 * scaled_radius);
+                                }
+                            }
+
+                            if mouse_buttons.pressed(MouseButton::Right) {
+                                if egui_wants_pointer {
                                     cursor_options.grab_mode = CursorGrabMode::None;
                                     cursor_options.visible = true;
                                 } else {

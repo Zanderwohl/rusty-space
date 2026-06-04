@@ -52,8 +52,37 @@ pub struct TrajectoryCache {
 /// Number of sides for the tube cross-section (6-8 is visually sufficient)
 const TUBE_SIDES: u32 = 8;
 
-/// Default tube radius in Bevy units
-const TUBE_RADIUS: f32 = 0.02;
+/// Minimum tube radius (when very close to camera) - keeps it as a thin line
+const MIN_TUBE_RADIUS: f32 = 0.001;
+
+/// Maximum tube radius (when very far from camera) - prevents massive tubes
+const MAX_TUBE_RADIUS: f32 = 0.5;
+
+/// Reference distance for radius scaling (radius = base at this distance)
+const REFERENCE_DISTANCE: f32 = 10.0;
+
+/// Base radius at reference distance
+const BASE_TUBE_RADIUS: f32 = 0.02;
+
+/// Power for distance-to-radius scaling (0.5 = square root, good for large ranges)
+const RADIUS_SCALE_POWER: f32 = 0.5;
+
+/// Calculate tube radius based on distance from camera.
+/// Uses a power curve with min/max clamping for smooth scaling across vast distance ranges.
+fn calculate_tube_radius(distance_from_camera: f32) -> f32 {
+    if distance_from_camera <= 0.0 {
+        return MIN_TUBE_RADIUS;
+    }
+    
+    // Scale radius based on distance using a power curve
+    // At reference_distance, radius = base_radius
+    // Closer → smaller, farther → larger, but with diminishing returns
+    let scale_factor = (distance_from_camera / REFERENCE_DISTANCE).powf(RADIUS_SCALE_POWER);
+    let radius = BASE_TUBE_RADIUS * scale_factor;
+    
+    // Clamp to min/max
+    radius.clamp(MIN_TUBE_RADIUS, MAX_TUBE_RADIUS)
+}
 
 /// Spawns a trajectory mesh entity as a child of the given body entity.
 /// Called when bodies are spawned.
@@ -230,19 +259,26 @@ pub fn build_trajectory_meshes(
             continue;
         }
         
-        // Transform points to Bevy space and compute brightness
+        // Transform points to Bevy space and compute brightness + radius
         let point_count = points.len();
         let transient_frac = transient_idx.map(|i| i as f32 / point_count as f32).unwrap_or(cycle_frac as f32);
         
-        let transformed_points: Vec<(Vec3, f32)> = points.iter().enumerate().map(|(idx, (_, pos))| {
+        // Points now include: (position, brightness, radius)
+        let transformed_points: Vec<(Vec3, f32, f32)> = points.iter().enumerate().map(|(idx, (_, pos))| {
             // Apply primary offset
             let world_pos = match primary_offset {
                 Some(offset) => *pos + offset,
                 None => *pos,
             };
             
-            // Transform to Bevy space
+            // Transform to Bevy space (camera is at origin in this space)
             let bevy_pos = world_pos.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos);
+            
+            // Distance from camera (which is at origin in cheated space)
+            let distance_from_camera = bevy_pos.length();
+            
+            // Calculate radius based on distance
+            let radius = calculate_tube_radius(distance_from_camera);
             
             // Compute brightness based on distance from transient point
             let point_frac = idx as f32 / point_count as f32;
@@ -254,11 +290,11 @@ pub fn build_trajectory_meshes(
                 max_brightness,
             );
             
-            (bevy_pos, brightness)
+            (bevy_pos, brightness, radius)
         }).collect();
         
-        // Generate tube mesh
-        let mesh = generate_tube_mesh(&transformed_points, TUBE_RADIUS, TUBE_SIDES);
+        // Generate tube mesh with per-point radii
+        let mesh = generate_tube_mesh(&transformed_points, TUBE_SIDES);
         
         // Update the mesh asset
         if let Some(mesh_asset) = meshes.get_mut(&mesh3d.0) {
@@ -315,9 +351,10 @@ fn compute_brightness(
     }
 }
 
-/// Generate a tube mesh from a list of points with associated brightness values.
+/// Generate a tube mesh from a list of points with associated brightness and radius values.
 /// Each point becomes a ring of vertices; adjacent rings are connected with triangles.
-pub fn generate_tube_mesh(points: &[(Vec3, f32)], radius: f32, sides: u32) -> Mesh {
+/// Points are (position, brightness, radius).
+pub fn generate_tube_mesh(points: &[(Vec3, f32, f32)], sides: u32) -> Mesh {
     if points.len() < 2 {
         return Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD);
     }
@@ -331,7 +368,7 @@ pub fn generate_tube_mesh(points: &[(Vec3, f32)], radius: f32, sides: u32) -> Me
     let mut colors: Vec<[f32; 4]> = Vec::with_capacity(total_verts);
     let mut indices: Vec<u32> = Vec::with_capacity((ring_count - 1) * verts_per_ring * 6);
     
-    for (ring_idx, (center, brightness)) in points.iter().enumerate() {
+    for (ring_idx, (center, brightness, radius)) in points.iter().enumerate() {
         // Compute tangent direction (forward along the tube)
         let tangent = if ring_idx == 0 {
             (points[1].0 - *center).normalize_or_zero()
@@ -344,13 +381,13 @@ pub fn generate_tube_mesh(points: &[(Vec3, f32)], radius: f32, sides: u32) -> Me
         // Find perpendicular vectors to form the ring plane
         let (perp1, perp2) = perpendicular_vectors(tangent);
         
-        // Generate ring vertices
+        // Generate ring vertices with per-point radius
         for i in 0..sides {
             let angle = (i as f32 / sides as f32) * 2.0 * PI;
             let (sin_a, cos_a) = angle.sin_cos();
             
-            // Position on the ring
-            let offset = perp1 * cos_a * radius + perp2 * sin_a * radius;
+            // Position on the ring using this point's radius
+            let offset = perp1 * cos_a * *radius + perp2 * sin_a * *radius;
             let pos = *center + offset;
             positions.push([pos.x, pos.y, pos.z]);
             
