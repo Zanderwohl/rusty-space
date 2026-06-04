@@ -360,8 +360,10 @@ pub fn build_trajectory_meshes(
         // Build the working point list with transient point insertion
         let mut points: Vec<(f64, DVec3)> = cache.local_points.clone();
         let mut transient_idx: Option<usize> = None;
+        let mut transient_prime_idx: Option<usize> = None;
         
-        // Insert transient point (body's current local position)
+        // Insert transient point T (body's current local position) and T' (same position, dimmest)
+        // T and T' are adjacent at the same position - the T-T' segment is hidden inside the body.
         // Skip for precessing orbits - the cached trajectory has different precession
         // states at each sample point, so inserting the current position would be inconsistent.
         if !cache.is_precessing {
@@ -376,17 +378,20 @@ pub fn build_trajectory_meshes(
                     let dist_after = (local_pos - points[seg + 1].1).length();
                     
                     if dist_before >= body_radius && dist_after >= body_radius {
+                        // Insert T (brightest) then T' (dimmest) at the same position
                         points.insert(seg + 1, (current_relative_time, local_pos));
                         transient_idx = Some(seg + 1);
+                        points.insert(seg + 2, (current_relative_time + 0.0001, local_pos));
+                        transient_prime_idx = Some(seg + 2);
                     }
                 }
             }
         }
         
-        // For closed orbits, append first point to close the loop
+        // For closed orbits, append first point to close the loop (A')
+        // Note: A and A' don't visually connect since the brightness fades to min at A'
         if cache.closed && !points.is_empty() {
             let first = points[0];
-            // Use a time slightly past the last point to maintain ordering
             let close_time = points.last().map(|(t, _)| t + 0.001).unwrap_or(0.0);
             points.push((close_time, first.1));
         }
@@ -398,7 +403,6 @@ pub fn build_trajectory_meshes(
         
         // Transform points to Bevy space and compute brightness + radius
         let point_count = points.len();
-        let transient_frac = transient_idx.map(|i| i as f32 / point_count as f32).unwrap_or(cycle_frac as f32);
         
         // Points now include: (position, brightness, radius)
         let transformed_points: Vec<(Vec3, f32, f32)> = points.iter().enumerate().map(|(idx, (_, pos))| {
@@ -417,14 +421,15 @@ pub fn build_trajectory_meshes(
             // Calculate radius based on distance
             let radius = calculate_tube_radius(distance_from_camera);
             
-            // Compute orbital brightness based on distance from transient point
-            let point_frac = idx as f32 / point_count as f32;
+            // Compute orbital brightness based on forward distance from T' around the orbit
             let orbital_brightness = compute_brightness(
-                point_frac, 
-                transient_frac, 
+                idx,
+                transient_idx,
+                transient_prime_idx,
                 cache.closed,
                 min_brightness,
                 max_brightness,
+                point_count,
             );
             
             // Distance-based dimming: far trajectories are dimmer
@@ -455,28 +460,46 @@ pub fn build_trajectory_meshes(
     }
 }
 
-/// Compute brightness for a point based on its arc distance from the transient point.
-/// Single continuous curve around the entire orbit - no discrete regimes.
-/// Just behind body = 100%, 180° behind = 50%, just ahead = ~0%.
+/// Compute brightness for a point based on forward distance from T' around the orbit.
+/// T' (right after body) is dimmest, going forward through the orbit brightness increases,
+/// reaching max at T (same position as T', one full orbit later).
+/// This creates a continuous gradient: T (max) → future → wake → T' (min).
 fn compute_brightness(
-    point_frac: f32,
-    transient_frac: f32,
+    idx: usize,
+    transient_idx: Option<usize>,
+    transient_prime_idx: Option<usize>,
     closed: bool,
     min_brightness: f32,
     max_brightness: f32,
+    point_count: usize,
 ) -> f32 {
     if closed {
-        // forward_dist: 0 = just ahead of body, 1 = just behind body
-        // This directly maps to brightness - smooth all the way around.
-        let forward_dist = (point_frac - transient_frac + 1.0) % 1.0;
-        min_brightness + (max_brightness - min_brightness) * forward_dist
+        if let Some(tp_idx) = transient_prime_idx {
+            // Forward distance from T' (wrapping around the orbit)
+            // T' = 0, going forward increases, T = point_count - 1 (just before wrapping back to T')
+            let forward_dist = ((idx as isize - tp_idx as isize + point_count as isize) % point_count as isize) as f32;
+            let max_dist = (point_count - 1) as f32;
+            let progress = forward_dist / max_dist;
+            // T' (progress=0) is min, T (progress≈1) is max
+            min_brightness + (max_brightness - min_brightness) * progress
+        } else if let Some(t_idx) = transient_idx {
+            // No T' but have T - use forward distance from T
+            let forward_dist = ((idx as isize - t_idx as isize + point_count as isize) % point_count as isize) as f32;
+            let max_dist = (point_count - 1) as f32;
+            let progress = 1.0 - forward_dist / max_dist;
+            min_brightness + (max_brightness - min_brightness) * progress
+        } else {
+            // No transient point - fallback to mid brightness
+            (min_brightness + max_brightness) / 2.0
+        }
     } else {
-        // Open orbits: fade based on distance behind the body
-        let dist = (point_frac - transient_frac).abs();
-        let is_wake = point_frac < transient_frac;
-        if is_wake {
-            let brightness_pct = (1.0 - dist).max(0.0);
-            min_brightness + (max_brightness - min_brightness) * brightness_pct
+        // Open orbits: simple wake bright, future dim
+        if let Some(t_idx) = transient_idx {
+            if idx <= t_idx {
+                max_brightness
+            } else {
+                min_brightness
+            }
         } else {
             min_brightness
         }
