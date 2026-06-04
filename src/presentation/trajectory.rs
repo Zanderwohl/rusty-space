@@ -268,7 +268,7 @@ pub fn build_trajectory_meshes(
 }
 
 /// Compute brightness for a point based on its arc distance from the transient point.
-/// The transient point is brightest, fading in both directions with asymmetric falloff.
+/// The wake (where the body just was) is brightest, fading toward the path ahead.
 fn compute_brightness(
     point_frac: f32,
     transient_frac: f32,
@@ -276,32 +276,43 @@ fn compute_brightness(
     min_brightness: f32,
     max_brightness: f32,
 ) -> f32 {
-    // Distance from transient point along the trajectory
-    let raw_dist = (point_frac - transient_frac).abs();
-    
-    // For closed orbits, take the shorter path around
-    let arc_dist = if closed {
-        raw_dist.min(1.0 - raw_dist)
-    } else {
-        raw_dist
-    };
-    
-    // Asymmetric falloff: wake (behind body) fades faster than ahead
-    // Determine if this point is "behind" or "ahead" of the body
-    let is_behind = if closed {
-        // For closed orbits, "behind" means the body has passed this point recently
+    // Determine if this point is "behind" (wake) or "ahead" of the body
+    let is_wake = if closed {
+        // For closed orbits, "wake" means the body has passed this point recently
+        // forward_dist is how far ahead this point is (0 = at body, approaching 1 = just behind)
         let forward_dist = (point_frac - transient_frac + 1.0) % 1.0;
-        forward_dist > 0.5
+        forward_dist > 0.5  // More than halfway around = in the wake
     } else {
+        // For open orbits, wake is simply earlier indices
         point_frac < transient_frac
     };
     
-    // Fade rate: faster behind, slower ahead
-    let fade_rate = if is_behind { 2.0 } else { 1.5 };
+    // Calculate distance along trajectory from the transient point
+    let raw_dist = if closed {
+        let forward_dist = (point_frac - transient_frac + 1.0) % 1.0;
+        if is_wake {
+            // Distance back into the wake (0 = just passed, 0.5 = opposite side)
+            1.0 - forward_dist
+        } else {
+            // Distance ahead (0 = at body, 0.5 = opposite side)
+            forward_dist
+        }
+    } else {
+        (point_frac - transient_frac).abs()
+    };
     
-    // Compute brightness: starts at max at transient, fades with distance
-    let falloff = 1.0 - (arc_dist * fade_rate).min(1.0);
-    min_brightness + (max_brightness - min_brightness) * falloff
+    if is_wake {
+        // Wake: brightest at the body, fading gradually into the past
+        // Points just behind the body are bright, points far behind are dimmer
+        let wake_falloff = raw_dist * 2.0;  // Fade over ~half the orbit
+        let brightness = 1.0 - wake_falloff.min(1.0);
+        min_brightness + (max_brightness - min_brightness) * brightness
+    } else {
+        // Ahead: dim throughout - the body hasn't been here yet
+        // Slight gradient: dimmest far ahead, slightly brighter near the body
+        let ahead_brightness = 0.3 * (1.0 - raw_dist.min(1.0));
+        min_brightness + (max_brightness - min_brightness) * ahead_brightness
+    }
 }
 
 /// Generate a tube mesh from a list of points with associated brightness values.
