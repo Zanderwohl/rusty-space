@@ -15,7 +15,7 @@ use crate::body::motive::kepler_motive;
 use crate::foundations::time::{Instant, J2000_JD, JD_SECONDS_PER_JULIAN_DAY};
 pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin};
 use crate::gui::planetarium::windows::body_info::BodyInfoState;
-use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin};
+use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, BodyPointMaterialPlugin};
 
 mod windows;
 
@@ -50,6 +50,7 @@ impl Plugin for PlanetariumUI {
             .add_plugins(PlanetariumCameraPlugin)
             .add_plugins(TrajectoryMaterialPlugin)
             .add_plugins(BodyWireframeMaterialPlugin)
+            .add_plugins(BodyPointMaterialPlugin)
             .add_systems(EguiPrimaryContextPass, (
                 (
                     windows::controls::control_window,
@@ -60,39 +61,55 @@ impl Plugin for PlanetariumUI {
                     windows::camera::camera_window,
                     ).run_if(in_state(AppState::Planetarium)),
                 ))
+            // Core simulation and position systems
             .add_systems(Update, (
-                (
-                    presentation::adjust_lights,
-                    calculate_body_positions::calculate_body_positions
-                        .after(universe::advance_time),
-                    kepler_motive::calculate_trajectory,
-                    presentation::position_bodies.after(calculate_body_positions::calculate_body_positions),
-                    presentation::orient_bodies.after(presentation::position_bodies),
-                    // Trajectory mesh systems
-                    presentation::spawn_trajectory_meshes_for_bodies,
-                    presentation::refresh_precessing_trajectories
-                        .before(kepler_motive::calculate_trajectory),
-                    presentation::rebuild_trajectory_caches
-                        .after(kepler_motive::calculate_trajectory),
-                    presentation::build_trajectory_meshes
-                        .after(presentation::position_bodies)
-                        .after(presentation::rebuild_trajectory_caches),
-                    presentation::cleanup_orphaned_trajectory_meshes,
-                    // Body wireframe mesh systems
-                    presentation::spawn_body_wireframe_meshes,
-                    presentation::spawn_terminator_meshes,
-                    presentation::update_terminator_meshes
-                        .after(presentation::orient_bodies),
-                    presentation::cleanup_orphaned_body_wireframes,
-                    // Labels (after position_bodies so transforms are current)
-                    presentation::label_bodies
-                        .after(presentation::position_bodies),
-                ).in_set(PlanetariumUISet),
-                (
-                    universe::advance_time,
-                ).in_set(PlanetariumSimulationSet),
-                (load_assets).in_set(PlanetariumLoadingSet),
-            ))
+                presentation::adjust_lights,
+                calculate_body_positions::calculate_body_positions
+                    .after(universe::advance_time),
+                kepler_motive::calculate_trajectory,
+                presentation::position_bodies.after(calculate_body_positions::calculate_body_positions),
+                presentation::orient_bodies.after(presentation::position_bodies),
+            ).in_set(PlanetariumUISet))
+            // Trajectory mesh systems
+            .add_systems(Update, (
+                presentation::spawn_trajectory_meshes_for_bodies,
+                presentation::refresh_precessing_trajectories
+                    .before(kepler_motive::calculate_trajectory),
+                presentation::rebuild_trajectory_caches
+                    .after(kepler_motive::calculate_trajectory),
+                presentation::build_trajectory_meshes
+                    .after(presentation::position_bodies)
+                    .after(presentation::rebuild_trajectory_caches),
+                presentation::cleanup_orphaned_trajectory_meshes,
+            ).in_set(PlanetariumUISet))
+            // Body wireframe, occluder, and terminator mesh systems
+            .add_systems(Update, (
+                presentation::spawn_body_wireframe_meshes,
+                presentation::spawn_body_occluders,
+                presentation::spawn_terminator_meshes,
+                presentation::update_terminator_meshes
+                    .after(presentation::orient_bodies),
+                presentation::update_wireframe_thickness
+                    .after(presentation::position_bodies),
+                presentation::update_occluder_scale
+                    .after(presentation::update_wireframe_thickness),
+                presentation::cleanup_orphaned_body_wireframes,
+            ).in_set(PlanetariumUISet))
+            // Body point mesh systems (distant body LOD)
+            .add_systems(Update, (
+                presentation::spawn_body_point_meshes,
+                presentation::update_body_points
+                    .after(presentation::position_bodies),
+                presentation::cleanup_orphaned_body_points,
+                presentation::label_bodies
+                    .after(presentation::position_bodies),
+            ).in_set(PlanetariumUISet))
+            // Simulation time advance
+            .add_systems(Update, (
+                universe::advance_time,
+            ).in_set(PlanetariumSimulationSet))
+            // Asset loading
+            .add_systems(Update, (load_assets).in_set(PlanetariumLoadingSet))
             .add_systems(OnExit(AppState::PlanetariumLoading), initial_trajectories)
             .add_systems(OnExit(AppState::Planetarium), unload_simulation_objects)
         ;

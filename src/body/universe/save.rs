@@ -368,10 +368,11 @@ impl SomeBody {
 
         match &appearance {
             Appearance::Empty => {}
-            Appearance::DebugBall(debug_ball) => {
-                let (mesh, material) = debug_ball.pbr_bundle(cache, meshes, materials, images);
-                entity.insert(mesh);
-                entity.insert(material);
+            Appearance::DebugBall(_debug_ball) => {
+                // Occluder mesh is spawned as a child entity by spawn_body_occluders
+                // to allow independent scaling for z-fighting avoidance at distance.
+                // Add Visibility so child entities with Inherited visibility work correctly.
+                entity.insert(Visibility::Visible);
             }
             Appearance::Star(star_ball) => {
                 let (mesh, material, light) = star_ball.pbr_bundle(cache, meshes, materials, images);

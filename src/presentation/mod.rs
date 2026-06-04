@@ -6,6 +6,8 @@
 mod bodies;
 mod body_material;
 mod body_mesh;
+mod body_point;
+mod body_point_material;
 mod lights;
 mod labels;
 mod rotation;
@@ -16,11 +18,16 @@ pub use bodies::position_bodies;
 pub use body_material::{BodyWireframeMaterial, BodyWireframeMaterialPlugin};
 pub use body_mesh::{
     spawn_body_wireframe_meshes,
+    spawn_body_occluders,
     spawn_terminator_meshes,
     update_terminator_meshes,
+    update_wireframe_thickness,
+    update_occluder_scale,
     cleanup_orphaned_body_wireframes,
     BodyWireframeMesh,
     BodyWireframeLink,
+    OccluderMesh,
+    OccluderLink,
     TerminatorMesh,
     TerminatorLinks,
 };
@@ -39,3 +46,11 @@ pub use trajectory::{
     TrajectoryMeshLink,
 };
 pub use trajectory_material::{TrajectoryMaterial, TrajectoryMaterialPlugin};
+pub use body_point::{
+    spawn_body_point_meshes,
+    update_body_points,
+    cleanup_orphaned_body_points,
+    BodyPointMesh,
+    BodyPointLink,
+};
+pub use body_point_material::{BodyPointMaterial, BodyPointMaterialPlugin};

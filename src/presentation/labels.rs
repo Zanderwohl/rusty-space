@@ -13,7 +13,7 @@ use crate::sim::SimulationObject;
 pub fn label_bodies(
     view_settings: Res<ViewSettings>,
     mut contexts: EguiContexts,
-    cameras: Query<(&Camera, &Camera3d, &PlanetariumCamera, &GlobalTransform, &Projection)>,
+    cameras: Query<(&Camera, &Camera3d, &PlanetariumCamera, &Projection, &Transform), Without<SimulationObject>>,
     bodies: Query<(&SimulationObject, &Transform, &BodyInfo), Without<PlanetariumCamera>>,
 ) {
     let ctx = contexts.ctx_mut();
@@ -21,7 +21,7 @@ pub fn label_bodies(
     let ctx = ctx.unwrap();
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("body_labels")));
 
-    for (camera, _, _, camera_global, projection) in &cameras {
+    for (camera, _, _, projection, camera_transform) in &cameras {
         // Get viewport size for angular size calculations
         let Some(viewport_size) = camera.logical_viewport_size() else {
             continue;
@@ -38,14 +38,16 @@ pub fn label_bodies(
                 continue;
             }
 
-            // Project body center to screen space
+            // Project body center to screen space using the camera's current-frame
+            // Transform, not the stale GlobalTransform (only propagated in PostUpdate).
             let body_center = transform.translation;
-            let Ok(center_screen) = camera.world_to_viewport(camera_global, body_center) else {
+            let fresh_camera_gt = GlobalTransform::from(*camera_transform);
+            let Ok(center_screen) = camera.world_to_viewport(&fresh_camera_gt, body_center) else {
                 continue;
             };
 
             // Calculate distance from camera to body
-            let camera_pos = camera_global.translation();
+            let camera_pos = fresh_camera_gt.translation();
             let distance = (body_center - camera_pos).length();
 
             // Calculate projected radius in pixels using angular size

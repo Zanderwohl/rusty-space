@@ -12,6 +12,7 @@ use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 
 use crate::body::appearance::Appearance;
 use crate::body::motive::info::{BodyInfo, BodyState};
+use crate::camera::PlanetariumCamera;
 
 use super::body_material::BodyWireframeMaterial;
 
@@ -51,13 +52,27 @@ const BODY_EMISSION_STRENGTH: f32 = 3.0;
 /// Emission strength for terminator (subtler)
 const TERMINATOR_EMISSION_STRENGTH: f32 = 1.5;
 
+/// Screen radius (px) at which terminators begin fading out
+const TERMINATOR_FADE_START_PX: f32 = 25.0;
+
+/// Screen radius (px) at which terminators are fully hidden
+const TERMINATOR_FADE_END_PX: f32 = 12.0;
+
 /// Terminator color (gentle warm yellow)
 const TERMINATOR_COLOR: LinearRgba = LinearRgba::new(0.95, 0.85, 0.4, 1.0);
+
+/// Minimum angular size for wireframe tubes to prevent sub-pixel aliasing.
+/// This is the minimum tube_radius / distance ratio.
+const MIN_ANGULAR_SIZE: f32 = 0.0008;
 
 /// Marker component for body wireframe mesh entities.
 #[derive(Component)]
 pub struct BodyWireframeMesh {
     pub body_entity: Entity,
+    /// Stored highlight latitudes for mesh regeneration
+    pub highlight_latitudes: Vec<f64>,
+    /// Current tube radius used in the mesh (for change detection)
+    pub current_tube_radius: f32,
 }
 
 /// Component linking a body to its wireframe mesh entity.
@@ -74,6 +89,16 @@ pub struct TerminatorMesh {
 /// Component linking a body to its terminator mesh entities.
 #[derive(Component)]
 pub struct TerminatorLinks(pub Vec<Entity>);
+
+/// Marker component for body occluder mesh entities.
+#[derive(Component)]
+pub struct OccluderMesh {
+    pub body_entity: Entity,
+}
+
+/// Component linking a body to its occluder mesh entity.
+#[derive(Component)]
+pub struct OccluderLink(pub Entity);
 
 /// Find two perpendicular vectors to form a plane orthogonal to the given direction.
 fn perpendicular_vectors(dir: Vec3) -> (Vec3, Vec3) {
@@ -369,13 +394,86 @@ pub fn spawn_body_wireframe_meshes(
                     Transform::default(),
                     Visibility::Inherited,
                     NoFrustumCulling,
-                    BodyWireframeMesh { body_entity },
+                    BodyWireframeMesh {
+                        body_entity,
+                        highlight_latitudes: highlight_lats.clone(),
+                        current_tube_radius: WIRE_TUBE_RADIUS,
+                    },
                     ChildOf(body_entity),
                 ))
                 .id();
 
             commands.entity(body_entity).insert(BodyWireframeLink(wireframe_entity));
         }
+    }
+}
+
+/// System to spawn occluder meshes as child entities for DebugBall bodies.
+/// This allows independent scaling of the occluder to avoid z-fighting at distance.
+pub fn spawn_body_occluders(
+    mut commands: Commands,
+    bodies: Query<(Entity, &Appearance), (With<BodyInfo>, Without<OccluderLink>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for (body_entity, appearance) in bodies.iter() {
+        if let Appearance::DebugBall(_) = appearance {
+            // Create occluder mesh (black unlit sphere at 0.97 radius)
+            let mesh = Sphere::new(0.97f32).mesh().ico(5).unwrap();
+            let mesh_handle = meshes.add(mesh);
+
+            let material = StandardMaterial {
+                base_color: Color::BLACK,
+                unlit: true,
+                ..Default::default()
+            };
+            let material_handle = materials.add(material);
+
+            let occluder_entity = commands
+                .spawn((
+                    Mesh3d(mesh_handle),
+                    MeshMaterial3d(material_handle),
+                    Transform::default(),
+                    Visibility::Inherited,
+                    OccluderMesh { body_entity },
+                    ChildOf(body_entity),
+                ))
+                .id();
+
+            commands.entity(body_entity).insert(OccluderLink(occluder_entity));
+        }
+    }
+}
+
+/// System to scale occluder meshes slightly smaller at distance to avoid z-fighting.
+pub fn update_occluder_scale(
+    cameras: Query<&GlobalTransform, With<PlanetariumCamera>>,
+    bodies: Query<&Transform, With<BodyInfo>>,
+    wireframes: Query<&BodyWireframeMesh>,
+    mut occluders: Query<(&OccluderMesh, &mut Transform, &ChildOf), Without<BodyInfo>>,
+) {
+    let Ok(camera_global) = cameras.single() else {
+        return;
+    };
+    let camera_pos = camera_global.translation();
+
+    for (occluder, mut occluder_transform, child_of) in occluders.iter_mut() {
+        let Ok(body_transform) = bodies.get(child_of.parent()) else {
+            continue;
+        };
+
+        // Get the wireframe's current tube radius to know how much the lines have grown
+        let tube_radius_ratio = wireframes
+            .iter()
+            .find(|wf| wf.body_entity == occluder.body_entity)
+            .map(|wf| wf.current_tube_radius / WIRE_TUBE_RADIUS)
+            .unwrap_or(1.0);
+
+        // Scale occluder down as tube thickness increases.
+        // At base radius: scale = 1.0, at larger radii: shrink slightly
+        let scale_reduction = (tube_radius_ratio - 1.0) * 0.01; // 1% per doubling
+        let occluder_scale = (1.0 - scale_reduction).max(0.9); // Don't shrink more than 10%
+        occluder_transform.scale = Vec3::splat(occluder_scale);
     }
 }
 
@@ -449,21 +547,69 @@ pub fn spawn_terminator_meshes(
 }
 
 /// System to update terminator meshes each frame based on star positions.
+/// Also adjusts tube thickness based on distance from camera and fades
+/// terminators out when the body is too small on screen.
 pub fn update_terminator_meshes(
-    terminators: Query<(&TerminatorMesh, &Mesh3d, &ChildOf)>,
+    cameras: Query<(&Camera, &GlobalTransform, &Projection), With<PlanetariumCamera>>,
+    mut terminators: Query<(&TerminatorMesh, &Mesh3d, &ChildOf, &mut Visibility, &MeshMaterial3d<BodyWireframeMaterial>)>,
     bodies: Query<(&Transform, &BodyState)>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<BodyWireframeMaterial>>,
 ) {
-    for (terminator, mesh3d, child_of) in terminators.iter() {
-        // Get body transform and state
+    let Ok((camera, camera_global, projection)) = cameras.single() else {
+        return;
+    };
+
+    let Some(viewport_size) = camera.logical_viewport_size() else {
+        return;
+    };
+
+    let fov_y = match projection {
+        Projection::Perspective(persp) => persp.fov,
+        _ => 1.0,
+    };
+
+    let camera_pos = camera_global.translation();
+
+    for (terminator, mesh3d, child_of, mut visibility, material_handle) in terminators.iter_mut() {
         let Ok((body_transform, body_state)) = bodies.get(child_of.parent()) else {
             continue;
         };
+
+        let body_center = body_transform.translation;
+        let distance = (body_center - camera_pos).length();
+        if distance <= 0.0 {
+            continue;
+        }
+
+        let body_scale = body_transform.scale.x;
+        let angular_radius = (body_scale / distance).min(1.0);
+        let screen_radius = angular_radius / (fov_y * 0.5) * viewport_size.y * 0.5;
+
+        if screen_radius <= TERMINATOR_FADE_END_PX {
+            *visibility = Visibility::Hidden;
+            continue;
+        }
+
+        *visibility = Visibility::Visible;
+
+        let fade = if screen_radius >= TERMINATOR_FADE_START_PX {
+            1.0
+        } else {
+            (screen_radius - TERMINATOR_FADE_END_PX)
+                / (TERMINATOR_FADE_START_PX - TERMINATOR_FADE_END_PX)
+        };
+
+        if let Some(mat) = materials.get_mut(material_handle.id()) {
+            mat.emission_strength = TERMINATOR_EMISSION_STRENGTH * fade;
+        }
 
         // Get star state
         let Ok((_, star_state)) = bodies.get(terminator.star_entity) else {
             continue;
         };
+
+        let tube_radius = calculate_tube_radius_for_distance(body_scale, distance);
 
         // Compute star direction in simulation space (Z-up)
         let star_dir_sim = (star_state.current_position - body_state.current_position).normalize();
@@ -475,13 +621,10 @@ pub fn update_terminator_meshes(
             -star_dir_sim.y as f32,
         );
 
-        // Transform to body-local space by applying inverse rotation
         let star_dir_local = body_transform.rotation.inverse() * star_dir_bevy;
 
-        // Generate new terminator mesh
-        let new_mesh = generate_great_circle_tube(star_dir_local, WIRE_TUBE_RADIUS, TUBE_SIDES);
+        let new_mesh = generate_great_circle_tube(star_dir_local, tube_radius, TUBE_SIDES);
 
-        // Update the mesh asset
         if let Some(mesh_asset) = meshes.get_mut(&mesh3d.0) {
             *mesh_asset = new_mesh;
         }
@@ -506,6 +649,70 @@ pub fn cleanup_orphaned_body_wireframes(
     for (entity, terminator) in terminators.iter() {
         if bodies.get(terminator.body_entity).is_err() {
             commands.entity(entity).despawn();
+        }
+    }
+}
+
+/// Maximum tube radius (in local coordinates) to prevent rendering issues at extreme distances.
+/// Beyond this, the point shader takes over anyway.
+const MAX_TUBE_RADIUS: f32 = 0.15;
+
+/// Calculate the tube radius needed to maintain minimum angular size at the given distance.
+/// Returns a radius in local (unit sphere) coordinates, clamped to reasonable bounds.
+fn calculate_tube_radius_for_distance(body_scale: f32, distance: f32) -> f32 {
+    if distance <= 0.0 || body_scale <= 0.0 {
+        return WIRE_TUBE_RADIUS;
+    }
+
+    // For minimum angular size:
+    // tube_radius_world / distance >= MIN_ANGULAR_SIZE
+    // tube_radius_local * body_scale / distance >= MIN_ANGULAR_SIZE
+    // tube_radius_local >= MIN_ANGULAR_SIZE * distance / body_scale
+    let min_local_radius = MIN_ANGULAR_SIZE * distance / body_scale;
+
+    // Clamp between base radius and maximum
+    min_local_radius.clamp(WIRE_TUBE_RADIUS, MAX_TUBE_RADIUS)
+}
+
+/// System to update wireframe mesh tube thickness based on distance from camera.
+/// Regenerates meshes each frame to maintain minimum screen-space thickness.
+pub fn update_wireframe_thickness(
+    cameras: Query<&GlobalTransform, With<PlanetariumCamera>>,
+    bodies: Query<(&Transform, &BodyInfo), With<BodyInfo>>,
+    mut wireframes: Query<(&mut BodyWireframeMesh, &Mesh3d, &ChildOf)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    let Ok(camera_global) = cameras.single() else {
+        return;
+    };
+    let camera_pos = camera_global.translation();
+
+    for (mut wireframe, mesh3d, child_of) in wireframes.iter_mut() {
+        let Ok((body_transform, _body_info)) = bodies.get(child_of.parent()) else {
+            continue;
+        };
+
+        let body_center = body_transform.translation;
+        let distance = (body_center - camera_pos).length();
+        let body_scale = body_transform.scale.x;
+
+        let required_radius = calculate_tube_radius_for_distance(body_scale, distance);
+
+        // Regenerate mesh if radius changed (with small tolerance to avoid unnecessary regeneration)
+        let ratio = required_radius / wireframe.current_tube_radius;
+        if ratio < 0.95 || ratio > 1.05 {
+            // Regenerate mesh with new tube radius
+            let new_mesh = generate_latlon_sphere(
+                &wireframe.highlight_latitudes,
+                required_radius,
+                TUBE_SIDES,
+            );
+
+            if let Some(mesh_asset) = meshes.get_mut(&mesh3d.0) {
+                *mesh_asset = new_mesh;
+            }
+
+            wireframe.current_tube_radius = required_radius;
         }
     }
 }
