@@ -48,7 +48,7 @@ pub fn run() {
         .add_systems(Startup, common_setup)
         .add_systems(Update, close_when_requested)
         .insert_state(AppState::Splash)
-        .insert_resource(ClearColor(Color::BLACK))
+        .insert_resource(ClearColor(Color::linear_rgb(0.0003, 0.002, 0.0011)))
         .add_plugins(EguiPlugin::default())
         .add_plugins(DebugPlugin)
         .add_plugins(SplashPlugin)

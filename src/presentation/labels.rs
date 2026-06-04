@@ -34,7 +34,7 @@ pub fn label_bodies(
                         egui::Align2::CENTER_BOTTOM,
                         body_info.display_name(),
                         egui::FontId::proportional(14.0),
-                        egui::Color32::WHITE,
+                        egui::Color32::from_rgb(90, 237, 175),
                     );
                 }
                 Err(_) => {}
