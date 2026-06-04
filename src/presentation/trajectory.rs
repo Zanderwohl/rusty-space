@@ -63,7 +63,7 @@ pub struct TrajectoryCache {
 const TUBE_SIDES: u32 = 8;
 
 /// Minimum tube radius (when very close to camera) - keeps it as a thin line
-const MIN_TUBE_RADIUS: f32 = 0.00001;
+const MIN_TUBE_RADIUS: f32 = 0.000005;
 
 /// Maximum tube radius (when very far from camera) - prevents massive tubes
 const MAX_TUBE_RADIUS: f32 = 10.0;
@@ -72,26 +72,32 @@ const MAX_TUBE_RADIUS: f32 = 10.0;
 const REFERENCE_DISTANCE: f32 = 10.0;
 
 /// Base radius at reference distance
-const BASE_TUBE_RADIUS: f32 = 0.02;
+const BASE_TUBE_RADIUS: f32 = 0.015;
 
-/// Power for distance-to-radius scaling (0.5 = square root, good for large ranges)
-const RADIUS_SCALE_POWER: f32 = 0.5;
+/// Power for distance-to-radius scaling. Higher = more constant screen-space size.
+/// 1.0 would be perfectly constant angular size; 0.5 is sqrt.
+const RADIUS_SCALE_POWER: f32 = 0.75;
+
+/// Minimum angular size (radius / distance) to prevent sub-pixel aliasing at extreme range.
+/// ~0.001 rad ≈ 1-2 pixels on typical displays.
+const MIN_ANGULAR_SIZE: f32 = 0.0001;
 
 /// Calculate tube radius based on distance from camera.
-/// Uses a power curve with min/max clamping for smooth scaling across vast distance ranges.
+/// Uses a power curve for general scaling, with a minimum angular size floor
+/// to prevent sub-pixel aliasing at extreme distances.
 fn calculate_tube_radius(distance_from_camera: f32) -> f32 {
     if distance_from_camera <= 0.0 {
         return MIN_TUBE_RADIUS;
     }
     
-    // Scale radius based on distance using a power curve
-    // At reference_distance, radius = base_radius
-    // Closer → smaller, farther → larger, but with diminishing returns
+    // Power curve: closer to 1.0 = more constant screen-space appearance
     let scale_factor = (distance_from_camera / REFERENCE_DISTANCE).powf(RADIUS_SCALE_POWER);
     let radius = BASE_TUBE_RADIUS * scale_factor;
     
-    // Clamp to min/max
-    radius.clamp(MIN_TUBE_RADIUS, MAX_TUBE_RADIUS)
+    // Floor: ensure minimum angular size to avoid sub-pixel flicker at extreme distance
+    let angular_floor = MIN_ANGULAR_SIZE * distance_from_camera;
+    
+    radius.max(angular_floor).clamp(MIN_TUBE_RADIUS, MAX_TUBE_RADIUS)
 }
 
 /// Spawns a trajectory mesh entity as a child of the given body entity.
@@ -392,6 +398,7 @@ pub fn build_trajectory_meshes(
 
 /// Compute brightness for a point based on its arc distance from the transient point.
 /// The wake (where the body just was) is brightest, fading toward the path ahead.
+/// The far tail end fades to near-transparent for a comet-like appearance.
 fn compute_brightness(
     point_frac: f32,
     transient_frac: f32,
@@ -425,16 +432,13 @@ fn compute_brightness(
     };
     
     if is_wake {
-        // Wake: brightest at the body, fading gradually into the past
-        // Points just behind the body are bright, points far behind are dimmer
-        let wake_falloff = raw_dist * 2.0;  // Fade over ~half the orbit
-        let brightness = 1.0 - wake_falloff.min(1.0);
-        min_brightness + (max_brightness - min_brightness) * brightness
+        // Wake: 100% at body, linear fade to 50% at 180° (opposite side)
+        let wake_fraction = (raw_dist * 2.0).min(1.0); // 0 at body, 1 at 180°
+        let brightness_pct = 1.0 - wake_fraction * 0.5; // 1.0 → 0.5
+        min_brightness + (max_brightness - min_brightness) * brightness_pct
     } else {
-        // Ahead: dim throughout - the body hasn't been here yet
-        // Slight gradient: dimmest far ahead, slightly brighter near the body
-        let ahead_brightness = 0.3 * (1.0 - raw_dist.min(1.0));
-        min_brightness + (max_brightness - min_brightness) * ahead_brightness
+        // Ahead: fully dim - the body hasn't been here yet
+        min_brightness
     }
 }
 
