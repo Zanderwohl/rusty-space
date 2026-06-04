@@ -111,6 +111,11 @@ impl KeplerMotive {
         let time_since_epoch = self.time_since_epoch(time);
         self.rotation.argument_of_periapsis(time_since_epoch)
     }
+
+    /// Returns true if this orbit has precessing orbital elements (nodal or apsidal precession).
+    pub fn is_precessing(&self) -> bool {
+        matches!(self.rotation, KeplerRotation::PrecessingEulerAngles(_))
+    }
     
     pub fn time_since_epoch(&self, time: Instant) -> TimeDelta {
         time - self.epoch.epoch()
@@ -169,6 +174,21 @@ impl KeplerMotive {
         let perifocal_displacement = self.displacement_pqw(time, gravitational_parameter)?;
         let rotated = self.perifocal_to_reference(perifocal_displacement, time);
 
+        Some(rotated)
+    }
+
+    /// Computes displacement at a given true anomaly, using precession angles for `precession_time`.
+    /// This allows sampling the orbit shape while keeping a consistent orbital plane orientation.
+    /// Use this for trajectory visualization where all points should share the current precession state.
+    pub fn displacement_at_true_anomaly_with_precession(
+        &self,
+        true_anomaly: f64,
+        precession_time: Instant,
+    ) -> Option<DVec3> {
+        let ecc = self.shape.eccentricity();
+        let rad = local::radius::from_elements2(self.shape.semi_major_axis(), ecc, true_anomaly)?;
+        let perifocal_displacement = DVec3::new(rad * true_anomaly.cos(), rad * true_anomaly.sin(), 0.0);
+        let rotated = self.perifocal_to_reference(perifocal_displacement, precession_time);
         Some(rotated)
     }
 
@@ -543,12 +563,28 @@ pub fn calculate_trajectory(
                 map.set_periodicity(periapsis_time, period);
             }
 
+            // For precessing orbits, we want all trajectory points to share the CURRENT
+            // precession state. Otherwise, each point would have a different orbital plane
+            // orientation, causing the trajectory to not match the actual orbital path.
+            let is_precessing = kepler_motive.is_precessing();
+
             for i in 0..=view_settings.trajectory_resolution {
                 let relative_time = (i as f64 / view_settings.trajectory_resolution as f64) * period.to_seconds();
-                let absolute_time = Instant::from_seconds_since_j2000(periapsis_time.to_j2000_seconds() + relative_time);
-                let displacement = kepler_motive.displacement(absolute_time, mu);
+                
+                let displacement = if is_precessing {
+                    // For precessing orbits: compute true anomaly for this time, then apply
+                    // the current time's precession rotation to all points
+                    let absolute_time = Instant::from_seconds_since_j2000(periapsis_time.to_j2000_seconds() + relative_time);
+                    let true_anomaly = kepler_motive.true_anomaly(absolute_time, mu);
+                    kepler_motive.displacement_at_true_anomaly_with_precession(true_anomaly, current_time)
+                } else {
+                    // For non-precessing orbits: use original logic (precession angles are constant)
+                    let absolute_time = Instant::from_seconds_since_j2000(periapsis_time.to_j2000_seconds() + relative_time);
+                    kepler_motive.displacement(absolute_time, mu)
+                };
+                
                 if let Some(displacement) = displacement {
-                    map.insert(relative_time, displacement); // Store using relative time as key
+                    map.insert(relative_time, displacement);
                 }
             }
         }

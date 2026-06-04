@@ -72,6 +72,8 @@ impl Plugin for PlanetariumUI {
                     presentation::render_axes.after(presentation::orient_bodies),
                     // Trajectory mesh systems
                     presentation::spawn_trajectory_meshes_for_bodies,
+                    presentation::refresh_precessing_trajectories
+                        .before(kepler_motive::calculate_trajectory),
                     presentation::rebuild_trajectory_caches
                         .after(kepler_motive::calculate_trajectory),
                     presentation::build_trajectory_meshes

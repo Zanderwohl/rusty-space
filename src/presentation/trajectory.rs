@@ -18,8 +18,9 @@ use crate::body::motive::{Motive, MotiveSelection};
 use crate::body::universe::save::ViewSettings;
 use crate::camera::{Freecam, PlanetariumCamera};
 use crate::gui::settings::{DisplayGlow, Settings};
-use crate::sim::SimTime;
+use crate::sim::{BodySelection, CalculateTrajectory, SimTime};
 use crate::util::bevystuff::GlamVec;
+use bevy::ecs::message::MessageWriter;
 
 use super::trajectory_material::TrajectoryMaterial;
 
@@ -29,6 +30,9 @@ pub struct TrajectoryMesh {
     /// The body entity this trajectory belongs to
     pub body_entity: Entity,
 }
+
+/// How often to rebuild trajectories for precessing orbits (in simulation seconds)
+const PRECESSION_REBUILD_INTERVAL: f64 = 86400.0; // One Julian day
 
 /// Cached trajectory data to avoid recomputing from TimeMap every frame.
 /// Only rebuilt when orbital parameters change.
@@ -47,16 +51,22 @@ pub struct TrajectoryCache {
     pub primary_id: Option<String>,
     /// Whether the cache is valid (set to false when trajectory needs rebuild)
     pub valid: bool,
+    /// Whether this orbit has precession (apsidal or nodal).
+    /// Precessing orbits need periodic trajectory recalculation.
+    pub is_precessing: bool,
+    /// Simulation time (J2000 seconds) when trajectory was last rebuilt.
+    /// Used to trigger periodic rebuilds for precessing orbits.
+    pub last_rebuild_time: f64,
 }
 
 /// Number of sides for the tube cross-section (6-8 is visually sufficient)
 const TUBE_SIDES: u32 = 8;
 
 /// Minimum tube radius (when very close to camera) - keeps it as a thin line
-const MIN_TUBE_RADIUS: f32 = 0.001;
+const MIN_TUBE_RADIUS: f32 = 0.00001;
 
 /// Maximum tube radius (when very far from camera) - prevents massive tubes
-const MAX_TUBE_RADIUS: f32 = 0.5;
+const MAX_TUBE_RADIUS: f32 = 10.0;
 
 /// Reference distance for radius scaling (radius = base at this distance)
 const REFERENCE_DISTANCE: f32 = 10.0;
@@ -110,47 +120,120 @@ pub fn spawn_trajectory_mesh(
 }
 
 /// System to rebuild trajectory caches when orbital parameters change.
-/// Listens for changes to BodyState.trajectory and repopulates the cache.
+/// Only rebuilds when the trajectory data actually changes, not on every BodyState mutation.
 pub fn rebuild_trajectory_caches(
-    bodies: Query<(Entity, &BodyState, &Motive), Changed<BodyState>>,
+    bodies: Query<(Entity, &BodyState, &Motive)>,
     mut trajectory_meshes: Query<(&TrajectoryMesh, &mut TrajectoryCache)>,
+    sim_time: Res<SimTime>,
 ) {
-    for (body_entity, state, motive) in bodies.iter() {
-        // Find the trajectory mesh for this body
-        for (traj_mesh, mut cache) in trajectory_meshes.iter_mut() {
-            if traj_mesh.body_entity != body_entity {
-                continue;
-            }
-            
-            // Only rebuild if body has a trajectory
-            let Some(trajectory) = &state.trajectory else {
+    for (traj_mesh, mut cache) in trajectory_meshes.iter_mut() {
+        // Find the body this trajectory belongs to
+        let Some((_, state, motive)) = bodies.iter().find(|(e, _, _)| *e == traj_mesh.body_entity) else {
+            continue;
+        };
+        
+        // Check if body has a trajectory
+        let Some(trajectory) = &state.trajectory else {
+            if cache.valid {
                 cache.valid = false;
                 cache.local_points.clear();
-                continue;
-            };
-            
-            // Get primary_id for Keplerian motives
-            let primary_id = match motive.motive_at(crate::foundations::time::Instant::J2000) {
-                (_, MotiveSelection::Keplerian(k)) => Some(k.primary_id.clone()),
-                _ => None,
-            };
-            
-            // Collect points from TimeMap (local displacements)
-            cache.local_points = trajectory.iter().map(|(t, d)| (t, *d)).collect();
-            
-            // Set periodicity info
-            if let Some(periodicity) = trajectory.periodicity() {
-                cache.closed = true;
-                cache.interval_size = Some(periodicity.interval_size);
-                cache.interval_start = Some(periodicity.interval_start);
-            } else {
-                cache.closed = false;
-                cache.interval_size = None;
-                cache.interval_start = None;
             }
-            
-            cache.primary_id = primary_id;
-            cache.valid = true;
+            continue;
+        };
+        
+        // Skip rebuild if cache is already valid and trajectory hasn't changed.
+        // We detect actual trajectory changes by comparing:
+        // 1. Point count (changes if resolution changes)
+        // 2. First point's position (changes when trajectory is recalculated, e.g. for precession)
+        let traj_len = trajectory.len();
+        let first_point_matches = if let (Some(cached_first), Some((_, traj_first))) = 
+            (cache.local_points.first(), trajectory.iter().next()) 
+        {
+            // Compare with small epsilon for floating point
+            (cached_first.1 - *traj_first).length_squared() < 1e-10
+        } else {
+            false
+        };
+        
+        if cache.valid 
+            && cache.local_points.len() == traj_len 
+            && first_point_matches
+        {
+            // Cache is up to date, skip rebuild
+            continue;
+        }
+        
+        // Get primary_id and check for precession
+        let (primary_id, is_precessing) = match motive.motive_at(crate::foundations::time::Instant::J2000) {
+            (_, MotiveSelection::Keplerian(k)) => {
+                let precessing = matches!(
+                    k.rotation,
+                    crate::body::motive::kepler_motive::KeplerRotation::PrecessingEulerAngles(_)
+                );
+                (Some(k.primary_id.clone()), precessing)
+            },
+            _ => (None, false),
+        };
+        
+        // Collect points from TimeMap (local displacements)
+        cache.local_points = trajectory.iter().map(|(t, d)| (t, *d)).collect();
+        
+        // Set periodicity info
+        if let Some(periodicity) = trajectory.periodicity() {
+            cache.closed = true;
+            cache.interval_size = Some(periodicity.interval_size);
+            cache.interval_start = Some(periodicity.interval_start);
+        } else {
+            cache.closed = false;
+            cache.interval_size = None;
+            cache.interval_start = None;
+        }
+        
+        cache.primary_id = primary_id.clone();
+        cache.is_precessing = is_precessing;
+        cache.last_rebuild_time = sim_time.time.to_j2000_seconds();
+        cache.valid = true;
+        
+        // Debug: log when precessing orbit cache is built
+        if is_precessing {
+            if let Some(pid) = &primary_id {
+                info!("Built trajectory cache for precessing orbit (primary: {}), rebuild_time: {:.0}", 
+                      pid, cache.last_rebuild_time);
+            }
+        }
+    }
+}
+
+/// System to trigger trajectory recalculation for precessing orbits periodically.
+/// Precessing orbits drift from their cached trajectory over time.
+pub fn refresh_precessing_trajectories(
+    mut trajectory_meshes: Query<(&TrajectoryMesh, &mut TrajectoryCache)>,
+    bodies: Query<&BodyInfo>,
+    sim_time: Res<SimTime>,
+    mut calc_writer: MessageWriter<CalculateTrajectory>,
+) {
+    let current_time = sim_time.time.to_j2000_seconds();
+    
+    for (traj_mesh, mut cache) in trajectory_meshes.iter_mut() {
+        // Only check precessing orbits with valid caches
+        if !cache.is_precessing || !cache.valid {
+            continue;
+        }
+        
+        // Check if enough simulation time has passed since last rebuild
+        let time_since_rebuild = (current_time - cache.last_rebuild_time).abs();
+        if time_since_rebuild >= PRECESSION_REBUILD_INTERVAL {
+            // Get the body's ID to request trajectory recalculation
+            if let Ok(info) = bodies.get(traj_mesh.body_entity) {
+                info!("Refreshing precessing trajectory for {} (time since rebuild: {:.0}s)", 
+                      info.id, time_since_rebuild);
+                calc_writer.write(CalculateTrajectory {
+                    selection: BodySelection::IDs(vec![info.id.clone()]),
+                });
+                
+                // Invalidate cache so rebuild_trajectory_caches will update it
+                cache.valid = false;
+            }
         }
     }
 }
@@ -229,19 +312,23 @@ pub fn build_trajectory_meshes(
         let mut transient_idx: Option<usize> = None;
         
         // Insert transient point (body's current local position)
-        if let (Some(local_pos), Some(interval_size)) = (state.current_local_position, cache.interval_size) {
-            let current_relative_time = cycle_frac * interval_size;
-            let body_radius = appearance.map(|a| a.radius()).unwrap_or(0.0);
-            
-            if let Some(seg) = points.windows(2).position(|w| {
-                current_relative_time >= w[0].0 && current_relative_time < w[1].0
-            }) {
-                let dist_before = (local_pos - points[seg].1).length();
-                let dist_after = (local_pos - points[seg + 1].1).length();
+        // Skip for precessing orbits - the cached trajectory has different precession
+        // states at each sample point, so inserting the current position would be inconsistent.
+        if !cache.is_precessing {
+            if let (Some(local_pos), Some(interval_size)) = (state.current_local_position, cache.interval_size) {
+                let current_relative_time = cycle_frac * interval_size;
+                let body_radius = appearance.map(|a| a.radius()).unwrap_or(0.0);
                 
-                if dist_before >= body_radius && dist_after >= body_radius {
-                    points.insert(seg + 1, (current_relative_time, local_pos));
-                    transient_idx = Some(seg + 1);
+                if let Some(seg) = points.windows(2).position(|w| {
+                    current_relative_time >= w[0].0 && current_relative_time < w[1].0
+                }) {
+                    let dist_before = (local_pos - points[seg].1).length();
+                    let dist_after = (local_pos - points[seg + 1].1).length();
+                    
+                    if dist_before >= body_radius && dist_after >= body_radius {
+                        points.insert(seg + 1, (current_relative_time, local_pos));
+                        transient_idx = Some(seg + 1);
+                    }
                 }
             }
         }

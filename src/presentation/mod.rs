@@ -18,6 +18,7 @@ pub use trajectory::{
     build_trajectory_meshes,
     cleanup_orphaned_trajectory_meshes,
     rebuild_trajectory_caches,
+    refresh_precessing_trajectories,
     spawn_trajectory_mesh,
     spawn_trajectory_meshes_for_bodies,
     TrajectoryCache,
