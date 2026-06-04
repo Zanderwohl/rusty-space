@@ -82,6 +82,16 @@ const RADIUS_SCALE_POWER: f32 = 0.75;
 /// ~0.001 rad ≈ 1-2 pixels on typical displays.
 const MIN_ANGULAR_SIZE: f32 = 0.0001;
 
+/// Distance (bevy meters) at/below which trajectories are at full brightness.
+const DISTANCE_DIM_REF: f32 = 5.0;
+
+/// Power for distance-based dimming. Lower = more gradual fade over distance.
+const DISTANCE_DIM_POWER: f32 = 0.4;
+
+/// Minimum dimming factor - distant trajectories never go fully invisible.
+const DISTANCE_DIM_MIN: f32 = 0.01;
+
+
 /// Calculate tube radius based on distance from camera.
 /// Uses a power curve for general scaling, with a minimum angular size floor
 /// to prevent sub-pixel aliasing at extreme distances.
@@ -373,15 +383,25 @@ pub fn build_trajectory_meshes(
             // Calculate radius based on distance
             let radius = calculate_tube_radius(distance_from_camera);
             
-            // Compute brightness based on distance from transient point
+            // Compute orbital brightness based on distance from transient point
             let point_frac = idx as f32 / point_count as f32;
-            let brightness = compute_brightness(
+            let orbital_brightness = compute_brightness(
                 point_frac, 
                 transient_frac, 
                 cache.closed,
                 min_brightness,
                 max_brightness,
             );
+            
+            // Distance-based dimming: far trajectories are dimmer
+            let distance_dim = if distance_from_camera <= DISTANCE_DIM_REF {
+                1.0
+            } else {
+                (DISTANCE_DIM_REF / distance_from_camera).powf(DISTANCE_DIM_POWER).max(DISTANCE_DIM_MIN)
+            };
+            
+            // Near-fade is handled per-fragment in the shader for pixel-accurate fading
+            let brightness = orbital_brightness * distance_dim;
             
             (bevy_pos, brightness, radius)
         }).collect();
