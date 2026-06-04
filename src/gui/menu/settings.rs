@@ -49,6 +49,13 @@ pub fn settings_panel(mut settings: &mut ResMut<Settings>, ui: &mut Ui) {
 
     ui.separator();
     ui.vertical(|ui| {
+        ui.heading("Simulation");
+        ui.checkbox(&mut settings.simulation.newtonian, "Newtonian Physics")
+            .on_hover_text("Enable gravity integration for free-flying bodies.\nDisabling skips sub-steps and positions bodies once per frame.");
+    });
+
+    ui.separator();
+    ui.vertical(|ui| {
         ui.heading("Windows");
         ui.checkbox(&mut settings.windows.spin, "Spin Gravity Calculator");
         ui.checkbox(&mut settings.windows.body_edit, "Body Edit");

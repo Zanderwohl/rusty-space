@@ -13,6 +13,8 @@ pub struct Settings {
     pub ui: UiSettings,
     #[serde(default)]
     pub windows: WindowSelections,
+    #[serde(default)]
+    pub simulation: SimulationSettings,
 }
 
 impl Default for Settings {
@@ -22,6 +24,23 @@ impl Default for Settings {
             sound: SoundSettings::default(),
             ui: UiSettings::default(),
             windows: WindowSelections::default(),
+            simulation: SimulationSettings::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+pub struct SimulationSettings {
+    /// Enable Newtonian physics integration (gravity affecting free-flying bodies).
+    /// When disabled, skips Newtonian sub-steps and only positions bodies once per frame.
+    #[serde(default = "default_false")]
+    pub newtonian: bool,
+}
+
+impl Default for SimulationSettings {
+    fn default() -> Self {
+        Self {
+            newtonian: false,
         }
     }
 }

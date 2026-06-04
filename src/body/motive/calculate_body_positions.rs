@@ -27,6 +27,7 @@ use crate::body::universe::save::UniversePhysics;
 use crate::sim::{PreviousTimesIter, SimTime};
 use crate::foundations::gravity;
 use crate::foundations::time::Instant;
+use crate::gui::settings::Settings;
 // ============================================================================
 // Time Iterator (avoids Box<dyn Iterator> allocation)
 // ============================================================================
@@ -243,9 +244,14 @@ impl Default for SimulationPerformanceMetrics {
 /// 
 /// This runs multiple physics steps per frame based on `previous_times` in SimTime,
 /// with a configurable time budget to prevent frame drops.
+/// 
+/// When `Settings.simulation.newtonian` is disabled:
+/// - Skips all sub-stepping (positions bodies once per frame at current time)
+/// - Skips Newtonian gravity integration entirely
 pub fn calculate_body_positions(
     mut sim_time: ResMut<SimTime>,
     physics: Res<UniversePhysics>,
+    settings: Res<Settings>,
     mut graph: ResMut<PhysicsGraph>,
     mut cache: ResMut<PositionCache>,
     mut metrics: ResMut<SimulationPerformanceMetrics>,
@@ -254,22 +260,40 @@ pub fn calculate_body_positions(
     // Start frame timing
     sim_time.begin_frame();
     
+    let newtonian_enabled = settings.simulation.newtonian;
     let current_time = sim_time.time;
+    
+    // Determine which times to step through
+    let queue_has_times = !sim_time.previous_times.is_empty();
+    let total_steps = sim_time.previous_times.len();
+    
+    // When Newtonian is enabled: step through each queued time for accurate integration
+    // When Newtonian is disabled: jump directly to the final time (skip sub-stepping)
+    let (times_iter, graph_build_time) = if newtonian_enabled && queue_has_times {
+        (TimeIter::Queued(sim_time.previous_times.iter()), current_time)
+    } else {
+        // Use the last queued time if available (to advance time), otherwise current
+        let target_time = sim_time.previous_times.last()
+            .unwrap_or(current_time.to_j2000_seconds());
+        let target_instant = Instant::from_seconds_since_j2000(target_time);
+        (TimeIter::Single(Some(target_time)), target_instant)
+    };
     
     // Check if we need to rebuild the graph
     // Rebuild if: first time, bodies changed, or motive events occurred
+    // Use graph_build_time to ensure cached data matches the time we'll calculate at
     let needs_rebuild = graph.needs_rebuild 
         || graph.body_data.is_empty()
-        || graph.check_for_motive_changes(&bodies, graph.last_build_time, current_time);
+        || graph.check_for_motive_changes(&bodies, graph.last_build_time, graph_build_time);
     
     if needs_rebuild {
         let rebuild_start = StdInstant::now();
-        rebuild_physics_graph(&mut graph, &bodies, current_time, physics.gravitational_constant);
+        rebuild_physics_graph(&mut graph, &bodies, graph_build_time, physics.gravitational_constant);
         graph.needs_rebuild = false;
-        graph.last_build_time = current_time;
+        graph.last_build_time = graph_build_time;
         
         metrics.last_graph_rebuild_duration_ms = rebuild_start.elapsed().as_secs_f64() * 1000.0;
-        metrics.last_graph_rebuild_sim_time = current_time;
+        metrics.last_graph_rebuild_sim_time = graph_build_time;
         
         // Update cache capacity based on new counts from graph rebuild
         cache.reserve(graph.last_body_count, graph.last_major_count);
@@ -278,17 +302,6 @@ pub fn calculate_body_positions(
     // Track how many steps we process and the last processed time
     let mut steps_processed = 0usize;
     let mut last_processed_time = current_time;
-    
-    // Determine which times to step through
-    let has_queued_times = !sim_time.previous_times.is_empty();
-    let total_steps = sim_time.previous_times.len();
-    
-    // Create an iterator over times (no heap allocation)
-    let times_iter = if has_queued_times {
-        TimeIter::Queued(sim_time.previous_times.iter())
-    } else {
-        TimeIter::Single(Some(current_time.to_j2000_seconds()))
-    };
     
     // Accumulators for per-step timing
     let mut total_hierarchical_ns = 0u128;
@@ -319,23 +332,26 @@ pub fn calculate_body_positions(
         );
         total_hierarchical_ns += t0.elapsed().as_nanos();
         
-        // Update major body positions in cache for Newtonian calculations
-        let t1 = StdInstant::now();
-        update_major_body_cache(&bodies, &graph, &mut cache);
-        total_cache_update_ns += t1.elapsed().as_nanos();
-        
-        // Phase 2: Calculate Newtonian positions
-        let t2 = StdInstant::now();
-        calculate_newtonian_positions(
-            &mut bodies,
-            &graph,
-            &cache,
-            step_time,
-            sim_time.step,
-            sim_time.playing,
-            physics.gravitational_constant,
-        );
-        total_newtonian_ns += t2.elapsed().as_nanos();
+        // Skip Newtonian calculations if disabled
+        if newtonian_enabled {
+            // Update major body positions in cache for Newtonian calculations
+            let t1 = StdInstant::now();
+            update_major_body_cache(&bodies, &graph, &mut cache);
+            total_cache_update_ns += t1.elapsed().as_nanos();
+            
+            // Phase 2: Calculate Newtonian positions
+            let t2 = StdInstant::now();
+            calculate_newtonian_positions(
+                &mut bodies,
+                &graph,
+                &cache,
+                step_time,
+                sim_time.step,
+                sim_time.playing,
+                physics.gravitational_constant,
+            );
+            total_newtonian_ns += t2.elapsed().as_nanos();
+        }
         
         last_processed_time = step_time;
         sim_time.step_completed();
@@ -349,12 +365,16 @@ pub fn calculate_body_positions(
     
     // Drain only the steps we actually processed; keep the remainder
     // so Newtonian bodies integrate through every timestep in order.
-    if has_queued_times {
+    // When Newtonian is disabled, clear the queue entirely since we jumped to the end.
+    if newtonian_enabled && queue_has_times {
         if steps_processed >= total_steps {
             sim_time.previous_times.clear();
         } else {
             sim_time.previous_times.drain_front(steps_processed);
         }
+    } else {
+        // Non-Newtonian mode or no queue: we processed everything in one step
+        sim_time.previous_times.clear();
     }
     
     // End frame and calculate performance metrics
@@ -364,7 +384,7 @@ pub fn calculate_body_positions(
     metrics.step_size = sim_time.step;
     metrics.current_sim_time = last_processed_time;
     metrics.steps_completed = steps_processed;
-    metrics.steps_intended = if has_queued_times { total_steps } else { 1 };
+    metrics.steps_intended = if newtonian_enabled && queue_has_times { total_steps } else { 1 };
     if steps_processed > 0 {
         let n = steps_processed as f64;
         metrics.avg_time_per_step_ms = total_step_time_ms / n;
