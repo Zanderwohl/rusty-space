@@ -30,7 +30,7 @@ pub struct TrajectoryMaterial {
 impl Default for TrajectoryMaterial {
     fn default() -> Self {
         Self {
-            base_color: LinearRgba::new(0.0, 1.0, 0.0, 1.0), // Green like original gizmos
+            base_color: LinearRgba::new(0.12, 0.85, 0.45, 1.0), // VFD green with slight blue tint
             brightness_threshold: 0.3,
             emission_strength: 4.0,
             alpha_mode: AlphaMode::Blend,

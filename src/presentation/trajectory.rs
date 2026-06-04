@@ -60,13 +60,13 @@ pub struct TrajectoryCache {
 }
 
 /// Number of sides for the tube cross-section (6-8 is visually sufficient)
-const TUBE_SIDES: u32 = 8;
+const TUBE_SIDES: u32 = 4;
 
 /// Minimum tube radius (when very close to camera) - keeps it as a thin line
 const MIN_TUBE_RADIUS: f32 = 0.000005;
 
 /// Maximum tube radius (when very far from camera) - prevents massive tubes
-const MAX_TUBE_RADIUS: f32 = 10.0;
+const MAX_TUBE_RADIUS: f32 = 1000.0;
 
 /// Reference distance for radius scaling (radius = base at this distance)
 const REFERENCE_DISTANCE: f32 = 10.0;
@@ -80,7 +80,7 @@ const RADIUS_SCALE_POWER: f32 = 0.75;
 
 /// Minimum angular size (radius / distance) to prevent sub-pixel aliasing at extreme range.
 /// ~0.001 rad ≈ 1-2 pixels on typical displays.
-const MIN_ANGULAR_SIZE: f32 = 0.0001;
+const MIN_ANGULAR_SIZE: f32 = 0.0005;
 
 /// Distance (bevy meters) at/below which trajectories are at full brightness.
 const DISTANCE_DIM_REF: f32 = 5.0;
@@ -489,7 +489,7 @@ pub fn generate_tube_mesh(points: &[(Vec3, f32, f32)], sides: u32) -> Mesh {
             normals.push([normal.x, normal.y, normal.z]);
             
             // Color: RGB is green (base color handled by material), alpha encodes brightness
-            colors.push([0.0, 1.0, 0.0, *brightness]);
+            colors.push([1.0, 1.0, 1.0, *brightness]);
         }
         
         // Generate triangles connecting this ring to the next
