@@ -519,6 +519,7 @@ pub fn calculate_trajectory(
     physics: Res<UniversePhysics>,
     view_settings: Res<ViewSettings>,
     sim_time: Res<SimTime>,
+    physics_graph: Res<crate::body::motive::calculate_body_positions::PhysicsGraph>,
 ) {
     if calcs.is_empty() { return; }
 
@@ -531,62 +532,95 @@ pub fn calculate_trajectory(
     let current_time = sim_time.time;
 
     for calc in calcs.read() {
+        // For IDs selection, use direct entity lookup (O(1) per ID) instead of scanning all bodies
+        if let BodySelection::IDs(ids) = &calc.selection {
+            for id in ids {
+                let Some(entity) = physics_graph.id_to_entity.get(id) else {
+                    continue;
+                };
+                let Ok((mut state, _info, motive)) = bodies.get_mut(*entity) else {
+                    continue;
+                };
+                calculate_trajectory_for_body(
+                    &mut state, motive, &body_masses, 
+                    current_time, &physics, &view_settings,
+                );
+            }
+            continue;
+        }
+        
+        // For All and Tag selections, iterate all bodies
         for (mut state, info, motive) in bodies.iter_mut() {
             let do_this = match &calc.selection {
                 BodySelection::All => true,
                 BodySelection::Tag(tag) => info.tags.contains(tag),
-                BodySelection::IDs(ids) => ids.contains(&info.id),
+                BodySelection::IDs(_) => unreachable!(), // Handled above
             };
             if !do_this { continue; }
 
-            // Get the current motive selection
-            let (_, selection) = motive.motive_at(current_time);
-            
-            // Only calculate trajectories for Keplerian bodies
-            let kepler_motive = match selection {
-                crate::body::motive::MotiveSelection::Keplerian(k) => k,
-                _ => continue,
-            };
+            calculate_trajectory_for_body(
+                &mut state, motive, &body_masses, 
+                current_time, &physics, &view_settings,
+            );
+        }
+    }
+}
 
-            let primary_mass = body_masses.get(&kepler_motive.primary_id)
-                .copied()
-                .expect("Missing primary body mass");
-            let mu = physics.gravitational_constant * primary_mass;
+/// Helper function to calculate trajectory for a single body.
+fn calculate_trajectory_for_body(
+    state: &mut BodyState,
+    motive: &crate::body::motive::Motive,
+    body_masses: &std::collections::HashMap<String, f64>,
+    current_time: Instant,
+    physics: &UniversePhysics,
+    view_settings: &ViewSettings,
+) {
+    // Get the current motive selection
+    let (_, selection) = motive.motive_at(current_time);
+    
+    // Only calculate trajectories for Keplerian bodies
+    let kepler_motive = match selection {
+        crate::body::motive::MotiveSelection::Keplerian(k) => k,
+        _ => return,
+    };
 
-            state.trajectory = Some(TimeMap::new());
-            let map = state.trajectory.as_mut().unwrap();
-            let period = kepler_motive.period(mu);
+    let primary_mass = body_masses.get(&kepler_motive.primary_id)
+        .copied()
+        .expect("Missing primary body mass");
+    let mu = physics.gravitational_constant * primary_mass;
 
-            let periapsis_time = kepler_motive.time_at_periapsis_passage(mu);
+    state.trajectory = Some(TimeMap::new());
+    let map = state.trajectory.as_mut().unwrap();
+    let period = kepler_motive.period(mu);
 
-            if !kepler_motive.is_open() {
-                map.set_periodicity(periapsis_time, period);
-            }
+    let periapsis_time = kepler_motive.time_at_periapsis_passage(mu);
 
-            // For precessing orbits, we want all trajectory points to share the CURRENT
-            // precession state. Otherwise, each point would have a different orbital plane
-            // orientation, causing the trajectory to not match the actual orbital path.
-            let is_precessing = kepler_motive.is_precessing();
+    if !kepler_motive.is_open() {
+        map.set_periodicity(periapsis_time, period);
+    }
 
-            for i in 0..=view_settings.trajectory_resolution {
-                let relative_time = (i as f64 / view_settings.trajectory_resolution as f64) * period.to_seconds();
-                
-                let displacement = if is_precessing {
-                    // For precessing orbits: compute true anomaly for this time, then apply
-                    // the current time's precession rotation to all points
-                    let absolute_time = Instant::from_seconds_since_j2000(periapsis_time.to_j2000_seconds() + relative_time);
-                    let true_anomaly = kepler_motive.true_anomaly(absolute_time, mu);
-                    kepler_motive.displacement_at_true_anomaly_with_precession(true_anomaly, current_time)
-                } else {
-                    // For non-precessing orbits: use original logic (precession angles are constant)
-                    let absolute_time = Instant::from_seconds_since_j2000(periapsis_time.to_j2000_seconds() + relative_time);
-                    kepler_motive.displacement(absolute_time, mu)
-                };
-                
-                if let Some(displacement) = displacement {
-                    map.insert(relative_time, displacement);
-                }
-            }
+    // For precessing orbits, we want all trajectory points to share the CURRENT
+    // precession state. Otherwise, each point would have a different orbital plane
+    // orientation, causing the trajectory to not match the actual orbital path.
+    let is_precessing = kepler_motive.is_precessing();
+
+    for i in 0..=view_settings.trajectory_resolution {
+        let relative_time = (i as f64 / view_settings.trajectory_resolution as f64) * period.to_seconds();
+        
+        let displacement = if is_precessing {
+            // For precessing orbits: compute true anomaly for this time, then apply
+            // the current time's precession rotation to all points
+            let absolute_time = Instant::from_seconds_since_j2000(periapsis_time.to_j2000_seconds() + relative_time);
+            let true_anomaly = kepler_motive.true_anomaly(absolute_time, mu);
+            kepler_motive.displacement_at_true_anomaly_with_precession(true_anomaly, current_time)
+        } else {
+            // For non-precessing orbits: use original logic (precession angles are constant)
+            let absolute_time = Instant::from_seconds_since_j2000(periapsis_time.to_j2000_seconds() + relative_time);
+            kepler_motive.displacement(absolute_time, mu)
+        };
+        
+        if let Some(displacement) = displacement {
+            map.insert(relative_time, displacement);
         }
     }
 }

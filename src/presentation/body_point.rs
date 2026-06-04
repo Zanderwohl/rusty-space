@@ -207,8 +207,14 @@ pub fn update_body_points(
             total_brightness = total_brightness.max(MIN_POINT_BRIGHTNESS).min(1.0);
 
             // Update material brightness (phase brightness * fade factor)
-            if let Some(material) = materials.get_mut(point_material_handle.id()) {
-                material.brightness = total_brightness * fade_factor;
+            // Only update if value changed to avoid spurious asset change detection
+            let new_brightness = total_brightness * fade_factor;
+            if let Some(material) = materials.get(point_material_handle.id()) {
+                if (material.brightness - new_brightness).abs() > 0.001 {
+                    if let Some(material) = materials.get_mut(point_material_handle.id()) {
+                        material.brightness = new_brightness;
+                    }
+                }
             }
 
             // Hide wireframe only when body is sub-pixel
@@ -253,13 +259,23 @@ pub fn update_body_points(
 }
 
 /// Cleanup orphaned body point meshes when bodies are despawned.
+/// System to clean up orphaned body point entities.
+/// Uses RemovedComponents to only run when bodies are actually removed.
 pub fn cleanup_orphaned_body_points(
     mut commands: Commands,
+    mut removed_bodies: RemovedComponents<BodyInfo>,
     points: Query<(Entity, &BodyPointMesh)>,
-    bodies: Query<Entity, With<BodyInfo>>,
 ) {
+    // Early exit if no bodies were removed
+    if removed_bodies.is_empty() {
+        return;
+    }
+    
+    // Collect removed body entities
+    let removed: std::collections::HashSet<Entity> = removed_bodies.read().collect();
+    
     for (point_entity, point_mesh) in points.iter() {
-        if bodies.get(point_mesh.body_entity).is_err() {
+        if removed.contains(&point_mesh.body_entity) {
             commands.entity(point_entity).despawn();
         }
     }

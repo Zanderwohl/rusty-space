@@ -14,7 +14,7 @@ use crate::body::appearance::Appearance;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::camera::PlanetariumCamera;
 
-use super::body_material::BodyWireframeMaterial;
+use super::body_material::{BodyWireframeMaterial, OccluderMaterial, MAX_SUNS};
 
 /// Number of sides for tube cross-section
 const TUBE_SIDES: u32 = 4;
@@ -84,6 +84,8 @@ pub struct BodyWireframeLink(pub Entity);
 pub struct TerminatorMesh {
     pub body_entity: Entity,
     pub star_entity: Entity,
+    /// Current tube radius used in the mesh (for change detection)
+    pub current_tube_radius: f32,
 }
 
 /// Component linking a body to its terminator mesh entities.
@@ -384,6 +386,7 @@ pub fn spawn_body_wireframe_meshes(
                 base_color: color,
                 emission_strength: BODY_EMISSION_STRENGTH,
                 alpha_mode: AlphaMode::Opaque,
+                ..Default::default()
             };
             let material_handle = materials.add(material);
 
@@ -414,20 +417,14 @@ pub fn spawn_body_occluders(
     mut commands: Commands,
     bodies: Query<(Entity, &Appearance), (With<BodyInfo>, Without<OccluderLink>)>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<OccluderMaterial>>,
 ) {
     for (body_entity, appearance) in bodies.iter() {
         if let Appearance::DebugBall(_) = appearance {
-            // Create occluder mesh (black unlit sphere at 0.97 radius)
             let mesh = Sphere::new(0.97f32).mesh().ico(5).unwrap();
             let mesh_handle = meshes.add(mesh);
 
-            let material = StandardMaterial {
-                base_color: Color::BLACK,
-                unlit: true,
-                ..Default::default()
-            };
-            let material_handle = materials.add(material);
+            let material_handle = materials.add(OccluderMaterial::default());
 
             let occluder_entity = commands
                 .spawn((
@@ -448,24 +445,24 @@ pub fn spawn_body_occluders(
 /// System to scale occluder meshes slightly smaller at distance to avoid z-fighting.
 pub fn update_occluder_scale(
     cameras: Query<&GlobalTransform, With<PlanetariumCamera>>,
-    bodies: Query<&Transform, With<BodyInfo>>,
+    bodies: Query<(&Transform, Option<&BodyWireframeLink>), With<BodyInfo>>,
     wireframes: Query<&BodyWireframeMesh>,
     mut occluders: Query<(&OccluderMesh, &mut Transform, &ChildOf), Without<BodyInfo>>,
 ) {
     let Ok(camera_global) = cameras.single() else {
         return;
     };
-    let camera_pos = camera_global.translation();
+    let _camera_pos = camera_global.translation();
 
     for (occluder, mut occluder_transform, child_of) in occluders.iter_mut() {
-        let Ok(body_transform) = bodies.get(child_of.parent()) else {
+        let Ok((_body_transform, wireframe_link)) = bodies.get(child_of.parent()) else {
             continue;
         };
 
         // Get the wireframe's current tube radius to know how much the lines have grown
-        let tube_radius_ratio = wireframes
-            .iter()
-            .find(|wf| wf.body_entity == occluder.body_entity)
+        // Use the BodyWireframeLink for O(1) lookup instead of iterating all wireframes
+        let tube_radius_ratio = wireframe_link
+            .and_then(|link| wireframes.get(link.0).ok())
             .map(|wf| wf.current_tube_radius / WIRE_TUBE_RADIUS)
             .unwrap_or(1.0);
 
@@ -512,14 +509,15 @@ pub fn spawn_terminator_meshes(
                     continue;
                 }
 
-                // Create initial empty mesh (will be updated each frame)
-                let mesh = generate_great_circle_tube(Vec3::X, WIRE_TUBE_RADIUS, TUBE_SIDES);
+                // Create initial mesh with canonical direction (orientation comes from Transform)
+                let mesh = generate_great_circle_tube(TERMINATOR_CANONICAL_DIR, WIRE_TUBE_RADIUS, TUBE_SIDES);
                 let mesh_handle = meshes.add(mesh);
 
                 let material = BodyWireframeMaterial {
                     base_color: TERMINATOR_COLOR,
                     emission_strength: TERMINATOR_EMISSION_STRENGTH,
                     alpha_mode: AlphaMode::Opaque,
+                    ..Default::default()
                 };
                 let material_handle = materials.add(material);
 
@@ -533,6 +531,7 @@ pub fn spawn_terminator_meshes(
                         TerminatorMesh {
                             body_entity,
                             star_entity,
+                            current_tube_radius: WIRE_TUBE_RADIUS,
                         },
                         ChildOf(body_entity),
                     ))
@@ -546,13 +545,19 @@ pub fn spawn_terminator_meshes(
     }
 }
 
-/// System to update terminator meshes each frame based on star positions.
+/// Canonical direction for terminator mesh generation.
+/// The mesh is generated with this normal, then rotated via Transform to the actual star direction.
+const TERMINATOR_CANONICAL_DIR: Vec3 = Vec3::Y;
+
+/// System to update terminator meshes based on star positions.
+/// Mesh regeneration only happens when tube radius changes significantly.
+/// Rotation is updated every frame via Transform (cheap).
 /// Also adjusts tube thickness based on distance from camera and fades
 /// terminators out when the body is too small on screen.
 pub fn update_terminator_meshes(
     cameras: Query<(&Camera, &GlobalTransform, &Projection), With<PlanetariumCamera>>,
-    mut terminators: Query<(&TerminatorMesh, &Mesh3d, &ChildOf, &mut Visibility, &MeshMaterial3d<BodyWireframeMaterial>)>,
-    bodies: Query<(&Transform, &BodyState)>,
+    mut terminators: Query<(&mut TerminatorMesh, &Mesh3d, &ChildOf, &mut Visibility, &MeshMaterial3d<BodyWireframeMaterial>, &mut Transform)>,
+    bodies: Query<(&Transform, &BodyState), Without<TerminatorMesh>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodyWireframeMaterial>>,
 ) {
@@ -571,7 +576,7 @@ pub fn update_terminator_meshes(
 
     let camera_pos = camera_global.translation();
 
-    for (terminator, mesh3d, child_of, mut visibility, material_handle) in terminators.iter_mut() {
+    for (mut terminator, mesh3d, child_of, mut visibility, material_handle, mut term_transform) in terminators.iter_mut() {
         let Ok((body_transform, body_state)) = bodies.get(child_of.parent()) else {
             continue;
         };
@@ -587,11 +592,15 @@ pub fn update_terminator_meshes(
         let screen_radius = angular_radius / (fov_y * 0.5) * viewport_size.y * 0.5;
 
         if screen_radius <= TERMINATOR_FADE_END_PX {
-            *visibility = Visibility::Hidden;
+            if *visibility != Visibility::Hidden {
+                *visibility = Visibility::Hidden;
+            }
             continue;
         }
 
-        *visibility = Visibility::Visible;
+        if *visibility != Visibility::Visible {
+            *visibility = Visibility::Visible;
+        }
 
         let fade = if screen_radius >= TERMINATOR_FADE_START_PX {
             1.0
@@ -600,8 +609,14 @@ pub fn update_terminator_meshes(
                 / (TERMINATOR_FADE_START_PX - TERMINATOR_FADE_END_PX)
         };
 
-        if let Some(mat) = materials.get_mut(material_handle.id()) {
-            mat.emission_strength = TERMINATOR_EMISSION_STRENGTH * fade;
+        // Only update material if value changed to avoid spurious asset change detection
+        let new_emission = TERMINATOR_EMISSION_STRENGTH * fade;
+        if let Some(mat) = materials.get(material_handle.id()) {
+            if (mat.emission_strength - new_emission).abs() > 0.001 {
+                if let Some(mat) = materials.get_mut(material_handle.id()) {
+                    mat.emission_strength = new_emission;
+                }
+            }
         }
 
         // Get star state
@@ -623,31 +638,57 @@ pub fn update_terminator_meshes(
 
         let star_dir_local = body_transform.rotation.inverse() * star_dir_bevy;
 
-        let new_mesh = generate_great_circle_tube(star_dir_local, tube_radius, TUBE_SIDES);
+        // Always update transform rotation to orient the terminator toward the star.
+        // This is cheap and ensures smooth rotation as the body spins.
+        let rotation = Quat::from_rotation_arc(TERMINATOR_CANONICAL_DIR, star_dir_local);
+        term_transform.rotation = rotation;
+
+        // Only regenerate mesh when tube radius changes significantly (>5%)
+        let radius_ratio = tube_radius / terminator.current_tube_radius;
+        let radius_changed = radius_ratio < 0.95 || radius_ratio > 1.05;
+        
+        if !radius_changed {
+            continue;
+        }
+
+        // Generate mesh with canonical direction - actual orientation comes from Transform
+        let new_mesh = generate_great_circle_tube(TERMINATOR_CANONICAL_DIR, tube_radius, TUBE_SIDES);
 
         if let Some(mesh_asset) = meshes.get_mut(&mesh3d.0) {
             *mesh_asset = new_mesh;
         }
+        
+        // Update cached tube radius
+        terminator.current_tube_radius = tube_radius;
     }
 }
 
 /// System to clean up orphaned wireframe and terminator entities.
+/// Uses RemovedComponents to only run when bodies are actually removed.
 pub fn cleanup_orphaned_body_wireframes(
     mut commands: Commands,
+    mut removed_bodies: RemovedComponents<BodyInfo>,
     wireframes: Query<(Entity, &BodyWireframeMesh)>,
     terminators: Query<(Entity, &TerminatorMesh)>,
-    bodies: Query<Entity, With<BodyInfo>>,
 ) {
+    // Early exit if no bodies were removed
+    if removed_bodies.is_empty() {
+        return;
+    }
+    
+    // Collect removed body entities
+    let removed: std::collections::HashSet<Entity> = removed_bodies.read().collect();
+    
     // Clean up wireframes
     for (entity, wireframe) in wireframes.iter() {
-        if bodies.get(wireframe.body_entity).is_err() {
+        if removed.contains(&wireframe.body_entity) {
             commands.entity(entity).despawn();
         }
     }
 
     // Clean up terminators
     for (entity, terminator) in terminators.iter() {
-        if bodies.get(terminator.body_entity).is_err() {
+        if removed.contains(&terminator.body_entity) {
             commands.entity(entity).despawn();
         }
     }
@@ -672,6 +713,111 @@ fn calculate_tube_radius_for_distance(body_scale: f32, distance: f32) -> f32 {
 
     // Clamp between base radius and maximum
     min_local_radius.clamp(WIRE_TUBE_RADIUS, MAX_TUBE_RADIUS)
+}
+
+/// System to update wireframe materials with sun directions for day/night shading.
+/// Computes star directions in body-local space and writes them into the material uniform.
+pub fn update_wireframe_lighting(
+    wireframes: Query<(&BodyWireframeMesh, &MeshMaterial3d<BodyWireframeMaterial>, &ChildOf)>,
+    bodies: Query<(&Transform, &BodyState)>,
+    stars: Query<(Entity, &Appearance, &BodyState)>,
+    mut materials: ResMut<Assets<BodyWireframeMaterial>>,
+) {
+    let star_data: Vec<(Entity, &BodyState)> = stars
+        .iter()
+        .filter(|(_, app, _)| matches!(app, Appearance::Star(_)))
+        .map(|(e, _, s)| (e, s))
+        .collect();
+
+    for (wireframe, material_handle, child_of) in wireframes.iter() {
+        let Ok((body_transform, body_state)) = bodies.get(child_of.parent()) else {
+            continue;
+        };
+
+        let mut num_suns = 0u32;
+        let mut sun_dirs = [Vec4::ZERO; MAX_SUNS];
+
+        for &(star_entity, star_state) in &star_data {
+            if star_entity == wireframe.body_entity {
+                continue;
+            }
+            if num_suns as usize >= MAX_SUNS {
+                break;
+            }
+
+            let star_dir_sim =
+                (star_state.current_position - body_state.current_position).normalize();
+            let star_dir_bevy = Vec3::new(
+                star_dir_sim.x as f32,
+                star_dir_sim.z as f32,
+                -star_dir_sim.y as f32,
+            );
+            let star_dir_local = body_transform.rotation.inverse() * star_dir_bevy;
+
+            sun_dirs[num_suns as usize] = star_dir_local.extend(0.0);
+            num_suns += 1;
+        }
+
+        if let Some(mat) = materials.get_mut(material_handle.id()) {
+            mat.num_suns = num_suns;
+            mat.sun_dir_0 = sun_dirs[0];
+            mat.sun_dir_1 = sun_dirs[1];
+            mat.sun_dir_2 = sun_dirs[2];
+            mat.sun_dir_3 = sun_dirs[3];
+        }
+    }
+}
+
+/// System to update occluder materials with sun directions for Lambert shading.
+pub fn update_occluder_lighting(
+    occluders: Query<(&OccluderMesh, &MeshMaterial3d<OccluderMaterial>, &ChildOf)>,
+    bodies: Query<(&Transform, &BodyState)>,
+    stars: Query<(Entity, &Appearance, &BodyState)>,
+    mut materials: ResMut<Assets<OccluderMaterial>>,
+) {
+    let star_data: Vec<(Entity, &BodyState)> = stars
+        .iter()
+        .filter(|(_, app, _)| matches!(app, Appearance::Star(_)))
+        .map(|(e, _, s)| (e, s))
+        .collect();
+
+    for (occluder, material_handle, child_of) in occluders.iter() {
+        let Ok((body_transform, body_state)) = bodies.get(child_of.parent()) else {
+            continue;
+        };
+
+        let mut num_suns = 0u32;
+        let mut sun_dirs = [Vec4::ZERO; MAX_SUNS];
+
+        for &(star_entity, star_state) in &star_data {
+            if star_entity == occluder.body_entity {
+                continue;
+            }
+            if num_suns as usize >= MAX_SUNS {
+                break;
+            }
+
+            let star_dir_sim =
+                (star_state.current_position - body_state.current_position).normalize();
+            let star_dir_bevy = Vec3::new(
+                star_dir_sim.x as f32,
+                star_dir_sim.z as f32,
+                -star_dir_sim.y as f32,
+            );
+            let star_dir_local = body_transform.rotation.inverse() * star_dir_bevy;
+
+            sun_dirs[num_suns as usize] = star_dir_local.extend(0.0);
+            num_suns += 1;
+        }
+
+        if let Some(mat) = materials.get_mut(material_handle.id()) {
+            mat.num_suns = num_suns;
+            mat.sun_dir_0 = sun_dirs[0];
+            mat.sun_dir_1 = sun_dirs[1];
+            mat.sun_dir_2 = sun_dirs[2];
+            mat.sun_dir_3 = sun_dirs[3];
+        }
+    }
 }
 
 /// System to update wireframe mesh tube thickness based on distance from camera.

@@ -287,7 +287,7 @@ fn load_tags(conn: &Connection) -> Result<HashMap<String, TagState>, SqliteSaveE
         let mut member_stmt = conn.prepare(
             "SELECT body_id FROM tag_members WHERE tag_name = ?1"
         )?;
-        let members: Vec<String> = member_stmt
+        let members: std::collections::HashSet<String> = member_stmt
             .query_map([&name], |row| row.get(0))?
             .filter_map(|r| r.ok())
             .collect();

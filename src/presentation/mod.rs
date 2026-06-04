@@ -15,12 +15,14 @@ mod trajectory;
 mod trajectory_material;
 
 pub use bodies::position_bodies;
-pub use body_material::{BodyWireframeMaterial, BodyWireframeMaterialPlugin};
+pub use body_material::{BodyWireframeMaterial, BodyWireframeMaterialPlugin, OccluderMaterial, OccluderMaterialPlugin};
 pub use body_mesh::{
     spawn_body_wireframe_meshes,
     spawn_body_occluders,
     spawn_terminator_meshes,
     update_terminator_meshes,
+    update_wireframe_lighting,
+    update_occluder_lighting,
     update_wireframe_thickness,
     update_occluder_scale,
     cleanup_orphaned_body_wireframes,

@@ -100,6 +100,8 @@ pub struct PhysicsGraph {
     pub sorted_entities: Vec<Entity>,
     /// List of Newtonian body entities
     pub newtonian_entities: Vec<Entity>,
+    /// Pre-computed list of major body entities with their masses (for Newtonian gravity)
+    pub major_entities: Vec<(Entity, f64)>,
     /// Map from String ID to Entity (for primary_id lookups)
     pub id_to_entity: HashMap<String, Entity>,
     /// The last simulation time the graph was built for
@@ -119,17 +121,21 @@ impl PhysicsGraph {
         self.cached_motives.clear();
         self.sorted_entities.clear();
         self.newtonian_entities.clear();
+        self.major_entities.clear();
         self.id_to_entity.clear();
     }
     
     /// Reserve capacity based on previous body counts (avoids reallocation)
-    pub fn reserve(&mut self, body_count: usize) {
+    pub fn reserve(&mut self, body_count: usize, major_count: usize) {
         if self.body_data.capacity() < body_count {
             self.body_data.reserve(body_count - self.body_data.len());
             self.cached_motives.reserve(body_count - self.cached_motives.len());
             self.id_to_entity.reserve(body_count - self.id_to_entity.len());
             self.sorted_entities.reserve(body_count);
             self.newtonian_entities.reserve(body_count / 4); // Newtonian bodies are typically fewer
+        }
+        if self.major_entities.capacity() < major_count {
+            self.major_entities.reserve(major_count - self.major_entities.len());
         }
     }
     
@@ -141,6 +147,11 @@ impl PhysicsGraph {
         last_time: Instant,
         current_time: Instant,
     ) -> bool {
+        // Short-circuit: no events can occur in a zero-width time range
+        if last_time == current_time {
+            return false;
+        }
+        
         for (_, _, motive, _, _) in bodies.iter() {
             // Binary search: O(log n) instead of iterating all events
             if motive.has_event_in_range(last_time, current_time) {
@@ -257,6 +268,14 @@ pub fn calculate_body_positions(
     mut metrics: ResMut<SimulationPerformanceMetrics>,
     mut bodies: Query<(Entity, &BodyInfo, &Motive, &mut BodyState, Option<&Major>)>,
 ) {
+    // Early exit when paused with no pending work AND initial positions have been calculated.
+    // This avoids recalculating the same positions every frame while paused.
+    // On first load, graph.body_data is empty so we must run to calculate initial positions.
+    // Note: When scrubbing the timeline, previous_times will be populated with the target time.
+    if !sim_time.playing && sim_time.previous_times.is_empty() && !graph.body_data.is_empty() {
+        return;
+    }
+    
     // Start frame timing
     sim_time.begin_frame();
     
@@ -414,17 +433,15 @@ fn rebuild_physics_graph(
     let body_count = bodies.iter().len();
     
     graph.clear();
-    graph.reserve(body_count);
+    graph.reserve(body_count, graph.last_major_count);
     graph.last_body_count = body_count;
     
-    // First pass: build id_to_entity mapping and collect body data
-    // Also count major bodies for later pre-allocation
-    let mut major_count = 0usize;
+    // First pass: build id_to_entity mapping, collect body data, and build major_entities list
     for (entity, info, _, _, major) in bodies.iter() {
         graph.id_to_entity.insert(info.id.clone(), entity);
         let is_major = major.is_some();
         if is_major {
-            major_count += 1;
+            graph.major_entities.push((entity, info.mass));
         }
         graph.body_data.insert(entity, BodyData {
             entity,
@@ -432,7 +449,7 @@ fn rebuild_physics_graph(
             is_major,
         });
     }
-    graph.last_major_count = major_count;
+    graph.last_major_count = graph.major_entities.len();
     
     // Build temporary structures for topological sort
     // Using body_count as upper bound for hierarchical bodies
@@ -576,12 +593,10 @@ fn update_major_body_cache(
     graph: &PhysicsGraph,
     cache: &mut PositionCache,
 ) {
-    // Clear is handled by caller - don't double-clear
-    for (&entity, &body_data) in &graph.body_data {
-        if body_data.is_major {
-            if let Ok((_, _, _, state, _)) = bodies.get(entity) {
-                cache.major_bodies.push((entity, body_data.mass, state.current_position));
-            }
+    // Use pre-computed major_entities list instead of iterating all body_data
+    for &(entity, mass) in &graph.major_entities {
+        if let Ok((_, _, _, state, _)) = bodies.get(entity) {
+            cache.major_bodies.push((entity, mass, state.current_position));
         }
     }
 }

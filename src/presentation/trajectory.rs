@@ -57,6 +57,12 @@ pub struct TrajectoryCache {
     /// Simulation time (J2000 seconds) when trajectory was last rebuilt.
     /// Used to trigger periodic rebuilds for precessing orbits.
     pub last_rebuild_time: f64,
+    /// Whether the mesh needs to be regenerated (set true when cache, camera, or time changes).
+    pub mesh_dirty: bool,
+    /// Last camera position (cheated bevy space) used for mesh generation.
+    pub last_camera_pos: Option<DVec3>,
+    /// Last simulation time (J2000 seconds) used for mesh generation.
+    pub last_mesh_time: f64,
 }
 
 /// Number of sides for the tube cross-section (6-8 is visually sufficient)
@@ -138,13 +144,13 @@ pub fn spawn_trajectory_mesh(
 /// System to rebuild trajectory caches when orbital parameters change.
 /// Only rebuilds when the trajectory data actually changes, not on every BodyState mutation.
 pub fn rebuild_trajectory_caches(
-    bodies: Query<(Entity, &BodyState, &Motive)>,
+    bodies: Query<(&BodyState, &Motive)>,
     mut trajectory_meshes: Query<(&TrajectoryMesh, &mut TrajectoryCache)>,
     sim_time: Res<SimTime>,
 ) {
     for (traj_mesh, mut cache) in trajectory_meshes.iter_mut() {
-        // Find the body this trajectory belongs to
-        let Some((_, state, motive)) = bodies.iter().find(|(e, _, _)| *e == traj_mesh.body_entity) else {
+        // Find the body this trajectory belongs to using direct entity lookup (O(1))
+        let Ok((state, motive)) = bodies.get(traj_mesh.body_entity) else {
             continue;
         };
         
@@ -209,6 +215,7 @@ pub fn rebuild_trajectory_caches(
         cache.is_precessing = is_precessing;
         cache.last_rebuild_time = sim_time.time.to_j2000_seconds();
         cache.valid = true;
+        cache.mesh_dirty = true; // Trigger mesh rebuild
         
         // Debug: log when precessing orbit cache is built
         if is_precessing {
@@ -254,20 +261,27 @@ pub fn refresh_precessing_trajectories(
     }
 }
 
+/// Threshold for camera movement before mesh rebuild (in bevy units)
+const CAMERA_MOVE_THRESHOLD: f64 = 0.005;
+
 /// Main system to build trajectory meshes each frame.
 /// Reads cached points, inserts transient point, applies transforms, computes brightness, generates tube geometry.
+/// Skips mesh regeneration when camera and sim time haven't changed significantly.
 pub fn build_trajectory_meshes(
-    bodies: Query<(Entity, &BodyState, &BodyInfo, &Motive, Option<&Appearance>)>,
-    mut trajectory_meshes: Query<(&TrajectoryMesh, &TrajectoryCache, &mut Visibility, &Mesh3d)>,
+    bodies: Query<(&BodyState, &BodyInfo, &Motive, Option<&Appearance>)>,
+    mut trajectory_meshes: Query<(&TrajectoryMesh, &mut TrajectoryCache, &mut Visibility, &Mesh3d)>,
     mut meshes: ResMut<Assets<Mesh>>,
     view_settings: Res<ViewSettings>,
     settings: Res<Settings>,
     fcam: Single<&Freecam, With<PlanetariumCamera>>,
     sim_time: Res<SimTime>,
     color_grading: Single<&ColorGrading>,
+    physics_graph: Res<crate::body::motive::calculate_body_positions::PhysicsGraph>,
 ) {
     let distance_scale = view_settings.distance_factor();
     let exposure = color_grading.global.exposure;
+    let current_time = sim_time.time.to_j2000_seconds();
+    let camera_pos = fcam.bevy_pos;
     
     // Brightness range based on glow settings
     let (min_brightness, max_brightness) = match settings.display.glow {
@@ -280,10 +294,12 @@ pub fn build_trajectory_meshes(
     let min_brightness = min_brightness * exposure_adjust;
     let max_brightness = max_brightness * exposure_adjust;
     
-    for (traj_mesh, cache, mut visibility, mesh3d) in trajectory_meshes.iter_mut() {
-        // Find the body this trajectory belongs to
-        let Some((_, state, info, _motive, appearance)) = bodies.iter().find(|(e, _, _, _, _)| *e == traj_mesh.body_entity) else {
-            *visibility = Visibility::Hidden;
+    for (traj_mesh, mut cache, mut visibility, mesh3d) in trajectory_meshes.iter_mut() {
+        // Find the body this trajectory belongs to using direct entity lookup (O(1))
+        let Ok((state, info, _motive, appearance)) = bodies.get(traj_mesh.body_entity) else {
+            if *visibility != Visibility::Hidden {
+                *visibility = Visibility::Hidden;
+            }
             continue;
         };
         
@@ -293,11 +309,29 @@ pub fn build_trajectory_meshes(
             && (view_settings.show_trajectories || view_settings.body_in_any_trajectory_tag(&info.id));
         
         if !should_show {
-            *visibility = Visibility::Hidden;
+            if *visibility != Visibility::Hidden {
+                *visibility = Visibility::Hidden;
+            }
             continue;
         }
         
-        *visibility = Visibility::Visible;
+        // Track if visibility just changed to visible (needs rebuild)
+        let was_hidden = *visibility == Visibility::Hidden;
+        if was_hidden {
+            *visibility = Visibility::Visible;
+            cache.mesh_dirty = true;
+        }
+        
+        // Check if we need to rebuild the mesh
+        let camera_moved = cache.last_camera_pos
+            .map(|last| (last - camera_pos).length() > CAMERA_MOVE_THRESHOLD)
+            .unwrap_or(true);
+        let time_changed = (cache.last_mesh_time - current_time).abs() > 0.001;
+        
+        // Skip mesh regeneration if nothing relevant changed
+        if !cache.mesh_dirty && !camera_moved && !time_changed {
+            continue;
+        }
         
         // Calculate cycle fraction for brightness
         let cycle_frac = if let (Some(interval_start), Some(interval_size)) = (cache.interval_start, cache.interval_size) {
@@ -313,11 +347,11 @@ pub fn build_trajectory_meshes(
             0.0
         };
         
-        // Get primary offset for Keplerian orbits
+        // Get primary offset for Keplerian orbits using O(1) lookup via PhysicsGraph
         let primary_offset: Option<DVec3> = cache.primary_id.as_ref().and_then(|pid| {
-            bodies.iter()
-                .find(|(_, _, info, _, _)| &info.id == pid)
-                .and_then(|(_, primary_state, _, _, _)| {
+            physics_graph.id_to_entity.get(pid)
+                .and_then(|entity| bodies.get(*entity).ok())
+                .and_then(|(primary_state, _, _, _)| {
                     if primary_state.trajectory.is_none() { return None; }
                     Some(primary_state.current_position)
                 })
@@ -413,6 +447,11 @@ pub fn build_trajectory_meshes(
         if let Some(mesh_asset) = meshes.get_mut(&mesh3d.0) {
             *mesh_asset = mesh;
         }
+        
+        // Update cache tracking for dirty detection
+        cache.mesh_dirty = false;
+        cache.last_camera_pos = Some(camera_pos);
+        cache.last_mesh_time = current_time;
     }
 }
 
@@ -558,14 +597,23 @@ pub fn spawn_trajectory_meshes_for_bodies(
 pub struct TrajectoryMeshLink(pub Entity);
 
 /// System to clean up trajectory meshes when their parent bodies are despawned.
+/// Uses RemovedComponents to only run when bodies are actually removed.
 pub fn cleanup_orphaned_trajectory_meshes(
     mut commands: Commands,
+    mut removed_bodies: RemovedComponents<BodyInfo>,
     trajectory_meshes: Query<(Entity, &TrajectoryMesh)>,
-    bodies: Query<Entity, With<BodyInfo>>,
 ) {
+    // Early exit if no bodies were removed
+    if removed_bodies.is_empty() {
+        return;
+    }
+    
+    // Collect removed body entities
+    let removed: std::collections::HashSet<Entity> = removed_bodies.read().collect();
+    
+    // Despawn trajectory meshes for removed bodies
     for (traj_entity, traj_mesh) in trajectory_meshes.iter() {
-        // If the body no longer exists, despawn the trajectory mesh
-        if bodies.get(traj_mesh.body_entity).is_err() {
+        if removed.contains(&traj_mesh.body_entity) {
             commands.entity(traj_entity).despawn();
         }
     }

@@ -1,7 +1,8 @@
 //! Body rotation system.
 
 use bevy::prelude::*;
-use crate::body::motive::info::{BodyInfo, BodyRotation, BodyState, RotationMode};
+use crate::body::motive::info::{BodyRotation, BodyState, RotationMode};
+use crate::body::motive::calculate_body_positions::PhysicsGraph;
 use crate::sim::SimTime;
 use crate::util::bevystuff::GlamQuat;
 
@@ -12,7 +13,8 @@ use crate::util::bevystuff::GlamQuat;
 /// For tidally locked bodies, orients them to face their primary.
 pub fn orient_bodies(
     mut bodies: Query<(&mut Transform, &BodyRotation, &BodyState)>,
-    all_bodies: Query<(&BodyInfo, &BodyState)>,
+    all_body_states: Query<&BodyState>,
+    physics_graph: Res<PhysicsGraph>,
     sim_time: Res<SimTime>,
 ) {
     for (mut transform, rotation, state) in bodies.iter_mut() {
@@ -21,10 +23,10 @@ pub fn orient_bodies(
                 rotation.orientation_at(sim_time.time)
             }
             RotationMode::TidallyLocked { primary_id, .. } => {
-                // Find the primary body's position
-                let primary_pos = all_bodies.iter()
-                    .find(|(info, _)| &info.id == primary_id)
-                    .map(|(_, primary_state)| primary_state.current_position);
+                // Find the primary body's position using O(1) lookup via PhysicsGraph
+                let primary_pos = physics_graph.id_to_entity.get(primary_id)
+                    .and_then(|entity| all_body_states.get(*entity).ok())
+                    .map(|primary_state| primary_state.current_position);
                 
                 if let Some(primary_pos) = primary_pos {
                     rotation.orientation_tidally_locked(state.current_position, primary_pos)

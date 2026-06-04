@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::ffi::OsStr;
 use bevy::math::DVec3;
 use bevy::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use bevy::camera::visibility::NoFrustumCulling;
 use serde::{Deserialize, Serialize};
 use crate::body::appearance::Appearance;
@@ -20,7 +20,7 @@ use crate::util::mappings;
 pub struct TagState {
     pub shown: bool,
     pub trajectory: bool,
-    pub members: Vec<String>,
+    pub members: HashSet<String>,
 }
 
 impl Default for TagState {
@@ -28,7 +28,7 @@ impl Default for TagState {
         Self {
             shown: false,
             trajectory: false,
-            members: Vec::new(),
+            members: HashSet::new(),
         }
     }
 }
@@ -253,18 +253,20 @@ impl Default for ViewSettings {
 }
 
 impl ViewSettings {
-    pub fn body_in_any_visible_tag<T:AsRef<str> + ToString>(&self, body_id: T) -> bool {
+    /// Check if body is in any visible tag. Uses O(1) HashSet lookup without allocation.
+    pub fn body_in_any_visible_tag(&self, body_id: &str) -> bool {
         for tag in self.tags.values() {
-            if tag.shown && tag.members.contains(&body_id.to_string()) {
+            if tag.shown && tag.members.contains(body_id) {
                 return true;
             }
         }
         false
     }
 
-    pub fn body_in_any_trajectory_tag<T:AsRef<str> + ToString>(&self, body_id: T) -> bool {
+    /// Check if body is in any tag with trajectory display enabled. Uses O(1) HashSet lookup without allocation.
+    pub fn body_in_any_trajectory_tag(&self, body_id: &str) -> bool {
         for tag in self.tags.values() {
-            if tag.trajectory && tag.members.contains(&body_id.to_string()) {
+            if tag.trajectory && tag.members.contains(body_id) {
                 return true;
             }
         }

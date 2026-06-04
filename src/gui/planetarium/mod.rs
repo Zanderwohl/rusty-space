@@ -15,7 +15,7 @@ use crate::body::motive::kepler_motive;
 use crate::foundations::time::{Instant, J2000_JD, JD_SECONDS_PER_JULIAN_DAY};
 pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin};
 use crate::gui::planetarium::windows::body_info::BodyInfoState;
-use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, BodyPointMaterialPlugin};
+use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin};
 
 mod windows;
 
@@ -50,6 +50,7 @@ impl Plugin for PlanetariumUI {
             .add_plugins(PlanetariumCameraPlugin)
             .add_plugins(TrajectoryMaterialPlugin)
             .add_plugins(BodyWireframeMaterialPlugin)
+            .add_plugins(OccluderMaterialPlugin)
             .add_plugins(BodyPointMaterialPlugin)
             .add_systems(EguiPrimaryContextPass, (
                 (
@@ -88,6 +89,10 @@ impl Plugin for PlanetariumUI {
                 presentation::spawn_body_occluders,
                 presentation::spawn_terminator_meshes,
                 presentation::update_terminator_meshes
+                    .after(presentation::orient_bodies),
+                presentation::update_wireframe_lighting
+                    .after(presentation::orient_bodies),
+                presentation::update_occluder_lighting
                     .after(presentation::orient_bodies),
                 presentation::update_wireframe_thickness
                     .after(presentation::position_bodies),
@@ -162,7 +167,7 @@ fn load_assets(
             let id = body.id();
             let name = body.name();
             for tag in body.tags() {
-                view_settings.tags.entry(tag.clone()).or_insert(TagState::default()).members.push(id.clone());
+                view_settings.tags.entry(tag.clone()).or_insert(TagState::default()).members.insert(id.clone());
             }
             // info!("{:?}", view_settings);
             universe.insert(name, id);
