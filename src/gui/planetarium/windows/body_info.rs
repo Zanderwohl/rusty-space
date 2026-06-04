@@ -8,7 +8,7 @@ use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::motive::newton_motive::NewtonMotive;
 use crate::body::universe::Universe;
 use crate::gui::menu::UiState;
-use crate::gui::planetarium::camera::GoTo;
+use crate::camera::GoTo;
 use crate::gui::settings::{Settings, UiTheme};
 use crate::util::bevystuff::GlamVec;
 

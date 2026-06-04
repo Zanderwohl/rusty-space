@@ -1,3 +1,5 @@
+//! Trajectory gizmo rendering system.
+
 use bevy::prelude::*;
 use bevy::color::Srgba;
 use bevy::math::{DVec3, FloatExt};
@@ -7,12 +9,12 @@ use num_traits::Pow;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::{Motive, MotiveSelection};
 use crate::body::universe::save::ViewSettings;
-use crate::gui::planetarium::PlanetariumCamera;
-use crate::gui::planetarium::time::SimTime;
+use crate::camera::{PlanetariumCamera, Freecam};
+use crate::sim::SimTime;
 use crate::gui::settings::{DisplayGlow, Settings};
-use crate::gui::util::freecam::Freecam;
 use crate::util::bevystuff::GlamVec;
 
+/// Renders trajectory lines as Bevy gizmos with brightness variation.
 pub fn render_trajectories(
     bodies: Query<(&BodyState, &BodyInfo, &Motive)>,
     mut gizmos: Gizmos,
@@ -57,7 +59,6 @@ pub fn render_trajectories(
                 _ => None,
             };
 
-            // TODO: this doesn't track for the future.
             let primary_d: Option<Vec<DVec3>> = primary_id
                 .and_then(|id| {
                     bodies.iter().find(|(_, info, _)| { &info.id == id })
@@ -66,7 +67,6 @@ pub fn render_trajectories(
                     if primary_state.trajectory.is_none() { return None; }
                     let _primary_trajectory = primary_state.trajectory.as_ref().unwrap();
                     Some(trajectory.iter().map(|(_t, _)| {
-                        // primary_trajectory.get_lerp(t)
                         primary_state.current_position
                     }).collect())
                 });
@@ -77,38 +77,32 @@ pub fn render_trajectories(
                     Some(primary_d) => (d1 + primary_d[idx], d2 + primary_d[idx + 1])
                 };
 
-                // Calculate the fractional position of this trajectory segment
                 let segment_frac = idx as f32 / len as f32;
                 let next_segment_frac = (idx + 1) as f32 / len as f32;
                 
-                // Check if planet is currently within this segment
                 let planet_in_segment = if next_segment_frac > segment_frac {
                     frac as f32 >= segment_frac && (frac as f32) < next_segment_frac
                 } else {
-                    // Handle wraparound case
                     frac as f32 >= segment_frac || (frac as f32) < next_segment_frac
                 };
                 
                 let brightness_factor = if planet_in_segment {
-                    // Smooth fade within current segment based on planet's position within it
                     let progress_through_segment = if next_segment_frac > segment_frac {
                         (frac as f32 - segment_frac) / (next_segment_frac - segment_frac)
                     } else {
-                        // Handle wraparound
                         if frac as f32 >= segment_frac {
                             (frac as f32 - segment_frac) / (1.0 - segment_frac + next_segment_frac)
                         } else {
                             (frac as f32 + 1.0 - segment_frac) / (1.0 - segment_frac + next_segment_frac)
                         }
                     };
-                    progress_through_segment // Fade from 0.0 to 1.0 as planet moves through segment
+                    progress_through_segment
                 } else {
-                    // Use sharp discontinuity for all other segments
                     let forward_offset = (segment_frac - frac as f32 + 1.0) % 1.0;
                     if forward_offset <= 0.5 {
-                        0.0  // Dark ahead of planet
+                        0.0
                     } else {
-                        (forward_offset - 0.5) * 2.0  // Brightens as we go behind planet (trail)
+                        (forward_offset - 0.5) * 2.0
                     }
                 };
                 

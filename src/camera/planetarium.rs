@@ -1,3 +1,5 @@
+//! Planetarium camera: goto animation and revolve-around-body behavior.
+
 use std::f64::consts::{PI, TAU};
 use bevy::app::App;
 use bevy::input::mouse::MouseMotion;
@@ -8,11 +10,11 @@ use bevy_egui::EguiContexts;
 use num_traits::Float;
 use crate::body::appearance::Appearance;
 use crate::body::motive::info::BodyState;
-use crate::body::motive::{calculate_body_positions, newton_motive};
+use crate::body::motive::calculate_body_positions;
 use crate::body::universe::save::ViewSettings;
 use crate::gui::app::AppState;
-use crate::gui::planetarium::position_bodies;
-use crate::gui::util::freecam::{FreeCamPlugin, Freecam, MovementSettings};
+use crate::presentation::position_bodies;
+use crate::camera::freecam::{FreeCamPlugin, Freecam, MovementSettings};
 use crate::util::bevystuff::GlamVec;
 use crate::util::ease;
 
@@ -26,10 +28,6 @@ impl Plugin for PlanetariumCameraPlugin {
             .add_systems(Update, (
                 handle_gotos,
                 run_goto,
-                // Camera position changes must happen *before* bodies are rendered
-                // to avoid jerking, because their rendered positions are relative to the camera,
-                // but after all bodies have moved in the sim if the camera is located relative
-                // to a simulated body.
                 revolve_around.before(position_bodies).after(calculate_body_positions),
                 ).run_if(in_state(AppState::Planetarium)))
         ;
@@ -49,6 +47,7 @@ impl PlanetariumCamera {
     }
 }
 
+#[derive(Clone)]
 pub enum CameraAction {
     Free,
     Goto(GoToInProgress),
@@ -71,6 +70,7 @@ pub struct GoTo {
     pub entity: Entity,
 }
 
+#[derive(Clone)]
 pub struct GoToInProgress {
     start_pos: DVec3,
     start_rot: Quat,
@@ -81,6 +81,7 @@ pub struct GoToInProgress {
     entity: Entity,
 }
 
+#[derive(Clone)]
 pub struct RevolveAround {
     entity: Entity,
     bevy_distance: f64,
@@ -103,9 +104,6 @@ fn handle_gotos (
             let (entity, state, appearance) = bodies.get(event.entity).unwrap();
             let obj_pos = state.current_position;
             
-            // Then, move to the nearby distance from the object
-            // Calculate the direction from object to camera (opposite of look direction)
-            // info!("Radius: {}", appearance.radius(), view_settings.body_scale_factor(appearance.radius()));
             let nearby_distance = 3f64 * view_settings.body_scale_factor(appearance.radius()) as f64;
             let (altitude, azimuth) = alt_az_in_bevy(obj_pos.as_bevy_scaled_dvec(view_settings.distance_factor()), fcam.bevy_pos);
 
@@ -136,27 +134,21 @@ fn run_goto (
         match &mut pcam.action {
             CameraAction::Goto(goto) => {
                 if let Ok(body_state) = bodies.get(goto.entity) {
-                    // How far are we in the go-to travel?
                     let frac = f64::min(1.0, (now - goto.start_time) / animation_time);
                     let frac = ease::f64::circ(frac);
 
-                    // get current position
                     let body_pos_in_bevy = body_state.current_position.as_bevy_scaled_dvec(view_settings.distance_factor());
 
-                    // Set new end position based on object's current location
                     let offset = local_to_object_in_bevy(goto.end_altitude, goto.end_azimuth, goto.end_distance);
                     let final_pos = body_pos_in_bevy + offset;
 
-                    // Set new target rotation based on where the body is now.
                     let look_at_rot = look_at(body_pos_in_bevy, final_pos, DVec3::Y);
 
-                    // Lerp between where we started and the current target position
                     let mid_pos = goto.start_pos.lerp(final_pos, frac);
                     let mid_rot = goto.start_rot.slerp(look_at_rot.as_quat(), frac as f32);
                     fcam.bevy_pos = mid_pos;
                     cam_t.rotation = mid_rot;
 
-                    // Transition control back to user
                     if (frac - 1.0).abs() <= f64::epsilon() {
                         next_action = Some(CameraAction::RevolveAround(RevolveAround {
                             entity: goto.entity,
@@ -200,7 +192,6 @@ fn revolve_around(
 
                             if mouse_buttons.pressed(MouseButton::Left) {
                                 if let Ok(ctx) = egui_ctx.ctx_mut() && ctx.wants_pointer_input() && ctx.wants_pointer_input() {
-                                    // If hovering over an egui window, don't rotate around! It grabs the mouse :(
                                     cursor_options.grab_mode = CursorGrabMode::None;
                                     cursor_options.visible = true;
                                 } else {
@@ -210,7 +201,7 @@ fn revolve_around(
                                         revolve.azimuth -= (ev.delta.x.clamp(-1000.0, 1000.0) * window_scale * settings.sensitivity) as f64;
                                         revolve.azimuth = revolve.azimuth.rem_euclid(TAU);
                                         revolve.altitude += (ev.delta.y.clamp(-1000.0, 1000.0) * window_scale * settings.sensitivity) as f64;
-                                        const ALT_LIMIT: f64 = PI / 2.0 - 0.001; // ~0.057° margin
+                                        const ALT_LIMIT: f64 = PI / 2.0 - 0.001;
                                         revolve.altitude = revolve.altitude.clamp(-ALT_LIMIT, ALT_LIMIT);
                                     }
                                 }
@@ -224,7 +215,7 @@ fn revolve_around(
                             let camera_pos_in_bevy = body_pos_in_bevy + offset;
 
                             fcam.bevy_pos = camera_pos_in_bevy;
-                            if offset.is_finite() && body_pos_in_bevy.is_finite() && body_pos_in_bevy != camera_pos_in_bevy { // Guard against degenerate zero-length looking vectors
+                            if offset.is_finite() && body_pos_in_bevy.is_finite() && body_pos_in_bevy != camera_pos_in_bevy {
                                 let look_at_rot = look_at(body_pos_in_bevy, fcam.bevy_pos, DVec3::Y);
                                 cam_t.rotation = look_at_rot.as_quat();
                             }

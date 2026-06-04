@@ -8,7 +8,7 @@ use crate::body::motive::newton_motive::NewtonMotive;
 use crate::body::universe::Universe;
 use crate::gui::common;
 use crate::gui::menu::UiState;
-use crate::gui::planetarium::{BodySelection, CalculateTrajectory};
+use crate::sim::{BodySelection, CalculateTrajectory};
 use crate::gui::planetarium::windows::body_info::BodyInfoState;
 use crate::gui::settings::{Settings, UiTheme};
 pub fn body_edit_window(

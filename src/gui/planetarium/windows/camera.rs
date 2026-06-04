@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy::render::view::ColorGrading;
 use bevy_egui::{egui, EguiContexts};
 use bevy_egui::egui::Context;
-use crate::gui::planetarium::PlanetariumCamera;
+use crate::camera::PlanetariumCamera;
 use crate::gui::settings::{Settings, UiTheme};
 
 pub fn camera_window(

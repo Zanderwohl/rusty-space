@@ -24,7 +24,7 @@ use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::{Motive, MotiveSelection};
 use crate::body::universe::Major;
 use crate::body::universe::save::UniversePhysics;
-use crate::gui::planetarium::time::{PreviousTimesIter, SimTime};
+use crate::sim::{PreviousTimesIter, SimTime};
 use crate::foundations::gravity;
 use crate::foundations::time::Instant;
 // ============================================================================

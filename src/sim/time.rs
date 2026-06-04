@@ -1,3 +1,8 @@
+//! Simulation time management.
+//!
+//! Provides `SimTime` (the simulation clock resource) and `PreviousTimes`
+//! (a queue of simulation times to be processed for physics stepping).
+
 use std::time::Instant as StdInstant;
 use bevy::prelude::*;
 use crate::foundations::time::Instant;
@@ -90,13 +95,10 @@ impl PreviousTimes {
     /// If the queue is empty, sets the start_time.
     pub fn expand(&mut self, new_start: f64, additional_count: usize, step: f64) {
         if self.count == 0 {
-            // Queue is empty - set fresh values
             self.start_time = new_start;
             self.count = additional_count;
             self.step = step;
         } else {
-            // Queue has items - just add to count
-            // (assumes step hasn't changed, which it shouldn't mid-simulation)
             self.step = step;
             self.count += additional_count;
         }
@@ -147,9 +149,12 @@ impl Iterator for PreviousTimesIter {
 
 impl ExactSizeIterator for PreviousTimesIter {}
 
+/// The simulation clock resource.
+///
+/// Tracks the current simulation time, physics stepping queue, and performance metrics.
 #[derive(Resource)]
 pub struct SimTime {
-    /// Current simulation time
+    /// Current simulation time (seconds since J2000)
     pub time: Instant,
     /// Queue of simulation times that need to be stepped through
     pub previous_times: PreviousTimes,
@@ -197,7 +202,6 @@ impl Default for SimTime {
             gui_speed: 1.0,
             playing: false,
             seconds_only: false,
-            // Performance defaults
             max_frame_time: 1.0 / 50.0,
             accumulated_time: 0.0,
             sim_time_fraction: 1.0,

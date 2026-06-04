@@ -1,21 +1,5 @@
-use bevy::prelude::*;
 use bevy_egui::egui;
 use crate::util::format;
-
-pub fn despawn_entities_with<T: Component>(to_despawn: Query<Entity, With<T>>, mut commands: Commands) {
-    for entity in &to_despawn {
-        commands.entity(entity).despawn();
-    }
-}
-
-pub fn despawn_recursive_entities_with<T: Component>(
-    mut commands: Commands,
-    query: Query<Entity, With<T>>,
-) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
-    }
-}
 
 pub fn stepper<S: AsRef<str>>(ui: &mut egui::Ui, label: S, mut value: &mut f64) {
     ui.horizontal(|ui| {

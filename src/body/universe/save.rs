@@ -10,11 +10,28 @@ use crate::body::appearance::AssetCache;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::motive::Motive;
-use crate::body::SimulationObject;
+use crate::sim::SimulationObject;
 use crate::body::universe::{Major, Minor};
 use crate::body::universe::save_sqlite;
-use crate::gui::menu::TagState;
 use crate::util::mappings;
+
+/// State for a tag (group of bodies).
+#[derive(Serialize, Deserialize, Resource, Debug)]
+pub struct TagState {
+    pub shown: bool,
+    pub trajectory: bool,
+    pub members: Vec<String>,
+}
+
+impl Default for TagState {
+    fn default() -> Self {
+        Self {
+            shown: false,
+            trajectory: false,
+            members: Vec::new(),
+        }
+    }
+}
 
 /// Supported save file formats
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

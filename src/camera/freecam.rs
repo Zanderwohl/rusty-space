@@ -1,10 +1,11 @@
+//! Free-look FPS camera controller.
+
 use bevy::input::mouse::MouseMotion;
 use bevy::math::DVec3;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use crate::gui::app::AppState;
-use crate::gui::planetarium::camera::CameraAction;
-use crate::gui::planetarium::PlanetariumCamera;
+use crate::camera::planetarium::{CameraAction, PlanetariumCamera};
 
 /// Mouse sensitivity and movement speed
 #[derive(Resource)]
@@ -48,10 +49,10 @@ impl Default for KeyBindings {
     }
 }
 
-/// Used in queries when you want flycams and not other cameras
-/// A marker component used in queries when you want flycams and not other cameras
+/// Marker component for entities with free camera control.
 #[derive(Component)]
 pub struct Freecam {
+    /// Camera position in Bevy-scaled coordinates
     pub bevy_pos: DVec3,
 }
 
@@ -82,7 +83,7 @@ fn player_move(
     cursor_options: Query<&CursorOptions, With<PrimaryWindow>>,
     settings: Res<MovementSettings>,
     key_bindings: Res<KeyBindings>,
-    mut query: Query<(&mut Freecam, &Transform, &PlanetariumCamera)>, //    mut query: Query<&mut Transform, With<FlyCam>>,
+    mut query: Query<(&mut Freecam, &Transform, &PlanetariumCamera)>,
 ) {
     if let Ok(cursor_options) = cursor_options.single() {
         for (mut freecam, transform, pcam) in query.iter_mut() {
@@ -144,16 +145,14 @@ fn player_look(
                                 _ => 1.0,
                             };
 
-                            // Using smallest of height or width ensures equal vertical and horizontal sensitivity
                             let window_scale = window.height().min(window.width());
-                            pitch -= (settings.sensitivity * ev.delta.y * window_scale * fov_factor);
-                            yaw -= (settings.sensitivity * ev.delta.x * window_scale * fov_factor);
+                            pitch -= settings.sensitivity * ev.delta.y * window_scale * fov_factor;
+                            yaw -= settings.sensitivity * ev.delta.x * window_scale * fov_factor;
                         }
                     }
 
                     pitch = pitch.clamp(-1.54, 1.54);
 
-                    // Order is important to prevent unintended roll
                     transform.rotation =
                         Quat::from_axis_angle(Vec3::Y, yaw) * Quat::from_axis_angle(Vec3::X, pitch);
                 }
@@ -179,7 +178,6 @@ fn cursor_grab(
     }
 }
 
-// Grab cursor when an entity with FlyCam is added
 fn initial_grab_on_flycam_spawn(
     mut cursor_options: Query<&mut CursorOptions, With<PrimaryWindow>>,
     query_added: Query<Entity, Added<Freecam>>,
@@ -196,7 +194,7 @@ fn initial_grab_on_flycam_spawn(
     }
 }
 
-/// Same as [`PlayerPlugin`] but does not spawn a camera
+/// Plugin for free camera controls (WASD movement, mouse look).
 pub struct FreeCamPlugin;
 impl Plugin for FreeCamPlugin {
     fn build(&self, app: &mut App) {

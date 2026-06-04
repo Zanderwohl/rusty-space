@@ -14,13 +14,13 @@ use bevy_egui::EguiPlugin;
 use crate::body::universe::solar_system::{write_temp_system_file, write_earth_moon_file};
 use crate::body::universe::Universe;
 use crate::gui::menu::{close_when_requested, MenuPlugin};
-use crate::gui::planetarium::{PlanetariumCamera, PlanetariumUI};
+use crate::gui::planetarium::PlanetariumUI;
 use crate::gui::post_process::{update_post_process_settings, PostProcessSettings};
 use crate::gui::settings;
 use crate::gui::splash::SplashPlugin;
 use crate::gui::util::debug::DebugPlugin;
 use crate::gui::util::ensure_folders;
-use crate::gui::util::freecam::{Freecam, FreeCamPlugin};
+use crate::camera::{Freecam, PlanetariumCamera};
 
 pub fn run() {
     init();

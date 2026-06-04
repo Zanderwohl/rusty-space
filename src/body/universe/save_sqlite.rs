@@ -21,7 +21,7 @@ use crate::body::universe::save::{
     SomeBody, CompoundMotiveEntry,
 };
 use crate::foundations::time::{Instant, TimeLength};
-use crate::gui::menu::TagState;
+use crate::body::universe::save::TagState;
 use crate::util::bitfutz;
 
 use super::migrations;

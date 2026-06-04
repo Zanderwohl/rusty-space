@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy::time::TimerMode;
 use bevy::ui::{AlignContent, AlignSelf, JustifyContent, JustifySelf};
 use crate::gui::app::AppState;
-use crate::gui::common::despawn_entities_with;
+use crate::sim::despawn_entities_with;
 
 #[derive(Component)]
 struct SplashScreen;

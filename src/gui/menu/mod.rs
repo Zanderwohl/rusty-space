@@ -18,22 +18,8 @@ pub struct UiState {
     pub current_save: Option<SaveFileMeta>,
 }
 
-#[derive(Serialize, Deserialize, Resource, Debug)]
-pub struct TagState {
-    pub shown: bool,
-    pub trajectory: bool,
-    pub members: Vec<String>,
-}
-
-impl Default for TagState {
-    fn default() -> Self {
-        Self {
-            shown: false,
-            trajectory: false,
-            members: Vec::new(),
-        }
-    }
-}
+// Re-export TagState from body::universe::save for backwards compatibility
+pub use crate::body::universe::save::TagState;
 
 impl Default for UiState {
     fn default() -> Self {

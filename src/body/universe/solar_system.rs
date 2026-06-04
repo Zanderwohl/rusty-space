@@ -7,11 +7,24 @@ use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEpoch, KeplerEul
 use crate::body::universe::save::{FixedEntry, KeplerEntry, NewtonEntry, SomeBody, UniverseFile, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings};
 use crate::foundations::time::{Instant, TimeLength};
 use crate::gui::util::ensure_folders;
-// Mass: Kg
-// Distance: Km
-// Longitude: From Vernal Equinox
-// Angles: Degrees
-// Inclination: degrees from ecliptic
+
+// =============================================================================
+// Solar System Template Data
+// =============================================================================
+//
+// Unit Conventions (all values stored in SI at rest):
+//
+//   Quantity                                  | Unit    | Notes
+//   ------------------------------------------|---------|----------------------------------
+//   Mass                                      | kg      |
+//   Distance (position, semi-major axis, r)  | m       | Source often in km; multiply by 1000
+//   Angles (inclination, Ω, ω)               | degrees | Converted to radians at math boundaries
+//   Mean anomaly                              | degrees | Converted to radians at math boundaries
+//   Time (epoch)                              | JD      | Julian days
+//
+// Source data is often in km; we convert to meters with `* 1000.0` at the point of entry.
+// Outer planets (Jupiter+) have values entered directly in meters since the source data varies.
+// =============================================================================
 
 pub fn solar_system() -> UniverseFile {
     let solar_system = UniverseFile {

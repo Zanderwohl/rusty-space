@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 use crate::body::universe::save::UniverseFile;
 use crate::foundations::time::Instant;
-use crate::gui::planetarium::time::SimTime;
+use crate::sim::SimTime;
 
 pub mod save;
 pub mod save_sqlite;

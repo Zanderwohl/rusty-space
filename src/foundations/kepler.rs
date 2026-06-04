@@ -1,5 +1,19 @@
+/// Mean anomaly calculations.
+///
+/// All angle parameters and return values are in **radians**.
 pub mod mean_anomaly {
 
+    /// Calculate mean anomaly at the given time.
+    ///
+    /// # Parameters
+    /// - `mean_anomaly_at_epoch`: Mean anomaly at epoch time, in **radians**
+    /// - `gravitational_parameter`: μ = G × M, in m³/s²
+    /// - `semi_major_axis`: in meters
+    /// - `epoch_time`: epoch time in seconds since J2000
+    /// - `current_time`: current time in seconds since J2000
+    ///
+    /// # Returns
+    /// Mean anomaly at `current_time` in **radians**
     pub fn definition(mean_anomaly_at_epoch: f64,
                       gravitational_parameter: f64,
                       semi_major_axis: f64,
@@ -9,6 +23,14 @@ pub mod mean_anomaly {
         mean_anomaly_at_epoch + f64::sqrt(x) * (current_time - epoch_time)
     }
 
+    /// Kepler's equation: M = E - e × sin(E)
+    ///
+    /// # Parameters
+    /// - `eccentric_anomaly`: E in **radians**
+    /// - `eccentricity`: dimensionless
+    ///
+    /// # Returns
+    /// Mean anomaly M in **radians**
     pub fn kepler(eccentric_anomaly: f64, eccentricity: f64) -> f64 {
         eccentric_anomaly - eccentricity * f64::sin(eccentric_anomaly)
     }

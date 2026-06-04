@@ -3,7 +3,7 @@ use iyes_perf_ui::PerfUiPlugin;
 use bevy::prelude::*;
 use iyes_perf_ui::entries::{PerfUiFixedTimeEntries, PerfUiFramerateEntries, PerfUiWindowEntries};
 use bevy::input::ButtonInput;
-use crate::gui::common;
+use crate::sim::despawn_recursive_entities_with;
 
 pub struct DebugPlugin;
 
@@ -16,7 +16,7 @@ impl Plugin for DebugPlugin {
             .insert_state(DebugState::Off)
             .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin { max_history_length: 100, smoothing_factor: 2.0 / 101.0})
             .add_plugins(PerfUiPlugin)
-            .add_systems(OnEnter(DebugState::Off), common::despawn_recursive_entities_with::<DebugUI>)
+            .add_systems(OnEnter(DebugState::Off), despawn_recursive_entities_with::<DebugUI>)
             .add_systems(OnEnter(DebugState::AllPerf), add_all_perf)
             .add_systems(Update, toggle_perf)
             .init_state::<DebugState>()

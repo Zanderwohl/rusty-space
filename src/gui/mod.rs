@@ -3,7 +3,7 @@ pub mod planetarium;
 pub(crate) mod body;
 pub mod util;
 pub mod app;
-mod settings;
+pub mod settings;
 mod splash;
 pub mod common;
 pub mod horizons;

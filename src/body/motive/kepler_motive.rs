@@ -3,10 +3,8 @@ use serde::{Deserialize, Serialize};
 use bevy::prelude::*;
 use bevy_egui::egui::Ui;
 use crate::body::motive::info::{BodyInfo, BodyState};
-use crate::body::SimulationObject;
+use crate::sim::{SimulationObject, BodySelection, CalculateTrajectory, SimTime};
 use crate::body::universe::save::{UniversePhysics, ViewSettings};
-use crate::gui::planetarium::{BodySelection, CalculateTrajectory};
-use crate::gui::planetarium::time::SimTime;
 use crate::foundations::kepler::{angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
 use crate::foundations::time::{Includes, Instant, TimeDelta, TimeLength};
 use crate::util::{mappings};
@@ -126,11 +124,13 @@ impl KeplerMotive {
         angular_motion::mean(gravitational_parameter, self.semi_major_axis())
     }
 
+    /// Returns mean anomaly at the given time in radians.
     pub fn mean_anomaly(&self, time: Instant, gravitational_parameter: f64) -> f64 {
-        let mean_anomaly_at_epoch = self.epoch.mean_anomaly_at_epoch();
+        // mean_anomaly_at_epoch is stored in degrees; convert to radians for the math
+        let mean_anomaly_at_epoch_rad = self.epoch.mean_anomaly_at_epoch().to_radians();
         let sma = self.shape.semi_major_axis();
         let epoch_time = self.epoch.epoch();
-        mean_anomaly::definition(mean_anomaly_at_epoch, gravitational_parameter, sma, epoch_time.to_j2000_seconds(), time.to_j2000_seconds())
+        mean_anomaly::definition(mean_anomaly_at_epoch_rad, gravitational_parameter, sma, epoch_time.to_j2000_seconds(), time.to_j2000_seconds())
     }
 
     pub fn true_anomaly(&self, time: Instant, gravitational_parameter: f64) -> f64 {
@@ -413,12 +413,16 @@ impl KeplerEpoch {
         let period_seconds = period.to_seconds();
         let raw_time = match self {
             KeplerEpoch::MeanAnomaly(mean_anomaly) => {
-               mean_anomaly.epoch.to_j2000_seconds() - period_seconds * (mean_anomaly.mean_anomaly / std::f64::consts::TAU)
+                // mean_anomaly is stored in degrees; convert to radians for the division by TAU
+                let mean_anomaly_rad = mean_anomaly.mean_anomaly.to_radians();
+                mean_anomaly.epoch.to_j2000_seconds() - period_seconds * (mean_anomaly_rad / std::f64::consts::TAU)
             }
             KeplerEpoch::TimeAtPeriapsisPassage(tapp) => tapp.to_j2000_seconds(),
             KeplerEpoch::TrueAnomaly(_) => { todo!() }
             KeplerEpoch::J2000(j2000) => {
-                -period_seconds * (j2000.mean_anomaly / (std::f64::consts::TAU))
+                // mean_anomaly is stored in degrees; convert to radians for the division by TAU
+                let mean_anomaly_rad = j2000.mean_anomaly.to_radians();
+                -period_seconds * (mean_anomaly_rad / std::f64::consts::TAU)
             }
         };
         
@@ -433,20 +437,26 @@ impl KeplerEpoch {
     }
 }
 
+/// Mean anomaly at a specified epoch.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct MeanAnomalyAtEpoch {
     pub epoch: Instant,
+    /// Mean anomaly in **degrees** (converted to radians at math boundaries).
     pub mean_anomaly: f64,
 }
 
+/// True anomaly at a specified epoch.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct TrueAnomalyAtEpoch {
     pub epoch: Instant,
+    /// True anomaly in **degrees** (converted to radians at math boundaries).
     pub true_anomaly: f64,
 }
 
+/// Mean anomaly at the J2000 epoch.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct MeanAnomalyAtJ2000 {
+    /// Mean anomaly in **degrees** (converted to radians at math boundaries).
     pub mean_anomaly: f64,
 }
 

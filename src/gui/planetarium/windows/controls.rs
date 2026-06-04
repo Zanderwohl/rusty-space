@@ -8,7 +8,7 @@ use crate::foundations::time::JD_SECONDS_PER_JULIAN_DAY;
 use crate::gui::app::AppState;
 use crate::gui::common;
 use crate::gui::menu::{MenuState, UiState};
-use crate::gui::planetarium::time::SimTime;
+use crate::sim::SimTime;
 use crate::gui::settings::{Settings, UiTheme};
 use crate::util::format;
 use crate::util::format::seconds_to_naive_date;
@@ -212,8 +212,9 @@ pub fn planetarium_controls(
                             let secs = d.as_secs();
                             let millis = d.subsec_millis();
                             // Break epoch seconds into date/time components
-                            let days = secs / 86400;
-                            let day_secs = secs % 86400;
+                            let seconds_per_day = JD_SECONDS_PER_JULIAN_DAY as u64;
+                            let days = secs / seconds_per_day;
+                            let day_secs = secs % seconds_per_day;
                             let hours = day_secs / 3600;
                             let mins = (day_secs % 3600) / 60;
                             let s = day_secs % 60;

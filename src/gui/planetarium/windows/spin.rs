@@ -1,11 +1,10 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use bevy_egui::egui::Context;
-use num_traits::FloatConst;
+use crate::foundations::spin;
 use crate::gui::settings::{Settings, UiTheme};
 
 pub fn spin_window(
-
     mut settings: ResMut<Settings>,
     mut contexts: EguiContexts,
 ) {
@@ -23,7 +22,7 @@ pub fn spin_window(
     }
 }
 
-pub fn spin_gravity_calculator(mut settings: &mut ResMut<Settings>, ctx: &mut Context) {
+pub fn spin_gravity_calculator(settings: &mut ResMut<Settings>, ctx: &mut Context) {
     egui::Window::new("Spin Gravity Calculator")
         .vscroll(true)
         .show(ctx, |ui| {
@@ -35,8 +34,11 @@ pub fn spin_gravity_calculator(mut settings: &mut ResMut<Settings>, ctx: &mut Co
                 .text("RPM")
                 .step_by(0.1)
             );
-            let v = 2.0 * f64::PI() * settings.windows.spin_data.radius * settings.windows.spin_data.rpm / 60.0;
-            let accel = v * v / settings.windows.spin_data.radius;
+            
+            let radius = settings.windows.spin_data.radius;
+            let rpm = settings.windows.spin_data.rpm;
+            let v = spin::tangential_velocity(radius, rpm);
+            let accel = spin::centripetal_acceleration(v, radius);
             ui.label(format!("Gravity: {:.2} m/s^2 ({:.2} g)", accel, accel / 9.81));
             ui.label(format!("Tangential Velocity: {:.2} m/s", v));
 
@@ -46,8 +48,8 @@ pub fn spin_gravity_calculator(mut settings: &mut ResMut<Settings>, ctx: &mut Co
                 .text("Vertical Velocity (positive is inward)")
                 .step_by(0.1)
             );
-            let omega = v / settings.windows.spin_data.radius;
-            let coriolis = 2.0 * omega * settings.windows.spin_data.vertical_velocity;
+            let omega = spin::angular_velocity(v, radius);
+            let coriolis = spin::coriolis_acceleration(omega, settings.windows.spin_data.vertical_velocity);
             ui.label(format!("Coriolis Effect (positive is spinward): {:.2} m/s^2", coriolis));
         });
 }
