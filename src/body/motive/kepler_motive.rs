@@ -364,14 +364,16 @@ pub struct KeplerPrecessingEulerAngles {
 }
 
 impl KeplerPrecessingEulerAngles {
+    /// Degrees of apsidal precession accumulated since epoch.
+    /// Positive period = prograde (ω advances), negative = retrograde.
     pub fn apsidal_precession_deg(&self, time_since_epoch: TimeDelta) -> f64 {
-        let bound_times = mappings::bound_circle(time_since_epoch.to_seconds(), self.apsidal_precession_period.to_seconds());
-        (bound_times / self.apsidal_precession_period.to_seconds()) / 360.0
+        (time_since_epoch.to_seconds() / self.apsidal_precession_period.to_seconds()) * 360.0
     }
 
+    /// Degrees of nodal precession accumulated since epoch.
+    /// Positive period = prograde (Ω advances), negative = retrograde (Ω regresses).
     pub fn nodal_precession_deg(&self, time_since_epoch: TimeDelta) -> f64 {
-         let bound_times = mappings::bound_circle(time_since_epoch.to_seconds(), self.apsidal_precession_period.to_seconds());
-        (bound_times / self.nodal_precession_period.to_seconds()) / 360.0
+        (time_since_epoch.to_seconds() / self.nodal_precession_period.to_seconds()) * 360.0
     }
 }
 

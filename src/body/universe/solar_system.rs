@@ -287,12 +287,12 @@ pub fn solar_system() -> UniverseFile {
                             eccentricity: 0.05490,
                             semi_major_axis: 384400.0 * 1000.0, // Convert km to m
                         }),
-                        rotation: KeplerRotation::PrecessingEulerAngles(KeplerPrecessingEulerAngles { // TODO: Precession https://en.wikipedia.org/wiki/Orbit_of_the_Moon#Precession
+                        rotation: KeplerRotation::PrecessingEulerAngles(KeplerPrecessingEulerAngles {
                             inclination: 5.240010829674768e0,
                             longitude_of_ascending_node: 1.239837028145578e2,
                             argument_of_periapsis: 3.081359034620368e2,
-                            apsidal_precession_period: TimeLength::period_from_julian_day(3231.50),
-                            nodal_precession_period: TimeLength::period_from_julian_day(6798.38),
+                            apsidal_precession_period: TimeLength::period_from_julian_day(3231.50), // prograde, ~8.85 yr
+                            nodal_precession_period: TimeLength::period_from_julian_day(-6798.38), // retrograde, ~18.61 yr
                         }),
                         epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
                             mean_anomaly: 1.407402571142365e02,
