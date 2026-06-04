@@ -58,8 +58,6 @@ impl Plugin for PlanetariumUI {
                     windows::settings::settings_window,
                     windows::spin::spin_window,
                     windows::camera::camera_window,
-
-                    presentation::label_bodies,
                     ).run_if(in_state(AppState::Planetarium)),
                 ))
             .add_systems(Update, (
@@ -86,6 +84,9 @@ impl Plugin for PlanetariumUI {
                     presentation::update_terminator_meshes
                         .after(presentation::orient_bodies),
                     presentation::cleanup_orphaned_body_wireframes,
+                    // Labels (after position_bodies so transforms are current)
+                    presentation::label_bodies
+                        .after(presentation::position_bodies),
                 ).in_set(PlanetariumUISet),
                 (
                     universe::advance_time,

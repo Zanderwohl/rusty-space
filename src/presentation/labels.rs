@@ -8,44 +8,65 @@ use crate::camera::PlanetariumCamera;
 use crate::sim::SimulationObject;
 
 /// Renders body name labels in screen-space via egui.
-/// Labels are positioned above the body (1.2 radii in the camera's "up" direction),
-/// so they always appear above the body from the camera's perspective.
+/// Labels are positioned above the body in screen space to avoid floating-point
+/// precision issues with nearby bodies.
 pub fn label_bodies(
     view_settings: Res<ViewSettings>,
     mut contexts: EguiContexts,
-    cameras: Query<(&Camera, &Camera3d, &PlanetariumCamera, &GlobalTransform)>,
-    bodies: Query<(&SimulationObject, &Transform, &BodyInfo)>,
+    cameras: Query<(&Camera, &Camera3d, &PlanetariumCamera, &GlobalTransform, &Projection)>,
+    bodies: Query<(&SimulationObject, &Transform, &BodyInfo), Without<PlanetariumCamera>>,
 ) {
     let ctx = contexts.ctx_mut();
     if ctx.is_err() { return; }
     let ctx = ctx.unwrap();
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("body_labels")));
 
-    for (camera, _, _, camera_transform) in &cameras {
-        // Get camera's "up" direction in world space
-        let camera_up = camera_transform.up().as_vec3();
+    for (camera, _, _, camera_global, projection) in &cameras {
+        // Get viewport size for angular size calculations
+        let Some(viewport_size) = camera.logical_viewport_size() else {
+            continue;
+        };
+
+        // Get vertical FOV for perspective projection
+        let fov_y = match projection {
+            Projection::Perspective(persp) => persp.fov,
+            _ => 1.0, // fallback for orthographic/custom
+        };
 
         for (_, transform, body_info) in bodies.iter() {
             if !view_settings.show_labels && !view_settings.body_in_any_visible_tag(&body_info.id) {
                 continue;
             }
 
-            // Position label above the body (1.2 radii in camera's up direction)
-            let label_offset = camera_up * transform.scale.x * 1.2;
-            let position = transform.translation + label_offset;
-            let view_pos = camera.world_to_viewport(camera_transform, position);
-            match view_pos {
-                Ok(pos) => {
-                    painter.text(
-                        egui::pos2(pos.x, pos.y),
-                        egui::Align2::CENTER_BOTTOM,
-                        body_info.display_name(),
-                        egui::FontId::proportional(14.0),
-                        egui::Color32::from_rgb(90, 237, 175),
-                    );
-                }
-                Err(_) => {}
-            }
+            // Project body center to screen space
+            let body_center = transform.translation;
+            let Ok(center_screen) = camera.world_to_viewport(camera_global, body_center) else {
+                continue;
+            };
+
+            // Calculate distance from camera to body
+            let camera_pos = camera_global.translation();
+            let distance = (body_center - camera_pos).length();
+
+            // Calculate projected radius in pixels using angular size
+            // angular_size = 2 * atan(radius / distance)
+            // For small angles: angular_size ≈ radius / distance
+            // Screen pixels = angular_size / fov_y * viewport_height
+            let radius = transform.scale.x;
+            let angular_radius = (radius / distance).min(1.0); // clamp to avoid issues at very close range
+            let screen_radius = angular_radius / (fov_y * 0.5) * viewport_size.y * 0.5;
+
+            // Position label 1.2 radii above body center in screen space
+            let screen_offset = screen_radius * 1.2;
+            let label_pos = egui::pos2(center_screen.x, center_screen.y - screen_offset);
+
+            painter.text(
+                label_pos,
+                egui::Align2::CENTER_BOTTOM,
+                body_info.display_name(),
+                egui::FontId::proportional(14.0),
+                egui::Color32::from_rgb(90, 237, 175),
+            );
         }
     }
 }
