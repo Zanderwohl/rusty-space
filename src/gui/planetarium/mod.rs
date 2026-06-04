@@ -67,6 +67,8 @@ impl Plugin for PlanetariumUI {
                         .after(universe::advance_time),
                     kepler_motive::calculate_trajectory,
                     presentation::position_bodies.after(calculate_body_positions::calculate_body_positions),
+                    presentation::orient_bodies.after(presentation::position_bodies),
+                    presentation::render_axes.after(presentation::orient_bodies),
                     presentation::render_trajectories,
                 ).in_set(PlanetariumUISet),
                 (

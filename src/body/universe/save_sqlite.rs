@@ -223,6 +223,7 @@ fn load_view_settings(conn: &Connection) -> Result<ViewSettings, SqliteSaveError
         logarithmic_body_base: row.5,
         show_labels: row.6,
         show_trajectories: row.7,
+        show_axes: true, // default for legacy files without this column
         tags,
         trajectory_resolution: row.8,
     })
@@ -373,6 +374,7 @@ fn load_bodies(conn: &Connection) -> Result<Vec<SomeBody>, SqliteSaveError> {
             info,
             motive,
             appearance,
+            rotation: None, // SQLite format doesn't store rotation yet
         }));
     }
     

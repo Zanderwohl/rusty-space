@@ -1,5 +1,5 @@
-
-use bevy::math::{Vec3, DVec3};
+use std::f64::consts::FRAC_PI_2;
+use bevy::math::{Vec3, DVec3, DQuat, Quat};
 
 pub trait GlamVec {
     // Convert from z-axis-up to y-axis-up coordinate system
@@ -42,5 +42,24 @@ impl GlamVec for DVec3 {
         let scaled = bevyed * scale;
         let cheated = scaled - cheat;
         cheated.as_vec3()
+    }
+}
+
+pub trait GlamQuat {
+    /// Convert a quaternion from Z-up (simulation) to Y-up (Bevy) coordinate system.
+    ///
+    /// The transformation is: sim(x,y,z) → bevy(x,z,-y)
+    /// This is a -90 degree rotation around the X axis.
+    /// Quaternion transformation uses conjugation: q_bevy = R * q_sim * R_inv
+    fn as_bevy(&self) -> Quat;
+}
+
+impl GlamQuat for DQuat {
+    fn as_bevy(&self) -> Quat {
+        // Rotation that transforms Z-up to Y-up: -90 degrees around X axis
+        // This sends +Z → +Y and +Y → -Z
+        let coord_transform = DQuat::from_axis_angle(DVec3::X, -FRAC_PI_2);
+        let transformed = coord_transform * *self * coord_transform.inverse();
+        transformed.as_quat()
     }
 }

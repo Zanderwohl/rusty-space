@@ -7,7 +7,7 @@ use bevy::camera::visibility::NoFrustumCulling;
 use serde::{Deserialize, Serialize};
 use crate::body::appearance::Appearance;
 use crate::body::appearance::AssetCache;
-use crate::body::motive::info::{BodyInfo, BodyState};
+use crate::body::motive::info::{BodyInfo, BodyRotation, BodyState};
 use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::motive::Motive;
 use crate::sim::SimulationObject;
@@ -203,6 +203,7 @@ pub struct UniverseFileTime {
 fn default_step() -> f64 { 0.1 }
 fn default_gui_speed() -> f64 { 1.0 }
 fn default_max_frame_time() -> f64 { 0.016 }
+fn default_show_axes() -> bool { true }
 
 #[derive(Resource, Serialize, Deserialize)]
 pub struct UniversePhysics {
@@ -227,6 +228,8 @@ pub struct ViewSettings {
     pub logarithmic_body_base: f64,
     pub show_labels: bool,
     pub show_trajectories: bool,
+    #[serde(default = "default_show_axes")]
+    pub show_axes: bool,
     pub tags: HashMap<String, TagState>,
     pub trajectory_resolution: usize,
 }
@@ -242,6 +245,7 @@ impl Default for ViewSettings {
             logarithmic_distance_base: 10.0,
             show_labels: true,
             show_trajectories: true,
+            show_axes: true,
             tags: HashMap::new(),
             trajectory_resolution: 120,
         }
@@ -314,16 +318,16 @@ impl SomeBody {
             BodyState::default(),
         ));
 
-        let (info, appearance, motive) = match self {
+        let (info, appearance, motive, rotation) = match self {
             SomeBody::FixedEntry(entry) => {
                 // Convert legacy FixedEntry to Motive with single Fixed entry at Epoch
                 let motive = Motive::fixed(entry.position);
-                (entry.info, entry.appearance, motive)
+                (entry.info, entry.appearance, motive, entry.rotation)
             },
             SomeBody::NewtonEntry(entry) => {
                 // Convert legacy NewtonEntry to Motive with single Newtonian entry at Epoch
                 let motive = Motive::newtonian(entry.position, entry.velocity);
-                (entry.info, entry.appearance, motive)
+                (entry.info, entry.appearance, motive, entry.rotation)
             },
             SomeBody::KeplerEntry(entry) => {
                 // Convert legacy KeplerEntry to Motive with single Keplerian entry at Epoch
@@ -333,22 +337,27 @@ impl SomeBody {
                     entry.params.rotation,
                     entry.params.epoch,
                 );
-                (entry.info, entry.appearance, motive)
+                (entry.info, entry.appearance, motive, entry.rotation)
             },
             SomeBody::CompoundEntry(entry) => {
                 // Legacy patched conics - create empty motive for now
                 // TODO: Convert old route HashMap to new Motive format if needed
                 let motive = Motive::fixed(DVec3::ZERO);
-                (entry.info, entry.appearance, motive)
+                (entry.info, entry.appearance, motive, None)
             },
             SomeBody::CompoundMotiveEntry(entry) => {
                 // New compound motive format - use directly
-                (entry.info, entry.appearance, entry.motive)
+                (entry.info, entry.appearance, entry.motive, entry.rotation)
             },
         };
 
         // Insert the compound motive
         entity.insert(motive);
+
+        // Insert body rotation if present
+        if let Some(body_rotation) = rotation {
+            entity.insert(body_rotation);
+        }
 
         if info.major {
             entity.insert(Major);
@@ -413,6 +422,8 @@ pub struct FixedEntry {
     pub info: BodyInfo,
     pub position: DVec3,
     pub appearance: Appearance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<BodyRotation>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -421,6 +432,8 @@ pub struct NewtonEntry {
     pub position: DVec3,
     pub velocity: DVec3,
     pub appearance: Appearance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<BodyRotation>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -428,6 +441,8 @@ pub struct KeplerEntry {
     pub info: BodyInfo,
     pub params: KeplerMotive,
     pub appearance: Appearance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<BodyRotation>,
 }
 
 /// Legacy format - use CompoundMotiveEntry for new saves
@@ -444,4 +459,6 @@ pub struct CompoundMotiveEntry {
     pub info: BodyInfo,
     pub motive: Motive,
     pub appearance: Appearance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<BodyRotation>,
 }

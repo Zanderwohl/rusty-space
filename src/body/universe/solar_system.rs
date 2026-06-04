@@ -1,8 +1,9 @@
 use std::default::Default;
+use std::f64::consts::PI;
 use std::path::PathBuf;
-use bevy::math::DVec3;
+use bevy::math::{DVec3, DQuat};
 use crate::body::appearance::{Appearance, AppearanceColor, DebugBall, StarBall};
-use crate::body::motive::info::BodyInfo;
+use crate::body::motive::info::{BodyInfo, BodyRotation, RotationEpoch};
 use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerPrecessingEulerAngles, KeplerRotation, KeplerShape, MeanAnomalyAtEpoch, MeanAnomalyAtJ2000};
 use crate::body::universe::save::{FixedEntry, KeplerEntry, NewtonEntry, SomeBody, UniverseFile, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings};
 use crate::foundations::time::{Instant, TimeLength};
@@ -25,6 +26,83 @@ use crate::gui::util::ensure_folders;
 // Source data is often in km; we convert to meters with `* 1000.0` at the point of entry.
 // Outer planets (Jupiter+) have values entered directly in meters since the source data varies.
 // =============================================================================
+
+// Obliquity of the ecliptic at J2000 in radians (~23.4393 degrees)
+const OBLIQUITY_J2000_RAD: f64 = 23.4392911_f64 * PI / 180.0;
+
+/// Create a BodyRotation from IAU pole parameters.
+///
+/// - `ra_deg`: Right ascension of north pole in ICRF (degrees)
+/// - `dec_deg`: Declination of north pole in ICRF (degrees)  
+/// - `w0_deg`: Prime meridian angle at J2000 (degrees)
+/// - `period_hours`: Rotation period in hours (negative = retrograde)
+fn iau_rotation(ra_deg: f64, dec_deg: f64, w0_deg: f64, period_hours: f64) -> BodyRotation {
+    let pole_ecliptic = equatorial_to_ecliptic_pole(ra_deg, dec_deg);
+    let orientation = pole_to_orientation(pole_ecliptic, w0_deg);
+    let angular_velocity = 2.0 * PI / (period_hours * 3600.0); // rad/s
+    
+    BodyRotation::spinning(orientation, angular_velocity, RotationEpoch::J2000)
+}
+
+/// Create a tidally locked BodyRotation.
+///
+/// - `primary_id`: ID of the body this is tidally locked to
+/// - `ra_deg`: Right ascension of north pole in ICRF (degrees)
+/// - `dec_deg`: Declination of north pole in ICRF (degrees)
+fn tidally_locked_rotation(primary_id: &str, ra_deg: f64, dec_deg: f64) -> BodyRotation {
+    let pole_ecliptic = equatorial_to_ecliptic_pole(ra_deg, dec_deg);
+    BodyRotation::tidally_locked(primary_id, pole_ecliptic)
+}
+
+/// Convert equatorial (ICRF) pole direction to ecliptic J2000 unit vector.
+///
+/// Input: RA and Dec in degrees (J2000 equatorial frame)
+/// Output: Unit vector in ecliptic J2000 frame (Z-up = ecliptic north)
+fn equatorial_to_ecliptic_pole(ra_deg: f64, dec_deg: f64) -> DVec3 {
+    let ra = ra_deg.to_radians();
+    let dec = dec_deg.to_radians();
+    
+    // Unit vector in equatorial frame
+    let eq_x = dec.cos() * ra.cos();
+    let eq_y = dec.cos() * ra.sin();
+    let eq_z = dec.sin();
+    
+    // Rotate from equatorial to ecliptic: rotation around X by obliquity
+    // Equatorial Z (celestial north) tilts toward equatorial +Y by obliquity angle
+    // This is equivalent to rotating the coordinate system by -obliquity around X
+    let cos_obl = OBLIQUITY_J2000_RAD.cos();
+    let sin_obl = OBLIQUITY_J2000_RAD.sin();
+    
+    let ecl_x = eq_x;
+    let ecl_y = eq_y * cos_obl + eq_z * sin_obl;
+    let ecl_z = -eq_y * sin_obl + eq_z * cos_obl;
+    
+    DVec3::new(ecl_x, ecl_y, ecl_z).normalize()
+}
+
+/// Create an orientation DQuat that aligns local +Z with the given pole direction,
+/// then applies the prime meridian rotation.
+///
+/// - `pole`: Unit vector pointing to north pole in ecliptic frame
+/// - `w0_deg`: Prime meridian angle at epoch in degrees
+fn pole_to_orientation(pole: DVec3, w0_deg: f64) -> DQuat {
+    // Create a rotation that takes +Z to the pole direction
+    // Using rotation_arc: finds shortest rotation from one vector to another
+    let base_rotation = if pole.z > 0.9999 {
+        // Pole is nearly +Z, use identity
+        DQuat::IDENTITY
+    } else if pole.z < -0.9999 {
+        // Pole is nearly -Z, rotate 180° around X
+        DQuat::from_rotation_x(PI)
+    } else {
+        DQuat::from_rotation_arc(DVec3::Z, pole)
+    };
+    
+    // Apply prime meridian rotation around the pole axis
+    let prime_meridian = DQuat::from_axis_angle(pole, w0_deg.to_radians());
+    
+    prime_meridian * base_rotation
+}
 
 pub fn solar_system() -> UniverseFile {
     let solar_system = UniverseFile {
@@ -65,6 +143,7 @@ pub fn solar_system() -> UniverseFile {
                         },
                         absolute_magnitude: 4.83,
                     }),
+                    rotation: Some(iau_rotation(286.13, 63.87, 84.176, 609.12)),
                 }), // Sun
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -99,6 +178,7 @@ pub fn solar_system() -> UniverseFile {
                             b: 145,
                         },
                     }),
+                    rotation: Some(iau_rotation(281.0103, 61.4155, 329.5988, 1407.6)),
                 }), // Mercury
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -133,6 +213,7 @@ pub fn solar_system() -> UniverseFile {
                             b: 224,
                         },
                     }),
+                    rotation: Some(iau_rotation(272.76, 67.16, 160.20, -5832.6)), // retrograde
                 }), // Venus
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -167,6 +248,7 @@ pub fn solar_system() -> UniverseFile {
                             b: 75
                         },
                     }),
+                    rotation: Some(iau_rotation(0.0, 90.0, 190.147, 23.9344696)),
                 }), // Earth
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -201,6 +283,7 @@ pub fn solar_system() -> UniverseFile {
                             b: 17,
                         },
                     }),
+                    rotation: Some(iau_rotation(317.269, 54.432, 176.049, 24.6229)),
                 }), // Mars
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -235,6 +318,7 @@ pub fn solar_system() -> UniverseFile {
                             b: 54,
                         },
                     }),
+                    rotation: Some(iau_rotation(291.418, 66.764, 170.65, 9.074170)),
                 }), // Ceres
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -270,6 +354,7 @@ pub fn solar_system() -> UniverseFile {
                             b: 54,
                         },
                     }),
+                    rotation: Some(iau_rotation(305.8, 41.4, 292.0, 5.342128)),
                 }), // Vesta
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -306,6 +391,7 @@ pub fn solar_system() -> UniverseFile {
                             b: 87,
                         },
                     }),
+                    rotation: Some(tidally_locked_rotation("earth", 269.9949, 66.5392)), // tidally locked to Earth
                 }), // Luna
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -339,6 +425,7 @@ pub fn solar_system() -> UniverseFile {
                             b: 0x35,
                         },
                     }),
+                    rotation: Some(iau_rotation(268.057, 64.495, 284.95, 9.9250)),
                 }), // Jupiter
                 // TODO: Jovian Moons
                 SomeBody::KeplerEntry(KeplerEntry {
@@ -373,6 +460,7 @@ pub fn solar_system() -> UniverseFile {
                             b: 180,
                         },
                     }),
+                    rotation: Some(iau_rotation(257.311, -15.175, 203.81, -17.24)), // retrograde, tilted ~98°
                 }), // Uranus
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -406,6 +494,7 @@ pub fn solar_system() -> UniverseFile {
                             b: 180,
                         },
                     }),
+                    rotation: Some(iau_rotation(299.36, 43.46, 253.18, 16.11)),
                 }), // Neptune
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -440,6 +529,7 @@ pub fn solar_system() -> UniverseFile {
                             b: 200,
                         },
                     }),
+                    rotation: Some(iau_rotation(79.6, 83.4, 0.0, 25.9)), // approx values
                 }), // Eris
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -473,7 +563,8 @@ pub fn solar_system() -> UniverseFile {
                             g: 200,
                             b: 200,
                         },
-                    })
+                    }),
+                    rotation: Some(tidally_locked_rotation("eris", 79.6, 83.4)), // tidally locked, uses Eris's pole
                 }), // Dysnomia
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -508,6 +599,7 @@ pub fn solar_system() -> UniverseFile {
                             b: 200,
                         },
                     }),
+                    rotation: Some(iau_rotation(0.0, 90.0, 0.0, 10.273)), // pole unknown, using approx period
                 }), // Sedna
             ] },
     };
@@ -580,6 +672,7 @@ pub fn earth_moon() -> UniverseFile {
                             b: 75
                         },
                     }),
+                    rotation: Some(iau_rotation(0.0, 90.0, 190.147, 23.9344696)),
                 }), // Earth
                 /*SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -636,6 +729,7 @@ pub fn earth_moon() -> UniverseFile {
                             b: 0,
                         },
                     }),
+                    rotation: None,
                 }), // Test Newtonian Body A
                 SomeBody::NewtonEntry(NewtonEntry {
                     info: BodyInfo {
@@ -656,6 +750,7 @@ pub fn earth_moon() -> UniverseFile {
                             b: 0,
                         },
                     }),
+                    rotation: None,
                 }), // Test Newtonian Body B
             ]
         },
