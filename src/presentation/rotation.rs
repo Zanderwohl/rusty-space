@@ -1,9 +1,7 @@
-//! Body rotation and axis gizmo systems.
+//! Body rotation system.
 
 use bevy::prelude::*;
-use bevy::color::Srgba;
 use crate::body::motive::info::{BodyInfo, BodyRotation, BodyState, RotationMode};
-use crate::body::universe::save::ViewSettings;
 use crate::sim::SimTime;
 use crate::util::bevystuff::GlamQuat;
 
@@ -39,43 +37,5 @@ pub fn orient_bodies(
         if let Some(orientation) = current_orientation {
             transform.rotation = orientation.as_bevy();
         }
-    }
-}
-
-/// Renders debug axis gizmos for each body's rotation.
-///
-/// Draws:
-/// - Red line through the rotation pole (like an "olive spear"), 3x radius above and below
-/// - Blue line pointing out of the prime meridian (local +X), 3x radius outward
-pub fn render_axes(
-    bodies: Query<(&Transform, &BodyRotation)>,
-    mut gizmos: Gizmos,
-    view_settings: Res<ViewSettings>,
-) {
-    if !view_settings.show_axes {
-        return;
-    }
-
-    let pole_color = Srgba::new(1.0, 0.0, 0.0, 1.0); // Red for pole axis
-    let meridian_color = Srgba::new(0.0, 0.0, 1.0, 1.0); // Blue for prime meridian
-
-    for (transform, rotation) in bodies.iter() {
-        // Use transform values set by position_bodies and orient_bodies
-        let center = transform.translation;
-        let length = transform.scale.x * 3.0;
-        
-        // Get pole axis in simulation space, convert direction to Bevy space
-        let pole_sim = rotation.pole_axis();
-        let pole_bevy = Vec3::new(pole_sim.x as f32, pole_sim.z as f32, -pole_sim.y as f32).normalize();
-        
-        // Red pole axis line (through the body)
-        let pole_start = center - pole_bevy * length;
-        let pole_end = center + pole_bevy * length;
-        gizmos.line(pole_start, pole_end, pole_color);
-        
-        // Green prime meridian line (local +X direction, already in Bevy space via orient_bodies)
-        let forward_bevy = transform.rotation * Vec3::X;
-        let meridian_end = center + forward_bevy * length;
-        gizmos.line(center, meridian_end, meridian_color);
     }
 }

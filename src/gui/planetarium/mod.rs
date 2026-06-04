@@ -15,7 +15,7 @@ use crate::body::motive::kepler_motive;
 use crate::foundations::time::{Instant, J2000_JD, JD_SECONDS_PER_JULIAN_DAY};
 pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin};
 use crate::gui::planetarium::windows::body_info::BodyInfoState;
-use crate::presentation::{self, TrajectoryMaterialPlugin};
+use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin};
 
 mod windows;
 
@@ -49,6 +49,7 @@ impl Plugin for PlanetariumUI {
             ))
             .add_plugins(PlanetariumCameraPlugin)
             .add_plugins(TrajectoryMaterialPlugin)
+            .add_plugins(BodyWireframeMaterialPlugin)
             .add_systems(EguiPrimaryContextPass, (
                 (
                     windows::controls::control_window,
@@ -69,7 +70,6 @@ impl Plugin for PlanetariumUI {
                     kepler_motive::calculate_trajectory,
                     presentation::position_bodies.after(calculate_body_positions::calculate_body_positions),
                     presentation::orient_bodies.after(presentation::position_bodies),
-                    presentation::render_axes.after(presentation::orient_bodies),
                     // Trajectory mesh systems
                     presentation::spawn_trajectory_meshes_for_bodies,
                     presentation::refresh_precessing_trajectories
@@ -80,6 +80,12 @@ impl Plugin for PlanetariumUI {
                         .after(presentation::position_bodies)
                         .after(presentation::rebuild_trajectory_caches),
                     presentation::cleanup_orphaned_trajectory_meshes,
+                    // Body wireframe mesh systems
+                    presentation::spawn_body_wireframe_meshes,
+                    presentation::spawn_terminator_meshes,
+                    presentation::update_terminator_meshes
+                        .after(presentation::orient_bodies),
+                    presentation::cleanup_orphaned_body_wireframes,
                 ).in_set(PlanetariumUISet),
                 (
                     universe::advance_time,

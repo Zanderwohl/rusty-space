@@ -177,6 +177,7 @@ pub fn solar_system() -> UniverseFile {
                             g: 145,
                             b: 145,
                         },
+                        highlight_latitudes: vec![],
                     }),
                     rotation: Some(iau_rotation(281.0103, 61.4155, 329.5988, 1407.6)),
                 }), // Mercury
@@ -212,6 +213,7 @@ pub fn solar_system() -> UniverseFile {
                             g: 224,
                             b: 224,
                         },
+                        highlight_latitudes: vec![],
                     }),
                     rotation: Some(iau_rotation(272.76, 67.16, 160.20, -5832.6)), // retrograde
                 }), // Venus
@@ -247,6 +249,7 @@ pub fn solar_system() -> UniverseFile {
                             g: 179,
                             b: 75
                         },
+                        highlight_latitudes: vec![23.44, 66.56],
                     }),
                     rotation: Some(iau_rotation(0.0, 90.0, 190.147, 23.9344696)),
                 }), // Earth
@@ -282,6 +285,7 @@ pub fn solar_system() -> UniverseFile {
                             g: 66,
                             b: 17,
                         },
+                        highlight_latitudes: vec![],
                     }),
                     rotation: Some(iau_rotation(317.269, 54.432, 176.049, 24.6229)),
                 }), // Mars
@@ -317,6 +321,7 @@ pub fn solar_system() -> UniverseFile {
                             g: 107,
                             b: 54,
                         },
+                        highlight_latitudes: vec![],
                     }),
                     rotation: Some(iau_rotation(291.418, 66.764, 170.65, 9.074170)),
                 }), // Ceres
@@ -353,6 +358,7 @@ pub fn solar_system() -> UniverseFile {
                             g: 107,
                             b: 54,
                         },
+                        highlight_latitudes: vec![],
                     }),
                     rotation: Some(iau_rotation(305.8, 41.4, 292.0, 5.342128)),
                 }), // Vesta
@@ -390,6 +396,7 @@ pub fn solar_system() -> UniverseFile {
                             g: 87,
                             b: 87,
                         },
+                        highlight_latitudes: vec![],
                     }),
                     rotation: Some(tidally_locked_rotation("earth", 269.9949, 66.5392)), // tidally locked to Earth
                 }), // Luna
@@ -424,6 +431,7 @@ pub fn solar_system() -> UniverseFile {
                             g: 0x7f,
                             b: 0x35,
                         },
+                        highlight_latitudes: vec![],
                     }),
                     rotation: Some(iau_rotation(268.057, 64.495, 284.95, 9.9250)),
                 }), // Jupiter
@@ -459,6 +467,7 @@ pub fn solar_system() -> UniverseFile {
                             g: 186,
                             b: 180,
                         },
+                        highlight_latitudes: vec![],
                     }),
                     rotation: Some(iau_rotation(257.311, -15.175, 203.81, -17.24)), // retrograde, tilted ~98°
                 }), // Uranus
@@ -493,6 +502,7 @@ pub fn solar_system() -> UniverseFile {
                             g: 186,
                             b: 180,
                         },
+                        highlight_latitudes: vec![],
                     }),
                     rotation: Some(iau_rotation(299.36, 43.46, 253.18, 16.11)),
                 }), // Neptune
@@ -528,6 +538,7 @@ pub fn solar_system() -> UniverseFile {
                             g: 200,
                             b: 200,
                         },
+                        highlight_latitudes: vec![],
                     }),
                     rotation: Some(iau_rotation(79.6, 83.4, 0.0, 25.9)), // approx values
                 }), // Eris
@@ -563,6 +574,7 @@ pub fn solar_system() -> UniverseFile {
                             g: 200,
                             b: 200,
                         },
+                        highlight_latitudes: vec![],
                     }),
                     rotation: Some(tidally_locked_rotation("eris", 79.6, 83.4)), // tidally locked, uses Eris's pole
                 }), // Dysnomia
@@ -598,6 +610,7 @@ pub fn solar_system() -> UniverseFile {
                             g: 200,
                             b: 200,
                         },
+                        highlight_latitudes: vec![],
                     }),
                     rotation: Some(iau_rotation(0.0, 90.0, 0.0, 10.273)), // pole unknown, using approx period
                 }), // Sedna
@@ -671,6 +684,7 @@ pub fn earth_moon() -> UniverseFile {
                             g: 179,
                             b: 75
                         },
+                        highlight_latitudes: vec![23.44, 66.56],
                     }),
                     rotation: Some(iau_rotation(0.0, 90.0, 190.147, 23.9344696)),
                 }), // Earth
@@ -728,6 +742,7 @@ pub fn earth_moon() -> UniverseFile {
                             g: 0,
                             b: 0,
                         },
+                        highlight_latitudes: vec![],
                     }),
                     rotation: None,
                 }), // Test Newtonian Body A
@@ -749,6 +764,7 @@ pub fn earth_moon() -> UniverseFile {
                             g: 0,
                             b: 0,
                         },
+                        highlight_latitudes: vec![],
                     }),
                     rotation: None,
                 }), // Test Newtonian Body B

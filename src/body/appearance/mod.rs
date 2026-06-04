@@ -41,28 +41,38 @@ impl Appearance {
 pub struct DebugBall {
     pub radius: f64,
     pub color: AppearanceColor,
+    #[serde(default)]
+    pub highlight_latitudes: Vec<f64>,
 }
 
 impl DebugBall {
+    /// Get highlight latitudes (for wireframe rendering).
+    /// Returns the stored values, or empty if none configured.
+    pub fn highlight_latitudes(&self) -> Vec<f64> {
+        self.highlight_latitudes.clone()
+    }
+}
+
+impl DebugBall {
+    /// Creates a black unlit occluder sphere at radius 0.97.
+    /// The wireframe grid is spawned separately as a child entity.
     pub fn pbr_bundle(&self,
                       cache: &mut ResMut<AssetCache>,
                       meshes: &mut Assets<Mesh>,
                       materials: &mut Assets<StandardMaterial>,
-                      mut images: &mut ResMut<Assets<Image>>,
+                      _images: &mut ResMut<Assets<Image>>,
     ) -> (Mesh3d, MeshMaterial3d<StandardMaterial>) {
-        let color = Color::srgb(self.color.r as f32 / 255.0, self.color.g as f32 / 255.0, self.color.b as f32 / 255.0);
-        let mesh_key = format!("icosphere_{}", self.radius);
-        let material_key = format!("color_{:02x}{:02x}{:02x}", self.color.r, self.color.g, self.color.b);
+        let mesh_key = "occluder_sphere".to_string();
+        let material_key = "occluder_black".to_string();
 
-        let mesh_handle = cache.meshes.entry(mesh_key.clone()).or_insert_with(|| {
-            meshes.add(Sphere::new(1.0f32).mesh().ico(5).unwrap())
+        let mesh_handle = cache.meshes.entry(mesh_key).or_insert_with(|| {
+            meshes.add(Sphere::new(0.97f32).mesh().ico(5).unwrap())
         }).clone();
 
-        let material_handle = cache.materials.entry(material_key.clone()).or_insert_with(|| {
+        let material_handle = cache.materials.entry(material_key).or_insert_with(|| {
             materials.add(StandardMaterial {
-                base_color: color,
-                metallic: 0.1,
-                perceptual_roughness: 1.0,
+                base_color: Color::BLACK,
+                unlit: true,
                 ..Default::default()
             })
         }).clone();

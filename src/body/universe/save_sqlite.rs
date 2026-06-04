@@ -484,6 +484,7 @@ fn load_appearance(conn: &Connection, body_id: &str) -> Result<Appearance, Sqlit
                             g: color_g.unwrap_or(255) as u16,
                             b: color_b.unwrap_or(255) as u16,
                         },
+                        highlight_latitudes: vec![],
                     }))
                 }
                 "Star" => {
