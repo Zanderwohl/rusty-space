@@ -16,7 +16,7 @@ use crate::foundations::time::{Instant, J2000_JD, JD_SECONDS_PER_JULIAN_DAY};
 pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin, CameraAction};
 use crate::camera::Freecam;
 pub use crate::gui::planetarium::windows::body_info::BodyInfoState;
-use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, TrajectoryMesh, BodyPointMesh};
+use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, TrajectoryMesh, BodyPointMesh};
 
 mod windows;
 
@@ -53,6 +53,7 @@ impl Plugin for PlanetariumUI {
             .add_plugins(BodyWireframeMaterialPlugin)
             .add_plugins(OccluderMaterialPlugin)
             .add_plugins(BodyPointMaterialPlugin)
+            .add_plugins(StarfieldMaterialPlugin)
             .add_systems(EguiPrimaryContextPass, (
                 (
                     windows::controls::control_window,

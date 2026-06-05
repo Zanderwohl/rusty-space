@@ -1,23 +1,33 @@
+use std::f32::consts::PI;
 use bevy::prelude::*;
 use csv::ReaderBuilder;
 
-/// Numerical star data suitable for copying to a GPU buffer.
+/// GPU-ready star data: pre-computed direction vector + apparent magnitude.
+/// 16 bytes total, maps directly to a WGSL `vec4<f32>`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StarGpuData {
-    pub ra: f32,
-    pub dec: f32,
-    pub dist: f32,
+    /// Unit direction vector in Bevy Y-up space (pre-computed from RA/dec)
+    pub dir: [f32; 3],
+    /// Apparent magnitude as seen from Earth
     pub mag: f32,
-    pub absmag: f32,
-    pub _padding: [f32; 3],
 }
 
 /// A single star entry from the HYG catalog.
 #[derive(Clone, Debug, Default)]
 pub struct DistantStar {
+    pub id: u32,
     pub proper: String,
     pub spect: String,
+    /// Right ascension in hours (0-24)
+    pub ra: f32,
+    /// Declination in degrees (-90 to +90)
+    pub dec: f32,
+    /// Distance in parsecs
+    pub dist: f32,
+    /// Absolute magnitude
+    pub absmag: f32,
+    /// Pre-computed GPU data
     pub gpu: StarGpuData,
 }
 
@@ -69,18 +79,33 @@ fn load_csv(path: &str) -> Vec<DistantStar> {
             let f = |col: usize| -> f32 {
                 r.get(col).unwrap_or("0").parse().unwrap_or(0.0)
             };
+            let id: u32 = r.get(id_col).unwrap_or("0").parse().unwrap_or(0);
+
+            let ra = f(ra_col);
+            let dec = f(dec_col);
+            let mag = f(mag_col);
+
+            // Convert RA (hours) and Dec (degrees) to radians
+            let ra_rad = ra * PI / 12.0;
+            let dec_rad = dec * PI / 180.0;
+
+            // Compute direction vector in Z-up astronomical coordinates
+            let x = dec_rad.cos() * ra_rad.cos();
+            let y = dec_rad.cos() * ra_rad.sin();
+            let z = dec_rad.sin();
+
+            // Swizzle to Bevy Y-up: (x, z, -y)
+            let dir = [x, z, -y];
 
             DistantStar {
+                id,
                 proper: r.get(proper_col).unwrap_or("").to_string(),
                 spect: r.get(spect_col).unwrap_or("").to_string(),
-                gpu: StarGpuData {
-                    ra: f(ra_col),
-                    dec: f(dec_col),
-                    dist: f(dist_col),
-                    mag: f(mag_col),
-                    absmag: f(absmag_col),
-                    _padding: [0.0; 3],
-                },
+                ra,
+                dec,
+                dist: f(dist_col),
+                absmag: f(absmag_col),
+                gpu: StarGpuData { dir, mag },
             }
         })
         .collect()

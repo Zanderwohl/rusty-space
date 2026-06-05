@@ -12,6 +12,8 @@ mod celestial_markers;
 mod lights;
 mod labels;
 mod rotation;
+mod starfield;
+mod starfield_material;
 mod trajectory;
 mod trajectory_material;
 
@@ -64,3 +66,5 @@ pub use celestial_markers::{
     CelestialMarker,
     CelestialMarkerCache,
 };
+pub use starfield::{spawn_starfield, Starfield};
+pub use starfield_material::{StarfieldMaterial, StarfieldMaterialPlugin};
