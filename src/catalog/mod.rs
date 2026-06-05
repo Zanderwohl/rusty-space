@@ -1,4 +1,5 @@
 pub mod spectral;
+pub mod spectral_color;
 
 use std::f32::consts::PI;
 use bevy::prelude::*;
