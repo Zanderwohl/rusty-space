@@ -109,6 +109,12 @@ impl Plugin for PlanetariumUI {
                 presentation::label_bodies
                     .after(presentation::position_bodies),
             ).in_set(PlanetariumUISet))
+            // Celestial reference markers (Point of Aries, etc.)
+            .add_systems(Update, (
+                presentation::spawn_celestial_markers,
+                presentation::update_celestial_markers
+                    .after(presentation::position_bodies),
+            ).in_set(PlanetariumUISet))
             // Simulation time advance
             .add_systems(Update, (
                 universe::advance_time,
@@ -116,7 +122,7 @@ impl Plugin for PlanetariumUI {
             // Asset loading
             .add_systems(Update, (load_assets).in_set(PlanetariumLoadingSet))
             .add_systems(OnExit(AppState::PlanetariumLoading), initial_trajectories)
-            .add_systems(OnExit(AppState::Planetarium), unload_simulation_objects)
+            .add_systems(OnExit(AppState::Planetarium), (unload_simulation_objects, presentation::cleanup_celestial_markers))
         ;
 
 

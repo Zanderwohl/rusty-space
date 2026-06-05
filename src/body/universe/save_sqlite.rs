@@ -713,6 +713,7 @@ fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, Sql
         shape,
         rotation,
         epoch,
+        gravitational_parameter: None, // TODO: load from database if stored
     })
 }
 

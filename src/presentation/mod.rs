@@ -8,6 +8,7 @@ mod body_material;
 mod body_mesh;
 mod body_point;
 mod body_point_material;
+mod celestial_markers;
 mod lights;
 mod labels;
 mod rotation;
@@ -56,3 +57,10 @@ pub use body_point::{
     BodyPointLink,
 };
 pub use body_point_material::{BodyPointMaterial, BodyPointMaterialPlugin};
+pub use celestial_markers::{
+    spawn_celestial_markers,
+    update_celestial_markers,
+    cleanup_celestial_markers,
+    CelestialMarker,
+    CelestialMarkerCache,
+};

@@ -1,6 +1,8 @@
 use eframe::egui;
 use exotic_matters::gui::horizons::{request_ui, BodyListStatus};
-use exotic_matters::interop::horizons::{self, MajorBody, Request};
+use exotic_matters::interop::horizons::{self, HorizonsData, MajorBody, Request};
+use std::fs;
+use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
 
@@ -25,6 +27,9 @@ struct Horizons {
     result_text: Option<String>,
     response_receiver: Option<mpsc::Receiver<Result<String, String>>>,
     is_fetching: bool,
+    last_fetched_request: Option<Request>,
+    pending_dump: bool,
+    dump_status: Option<String>,
 }
 
 
@@ -51,7 +56,75 @@ impl Horizons {
             result_text: None,
             response_receiver: None,
             is_fetching: false,
+            last_fetched_request: None,
+            pending_dump: false,
+            dump_status: None,
         }
+    }
+
+    fn needs_fetch(&self) -> bool {
+        match &self.last_fetched_request {
+            None => true,
+            Some(last) => self.request.to_url() != last.to_url(),
+        }
+    }
+
+    fn perform_dump(&mut self) {
+        let Some(response) = &self.result_text else {
+            self.dump_status = Some("No response data to dump".into());
+            return;
+        };
+
+        let data = HorizonsData {
+            request: self.request.clone(),
+            response: response.clone(),
+        };
+
+        let toml_str = match toml::to_string_pretty(&data) {
+            Ok(s) => s,
+            Err(e) => {
+                self.dump_status = Some(format!("TOML serialization failed: {}", e));
+                return;
+            }
+        };
+
+        let dir = Path::new("./horizons");
+        if !dir.exists() {
+            if let Err(e) = fs::create_dir_all(dir) {
+                self.dump_status = Some(format!("Failed to create directory: {}", e));
+                return;
+            }
+        }
+
+        let filename = self.request.dump_filename();
+        let path = dir.join(&filename);
+
+        match fs::write(&path, toml_str) {
+            Ok(_) => {
+                self.dump_status = Some(format!("Saved to {}", path.display()));
+            }
+            Err(e) => {
+                self.dump_status = Some(format!("Failed to write file: {}", e));
+            }
+        }
+    }
+
+    fn start_fetch(&mut self) {
+        let url = self.request.to_url();
+        self.url_cache = Some(url.clone());
+        let (tx, rx) = mpsc::channel();
+        self.response_receiver = Some(rx);
+        self.is_fetching = true;
+        self.api_error = None;
+        self.result_text = None;
+
+        thread::spawn(move || {
+            let result = match reqwest::blocking::get(&url) {
+                Ok(response) => response.text().map_err(|e| e.to_string()),
+                Err(e) => Err(e.to_string()),
+            };
+            tx.send(result).ok();
+        });
     }
 }
 
@@ -105,6 +178,7 @@ impl eframe::App for Horizons {
                         let (result, error) = parse_horizons_json(&body);
                         self.api_error = error;
                         self.result_text = result.or(Some(body));
+                        self.last_fetched_request = Some(self.request.clone());
                     }
                     Err(err) => {
                         self.api_error = Some(err);
@@ -113,6 +187,11 @@ impl eframe::App for Horizons {
                 }
                 self.response_receiver = None;
                 self.is_fetching = false;
+
+                if self.pending_dump && self.result_text.is_some() {
+                    self.perform_dump();
+                    self.pending_dump = false;
+                }
             } else {
                 ctx.request_repaint();
             }
@@ -139,30 +218,32 @@ impl eframe::App for Horizons {
             ui.separator();
             ui.heading("Response");
 
-            let send_button =
-                ui.add_enabled(!self.is_fetching, egui::Button::new("Send"));
-            if send_button.clicked() {
-                let url = self.request.to_url();
-                self.url_cache = Some(url.clone());
-                let (tx, rx) = mpsc::channel();
-                self.response_receiver = Some(rx);
-                self.is_fetching = true;
-                self.api_error = None;
-                self.result_text = None;
+            ui.horizontal(|ui| {
+                let send_button =
+                    ui.add_enabled(!self.is_fetching, egui::Button::new("Send"));
+                if send_button.clicked() {
+                    self.start_fetch();
+                }
 
-                thread::spawn(move || {
-                    let result = match reqwest::blocking::get(&url) {
-                        Ok(response) => {
-                            response.text().map_err(|e| e.to_string())
-                        }
-                        Err(e) => Err(e.to_string()),
-                    };
-                    tx.send(result).ok();
-                });
-            }
+                let dump_button =
+                    ui.add_enabled(!self.is_fetching, egui::Button::new("Dump"));
+                if dump_button.clicked() {
+                    self.dump_status = None;
+                    if self.needs_fetch() {
+                        self.pending_dump = true;
+                        self.start_fetch();
+                    } else {
+                        self.perform_dump();
+                    }
+                }
 
-            if self.is_fetching {
-                ui.spinner();
+                if self.is_fetching {
+                    ui.spinner();
+                }
+            });
+
+            if let Some(status) = &self.dump_status {
+                ui.label(status);
             }
 
             if let Some(err) = &self.api_error {

@@ -130,7 +130,26 @@ impl Motive {
     pub fn keplerian(primary_id: String, shape: KeplerShape, rotation: KeplerRotation, epoch: KeplerEpoch) -> Self {
         let mut new = Self::new();
         let zero = Instant::from_seconds_since_j2000(0.0);
-        new.insert_event(zero, TransitionEvent::Epoch, MotiveSelection::Keplerian(KeplerMotive { primary_id, shape, rotation, epoch }));
+        new.insert_event(zero, TransitionEvent::Epoch, MotiveSelection::Keplerian(KeplerMotive { 
+            primary_id, 
+            shape, 
+            rotation, 
+            epoch,
+            gravitational_parameter: None,
+        }));
+        new
+    }
+
+    pub fn keplerian_with_gm(primary_id: String, shape: KeplerShape, rotation: KeplerRotation, epoch: KeplerEpoch, gravitational_parameter: f64) -> Self {
+        let mut new = Self::new();
+        let zero = Instant::from_seconds_since_j2000(0.0);
+        new.insert_event(zero, TransitionEvent::Epoch, MotiveSelection::Keplerian(KeplerMotive { 
+            primary_id, 
+            shape, 
+            rotation, 
+            epoch,
+            gravitational_parameter: Some(gravitational_parameter),
+        }));
         new
     }
 
@@ -213,5 +232,6 @@ lazy_static! {
         epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
             mean_anomaly: 0.0,
         }),
+        gravitational_parameter: None,
     });
 }

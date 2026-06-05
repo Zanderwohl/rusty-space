@@ -485,11 +485,13 @@ fn rebuild_physics_graph(
                 dependencies.insert(entity, parent_entity);
                 hierarchical_bodies.insert(entity);
 
+                // Use explicit gravitational_parameter override if provided, otherwise compute from parent mass
+                let mu = kepler.gravitational_parameter
+                    .unwrap_or(gravitational_constant * parent_mass);
+
                 graph.cached_motives.insert(entity, CachedMotive {
                     parent_entity,
-                    selection: CachedMotiveSelection::Keplerian {
-                        mu: gravitational_constant * parent_mass,
-                    },
+                    selection: CachedMotiveSelection::Keplerian { mu },
                 });
             }
             MotiveSelection::Newtonian { position, velocity } => {

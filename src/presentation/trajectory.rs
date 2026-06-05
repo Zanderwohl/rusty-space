@@ -275,7 +275,7 @@ const CAMERA_MOVE_THRESHOLD: f64 = 0.005;
 /// Skips mesh regeneration when camera and sim time haven't changed significantly.
 pub fn build_trajectory_meshes(
     bodies: Query<(&BodyState, &BodyInfo, &Motive, Option<&Appearance>)>,
-    mut trajectory_meshes: Query<(&TrajectoryMesh, &mut TrajectoryCache, &mut Visibility, &Mesh3d)>,
+    mut trajectory_meshes: Query<(&TrajectoryMesh, &mut TrajectoryCache, &mut Visibility, &Mesh3d, &mut Transform)>,
     mut meshes: ResMut<Assets<Mesh>>,
     view_settings: Res<ViewSettings>,
     settings: Res<Settings>,
@@ -301,7 +301,14 @@ pub fn build_trajectory_meshes(
     let min_brightness = min_brightness * exposure_adjust;
     let max_brightness = max_brightness * exposure_adjust;
     
-    for (traj_mesh, mut cache, mut visibility, mesh3d) in trajectory_meshes.iter_mut() {
+    for (traj_mesh, mut cache, mut visibility, mesh3d, mut transform) in trajectory_meshes.iter_mut() {
+        // Compensate for camera movement since last mesh rebuild so the
+        // trajectory tracks bodies even when the mesh isn't regenerated.
+        if let Some(last_cam) = cache.last_camera_pos {
+            let delta = last_cam - camera_pos;
+            transform.translation = delta.as_vec3();
+        }
+
         // Find the body this trajectory belongs to using direct entity lookup (O(1))
         let Ok((state, info, motive, appearance)) = bodies.get(traj_mesh.body_entity) else {
             if *visibility != Visibility::Hidden {
@@ -502,6 +509,9 @@ pub fn build_trajectory_meshes(
             *mesh_asset = mesh;
         }
         
+        // Mesh is now built for the current camera position; clear the drift offset.
+        transform.translation = Vec3::ZERO;
+
         // Update cache tracking for dirty detection
         cache.mesh_dirty = false;
         cache.last_camera_pos = Some(camera_pos);

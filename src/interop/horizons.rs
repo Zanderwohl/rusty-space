@@ -1,3 +1,4 @@
+use serde::Serialize;
 use url::form_urlencoded;
 
 const BASE_URL: &str = "https://ssd.jpl.nasa.gov/api/horizons.api";
@@ -6,6 +7,7 @@ const BASE_URL: &str = "https://ssd.jpl.nasa.gov/api/horizons.api";
 // Top-level request
 // ---------------------------------------------------------------------------
 
+#[derive(Serialize, Clone)]
 pub struct Request {
     pub command: Command,
     pub obj_data: bool,
@@ -78,7 +80,7 @@ impl Request {
 // Command (target selection)
 // ---------------------------------------------------------------------------
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Serialize)]
 pub enum Command {
     MajorBody(i64),
     SmallBodyNumber(u64),
@@ -136,6 +138,7 @@ impl Command {
 // Ephemeris request — the variant determines which params struct is active
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Serialize)]
 pub enum EphemerisRequest {
     Observer(ObserverParams),
     Vectors(VectorsParams),
@@ -195,7 +198,7 @@ impl EphemerisRequest {
 // Shared enums
 // ---------------------------------------------------------------------------
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum Center {
     #[default]
     Geocentric,
@@ -241,13 +244,14 @@ impl Center {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum TimeSpec {
     #[default]
     Span,
     List,
 }
 
+#[derive(Clone, Serialize)]
 pub struct TimeSpan {
     pub start: String,
     pub stop: String,
@@ -272,6 +276,7 @@ impl TimeSpan {
     }
 }
 
+#[derive(Clone, Serialize)]
 pub struct TimeList {
     pub times: String,
     pub list_type: Option<TListType>,
@@ -295,6 +300,7 @@ impl TimeList {
     }
 }
 
+#[derive(Clone, Serialize)]
 pub struct TimeConfig {
     pub spec: TimeSpec,
     pub span: TimeSpan,
@@ -320,7 +326,7 @@ impl TimeConfig {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum TListType {
     #[default]
     Jd,
@@ -345,7 +351,7 @@ impl TListType {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum RefPlane {
     #[default]
     Ecliptic,
@@ -370,7 +376,7 @@ impl RefPlane {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum RefSystem {
     #[default]
     Icrf,
@@ -392,7 +398,7 @@ impl RefSystem {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum OutUnits {
     #[default]
     KmS,
@@ -417,7 +423,7 @@ impl OutUnits {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum CoordType {
     #[default]
     Geodetic,
@@ -439,7 +445,7 @@ impl CoordType {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum TimeDigits {
     #[default]
     Minutes,
@@ -464,7 +470,7 @@ impl TimeDigits {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum CalFormat {
     #[default]
     Cal,
@@ -489,7 +495,7 @@ impl CalFormat {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum CalType {
     #[default]
     Mixed,
@@ -511,7 +517,7 @@ impl CalType {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum AngFormat {
     #[default]
     Hms,
@@ -533,7 +539,7 @@ impl AngFormat {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum Apparent {
     #[default]
     Airless,
@@ -555,7 +561,7 @@ impl Apparent {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum RangeUnits {
     #[default]
     Au,
@@ -574,7 +580,7 @@ impl RangeUnits {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum VecTable {
     Position,
     #[default]
@@ -608,7 +614,7 @@ impl VecTable {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum VecCorr {
     #[default]
     None,
@@ -633,7 +639,7 @@ impl VecCorr {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum TpType {
     #[default]
     Absolute,
@@ -655,7 +661,7 @@ impl TpType {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum CaTableType {
     #[default]
     Standard,
@@ -677,7 +683,7 @@ impl CaTableType {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum ObserverTimeType {
     #[default]
     Ut,
@@ -699,7 +705,7 @@ impl ObserverTimeType {
     }
 }
 
-#[derive(Default, PartialEq, Clone, Copy)]
+#[derive(Default, PartialEq, Clone, Copy, Serialize)]
 pub enum VectorTimeType {
     #[default]
     Tdb,
@@ -725,6 +731,7 @@ impl VectorTimeType {
 // Per-type parameter structs
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Serialize)]
 pub struct ObserverParams {
     pub center: Center,
     pub time: TimeConfig,
@@ -791,6 +798,7 @@ impl ObserverParams {
     }
 }
 
+#[derive(Clone, Serialize)]
 pub struct VectorsParams {
     pub center: Center,
     pub time: TimeConfig,
@@ -845,6 +853,7 @@ impl VectorsParams {
     }
 }
 
+#[derive(Clone, Serialize)]
 pub struct ElementsParams {
     pub center: Center,
     pub time: TimeConfig,
@@ -887,6 +896,7 @@ impl ElementsParams {
     }
 }
 
+#[derive(Clone, Serialize)]
 pub struct CloseApproachParams {
     pub ca_table_type: CaTableType,
     pub cal_type: CalType,
@@ -908,6 +918,7 @@ impl CloseApproachParams {
     }
 }
 
+#[derive(Clone, Serialize)]
 pub struct SpkParams {
     pub start_time: String,
     pub stop_time: String,
@@ -933,7 +944,7 @@ impl SpkParams {
 // Ephemeris type tag (used by the UI to switch types while preserving state)
 // ---------------------------------------------------------------------------
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Serialize)]
 pub enum EphemerisTypeTag {
     Observer,
     Vectors,
@@ -1164,4 +1175,67 @@ fn encode_url(params: &[(&str, String)]) -> String {
         })
         .collect();
     format!("{}?{}", BASE_URL, pairs.join("&"))
+}
+
+// ---------------------------------------------------------------------------
+// Combined Request + Response for serialization (DUMP feature)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct HorizonsData {
+    pub request: Request,
+    pub response: String,
+}
+
+impl Request {
+    /// Extract the body/command identifier for use in filenames.
+    pub fn body_id_for_filename(&self) -> String {
+        match &self.command {
+            Command::MajorBody(id) => id.to_string(),
+            Command::SmallBodyNumber(n) => format!("sb{}", n),
+            Command::SmallBodyDesignation(d) => sanitize_filename_part(d),
+            Command::SmallBodyName(n) => sanitize_filename_part(n),
+            Command::MajorBodyList => "MB".to_string(),
+        }
+    }
+
+    /// Extract the ephemeris type string for use in filenames.
+    pub fn ephemeris_type_for_filename(&self) -> String {
+        match &self.ephemeris {
+            Some(eph) => eph.api_type().to_lowercase(),
+            None => "none".to_string(),
+        }
+    }
+
+    /// Extract the center identifier for use in filenames.
+    pub fn center_for_filename(&self) -> String {
+        match &self.ephemeris {
+            Some(eph) => match eph.center() {
+                Some(center) => match center {
+                    Center::Geocentric => "geo".to_string(),
+                    Center::BodyCenter(id) => id.to_string(),
+                    Center::SiteOnBody { site, body } => format!("{}at{}", site, body),
+                    Center::Coordinate { body, .. } => format!("coord{}", body),
+                },
+                None => "na".to_string(),
+            },
+            None => "na".to_string(),
+        }
+    }
+
+    /// Generate a filename for dumping this request's data.
+    pub fn dump_filename(&self) -> String {
+        format!(
+            "{}-{}-{}.toml",
+            self.body_id_for_filename(),
+            self.ephemeris_type_for_filename(),
+            self.center_for_filename(),
+        )
+    }
+}
+
+fn sanitize_filename_part(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect()
 }

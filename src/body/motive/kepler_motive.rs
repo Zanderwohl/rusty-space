@@ -16,6 +16,11 @@ pub struct KeplerMotive {
     pub shape: KeplerShape,
     pub rotation: KeplerRotation,
     pub epoch: KeplerEpoch,
+    /// Optional override for gravitational parameter (mu = G*M) in m^3/s^2.
+    /// When set, this value is used instead of computing G * primary_mass.
+    /// Useful for barycentric orbits where each body has a different effective mu.
+    #[serde(default)]
+    pub gravitational_parameter: Option<f64>,
 }
 
 const EXPANSION_ITERATIONS: usize = 10;
