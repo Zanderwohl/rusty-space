@@ -223,13 +223,6 @@ pub fn rebuild_trajectory_caches(
         cache.valid = true;
         cache.mesh_dirty = true; // Trigger mesh rebuild
         
-        // Debug: log when precessing orbit cache is built
-        if is_precessing {
-            if let Some(pid) = &primary_id {
-                info!("Built trajectory cache for precessing orbit (primary: {}), rebuild_time: {:.0}", 
-                      pid, cache.last_rebuild_time);
-            }
-        }
     }
 }
 
@@ -254,8 +247,6 @@ pub fn refresh_precessing_trajectories(
         if time_since_rebuild >= PRECESSION_REBUILD_INTERVAL {
             // Get the body's ID to request trajectory recalculation
             if let Ok(info) = bodies.get(traj_mesh.body_entity) {
-                info!("Refreshing precessing trajectory for {} (time since rebuild: {:.0}s)", 
-                      info.id, time_since_rebuild);
                 calc_writer.write(CalculateTrajectory {
                     selection: BodySelection::IDs(vec![info.id.clone()]),
                 });

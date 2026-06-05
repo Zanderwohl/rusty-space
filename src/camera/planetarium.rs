@@ -28,6 +28,7 @@ use crate::gui::app::AppState;
 use crate::presentation::position_bodies;
 use crate::sim::SimTime;
 use crate::camera::freecam::{FreeCamPlugin, Freecam, MovementSettings};
+use crate::gui::planetarium::BodyInfoState;
 use crate::util::bevystuff::GlamVec;
 use crate::util::ease;
 
@@ -42,6 +43,7 @@ impl Plugin for PlanetariumCameraPlugin {
                 handle_gotos,
                 run_goto.before(position_bodies).after(calculate_body_positions),
                 revolve_around.before(position_bodies).after(calculate_body_positions),
+                pick_body_on_click,
                 ).run_if(in_state(AppState::Planetarium)))
         ;
     }
@@ -223,6 +225,100 @@ fn run_goto (
 
         if let Some(next_action) = next_action {
             pcam.action = next_action;
+        }
+    }
+}
+
+#[derive(Default)]
+struct PickState {
+    last_pick_id: Option<String>,
+    last_pick_time: f64,
+}
+
+const DOUBLE_CLICK_WINDOW: f64 = 0.5;
+
+fn pick_body_on_click(
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+    cameras: Query<(&Camera, &Projection, &Transform, &Freecam), With<PlanetariumCamera>>,
+    bodies: Query<(&BodyState, &BodyInfo, &Appearance), Without<PlanetariumCamera>>,
+    view_settings: Res<ViewSettings>,
+    mut egui_ctx: EguiContexts,
+    time: Res<Time>,
+    mut pick_state: Local<PickState>,
+    mut body_info_state: ResMut<BodyInfoState>,
+) {
+    if !mouse_buttons.just_pressed(MouseButton::Left) {
+        return;
+    }
+
+    let egui_wants_pointer = egui_ctx.ctx_mut()
+        .map_or(false, |ctx| ctx.wants_pointer_input());
+    if egui_wants_pointer {
+        return;
+    }
+
+    let Ok(window) = primary_window.single() else { return };
+    let Some(cursor_pos) = window.cursor_position() else { return };
+    let Ok((camera, _projection, cam_transform, freecam)) = cameras.single() else { return };
+
+    let fresh_gt = GlobalTransform::from(*cam_transform);
+    let Ok(ray) = camera.viewport_to_world(&fresh_gt, cursor_pos) else { return };
+
+    let distance_scale = view_settings.distance_factor();
+    let ray_origin = ray.origin;
+    let ray_dir: Vec3 = *ray.direction;
+
+    let mut sphere_hits: Vec<&BodyInfo> = Vec::new();
+    let mut pixel_hits: Vec<&BodyInfo> = Vec::new();
+
+    for (state, info, appearance) in bodies.iter() {
+        let body_pos = state.current_position
+            .as_bevy_scaled_cheated(distance_scale, freecam.bevy_pos);
+
+        let visual_radius = view_settings.body_scale_factor(appearance.radius());
+        let pick_radius = visual_radius * 1.5;
+
+        let oc = ray_origin - body_pos;
+        let b = oc.dot(ray_dir);
+        let c = oc.dot(oc) - pick_radius * pick_radius;
+        let discriminant = b * b - c;
+
+        if discriminant >= 0.0 {
+            let t2 = -b + discriminant.sqrt();
+            if t2 >= 0.0 {
+                sphere_hits.push(info);
+            }
+        }
+
+        if let Ok(screen_pos) = camera.world_to_viewport(&fresh_gt, body_pos) {
+            if cursor_pos.distance(screen_pos) <= 20.0 {
+                pixel_hits.push(info);
+            }
+        }
+    }
+
+    let pick_from = if !sphere_hits.is_empty() {
+        &sphere_hits
+    } else {
+        &pixel_hits
+    };
+
+    if let Some(info) = pick_from.iter()
+        .max_by(|a, b| a.mass.partial_cmp(&b.mass).unwrap_or(std::cmp::Ordering::Equal))
+    {
+        let now = time.elapsed().as_secs_f64();
+        let is_double = pick_state.last_pick_id.as_deref() == Some(&info.id)
+            && (now - pick_state.last_pick_time) <= DOUBLE_CLICK_WINDOW;
+
+        if is_double {
+            body_info_state.current_body_id = Some(info.id.clone());
+            info!("Selected body: {} (id: {})", info.display_name(), info.id);
+            pick_state.last_pick_id = None;
+        } else {
+            info!("Picked body: {} (id: {})", info.display_name(), info.id);
+            pick_state.last_pick_id = Some(info.id.clone());
+            pick_state.last_pick_time = now;
         }
     }
 }

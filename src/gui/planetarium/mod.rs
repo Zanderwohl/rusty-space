@@ -15,7 +15,7 @@ use crate::body::motive::kepler_motive;
 use crate::foundations::time::{Instant, J2000_JD, JD_SECONDS_PER_JULIAN_DAY};
 pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin, CameraAction};
 use crate::camera::Freecam;
-use crate::gui::planetarium::windows::body_info::BodyInfoState;
+pub use crate::gui::planetarium::windows::body_info::BodyInfoState;
 use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, TrajectoryMesh, BodyPointMesh};
 
 mod windows;
