@@ -40,6 +40,7 @@ itertools = "0.14.0"
 rusqlite = { version = "0.32", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
 csv = "1"
+bitflags = "2"
 
 [dependencies.eframe]
 version = "0.33.3"

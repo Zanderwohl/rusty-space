@@ -1,6 +1,9 @@
+pub mod spectral;
+
 use std::f32::consts::PI;
 use bevy::prelude::*;
 use csv::ReaderBuilder;
+use spectral::SpectralType;
 
 /// GPU-ready star data: pre-computed direction vector + apparent magnitude.
 /// 16 bytes total, maps directly to a WGSL `vec4<f32>`.
@@ -19,6 +22,8 @@ pub struct DistantStar {
     pub id: u32,
     pub proper: String,
     pub spect: String,
+    /// Parsed MK spectral classification
+    pub spectral: Option<SpectralType>,
     /// Right ascension in hours (0-24)
     pub ra: f32,
     /// Declination in degrees (-90 to +90)
@@ -97,10 +102,14 @@ fn load_csv(path: &str) -> Vec<DistantStar> {
             // Swizzle to Bevy Y-up: (x, z, -y)
             let dir = [x, z, -y];
 
+            let spect_str = r.get(spect_col).unwrap_or("").to_string();
+            let spectral = SpectralType::parse(&spect_str);
+
             DistantStar {
                 id,
                 proper: r.get(proper_col).unwrap_or("").to_string(),
-                spect: r.get(spect_col).unwrap_or("").to_string(),
+                spect: spect_str,
+                spectral,
                 ra,
                 dec,
                 dist: f(dist_col),
