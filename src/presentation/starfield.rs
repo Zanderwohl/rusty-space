@@ -4,7 +4,9 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 use bevy::render::storage::ShaderStorageBuffer;
 
+use bevy::color::Color;
 use crate::catalog::Catalogs;
+use crate::catalog::spectral::SpectralType;
 use crate::gui::settings::Settings;
 use crate::presentation::starfield_material::StarfieldMaterial;
 
@@ -28,24 +30,33 @@ pub fn spawn_starfield(
     // Combine closest and brightest stars, deduplicating by id
     let mut seen_ids = HashSet::new();
     let mut star_data: Vec<[f32; 4]> = Vec::new();
+    let mut color_data: Vec<[f32; 4]> = Vec::new();
+
+    let default_color = Color::linear_rgba(1.0, 1.0, 1.0, 1.0);
 
     for star in catalogs.hyg_closest.iter().chain(catalogs.hyg_brightest.iter()) {
         if seen_ids.insert(star.id) {
-            // Convert StarGpuData to [f32; 4] for the GPU buffer
             star_data.push([
                 star.gpu.dir[0],
                 star.gpu.dir[1],
                 star.gpu.dir[2],
                 star.gpu.mag,
             ]);
+
+            let color = star.spectral.as_ref()
+                .map(SpectralType::to_color)
+                .unwrap_or(default_color);
+            let linear = color.to_linear();
+            color_data.push([linear.red, linear.green, linear.blue, 1.0]);
         }
     }
 
     let star_count = star_data.len() as u32;
     info!("Uploading {} unique stars to GPU buffer", star_count);
 
-    // Upload star data to GPU storage buffer
+    // Upload star data and colors to GPU storage buffers
     let stars_buffer = buffers.add(ShaderStorageBuffer::from(star_data));
+    let colors_buffer = buffers.add(ShaderStorageBuffer::from(color_data));
 
     // Create settings buffer: [brightness, padding, padding, padding]
     let settings_data: Vec<[f32; 4]> = vec![[settings.display.star_brightness, 0.0, 0.0, 0.0]];
@@ -57,6 +68,7 @@ pub fn spawn_starfield(
     // Create the starfield material
     let material_handle = materials.add(StarfieldMaterial {
         stars: stars_buffer,
+        colors: colors_buffer,
         settings: settings_buffer,
         star_count,
     });

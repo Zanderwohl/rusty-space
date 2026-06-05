@@ -13,18 +13,23 @@ use bevy_mesh::MeshVertexBufferLayoutRef;
 ///
 /// Stars are stored in a GPU buffer as `vec4(dir.x, dir.y, dir.z, mag)` where
 /// `dir` is a pre-computed unit direction vector in Bevy Y-up space.
+/// Colors are stored separately as `vec4(r, g, b, 1.0)` in linear RGB.
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
 pub struct StarfieldMaterial {
     /// Storage buffer containing star data as `[f32; 4]` per star
     #[storage(0, read_only)]
     pub stars: Handle<ShaderStorageBuffer>,
 
-    /// Storage buffer containing settings as `[f32; 4]` (brightness, padding...)
+    /// Storage buffer containing per-star linear RGB colors as `[f32; 4]`
     #[storage(1, read_only)]
+    pub colors: Handle<ShaderStorageBuffer>,
+
+    /// Storage buffer containing settings as `[f32; 4]` (brightness, padding...)
+    #[storage(2, read_only)]
     pub settings: Handle<ShaderStorageBuffer>,
 
     /// Number of stars in the buffer
-    #[uniform(2)]
+    #[uniform(3)]
     pub star_count: u32,
 }
 

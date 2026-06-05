@@ -25,8 +25,9 @@ struct StarfieldMaterialUniform {
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<storage, read> stars: array<vec4<f32>>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var<storage, read> settings: array<vec4<f32>>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> material: StarfieldMaterialUniform;
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var<storage, read> colors: array<vec4<f32>>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<storage, read> settings: array<vec4<f32>>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(3) var<uniform> material: StarfieldMaterialUniform;
 
 // Dot product threshold for star visibility (controls apparent star size)
 // 0.999995 ≈ 0.18 degrees, roughly 2-3 pixels radius
@@ -61,9 +62,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // View direction from camera toward this fragment on the sphere
     let view_dir = normalize(in.local_position);
 
-    var total_brightness: f32 = 0.0;
+    var total_color: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
 
-    // Loop through all stars and accumulate brightness
+    // Loop through all stars and accumulate colored brightness
     for (var i: u32 = 0u; i < material.star_count; i = i + 1u) {
         let star = stars[i];
         let star_dir = star.xyz;
@@ -74,19 +75,18 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
         if alignment > STAR_THRESHOLD {
             // Convert magnitude to brightness (lower mag = brighter)
-            // Each magnitude step is 2.512x brightness, but scaled to HDR range
-            // mag 0 -> MAG_ZERO_BRIGHTNESS, mag -1.5 (Sirius) -> ~4x brighter
             let brightness = MAG_ZERO_BRIGHTNESS * pow(2.512, -mag) * BRIGHTNESS_SCALE;
 
             // Smooth falloff from center to reduce flickering/aliasing
             let falloff = (alignment - STAR_THRESHOLD) / (1.0 - STAR_THRESHOLD);
-            total_brightness += brightness * falloff;
+
+            let star_color = colors[i].rgb;
+            total_color += star_color * brightness * falloff;
         }
     }
 
-    // Output HDR white with accumulated brightness for bloom
     // settings[0].x contains the brightness multiplier
     let emission_strength = settings[0].x;
-    let emissive = vec3<f32>(1.0, 1.0, 1.0) * total_brightness * emission_strength;
+    let emissive = total_color * emission_strength;
     return vec4(emissive, 1.0);
 }
