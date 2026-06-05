@@ -178,7 +178,12 @@ fn load_assets(
             let id = body.id();
             let name = body.name();
             for tag in body.tags() {
-                view_settings.tags.entry(tag.clone()).or_insert(TagState::default()).members.insert(id.clone());
+                let default_state = if tag == "Major Moon" {
+                    TagState { shown: true, trajectory: true, ..Default::default() }
+                } else {
+                    TagState::default()
+                };
+                view_settings.tags.entry(tag.clone()).or_insert(default_state).members.insert(id.clone());
             }
             // info!("{:?}", view_settings);
             universe.insert(name, id);

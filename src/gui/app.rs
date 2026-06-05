@@ -116,7 +116,7 @@ pub fn common_setup(
             fov: PI / 2.0,
             aspect_ratio: 1.0,
             near: 0.001,
-            far: 10000.0,
+            far: 1e8,
         }),
         Transform::from_rotation(rotation),
         Freecam { bevy_pos: DVec3::new(20., 2., 0.) },

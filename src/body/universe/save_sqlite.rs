@@ -425,10 +425,14 @@ fn save_bodies(conn: &Connection, bodies: &[SomeBody]) -> Result<(), SqliteSaveE
         
         // Save body's tags to tag_members
         for tag in &info.tags {
-            // Ensure the tag exists in the tags table
+            let (default_shown, default_trajectory) = if tag == "Major Moon" {
+                (1, 1)
+            } else {
+                (1, 0)
+            };
             conn.execute(
-                "INSERT OR IGNORE INTO tags (name, shown, trajectory) VALUES (?1, 1, 0)",
-                [tag],
+                "INSERT OR IGNORE INTO tags (name, shown, trajectory) VALUES (?1, ?2, ?3)",
+                params![tag, default_shown, default_trajectory],
             )?;
             // Add body as member of this tag
             conn.execute(

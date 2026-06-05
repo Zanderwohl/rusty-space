@@ -300,7 +300,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.08e16,
                         major: true,
                         designation: Some("Mars I".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -339,7 +339,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.80e15,
                         major: true,
                         designation: Some("Mars II".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -453,7 +453,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 7.346e22,
                         major: true,
                         designation: Some("Earth I".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -528,7 +528,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 3.75e16,
                         major: true,
                         designation: Some("Jupiter XVI".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -565,7 +565,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.50e15,
                         major: true,
                         designation: Some("Jupiter XV".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -602,7 +602,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 2.47e18,
                         major: true,
                         designation: Some("Jupiter V".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -639,7 +639,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 4.51e17,
                         major: true,
                         designation: Some("Jupiter XIV".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -676,7 +676,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.932e22,
                         major: true,
                         designation: Some("Jupiter I".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -713,7 +713,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 4.800e22,
                         major: true,
                         designation: Some("Jupiter II".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -750,7 +750,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.482e23,
                         major: true,
                         designation: Some("Jupiter III".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -787,7 +787,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.076e23,
                         major: true,
                         designation: Some("Jupiter IV".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -824,7 +824,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.0e15,
                         major: false,
                         designation: Some("Jupiter XVIII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -861,7 +861,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.4e15,
                         major: false,
                         designation: Some("Jupiter XIII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -898,7 +898,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 2.27e18,
                         major: false,
                         designation: Some("Jupiter VI".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -935,7 +935,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.9e16,
                         major: false,
                         designation: Some("Jupiter X".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -972,7 +972,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 7.0e17,
                         major: false,
                         designation: Some("Jupiter VII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1009,7 +1009,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.1e16,
                         major: false,
                         designation: Some("Jupiter XII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1046,7 +1046,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 2.0e14,
                         major: false,
                         designation: Some("Jupiter XX".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1083,7 +1083,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 3.0e16,
                         major: false,
                         designation: Some("Jupiter IX".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1120,7 +1120,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.0e15,
                         major: false,
                         designation: Some("Jupiter XVII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1157,7 +1157,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 6.4e16,
                         major: false,
                         designation: Some("Jupiter VIII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1194,7 +1194,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 3.7e16,
                         major: false,
                         designation: Some("Jupiter XI".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1231,7 +1231,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 2.0e14,
                         major: false,
                         designation: Some("Jupiter XIX".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1268,7 +1268,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXI".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1305,7 +1305,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1342,7 +1342,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXIII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1379,7 +1379,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXIV".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1416,7 +1416,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXV".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1453,7 +1453,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXVI".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1490,7 +1490,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXVII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1527,7 +1527,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXVIII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1564,7 +1564,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXIX".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1601,7 +1601,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXX".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1638,7 +1638,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXXI".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1675,7 +1675,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXXII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1712,7 +1712,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXXIII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1749,7 +1749,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXXIV".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1786,7 +1786,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXXV".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1823,7 +1823,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXXVI".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1860,7 +1860,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXXVII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1897,7 +1897,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXXVIII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1934,7 +1934,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XXXIX".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -1971,7 +1971,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: Some("Jupiter XL".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2008,7 +2008,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2045,7 +2045,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2082,7 +2082,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2119,7 +2119,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2156,7 +2156,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2193,7 +2193,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2230,7 +2230,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2267,7 +2267,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2304,7 +2304,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2341,7 +2341,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2378,7 +2378,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2415,7 +2415,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2452,7 +2452,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2489,7 +2489,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2526,7 +2526,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2563,7 +2563,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2600,7 +2600,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2637,7 +2637,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2674,7 +2674,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2711,7 +2711,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2748,7 +2748,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2785,7 +2785,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2822,7 +2822,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2859,7 +2859,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2896,7 +2896,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2933,7 +2933,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -2970,7 +2970,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3007,7 +3007,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3044,7 +3044,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3081,7 +3081,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3118,7 +3118,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3155,7 +3155,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3228,7 +3228,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 3.75e19,
                         major: true,
                         designation: Some("Saturn I".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3265,7 +3265,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.0805e20,
                         major: true,
                         designation: Some("Saturn II".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3302,7 +3302,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 6.176e20,
                         major: true,
                         designation: Some("Saturn III".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3339,7 +3339,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.09572e21,
                         major: true,
                         designation: Some("Saturn IV".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3376,7 +3376,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 2.309e21,
                         major: true,
                         designation: Some("Saturn V".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3413,7 +3413,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.34553e23,
                         major: true,
                         designation: Some("Saturn VI".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3450,7 +3450,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.08e19,
                         major: true,
                         designation: Some("Saturn VII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3487,7 +3487,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.8059e21,
                         major: true,
                         designation: Some("Saturn VIII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3524,7 +3524,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.289e18,
                         major: false,
                         designation: Some("Saturn IX".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3561,7 +3561,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.98e18,
                         major: false,
                         designation: Some("Saturn X".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3598,7 +3598,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 5.5e17,
                         major: false,
                         designation: Some("Saturn XI".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3635,7 +3635,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 2.55e16,
                         major: false,
                         designation: Some("Saturn XII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3672,7 +3672,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 7.2e15,
                         major: false,
                         designation: Some("Saturn XIII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3709,7 +3709,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 3.6e15,
                         major: false,
                         designation: Some("Saturn XIV".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3746,7 +3746,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.4e15,
                         major: false,
                         designation: Some("Saturn XV".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3783,7 +3783,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.4e17,
                         major: false,
                         designation: Some("Saturn XVI".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3820,7 +3820,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.3e17,
                         major: false,
                         designation: Some("Saturn XVII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3857,7 +3857,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 4.95e15,
                         major: false,
                         designation: Some("Saturn XVIII".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3894,7 +3894,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3931,7 +3931,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -3968,7 +3968,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4005,7 +4005,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4042,7 +4042,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4079,7 +4079,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4116,7 +4116,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4153,7 +4153,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4190,7 +4190,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4227,7 +4227,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4264,7 +4264,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4301,7 +4301,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4338,7 +4338,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4375,7 +4375,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4412,7 +4412,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4449,7 +4449,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4486,7 +4486,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4523,7 +4523,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4560,7 +4560,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4597,7 +4597,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4634,7 +4634,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4671,7 +4671,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4708,7 +4708,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4745,7 +4745,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4782,7 +4782,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4819,7 +4819,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4856,7 +4856,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4893,7 +4893,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4930,7 +4930,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -4967,7 +4967,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5004,7 +5004,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5041,7 +5041,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5078,7 +5078,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5115,7 +5115,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5152,7 +5152,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5189,7 +5189,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5226,7 +5226,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5263,7 +5263,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5300,7 +5300,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5337,7 +5337,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5374,7 +5374,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5411,7 +5411,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5448,7 +5448,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5485,7 +5485,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5522,7 +5522,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5559,7 +5559,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5596,7 +5596,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5633,7 +5633,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.7e13,
                         major: false,
                         designation: None,
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5808,7 +5808,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 1.586e21,
                         major: true,
                         designation: Some("Pluto I".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5845,7 +5845,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 6.07e15,
                         major: false,
                         designation: Some("Pluto V".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5882,7 +5882,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 2.24e16,
                         major: false,
                         designation: Some("Pluto II".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5919,7 +5919,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 9.05e15,
                         major: false,
                         designation: Some("Pluto IV".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -5956,7 +5956,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 3.01e16,
                         major: false,
                         designation: Some("Pluto III".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
@@ -6030,7 +6030,7 @@ pub fn solar_system() -> UniverseFile {
                         mass: 8.2e19,
                         major: true,
                         designation: Some("136199 Eris I".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Minor Moon".into()],
                     },
                     params: KeplerMotive {
                         primary_id: "Eris".to_string(),
@@ -6178,7 +6178,7 @@ pub fn earth_moon() -> UniverseFile {
                         mass: 6.4171,
                         major: true,
                         designation: Some("Earth I".into()),
-                        tags: vec!["Moon".into()],
+                        tags: vec!["Moon".into(), "Major Moon".into()],
                         ..Default::default()
                     },
                     params: KeplerMotive {
