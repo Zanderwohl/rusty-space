@@ -15,7 +15,7 @@ use num_traits::Pow;
 use crate::body::appearance::Appearance;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::{Motive, MotiveSelection};
-use crate::body::universe::save::ViewSettings;
+use crate::body::universe::save::{UniversePhysics, ViewSettings};
 use crate::camera::{Freecam, PlanetariumCamera};
 use crate::gui::settings::{DisplayGlow, Settings};
 use crate::sim::{BodySelection, CalculateTrajectory, SimTime};
@@ -96,6 +96,12 @@ const DISTANCE_DIM_POWER: f32 = 0.4;
 
 /// Minimum dimming factor - distant trajectories never go fully invisible.
 const DISTANCE_DIM_MIN: f32 = 0.01;
+
+/// Number of transient points to insert (T and T' count as 2, plus neighbors on each side)
+const TRANSIENT_POINT_N: usize = 5;
+
+/// Spacing between transient point neighbors in radians (5 degrees)
+const TRANSIENT_SPACING: f64 = 0.05 * std::f64::consts::PI / 180.0;
 
 
 /// Calculate tube radius based on distance from camera.
@@ -277,6 +283,7 @@ pub fn build_trajectory_meshes(
     sim_time: Res<SimTime>,
     color_grading: Single<&ColorGrading>,
     physics_graph: Res<crate::body::motive::calculate_body_positions::PhysicsGraph>,
+    physics: Res<UniversePhysics>,
 ) {
     let distance_scale = view_settings.distance_factor();
     let exposure = color_grading.global.exposure;
@@ -296,7 +303,7 @@ pub fn build_trajectory_meshes(
     
     for (traj_mesh, mut cache, mut visibility, mesh3d) in trajectory_meshes.iter_mut() {
         // Find the body this trajectory belongs to using direct entity lookup (O(1))
-        let Ok((state, info, _motive, appearance)) = bodies.get(traj_mesh.body_entity) else {
+        let Ok((state, info, motive, appearance)) = bodies.get(traj_mesh.body_entity) else {
             if *visibility != Visibility::Hidden {
                 *visibility = Visibility::Hidden;
             }
@@ -362,10 +369,8 @@ pub fn build_trajectory_meshes(
         let mut transient_idx: Option<usize> = None;
         let mut transient_prime_idx: Option<usize> = None;
         
-        // Insert transient point T (body's current local position) and T' (same position, dimmest)
-        // T and T' are adjacent at the same position - the T-T' segment is hidden inside the body.
-        // Skip for precessing orbits - the cached trajectory has different precession
-        // states at each sample point, so inserting the current position would be inconsistent.
+        // Insert transient points: T (body position), T' (same position, dimmest), and neighbors
+        // for increased local resolution. Skip for precessing orbits.
         if !cache.is_precessing {
             if let (Some(local_pos), Some(interval_size)) = (state.current_local_position, cache.interval_size) {
                 let current_relative_time = cycle_frac * interval_size;
@@ -378,11 +383,55 @@ pub fn build_trajectory_meshes(
                     let dist_after = (local_pos - points[seg + 1].1).length();
                     
                     if dist_before >= body_radius && dist_after >= body_radius {
-                        // Insert T (brightest) then T' (dimmest) at the same position
-                        points.insert(seg + 1, (current_relative_time, local_pos));
-                        transient_idx = Some(seg + 1);
-                        points.insert(seg + 2, (current_relative_time + 0.0001, local_pos));
-                        transient_prime_idx = Some(seg + 2);
+                        // Get segment boundary positions
+                        let pos_a = points[seg].1;     // Position before T
+                        let pos_b = points[seg + 1].1; // Position after T
+                        let time_a = points[seg].0;
+                        let time_b = points[seg + 1].0;
+                        
+                        // Number of neighbors on each side of T
+                        let neighbor_count = TRANSIENT_POINT_N / 2;
+                        
+                        // Build transient points by interpolating within the segment
+                        // Order: wake neighbors (A toward T), T, T', future neighbors (T toward B)
+                        let mut transient_points: Vec<(f64, DVec3)> = Vec::new();
+                        
+                        // Wake neighbors: interpolate between A and T
+                        // Evenly space them, with the last one closest to T
+                        for i in (1..=neighbor_count).rev() {
+                            // t=0 at A, t=1 at T; we want positions at t = i/(neighbor_count+1)
+                            let t = i as f64 / (neighbor_count + 1) as f64;
+                            let pos = pos_a.lerp(local_pos, t);
+                            let time = time_a + (current_relative_time - time_a) * t;
+                            transient_points.push((time, pos));
+                        }
+                        
+                        // T (brightest) - body's actual position
+                        let t_local_idx = transient_points.len();
+                        transient_points.push((current_relative_time, local_pos));
+                        
+                        // T' (dimmest, same position as T)
+                        let tp_local_idx = transient_points.len();
+                        transient_points.push((current_relative_time + 0.0001, local_pos));
+                        
+                        // Future neighbors: interpolate between T and B
+                        // Evenly space them, with the first one closest to T
+                        for i in 1..=neighbor_count {
+                            // t=0 at T, t=1 at B; we want positions at t = i/(neighbor_count+1)
+                            let t = i as f64 / (neighbor_count + 1) as f64;
+                            let pos = local_pos.lerp(pos_b, t);
+                            let time = current_relative_time + (time_b - current_relative_time) * t;
+                            transient_points.push((time, pos));
+                        }
+                        
+                        // Insert all transient points at the correct position
+                        let insert_pos = seg + 1;
+                        for (i, pt) in transient_points.iter().enumerate() {
+                            points.insert(insert_pos + i, *pt);
+                        }
+                        
+                        transient_idx = Some(insert_pos + t_local_idx);
+                        transient_prime_idx = Some(insert_pos + tp_local_idx);
                     }
                 }
             }
