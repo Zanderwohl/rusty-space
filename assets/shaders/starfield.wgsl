@@ -16,17 +16,17 @@ struct Vertex {
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @location(0) world_position: vec4<f32>,
+    @location(0) world_position: vec3<f32>,
     @location(1) local_position: vec3<f32>,
 }
 
 struct StarfieldMaterialUniform {
     star_count: u32,
-    emission_strength: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<storage, read> stars: array<vec4<f32>>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var<uniform> material: StarfieldMaterialUniform;
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var<storage, read> settings: array<vec4<f32>>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> material: StarfieldMaterialUniform;
 
 // Dot product threshold for star visibility (controls apparent star size)
 // 0.999995 ≈ 0.18 degrees, roughly 2-3 pixels radius
@@ -43,8 +43,9 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 
     var world_from_local = mesh_functions::get_world_from_local(vertex.instance_index);
 
-    out.world_position = mesh_functions::mesh_position_local_to_world(world_from_local, vec4(vertex.position, 1.0));
-    out.clip_position = position_world_to_clip(out.world_position.xyz);
+    let world_pos = mesh_functions::mesh_position_local_to_world(world_from_local, vec4(vertex.position, 1.0));
+    out.world_position = world_pos.xyz;
+    out.clip_position = position_world_to_clip(world_pos.xyz);
 
     // Clamp depth to far plane so starfield renders behind everything
     out.clip_position.z = out.clip_position.w;
@@ -84,6 +85,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     // Output HDR white with accumulated brightness for bloom
-    let emissive = vec3<f32>(1.0, 1.0, 1.0) * total_brightness * material.emission_strength;
+    // settings[0].x contains the brightness multiplier
+    let emission_strength = settings[0].x;
+    let emissive = vec3<f32>(1.0, 1.0, 1.0) * total_brightness * emission_strength;
     return vec4(emissive, 1.0);
 }

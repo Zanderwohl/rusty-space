@@ -66,5 +66,5 @@ pub use celestial_markers::{
     CelestialMarker,
     CelestialMarkerCache,
 };
-pub use starfield::{spawn_starfield, Starfield};
+pub use starfield::{spawn_starfield, update_starfield_brightness, Starfield, StarfieldSettingsBuffer};
 pub use starfield_material::{StarfieldMaterial, StarfieldMaterialPlugin};

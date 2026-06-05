@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use bevy_egui::EguiPrimaryContextPass;
 use crate::body::appearance::AssetCache;
 use crate::body::universe::save::{UniverseFile, UniversePhysics, ViewSettings};
+use crate::gui::settings::Settings;
 use crate::body::universe::Universe;
 use crate::gui::app::AppState;
 use crate::gui::menu::UiState;
@@ -117,6 +118,11 @@ impl Plugin for PlanetariumUI {
                 presentation::update_celestial_markers
                     .after(presentation::position_bodies),
             ).in_set(PlanetariumUISet))
+            // Starfield brightness updates (via buffer, not material mutation)
+            //.add_systems(Update, (
+            //    presentation::update_starfield_brightness
+            //        .run_if(resource_changed::<Settings>),
+            //).in_set(PlanetariumUISet))
             // Simulation time advance
             .add_systems(Update, (
                 universe::advance_time,

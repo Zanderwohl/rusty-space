@@ -23,11 +23,11 @@ pub fn camera_window(
     }
 
     if settings.windows.camera {
-        camera_settings_window(ctx, camera, tonemapping, color_grading);
+        camera_settings_window(ctx, camera, tonemapping, color_grading, &mut settings);
     }
 }
 
-fn camera_settings_window(ctx: &mut Context, mut camera: Single<&mut Projection, With<PlanetariumCamera>>, tonemapping: Single<&mut Tonemapping>, mut color_grading: Single<&mut ColorGrading>) {
+fn camera_settings_window(ctx: &mut Context, mut camera: Single<&mut Projection, With<PlanetariumCamera>>, tonemapping: Single<&mut Tonemapping>, mut color_grading: Single<&mut ColorGrading>, settings: &mut Settings) {
     egui::Window::new("Camera Settings")
         .vscroll(true)
         .show(ctx, |ui| {
@@ -40,5 +40,10 @@ fn camera_settings_window(ctx: &mut Context, mut camera: Single<&mut Projection,
                 ui.add(egui::Slider::new(&mut fov_deg, 0.5..=190.0).text("FOV"));
                 perspective.fov = fov_deg.to_radians();
             }
+
+            ui.heading("Stars");
+            ui.add(egui::Slider::new(&mut settings.display.star_brightness, 0.1..=10.0)
+                .logarithmic(true)
+                .text("Brightness"));
         });
 }

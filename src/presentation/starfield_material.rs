@@ -19,13 +19,13 @@ pub struct StarfieldMaterial {
     #[storage(0, read_only)]
     pub stars: Handle<ShaderStorageBuffer>,
 
-    /// Number of stars in the buffer
-    #[uniform(1)]
-    pub star_count: u32,
+    /// Storage buffer containing settings as `[f32; 4]` (brightness, padding...)
+    #[storage(1, read_only)]
+    pub settings: Handle<ShaderStorageBuffer>,
 
-    /// Emission multiplier for bloom intensity
-    #[uniform(1)]
-    pub emission_strength: f32,
+    /// Number of stars in the buffer
+    #[uniform(2)]
+    pub star_count: u32,
 }
 
 impl Material for StarfieldMaterial {

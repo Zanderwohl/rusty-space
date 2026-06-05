@@ -5,16 +5,22 @@ use bevy::prelude::*;
 use bevy::render::storage::ShaderStorageBuffer;
 
 use crate::catalog::Catalogs;
+use crate::gui::settings::Settings;
 use crate::presentation::starfield_material::StarfieldMaterial;
 
 /// Marker component for the starfield sphere entity.
 #[derive(Component)]
 pub struct Starfield;
 
+/// Resource holding the settings buffer handle for runtime updates.
+#[derive(Resource)]
+pub struct StarfieldSettingsBuffer(pub Handle<ShaderStorageBuffer>);
+
 /// Spawns the starfield background sphere with all catalog stars.
 pub fn spawn_starfield(
     mut commands: Commands,
     catalogs: Res<Catalogs>,
+    settings: Res<Settings>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
     mut materials: ResMut<Assets<StarfieldMaterial>>,
@@ -39,13 +45,20 @@ pub fn spawn_starfield(
     info!("Uploading {} unique stars to GPU buffer", star_count);
 
     // Upload star data to GPU storage buffer
-    let buffer_handle = buffers.add(ShaderStorageBuffer::from(star_data));
+    let stars_buffer = buffers.add(ShaderStorageBuffer::from(star_data));
+
+    // Create settings buffer: [brightness, padding, padding, padding]
+    let settings_data: Vec<[f32; 4]> = vec![[settings.display.star_brightness, 0.0, 0.0, 0.0]];
+    let settings_buffer = buffers.add(ShaderStorageBuffer::from(settings_data));
+
+    // Store the settings buffer handle for runtime updates
+    commands.insert_resource(StarfieldSettingsBuffer(settings_buffer.clone()));
 
     // Create the starfield material
     let material_handle = materials.add(StarfieldMaterial {
-        stars: buffer_handle,
+        stars: stars_buffer,
+        settings: settings_buffer,
         star_count,
-        emission_strength: 1.0,
     });
 
     // Create an inverted sphere mesh (we view from inside)
@@ -58,4 +71,17 @@ pub fn spawn_starfield(
         Transform::default(),
         Starfield,
     ));
+}
+
+/// Syncs the star brightness setting to the starfield settings buffer.
+pub fn update_starfield_brightness(
+    settings: Res<Settings>,
+    handle: Option<Res<StarfieldSettingsBuffer>>,
+    mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
+) {
+    let Some(handle) = handle else { return };
+    if let Some(buffer) = buffers.get_mut(&handle.0) {
+        let data: Vec<[f32; 4]> = vec![[settings.display.star_brightness, 0.0, 0.0, 0.0]];
+        *buffer = ShaderStorageBuffer::from(data);
+    }
 }
