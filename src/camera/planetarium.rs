@@ -38,7 +38,7 @@ impl Plugin for PlanetariumCameraPlugin {
             .add_message::<GoTo>()
             .add_systems(Update, (
                 handle_gotos,
-                run_goto,
+                run_goto.before(position_bodies).after(calculate_body_positions),
                 revolve_around.before(position_bodies).after(calculate_body_positions),
                 ).run_if(in_state(AppState::Planetarium)))
         ;
@@ -82,8 +82,21 @@ pub struct GoTo {
 }
 
 #[derive(Clone)]
+pub enum GoToOrigin {
+    /// Fixed starting position (from Free mode)
+    Position(DVec3),
+    /// Revolving around an entity — track its position + offset each frame
+    Revolving {
+        entity: Entity,
+        bevy_distance: f64,
+        altitude: f64,
+        azimuth: f64,
+    },
+}
+
+#[derive(Clone)]
 pub struct GoToInProgress {
-    start_pos: DVec3,
+    origin: GoToOrigin,
     start_rot: Quat,
     start_time: f64,
     end_distance: f64,
@@ -109,8 +122,17 @@ fn handle_gotos (
 ) {
     if let Ok((mut cam_t, mut pcam, mut fcam)) = camera.single_mut() {
         for event in go_tos.read() {
-            let start_pos = fcam.bevy_pos;
             let start_rot = cam_t.rotation;
+
+            let origin = match &pcam.action {
+                CameraAction::RevolveAround(revolve) => GoToOrigin::Revolving {
+                    entity: revolve.entity,
+                    bevy_distance: revolve.bevy_distance,
+                    altitude: revolve.altitude,
+                    azimuth: revolve.azimuth,
+                },
+                _ => GoToOrigin::Position(fcam.bevy_pos),
+            };
 
             let (entity, state, appearance) = bodies.get(event.entity).unwrap();
             let obj_pos = state.current_position;
@@ -119,7 +141,7 @@ fn handle_gotos (
             let (altitude, azimuth) = alt_az_in_bevy(obj_pos.as_bevy_scaled_dvec(view_settings.distance_factor()), fcam.bevy_pos);
 
             pcam.action = CameraAction::Goto(GoToInProgress {
-                start_pos,
+                origin,
                 start_rot,
                 start_time: time.elapsed().as_secs_f64(),
                 entity,
@@ -148,6 +170,18 @@ fn run_goto (
                     let frac = f64::min(1.0, (now - goto.start_time) / animation_time);
                     let frac = ease::f64::circ(frac);
 
+                    let start_pos = match &goto.origin {
+                        GoToOrigin::Position(pos) => *pos,
+                        GoToOrigin::Revolving { entity, bevy_distance, altitude, azimuth } => {
+                            if let Ok(origin_body) = bodies.get(*entity) {
+                                let origin_pos = origin_body.current_position.as_bevy_scaled_dvec(view_settings.distance_factor());
+                                origin_pos + local_to_object_in_bevy(*altitude, *azimuth, *bevy_distance)
+                            } else {
+                                fcam.bevy_pos
+                            }
+                        }
+                    };
+
                     let body_pos_in_bevy = body_state.current_position.as_bevy_scaled_dvec(view_settings.distance_factor());
 
                     let offset = local_to_object_in_bevy(goto.end_altitude, goto.end_azimuth, goto.end_distance);
@@ -155,7 +189,7 @@ fn run_goto (
 
                     let look_at_rot = look_at(body_pos_in_bevy, final_pos, DVec3::Y);
 
-                    let mid_pos = goto.start_pos.lerp(final_pos, frac);
+                    let mid_pos = start_pos.lerp(final_pos, frac);
                     let mid_rot = goto.start_rot.slerp(look_at_rot.as_quat(), frac as f32);
                     fcam.bevy_pos = mid_pos;
                     cam_t.rotation = mid_rot;
