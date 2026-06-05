@@ -13,9 +13,10 @@ use crate::body::universe;
 use crate::body::motive::calculate_body_positions::{self, PhysicsGraph, PositionCache, SimulationPerformanceMetrics};
 use crate::body::motive::kepler_motive;
 use crate::foundations::time::{Instant, J2000_JD, JD_SECONDS_PER_JULIAN_DAY};
-pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin};
+pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin, CameraAction};
+use crate::camera::Freecam;
 use crate::gui::planetarium::windows::body_info::BodyInfoState;
-use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin};
+use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, TrajectoryMesh, BodyPointMesh};
 
 mod windows;
 
@@ -122,7 +123,11 @@ impl Plugin for PlanetariumUI {
             // Asset loading
             .add_systems(Update, (load_assets).in_set(PlanetariumLoadingSet))
             .add_systems(OnExit(AppState::PlanetariumLoading), initial_trajectories)
-            .add_systems(OnExit(AppState::Planetarium), (unload_simulation_objects, presentation::cleanup_celestial_markers))
+            .add_systems(OnExit(AppState::Planetarium), (
+                unload_simulation_objects,
+                presentation::cleanup_celestial_markers,
+                cleanup_planetarium,
+            ))
         ;
 
 
@@ -182,4 +187,54 @@ fn load_assets(
     }
 
     next_app_state.set(AppState::Planetarium);
+}
+
+fn cleanup_planetarium(
+    mut commands: Commands,
+    trajectory_meshes: Query<Entity, With<TrajectoryMesh>>,
+    body_point_meshes: Query<Entity, With<BodyPointMesh>>,
+    mut graph: ResMut<PhysicsGraph>,
+    mut cache: ResMut<PositionCache>,
+    mut sim_time: ResMut<SimTime>,
+    mut view_settings: ResMut<ViewSettings>,
+    mut body_info_state: ResMut<BodyInfoState>,
+    mut metrics: ResMut<SimulationPerformanceMetrics>,
+    mut universe: ResMut<Universe>,
+    mut asset_cache: ResMut<AssetCache>,
+    mut camera: Query<(&mut PlanetariumCamera, &mut Freecam)>,
+) {
+    // Despawn orphaned presentation entities that aren't children of SimulationObject
+    for entity in &trajectory_meshes {
+        commands.entity(entity).despawn();
+    }
+    for entity in &body_point_meshes {
+        commands.entity(entity).despawn();
+    }
+
+    // Reset physics state
+    graph.clear();
+    graph.needs_rebuild = true;
+    *cache = PositionCache::default();
+
+    // Reset simulation clock
+    *sim_time = SimTime::default();
+
+    // Reset view and UI state
+    *view_settings = ViewSettings::default();
+    *body_info_state = BodyInfoState::default();
+    *metrics = SimulationPerformanceMetrics::default();
+
+    // Clear universe maps so stale IDs don't linger
+    universe.clear_all();
+    universe.path = None;
+
+    // Clear cached mesh/material handles
+    asset_cache.meshes.clear();
+    asset_cache.materials.clear();
+
+    // Reset camera to free mode at origin
+    if let Ok((mut pcam, mut fcam)) = camera.single_mut() {
+        pcam.action = CameraAction::Free;
+        fcam.bevy_pos = bevy::math::DVec3::new(20., 2., 0.);
+    }
 }

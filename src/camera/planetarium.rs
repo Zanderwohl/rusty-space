@@ -20,11 +20,13 @@ use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use bevy_egui::EguiContexts;
 use num_traits::Float;
 use crate::body::appearance::Appearance;
-use crate::body::motive::info::BodyState;
+use crate::body::motive::compound_motive::{Motive, MotiveSelection};
+use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::calculate_body_positions;
 use crate::body::universe::save::ViewSettings;
 use crate::gui::app::AppState;
 use crate::presentation::position_bodies;
+use crate::sim::SimTime;
 use crate::camera::freecam::{FreeCamPlugin, Freecam, MovementSettings};
 use crate::util::bevystuff::GlamVec;
 use crate::util::ease;
@@ -116,9 +118,10 @@ pub struct RevolveAround {
 fn handle_gotos (
     mut go_tos: MessageReader<GoTo>,
     mut camera: Query<(&mut Transform, &mut PlanetariumCamera, &mut Freecam)>,
-    bodies: Query<(Entity, &BodyState, &Appearance), Without<PlanetariumCamera>>,
+    bodies: Query<(Entity, &BodyState, &Appearance, &BodyInfo, &Motive), Without<PlanetariumCamera>>,
     view_settings: Res<ViewSettings>,
     time: Res<Time>,
+    sim_time: Res<SimTime>,
 ) {
     if let Ok((mut cam_t, mut pcam, mut fcam)) = camera.single_mut() {
         for event in go_tos.read() {
@@ -134,10 +137,19 @@ fn handle_gotos (
                 _ => GoToOrigin::Position(fcam.bevy_pos),
             };
 
-            let (entity, state, appearance) = bodies.get(event.entity).unwrap();
+            let (entity, state, appearance, info, _) = bodies.get(event.entity).unwrap();
             let obj_pos = state.current_position;
-            
-            let nearby_distance = 3f64 * view_settings.body_scale_factor(appearance.radius()) as f64;
+
+            let nearby_distance = if matches!(appearance, Appearance::Empty) {
+                let max_child_sma = find_max_child_sma(&info.id, &bodies, sim_time.time);
+                if max_child_sma > 0.0 {
+                    1.5 * max_child_sma * view_settings.distance_factor()
+                } else {
+                    3.0 * view_settings.distance_factor()
+                }
+            } else {
+                3.0 * view_settings.body_scale_factor(appearance.radius()) as f64
+            };
             let (altitude, azimuth) = alt_az_in_bevy(obj_pos.as_bevy_scaled_dvec(view_settings.distance_factor()), fcam.bevy_pos);
 
             pcam.action = CameraAction::Goto(GoToInProgress {
@@ -235,7 +247,11 @@ fn revolve_around(
                     match entities.get(revolve.entity) {
                         Ok((entity, state, appearance, transform)) => {
                             let window_scale = window.height().min(window.width());
-                            let scaled_radius = view_settings.body_scale_factor(appearance.radius()) as f64;
+                            let scaled_radius = if matches!(appearance, Appearance::Empty) {
+                                view_settings.distance_factor()
+                            } else {
+                                view_settings.body_scale_factor(appearance.radius()) as f64
+                            };
 
                             let egui_wants_pointer = egui_ctx.ctx_mut()
                                 .map_or(false, |ctx| ctx.wants_pointer_input());
@@ -301,6 +317,26 @@ fn revolve_around(
             }
         }
     }
+}
+
+/// Find the largest semi-major axis among bodies whose current Keplerian motive
+/// has `target_id` as its primary. Returns 0.0 if no children are found.
+fn find_max_child_sma(
+    target_id: &str,
+    bodies: &Query<(Entity, &BodyState, &Appearance, &BodyInfo, &Motive), Without<PlanetariumCamera>>,
+    time: crate::foundations::time::Instant,
+) -> f64 {
+    bodies.iter()
+        .filter_map(|(_, _, _, _, motive)| {
+            let (_, ms) = motive.motive_at(time);
+            if let MotiveSelection::Keplerian(k) = ms {
+                if k.primary_id == target_id {
+                    return Some(k.semi_major_axis());
+                }
+            }
+            None
+        })
+        .fold(0.0f64, f64::max)
 }
 
 fn local_to_object_in_bevy(altitude: f64, azimuth: f64, bevy_distance: f64) -> DVec3 {
