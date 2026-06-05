@@ -5,4 +5,5 @@ pub mod interop;
 pub mod sim;
 pub mod presentation;
 pub mod camera;
+pub mod catalog;
 mod foundations;

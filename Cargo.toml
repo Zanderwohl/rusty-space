@@ -38,6 +38,8 @@ reqwest = { version = "0.12", features = ["blocking"] }
 serde_json = "1"
 itertools = "0.14.0"
 rusqlite = { version = "0.32", features = ["bundled"] }
+clap = { version = "4", features = ["derive"] }
+csv = "1"
 
 [dependencies.eframe]
 version = "0.33.3"
@@ -60,3 +62,7 @@ path = "src/bin/horizons.rs"
 [[bin]]
 name = "migrate-saves"
 path = "src/bin/migrate_saves.rs"
+
+[[bin]]
+name = "csv-sort"
+path = "src/bin/csv_sort.rs"
