@@ -29,10 +29,13 @@ struct StarfieldMaterialUniform {
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var<uniform> material: StarfieldMaterialUniform;
 
 // Dot product threshold for star visibility (controls apparent star size)
-const STAR_THRESHOLD: f32 = 0.9999;
+// 0.999995 ≈ 0.18 degrees, roughly 2-3 pixels radius
+const STAR_THRESHOLD: f32 = 0.999995;
 
-// Reference magnitude for brightness scaling (Sirius is about -1.5)
-const MAG_REFERENCE: f32 = 6.0;
+// Brightness scaling: maps magnitude to HDR output
+// Sirius (mag -1.5) -> ~2.0, naked eye limit (mag 6) -> ~0.05
+const BRIGHTNESS_SCALE: f32 = 0.15;
+const MAG_ZERO_BRIGHTNESS: f32 = 1.0;
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
@@ -70,10 +73,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
         if alignment > STAR_THRESHOLD {
             // Convert magnitude to brightness (lower mag = brighter)
-            // Using logarithmic scale: each magnitude step is ~2.512x brightness
-            let brightness = pow(10.0, -0.4 * (mag - MAG_REFERENCE));
+            // Each magnitude step is 2.512x brightness, but scaled to HDR range
+            // mag 0 -> MAG_ZERO_BRIGHTNESS, mag -1.5 (Sirius) -> ~4x brighter
+            let brightness = MAG_ZERO_BRIGHTNESS * pow(2.512, -mag) * BRIGHTNESS_SCALE;
 
-            // Soft falloff from star center
+            // Smooth falloff from center to reduce flickering/aliasing
             let falloff = (alignment - STAR_THRESHOLD) / (1.0 - STAR_THRESHOLD);
             total_brightness += brightness * falloff;
         }

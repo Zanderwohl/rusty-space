@@ -45,7 +45,7 @@ pub fn spawn_starfield(
     let material_handle = materials.add(StarfieldMaterial {
         stars: buffer_handle,
         star_count,
-        emission_strength: 3.0,
+        emission_strength: 1.0,
     });
 
     // Create an inverted sphere mesh (we view from inside)
