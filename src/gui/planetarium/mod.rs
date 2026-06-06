@@ -58,6 +58,7 @@ impl Plugin for PlanetariumUI {
             .add_plugins(EscapeMenuPlugin)
             .add_systems(EguiPrimaryContextPass, (
                 (
+                    windows::mission_clock::mission_clock_widget,
                     windows::controls::control_window,
                     windows::body_edit::body_edit_window,
                     windows::body_info::body_info_window,
