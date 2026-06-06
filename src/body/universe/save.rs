@@ -16,7 +16,7 @@ use crate::body::universe::save_sqlite;
 use crate::util::mappings;
 
 /// State for a tag (group of bodies).
-#[derive(Serialize, Deserialize, Resource, Debug)]
+#[derive(Serialize, Deserialize, Resource, Debug, Clone)]
 pub struct TagState {
     pub shown: bool,
     pub trajectory: bool,
@@ -205,7 +205,7 @@ fn default_gui_speed() -> f64 { 1.0 }
 fn default_max_frame_time() -> f64 { 0.016 }
 fn default_show_axes() -> bool { true }
 
-#[derive(Resource, Serialize, Deserialize)]
+#[derive(Resource, Serialize, Deserialize, Clone)]
 pub struct UniversePhysics {
     pub gravitational_constant: f64,
 }
@@ -218,7 +218,7 @@ impl Default for UniversePhysics {
     }
 }
 
-#[derive(Serialize, Deserialize, Resource, Debug)]
+#[derive(Serialize, Deserialize, Resource, Debug, Clone)]
 pub struct ViewSettings {
     pub distance_scale: f64,
     pub logarithmic_distance_scale: bool,

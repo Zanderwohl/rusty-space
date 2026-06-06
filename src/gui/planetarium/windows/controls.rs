@@ -5,9 +5,8 @@ use num_traits::Pow;
 use crate::body::motive::calculate_body_positions::SimulationPerformanceMetrics;
 use crate::body::universe::save::ViewSettings;
 use crate::foundations::time::JD_SECONDS_PER_JULIAN_DAY;
-use crate::gui::app::AppState;
 use crate::gui::common;
-use crate::gui::menu::{MenuState, UiState};
+use crate::gui::menu::UiState;
 use crate::sim::SimTime;
 use crate::gui::settings::{Settings, UiTheme};
 use crate::util::format;
@@ -15,10 +14,8 @@ use crate::util::format::seconds_to_naive_date;
 
 pub fn control_window(
     mut contexts: EguiContexts,
-    mut settings: ResMut<Settings>,
-    mut ui_state: ResMut<UiState>,
-    next_app_state: ResMut<NextState<AppState>>,
-    next_menu_state: ResMut<NextState<MenuState>>,
+    settings: Res<Settings>,
+    ui_state: Res<UiState>,
     mut time: ResMut<SimTime>,
     view_settings: ResMut<ViewSettings>,
     perf_metrics: Res<SimulationPerformanceMetrics>,
@@ -35,34 +32,25 @@ pub fn control_window(
     egui::Window::new("Controls")
         .vscroll(true)
         .show(ctx, |ui| {
-            planetarium_controls(next_app_state, next_menu_state, &mut time, ui, &mut ui_state, view_settings, &perf_metrics);
+            planetarium_controls(&mut time, ui, &ui_state, view_settings, &perf_metrics);
     });
 }
 
 pub fn planetarium_controls(
-    mut next_app_state: ResMut<NextState<AppState>>,
-    mut next_menu_state: ResMut<NextState<MenuState>>,
     time: &mut ResMut<SimTime>,
     ui: &mut Ui,
-    ui_state: &mut ResMut<UiState>,
+    ui_state: &UiState,
     mut view_settings: ResMut<ViewSettings>,
     perf_metrics: &SimulationPerformanceMetrics,
 ) {
-    if ui.button("Quit to Main Menu").clicked() {
-        // TODO: Some kind of save nag
-        ui_state.current_save = None;
-        next_app_state.set(AppState::MainMenu);
-        next_menu_state.set(MenuState::Planetarium);
-    }
     ui.horizontal(|ui| {
+        ui.label("File:");
         match &ui_state.current_save {
             None => { ui.label("New Universe"); },
             Some(file) => { ui.label(file.file_name.clone()); }
         }
-
-        ui.disable();
-        let _ = ui.button("Save");
     });
+    ui.label("Press Esc for menu");
     ui.separator();
     ui.horizontal(|ui| {
         if time.playing {

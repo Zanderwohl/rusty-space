@@ -4,7 +4,6 @@ use bevy::prelude::*;
 use bevy_egui::EguiPrimaryContextPass;
 use crate::body::appearance::AssetCache;
 use crate::body::universe::save::{UniverseFile, UniversePhysics, ViewSettings};
-use crate::gui::settings::Settings;
 use crate::body::universe::Universe;
 use crate::gui::app::AppState;
 use crate::gui::menu::UiState;
@@ -18,8 +17,10 @@ pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin, Camer
 use crate::camera::Freecam;
 pub use crate::gui::planetarium::windows::body_info::BodyInfoState;
 use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, TrajectoryMesh, BodyPointMesh};
+use escape_menu::{EscapeMenuPlugin, EscMenuState, UnsavedChanges};
 
 mod windows;
+pub mod escape_menu;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 struct PlanetariumUISet;
@@ -55,6 +56,7 @@ impl Plugin for PlanetariumUI {
             .add_plugins(OccluderMaterialPlugin)
             .add_plugins(BodyPointMaterialPlugin)
             .add_plugins(StarfieldMaterialPlugin)
+            .add_plugins(EscapeMenuPlugin)
             .add_systems(EguiPrimaryContextPass, (
                 (
                     windows::controls::control_window,
@@ -157,7 +159,10 @@ fn load_assets(
     mut universe: ResMut<Universe>,
     mut physics: ResMut<UniversePhysics>,
     mut sim_time: ResMut<SimTime>,
+    mut unsaved: ResMut<UnsavedChanges>,
 ) {
+    unsaved.0 = false;
+    
     if ui_state.current_save.is_none() {
         next_app_state.set(AppState::Planetarium);
         return;
@@ -168,13 +173,16 @@ fn load_assets(
 
     let universe_file: Option<UniverseFile> = UniverseFile::load_from_path(&path);
     if let Some(universe_file) = universe_file {
-        let (new_universe, mut sim_time) = Universe::from_file(&universe_file);
+        let (new_universe, loaded_time) = Universe::from_file(&universe_file);
         universe.path = new_universe.path.clone();
         universe.clear_all();
-        let version = universe_file.contents.version; // TODO: Support multiple file format versions?
+        let _version = universe_file.contents.version; // TODO: Support multiple file format versions?
 
-        let time = (universe_file.contents.time.time_julian_days - J2000_JD) * JD_SECONDS_PER_JULIAN_DAY; // Convert Julian Days to seconds
-        sim_time.time = Instant::from_seconds_since_j2000(time);
+        // Apply loaded time to the actual resource
+        sim_time.time = loaded_time.time;
+        sim_time.step = loaded_time.step;
+        sim_time.gui_speed = loaded_time.gui_speed;
+        sim_time.max_frame_time = loaded_time.max_frame_time;
         sim_time.playing = false;
 
         physics.gravitational_constant = universe_file.contents.physics.gravitational_constant;
@@ -214,7 +222,11 @@ fn cleanup_planetarium(
     mut universe: ResMut<Universe>,
     mut asset_cache: ResMut<AssetCache>,
     mut camera: Query<(&mut PlanetariumCamera, &mut Freecam)>,
+    mut next_esc_state: ResMut<NextState<EscMenuState>>,
+    mut unsaved: ResMut<UnsavedChanges>,
 ) {
+    next_esc_state.set(EscMenuState::Closed);
+    unsaved.0 = false;
     // Despawn orphaned presentation entities that aren't children of SimulationObject
     for entity in &trajectory_meshes {
         commands.entity(entity).despawn();

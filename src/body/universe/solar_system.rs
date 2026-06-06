@@ -106,7 +106,7 @@ fn pole_to_orientation(pole: DVec3, w0_deg: f64) -> DQuat {
 
 pub fn solar_system() -> UniverseFile {
     let solar_system = UniverseFile {
-        file: Some(PathBuf::from("data/templates/solar_system.toml")),
+        file: Some(PathBuf::from("data/templates/solar_system.em")),
         contents: UniverseFileContents {
             version: "0.0".into(),
             time: UniverseFileTime {
@@ -6111,7 +6111,7 @@ pub fn write_temp_system_file() {
 
 pub fn earth_moon() -> UniverseFile {
     let solar_system = UniverseFile {
-        file: Some(PathBuf::from("data/templates/earth_moon.toml")),
+        file: Some(PathBuf::from("data/templates/earth_moon.em")),
         contents: UniverseFileContents {
             version: "0.0".into(),
             time: UniverseFileTime {
