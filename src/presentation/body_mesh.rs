@@ -203,6 +203,23 @@ fn build_tube_from_points(
     (positions, normals, colors, indices)
 }
 
+/// Build an empty mesh that still declares the vertex layout required by
+/// `body_wireframe.wgsl` (`position`, `normal`, `color`).
+fn empty_wireframe_mesh() -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, Vec::<[f32; 3]>::new());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, Vec::<[f32; 3]>::new());
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_COLOR,
+        VertexAttributeValues::Float32x4(Vec::new()),
+    );
+    mesh.insert_indices(Indices::U32(Vec::new()));
+    mesh
+}
+
 /// Convert latitude/longitude (in radians) to a point on the unit sphere.
 /// Uses Bevy Y-up convention: +Y = north pole, +X = prime meridian (lon=0).
 fn latlon_to_point(lat: f32, lon: f32) -> Vec3 {
@@ -330,10 +347,7 @@ pub fn generate_latlon_sphere(highlight_latitudes: &[f64], tube_radius: f32, tub
 pub fn generate_great_circle_tube(normal: Vec3, tube_radius: f32, tube_sides: u32) -> Mesh {
     let normal = normal.normalize_or_zero();
     if normal.length_squared() < 0.001 {
-        return Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-        );
+        return empty_wireframe_mesh();
     }
 
     // Find two perpendicular vectors in the great circle plane

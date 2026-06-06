@@ -16,7 +16,8 @@ use crate::body::universe::Universe;
 use crate::gui::app::AppState;
 use crate::sim::{SimTime, SimulationObject};
 
-use super::{vfd, MenuState, UiState, SaveFileMeta};
+use super::{MenuState, UiState, SaveFileMeta};
+use crate::gui::style::vfd;
 
 // ============================================================================
 // State Machine

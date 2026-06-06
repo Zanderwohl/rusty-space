@@ -39,6 +39,23 @@ const HORN_SWEEP_DEG: f32 = 210.0;
 /// Length of the vertical stem below the horn meeting point.
 const STEM_LENGTH: f32 = 0.35;
 
+/// Build an empty mesh that still declares the vertex layout required by
+/// `trajectory.wgsl` (`position`, `normal`, `color`).
+fn empty_marker_mesh() -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, Vec::<[f32; 3]>::new());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, Vec::<[f32; 3]>::new());
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_COLOR,
+        VertexAttributeValues::Float32x4(Vec::new()),
+    );
+    mesh.insert_indices(Indices::U32(Vec::new()));
+    mesh
+}
+
 #[derive(Component)]
 pub struct CelestialMarker {
     /// Position in simulation space (meters, Z-up ecliptic J2000).
@@ -63,10 +80,7 @@ pub fn spawn_celestial_markers(
     // Point of Aries: vernal equinox direction = +X in ecliptic J2000
     let aries_pos = DVec3::new(LIGHT_YEAR_M, 0.0, 0.0);
 
-    let mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-    );
+    let mesh = empty_marker_mesh();
     let mesh_handle = meshes.add(mesh);
 
     let material = TrajectoryMaterial {

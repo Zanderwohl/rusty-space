@@ -103,6 +103,24 @@ const TRANSIENT_POINT_N: usize = 5;
 /// Spacing between transient point neighbors in radians (5 degrees)
 const TRANSIENT_SPACING: f64 = 0.05 * std::f64::consts::PI / 180.0;
 
+/// Build an empty mesh that still declares the vertex layout required by
+/// `trajectory.wgsl` (position, normal, color). This prevents pipeline
+/// specialization failures when a placeholder mesh is used.
+fn empty_trajectory_mesh() -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, Vec::<[f32; 3]>::new());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, Vec::<[f32; 3]>::new());
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_COLOR,
+        VertexAttributeValues::Float32x4(Vec::new()),
+    );
+    mesh.insert_indices(Indices::U32(Vec::new()));
+    mesh
+}
+
 
 /// Calculate tube radius based on distance from camera.
 /// Uses a power curve for general scaling, with a minimum angular size floor
@@ -130,7 +148,7 @@ pub fn spawn_trajectory_mesh(
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<TrajectoryMaterial>>,
 ) -> Entity {
-    let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD);
+    let mesh = empty_trajectory_mesh();
     let mesh_handle = meshes.add(mesh);
     
     let material = TrajectoryMaterial::default();
@@ -561,7 +579,7 @@ fn compute_brightness(
 /// Points are (position, brightness, radius).
 pub fn generate_tube_mesh(points: &[(Vec3, f32, f32)], sides: u32) -> Mesh {
     if points.len() < 2 {
-        return Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD);
+        return empty_trajectory_mesh();
     }
     
     let ring_count = points.len();
