@@ -182,11 +182,16 @@ impl Motive {
     }
 
     /// Invariant: There must be at least one motive.
+    /// If the requested time is before all motive events, returns the earliest motive.
     pub fn motive_at(&self, time: Instant) -> &(TransitionEvent, MotiveSelection) {
         let time_f64 = time.to_j2000_seconds();
-        let time = self.times.get_at_or_before(time_f64).expect("Invariant violated: CompoundMotive must have at least one motive.");
-        let key = util::bitfutz::f64::to_u64(time);
-        self.motives.get(&key).expect(format!("Invariant violated: CompoundMotive.times gave the time {}, but CompoundMotive.time motives has no such key {}.", time, key).as_ref())
+        // Try to find a motive at or before the requested time
+        let motive_time = self.times.get_at_or_before(time_f64)
+            // If no motive at or before, fall back to the earliest motive
+            .or_else(|| self.times.get(0).copied())
+            .expect("Invariant violated: CompoundMotive must have at least one motive.");
+        let key = util::bitfutz::f64::to_u64(motive_time);
+        self.motives.get(&key).expect(format!("Invariant violated: CompoundMotive.times gave the time {}, but CompoundMotive.time motives has no such key {}.", motive_time, key).as_ref())
     }
 
     /// Get the motive that was active just before the motive at the given time.
@@ -194,7 +199,9 @@ impl Motive {
     pub fn motive_before(&self, time: Instant) -> Option<&(TransitionEvent, MotiveSelection)> {
         // First find the current motive's time
         let time_f64 = time.to_j2000_seconds();
-        let current_time = self.times.get_at_or_before(time_f64)?;
+        // Try to find a motive at or before the requested time, or fall back to earliest
+        let current_time = self.times.get_at_or_before(time_f64)
+            .or_else(|| self.times.get(0).copied())?;
         // Then find the motive before that time
         let prev_time = self.times.get_before(current_time)?;
         let key = util::bitfutz::f64::to_u64(prev_time);

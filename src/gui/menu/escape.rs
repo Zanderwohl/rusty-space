@@ -14,24 +14,9 @@ use crate::body::universe::save::{
 };
 use crate::body::universe::Universe;
 use crate::gui::app::AppState;
-use crate::gui::menu::{MenuState, UiState};
 use crate::sim::{SimTime, SimulationObject};
 
-// ============================================================================
-// VFD Color Palette
-// ============================================================================
-
-pub mod vfd {
-    use bevy::color::Color;
-
-    pub const PANEL_BG: Color = Color::srgba(0.04, 0.10, 0.06, 0.92);
-    pub const BUTTON_BG: Color = Color::srgb(0.10, 0.23, 0.15);
-    pub const BUTTON_HOVER: Color = Color::srgb(0.16, 0.35, 0.21);
-    pub const BUTTON_BORDER: Color = Color::srgb(0.23, 0.73, 0.40);
-    pub const TEXT: Color = Color::srgb(0.35, 0.93, 0.69);
-    pub const TEXT_DIM: Color = Color::srgb(0.20, 0.55, 0.40);
-    pub const OVERLAY_BACKDROP: Color = Color::srgba(0.0, 0.0, 0.0, 0.70);
-}
+use super::{vfd, MenuState, UiState, SaveFileMeta};
 
 // ============================================================================
 // State Machine
@@ -291,7 +276,7 @@ fn spawn_message(commands: &mut Commands, panel: Entity, text: &str) {
         .spawn((
             Text::new(text),
             TextFont {
-                font_size: 28.0,
+                font_size: 18.0,
                 ..default()
             },
             TextColor(vfd::TEXT_DIM.into()),
@@ -639,7 +624,7 @@ pub fn handle_naming_buttons(
                     ) {
                         Ok(()) => {
                             unsaved.0 = false;
-                            ui_state.current_save = Some(crate::gui::menu::SaveFileMeta {
+                            ui_state.current_save = Some(SaveFileMeta {
                                 path: path.clone(),
                                 file_name: format!("{}.em", name),
                             });
@@ -731,7 +716,7 @@ pub fn handle_confirm_overwrite_buttons(
                 ) {
                     Ok(()) => {
                         unsaved.0 = false;
-                        ui_state.current_save = Some(crate::gui::menu::SaveFileMeta {
+                        ui_state.current_save = Some(SaveFileMeta {
                             path: path.clone(),
                             file_name: format!("{}.em", context.intended_name),
                         });

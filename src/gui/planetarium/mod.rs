@@ -17,10 +17,9 @@ pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin, Camer
 use crate::camera::Freecam;
 pub use crate::gui::planetarium::windows::body_info::BodyInfoState;
 use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, TrajectoryMesh, BodyPointMesh};
-use escape_menu::{EscapeMenuPlugin, EscMenuState, UnsavedChanges};
+use crate::gui::menu::escape::{EscapeMenuPlugin, EscMenuState, UnsavedChanges};
 
 mod windows;
-pub mod escape_menu;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 struct PlanetariumUISet;

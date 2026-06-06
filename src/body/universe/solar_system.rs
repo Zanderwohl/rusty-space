@@ -110,7 +110,7 @@ pub fn solar_system() -> UniverseFile {
         contents: UniverseFileContents {
             version: "0.0".into(),
             time: UniverseFileTime {
-                time_julian_days: 2451544.500000, // Midnight 2000 January 1 00:00
+                time_julian_days: 2451545.0, // J2000 epoch (2000 January 1 12:00 TT)
                 step: 0.1,
                 gui_speed: 1.0,
                 max_frame_time: 0.016,
@@ -6115,7 +6115,7 @@ pub fn earth_moon() -> UniverseFile {
         contents: UniverseFileContents {
             version: "0.0".into(),
             time: UniverseFileTime {
-                time_julian_days: 2451544.500000, // Midnight 2000 January 1 00:00
+                time_julian_days: 2451545.0, // J2000 epoch (2000 January 1 12:00 TT)
                 step: 0.1,
                 gui_speed: 1.0,
                 max_frame_time: 0.016,
