@@ -425,7 +425,7 @@ fn save_bodies(conn: &Connection, bodies: &[SomeBody]) -> Result<(), SqliteSaveE
         
         // Save body's tags to tag_members
         for tag in &info.tags {
-            let (default_shown, default_trajectory) = if tag == "Major Moon" {
+            let (default_shown, default_trajectory) = if tag == "Major Moon" || tag == "Major Planet" || tag == "Minor Planet" {
                 (1, 1)
             } else {
                 (1, 0)

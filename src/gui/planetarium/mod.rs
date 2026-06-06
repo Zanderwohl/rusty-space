@@ -185,7 +185,7 @@ fn load_assets(
             let id = body.id();
             let name = body.name();
             for tag in body.tags() {
-                let default_state = if tag == "Major Moon" {
+                let default_state = if tag == "Major Moon" || tag == "Major Planet" || tag == "Minor Planet" {
                     TagState { shown: true, trajectory: true, ..Default::default() }
                 } else {
                     TagState::default()
