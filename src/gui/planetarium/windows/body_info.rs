@@ -1,16 +1,13 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use bevy_egui::egui::Ui;
-use crate::body::appearance::Appearance;
 use crate::body::motive::fixed_motive::FixedMotive;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::motive::newton_motive::NewtonMotive;
 use crate::body::universe::Universe;
-use crate::gui::menu::UiState;
 use crate::camera::GoTo;
 use crate::gui::settings::{Settings, UiTheme};
-use crate::util::bevystuff::GlamVec;
 
 #[derive(Resource)]
 pub struct BodyInfoState {
@@ -26,8 +23,7 @@ impl Default for BodyInfoState {
 }
 
 pub fn body_info_window(
-    mut settings: ResMut<Settings>,
-    mut ui_state: ResMut<UiState>,
+    settings: Res<Settings>,
     universe: Res<Universe>,
     bodies: Query<(Entity, &BodyInfo, &BodyState, Option<&FixedMotive>, Option<&KeplerMotive>, Option<&NewtonMotive>)>,
     mut contexts: EguiContexts,
@@ -56,12 +52,14 @@ pub fn body_info_window(
                 body_select_dropdown(universe, &mut body_info_state, ui, body_options);
                 
                 // Get the body using the BodyInfo.id from bodies query
-                let selected_body = bodies.iter().filter(|(e, info, state, fixed_motive, kepler_motive, newton_motive)| {
-                    if body_info_state.current_body_id.is_none() { return false; }
-                    <std::string::String as AsRef<str>>::as_ref(&info.id) == body_info_state.current_body_id.as_ref().unwrap()
-                }).collect::<Vec<_>>();
-
-                let selected_body = selected_body.get(0);
+                let selected_body = body_info_state
+                    .current_body_id
+                    .as_deref()
+                    .and_then(|selected_id| {
+                        bodies
+                            .iter()
+                            .find(|(_, info, _, _, _, _)| info.id.as_str() == selected_id)
+                    });
                 match selected_body {
                     Some((e, info, state, fixed_motive, kepler_motive, newton_motive)) => {
                         if ui.button("Go to").clicked() {
@@ -70,13 +68,42 @@ pub fn body_info_window(
                             });
                         }
 
-                        display_body_info(ui, info, state, *fixed_motive, *kepler_motive, *newton_motive)
+                        display_body_info(ui, info, state, fixed_motive, kepler_motive, newton_motive)
                     }
                     None => {
                         ui.label("No body selected.");
                     }
                 }
             });
+    }
+}
+
+pub fn handle_go_to_shortcut(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut contexts: EguiContexts,
+    body_info_state: Res<BodyInfoState>,
+    bodies: Query<(Entity, &BodyInfo)>,
+    mut go_to: MessageWriter<GoTo>,
+) {
+    if !keys.just_pressed(KeyCode::KeyG) {
+        return;
+    }
+
+    if let Ok(ctx) = contexts.ctx_mut() {
+        if ctx.wants_keyboard_input() {
+            return;
+        }
+    }
+
+    let Some(selected_id) = body_info_state.current_body_id.as_deref() else {
+        return;
+    };
+
+    if let Some((entity, _)) = bodies
+        .iter()
+        .find(|(_, info)| info.id.as_str() == selected_id)
+    {
+        go_to.write(GoTo { entity: entity.entity() });
     }
 }
 
@@ -141,7 +168,7 @@ fn body_info_section(ui: &mut Ui, info: &BodyInfo) {
     });
 }
 
-fn body_state_section(ui: &mut Ui, state: &BodyState) {
+fn body_state_section(ui: &mut Ui, _state: &BodyState) {
     ui.label("Current State");
 }
 
@@ -160,7 +187,7 @@ fn newton_motive_section(ui: &mut Ui, motive: &NewtonMotive) {
     motive.display(ui);
 }
 
-pub(crate) fn body_select_dropdown(universe: Res<Universe>, mut body_info_state: &mut ResMut<BodyInfoState>, ui: &mut Ui, mut body_options: Vec<(String, String)>) {
+pub(crate) fn body_select_dropdown(universe: Res<Universe>, body_info_state: &mut ResMut<BodyInfoState>, ui: &mut Ui, body_options: Vec<(String, String)>) {
     egui::ComboBox::from_label("Body")
         .selected_text(
             body_info_state.current_body_id

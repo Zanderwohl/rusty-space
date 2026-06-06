@@ -13,6 +13,7 @@ use crate::body::motive::Motive;
 use crate::sim::SimulationObject;
 use crate::body::universe::{Major, Minor};
 use crate::body::universe::save_sqlite;
+use crate::presentation::BodyWireframeMaterial;
 use crate::util::mappings;
 
 /// State for a tag (group of bodies).
@@ -312,6 +313,7 @@ impl SomeBody {
         cache: &mut ResMut<AssetCache>,
         meshes: &mut ResMut<Assets<Mesh>>,
         materials: &mut ResMut<Assets<StandardMaterial>>,
+        star_materials: &mut ResMut<Assets<BodyWireframeMaterial>>,
         images: &mut ResMut<Assets<Image>>,
     )  -> Entity {
         let mut entity = commands.spawn((
@@ -377,7 +379,7 @@ impl SomeBody {
                 entity.insert(Visibility::Visible);
             }
             Appearance::Star(star_ball) => {
-                let (mesh, material, light) = star_ball.pbr_bundle(cache, meshes, materials, images);
+                let (mesh, material, light) = star_ball.pbr_bundle(cache, meshes, star_materials, images);
                 entity.insert(mesh);
                 entity.insert(material);
                 entity.insert(light);

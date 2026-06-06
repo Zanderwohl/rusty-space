@@ -16,7 +16,7 @@ use crate::foundations::time::{Instant, J2000_JD, JD_SECONDS_PER_JULIAN_DAY};
 pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin, CameraAction};
 use crate::camera::Freecam;
 pub use crate::gui::planetarium::windows::body_info::BodyInfoState;
-use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, TrajectoryMesh, BodyPointMesh};
+use crate::presentation::{self, BodyWireframeMaterial, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, TrajectoryMesh, BodyPointMesh};
 use crate::gui::menu::escape::{EscapeMenuPlugin, EscMenuState, UnsavedChanges};
 
 mod windows;
@@ -70,6 +70,7 @@ impl Plugin for PlanetariumUI {
             // Core simulation and position systems
             .add_systems(Update, (
                 presentation::adjust_lights,
+                windows::body_info::handle_go_to_shortcut,
                 calculate_body_positions::calculate_body_positions
                     .after(universe::advance_time),
                 kepler_motive::calculate_trajectory,
@@ -155,6 +156,7 @@ fn load_assets(
     mut cache: ResMut<AssetCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut star_materials: ResMut<Assets<BodyWireframeMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut universe: ResMut<Universe>,
     mut physics: ResMut<UniversePhysics>,
@@ -202,7 +204,7 @@ fn load_assets(
             }
             // info!("{:?}", view_settings);
             universe.insert(name, id);
-            body.spawn(&mut commands, &mut cache, &mut meshes, &mut materials, &mut images);
+            body.spawn(&mut commands, &mut cache, &mut meshes, &mut materials, &mut star_materials, &mut images);
         }
     }
 
