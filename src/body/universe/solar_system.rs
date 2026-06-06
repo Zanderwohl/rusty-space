@@ -6171,11 +6171,11 @@ pub fn earth_moon() -> UniverseFile {
                     }),
                     rotation: Some(iau_rotation(0.0, 90.0, 190.147, 23.9344696)),
                 }), // Earth
-                /*SomeBody::KeplerEntry(KeplerEntry {
+                SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
                         name: Some("Luna".into()),
                         id: "Luna".to_string(),
-                        mass: 6.4171,
+                        mass: 7.346e22,
                         major: true,
                         designation: Some("Earth I".into()),
                         tags: vec!["Moon".into(), "Major Moon".into()],
@@ -6187,12 +6187,12 @@ pub fn earth_moon() -> UniverseFile {
                             eccentricity: 0.05490,
                             semi_major_axis: 384400.0 * 1000.0, // Convert km to m
                         }),
-                        rotation: KeplerRotation::PrecessingEulerAngles(KeplerPrecessingEulerAngles { // TODO: Precession https://en.wikipedia.org/wiki/Orbit_of_the_Moon#Precession
+                        rotation: KeplerRotation::PrecessingEulerAngles(KeplerPrecessingEulerAngles {
                             inclination: 5.240010829674768e0,
                             longitude_of_ascending_node: 1.239837028145578e2,
                             argument_of_periapsis: 3.081359034620368e2,
-                            apsidal_precession_period: 3231.50,
-                            nodal_precession_period: 6798.38,
+                            apsidal_precession_period: TimeLength::period_from_julian_day(3231.50), // prograde, ~8.85 yr
+                            nodal_precession_period: TimeLength::period_from_julian_day(-6798.38), // retrograde, ~18.61 yr
                         }),
                         epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
                             mean_anomaly: 1.407402571142365e02,
@@ -6206,52 +6206,10 @@ pub fn earth_moon() -> UniverseFile {
                             g: 87,
                             b: 87,
                         },
-                    }),
-                }),*/ // Luna
-                SomeBody::NewtonEntry(NewtonEntry {
-                    info: BodyInfo {
-                        name: Some("Newtonian Test Body A".into()),
-                        id: "NTB-A".to_string(),
-                        mass: 1000.0,
-                        major: false,
-                        designation: Some("TB-A".into()),
-                        tags: vec!["Test Body".into()],
-                    },
-                    position: DVec3::new(384400.0 * 1000.0, 0.0, 0.0),
-                    velocity: DVec3::new(1.5e3, 0.0, 0.0),
-                    appearance: Appearance::DebugBall(DebugBall {
-                        radius: 100.0,
-                        color: AppearanceColor {
-                            r: 255,
-                            g: 0,
-                            b: 0,
-                        },
                         highlight_latitudes: vec![],
                     }),
-                    rotation: None,
-                }), // Test Newtonian Body A
-                SomeBody::NewtonEntry(NewtonEntry {
-                    info: BodyInfo {
-                        name: Some("Newtonian Test Body B".into()),
-                        id: "NTB-B".to_string(),
-                        mass: 1000.0,
-                        major: false,
-                        designation: Some("TB-B".into()),
-                        tags: vec!["Test Body".into()],
-                    },
-                    position: DVec3::new(384400.0 * 1000.0, 0.0, 0.0),
-                    velocity: DVec3::new(0.0, 0.0, 0.0),
-                    appearance: Appearance::DebugBall(DebugBall {
-                        radius: 100.0,
-                        color: AppearanceColor {
-                            r: 255,
-                            g: 0,
-                            b: 0,
-                        },
-                        highlight_latitudes: vec![],
-                    }),
-                    rotation: None,
-                }), // Test Newtonian Body B
+                    rotation: Some(tidally_locked_rotation("Earth", 269.9949, 66.5392)), // tidally locked to Earth
+                }), // Luna
             ]
         },
     };

@@ -27,17 +27,25 @@ const CAMERA_MOVE_THRESHOLD: f64 = 0.005;
 const SYMBOL_ANGULAR_SIZE: f32 = 0.03;
 /// Tube wall thickness as a fraction of overall symbol size.
 const TUBE_THICKNESS_RATIO: f32 = 0.06;
-/// Sample points per horn arc.
-const HORN_SAMPLES: u32 = 24;
+/// Sample points on each V-leg segment.
+const V_SAMPLES: u32 = 10;
+/// Sample points per horn curl segment.
+const HORN_SAMPLES: u32 = 16;
 
-/// Horn circle-center X offset in symbol-local coordinates.
-const HORN_CX: f32 = 0.35;
-/// Horn circle-center Y offset in symbol-local coordinates (slightly above cusp for taller horns).
-const HORN_CY: f32 = 0.05;
-/// Arc sweep per horn (degrees, clockwise). 210° gives horns that rise, curve out, and curl down.
-const HORN_SWEEP_DEG: f32 = 210.0;
-/// Length of the vertical stem below the horn meeting point.
-const STEM_LENGTH: f32 = 0.35;
+/// Bottom cusp Y (single point where both legs meet).
+const ARIES_BOTTOM_Y: f32 = -0.45;
+/// Shoulder where each leg transitions into the horn curl.
+const V_SHOULDER_X: f32 = 0.22;
+const V_SHOULDER_Y: f32 = 0.14;
+
+/// Cubic controls for the horn path (mirrored in X for left/right).
+/// The path starts at the shoulder, goes up, then curls outward.
+const HORN_CTRL1_X: f32 = 0.24;
+const HORN_CTRL1_Y: f32 = 0.34;
+const HORN_CTRL2_X: f32 = 0.42;
+const HORN_CTRL2_Y: f32 = 0.34;
+const HORN_TIP_X: f32 = 0.50;
+const HORN_TIP_Y: f32 = 0.22;
 
 /// Build an empty mesh that still declares the vertex layout required by
 /// `trajectory.wgsl` (`position`, `normal`, `color`).
@@ -189,43 +197,45 @@ fn generate_aries_mesh(
     tube_radius: f32,
     brightness: f32,
 ) -> Mesh {
-    let horn_radius = (HORN_CX * HORN_CX + HORN_CY * HORN_CY).sqrt();
-    let sweep = HORN_SWEEP_DEG.to_radians();
+    // Build one side then mirror it: bottom point -> V leg -> outward horn curl.
+    let build_side = |side_sign: f32| {
+        let mut side_points = Vec::new();
 
-    // Right horn: clockwise arc from cusp (0,0), rising upward then curving right and down
-    let right_start = f32::atan2(-HORN_CY, -HORN_CX);
-    let right_horn: Vec<Vec3> = (0..=HORN_SAMPLES)
-        .map(|i| {
+        // Shared bottom cusp.
+        let bottom = Vec2::new(0.0, ARIES_BOTTOM_Y);
+        let shoulder = Vec2::new(side_sign * V_SHOULDER_X, V_SHOULDER_Y);
+        let leg_ctrl = Vec2::new(side_sign * 0.04, -0.10);
+        for i in 0..=V_SAMPLES {
+            let t = i as f32 / V_SAMPLES as f32;
+            let one_minus_t = 1.0 - t;
+            let p = one_minus_t * one_minus_t * bottom
+                + 2.0 * one_minus_t * t * leg_ctrl
+                + t * t * shoulder;
+            side_points.push(center + right * p.x * size + up * p.y * size);
+        }
+
+        // Horn curl starts at the shoulder, rises, then bends outward.
+        let p0 = Vec2::new(side_sign * V_SHOULDER_X, V_SHOULDER_Y);
+        let p1 = Vec2::new(side_sign * HORN_CTRL1_X, HORN_CTRL1_Y);
+        let p2 = Vec2::new(side_sign * HORN_CTRL2_X, HORN_CTRL2_Y);
+        let p3 = Vec2::new(side_sign * HORN_TIP_X, HORN_TIP_Y);
+        for i in 1..=HORN_SAMPLES {
             let t = i as f32 / HORN_SAMPLES as f32;
-            let angle = right_start - sweep * t;
-            let x = HORN_CX + horn_radius * angle.cos();
-            let y = HORN_CY + horn_radius * angle.sin();
-            center + right * x * size + up * y * size
-        })
-        .collect();
+            let one_minus_t = 1.0 - t;
+            let p = one_minus_t * one_minus_t * one_minus_t * p0
+                + 3.0 * one_minus_t * one_minus_t * t * p1
+                + 3.0 * one_minus_t * t * t * p2
+                + t * t * t * p3;
+            side_points.push(center + right * p.x * size + up * p.y * size);
+        }
 
-    // Left horn: mirror of the right horn in x
-    let left_horn: Vec<Vec3> = (0..=HORN_SAMPLES)
-        .map(|i| {
-            let t = i as f32 / HORN_SAMPLES as f32;
-            let angle = right_start - sweep * t;
-            let x = HORN_CX + horn_radius * angle.cos();
-            let y = HORN_CY + horn_radius * angle.sin();
-            center - right * x * size + up * y * size
-        })
-        .collect();
+        side_points
+    };
 
-    // Vertical stem below the cusp
-    let stem_points = 4u32;
-    let stem: Vec<Vec3> = (0..=stem_points)
-        .map(|i| {
-            let t = i as f32 / stem_points as f32;
-            let y = -STEM_LENGTH * (1.0 - t);
-            center + up * y * size
-        })
-        .collect();
+    let right_stroke = build_side(1.0);
+    let left_stroke = build_side(-1.0);
 
-    let strokes: &[&[Vec3]] = &[&right_horn, &left_horn, &stem];
+    let strokes: &[&[Vec3]] = &[&right_stroke, &left_stroke];
     build_combined_tube_mesh(strokes, brightness, tube_radius, TUBE_SIDES)
 }
 
