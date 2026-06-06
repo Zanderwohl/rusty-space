@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 
 use crate::gui::style::vfd;
 use crate::sim::SimTime;
+use crate::util::format::seconds_to_naive_date;
 
 const UNIX_EPOCH_AT_J2000_UTC: f64 = 946_728_000.0;
 const SIDECAR_GAP: f32 = 8.0;
@@ -11,9 +12,10 @@ const SIDECAR_WIDTH: f32 = 150.0;
 const SIDECAR_BUTTON_WIDTH: f32 = 26.0;
 const THROTTLE_ARROW_COUNT: usize = 8;
 const THROTTLE_ARROW_WIDTH_SCALE: f32 = 0.8;
-const THROTTLE_ARROW_HEIGHT_SCALE: f32 = 0.25;
+const THROTTLE_ARROW_HEIGHT_SCALE: f32 = 0.6;
 const THROTTLE_GROUP_PAD_X: f32 = 6.0;
 const THROTTLE_MATCH_RATIO: f64 = 0.95;
+const THROTTLE_ARROWS_REGION_RATIO: f32 = 0.62;
 
 const THROTTLE_SPEEDS: [f64; THROTTLE_ARROW_COUNT] = [
     1.0,      // 1 s/s
@@ -28,16 +30,18 @@ const THROTTLE_SPEEDS: [f64; THROTTLE_ARROW_COUNT] = [
 
 #[derive(Default, Clone, Copy)]
 pub(crate) enum MissionClockMode {
-    #[default]
     JulianDay,
+    #[default]
     Utc,
+    Met,
 }
 
 impl MissionClockMode {
-    fn toggle(&mut self) {
+    fn cycle(&mut self) {
         *self = match self {
             Self::JulianDay => Self::Utc,
-            Self::Utc => Self::JulianDay,
+            Self::Utc => Self::Met,
+            Self::Met => Self::JulianDay,
         };
     }
 }
@@ -117,6 +121,7 @@ impl TimeThrottleLevel {
             Self::Other
         }
     }
+
 }
 
 pub fn mission_clock_widget(
@@ -132,8 +137,10 @@ pub fn mission_clock_widget(
     let ctx = ctx.unwrap();
 
     let jd = sim_time.time.to_julian_day();
-    let unix_seconds = sim_time.time.to_j2000_seconds() + UNIX_EPOCH_AT_J2000_UTC;
+    let j2000_seconds = sim_time.time.to_j2000_seconds();
+    let unix_seconds = j2000_seconds + UNIX_EPOCH_AT_J2000_UTC;
     let utc_display = format_utc_string(unix_seconds);
+    let met_display = format_met_string(j2000_seconds);
     let mut clock_panel_rect: Option<egui::Rect> = None;
 
     // External speed changes update UI throttle state.
@@ -154,15 +161,16 @@ pub fn mission_clock_widget(
                 .show(ui, |ui| {
                     ui.horizontal_centered(|ui| {
                         if draw_mode_cycler(ui, *mode, text, text_dim).clicked() {
-                            mode.toggle();
+                            mode.cycle();
                         }
 
                         let display_text = match *mode {
                             MissionClockMode::JulianDay => format!("JD {:.2}", jd),
                             MissionClockMode::Utc => utc_display.clone(),
+                            MissionClockMode::Met => met_display.clone(),
                         };
 
-                        let min_display_width = minimum_utc_display_width(ui, text);
+                        let min_display_width = minimum_time_display_width(ui, text);
                         ui.add_sized(
                             [min_display_width, 0.0],
                             egui::Label::new(egui::RichText::new(display_text).color(text)),
@@ -187,6 +195,7 @@ pub fn mission_clock_widget(
                     rect.height(),
                     sim_time.playing,
                     *throttle_level,
+                    sim_time.gui_speed,
                     panel_bg,
                     border,
                     text,
@@ -213,27 +222,25 @@ fn draw_mode_cycler(
     active: egui::Color32,
     inactive: egui::Color32,
 ) -> egui::Response {
-    let desired_size = egui::vec2(40.0, 26.0);
+    let desired_size = egui::vec2(40.0, 38.0);
     let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
 
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         let radius = 4.0;
-        let top_center = egui::pos2(rect.left() + 7.0, rect.top() + 7.0);
-        let bottom_center = egui::pos2(rect.left() + 7.0, rect.bottom() - 7.0);
+        let top_center = egui::pos2(rect.left() + 7.0, rect.top() + 6.5);
+        let mid_center = egui::pos2(rect.left() + 7.0, rect.center().y);
+        let bottom_center = egui::pos2(rect.left() + 7.0, rect.bottom() - 6.5);
 
-        let top_color = match mode {
-            MissionClockMode::JulianDay => active,
-            MissionClockMode::Utc => inactive,
-        };
-        let bottom_color = match mode {
-            MissionClockMode::JulianDay => inactive,
-            MissionClockMode::Utc => active,
-        };
+        let jd_color = if matches!(mode, MissionClockMode::JulianDay) { active } else { inactive };
+        let utc_color = if matches!(mode, MissionClockMode::Utc) { active } else { inactive };
+        let met_color = if matches!(mode, MissionClockMode::Met) { active } else { inactive };
 
-        painter.circle_filled(top_center, radius, top_color);
+        painter.circle_filled(top_center, radius, jd_color);
         painter.circle_stroke(top_center, radius, egui::Stroke::new(1.0, active));
-        painter.circle_filled(bottom_center, radius, bottom_color);
+        painter.circle_filled(mid_center, radius, utc_color);
+        painter.circle_stroke(mid_center, radius, egui::Stroke::new(1.0, active));
+        painter.circle_filled(bottom_center, radius, met_color);
         painter.circle_stroke(bottom_center, radius, egui::Stroke::new(1.0, active));
 
         let label_font = egui::FontId::proportional(9.0);
@@ -242,25 +249,41 @@ fn draw_mode_cycler(
             egui::Align2::LEFT_CENTER,
             "JD",
             label_font.clone(),
-            top_color,
+            jd_color,
+        );
+        painter.text(
+            egui::pos2(rect.left() + 15.0, mid_center.y),
+            egui::Align2::LEFT_CENTER,
+            "UTC",
+            label_font.clone(),
+            utc_color,
         );
         painter.text(
             egui::pos2(rect.left() + 15.0, bottom_center.y),
             egui::Align2::LEFT_CENTER,
-            "UTC",
+            "MET",
             label_font,
-            bottom_color,
+            met_color,
         );
     }
 
     response
 }
 
-fn minimum_utc_display_width(ui: &egui::Ui, color: egui::Color32) -> f32 {
-    let sample = "0000-00-00 00:00:00";
+fn minimum_time_display_width(ui: &egui::Ui, color: egui::Color32) -> f32 {
+    let samples = [
+        "0000-00-00 00:00:00", // UTC
+        "MET +000000 00:00:00", // MET
+        "JD 0000000.00",        // JD
+    ];
     let font_id = egui::TextStyle::Body.resolve(ui.style());
-    let galley = ui.painter().layout_no_wrap(sample.to_string(), font_id, color);
-    galley.size().x
+    samples
+        .iter()
+        .map(|sample| {
+            let galley = ui.painter().layout_no_wrap((*sample).to_string(), font_id.clone(), color);
+            galley.size().x
+        })
+        .fold(0.0f32, f32::max)
 }
 
 fn draw_play_pause_sidecar(
@@ -268,6 +291,7 @@ fn draw_play_pause_sidecar(
     height: f32,
     is_playing: bool,
     throttle_level: TimeThrottleLevel,
+    gui_speed: f64,
     panel_bg: egui::Color32,
     border_color: egui::Color32,
     icon_color: egui::Color32,
@@ -325,23 +349,39 @@ fn draw_play_pause_sidecar(
         egui::Sense::click(),
     );
     let throttle_draw_rect = throttle_rect.shrink2(egui::vec2(THROTTLE_GROUP_PAD_X, 0.0));
+    let arrows_height = throttle_draw_rect.height() * THROTTLE_ARROWS_REGION_RATIO;
+    let throttle_arrows_rect = egui::Rect::from_min_max(
+        throttle_draw_rect.min,
+        egui::pos2(throttle_draw_rect.max.x, throttle_draw_rect.min.y + arrows_height),
+    );
+    let throttle_label_rect = egui::Rect::from_min_max(
+        egui::pos2(throttle_draw_rect.min.x, throttle_arrows_rect.max.y),
+        throttle_draw_rect.max,
+    );
+
     if throttle_response.hovered() {
         painter.rect_filled(throttle_draw_rect, 0.0, button_hover.gamma_multiply(0.25));
     }
 
     draw_throttle_arrows(
         painter,
-        throttle_draw_rect,
+        throttle_arrows_rect,
         throttle_level.active_count(),
         icon_color,
         border_color.gamma_multiply(0.8),
+    );
+    draw_throttle_label(
+        painter,
+        throttle_label_rect,
+        gui_speed,
+        icon_color,
     );
 
     let mut clicked_level = None;
     if throttle_response.clicked() {
         if let Some(pos) = throttle_response.interact_pointer_pos() {
-            let rel_x = (pos.x - throttle_draw_rect.left()).clamp(0.0, throttle_draw_rect.width());
-            let idx = ((rel_x / throttle_draw_rect.width()) * THROTTLE_ARROW_COUNT as f32)
+            let rel_x = (pos.x - throttle_arrows_rect.left()).clamp(0.0, throttle_arrows_rect.width());
+            let idx = ((rel_x / throttle_arrows_rect.width()) * THROTTLE_ARROW_COUNT as f32)
                 .floor()
                 .clamp(0.0, (THROTTLE_ARROW_COUNT - 1) as f32) as usize;
             clicked_level = Some(TimeThrottleLevel::from_arrow_index(idx));
@@ -415,6 +455,24 @@ fn draw_throttle_arrows(
     }
 }
 
+fn draw_throttle_label(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    gui_speed: f64,
+    color: egui::Color32,
+) {
+    let speed_text = seconds_to_naive_date(gui_speed.round() as i64);
+    let label = format!("{speed_text} / s");
+
+    painter.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        egui::FontId::proportional(9.0),
+        color,
+    );
+}
+
 fn speed_match_ratio(a: f64, b: f64) -> f64 {
     if a <= 0.0 || b <= 0.0 {
         return 0.0;
@@ -428,6 +486,18 @@ fn format_utc_string(unix_seconds: f64) -> String {
         return "UTC out of range".to_string();
     };
     datetime.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+fn format_met_string(seconds_since_j2000: f64) -> String {
+    let total_seconds = seconds_since_j2000.round() as i64;
+    let sign = if total_seconds < 0 { '-' } else { '+' };
+    let abs_seconds = total_seconds.unsigned_abs();
+    let days = abs_seconds / 86_400;
+    let rem = abs_seconds % 86_400;
+    let hours = rem / 3_600;
+    let mins = (rem % 3_600) / 60;
+    let secs = rem % 60;
+    format!("MET {}{}d {:02}:{:02}:{:02}", sign, days, hours, mins, secs)
 }
 
 fn to_egui_color(color: Color) -> egui::Color32 {
