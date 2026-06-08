@@ -408,6 +408,7 @@ fn update_hover_target(
     markers: Query<(&FocusedTrajectoryMarker, &Transform)>,
     trajectory_caches: Query<(&crate::presentation::TrajectoryMesh, &crate::presentation::TrajectoryCache)>,
     view_settings: Res<ViewSettings>,
+    sim_time: Res<SimTime>,
     focused_body_state: Res<FocusedBodyState>,
     mut egui_ctx: EguiContexts,
     mut hover_state: ResMut<HoverState>,
@@ -419,6 +420,7 @@ fn update_hover_target(
         &markers,
         &trajectory_caches,
         &view_settings,
+        &sim_time,
         &focused_body_state,
         &mut egui_ctx,
     );
@@ -435,6 +437,7 @@ fn pick_body_on_click(
     markers: Query<(&FocusedTrajectoryMarker, &Transform)>,
     trajectory_caches: Query<(&crate::presentation::TrajectoryMesh, &crate::presentation::TrajectoryCache)>,
     view_settings: Res<ViewSettings>,
+    sim_time: Res<SimTime>,
     mut egui_ctx: EguiContexts,
     time: Res<Time>,
     mut pick_state: Local<PickState>,
@@ -451,6 +454,7 @@ fn pick_body_on_click(
         &markers,
         &trajectory_caches,
         &view_settings,
+        &sim_time,
         &focused_body_state,
         &mut egui_ctx,
     );
@@ -484,6 +488,7 @@ fn pick_hover_target(
     markers: &Query<(&FocusedTrajectoryMarker, &Transform)>,
     trajectory_caches: &Query<(&crate::presentation::TrajectoryMesh, &crate::presentation::TrajectoryCache)>,
     view_settings: &ViewSettings,
+    sim_time: &SimTime,
     focused_body_state: &FocusedBodyState,
     egui_ctx: &mut EguiContexts,
 ) -> HoverPickResult {
@@ -586,6 +591,7 @@ fn pick_hover_target(
             bodies,
             trajectory_caches,
             view_settings,
+            sim_time.time.to_j2000_seconds(),
             freecam,
             ray_origin,
             ray_dir,
@@ -608,6 +614,7 @@ fn pick_trajectory_segment(
     bodies: &Query<(&BodyState, &BodyInfo, &Appearance), Without<PlanetariumCamera>>,
     trajectory_caches: &Query<(&crate::presentation::TrajectoryMesh, &crate::presentation::TrajectoryCache)>,
     view_settings: &ViewSettings,
+    sim_time_seconds: f64,
     freecam: &Freecam,
     ray_origin: Vec3,
     ray_dir: Vec3,
@@ -615,10 +622,10 @@ fn pick_trajectory_segment(
     let focused_id = focused_body_state.current_body_id.as_ref()?;
     
     // Find the focused body's entity and state
-    let (_focused_state, _focused_info) = bodies
+    let (focused_state, _focused_info, focused_appearance) = bodies
         .iter()
         .find(|(_, info, _)| &info.id == focused_id)
-        .map(|(state, info, _)| (state, info))?;
+        .map(|(state, info, appearance)| (state, info, appearance))?;
     
     // Find the trajectory cache for the focused body
     let cache = trajectory_caches
@@ -635,11 +642,16 @@ fn pick_trajectory_segment(
         })?;
     
     // Get primary position offset for Keplerian orbits
-    let primary_offset: DVec3 = cache.primary_id.as_ref().and_then(|pid| {
-        bodies.iter()
-            .find(|(_, info, _)| &info.id == pid)
-            .map(|(state, _, _)| state.current_position)
-    }).unwrap_or(DVec3::ZERO);
+    let primary_offset: DVec3 = cache
+        .primary_id
+        .as_ref()
+        .and_then(|pid| {
+            bodies
+                .iter()
+                .find(|(_, info, _)| &info.id == pid)
+                .map(|(state, _, _)| state.current_position)
+        })
+        .unwrap_or(DVec3::ZERO);
     
     let distance_scale = view_settings.distance_factor();
     let camera_pos = freecam.bevy_pos;
@@ -651,7 +663,13 @@ fn pick_trajectory_segment(
     // (distance, idx, seg_t, time_a, time_b, local_pos, bevy_pos)
     let mut best_hit: Option<(f64, usize, f64, f64, f64, DVec3, Vec3)> = None;
     
-    let points = &cache.local_points;
+    let points = crate::presentation::build_working_trajectory_points(
+        cache,
+        focused_state.current_local_position,
+        focused_appearance.radius(),
+        sim_time_seconds,
+        false,
+    );
     for i in 0..points.len().saturating_sub(1) {
         let (time_a, local_a) = points[i];
         let (time_b, local_b) = points[i + 1];

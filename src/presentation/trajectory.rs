@@ -84,6 +84,74 @@ pub struct TrajectoryCache {
     pub last_mesh_time: f64,
 }
 
+pub fn build_working_trajectory_points(
+    cache: &TrajectoryCache,
+    current_local_position: Option<DVec3>,
+    body_radius: f64,
+    sim_time_seconds: f64,
+    include_closing_duplicate: bool,
+) -> Vec<(f64, DVec3)> {
+    let cycle_frac = if let (Some(interval_start), Some(interval_size)) = (cache.interval_start, cache.interval_size) {
+        let elapsed = sim_time_seconds - interval_start;
+        let position_in_cycle = elapsed % interval_size;
+        let normalized = if position_in_cycle < 0.0 {
+            position_in_cycle + interval_size
+        } else {
+            position_in_cycle
+        };
+        normalized / interval_size
+    } else {
+        0.0
+    };
+
+    let mut points: Vec<(f64, DVec3)> = cache.local_points.clone();
+    if !cache.is_precessing {
+        if let (Some(local_pos), Some(interval_size)) = (current_local_position, cache.interval_size) {
+            let current_relative_time = cycle_frac * interval_size;
+            if let Some(seg) = points.windows(2).position(|w| {
+                current_relative_time >= w[0].0 && current_relative_time < w[1].0
+            }) {
+                let dist_before = (local_pos - points[seg].1).length();
+                let dist_after = (local_pos - points[seg + 1].1).length();
+                if dist_before >= body_radius && dist_after >= body_radius {
+                    let pos_a = points[seg].1;
+                    let pos_b = points[seg + 1].1;
+                    let time_a = points[seg].0;
+                    let time_b = points[seg + 1].0;
+                    let neighbor_count = TRANSIENT_POINT_N / 2;
+                    let mut transient_points: Vec<(f64, DVec3)> = Vec::new();
+                    for i in (1..=neighbor_count).rev() {
+                        let t = i as f64 / (neighbor_count + 1) as f64;
+                        let pos = pos_a.lerp(local_pos, t);
+                        let time = time_a + (current_relative_time - time_a) * t;
+                        transient_points.push((time, pos));
+                    }
+                    transient_points.push((current_relative_time, local_pos));
+                    transient_points.push((current_relative_time + 0.0001, local_pos));
+                    for i in 1..=neighbor_count {
+                        let t = i as f64 / (neighbor_count + 1) as f64;
+                        let pos = local_pos.lerp(pos_b, t);
+                        let time = current_relative_time + (time_b - current_relative_time) * t;
+                        transient_points.push((time, pos));
+                    }
+                    let insert_pos = seg + 1;
+                    for (i, pt) in transient_points.iter().enumerate() {
+                        points.insert(insert_pos + i, *pt);
+                    }
+                }
+            }
+        }
+    }
+
+    if include_closing_duplicate && cache.closed && !points.is_empty() {
+        let first = points[0];
+        let close_time = points.last().map(|(t, _)| t + 0.001).unwrap_or(0.0);
+        points.push((close_time, first.1));
+    }
+
+    points
+}
+
 /// Number of sides for the tube cross-section (6-8 is visually sufficient)
 const TUBE_SIDES: u32 = 4;
 
@@ -376,13 +444,18 @@ pub fn build_trajectory_meshes(
             .map(|last| (last - camera_pos).length() > CAMERA_MOVE_THRESHOLD)
             .unwrap_or(true);
         let time_changed = (cache.last_mesh_time - current_time).abs() > 0.001;
+        let _focused_matches = focused_body_state
+            .current_body_id
+            .as_ref()
+            .map(|id| id == &info.id)
+            .unwrap_or(false);
         
         // Skip mesh regeneration if nothing relevant changed
         if !cache.mesh_dirty && !camera_moved && !time_changed {
             continue;
         }
         
-        // Calculate cycle fraction for brightness
+        // Calculate cycle fraction for brightness and transient insertion
         let cycle_frac = if let (Some(interval_start), Some(interval_size)) = (cache.interval_start, cache.interval_size) {
             let elapsed = sim_time.time.to_j2000_seconds() - interval_start;
             let position_in_cycle = elapsed % interval_size;
@@ -397,14 +470,19 @@ pub fn build_trajectory_meshes(
         };
         
         // Get primary offset for Keplerian orbits using O(1) lookup via PhysicsGraph
-        let primary_offset: Option<DVec3> = cache.primary_id.as_ref().and_then(|pid| {
-            physics_graph.id_to_entity.get(pid)
-                .and_then(|entity| bodies.get(*entity).ok())
-                .and_then(|(primary_state, _, _, _)| {
-                    if primary_state.trajectory.is_none() { return None; }
-                    Some(primary_state.current_position)
-                })
-        });
+        let primary_offset: Option<DVec3> = cache
+            .primary_id
+            .as_ref()
+            .and_then(|pid| {
+                physics_graph
+                    .id_to_entity
+                    .get(pid)
+                    .and_then(|entity| bodies.get(*entity).ok())
+                    .and_then(|(primary_state, _, _, _)| {
+                        if primary_state.trajectory.is_none() { return None; }
+                        Some(primary_state.current_position)
+                    })
+            });
         
         // Build the working point list with transient point insertion
         let mut points: Vec<(f64, DVec3)> = cache.local_points.clone();
@@ -535,7 +613,6 @@ pub fn build_trajectory_meshes(
             
             (bevy_pos, brightness, radius)
         }).collect();
-        
         // Generate tube mesh with per-point radii
         let mesh = generate_tube_mesh(&transformed_points, TUBE_SIDES);
         
@@ -702,7 +779,7 @@ pub fn update_mouse_hit_marker(
     physics: Res<UniversePhysics>,
     fcam: Single<&Freecam, With<PlanetariumCamera>>,
     physics_graph: Res<crate::body::motive::calculate_body_positions::PhysicsGraph>,
-    bodies: Query<(Entity, &BodyInfo, &BodyState, &Motive)>,
+    bodies: Query<(Entity, &BodyInfo, &BodyState, &Motive, Option<&Appearance>)>,
     trajectory_caches: Query<(&TrajectoryMesh, &TrajectoryCache)>,
     mut markers: Query<(Entity, &mut FocusedTrajectoryMarker, &mut Transform)>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -723,7 +800,7 @@ pub fn update_mouse_hit_marker(
         return;
     };
 
-    let Ok((_, _info, _focused_state, motive)) = bodies.get(focused_entity) else {
+    let Ok((_, _info, focused_state, motive, appearance)) = bodies.get(focused_entity) else {
         despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
         return;
     };
@@ -736,7 +813,7 @@ pub fn update_mouse_hit_marker(
 
     // Find the trajectory cache for the focused body
     let Some(cache) = trajectory_caches.iter().find_map(|(traj_mesh, cache)| {
-        let Ok((_, info, _, _)) = bodies.get(traj_mesh.body_entity) else {
+        let Ok((_, info, _, _, _)) = bodies.get(traj_mesh.body_entity) else {
             return None;
         };
         if info.id == focused_id && cache.valid && !cache.local_points.is_empty() {
@@ -752,12 +829,14 @@ pub fn update_mouse_hit_marker(
     // Get primary info for mu calculation and position offset
     let primary_mass = physics_graph.id_to_entity.get(&kepler.primary_id)
         .and_then(|e| bodies.get(*e).ok())
-        .map(|(_, info, _, _)| info.mass)
+        .map(|(_, info, _, _, _)| info.mass)
         .unwrap_or(0.0);
-    let primary_offset = cache.primary_id.as_ref()
+    let primary_offset = cache
+        .primary_id
+        .as_ref()
         .and_then(|pid| physics_graph.id_to_entity.get(pid))
         .and_then(|e| bodies.get(*e).ok())
-        .map(|(_, _, state, _)| state.current_position)
+        .map(|(_, _, state, _, _)| state.current_position)
         .unwrap_or(DVec3::ZERO);
 
     let mu = kepler.gravitational_parameter
@@ -767,7 +846,7 @@ pub fn update_mouse_hit_marker(
 
     // Compute true anomaly using Newton refinement (20 iterations in fourier_expansion)
     let true_anomaly = refine_true_anomaly_newton(
-        kepler,
+        &kepler,
         mu,
         hit_data.start_time,
         hit_data.end_time,
@@ -778,7 +857,7 @@ pub fn update_mouse_hit_marker(
 
     // Calculate next and previous times for this true anomaly position
     let event_times = compute_anomaly_event_times(
-        kepler,
+        &kepler,
         mu,
         true_anomaly,
         period_seconds,
@@ -788,19 +867,28 @@ pub fn update_mouse_hit_marker(
 
     // Re-interpolate the marker position using current trajectory cache and camera position
     // This ensures the marker lies exactly on the rendered trajectory line
-    let points = &cache.local_points;
+    let points = build_working_trajectory_points(
+        cache,
+        focused_state.current_local_position,
+        appearance.map(|a| a.radius()).unwrap_or(0.0),
+        sim_time.time.to_j2000_seconds(),
+        false,
+    );
     let idx = hit_data.segment_start_idx;
+    if idx >= points.len() {
+        despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
+        return;
+    }
     let end_idx = if idx + 1 < points.len() { idx + 1 } else { 0 };
     
     let (_, local_a) = points[idx];
     let (_, local_b) = points[end_idx];
     
-    // Interpolate in local space then transform to bevy space
+    // Interpolate in local space then transform to bevy space.
     let local_hit = local_a.lerp(local_b, hit_data.t);
     let world_hit = local_hit + primary_offset;
     let distance_scale = view_settings.distance_factor();
     let marker_bevy_pos = world_hit.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos);
-    
     let tube_radius = calculate_tube_radius(marker_bevy_pos.length());
     let marker_radius = 2.0 * tube_radius;
 
@@ -975,6 +1063,7 @@ fn repeating_event_prev_next(
     );
     (Some(prev), Some(next))
 }
+
 
 pub fn draw_trajectory_marker_labels(
     marker_query: Query<(&FocusedTrajectoryMarker, &Transform)>,
