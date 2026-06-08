@@ -17,13 +17,3 @@ impl FixedMotive {
         });
     }
 }
-
-pub fn calculate(
-    mut fixed_bodies: Query<(&mut BodyState, &BodyInfo, &FixedMotive),
-        Or<(Changed<FixedMotive>, Added<FixedMotive>)>>,
-) {
-    for (mut state, _, motive) in fixed_bodies.iter_mut() {
-        state.current_position = motive.position;
-        state.last_step_position = motive.position;
-    }
-}

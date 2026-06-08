@@ -487,37 +487,6 @@ pub struct MeanAnomalyAtJ2000 {
     pub mean_anomaly: f64,
 }
 
-pub fn calculate(
-    mut sim_time: ResMut<SimTime>,
-    mut kepler_bodies: Query<(&mut KeplerMotive, &BodyInfo, &mut BodyState)>,
-    fixed_bodies: Query<(&SimulationObject, &BodyInfo, &BodyState), Without<KeplerMotive>>,
-    physics: Res<UniversePhysics>,
-) {
-    // First collect all body IDs and masses into a HashMap to avoid borrow conflicts
-    let mut bodies_prev_frame: std::collections::HashMap<String, (f64, DVec3)> = std::collections::HashMap::new();
-    for (_, info, state) in fixed_bodies.iter() {
-        bodies_prev_frame.insert(info.id.clone(), (info.mass, state.current_position));
-    }
-    for (_, info, state) in kepler_bodies.iter() {
-        bodies_prev_frame.insert(info.id.clone(), (info.mass, state.current_position));
-    }
-
-    let time = sim_time.time;
-    for (mut motive, _, mut state) in kepler_bodies.iter_mut() {
-        let (primary_mass, primary_position) = bodies_prev_frame.get(&motive.primary_id)
-            .copied()
-            .expect("Missing body info");
-
-        let mu = physics.gravitational_constant * primary_mass;
-        let position = motive.displacement(time, mu);
-        if let Some(position) = position {
-            state.current_position = primary_position + position;
-            state.current_local_position = Some(position);
-            state.current_primary_position = Some(primary_position);
-        }
-    }
-}
-
 pub fn calculate_trajectory(
     mut calcs: MessageReader<CalculateTrajectory>,
     mut bodies: Query<(&mut BodyState, &BodyInfo, &crate::body::motive::Motive)>,
