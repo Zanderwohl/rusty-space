@@ -11,7 +11,19 @@ pub fn handle_go_to_shortcut(
     bodies: Query<(Entity, &BodyInfo)>,
     mut go_to: MessageWriter<GoTo>,
 ) {
-    if !keys.just_pressed(KeyCode::KeyG) || egui_wants_keyboard(&mut contexts) {
+    let go_to_source = if keys.just_pressed(KeyCode::KeyG) {
+        Some(GoToSource::KeyboardG)
+    } else if keys.just_pressed(KeyCode::KeyF) {
+        Some(GoToSource::KeyboardF)
+    } else {
+        None
+    };
+
+    let Some(source) = go_to_source else {
+        return;
+    };
+
+    if egui_wants_keyboard(&mut contexts) {
         return;
     }
 
@@ -23,11 +35,11 @@ pub fn handle_go_to_shortcut(
         .iter()
         .find(|(_, info)| info.id.as_str() == selected_id)
     {
-        info!("cam.input.goto source=KeyboardG entity={:?}", entity);
+        info!("cam.input.goto source={:?} entity={:?}", source, entity);
         go_to.write(GoTo {
             entity,
             frame: None,
-            source: GoToSource::KeyboardG,
+            source,
         });
     }
 }

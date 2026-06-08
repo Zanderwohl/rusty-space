@@ -698,9 +698,12 @@ pub fn update_mouse_hit_marker(
     hover_state: Res<HoverState>,
     focused_body_state: Res<FocusedBodyState>,
     sim_time: Res<SimTime>,
+    view_settings: Res<ViewSettings>,
     physics: Res<UniversePhysics>,
+    fcam: Single<&Freecam, With<PlanetariumCamera>>,
     physics_graph: Res<crate::body::motive::calculate_body_positions::PhysicsGraph>,
     bodies: Query<(Entity, &BodyInfo, &BodyState, &Motive)>,
+    trajectory_caches: Query<(&TrajectoryMesh, &TrajectoryCache)>,
     mut markers: Query<(Entity, &mut FocusedTrajectoryMarker, &mut Transform)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TrajectoryMaterial>>,
@@ -731,11 +734,32 @@ pub fn update_mouse_hit_marker(
         return;
     };
 
-    // Get primary info for mu calculation
+    // Find the trajectory cache for the focused body
+    let Some(cache) = trajectory_caches.iter().find_map(|(traj_mesh, cache)| {
+        let Ok((_, info, _, _)) = bodies.get(traj_mesh.body_entity) else {
+            return None;
+        };
+        if info.id == focused_id && cache.valid && !cache.local_points.is_empty() {
+            Some(cache)
+        } else {
+            None
+        }
+    }) else {
+        despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
+        return;
+    };
+
+    // Get primary info for mu calculation and position offset
     let primary_mass = physics_graph.id_to_entity.get(&kepler.primary_id)
         .and_then(|e| bodies.get(*e).ok())
         .map(|(_, info, _, _)| info.mass)
         .unwrap_or(0.0);
+    let primary_offset = cache.primary_id.as_ref()
+        .and_then(|pid| physics_graph.id_to_entity.get(pid))
+        .and_then(|e| bodies.get(*e).ok())
+        .map(|(_, _, state, _)| state.current_position)
+        .unwrap_or(DVec3::ZERO);
+
     let mu = kepler.gravitational_parameter
         .unwrap_or(physics.gravitational_constant * primary_mass);
     let period_seconds = kepler.period(mu).to_seconds();
@@ -753,7 +777,6 @@ pub fn update_mouse_hit_marker(
     );
 
     // Calculate next and previous times for this true anomaly position
-    // The event occurs when the body reaches this true anomaly
     let event_times = compute_anomaly_event_times(
         kepler,
         mu,
@@ -763,8 +786,21 @@ pub fn update_mouse_hit_marker(
         sim_time.time,
     );
 
-    // Position and size for the marker
-    let marker_bevy_pos = hit_data.hit_position_bevy;
+    // Re-interpolate the marker position using current trajectory cache and camera position
+    // This ensures the marker lies exactly on the rendered trajectory line
+    let points = &cache.local_points;
+    let idx = hit_data.segment_start_idx;
+    let end_idx = if idx + 1 < points.len() { idx + 1 } else { 0 };
+    
+    let (_, local_a) = points[idx];
+    let (_, local_b) = points[end_idx];
+    
+    // Interpolate in local space then transform to bevy space
+    let local_hit = local_a.lerp(local_b, hit_data.t);
+    let world_hit = local_hit + primary_offset;
+    let distance_scale = view_settings.distance_factor();
+    let marker_bevy_pos = world_hit.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos);
+    
     let tube_radius = calculate_tube_radius(marker_bevy_pos.length());
     let marker_radius = 2.0 * tube_radius;
 
@@ -967,7 +1003,7 @@ pub fn draw_trajectory_marker_labels(
                 FocusedTrajectoryMarkerKind::MouseHit => {
                     // MouseHit always shows full label with true anomaly + times
                     let anomaly_degrees = marker.true_anomaly
-                        .map(|a| a.to_degrees())
+                        .map(|a| a.to_degrees().rem_euclid(360.0))
                         .unwrap_or(0.0);
                     let next_line = marker.next_time
                         .map(|t| format_sim_time_for_mode(clock_settings.mode, t))

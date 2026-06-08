@@ -108,6 +108,7 @@ pub struct GoTo {
 pub enum GoToSource {
     UiButton,
     KeyboardG,
+    KeyboardF,
     KeyboardV,
 }
 
@@ -221,7 +222,7 @@ fn handle_gotos (
             };
             let body_pos = obj_pos.as_bevy_scaled_dvec(view_settings.distance_factor());
             let current_distance = (fcam.bevy_pos - body_pos).length();
-            let preserve_distance = matches!(event.source, GoToSource::KeyboardV)
+            let preserve_distance = matches!(event.source, GoToSource::KeyboardV | GoToSource::KeyboardF)
                 && current_distance.is_finite()
                 && current_distance > f64::EPSILON;
             let end_distance = if preserve_distance {
@@ -669,8 +670,8 @@ fn pick_trajectory_segment(
         let seg_mid = (bevy_a + bevy_b) * 0.5;
         let mid_dist = seg_mid.length();
         let tube_radius = crate::presentation::calculate_tube_radius(mid_dist);
-        let pick_radius = (tube_radius * 2.0).max(MIN_PICK_RADIUS);
-        
+        let pick_radius = (tube_radius * 4.0).max(MIN_PICK_RADIUS);
+
         // Find closest point on segment to ray
         if let Some((seg_t, closest_dist, _)) = ray_segment_closest_point(ray_origin_d, ray_dir_d, seg_a, seg_b) {
             if closest_dist <= pick_radius as f64 {
@@ -700,8 +701,8 @@ fn pick_trajectory_segment(
         let seg_mid = (bevy_a + bevy_b) * 0.5;
         let mid_dist = seg_mid.length();
         let tube_radius = crate::presentation::calculate_tube_radius(mid_dist);
-        let pick_radius = (tube_radius * 2.0).max(MIN_PICK_RADIUS);
-        
+        let pick_radius = (tube_radius * 4.0).max(MIN_PICK_RADIUS);
+
         if let Some((seg_t, closest_dist, _)) = ray_segment_closest_point(ray_origin_d, ray_dir_d, seg_a, seg_b) {
             if closest_dist <= pick_radius as f64 {
                 if best_hit.is_none() || closest_dist < best_hit.as_ref().unwrap().0 {
@@ -835,12 +836,6 @@ fn revolve_around(
                         Ok((entity, state, appearance, motive, transform)) => {
                             let frame = resolve_frame_or_fallback(revolve.frame, motive, sim_time.time, entity);
                             if frame != revolve.frame {
-                                info!(
-                                    "cam.revolve.frame_fallback entity={:?} from={:?} to={:?}",
-                                    entity,
-                                    revolve.frame,
-                                    frame
-                                );
                                 revolve.frame = frame;
                             }
                             let window_scale = window.height().min(window.width());
@@ -899,15 +894,6 @@ fn revolve_around(
                                             || (revolve.azimuth - prev_azimuth).abs() > f64::EPSILON
                                         {
                                             view_changed = true;
-                                            debug!(
-                                                "cam.revolve.orbit entity={:?} frame={:?} altitude={} azimuth={} mouse_delta=({}, {})",
-                                                entity,
-                                                revolve.frame,
-                                                revolve.altitude,
-                                                revolve.azimuth,
-                                                ev.delta.x,
-                                                ev.delta.y
-                                            );
                                         }
                                     }
                                 }
@@ -935,19 +921,10 @@ fn revolve_around(
                                 let look_at_rot = look_at(fcam.bevy_pos, body_pos_in_bevy, up);
                                 cam_t.rotation = look_at_rot.as_quat();
                                 if view_changed {
-                                    info!(
-                                        "cam.revolve.view_change entity={:?} frame={:?} distance={} altitude={} azimuth={}",
-                                        entity,
-                                        revolve.frame,
-                                        revolve.bevy_distance,
-                                        revolve.altitude,
-                                        revolve.azimuth
-                                    );
                                 }
                             }
                         }
                         Err(_) => {
-                            info!("cam.revolve.target_lost entity={:?}", revolve.entity);
                             pcam.action = CameraAction::Free;
                         }
                     }
