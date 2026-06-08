@@ -574,7 +574,7 @@ pub fn update_focused_trajectory_markers(
         return;
     };
 
-    let Ok((_, _info, _state, motive)) = bodies.get(focused_entity) else {
+    let Ok((_, _info, focused_state, motive)) = bodies.get(focused_entity) else {
         despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
         return;
     };
@@ -605,10 +605,36 @@ pub fn update_focused_trajectory_markers(
     let period_seconds = kepler.period(mu).to_seconds();
     let periapsis_base = kepler.time_at_periapsis_passage(mu);
 
-    let periapsis_world = primary_state.current_position + kepler.periapsis_vec(sim_time.time);
-    let apoapsis_world = kepler
-        .apoapsis_vec(sim_time.time)
-        .map(|apo| primary_state.current_position + apo);
+    let Some(trajectory) = focused_state.trajectory.as_ref() else {
+        despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
+        return;
+    };
+    let periapsis_local = trajectory
+        .iter()
+        .min_by(|a, b| {
+            a.1.length_squared()
+                .partial_cmp(&b.1.length_squared())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(_, d)| *d);
+    let apoapsis_local = if kepler.is_open() {
+        None
+    } else {
+        trajectory
+            .iter()
+            .max_by(|a, b| {
+                a.1.length_squared()
+                    .partial_cmp(&b.1.length_squared())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(_, d)| *d)
+    };
+    let Some(periapsis_local) = periapsis_local else {
+        despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
+        return;
+    };
+    let periapsis_world = primary_state.current_position + periapsis_local;
+    let apoapsis_world = apoapsis_local.map(|apo| primary_state.current_position + apo);
     let peri_times = repeating_event_prev_next(periapsis_base, period_seconds, sim_time.time);
     let apo_times = repeating_event_prev_next(
         crate::foundations::time::Instant::from_seconds_since_j2000(
