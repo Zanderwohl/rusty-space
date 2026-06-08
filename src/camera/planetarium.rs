@@ -393,6 +393,7 @@ struct PickState {
 const DOUBLE_CLICK_WINDOW: f64 = 0.5;
 const HOVER_PIXEL_RADIUS: f32 = 20.0;
 const MIN_PICK_RADIUS: f32 = 0.01;
+const TRAJECTORY_PICK_PIXEL_RADIUS: f32 = 10.0;
 
 #[derive(Default)]
 struct HoverPickResult {
@@ -593,8 +594,9 @@ fn pick_hover_target(
             view_settings,
             sim_time.time.to_j2000_seconds(),
             freecam,
-            ray_origin,
-            ray_dir,
+            camera,
+            &fresh_gt,
+            cursor_pos,
         )
     } else {
         None
@@ -616,8 +618,9 @@ fn pick_trajectory_segment(
     view_settings: &ViewSettings,
     sim_time_seconds: f64,
     freecam: &Freecam,
-    ray_origin: Vec3,
-    ray_dir: Vec3,
+    camera: &Camera,
+    camera_global_transform: &GlobalTransform,
+    cursor_pos: Vec2,
 ) -> Option<TrajectoryHitData> {
     let focused_id = focused_body_state.current_body_id.as_ref()?;
     
@@ -656,12 +659,8 @@ fn pick_trajectory_segment(
     let distance_scale = view_settings.distance_factor();
     let camera_pos = freecam.bevy_pos;
     
-    // Convert ray to f64 for precision
-    let ray_origin_d = DVec3::new(ray_origin.x as f64, ray_origin.y as f64, ray_origin.z as f64);
-    let ray_dir_d = DVec3::new(ray_dir.x as f64, ray_dir.y as f64, ray_dir.z as f64).normalize();
-    
-    // (distance, idx, seg_t, time_a, time_b, local_pos, bevy_pos)
-    let mut best_hit: Option<(f64, usize, f64, f64, f64, DVec3, Vec3)> = None;
+    // (pixel_distance, idx, seg_t, time_a, time_b, local_pos, bevy_pos)
+    let mut best_hit: Option<(f32, usize, f64, f64, f64, DVec3, Vec3)> = None;
     
     let points = crate::presentation::build_working_trajectory_points(
         cache,
@@ -680,25 +679,20 @@ fn pick_trajectory_segment(
         let bevy_a = world_a.as_bevy_scaled_cheated(distance_scale, camera_pos);
         let bevy_b = world_b.as_bevy_scaled_cheated(distance_scale, camera_pos);
         
-        // Convert to DVec3 for calculation
-        let seg_a = DVec3::new(bevy_a.x as f64, bevy_a.y as f64, bevy_a.z as f64);
-        let seg_b = DVec3::new(bevy_b.x as f64, bevy_b.y as f64, bevy_b.z as f64);
-        
-        // Calculate tube radius at segment midpoint for hit threshold
-        let seg_mid = (bevy_a + bevy_b) * 0.5;
-        let mid_dist = seg_mid.length();
-        let tube_radius = crate::presentation::calculate_tube_radius(mid_dist);
-        let pick_radius = (tube_radius * 4.0).max(MIN_PICK_RADIUS);
+        let Ok(screen_a) = camera.world_to_viewport(camera_global_transform, bevy_a) else {
+            continue;
+        };
+        let Ok(screen_b) = camera.world_to_viewport(camera_global_transform, bevy_b) else {
+            continue;
+        };
+        let (seg_t, screen_dist) = closest_point_on_screen_segment(cursor_pos, screen_a, screen_b);
 
-        // Find closest point on segment to ray
-        if let Some((seg_t, closest_dist, _)) = ray_segment_closest_point(ray_origin_d, ray_dir_d, seg_a, seg_b) {
-            if closest_dist <= pick_radius as f64 {
-                if best_hit.is_none() || closest_dist < best_hit.as_ref().unwrap().0 {
-                    // Interpolate local position
-                    let local_hit = local_a.lerp(local_b, seg_t);
-                    let bevy_hit = bevy_a.lerp(bevy_b, seg_t as f32);
-                    best_hit = Some((closest_dist, i, seg_t, time_a, time_b, local_hit, bevy_hit));
-                }
+        if screen_dist <= TRAJECTORY_PICK_PIXEL_RADIUS {
+            if best_hit.is_none() || screen_dist < best_hit.as_ref().unwrap().0 {
+                // Interpolate local position
+                let local_hit = local_a.lerp(local_b, seg_t);
+                let bevy_hit = bevy_a.lerp(bevy_b, seg_t as f32);
+                best_hit = Some((screen_dist, i, seg_t, time_a, time_b, local_hit, bevy_hit));
             }
         }
     }
@@ -713,17 +707,14 @@ fn pick_trajectory_segment(
         let bevy_a = world_a.as_bevy_scaled_cheated(distance_scale, camera_pos);
         let bevy_b = world_b.as_bevy_scaled_cheated(distance_scale, camera_pos);
         
-        let seg_a = DVec3::new(bevy_a.x as f64, bevy_a.y as f64, bevy_a.z as f64);
-        let seg_b = DVec3::new(bevy_b.x as f64, bevy_b.y as f64, bevy_b.z as f64);
-        
-        let seg_mid = (bevy_a + bevy_b) * 0.5;
-        let mid_dist = seg_mid.length();
-        let tube_radius = crate::presentation::calculate_tube_radius(mid_dist);
-        let pick_radius = (tube_radius * 4.0).max(MIN_PICK_RADIUS);
+        if let (Ok(screen_a), Ok(screen_b)) = (
+            camera.world_to_viewport(camera_global_transform, bevy_a),
+            camera.world_to_viewport(camera_global_transform, bevy_b),
+        ) {
+            let (seg_t, screen_dist) = closest_point_on_screen_segment(cursor_pos, screen_a, screen_b);
 
-        if let Some((seg_t, closest_dist, _)) = ray_segment_closest_point(ray_origin_d, ray_dir_d, seg_a, seg_b) {
-            if closest_dist <= pick_radius as f64 {
-                if best_hit.is_none() || closest_dist < best_hit.as_ref().unwrap().0 {
+            if screen_dist <= TRAJECTORY_PICK_PIXEL_RADIUS {
+                if best_hit.is_none() || screen_dist < best_hit.as_ref().unwrap().0 {
                     let local_hit = local_a.lerp(local_b, seg_t);
                     let bevy_hit = bevy_a.lerp(bevy_b, seg_t as f32);
                     // For wrapped segment, time_b is actually the start of the period (0)
@@ -733,7 +724,7 @@ fn pick_trajectory_segment(
                     } else {
                         time_b
                     };
-                    best_hit = Some((closest_dist, points.len() - 1, seg_t, time_a, adjusted_time_b, local_hit, bevy_hit));
+                    best_hit = Some((screen_dist, points.len() - 1, seg_t, time_a, adjusted_time_b, local_hit, bevy_hit));
                 }
             }
         }
@@ -751,73 +742,18 @@ fn pick_trajectory_segment(
     })
 }
 
-/// Find the closest point on a line segment to a ray.
-/// Returns (t, distance, closest_point_on_segment) where t is in [0, 1].
-fn ray_segment_closest_point(
-    ray_origin: DVec3,
-    ray_dir: DVec3,
-    seg_a: DVec3,
-    seg_b: DVec3,
-) -> Option<(f64, f64, DVec3)> {
-    let seg_dir = seg_b - seg_a;
-    let seg_len_sq = seg_dir.length_squared();
-    
-    if seg_len_sq < 1e-12 {
-        // Degenerate segment (point)
-        let to_point = seg_a - ray_origin;
-        let t_ray = to_point.dot(ray_dir);
-        if t_ray < 0.0 {
-            return None; // Behind ray
-        }
-        let closest_on_ray = ray_origin + ray_dir * t_ray;
-        let dist = (seg_a - closest_on_ray).length();
-        return Some((0.0, dist, seg_a));
+/// Find the closest point on a 2D segment to a 2D point.
+/// Returns (t, distance) where t is in [0, 1].
+fn closest_point_on_screen_segment(point: Vec2, seg_a: Vec2, seg_b: Vec2) -> (f64, f32) {
+    let seg = seg_b - seg_a;
+    let seg_len_sq = seg.length_squared();
+    if seg_len_sq <= f32::EPSILON {
+        return (0.0, point.distance(seg_a));
     }
-    
-    // Solve for closest points on ray and segment
-    // Ray: P = ray_origin + s * ray_dir
-    // Segment: Q = seg_a + t * seg_dir, t in [0, 1]
-    // Minimize |P - Q|^2
-    
-    let w0 = ray_origin - seg_a;
-    let a = ray_dir.dot(ray_dir); // Always 1 for normalized ray_dir
-    let b = ray_dir.dot(seg_dir);
-    let c = seg_dir.dot(seg_dir);
-    let d = ray_dir.dot(w0);
-    let e = seg_dir.dot(w0);
-    
-    let denom = a * c - b * b;
-    
-    let (s, t) = if denom.abs() < 1e-12 {
-        // Lines are parallel
-        let t = e / c;
-        let t = t.clamp(0.0, 1.0);
-        let closest_on_seg = seg_a + seg_dir * t;
-        let to_closest = closest_on_seg - ray_origin;
-        let s = to_closest.dot(ray_dir);
-        (s, t)
-    } else {
-        let s = (b * e - c * d) / denom;
-        let t = (a * e - b * d) / denom;
-        let t = t.clamp(0.0, 1.0);
-        
-        // Recompute s for clamped t
-        let closest_on_seg = seg_a + seg_dir * t;
-        let to_closest = closest_on_seg - ray_origin;
-        let s = to_closest.dot(ray_dir);
-        (s, t)
-    };
-    
-    if s < 0.0 {
-        // Closest point is behind ray origin
-        return None;
-    }
-    
-    let closest_on_ray = ray_origin + ray_dir * s;
-    let closest_on_seg = seg_a + seg_dir * t;
-    let dist = (closest_on_seg - closest_on_ray).length();
-    
-    Some((t, dist, closest_on_seg))
+
+    let t = ((point - seg_a).dot(seg) / seg_len_sq).clamp(0.0, 1.0);
+    let closest = seg_a + seg * t;
+    (t as f64, point.distance(closest))
 }
 
 fn ray_hits_sphere(ray_origin: Vec3, ray_dir: Vec3, center: Vec3, radius: f32) -> bool {
