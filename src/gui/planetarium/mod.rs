@@ -16,7 +16,7 @@ use crate::body::motive::kepler_motive;
 pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin, CameraAction};
 use crate::camera::Freecam;
 pub use crate::gui::planetarium::focused_body::FocusedBodyState;
-pub use crate::gui::planetarium::focused_body::{HoverState, HoveredTrajectoryMarkerKind};
+pub use crate::gui::planetarium::focused_body::{HoverState, HoveredTrajectoryMarkerKind, TrajectoryHitData};
 pub use crate::gui::planetarium::windows::mission_clock::{MissionClockMode, MissionClockSettings, format_sim_time_for_mode};
 use crate::presentation::{self, BodyWireframeMaterial, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, TrajectoryMesh, BodyPointMesh, FocusedTrajectoryMarker};
 use crate::gui::menu::escape::{EscapeMenuPlugin, EscMenuState, UnsavedChanges};
@@ -93,6 +93,8 @@ impl Plugin for PlanetariumUI {
                     .after(kepler_motive::calculate_trajectory),
                 presentation::update_focused_trajectory_markers
                     .after(presentation::position_bodies),
+                presentation::update_mouse_hit_marker
+                    .after(presentation::position_bodies),
                 presentation::build_trajectory_meshes
                     .after(presentation::position_bodies)
                     .after(presentation::rebuild_trajectory_caches),
@@ -125,7 +127,8 @@ impl Plugin for PlanetariumUI {
                     .after(presentation::position_bodies),
                 presentation::draw_trajectory_marker_labels
                     .after(presentation::position_bodies)
-                    .after(presentation::update_focused_trajectory_markers),
+                    .after(presentation::update_focused_trajectory_markers)
+                    .after(presentation::update_mouse_hit_marker),
             ).in_set(PlanetariumUISet))
             // Celestial reference markers (Point of Aries, etc.)
             .add_systems(Update, (

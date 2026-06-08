@@ -25,7 +25,7 @@ use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::calculate_body_positions;
 use crate::body::universe::save::ViewSettings;
 use crate::gui::app::AppState;
-use crate::gui::planetarium::{FocusedBodyState, HoverState, HoveredTrajectoryMarkerKind};
+use crate::gui::planetarium::{FocusedBodyState, HoverState, HoveredTrajectoryMarkerKind, TrajectoryHitData};
 use crate::presentation::{position_bodies, FocusedTrajectoryMarker, FocusedTrajectoryMarkerKind};
 use crate::sim::SimTime;
 use crate::camera::freecam::{FreeCamPlugin, Freecam, MovementSettings};
@@ -397,6 +397,7 @@ const MIN_PICK_RADIUS: f32 = 0.01;
 struct HoverPickResult {
     hovered_body_id: Option<String>,
     hovered_marker_kind: Option<HoveredTrajectoryMarkerKind>,
+    trajectory_hit: Option<TrajectoryHitData>,
 }
 
 fn update_hover_target(
@@ -404,7 +405,9 @@ fn update_hover_target(
     cameras: Query<(&Camera, &Projection, &Transform, &Freecam), With<PlanetariumCamera>>,
     bodies: Query<(&BodyState, &BodyInfo, &Appearance), Without<PlanetariumCamera>>,
     markers: Query<(&FocusedTrajectoryMarker, &Transform)>,
+    trajectory_caches: Query<(&crate::presentation::TrajectoryMesh, &crate::presentation::TrajectoryCache)>,
     view_settings: Res<ViewSettings>,
+    focused_body_state: Res<FocusedBodyState>,
     mut egui_ctx: EguiContexts,
     mut hover_state: ResMut<HoverState>,
 ) {
@@ -413,11 +416,14 @@ fn update_hover_target(
         &cameras,
         &bodies,
         &markers,
+        &trajectory_caches,
         &view_settings,
+        &focused_body_state,
         &mut egui_ctx,
     );
     hover_state.hovered_body_id = hovered.hovered_body_id;
     hover_state.hovered_marker_kind = hovered.hovered_marker_kind;
+    hover_state.hovered_trajectory_hit = hovered.trajectory_hit;
 }
 
 fn pick_body_on_click(
@@ -426,6 +432,7 @@ fn pick_body_on_click(
     cameras: Query<(&Camera, &Projection, &Transform, &Freecam), With<PlanetariumCamera>>,
     bodies: Query<(&BodyState, &BodyInfo, &Appearance), Without<PlanetariumCamera>>,
     markers: Query<(&FocusedTrajectoryMarker, &Transform)>,
+    trajectory_caches: Query<(&crate::presentation::TrajectoryMesh, &crate::presentation::TrajectoryCache)>,
     view_settings: Res<ViewSettings>,
     mut egui_ctx: EguiContexts,
     time: Res<Time>,
@@ -441,7 +448,9 @@ fn pick_body_on_click(
         &cameras,
         &bodies,
         &markers,
+        &trajectory_caches,
         &view_settings,
+        &focused_body_state,
         &mut egui_ctx,
     );
     if let Some(selected_id) = hovered.hovered_body_id {
@@ -472,7 +481,9 @@ fn pick_hover_target(
     cameras: &Query<(&Camera, &Projection, &Transform, &Freecam), With<PlanetariumCamera>>,
     bodies: &Query<(&BodyState, &BodyInfo, &Appearance), Without<PlanetariumCamera>>,
     markers: &Query<(&FocusedTrajectoryMarker, &Transform)>,
+    trajectory_caches: &Query<(&crate::presentation::TrajectoryMesh, &crate::presentation::TrajectoryCache)>,
     view_settings: &ViewSettings,
+    focused_body_state: &FocusedBodyState,
     egui_ctx: &mut EguiContexts,
 ) -> HoverPickResult {
     let egui_wants_pointer = egui_ctx.ctx_mut()
@@ -538,6 +549,7 @@ fn pick_hover_target(
         let marker_kind = match marker.kind {
             FocusedTrajectoryMarkerKind::Periapsis => HoveredTrajectoryMarkerKind::Periapsis,
             FocusedTrajectoryMarkerKind::Apoapsis => HoveredTrajectoryMarkerKind::Apoapsis,
+            FocusedTrajectoryMarkerKind::MouseHit => continue, // Skip MouseHit markers in picking
         };
         if ray_hits_sphere(ray_origin, ray_dir, marker_pos, pick_radius) {
             let screen_dist = camera
@@ -566,10 +578,227 @@ fn pick_hover_target(
             .map(|(kind, _)| kind)
     };
 
+    // Fallback: trajectory segment cast only when no body or marker hit
+    let trajectory_hit = if hovered_body_id.is_none() && hovered_marker_kind.is_none() {
+        pick_trajectory_segment(
+            focused_body_state,
+            bodies,
+            trajectory_caches,
+            view_settings,
+            freecam,
+            ray_origin,
+            ray_dir,
+        )
+    } else {
+        None
+    };
+
     HoverPickResult {
         hovered_body_id,
         hovered_marker_kind,
+        trajectory_hit,
     }
+}
+
+/// Raycast against the focused body's trajectory segments.
+/// Returns the closest hit within the pick radius threshold.
+fn pick_trajectory_segment(
+    focused_body_state: &FocusedBodyState,
+    bodies: &Query<(&BodyState, &BodyInfo, &Appearance), Without<PlanetariumCamera>>,
+    trajectory_caches: &Query<(&crate::presentation::TrajectoryMesh, &crate::presentation::TrajectoryCache)>,
+    view_settings: &ViewSettings,
+    freecam: &Freecam,
+    ray_origin: Vec3,
+    ray_dir: Vec3,
+) -> Option<TrajectoryHitData> {
+    let focused_id = focused_body_state.current_body_id.as_ref()?;
+    
+    // Find the focused body's entity and state
+    let (_focused_state, _focused_info) = bodies
+        .iter()
+        .find(|(_, info, _)| &info.id == focused_id)
+        .map(|(state, info, _)| (state, info))?;
+    
+    // Find the trajectory cache for the focused body
+    let cache = trajectory_caches
+        .iter()
+        .find_map(|(traj_mesh, cache)| {
+            let Ok((_, info, _)) = bodies.get(traj_mesh.body_entity) else {
+                return None;
+            };
+            if &info.id == focused_id && cache.valid && !cache.local_points.is_empty() {
+                Some(cache)
+            } else {
+                None
+            }
+        })?;
+    
+    // Get primary position offset for Keplerian orbits
+    let primary_offset: DVec3 = cache.primary_id.as_ref().and_then(|pid| {
+        bodies.iter()
+            .find(|(_, info, _)| &info.id == pid)
+            .map(|(state, _, _)| state.current_position)
+    }).unwrap_or(DVec3::ZERO);
+    
+    let distance_scale = view_settings.distance_factor();
+    let camera_pos = freecam.bevy_pos;
+    
+    // Convert ray to f64 for precision
+    let ray_origin_d = DVec3::new(ray_origin.x as f64, ray_origin.y as f64, ray_origin.z as f64);
+    let ray_dir_d = DVec3::new(ray_dir.x as f64, ray_dir.y as f64, ray_dir.z as f64).normalize();
+    
+    // (distance, idx, seg_t, time_a, time_b, local_pos, bevy_pos)
+    let mut best_hit: Option<(f64, usize, f64, f64, f64, DVec3, Vec3)> = None;
+    
+    let points = &cache.local_points;
+    for i in 0..points.len().saturating_sub(1) {
+        let (time_a, local_a) = points[i];
+        let (time_b, local_b) = points[i + 1];
+        
+        // Transform to bevy space
+        let world_a = local_a + primary_offset;
+        let world_b = local_b + primary_offset;
+        let bevy_a = world_a.as_bevy_scaled_cheated(distance_scale, camera_pos);
+        let bevy_b = world_b.as_bevy_scaled_cheated(distance_scale, camera_pos);
+        
+        // Convert to DVec3 for calculation
+        let seg_a = DVec3::new(bevy_a.x as f64, bevy_a.y as f64, bevy_a.z as f64);
+        let seg_b = DVec3::new(bevy_b.x as f64, bevy_b.y as f64, bevy_b.z as f64);
+        
+        // Calculate tube radius at segment midpoint for hit threshold
+        let seg_mid = (bevy_a + bevy_b) * 0.5;
+        let mid_dist = seg_mid.length();
+        let tube_radius = crate::presentation::calculate_tube_radius(mid_dist);
+        let pick_radius = (tube_radius * 2.0).max(MIN_PICK_RADIUS);
+        
+        // Find closest point on segment to ray
+        if let Some((seg_t, closest_dist, _)) = ray_segment_closest_point(ray_origin_d, ray_dir_d, seg_a, seg_b) {
+            if closest_dist <= pick_radius as f64 {
+                if best_hit.is_none() || closest_dist < best_hit.as_ref().unwrap().0 {
+                    // Interpolate local position
+                    let local_hit = local_a.lerp(local_b, seg_t);
+                    let bevy_hit = bevy_a.lerp(bevy_b, seg_t as f32);
+                    best_hit = Some((closest_dist, i, seg_t, time_a, time_b, local_hit, bevy_hit));
+                }
+            }
+        }
+    }
+    
+    // Handle closed orbit: check segment from last point back to first
+    if cache.closed && points.len() >= 2 {
+        let (time_a, local_a) = points[points.len() - 1];
+        let (time_b, local_b) = points[0];
+        
+        let world_a = local_a + primary_offset;
+        let world_b = local_b + primary_offset;
+        let bevy_a = world_a.as_bevy_scaled_cheated(distance_scale, camera_pos);
+        let bevy_b = world_b.as_bevy_scaled_cheated(distance_scale, camera_pos);
+        
+        let seg_a = DVec3::new(bevy_a.x as f64, bevy_a.y as f64, bevy_a.z as f64);
+        let seg_b = DVec3::new(bevy_b.x as f64, bevy_b.y as f64, bevy_b.z as f64);
+        
+        let seg_mid = (bevy_a + bevy_b) * 0.5;
+        let mid_dist = seg_mid.length();
+        let tube_radius = crate::presentation::calculate_tube_radius(mid_dist);
+        let pick_radius = (tube_radius * 2.0).max(MIN_PICK_RADIUS);
+        
+        if let Some((seg_t, closest_dist, _)) = ray_segment_closest_point(ray_origin_d, ray_dir_d, seg_a, seg_b) {
+            if closest_dist <= pick_radius as f64 {
+                if best_hit.is_none() || closest_dist < best_hit.as_ref().unwrap().0 {
+                    let local_hit = local_a.lerp(local_b, seg_t);
+                    let bevy_hit = bevy_a.lerp(bevy_b, seg_t as f32);
+                    // For wrapped segment, time_b is actually the start of the period (0)
+                    // but we want the logical continuation, so add period if needed
+                    let adjusted_time_b = if let Some(interval_size) = cache.interval_size {
+                        time_b + interval_size
+                    } else {
+                        time_b
+                    };
+                    best_hit = Some((closest_dist, points.len() - 1, seg_t, time_a, adjusted_time_b, local_hit, bevy_hit));
+                }
+            }
+        }
+    }
+    
+    best_hit.map(|(_, idx, seg_t, time_a, time_b, local_pos, bevy_pos)| {
+        TrajectoryHitData {
+            segment_start_idx: idx,
+            start_time: time_a,
+            end_time: time_b,
+            t: seg_t,
+            hit_position_local: local_pos,
+            hit_position_bevy: bevy_pos,
+        }
+    })
+}
+
+/// Find the closest point on a line segment to a ray.
+/// Returns (t, distance, closest_point_on_segment) where t is in [0, 1].
+fn ray_segment_closest_point(
+    ray_origin: DVec3,
+    ray_dir: DVec3,
+    seg_a: DVec3,
+    seg_b: DVec3,
+) -> Option<(f64, f64, DVec3)> {
+    let seg_dir = seg_b - seg_a;
+    let seg_len_sq = seg_dir.length_squared();
+    
+    if seg_len_sq < 1e-12 {
+        // Degenerate segment (point)
+        let to_point = seg_a - ray_origin;
+        let t_ray = to_point.dot(ray_dir);
+        if t_ray < 0.0 {
+            return None; // Behind ray
+        }
+        let closest_on_ray = ray_origin + ray_dir * t_ray;
+        let dist = (seg_a - closest_on_ray).length();
+        return Some((0.0, dist, seg_a));
+    }
+    
+    // Solve for closest points on ray and segment
+    // Ray: P = ray_origin + s * ray_dir
+    // Segment: Q = seg_a + t * seg_dir, t in [0, 1]
+    // Minimize |P - Q|^2
+    
+    let w0 = ray_origin - seg_a;
+    let a = ray_dir.dot(ray_dir); // Always 1 for normalized ray_dir
+    let b = ray_dir.dot(seg_dir);
+    let c = seg_dir.dot(seg_dir);
+    let d = ray_dir.dot(w0);
+    let e = seg_dir.dot(w0);
+    
+    let denom = a * c - b * b;
+    
+    let (s, t) = if denom.abs() < 1e-12 {
+        // Lines are parallel
+        let t = e / c;
+        let t = t.clamp(0.0, 1.0);
+        let closest_on_seg = seg_a + seg_dir * t;
+        let to_closest = closest_on_seg - ray_origin;
+        let s = to_closest.dot(ray_dir);
+        (s, t)
+    } else {
+        let s = (b * e - c * d) / denom;
+        let t = (a * e - b * d) / denom;
+        let t = t.clamp(0.0, 1.0);
+        
+        // Recompute s for clamped t
+        let closest_on_seg = seg_a + seg_dir * t;
+        let to_closest = closest_on_seg - ray_origin;
+        let s = to_closest.dot(ray_dir);
+        (s, t)
+    };
+    
+    if s < 0.0 {
+        // Closest point is behind ray origin
+        return None;
+    }
+    
+    let closest_on_ray = ray_origin + ray_dir * s;
+    let closest_on_seg = seg_a + seg_dir * t;
+    let dist = (closest_on_seg - closest_on_ray).length();
+    
+    Some((t, dist, closest_on_seg))
 }
 
 fn ray_hits_sphere(ray_origin: Vec3, ray_dir: Vec3, center: Vec3, radius: f32) -> bool {

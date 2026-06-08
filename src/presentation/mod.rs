@@ -41,9 +41,11 @@ pub use labels::label_bodies;
 pub use rotation::orient_bodies;
 pub use trajectory::{
     build_trajectory_meshes,
+    calculate_tube_radius,
     cleanup_orphaned_trajectory_meshes,
     draw_trajectory_marker_labels,
     update_focused_trajectory_markers,
+    update_mouse_hit_marker,
     rebuild_trajectory_caches,
     refresh_precessing_trajectories,
     spawn_trajectory_mesh,

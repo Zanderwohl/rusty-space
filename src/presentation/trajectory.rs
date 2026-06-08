@@ -38,6 +38,7 @@ pub struct TrajectoryMesh {
 pub enum FocusedTrajectoryMarkerKind {
     Periapsis,
     Apoapsis,
+    MouseHit,
 }
 
 #[derive(Component)]
@@ -45,6 +46,8 @@ pub struct FocusedTrajectoryMarker {
     pub kind: FocusedTrajectoryMarkerKind,
     pub previous_time: Option<crate::foundations::time::Instant>,
     pub next_time: Option<crate::foundations::time::Instant>,
+    /// Refined true anomaly in radians (only used for MouseHit markers).
+    pub true_anomaly: Option<f64>,
 }
 
 /// How often to rebuild trajectories for precessing orbits (in simulation seconds)
@@ -141,7 +144,7 @@ fn empty_trajectory_mesh() -> Mesh {
 /// Calculate tube radius based on distance from camera.
 /// Uses a power curve for general scaling, with a minimum angular size floor
 /// to prevent sub-pixel aliasing at extreme distances.
-fn calculate_tube_radius(distance_from_camera: f32) -> f32 {
+pub fn calculate_tube_radius(distance_from_camera: f32) -> f32 {
     if distance_from_camera <= 0.0 {
         return MIN_TUBE_RADIUS;
     }
@@ -664,6 +667,7 @@ pub fn update_focused_trajectory_markers(
         peri_marker_radius,
         peri_times.0,
         peri_times.1,
+        None, // Pe/Ap don't use true_anomaly field
     );
 
     match (apo_bevy, apo_marker_radius) {
@@ -678,12 +682,160 @@ pub fn update_focused_trajectory_markers(
                 radius,
                 apo_times.0,
                 apo_times.1,
+                None, // Pe/Ap don't use true_anomaly field
             );
         }
         _ => {
             despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::Apoapsis);
         }
     }
+}
+
+/// System to update the MouseHit trajectory marker based on hover state.
+/// Spawns/updates marker when trajectory is hit, despawns when not.
+pub fn update_mouse_hit_marker(
+    mut commands: Commands,
+    hover_state: Res<HoverState>,
+    focused_body_state: Res<FocusedBodyState>,
+    sim_time: Res<SimTime>,
+    physics: Res<UniversePhysics>,
+    physics_graph: Res<crate::body::motive::calculate_body_positions::PhysicsGraph>,
+    bodies: Query<(Entity, &BodyInfo, &BodyState, &Motive)>,
+    mut markers: Query<(Entity, &mut FocusedTrajectoryMarker, &mut Transform)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<TrajectoryMaterial>>,
+) {
+    let Some(hit_data) = hover_state.hovered_trajectory_hit.as_ref() else {
+        despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
+        return;
+    };
+
+    let Some(focused_id) = focused_body_state.current_body_id.as_deref() else {
+        despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
+        return;
+    };
+
+    let Some(focused_entity) = physics_graph.id_to_entity.get(focused_id).copied() else {
+        despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
+        return;
+    };
+
+    let Ok((_, _info, _focused_state, motive)) = bodies.get(focused_entity) else {
+        despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
+        return;
+    };
+
+    let (_, selection) = motive.motive_at(sim_time.time);
+    let MotiveSelection::Keplerian(kepler) = selection else {
+        despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
+        return;
+    };
+
+    // Get primary info for mu calculation
+    let primary_mass = physics_graph.id_to_entity.get(&kepler.primary_id)
+        .and_then(|e| bodies.get(*e).ok())
+        .map(|(_, info, _, _)| info.mass)
+        .unwrap_or(0.0);
+    let mu = kepler.gravitational_parameter
+        .unwrap_or(physics.gravitational_constant * primary_mass);
+    let period_seconds = kepler.period(mu).to_seconds();
+    let periapsis_base = kepler.time_at_periapsis_passage(mu);
+
+    // Compute true anomaly using Newton refinement (20 iterations in fourier_expansion)
+    let true_anomaly = refine_true_anomaly_newton(
+        kepler,
+        mu,
+        hit_data.start_time,
+        hit_data.end_time,
+        hit_data.t,
+        periapsis_base,
+        20, // Newton iterations
+    );
+
+    // Calculate next and previous times for this true anomaly position
+    // The event occurs when the body reaches this true anomaly
+    let event_times = compute_anomaly_event_times(
+        kepler,
+        mu,
+        true_anomaly,
+        period_seconds,
+        periapsis_base,
+        sim_time.time,
+    );
+
+    // Position and size for the marker
+    let marker_bevy_pos = hit_data.hit_position_bevy;
+    let tube_radius = calculate_tube_radius(marker_bevy_pos.length());
+    let marker_radius = 2.0 * tube_radius;
+
+    ensure_trajectory_marker(
+        &mut commands,
+        &mut markers,
+        &mut meshes,
+        &mut materials,
+        FocusedTrajectoryMarkerKind::MouseHit,
+        marker_bevy_pos,
+        marker_radius,
+        event_times.0,
+        event_times.1,
+        Some(true_anomaly),
+    );
+}
+
+/// Refine true anomaly using Newton iteration within the segment bounds.
+/// Takes segment endpoint times and interpolation parameter, returns refined true anomaly.
+fn refine_true_anomaly_newton(
+    kepler: &crate::body::motive::kepler_motive::KeplerMotive,
+    mu: f64,
+    start_time: f64,
+    end_time: f64,
+    t: f64,
+    periapsis_base: crate::foundations::time::Instant,
+    iterations: usize,
+) -> f64 {
+    // Initial guess: linear interpolation of time
+    let interpolated_relative_time = start_time + t * (end_time - start_time);
+    let absolute_time = crate::foundations::time::Instant::from_seconds_since_j2000(
+        periapsis_base.to_j2000_seconds() + interpolated_relative_time
+    );
+    
+    // Use kepler's eccentricity via public method
+    let ecc = kepler.eccentricity();
+    let mean_anomaly = kepler.mean_anomaly(absolute_time, mu);
+    
+    // Apply N-iteration Fourier expansion for true anomaly refinement
+    crate::foundations::kepler::true_anomaly::fourier_expansion(mean_anomaly, ecc, iterations)
+}
+
+/// Compute the previous and next times when the body will be at a given true anomaly.
+fn compute_anomaly_event_times(
+    kepler: &crate::body::motive::kepler_motive::KeplerMotive,
+    _mu: f64,
+    true_anomaly: f64,
+    period_seconds: f64,
+    periapsis_base: crate::foundations::time::Instant,
+    now: crate::foundations::time::Instant,
+) -> (Option<crate::foundations::time::Instant>, Option<crate::foundations::time::Instant>) {
+    use std::f64::consts::TAU;
+    
+    // Convert true anomaly to mean anomaly, then to time offset from periapsis
+    let ecc = kepler.eccentricity();
+    let eccentric_anomaly = crate::foundations::kepler::eccentric_anomaly::from_true_anomaly(ecc, true_anomaly);
+    let mean_anomaly = crate::foundations::kepler::mean_anomaly::kepler(eccentric_anomaly, ecc);
+    
+    // Normalize mean anomaly to [0, 2π)
+    let mean_anomaly = mean_anomaly.rem_euclid(TAU);
+    
+    // Time offset from periapsis for this mean anomaly
+    let time_offset = (mean_anomaly / TAU) * period_seconds;
+    
+    // Base time for this anomaly event
+    let event_base = crate::foundations::time::Instant::from_seconds_since_j2000(
+        periapsis_base.to_j2000_seconds() + time_offset
+    );
+    
+    // Find previous and next occurrences
+    repeating_event_prev_next(event_base, period_seconds, now)
 }
 
 fn ensure_trajectory_marker(
@@ -696,6 +848,7 @@ fn ensure_trajectory_marker(
     radius: f32,
     previous_time: Option<crate::foundations::time::Instant>,
     next_time: Option<crate::foundations::time::Instant>,
+    true_anomaly: Option<f64>,
 ) {
     let mut existing = None;
     for (entity, marker, _) in markers.iter_mut() {
@@ -709,6 +862,7 @@ fn ensure_trajectory_marker(
         if let Ok((_, mut marker, mut transform)) = markers.get_mut(entity) {
             marker.previous_time = previous_time;
             marker.next_time = next_time;
+            marker.true_anomaly = true_anomaly;
             transform.translation = position;
             transform.scale = Vec3::splat(radius);
         }
@@ -739,6 +893,7 @@ fn ensure_trajectory_marker(
             kind,
             previous_time,
             next_time,
+            true_anomaly,
         },
     ));
 }
@@ -803,42 +958,66 @@ pub fn draw_trajectory_marker_labels(
     for (camera, _, _, camera_transform) in &cameras {
         let fresh_camera_gt = GlobalTransform::from(*camera_transform);
         for (marker, transform) in marker_query.iter() {
-            let marker_name = match marker.kind {
-                FocusedTrajectoryMarkerKind::Periapsis => "Periapsis",
-                FocusedTrajectoryMarkerKind::Apoapsis => "Apoapsis",
-            };
-            let marker_summary = match marker.kind {
-                FocusedTrajectoryMarkerKind::Periapsis => "Pe",
-                FocusedTrajectoryMarkerKind::Apoapsis => "Ap",
-            };
-            let marker_hovered = match marker.kind {
-                FocusedTrajectoryMarkerKind::Periapsis => {
-                    hover_state.hovered_marker_kind == Some(HoveredTrajectoryMarkerKind::Periapsis)
-                }
-                FocusedTrajectoryMarkerKind::Apoapsis => {
-                    hover_state.hovered_marker_kind == Some(HoveredTrajectoryMarkerKind::Apoapsis)
-                }
-            };
-
             let world_pos = transform.translation + Vec3::Y * (transform.scale.y * 1.6);
             let Ok(screen_pos) = camera.world_to_viewport(&fresh_camera_gt, world_pos) else {
                 continue;
             };
 
-            let label_text = if marker_hovered {
-                let next_line = marker.next_time
-                    .map(|t| format_sim_time_for_mode(clock_settings.mode, t))
-                    .unwrap_or_else(|| "N/A".to_string());
-                let prev_line = marker.previous_time
-                    .map(|t| format_sim_time_for_mode(clock_settings.mode, t))
-                    .unwrap_or_else(|| "N/A".to_string());
-                format!(
-                    "{}\nNext: {}\nPrev: {}",
-                    marker_name, next_line, prev_line
-                )
-            } else {
-                marker_summary.to_string()
+            let label_text = match marker.kind {
+                FocusedTrajectoryMarkerKind::MouseHit => {
+                    // MouseHit always shows full label with true anomaly + times
+                    let anomaly_degrees = marker.true_anomaly
+                        .map(|a| a.to_degrees())
+                        .unwrap_or(0.0);
+                    let next_line = marker.next_time
+                        .map(|t| format_sim_time_for_mode(clock_settings.mode, t))
+                        .unwrap_or_else(|| "N/A".to_string());
+                    let prev_line = marker.previous_time
+                        .map(|t| format_sim_time_for_mode(clock_settings.mode, t))
+                        .unwrap_or_else(|| "N/A".to_string());
+                    format!(
+                        "ν = {:.1}°\nNext: {}\nPrev: {}",
+                        anomaly_degrees, next_line, prev_line
+                    )
+                }
+                FocusedTrajectoryMarkerKind::Periapsis | FocusedTrajectoryMarkerKind::Apoapsis => {
+                    let marker_name = match marker.kind {
+                        FocusedTrajectoryMarkerKind::Periapsis => "Periapsis",
+                        FocusedTrajectoryMarkerKind::Apoapsis => "Apoapsis",
+                        _ => unreachable!(),
+                    };
+                    let marker_summary = match marker.kind {
+                        FocusedTrajectoryMarkerKind::Periapsis => "Pe",
+                        FocusedTrajectoryMarkerKind::Apoapsis => "Ap",
+                        _ => unreachable!(),
+                    };
+                    let marker_hovered = match marker.kind {
+                        FocusedTrajectoryMarkerKind::Periapsis => {
+                            hover_state.hovered_marker_kind == Some(HoveredTrajectoryMarkerKind::Periapsis)
+                        }
+                        FocusedTrajectoryMarkerKind::Apoapsis => {
+                            hover_state.hovered_marker_kind == Some(HoveredTrajectoryMarkerKind::Apoapsis)
+                        }
+                        _ => false,
+                    };
+
+                    if marker_hovered {
+                        let next_line = marker.next_time
+                            .map(|t| format_sim_time_for_mode(clock_settings.mode, t))
+                            .unwrap_or_else(|| "N/A".to_string());
+                        let prev_line = marker.previous_time
+                            .map(|t| format_sim_time_for_mode(clock_settings.mode, t))
+                            .unwrap_or_else(|| "N/A".to_string());
+                        format!(
+                            "{}\nNext: {}\nPrev: {}",
+                            marker_name, next_line, prev_line
+                        )
+                    } else {
+                        marker_summary.to_string()
+                    }
+                }
             };
+            
             painter.text(
                 egui::pos2(screen_pos.x, screen_pos.y),
                 egui::Align2::CENTER_BOTTOM,
