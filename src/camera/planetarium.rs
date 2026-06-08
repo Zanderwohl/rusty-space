@@ -219,6 +219,15 @@ fn handle_gotos (
                 3.0 * view_settings.body_scale_factor(appearance.radius()) as f64
             };
             let body_pos = obj_pos.as_bevy_scaled_dvec(view_settings.distance_factor());
+            let current_distance = (fcam.bevy_pos - body_pos).length();
+            let preserve_distance = matches!(event.source, GoToSource::KeyboardV)
+                && current_distance.is_finite()
+                && current_distance > f64::EPSILON;
+            let end_distance = if preserve_distance {
+                current_distance
+            } else {
+                nearby_distance
+            };
             let requested_frame = event.frame
                 .or_else(|| pcam.action.goto_target().map(|(_, frame)| frame))
                 .or_else(|| pcam.action.revolve_target().map(|(_, frame)| frame))
@@ -234,11 +243,12 @@ fn handle_gotos (
                 entity,
             );
             info!(
-                "cam.goto.start source={:?} entity={:?} frame={:?} distance={} altitude={} azimuth={}",
+                "cam.goto.start source={:?} entity={:?} frame={:?} distance={} preserve_distance={} altitude={} azimuth={}",
                 event.source,
                 entity,
                 frame,
-                nearby_distance,
+                end_distance,
+                preserve_distance,
                 altitude,
                 azimuth
             );
@@ -248,7 +258,7 @@ fn handle_gotos (
                 start_rot,
                 start_time: now,
                 entity,
-                end_distance: nearby_distance,
+                end_distance,
                 end_altitude: altitude,
                 end_azimuth: azimuth,
                 end_frame: frame,
