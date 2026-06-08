@@ -16,7 +16,9 @@ use crate::body::motive::kepler_motive;
 pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin, CameraAction};
 use crate::camera::Freecam;
 pub use crate::gui::planetarium::focused_body::FocusedBodyState;
-use crate::presentation::{self, BodyWireframeMaterial, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, TrajectoryMesh, BodyPointMesh};
+pub use crate::gui::planetarium::focused_body::{HoverState, HoveredTrajectoryMarkerKind};
+pub use crate::gui::planetarium::windows::mission_clock::{MissionClockMode, MissionClockSettings, format_sim_time_for_mode};
+use crate::presentation::{self, BodyWireframeMaterial, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, TrajectoryMesh, BodyPointMesh, FocusedTrajectoryMarker};
 use crate::gui::menu::escape::{EscapeMenuPlugin, EscMenuState, UnsavedChanges};
 
 mod windows;
@@ -42,6 +44,8 @@ impl Plugin for PlanetariumUI {
             .init_resource::<ViewSettings>()
             .init_resource::<AssetCache>()
             .init_resource::<FocusedBodyState>()
+            .init_resource::<HoverState>()
+            .init_resource::<MissionClockSettings>()
             .init_resource::<PhysicsGraph>()
             .init_resource::<PositionCache>()
             .init_resource::<SimulationPerformanceMetrics>()
@@ -87,6 +91,8 @@ impl Plugin for PlanetariumUI {
                     .before(kepler_motive::calculate_trajectory),
                 presentation::rebuild_trajectory_caches
                     .after(kepler_motive::calculate_trajectory),
+                presentation::update_focused_trajectory_markers
+                    .after(presentation::position_bodies),
                 presentation::build_trajectory_meshes
                     .after(presentation::position_bodies)
                     .after(presentation::rebuild_trajectory_caches),
@@ -117,6 +123,9 @@ impl Plugin for PlanetariumUI {
                 presentation::cleanup_orphaned_body_points,
                 presentation::label_bodies
                     .after(presentation::position_bodies),
+                presentation::draw_trajectory_marker_labels
+                    .after(presentation::position_bodies)
+                    .after(presentation::update_focused_trajectory_markers),
             ).in_set(PlanetariumUISet))
             // Celestial reference markers (Point of Aries, etc.)
             .add_systems(Update, (
@@ -218,11 +227,13 @@ fn cleanup_planetarium(
     mut commands: Commands,
     trajectory_meshes: Query<Entity, With<TrajectoryMesh>>,
     body_point_meshes: Query<Entity, With<BodyPointMesh>>,
+    trajectory_markers: Query<Entity, With<FocusedTrajectoryMarker>>,
     mut graph: ResMut<PhysicsGraph>,
     mut cache: ResMut<PositionCache>,
     mut sim_time: ResMut<SimTime>,
     mut view_settings: ResMut<ViewSettings>,
     mut focused_body_state: ResMut<FocusedBodyState>,
+    mut hover_state: ResMut<HoverState>,
     mut metrics: ResMut<SimulationPerformanceMetrics>,
     mut universe: ResMut<Universe>,
     mut asset_cache: ResMut<AssetCache>,
@@ -239,6 +250,9 @@ fn cleanup_planetarium(
     for entity in &body_point_meshes {
         commands.entity(entity).despawn();
     }
+    for entity in &trajectory_markers {
+        commands.entity(entity).despawn();
+    }
 
     // Reset physics state
     graph.clear();
@@ -251,6 +265,7 @@ fn cleanup_planetarium(
     // Reset view and UI state
     *view_settings = ViewSettings::default();
     *focused_body_state = FocusedBodyState::default();
+    *hover_state = HoverState::default();
     *metrics = SimulationPerformanceMetrics::default();
 
     // Clear universe maps so stale IDs don't linger

@@ -8,9 +8,27 @@ pub struct FocusedBodyState {
     pub current_body_id: Option<String>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum HoveredTrajectoryMarkerKind {
+    Periapsis,
+    Apoapsis,
+}
+
+#[derive(Resource, Default)]
+pub struct HoverState {
+    pub hovered_body_id: Option<String>,
+    pub hovered_marker_kind: Option<HoveredTrajectoryMarkerKind>,
+}
+
 impl FocusedBodyState {
     pub fn is_focused(&self, body_id: &str) -> bool {
         self.current_body_id.as_deref() == Some(body_id)
+    }
+}
+
+impl HoverState {
+    pub fn is_body_hovered(&self, body_id: &str) -> bool {
+        self.hovered_body_id.as_deref() == Some(body_id)
     }
 }
 

@@ -25,8 +25,8 @@ use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::calculate_body_positions;
 use crate::body::universe::save::ViewSettings;
 use crate::gui::app::AppState;
-use crate::gui::planetarium::FocusedBodyState;
-use crate::presentation::position_bodies;
+use crate::gui::planetarium::{FocusedBodyState, HoverState, HoveredTrajectoryMarkerKind};
+use crate::presentation::{position_bodies, FocusedTrajectoryMarker, FocusedTrajectoryMarkerKind};
 use crate::sim::SimTime;
 use crate::camera::freecam::{FreeCamPlugin, Freecam, MovementSettings};
 use crate::util::bevystuff::GlamVec;
@@ -43,6 +43,7 @@ impl Plugin for PlanetariumCameraPlugin {
                 handle_gotos,
                 run_goto.before(position_bodies).after(calculate_body_positions),
                 revolve_around.before(position_bodies).after(calculate_body_positions),
+                update_hover_target,
                 pick_body_on_click,
                 ).run_if(in_state(AppState::Planetarium)))
         ;
@@ -389,12 +390,42 @@ struct PickState {
 }
 
 const DOUBLE_CLICK_WINDOW: f64 = 0.5;
+const HOVER_PIXEL_RADIUS: f32 = 20.0;
+const MIN_PICK_RADIUS: f32 = 0.01;
+
+#[derive(Default)]
+struct HoverPickResult {
+    hovered_body_id: Option<String>,
+    hovered_marker_kind: Option<HoveredTrajectoryMarkerKind>,
+}
+
+fn update_hover_target(
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+    cameras: Query<(&Camera, &Projection, &Transform, &Freecam), With<PlanetariumCamera>>,
+    bodies: Query<(&BodyState, &BodyInfo, &Appearance), Without<PlanetariumCamera>>,
+    markers: Query<(&FocusedTrajectoryMarker, &Transform)>,
+    view_settings: Res<ViewSettings>,
+    mut egui_ctx: EguiContexts,
+    mut hover_state: ResMut<HoverState>,
+) {
+    let hovered = pick_hover_target(
+        &primary_window,
+        &cameras,
+        &bodies,
+        &markers,
+        &view_settings,
+        &mut egui_ctx,
+    );
+    hover_state.hovered_body_id = hovered.hovered_body_id;
+    hover_state.hovered_marker_kind = hovered.hovered_marker_kind;
+}
 
 fn pick_body_on_click(
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     primary_window: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &Projection, &Transform, &Freecam), With<PlanetariumCamera>>,
     bodies: Query<(&BodyState, &BodyInfo, &Appearance), Without<PlanetariumCamera>>,
+    markers: Query<(&FocusedTrajectoryMarker, &Transform)>,
     view_settings: Res<ViewSettings>,
     mut egui_ctx: EguiContexts,
     time: Res<Time>,
@@ -405,61 +436,20 @@ fn pick_body_on_click(
         return;
     }
 
-    let egui_wants_pointer = egui_ctx.ctx_mut()
-        .map_or(false, |ctx| ctx.wants_pointer_input());
-    if egui_wants_pointer {
-        return;
-    }
-
-    let Ok(window) = primary_window.single() else { return };
-    let Some(cursor_pos) = window.cursor_position() else { return };
-    let Ok((camera, _projection, cam_transform, freecam)) = cameras.single() else { return };
-
-    let fresh_gt = GlobalTransform::from(*cam_transform);
-    let Ok(ray) = camera.viewport_to_world(&fresh_gt, cursor_pos) else { return };
-
-    let distance_scale = view_settings.distance_factor();
-    let ray_origin = ray.origin;
-    let ray_dir: Vec3 = *ray.direction;
-
-    let mut sphere_hits: Vec<&BodyInfo> = Vec::new();
-    let mut pixel_hits: Vec<&BodyInfo> = Vec::new();
-
-    for (state, info, appearance) in bodies.iter() {
-        let body_pos = state.current_position
-            .as_bevy_scaled_cheated(distance_scale, freecam.bevy_pos);
-
-        let visual_radius = view_settings.body_scale_factor(appearance.radius());
-        let pick_radius = visual_radius * 1.5;
-
-        let oc = ray_origin - body_pos;
-        let b = oc.dot(ray_dir);
-        let c = oc.dot(oc) - pick_radius * pick_radius;
-        let discriminant = b * b - c;
-
-        if discriminant >= 0.0 {
-            let t2 = -b + discriminant.sqrt();
-            if t2 >= 0.0 {
-                sphere_hits.push(info);
-            }
-        }
-
-        if let Ok(screen_pos) = camera.world_to_viewport(&fresh_gt, body_pos) {
-            if cursor_pos.distance(screen_pos) <= 20.0 {
-                pixel_hits.push(info);
-            }
-        }
-    }
-
-    let pick_from = if !sphere_hits.is_empty() {
-        &sphere_hits
-    } else {
-        &pixel_hits
-    };
-
-    if let Some(info) = pick_from.iter()
-        .max_by(|a, b| a.mass.partial_cmp(&b.mass).unwrap_or(std::cmp::Ordering::Equal))
-    {
+    let hovered = pick_hover_target(
+        &primary_window,
+        &cameras,
+        &bodies,
+        &markers,
+        &view_settings,
+        &mut egui_ctx,
+    );
+    if let Some(selected_id) = hovered.hovered_body_id {
+        let info = bodies
+            .iter()
+            .find(|(_, info, _)| info.id == selected_id)
+            .map(|(_, info, _)| info);
+        if let Some(info) = info {
         let now = time.elapsed().as_secs_f64();
         let is_double = pick_state.last_pick_id.as_deref() == Some(&info.id)
             && (now - pick_state.last_pick_time) <= DOUBLE_CLICK_WINDOW;
@@ -473,7 +463,125 @@ fn pick_body_on_click(
             pick_state.last_pick_id = Some(info.id.clone());
             pick_state.last_pick_time = now;
         }
+        }
     }
+}
+
+fn pick_hover_target(
+    primary_window: &Query<&Window, With<PrimaryWindow>>,
+    cameras: &Query<(&Camera, &Projection, &Transform, &Freecam), With<PlanetariumCamera>>,
+    bodies: &Query<(&BodyState, &BodyInfo, &Appearance), Without<PlanetariumCamera>>,
+    markers: &Query<(&FocusedTrajectoryMarker, &Transform)>,
+    view_settings: &ViewSettings,
+    egui_ctx: &mut EguiContexts,
+) -> HoverPickResult {
+    let egui_wants_pointer = egui_ctx.ctx_mut()
+        .map_or(false, |ctx| ctx.wants_pointer_input());
+    if egui_wants_pointer {
+        return HoverPickResult::default();
+    }
+
+    let Ok(window) = primary_window.single() else {
+        return HoverPickResult::default();
+    };
+    let Some(cursor_pos) = window.cursor_position() else {
+        return HoverPickResult::default();
+    };
+    let Ok((camera, _projection, cam_transform, freecam)) = cameras.single() else {
+        return HoverPickResult::default();
+    };
+
+    let fresh_gt = GlobalTransform::from(*cam_transform);
+    let Ok(ray) = camera.viewport_to_world(&fresh_gt, cursor_pos) else {
+        return HoverPickResult::default();
+    };
+
+    let distance_scale = view_settings.distance_factor();
+    let ray_origin = ray.origin;
+    let ray_dir: Vec3 = *ray.direction;
+
+    let mut body_sphere_hits: Vec<&BodyInfo> = Vec::new();
+    let mut body_pixel_hits: Vec<&BodyInfo> = Vec::new();
+    for (state, info, appearance) in bodies.iter() {
+        let body_pos = state.current_position
+            .as_bevy_scaled_cheated(distance_scale, freecam.bevy_pos);
+
+        let visual_radius = view_settings.body_scale_factor(appearance.radius());
+        let pick_radius = (visual_radius * 1.5).max(MIN_PICK_RADIUS);
+        if ray_hits_sphere(ray_origin, ray_dir, body_pos, pick_radius) {
+            body_sphere_hits.push(info);
+        }
+
+        if let Ok(screen_pos) = camera.world_to_viewport(&fresh_gt, body_pos) {
+            if cursor_pos.distance(screen_pos) <= HOVER_PIXEL_RADIUS {
+                body_pixel_hits.push(info);
+            }
+        }
+    }
+    let hovered_body_id = if !body_sphere_hits.is_empty() {
+        body_sphere_hits
+            .iter()
+            .max_by(|a, b| a.mass.partial_cmp(&b.mass).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|info| info.id.clone())
+    } else {
+        body_pixel_hits
+            .iter()
+            .max_by(|a, b| a.mass.partial_cmp(&b.mass).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|info| info.id.clone())
+    };
+
+    let mut marker_sphere_hits: Vec<(HoveredTrajectoryMarkerKind, f32)> = Vec::new();
+    let mut marker_pixel_hits: Vec<(HoveredTrajectoryMarkerKind, f32)> = Vec::new();
+    for (marker, marker_transform) in markers.iter() {
+        let marker_pos = marker_transform.translation;
+        let pick_radius = (marker_transform.scale.x * 1.5).max(MIN_PICK_RADIUS);
+        let marker_kind = match marker.kind {
+            FocusedTrajectoryMarkerKind::Periapsis => HoveredTrajectoryMarkerKind::Periapsis,
+            FocusedTrajectoryMarkerKind::Apoapsis => HoveredTrajectoryMarkerKind::Apoapsis,
+        };
+        if ray_hits_sphere(ray_origin, ray_dir, marker_pos, pick_radius) {
+            let screen_dist = camera
+                .world_to_viewport(&fresh_gt, marker_pos)
+                .map(|p| cursor_pos.distance(p))
+                .unwrap_or(f32::MAX);
+            marker_sphere_hits.push((marker_kind, screen_dist));
+        }
+
+        if let Ok(screen_pos) = camera.world_to_viewport(&fresh_gt, marker_pos) {
+            let screen_dist = cursor_pos.distance(screen_pos);
+            if screen_dist <= HOVER_PIXEL_RADIUS {
+                marker_pixel_hits.push((marker_kind, screen_dist));
+            }
+        }
+    }
+    let hovered_marker_kind = if !marker_sphere_hits.is_empty() {
+        marker_sphere_hits
+            .into_iter()
+            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(kind, _)| kind)
+    } else {
+        marker_pixel_hits
+            .into_iter()
+            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(kind, _)| kind)
+    };
+
+    HoverPickResult {
+        hovered_body_id,
+        hovered_marker_kind,
+    }
+}
+
+fn ray_hits_sphere(ray_origin: Vec3, ray_dir: Vec3, center: Vec3, radius: f32) -> bool {
+    let oc = ray_origin - center;
+    let b = oc.dot(ray_dir);
+    let c = oc.dot(oc) - radius * radius;
+    let discriminant = b * b - c;
+    if discriminant < 0.0 {
+        return false;
+    }
+    let t2 = -b + discriminant.sqrt();
+    t2 >= 0.0
 }
 
 fn revolve_around(

@@ -17,10 +17,12 @@ use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::{Motive, MotiveSelection};
 use crate::body::universe::save::{UniversePhysics, ViewSettings};
 use crate::camera::{Freecam, PlanetariumCamera};
-use crate::gui::planetarium::FocusedBodyState;
+use crate::gui::planetarium::{FocusedBodyState, HoverState, HoveredTrajectoryMarkerKind};
+use crate::gui::planetarium::{format_sim_time_for_mode, MissionClockSettings};
 use crate::gui::settings::{DisplayGlow, Settings};
 use crate::sim::{BodySelection, CalculateTrajectory, SimTime};
 use crate::util::bevystuff::GlamVec;
+use bevy_egui::{egui, EguiContexts};
 use bevy::ecs::message::MessageWriter;
 
 use super::trajectory_material::TrajectoryMaterial;
@@ -30,6 +32,19 @@ use super::trajectory_material::TrajectoryMaterial;
 pub struct TrajectoryMesh {
     /// The body entity this trajectory belongs to
     pub body_entity: Entity,
+}
+
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub enum FocusedTrajectoryMarkerKind {
+    Periapsis,
+    Apoapsis,
+}
+
+#[derive(Component)]
+pub struct FocusedTrajectoryMarker {
+    pub kind: FocusedTrajectoryMarkerKind,
+    pub previous_time: Option<crate::foundations::time::Instant>,
+    pub next_time: Option<crate::foundations::time::Instant>,
 }
 
 /// How often to rebuild trajectories for precessing orbits (in simulation seconds)
@@ -289,6 +304,7 @@ pub fn build_trajectory_meshes(
     mut meshes: ResMut<Assets<Mesh>>,
     view_settings: Res<ViewSettings>,
     focused_body_state: Res<FocusedBodyState>,
+    hover_state: Res<HoverState>,
     settings: Res<Settings>,
     fcam: Single<&Freecam, With<PlanetariumCamera>>,
     sim_time: Res<SimTime>,
@@ -335,6 +351,7 @@ pub fn build_trajectory_meshes(
                 view_settings.show_trajectories
                     || view_settings.body_in_any_trajectory_tag(&info.id)
                     || focused_body_state.is_focused(&info.id)
+                    || hover_state.is_body_hovered(&info.id)
             );
         
         if !should_show {
@@ -531,6 +548,279 @@ pub fn build_trajectory_meshes(
         cache.mesh_dirty = false;
         cache.last_camera_pos = Some(camera_pos);
         cache.last_mesh_time = current_time;
+    }
+}
+
+pub fn update_focused_trajectory_markers(
+    mut commands: Commands,
+    focused_body_state: Res<FocusedBodyState>,
+    sim_time: Res<SimTime>,
+    view_settings: Res<ViewSettings>,
+    physics: Res<UniversePhysics>,
+    fcam: Single<&Freecam, With<PlanetariumCamera>>,
+    physics_graph: Res<crate::body::motive::calculate_body_positions::PhysicsGraph>,
+    bodies: Query<(Entity, &BodyInfo, &BodyState, &Motive)>,
+    mut markers: Query<(Entity, &mut FocusedTrajectoryMarker, &mut Transform)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<TrajectoryMaterial>>,
+) {
+    let Some(focused_id) = focused_body_state.current_body_id.as_deref() else {
+        despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
+        return;
+    };
+
+    let Some(focused_entity) = physics_graph.id_to_entity.get(focused_id).copied() else {
+        despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
+        return;
+    };
+
+    let Ok((_, _info, _state, motive)) = bodies.get(focused_entity) else {
+        despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
+        return;
+    };
+
+    let (_, selection) = motive.motive_at(sim_time.time);
+    let MotiveSelection::Keplerian(kepler) = selection else {
+        despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
+        return;
+    };
+
+    let Some(primary_entity) = physics_graph.id_to_entity.get(&kepler.primary_id).copied() else {
+        despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
+        return;
+    };
+
+    let Ok((_, _, primary_state, _)) = bodies.get(primary_entity) else {
+        despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
+        return;
+    };
+
+    let primary_mass = bodies
+        .get(primary_entity)
+        .map(|(_, info, _, _)| info.mass)
+        .unwrap_or(0.0);
+    let mu = kepler
+        .gravitational_parameter
+        .unwrap_or(physics.gravitational_constant * primary_mass);
+    let period_seconds = kepler.period(mu).to_seconds();
+    let periapsis_base = kepler.time_at_periapsis_passage(mu);
+
+    let periapsis_world = primary_state.current_position + kepler.periapsis_vec(sim_time.time);
+    let apoapsis_world = kepler
+        .apoapsis_vec(sim_time.time)
+        .map(|apo| primary_state.current_position + apo);
+    let peri_times = repeating_event_prev_next(periapsis_base, period_seconds, sim_time.time);
+    let apo_times = repeating_event_prev_next(
+        crate::foundations::time::Instant::from_seconds_since_j2000(
+            periapsis_base.to_j2000_seconds() + period_seconds * 0.5,
+        ),
+        period_seconds,
+        sim_time.time,
+    );
+
+    let distance_scale = view_settings.distance_factor();
+    let peri_bevy = periapsis_world.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos);
+    let peri_tube_radius = calculate_tube_radius(peri_bevy.length());
+    let peri_marker_radius = 2.0 * peri_tube_radius;
+
+    let apo_bevy = apoapsis_world.map(|pos| pos.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos));
+    let apo_marker_radius = apo_bevy
+        .as_ref()
+        .map(|pos| 2.0 * calculate_tube_radius(pos.length()));
+
+    ensure_trajectory_marker(
+        &mut commands,
+        &mut markers,
+        &mut meshes,
+        &mut materials,
+        FocusedTrajectoryMarkerKind::Periapsis,
+        peri_bevy,
+        peri_marker_radius,
+        peri_times.0,
+        peri_times.1,
+    );
+
+    match (apo_bevy, apo_marker_radius) {
+        (Some(position), Some(radius)) => {
+            ensure_trajectory_marker(
+                &mut commands,
+                &mut markers,
+                &mut meshes,
+                &mut materials,
+                FocusedTrajectoryMarkerKind::Apoapsis,
+                position,
+                radius,
+                apo_times.0,
+                apo_times.1,
+            );
+        }
+        _ => {
+            despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::Apoapsis);
+        }
+    }
+}
+
+fn ensure_trajectory_marker(
+    commands: &mut Commands,
+    markers: &mut Query<(Entity, &mut FocusedTrajectoryMarker, &mut Transform)>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<TrajectoryMaterial>>,
+    kind: FocusedTrajectoryMarkerKind,
+    position: Vec3,
+    radius: f32,
+    previous_time: Option<crate::foundations::time::Instant>,
+    next_time: Option<crate::foundations::time::Instant>,
+) {
+    let mut existing = None;
+    for (entity, marker, _) in markers.iter_mut() {
+        if marker.kind == kind {
+            existing = Some(entity);
+            break;
+        }
+    }
+
+    if let Some(entity) = existing {
+        if let Ok((_, mut marker, mut transform)) = markers.get_mut(entity) {
+            marker.previous_time = previous_time;
+            marker.next_time = next_time;
+            transform.translation = position;
+            transform.scale = Vec3::splat(radius);
+        }
+        return;
+    }
+
+    let mut mesh = Sphere::new(1.0f32).mesh().ico(2).unwrap();
+    if let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_COLOR,
+            VertexAttributeValues::Float32x4(vec![[1.0, 1.0, 1.0, 1.0]; positions.len()]),
+        );
+    }
+    let mesh_handle = meshes.add(mesh);
+    let material_handle = materials.add(TrajectoryMaterial::default());
+
+    commands.spawn((
+        Mesh3d(mesh_handle),
+        MeshMaterial3d(material_handle),
+        Transform {
+            translation: position,
+            scale: Vec3::splat(radius),
+            ..Default::default()
+        },
+        Visibility::Visible,
+        NoFrustumCulling,
+        FocusedTrajectoryMarker {
+            kind,
+            previous_time,
+            next_time,
+        },
+    ));
+}
+
+fn despawn_trajectory_marker(
+    commands: &mut Commands,
+    markers: &mut Query<(Entity, &mut FocusedTrajectoryMarker, &mut Transform)>,
+    kind: FocusedTrajectoryMarkerKind,
+) {
+    for (entity, marker, _) in markers.iter_mut() {
+        if marker.kind == kind {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+fn despawn_all_focused_trajectory_markers(
+    commands: &mut Commands,
+    markers: &mut Query<(Entity, &mut FocusedTrajectoryMarker, &mut Transform)>,
+) {
+    for (entity, _, _) in markers.iter_mut() {
+        commands.entity(entity).despawn();
+    }
+}
+
+fn repeating_event_prev_next(
+    base: crate::foundations::time::Instant,
+    period_seconds: f64,
+    now: crate::foundations::time::Instant,
+) -> (Option<crate::foundations::time::Instant>, Option<crate::foundations::time::Instant>) {
+    if !period_seconds.is_finite() || period_seconds <= f64::EPSILON {
+        return (None, None);
+    }
+
+    let base_seconds = base.to_j2000_seconds();
+    let now_seconds = now.to_j2000_seconds();
+    let n = ((now_seconds - base_seconds) / period_seconds).floor();
+    let prev = crate::foundations::time::Instant::from_seconds_since_j2000(
+        base_seconds + n * period_seconds,
+    );
+    let next = crate::foundations::time::Instant::from_seconds_since_j2000(
+        prev.to_j2000_seconds() + period_seconds,
+    );
+    (Some(prev), Some(next))
+}
+
+pub fn draw_trajectory_marker_labels(
+    marker_query: Query<(&FocusedTrajectoryMarker, &Transform)>,
+    cameras: Query<(&Camera, &PlanetariumCamera, &Projection, &Transform)>,
+    mut contexts: EguiContexts,
+    clock_settings: Res<MissionClockSettings>,
+    hover_state: Res<HoverState>,
+) {
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Background,
+        egui::Id::new("trajectory_marker_labels"),
+    ));
+
+    for (camera, _, _, camera_transform) in &cameras {
+        let fresh_camera_gt = GlobalTransform::from(*camera_transform);
+        for (marker, transform) in marker_query.iter() {
+            let marker_name = match marker.kind {
+                FocusedTrajectoryMarkerKind::Periapsis => "Periapsis",
+                FocusedTrajectoryMarkerKind::Apoapsis => "Apoapsis",
+            };
+            let marker_summary = match marker.kind {
+                FocusedTrajectoryMarkerKind::Periapsis => "Pe",
+                FocusedTrajectoryMarkerKind::Apoapsis => "Ap",
+            };
+            let marker_hovered = match marker.kind {
+                FocusedTrajectoryMarkerKind::Periapsis => {
+                    hover_state.hovered_marker_kind == Some(HoveredTrajectoryMarkerKind::Periapsis)
+                }
+                FocusedTrajectoryMarkerKind::Apoapsis => {
+                    hover_state.hovered_marker_kind == Some(HoveredTrajectoryMarkerKind::Apoapsis)
+                }
+            };
+
+            let world_pos = transform.translation + Vec3::Y * (transform.scale.y * 1.6);
+            let Ok(screen_pos) = camera.world_to_viewport(&fresh_camera_gt, world_pos) else {
+                continue;
+            };
+
+            let label_text = if marker_hovered {
+                let next_line = marker.next_time
+                    .map(|t| format_sim_time_for_mode(clock_settings.mode, t))
+                    .unwrap_or_else(|| "N/A".to_string());
+                let prev_line = marker.previous_time
+                    .map(|t| format_sim_time_for_mode(clock_settings.mode, t))
+                    .unwrap_or_else(|| "N/A".to_string());
+                format!(
+                    "{}\nNext: {}\nPrev: {}",
+                    marker_name, next_line, prev_line
+                )
+            } else {
+                marker_summary.to_string()
+            };
+            painter.text(
+                egui::pos2(screen_pos.x, screen_pos.y),
+                egui::Align2::CENTER_BOTTOM,
+                label_text,
+                egui::FontId::proportional(12.0),
+                egui::Color32::from_rgb(90, 237, 175),
+            );
+        }
     }
 }
 

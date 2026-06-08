@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use chrono::{DateTime, Utc};
 
+use crate::foundations::time::Instant;
 use crate::gui::style::vfd;
 use crate::sim::SimTime;
 use crate::util::format::seconds_to_naive_date;
@@ -29,7 +30,7 @@ const THROTTLE_SPEEDS: [f64; THROTTLE_ARROW_COUNT] = [
 ];
 
 #[derive(Default, Clone, Copy)]
-pub(crate) enum MissionClockMode {
+pub enum MissionClockMode {
     JulianDay,
     #[default]
     Utc,
@@ -37,13 +38,18 @@ pub(crate) enum MissionClockMode {
 }
 
 impl MissionClockMode {
-    fn cycle(&mut self) {
+    pub fn cycle(&mut self) {
         *self = match self {
             Self::JulianDay => Self::Utc,
             Self::Utc => Self::Met,
             Self::Met => Self::JulianDay,
         };
     }
+}
+
+#[derive(Resource, Default, Clone, Copy)]
+pub struct MissionClockSettings {
+    pub mode: MissionClockMode,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -127,7 +133,7 @@ impl TimeThrottleLevel {
 pub fn mission_clock_widget(
     mut contexts: EguiContexts,
     mut sim_time: ResMut<SimTime>,
-    mut mode: Local<MissionClockMode>,
+    mut clock_settings: ResMut<MissionClockSettings>,
     mut throttle_level: Local<TimeThrottleLevel>,
 ) {
     let ctx = contexts.ctx_mut();
@@ -136,11 +142,6 @@ pub fn mission_clock_widget(
     }
     let ctx = ctx.unwrap();
 
-    let jd = sim_time.time.to_julian_day();
-    let j2000_seconds = sim_time.time.to_j2000_seconds();
-    let unix_seconds = j2000_seconds + UNIX_EPOCH_AT_J2000_UTC;
-    let utc_display = format_utc_string(unix_seconds);
-    let met_display = format_met_string(j2000_seconds);
     let mut clock_panel_rect: Option<egui::Rect> = None;
 
     // External speed changes update UI throttle state.
@@ -160,15 +161,11 @@ pub fn mission_clock_widget(
                 .inner_margin(egui::Margin::same(8))
                 .show(ui, |ui| {
                     ui.horizontal_centered(|ui| {
-                        if draw_mode_cycler(ui, *mode, text, text_dim).clicked() {
-                            mode.cycle();
+                        if draw_mode_cycler(ui, clock_settings.mode, text, text_dim).clicked() {
+                            clock_settings.mode.cycle();
                         }
 
-                        let display_text = match *mode {
-                            MissionClockMode::JulianDay => format!("JD {:.2}", jd),
-                            MissionClockMode::Utc => utc_display.clone(),
-                            MissionClockMode::Met => met_display.clone(),
-                        };
+                        let display_text = format_sim_time_for_mode(clock_settings.mode, sim_time.time);
 
                         let min_display_width = minimum_time_display_width(ui, text);
                         ui.add_sized(
@@ -498,6 +495,17 @@ fn format_met_string(seconds_since_j2000: f64) -> String {
     let mins = (rem % 3_600) / 60;
     let secs = rem % 60;
     format!("MET {}{}d {:02}:{:02}:{:02}", sign, days, hours, mins, secs)
+}
+
+pub fn format_sim_time_for_mode(mode: MissionClockMode, time: Instant) -> String {
+    match mode {
+        MissionClockMode::JulianDay => format!("JD {:.2}", time.to_julian_day()),
+        MissionClockMode::Utc => {
+            let unix_seconds = time.to_j2000_seconds() + UNIX_EPOCH_AT_J2000_UTC;
+            format_utc_string(unix_seconds)
+        }
+        MissionClockMode::Met => format_met_string(time.to_j2000_seconds()),
+    }
 }
 
 fn to_egui_color(color: Color) -> egui::Color32 {

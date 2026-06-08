@@ -5,7 +5,7 @@ use bevy_egui::{egui, EguiContexts};
 use crate::body::motive::info::BodyInfo;
 use crate::body::universe::save::ViewSettings;
 use crate::camera::PlanetariumCamera;
-use crate::gui::planetarium::FocusedBodyState;
+use crate::gui::planetarium::{FocusedBodyState, HoverState};
 use crate::sim::SimulationObject;
 
 /// Renders body name labels in screen-space via egui.
@@ -14,6 +14,7 @@ use crate::sim::SimulationObject;
 pub fn label_bodies(
     view_settings: Res<ViewSettings>,
     focused_body_state: Res<FocusedBodyState>,
+    hover_state: Res<HoverState>,
     mut contexts: EguiContexts,
     cameras: Query<(&Camera, &Camera3d, &PlanetariumCamera, &Projection, &Transform), Without<SimulationObject>>,
     bodies: Query<(&SimulationObject, &Transform, &BodyInfo), Without<PlanetariumCamera>>,
@@ -38,7 +39,8 @@ pub fn label_bodies(
         for (_, transform, body_info) in bodies.iter() {
             let should_show = view_settings.show_labels
                 || view_settings.body_in_any_visible_tag(&body_info.id)
-                || focused_body_state.is_focused(&body_info.id);
+                || focused_body_state.is_focused(&body_info.id)
+                || hover_state.is_body_hovered(&body_info.id);
             if !should_show {
                 continue;
             }
