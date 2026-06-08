@@ -775,9 +775,8 @@ pub fn update_mouse_hit_marker(
     hover_state: Res<HoverState>,
     focused_body_state: Res<FocusedBodyState>,
     sim_time: Res<SimTime>,
-    view_settings: Res<ViewSettings>,
     physics: Res<UniversePhysics>,
-    fcam: Single<&Freecam, With<PlanetariumCamera>>,
+    _fcam: Single<&Freecam, With<PlanetariumCamera>>,
     physics_graph: Res<crate::body::motive::calculate_body_positions::PhysicsGraph>,
     bodies: Query<(Entity, &BodyInfo, &BodyState, &Motive, Option<&Appearance>)>,
     trajectory_caches: Query<(&TrajectoryMesh, &TrajectoryCache)>,
@@ -800,7 +799,7 @@ pub fn update_mouse_hit_marker(
         return;
     };
 
-    let Ok((_, _info, focused_state, motive, appearance)) = bodies.get(focused_entity) else {
+    let Ok((_, _info, _focused_state, motive, _appearance)) = bodies.get(focused_entity) else {
         despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
         return;
     };
@@ -812,7 +811,7 @@ pub fn update_mouse_hit_marker(
     };
 
     // Find the trajectory cache for the focused body
-    let Some(cache) = trajectory_caches.iter().find_map(|(traj_mesh, cache)| {
+    let Some(_cache) = trajectory_caches.iter().find_map(|(traj_mesh, cache)| {
         let Ok((_, info, _, _, _)) = bodies.get(traj_mesh.body_entity) else {
             return None;
         };
@@ -826,18 +825,11 @@ pub fn update_mouse_hit_marker(
         return;
     };
 
-    // Get primary info for mu calculation and position offset
+    // Get primary info for mu calculation
     let primary_mass = physics_graph.id_to_entity.get(&kepler.primary_id)
         .and_then(|e| bodies.get(*e).ok())
         .map(|(_, info, _, _, _)| info.mass)
         .unwrap_or(0.0);
-    let primary_offset = cache
-        .primary_id
-        .as_ref()
-        .and_then(|pid| physics_graph.id_to_entity.get(pid))
-        .and_then(|e| bodies.get(*e).ok())
-        .map(|(_, _, state, _, _)| state.current_position)
-        .unwrap_or(DVec3::ZERO);
 
     let mu = kepler.gravitational_parameter
         .unwrap_or(physics.gravitational_constant * primary_mass);
@@ -865,30 +857,8 @@ pub fn update_mouse_hit_marker(
         sim_time.time,
     );
 
-    // Re-interpolate the marker position using current trajectory cache and camera position
-    // This ensures the marker lies exactly on the rendered trajectory line
-    let points = build_working_trajectory_points(
-        cache,
-        focused_state.current_local_position,
-        appearance.map(|a| a.radius()).unwrap_or(0.0),
-        sim_time.time.to_j2000_seconds(),
-        false,
-    );
-    let idx = hit_data.segment_start_idx;
-    if idx >= points.len() {
-        despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
-        return;
-    }
-    let end_idx = if idx + 1 < points.len() { idx + 1 } else { 0 };
-    
-    let (_, local_a) = points[idx];
-    let (_, local_b) = points[end_idx];
-    
-    // Interpolate in local space then transform to bevy space.
-    let local_hit = local_a.lerp(local_b, hit_data.t);
-    let world_hit = local_hit + primary_offset;
-    let distance_scale = view_settings.distance_factor();
-    let marker_bevy_pos = world_hit.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos);
+    // Marker position follows picker-provided hit position.
+    let marker_bevy_pos = hit_data.hit_position_bevy;
     let tube_radius = calculate_tube_radius(marker_bevy_pos.length());
     let marker_radius = 2.0 * tube_radius;
 
