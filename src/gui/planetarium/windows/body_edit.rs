@@ -8,15 +8,16 @@ use crate::body::motive::newton_motive::NewtonMotive;
 use crate::body::universe::Universe;
 use crate::gui::common;
 use crate::gui::menu::UiState;
+use crate::gui::planetarium::focused_body::{body_select_dropdown, sorted_body_options};
+use crate::gui::planetarium::FocusedBodyState;
 use crate::sim::{BodySelection, CalculateTrajectory};
-use crate::gui::planetarium::windows::body_info::BodyInfoState;
 use crate::gui::settings::{Settings, UiTheme};
 pub fn body_edit_window(
     settings: ResMut<Settings>,
     _ui_state: ResMut<UiState>,
     universe: Res<Universe>,
     mut contexts: EguiContexts,
-    mut body_info_state: ResMut<BodyInfoState>,
+    mut focused_body_state: ResMut<FocusedBodyState>,
     mut bodies: Query<(Entity, &mut BodyInfo, &BodyState, Option<&mut FixedMotive>, Option<&mut KeplerMotive>, Option<&mut NewtonMotive>)>,
     mut calc: MessageWriter<CalculateTrajectory>,
 ) {
@@ -33,15 +34,11 @@ pub fn body_edit_window(
         egui::Window::new("Body Edit")
             .vscroll(true)
             .show(ctx, |ui| {
-                let mut body_options: Vec<(String, String)> = universe.id_to_name_iter()
-                    .map(|(id, name)| (name.clone(), id.clone()))
-                    .collect();
-                body_options.sort_by(|a, b| a.0.cmp(&b.0));
-                crate::gui::planetarium::windows::body_info::body_select_dropdown(universe, &mut body_info_state, ui, body_options);
+                let body_options = sorted_body_options(&universe);
+                body_select_dropdown(&universe, &mut focused_body_state, ui, &body_options);
 
                 let mut selected_body = bodies.iter_mut().filter(|(_e, info, _state, _fixed_motive, _kepler_motive, _newton_motive)| {
-                    if body_info_state.current_body_id.is_none() { return false; }
-                    <std::string::String as AsRef<str>>::as_ref(&info.id) == body_info_state.current_body_id.as_ref().unwrap()
+                    focused_body_state.current_body_id.as_deref() == Some(info.id.as_str())
                 }).collect::<Vec<_>>();
 
                 let selected_body = selected_body.get_mut(0);

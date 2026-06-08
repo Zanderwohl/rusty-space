@@ -2,12 +2,12 @@ use bevy::prelude::*;
 use bevy_egui::EguiContexts;
 use crate::body::motive::info::BodyInfo;
 use crate::camera::{GoTo, GoToSource, PlanetariumCamera};
-use crate::gui::planetarium::BodyInfoState;
+use crate::gui::planetarium::FocusedBodyState;
 
 pub fn handle_go_to_shortcut(
     keys: Res<ButtonInput<KeyCode>>,
     mut contexts: EguiContexts,
-    body_info_state: Res<BodyInfoState>,
+    focused_body_state: Res<FocusedBodyState>,
     bodies: Query<(Entity, &BodyInfo)>,
     mut go_to: MessageWriter<GoTo>,
 ) {
@@ -15,7 +15,7 @@ pub fn handle_go_to_shortcut(
         return;
     }
 
-    let Some(selected_id) = body_info_state.current_body_id.as_deref() else {
+    let Some(selected_id) = focused_body_state.current_body_id.as_deref() else {
         return;
     };
 

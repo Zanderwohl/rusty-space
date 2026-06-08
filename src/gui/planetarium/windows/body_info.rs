@@ -7,27 +7,16 @@ use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::motive::newton_motive::NewtonMotive;
 use crate::body::universe::Universe;
 use crate::camera::{GoTo, GoToSource};
+use crate::gui::planetarium::focused_body::{body_select_dropdown, sorted_body_options};
+use crate::gui::planetarium::FocusedBodyState;
 use crate::gui::settings::{Settings, UiTheme};
-
-#[derive(Resource)]
-pub struct BodyInfoState {
-    pub current_body_id: Option<String>,
-}
-
-impl Default for BodyInfoState {
-    fn default() -> Self {
-        Self {
-            current_body_id: None,
-        }
-    }
-}
 
 pub fn body_info_window(
     settings: Res<Settings>,
     universe: Res<Universe>,
     bodies: Query<(Entity, &BodyInfo, &BodyState, Option<&FixedMotive>, Option<&KeplerMotive>, Option<&NewtonMotive>)>,
     mut contexts: EguiContexts,
-    mut body_info_state: ResMut<BodyInfoState>,
+    mut focused_body_state: ResMut<FocusedBodyState>,
     mut go_to: MessageWriter<GoTo>,
 ) {
     let ctx = contexts.ctx_mut();
@@ -43,16 +32,11 @@ pub fn body_info_window(
         egui::Window::new("Body Info")
             .vscroll(true)
             .show(ctx, |ui| {
-                // Create a sorted list of body names and their IDs
-                let mut body_options: Vec<(String, String)> = universe.id_to_name_iter()
-                    .map(|(id, name)| (name.clone(), id.clone()))
-                    .collect();
-                body_options.sort_by(|a, b| a.0.cmp(&b.0));
-
-                body_select_dropdown(universe, &mut body_info_state, ui, body_options);
+                let body_options = sorted_body_options(&universe);
+                body_select_dropdown(&universe, &mut focused_body_state, ui, &body_options);
                 
                 // Get the body using the BodyInfo.id from bodies query
-                let selected_body = body_info_state
+                let selected_body = focused_body_state
                     .current_body_id
                     .as_deref()
                     .and_then(|selected_id| {
@@ -158,30 +142,4 @@ fn kepler_motive_section(ui: &mut Ui, motive: &KeplerMotive) {
 fn newton_motive_section(ui: &mut Ui, motive: &NewtonMotive) {
     ui.label("Newtonian Body");
     motive.display(ui);
-}
-
-pub(crate) fn body_select_dropdown(universe: Res<Universe>, body_info_state: &mut ResMut<BodyInfoState>, ui: &mut Ui, body_options: Vec<(String, String)>) {
-    egui::ComboBox::from_label("Body")
-        .selected_text(
-            body_info_state.current_body_id
-                .as_ref()
-                .and_then(|id| universe.get_by_id(id))
-                .map(|name| name.clone())
-                .unwrap_or_else(|| "Choose a body".to_string())
-        )
-        .show_ui(ui, |ui| {
-            ui.selectable_value(
-                &mut body_info_state.current_body_id,
-                None,
-                "Choose a body"
-            );
-
-            for (name, id) in body_options {
-                ui.selectable_value(
-                    &mut body_info_state.current_body_id,
-                    Some(id.clone()),
-                    name
-                );
-            }
-        });
 }

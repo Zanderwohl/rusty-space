@@ -25,10 +25,10 @@ use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::calculate_body_positions;
 use crate::body::universe::save::ViewSettings;
 use crate::gui::app::AppState;
+use crate::gui::planetarium::FocusedBodyState;
 use crate::presentation::position_bodies;
 use crate::sim::SimTime;
 use crate::camera::freecam::{FreeCamPlugin, Freecam, MovementSettings};
-use crate::gui::planetarium::BodyInfoState;
 use crate::util::bevystuff::GlamVec;
 use crate::util::ease;
 
@@ -399,7 +399,7 @@ fn pick_body_on_click(
     mut egui_ctx: EguiContexts,
     time: Res<Time>,
     mut pick_state: Local<PickState>,
-    mut body_info_state: ResMut<BodyInfoState>,
+    mut focused_body_state: ResMut<FocusedBodyState>,
 ) {
     if !mouse_buttons.just_pressed(MouseButton::Left) {
         return;
@@ -465,7 +465,7 @@ fn pick_body_on_click(
             && (now - pick_state.last_pick_time) <= DOUBLE_CLICK_WINDOW;
 
         if is_double {
-            body_info_state.current_body_id = Some(info.id.clone());
+            focused_body_state.current_body_id = Some(info.id.clone());
             info!("Selected body: {} (id: {})", info.display_name(), info.id);
             pick_state.last_pick_id = None;
         } else {

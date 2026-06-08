@@ -15,12 +15,13 @@ use crate::body::motive::calculate_body_positions::{self, PhysicsGraph, Position
 use crate::body::motive::kepler_motive;
 pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin, CameraAction};
 use crate::camera::Freecam;
-pub use crate::gui::planetarium::windows::body_info::BodyInfoState;
+pub use crate::gui::planetarium::focused_body::FocusedBodyState;
 use crate::presentation::{self, BodyWireframeMaterial, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, TrajectoryMesh, BodyPointMesh};
 use crate::gui::menu::escape::{EscapeMenuPlugin, EscMenuState, UnsavedChanges};
 
 mod windows;
 mod input;
+mod focused_body;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 struct PlanetariumUISet;
@@ -40,7 +41,7 @@ impl Plugin for PlanetariumUI {
             .init_resource::<UniversePhysics>()
             .init_resource::<ViewSettings>()
             .init_resource::<AssetCache>()
-            .init_resource::<BodyInfoState>()
+            .init_resource::<FocusedBodyState>()
             .init_resource::<PhysicsGraph>()
             .init_resource::<PositionCache>()
             .init_resource::<SimulationPerformanceMetrics>()
@@ -221,7 +222,7 @@ fn cleanup_planetarium(
     mut cache: ResMut<PositionCache>,
     mut sim_time: ResMut<SimTime>,
     mut view_settings: ResMut<ViewSettings>,
-    mut body_info_state: ResMut<BodyInfoState>,
+    mut focused_body_state: ResMut<FocusedBodyState>,
     mut metrics: ResMut<SimulationPerformanceMetrics>,
     mut universe: ResMut<Universe>,
     mut asset_cache: ResMut<AssetCache>,
@@ -249,7 +250,7 @@ fn cleanup_planetarium(
 
     // Reset view and UI state
     *view_settings = ViewSettings::default();
-    *body_info_state = BodyInfoState::default();
+    *focused_body_state = FocusedBodyState::default();
     *metrics = SimulationPerformanceMetrics::default();
 
     // Clear universe maps so stale IDs don't linger

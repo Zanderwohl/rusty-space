@@ -17,6 +17,7 @@ use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::{Motive, MotiveSelection};
 use crate::body::universe::save::{UniversePhysics, ViewSettings};
 use crate::camera::{Freecam, PlanetariumCamera};
+use crate::gui::planetarium::FocusedBodyState;
 use crate::gui::settings::{DisplayGlow, Settings};
 use crate::sim::{BodySelection, CalculateTrajectory, SimTime};
 use crate::util::bevystuff::GlamVec;
@@ -287,6 +288,7 @@ pub fn build_trajectory_meshes(
     mut trajectory_meshes: Query<(&TrajectoryMesh, &mut TrajectoryCache, &mut Visibility, &Mesh3d, &mut Transform)>,
     mut meshes: ResMut<Assets<Mesh>>,
     view_settings: Res<ViewSettings>,
+    focused_body_state: Res<FocusedBodyState>,
     settings: Res<Settings>,
     fcam: Single<&Freecam, With<PlanetariumCamera>>,
     sim_time: Res<SimTime>,
@@ -327,9 +329,13 @@ pub fn build_trajectory_meshes(
         };
         
         // Check visibility conditions
-        let should_show = cache.valid 
+        let should_show = cache.valid
             && !cache.local_points.is_empty()
-            && (view_settings.show_trajectories || view_settings.body_in_any_trajectory_tag(&info.id));
+            && (
+                view_settings.show_trajectories
+                    || view_settings.body_in_any_trajectory_tag(&info.id)
+                    || focused_body_state.is_focused(&info.id)
+            );
         
         if !should_show {
             if *visibility != Visibility::Hidden {
