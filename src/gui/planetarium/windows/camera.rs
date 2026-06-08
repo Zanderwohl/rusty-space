@@ -9,9 +9,9 @@ use crate::gui::settings::{Settings, UiTheme};
 pub fn camera_window(
     mut settings: ResMut<Settings>,
     mut contexts: EguiContexts,
-    mut tonemapping: Single<&mut Tonemapping>,
-    mut color_grading: Single<&mut ColorGrading>,
-    mut camera: Single<&mut Projection, With<PlanetariumCamera>>,
+    _tonemapping: Single<&mut Tonemapping>,
+    color_grading: Single<&mut ColorGrading>,
+    camera: Single<&mut Projection, With<PlanetariumCamera>>,
 ) {
     let ctx = contexts.ctx_mut();
     if ctx.is_err() { return; }
@@ -23,11 +23,11 @@ pub fn camera_window(
     }
 
     if settings.windows.camera {
-        camera_settings_window(ctx, camera, tonemapping, color_grading, &mut settings);
+        camera_settings_window(ctx, camera, color_grading, &mut settings);
     }
 }
 
-fn camera_settings_window(ctx: &mut Context, mut camera: Single<&mut Projection, With<PlanetariumCamera>>, tonemapping: Single<&mut Tonemapping>, mut color_grading: Single<&mut ColorGrading>, settings: &mut Settings) {
+fn camera_settings_window(ctx: &mut Context, mut camera: Single<&mut Projection, With<PlanetariumCamera>>, mut color_grading: Single<&mut ColorGrading>, settings: &mut Settings) {
     egui::Window::new("Camera Settings")
         .vscroll(true)
         .show(ctx, |ui| {

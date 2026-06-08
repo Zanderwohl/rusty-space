@@ -1,11 +1,11 @@
 use std::default::Default;
 use std::f64::consts::PI;
 use std::path::PathBuf;
-use bevy::math::{DVec3, DQuat};
+use bevy::math::{DMat3, DVec3, DQuat};
 use crate::body::appearance::{Appearance, AppearanceColor, DebugBall, StarBall};
 use crate::body::motive::info::{BodyInfo, BodyRotation, RotationEpoch};
 use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerPrecessingEulerAngles, KeplerRotation, KeplerShape, MeanAnomalyAtEpoch, MeanAnomalyAtJ2000};
-use crate::body::universe::save::{FixedEntry, KeplerEntry, NewtonEntry, SomeBody, UniverseFile, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings};
+use crate::body::universe::save::{FixedEntry, KeplerEntry, SomeBody, UniverseFile, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings};
 use crate::foundations::time::{Instant, TimeLength};
 use crate::gui::util::ensure_folders;
 
@@ -52,6 +52,14 @@ fn iau_rotation(ra_deg: f64, dec_deg: f64, w0_deg: f64, period_hours: f64) -> Bo
 fn tidally_locked_rotation(primary_id: &str, ra_deg: f64, dec_deg: f64) -> BodyRotation {
     let pole_ecliptic = equatorial_to_ecliptic_pole(ra_deg, dec_deg);
     BodyRotation::tidally_locked(primary_id, pole_ecliptic)
+}
+
+/// Create a tidally locked BodyRotation whose pole is exactly the orbital plane normal.
+fn tidally_locked_rotation_orbital_plane(primary_id: &str, inclination_deg: f64, longitude_of_ascending_node_deg: f64) -> BodyRotation {
+    let rot_inc = DMat3::from_rotation_x(inclination_deg.to_radians());
+    let rot_lan = DMat3::from_rotation_z(longitude_of_ascending_node_deg.to_radians());
+    let orbital_pole = (rot_lan * rot_inc * DVec3::Z).normalize();
+    BodyRotation::tidally_locked(primary_id, orbital_pole)
 }
 
 /// Convert equatorial (ICRF) pole direction to ecliptic J2000 unit vector.
@@ -5788,7 +5796,10 @@ pub fn solar_system() -> UniverseFile {
                         epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
                             mean_anomaly: 1.692310582980274e02,
                         }),
-                        gravitational_parameter: Some(1.2554846715321102e9), // Horizons Keplerian GM in m^3/s^2
+                        // Use a two-body-consistent effective mu so Pluto and Charon share
+                        // the same orbital period around the barycenter in this Kepler model.
+                        // Derived from Charon Horizons barycentric period and Pluto a.
+                        gravitational_parameter: Some(1.2549268767849464e9), // m^3/s^2
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 1188.3 * 1000.0,
@@ -5799,7 +5810,11 @@ pub fn solar_system() -> UniverseFile {
                         },
                         highlight_latitudes: vec![],
                     }),
-                    rotation: Some(iau_rotation(132.993, -6.163, 302.695, 56.3625)),
+                    rotation: Some(tidally_locked_rotation_orbital_plane(
+                        "Charon",
+                        1.128907994954536e02,
+                        2.273916747205139e02,
+                    )),
                 }), // Pluto
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
@@ -5836,7 +5851,11 @@ pub fn solar_system() -> UniverseFile {
                         },
                         highlight_latitudes: vec![],
                     }),
-                    rotation: Some(tidally_locked_rotation("Pluto", 132.993, -6.163)),
+                    rotation: Some(tidally_locked_rotation_orbital_plane(
+                        "Pluto",
+                        1.128908110174224e02,
+                        2.273916881630542e02,
+                    )),
                 }), // Charon
                 SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {

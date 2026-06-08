@@ -10,7 +10,6 @@ use bevy::app::AppExit;
 use bevy::prelude::*;
 use bevy::window::{ClosingWindow, WindowCloseRequested};
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
-use serde::{Deserialize, Serialize};
 use crate::gui::app::AppState;
 use crate::gui::settings::{Settings, UiTheme};
 

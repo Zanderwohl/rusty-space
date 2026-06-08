@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use bevy::prelude::*;
 use bevy_egui::egui::Ui;
 use crate::body::motive::info::{BodyInfo, BodyState};
-use crate::sim::{SimulationObject, BodySelection, CalculateTrajectory, SimTime};
+use crate::sim::{BodySelection, CalculateTrajectory, SimTime};
 use crate::body::universe::save::{UniversePhysics, ViewSettings};
 use crate::foundations::kepler::{angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
 use crate::foundations::time::{Includes, Instant, TimeDelta, TimeLength};
@@ -561,7 +561,10 @@ fn calculate_trajectory_for_body(
     let primary_mass = body_masses.get(&kepler_motive.primary_id)
         .copied()
         .expect("Missing primary body mass");
-    let mu = physics.gravitational_constant * primary_mass;
+    // Honor explicit mu overrides (e.g. barycentric orbits like Pluto/Charon).
+    let mu = kepler_motive
+        .gravitational_parameter
+        .unwrap_or(physics.gravitational_constant * primary_mass);
 
     state.trajectory = Some(TimeMap::new());
     let map = state.trajectory.as_mut().unwrap();

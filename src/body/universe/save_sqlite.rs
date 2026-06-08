@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::collections::HashMap;
 use bevy::math::DVec3;
-use rusqlite::{Connection, Result as SqlResult, params};
+use rusqlite::{Connection, params};
 
 use crate::body::appearance::{Appearance, AppearanceColor, DebugBall, StarBall};
 use crate::body::motive::info::BodyInfo;
@@ -393,12 +393,21 @@ fn save_bodies(conn: &Connection, bodies: &[SomeBody]) -> Result<(), SqliteSaveE
                 (&e.info, &e.appearance, m)
             }
             SomeBody::KeplerEntry(e) => {
-                let m = Motive::keplerian(
-                    e.params.primary_id.clone(),
-                    e.params.shape.clone(),
-                    e.params.rotation.clone(),
-                    e.params.epoch.clone(),
-                );
+                let m = match e.params.gravitational_parameter {
+                    Some(gm) => Motive::keplerian_with_gm(
+                        e.params.primary_id.clone(),
+                        e.params.shape.clone(),
+                        e.params.rotation.clone(),
+                        e.params.epoch.clone(),
+                        gm,
+                    ),
+                    None => Motive::keplerian(
+                        e.params.primary_id.clone(),
+                        e.params.shape.clone(),
+                        e.params.rotation.clone(),
+                        e.params.epoch.clone(),
+                    ),
+                };
                 (&e.info, &e.appearance, m)
             }
             SomeBody::CompoundEntry(e) => {
@@ -630,7 +639,8 @@ fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, Sql
         "SELECT primary_id, shape_type, eccentricity, semi_major_axis, periapsis, apoapsis,
                 rotation_type, inclination, longitude_of_ascending_node, argument_of_periapsis,
                 apsidal_precession_period, nodal_precession_period, longitude_of_periapsis,
-                epoch_type, epoch_julian_day, mean_anomaly, true_anomaly, periapsis_time_julian_day
+                epoch_type, epoch_julian_day, mean_anomaly, true_anomaly, periapsis_time_julian_day,
+                gravitational_parameter
          FROM motive_keplerian WHERE motive_id = ?1",
         [motive_id],
         |row| {
@@ -653,6 +663,7 @@ fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, Sql
                 row.get::<_, Option<f64>>(15)?,  // mean_anomaly
                 row.get::<_, Option<f64>>(16)?,  // true_anomaly
                 row.get::<_, Option<f64>>(17)?,  // periapsis_time_julian_day
+                row.get::<_, Option<f64>>(18)?,  // gravitational_parameter
             ))
         },
     )?;
@@ -660,7 +671,8 @@ fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, Sql
     let (primary_id, shape_type, eccentricity, semi_major_axis, periapsis, apoapsis,
          rotation_type, inclination, longitude_of_ascending_node, argument_of_periapsis,
          apsidal_precession_period, nodal_precession_period, longitude_of_periapsis,
-         epoch_type, epoch_julian_day, mean_anomaly, true_anomaly, periapsis_time_julian_day) = row;
+         epoch_type, epoch_julian_day, mean_anomaly, true_anomaly, periapsis_time_julian_day,
+         gravitational_parameter) = row;
     
     // Parse shape
     let shape = match shape_type.as_str() {
@@ -717,7 +729,7 @@ fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, Sql
         shape,
         rotation,
         epoch,
-        gravitational_parameter: None, // TODO: load from database if stored
+        gravitational_parameter,
     })
 }
 
@@ -853,8 +865,9 @@ fn save_keplerian(conn: &Connection, motive_id: i64, kepler: &KeplerMotive) -> R
             shape_type, eccentricity, semi_major_axis, periapsis, apoapsis,
             rotation_type, inclination, longitude_of_ascending_node, argument_of_periapsis,
             apsidal_precession_period, nodal_precession_period, longitude_of_periapsis,
-            epoch_type, epoch_julian_day, mean_anomaly, true_anomaly, periapsis_time_julian_day
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+            epoch_type, epoch_julian_day, mean_anomaly, true_anomaly, periapsis_time_julian_day,
+            gravitational_parameter
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
         params![
             motive_id,
             kepler.primary_id,
@@ -875,6 +888,7 @@ fn save_keplerian(conn: &Connection, motive_id: i64, kepler: &KeplerMotive) -> R
             mean_anomaly,
             true_anomaly_val,
             periapsis_time_julian_day,
+            kepler.gravitational_parameter,
         ],
     )?;
     

@@ -168,7 +168,7 @@ fn handle_gotos (
     time: Res<Time>,
     sim_time: Res<SimTime>,
 ) {
-    if let Ok((mut cam_t, mut pcam, mut fcam)) = camera.single_mut() {
+    if let Ok((cam_t, mut pcam, fcam)) = camera.single_mut() {
         let now = time.elapsed().as_secs_f64();
         for event in go_tos.read() {
             let start_rot = cam_t.rotation;
@@ -488,7 +488,7 @@ fn revolve_around(
     mut egui_ctx: EguiContexts,
     sim_time: Res<SimTime>,
 ) {
-    if let Ok((mut window, mut cursor_options)) = primary_window.single_mut() {
+    if let Ok((window, mut cursor_options)) = primary_window.single_mut() {
         for (mut cam_t, mut pcam, mut fcam) in camera.iter_mut() {
 
             match &mut pcam.action {

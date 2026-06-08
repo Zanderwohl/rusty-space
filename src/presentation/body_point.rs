@@ -134,7 +134,7 @@ pub fn update_body_points(
     let camera_pos = camera_global.translation();
 
     for (_body_entity, body_transform, point_link, wireframe_link, occluder_link, _body_info) in bodies.iter() {
-        let Ok((point_mesh, mut point_transform, mut point_visibility, point_material_handle)) =
+        let Ok((_point_mesh, mut point_transform, mut point_visibility, point_material_handle)) =
             points.get_mut(point_link.0)
         else {
             continue;

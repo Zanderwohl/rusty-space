@@ -13,7 +13,6 @@ use crate::sim::{SimTime, unload_simulation_objects, CalculateTrajectory, BodySe
 use crate::body::universe;
 use crate::body::motive::calculate_body_positions::{self, PhysicsGraph, PositionCache, SimulationPerformanceMetrics};
 use crate::body::motive::kepler_motive;
-use crate::foundations::time::{Instant, J2000_JD, JD_SECONDS_PER_JULIAN_DAY};
 pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin, CameraAction};
 use crate::camera::Freecam;
 pub use crate::gui::planetarium::windows::body_info::BodyInfoState;
@@ -153,7 +152,7 @@ fn initial_trajectories(mut calcs: MessageWriter<CalculateTrajectory>) {
 
 fn load_assets(
     mut commands: Commands,
-    mut ui_state: ResMut<UiState>,
+    ui_state: ResMut<UiState>,
     mut view_settings: ResMut<ViewSettings>,
     mut next_app_state: ResMut<NextState<AppState>>,
     mut cache: ResMut<AssetCache>,

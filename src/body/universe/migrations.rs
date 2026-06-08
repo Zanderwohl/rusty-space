@@ -231,6 +231,16 @@ pub static MIGRATIONS: &[Migration] = &[
             ALTER TABLE sim_time_new RENAME TO sim_time;
         "#,
     },
+    // Version 2 -> 3: Persist optional Keplerian gravitational_parameter overrides
+    Migration {
+        description: "Add gravitational_parameter column to motive_keplerian",
+        up: r#"
+            ALTER TABLE motive_keplerian ADD COLUMN gravitational_parameter REAL;
+        "#,
+        down: r#"
+            -- SQLite cannot drop columns directly; keep column for rollback compatibility.
+        "#,
+    },
 ];
 
 /// Get the current program version (number of migrations available)

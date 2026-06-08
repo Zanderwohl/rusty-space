@@ -4,7 +4,6 @@ use bevy::color::Color;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::DefaultPlugins;
 use bevy::diagnostic::FrameCount;
-use bevy::input::keyboard::Key::DVR;
 use bevy::math::DVec3;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;

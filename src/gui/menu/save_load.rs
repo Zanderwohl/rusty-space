@@ -8,12 +8,12 @@ use crate::gui::settings::{Settings, UiTheme};
 
 pub fn planetarium_menu(
     mut contexts: EguiContexts,
-    mut settings: ResMut<Settings>,
+    settings: ResMut<Settings>,
     mut ui_state: ResMut<UiState>,
     mut next_menu: ResMut<NextState<MenuState>>,
     mut next_app_state: ResMut<NextState<AppState>>,
     files: Res<PlanetariumFiles>,
-    mut universe: ResMut<Universe>,
+    _universe: ResMut<Universe>,
 ) {
     let ctx = contexts.ctx_mut();
     if ctx.is_err() { return; }
@@ -64,7 +64,7 @@ pub fn planetarium_menu(
                             .id_salt("planetarium-template-list")
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                display_saves_list(&files.templates, ui, "Create", &mut universe, &mut ui_state, &mut next_app_state);
+                                display_saves_list(&files.templates, ui, "Create", &mut ui_state, &mut next_app_state);
                             });
                     });
                 });
@@ -85,7 +85,7 @@ pub fn planetarium_menu(
                             .id_salt("planetarium-save-list")
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                display_saves_list(&files.saves, ui, "Load", &mut universe, &mut ui_state, &mut next_app_state);
+                                display_saves_list(&files.saves, ui, "Load", &mut ui_state, &mut next_app_state);
                             });
                     });
                 });
@@ -97,9 +97,8 @@ fn display_saves_list(
     saves: &Vec<SaveFileMeta>,
     ui: &mut Ui,
     load_label: &str,
-    universe: &mut ResMut<Universe>,
-    mut ui_state: &mut ResMut<UiState>,
-    mut next_app_state: &mut ResMut<NextState<AppState>>,
+    ui_state: &mut ResMut<UiState>,
+    next_app_state: &mut ResMut<NextState<AppState>>,
 ) {
     for (idx, save) in saves.iter().enumerate() {
         // Card frame for each item

@@ -292,7 +292,7 @@ pub fn build_trajectory_meshes(
     sim_time: Res<SimTime>,
     color_grading: Single<&ColorGrading>,
     physics_graph: Res<crate::body::motive::calculate_body_positions::PhysicsGraph>,
-    physics: Res<UniversePhysics>,
+    _physics: Res<UniversePhysics>,
 ) {
     let distance_scale = view_settings.distance_factor();
     let exposure = color_grading.global.exposure;
@@ -319,7 +319,7 @@ pub fn build_trajectory_meshes(
         }
 
         // Find the body this trajectory belongs to using direct entity lookup (O(1))
-        let Ok((state, info, motive, appearance)) = bodies.get(traj_mesh.body_entity) else {
+        let Ok((state, info, _motive, appearance)) = bodies.get(traj_mesh.body_entity) else {
             if *visibility != Visibility::Hidden {
                 *visibility = Visibility::Hidden;
             }

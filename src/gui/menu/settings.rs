@@ -3,7 +3,7 @@ use bevy_egui::egui;
 use bevy_egui::egui::Ui;
 use crate::gui::settings::{DisplayGlow, DisplayQuality, Settings, UiTheme};
 
-pub fn settings_panel(mut settings: &mut ResMut<Settings>, ui: &mut Ui) {
+pub fn settings_panel(settings: &mut ResMut<Settings>, ui: &mut Ui) {
     ui.vertical(|ui| {
         ui.heading("Display");
         egui::ComboBox::from_label("Quality")

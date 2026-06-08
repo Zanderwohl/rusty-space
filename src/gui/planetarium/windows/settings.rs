@@ -6,7 +6,7 @@ use crate::gui::settings::{Settings, UiTheme};
 pub fn settings_window(
 
     mut settings: ResMut<Settings>,
-    mut ui_state: ResMut<UiState>,
+    _ui_state: ResMut<UiState>,
     mut contexts: EguiContexts,
 ) {
     let ctx = contexts.ctx_mut();

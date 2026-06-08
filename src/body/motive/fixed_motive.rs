@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use bevy::math::DVec3;
 use bevy_egui::egui::Ui;
-use crate::body::motive::info::{BodyInfo, BodyState};
 
 #[derive(Component)]
 pub struct FixedMotive {

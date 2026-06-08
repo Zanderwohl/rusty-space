@@ -1,7 +1,6 @@
 use bevy_egui::{egui, EguiContexts};
 use bevy::prelude::*;
 use bevy_egui::egui::Ui;
-use num_traits::Pow;
 use crate::body::motive::calculate_body_positions::SimulationPerformanceMetrics;
 use crate::body::universe::save::ViewSettings;
 use crate::foundations::time::JD_SECONDS_PER_JULIAN_DAY;
@@ -69,13 +68,6 @@ pub fn planetarium_controls(
         }
     });
     let gui_speed_current = time.gui_speed;
-    let gui_speed_step = {
-        let s = format!("{gui_speed_current:e}");
-        let a = s.split("e").collect::<Vec<&str>>();
-        let exponent = a[1].parse::<i64>().unwrap();
-        let step = (10.0f64.pow(exponent as f64) / 10.0).abs();
-        step
-    };
     ui.horizontal(|ui| {
         if time.seconds_only {
             ui.label(format!("Simulation speed: {:.1}s / s", gui_speed_current));

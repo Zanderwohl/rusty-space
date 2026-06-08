@@ -312,7 +312,7 @@ impl SomeBody {
         commands: &mut Commands,
         cache: &mut ResMut<AssetCache>,
         meshes: &mut ResMut<Assets<Mesh>>,
-        materials: &mut ResMut<Assets<StandardMaterial>>,
+        _materials: &mut ResMut<Assets<StandardMaterial>>,
         star_materials: &mut ResMut<Assets<BodyWireframeMaterial>>,
         images: &mut ResMut<Assets<Image>>,
     )  -> Entity {

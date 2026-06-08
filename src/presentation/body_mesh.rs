@@ -468,7 +468,7 @@ pub fn update_occluder_scale(
     };
     let _camera_pos = camera_global.translation();
 
-    for (occluder, mut occluder_transform, child_of) in occluders.iter_mut() {
+    for (_occluder, mut occluder_transform, child_of) in occluders.iter_mut() {
         let Ok((_body_transform, wireframe_link)) = bodies.get(child_of.parent()) else {
             continue;
         };
