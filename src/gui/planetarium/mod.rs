@@ -21,6 +21,7 @@ use crate::presentation::{self, BodyWireframeMaterial, TrajectoryMaterialPlugin,
 use crate::gui::menu::escape::{EscapeMenuPlugin, EscMenuState, UnsavedChanges};
 
 mod windows;
+mod input;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 struct PlanetariumUISet;
@@ -71,7 +72,8 @@ impl Plugin for PlanetariumUI {
             // Core simulation and position systems
             .add_systems(Update, (
                 presentation::adjust_lights,
-                windows::body_info::handle_go_to_shortcut,
+                input::handle_go_to_shortcut,
+                input::handle_revolve_frame_shortcut,
                 calculate_body_positions::calculate_body_positions
                     .after(universe::advance_time),
                 kepler_motive::calculate_trajectory,

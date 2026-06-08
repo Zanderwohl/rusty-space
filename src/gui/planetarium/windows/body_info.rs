@@ -6,7 +6,7 @@ use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::motive::newton_motive::NewtonMotive;
 use crate::body::universe::Universe;
-use crate::camera::GoTo;
+use crate::camera::{GoTo, GoToSource};
 use crate::gui::settings::{Settings, UiTheme};
 
 #[derive(Resource)]
@@ -65,6 +65,8 @@ pub fn body_info_window(
                         if ui.button("Go to").clicked() {
                             go_to.write(GoTo {
                                 entity: e.entity(),
+                                frame: None,
+                                source: GoToSource::UiButton,
                             });
                         }
 
@@ -75,35 +77,6 @@ pub fn body_info_window(
                     }
                 }
             });
-    }
-}
-
-pub fn handle_go_to_shortcut(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut contexts: EguiContexts,
-    body_info_state: Res<BodyInfoState>,
-    bodies: Query<(Entity, &BodyInfo)>,
-    mut go_to: MessageWriter<GoTo>,
-) {
-    if !keys.just_pressed(KeyCode::KeyG) {
-        return;
-    }
-
-    if let Ok(ctx) = contexts.ctx_mut() {
-        if ctx.wants_keyboard_input() {
-            return;
-        }
-    }
-
-    let Some(selected_id) = body_info_state.current_body_id.as_deref() else {
-        return;
-    };
-
-    if let Some((entity, _)) = bodies
-        .iter()
-        .find(|(_, info)| info.id.as_str() == selected_id)
-    {
-        go_to.write(GoTo { entity: entity.entity() });
     }
 }
 
