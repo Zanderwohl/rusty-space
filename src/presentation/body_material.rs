@@ -81,6 +81,8 @@ impl Plugin for BodyWireframeMaterialPlugin {
 ///
 /// Renders a solid sphere that is fully dark on the night side and shows
 /// a subtle VFD-green Lambert-shaded surface on the day side.
+/// Star positions are provided in world space so the shader can compute
+/// per-fragment light direction for all occluders using one shared material.
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
 pub struct OccluderMaterial {
     #[uniform(0)]
@@ -90,16 +92,16 @@ pub struct OccluderMaterial {
     pub num_suns: u32,
 
     #[uniform(0)]
-    pub sun_dir_0: Vec4,
+    pub sun_pos_0: Vec4,
 
     #[uniform(0)]
-    pub sun_dir_1: Vec4,
+    pub sun_pos_1: Vec4,
 
     #[uniform(0)]
-    pub sun_dir_2: Vec4,
+    pub sun_pos_2: Vec4,
 
     #[uniform(0)]
-    pub sun_dir_3: Vec4,
+    pub sun_pos_3: Vec4,
 
     pub alpha_mode: AlphaMode,
 }
@@ -109,10 +111,10 @@ impl Default for OccluderMaterial {
         Self {
             base_color: LinearRgba::new(0.015, 0.10, 0.05, 1.0),
             num_suns: 0,
-            sun_dir_0: Vec4::ZERO,
-            sun_dir_1: Vec4::ZERO,
-            sun_dir_2: Vec4::ZERO,
-            sun_dir_3: Vec4::ZERO,
+            sun_pos_0: Vec4::ZERO,
+            sun_pos_1: Vec4::ZERO,
+            sun_pos_2: Vec4::ZERO,
+            sun_pos_3: Vec4::ZERO,
             alpha_mode: AlphaMode::Opaque,
         }
     }

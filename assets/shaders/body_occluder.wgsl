@@ -16,16 +16,16 @@ struct Vertex {
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) world_position: vec4<f32>,
-    @location(1) lambert: f32,
+    @location(1) world_normal: vec3<f32>,
 }
 
 struct OccluderMaterialUniform {
     base_color: vec4<f32>,
     num_suns: u32,
-    sun_dir_0: vec4<f32>,
-    sun_dir_1: vec4<f32>,
-    sun_dir_2: vec4<f32>,
-    sun_dir_3: vec4<f32>,
+    sun_pos_0: vec4<f32>,
+    sun_pos_1: vec4<f32>,
+    sun_pos_2: vec4<f32>,
+    sun_pos_3: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: OccluderMaterialUniform;
@@ -38,28 +38,29 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 
     out.world_position = mesh_functions::mesh_position_local_to_world(world_from_local, vec4(vertex.position, 1.0));
     out.clip_position = position_world_to_clip(out.world_position.xyz);
-
-    let n = normalize(vertex.normal);
-
-    var lam = 0.0;
-    if (material.num_suns > 0u) {
-        lam += max(0.0, dot(n, material.sun_dir_0.xyz));
-    }
-    if (material.num_suns > 1u) {
-        lam += max(0.0, dot(n, material.sun_dir_1.xyz));
-    }
-    if (material.num_suns > 2u) {
-        lam += max(0.0, dot(n, material.sun_dir_2.xyz));
-    }
-    if (material.num_suns > 3u) {
-        lam += max(0.0, dot(n, material.sun_dir_3.xyz));
-    }
-    out.lambert = lam;
+    out.world_normal = mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex.instance_index);
 
     return out;
 }
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4(material.base_color.rgb * in.lambert, 1.0);
+    let n = normalize(in.world_normal);
+    let p = in.world_position.xyz;
+
+    var lam = 0.0;
+    if (material.num_suns > 0u) {
+        lam += max(0.0, dot(n, normalize(material.sun_pos_0.xyz - p)));
+    }
+    if (material.num_suns > 1u) {
+        lam += max(0.0, dot(n, normalize(material.sun_pos_1.xyz - p)));
+    }
+    if (material.num_suns > 2u) {
+        lam += max(0.0, dot(n, normalize(material.sun_pos_2.xyz - p)));
+    }
+    if (material.num_suns > 3u) {
+        lam += max(0.0, dot(n, normalize(material.sun_pos_3.xyz - p)));
+    }
+
+    return vec4(material.base_color.rgb * lam, 1.0);
 }

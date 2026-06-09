@@ -3,6 +3,7 @@
 //! Generates lat/lon grid tube meshes for bodies and terminator circles
 //! that show the day/night boundary relative to each star.
 
+use std::collections::HashSet;
 use std::f32::consts::PI;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
@@ -433,18 +434,21 @@ pub fn spawn_body_occluders(
     bodies: Query<(Entity, &Appearance), (With<BodyInfo>, Without<OccluderLink>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<OccluderMaterial>>,
+    mut shared_material: Local<Option<Handle<OccluderMaterial>>>,
 ) {
+    let material_handle = shared_material
+        .get_or_insert_with(|| materials.add(OccluderMaterial::default()))
+        .clone();
+
     for (body_entity, appearance) in bodies.iter() {
         if let Appearance::DebugBall(_) = appearance {
             let mesh = Sphere::new(0.97f32).mesh().ico(5).unwrap();
             let mesh_handle = meshes.add(mesh);
 
-            let material_handle = materials.add(OccluderMaterial::default());
-
             let occluder_entity = commands
                 .spawn((
                     Mesh3d(mesh_handle),
-                    MeshMaterial3d(material_handle),
+                    MeshMaterial3d(material_handle.clone()),
                     Transform::default(),
                     Visibility::Inherited,
                     OccluderMesh { body_entity },
@@ -796,46 +800,38 @@ pub fn update_wireframe_lighting(
 
 /// System to update occluder materials with sun directions for Lambert shading.
 pub fn update_occluder_lighting(
-    occluders: Query<(&OccluderMesh, &MeshMaterial3d<OccluderMaterial>, &ChildOf)>,
-    bodies: Query<(&Transform, &BodyState)>,
+    occluders: Query<&MeshMaterial3d<OccluderMaterial>, With<OccluderMesh>>,
     star_cache: Res<StarLightingFrameCache>,
     mut materials: ResMut<Assets<OccluderMaterial>>,
 ) {
-    for (occluder, material_handle, child_of) in occluders.iter() {
-        let Ok((body_transform, body_state)) = bodies.get(child_of.parent()) else {
+    if occluders.is_empty() {
+        return;
+    }
+
+    let mut num_suns = 0u32;
+    let mut sun_positions = [Vec4::ZERO; MAX_SUNS];
+
+    for star in &star_cache.stars {
+        if num_suns as usize >= MAX_SUNS {
+            break;
+        }
+
+        sun_positions[num_suns as usize] = star.bevy_position.extend(0.0);
+        num_suns += 1;
+    }
+
+    let mut updated_materials = HashSet::new();
+    for material_handle in occluders.iter() {
+        if !updated_materials.insert(material_handle.id()) {
             continue;
-        };
-
-        let mut num_suns = 0u32;
-        let mut sun_dirs = [Vec4::ZERO; MAX_SUNS];
-
-        for star in &star_cache.stars {
-            if star.entity == occluder.body_entity {
-                continue;
-            }
-            if num_suns as usize >= MAX_SUNS {
-                break;
-            }
-
-            let star_dir_sim =
-                (star.sim_position - body_state.current_position).normalize();
-            let star_dir_bevy = Vec3::new(
-                star_dir_sim.x as f32,
-                star_dir_sim.z as f32,
-                -star_dir_sim.y as f32,
-            );
-            let star_dir_local = body_transform.rotation.inverse() * star_dir_bevy;
-
-            sun_dirs[num_suns as usize] = star_dir_local.extend(0.0);
-            num_suns += 1;
         }
 
         let needs_update = if let Some(mat) = materials.get(material_handle.id()) {
             mat.num_suns != num_suns
-                || !vec4_approx_eq(mat.sun_dir_0, sun_dirs[0], SUN_DIR_EPSILON)
-                || !vec4_approx_eq(mat.sun_dir_1, sun_dirs[1], SUN_DIR_EPSILON)
-                || !vec4_approx_eq(mat.sun_dir_2, sun_dirs[2], SUN_DIR_EPSILON)
-                || !vec4_approx_eq(mat.sun_dir_3, sun_dirs[3], SUN_DIR_EPSILON)
+                || !vec4_approx_eq(mat.sun_pos_0, sun_positions[0], SUN_DIR_EPSILON)
+                || !vec4_approx_eq(mat.sun_pos_1, sun_positions[1], SUN_DIR_EPSILON)
+                || !vec4_approx_eq(mat.sun_pos_2, sun_positions[2], SUN_DIR_EPSILON)
+                || !vec4_approx_eq(mat.sun_pos_3, sun_positions[3], SUN_DIR_EPSILON)
         } else {
             false
         };
@@ -843,10 +839,10 @@ pub fn update_occluder_lighting(
         if needs_update {
             if let Some(mat) = materials.get_mut(material_handle.id()) {
                 mat.num_suns = num_suns;
-                mat.sun_dir_0 = sun_dirs[0];
-                mat.sun_dir_1 = sun_dirs[1];
-                mat.sun_dir_2 = sun_dirs[2];
-                mat.sun_dir_3 = sun_dirs[3];
+                mat.sun_pos_0 = sun_positions[0];
+                mat.sun_pos_1 = sun_positions[1];
+                mat.sun_pos_2 = sun_positions[2];
+                mat.sun_pos_3 = sun_positions[3];
             }
         }
     }
