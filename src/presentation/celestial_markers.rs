@@ -19,8 +19,8 @@ use super::trajectory_material::TrajectoryMaterial;
 
 const LIGHT_YEAR_M: f64 = 9.460_730_472_580_8e15;
 
-const TUBE_SIDES: u32 = 6;
-const MARKER_BRIGHTNESS: f32 = 2.0;
+const TUBE_SIDES: u32 = 3;
+const MARKER_BRIGHTNESS: f32 = 1.2;
 const CAMERA_MOVE_THRESHOLD: f64 = 0.005;
 
 /// Angular size of the symbol (radians). ~1.7 degrees on screen.

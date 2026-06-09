@@ -162,7 +162,7 @@ pub fn build_working_trajectory_points(
 }
 
 /// Number of sides for the tube cross-section (6-8 is visually sufficient)
-const TUBE_SIDES: u32 = 4;
+const TUBE_SIDES: u32 = 3;
 
 /// Minimum tube radius (when very close to camera) - keeps it as a thin line
 const MIN_TUBE_RADIUS: f32 = 0.000005;
@@ -857,7 +857,6 @@ pub fn update_mouse_hit_marker(
         hit_data.end_time,
         hit_data.t,
         periapsis_base,
-        20, // Newton iterations
     );
 
     // Calculate next and previous times for this true anomaly position
@@ -898,7 +897,6 @@ fn refine_true_anomaly_newton(
     end_time: f64,
     t: f64,
     periapsis_base: crate::foundations::time::Instant,
-    iterations: usize,
 ) -> f64 {
     // Initial guess: linear interpolation of time
     let interpolated_relative_time = start_time + t * (end_time - start_time);
@@ -909,6 +907,8 @@ fn refine_true_anomaly_newton(
     // Use kepler's eccentricity via public method
     let ecc = kepler.eccentricity();
     let mean_anomaly = kepler.mean_anomaly(absolute_time, mu);
+
+    let iterations = crate::body::motive::kepler_motive::expansion_iterations(ecc);
     
     // Apply N-iteration Fourier expansion for true anomaly refinement
     crate::foundations::kepler::true_anomaly::fourier_expansion(mean_anomaly, ecc, iterations)

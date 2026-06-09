@@ -24,7 +24,7 @@ pub struct KeplerMotive {
 }
 
 #[inline(always)]
-fn expansion_iterations(eccentricity: f64) -> usize {
+pub fn expansion_iterations(eccentricity: f64) -> usize {
     if eccentricity < 0.3 {
         4
     } else if eccentricity < 0.6 {
