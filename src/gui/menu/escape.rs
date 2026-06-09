@@ -42,6 +42,9 @@ pub struct EscMenuContext {
     pub intended_name: String,
     pub quit_after_save: bool,
     pub came_from_save_nag: bool,
+    pub settings_window_visible: bool,
+    pub was_playing_before_open: bool,
+    pub restore_playing_on_close: bool,
 }
 
 #[derive(Resource, Default)]
@@ -180,6 +183,8 @@ pub fn handle_escape_key(
     keys: Res<ButtonInput<KeyCode>>,
     current_state: Res<State<EscMenuState>>,
     mut next_state: ResMut<NextState<EscMenuState>>,
+    mut context: ResMut<EscMenuContext>,
+    mut sim_time: ResMut<SimTime>,
     mut contexts: EguiContexts,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
@@ -193,7 +198,12 @@ pub fn handle_escape_key(
     }
 
     match current_state.get() {
-        EscMenuState::Closed => next_state.set(EscMenuState::Main),
+        EscMenuState::Closed => {
+            context.was_playing_before_open = sim_time.playing;
+            context.restore_playing_on_close = true;
+            sim_time.playing = false;
+            next_state.set(EscMenuState::Main);
+        }
         _ => next_state.set(EscMenuState::Closed),
     }
 }
@@ -293,6 +303,7 @@ fn spawn_message(commands: &mut Commands, panel: Entity, text: &str) {
 #[derive(Clone)]
 pub enum MenuAction {
     Resume,
+    Settings,
     Save,
     Quit,
     SaveAndQuit,
@@ -373,6 +384,7 @@ pub fn setup_main_menu(mut commands: Commands) {
     let panel = spawn_panel(&mut commands, overlay);
     spawn_title(&mut commands, panel, "Paused");
     spawn_button(&mut commands, panel, "Resume", MenuAction::Resume);
+    spawn_button(&mut commands, panel, "Settings", MenuAction::Settings);
     spawn_button(&mut commands, panel, "Save", MenuAction::Save);
     spawn_button(&mut commands, panel, "Quit", MenuAction::Quit);
 }
@@ -409,6 +421,11 @@ pub fn handle_main_menu_buttons(
             MenuAction::Resume => {
                 next_esc_state.set(EscMenuState::Closed);
             }
+            MenuAction::Settings => {
+                context.settings_window_visible = true;
+                context.restore_playing_on_close = false;
+                next_esc_state.set(EscMenuState::Closed);
+            }
             MenuAction::Save => {
                 context.quit_after_save = false;
                 context.came_from_save_nag = false;
@@ -435,6 +452,7 @@ pub fn handle_main_menu_buttons(
                 if unsaved.0 {
                     next_esc_state.set(EscMenuState::SaveNag);
                 } else {
+                    context.restore_playing_on_close = false;
                     ui_state.current_save = None;
                     next_esc_state.set(EscMenuState::Closed);
                     next_app_state.set(AppState::MainMenu);
@@ -494,6 +512,7 @@ pub fn handle_save_nag_buttons(
             MenuAction::SaveAndQuit => {
                 context.quit_after_save = true;
                 context.came_from_save_nag = true;
+                context.restore_playing_on_close = false;
                 
                 if has_save_path(&universe) {
                     if let Some(path) = universe.path.clone() {
@@ -517,6 +536,7 @@ pub fn handle_save_nag_buttons(
                 }
             }
             MenuAction::QuitWithoutSaving => {
+                context.restore_playing_on_close = false;
                 ui_state.current_save = None;
                 next_esc_state.set(EscMenuState::Closed);
                 next_app_state.set(AppState::MainMenu);
@@ -748,10 +768,16 @@ pub fn handle_confirm_overwrite_buttons(
 // Context Reset on Menu Close
 // ============================================================================
 
-pub fn reset_context_on_close(mut context: ResMut<EscMenuContext>) {
+pub fn reset_context_on_close(mut context: ResMut<EscMenuContext>, mut sim_time: ResMut<SimTime>) {
+    if context.restore_playing_on_close {
+        sim_time.playing = context.was_playing_before_open;
+    }
+
     context.intended_name.clear();
     context.quit_after_save = false;
     context.came_from_save_nag = false;
+    context.was_playing_before_open = false;
+    context.restore_playing_on_close = false;
 }
 
 // ============================================================================

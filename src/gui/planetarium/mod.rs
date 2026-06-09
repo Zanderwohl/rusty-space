@@ -19,7 +19,7 @@ pub use crate::gui::planetarium::focused_body::FocusedBodyState;
 pub use crate::gui::planetarium::focused_body::{HoverState, HoveredTrajectoryMarkerKind, TrajectoryHitData};
 pub use crate::gui::planetarium::windows::mission_clock::{MissionClockMode, MissionClockSettings, format_sim_time_for_mode};
 use crate::presentation::{self, BodyWireframeMaterial, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, TrajectoryMesh, BodyPointMesh, FocusedTrajectoryMarker};
-use crate::gui::menu::escape::{EscapeMenuPlugin, EscMenuState, UnsavedChanges};
+use crate::gui::menu::escape::{EscapeMenuPlugin, EscMenuContext, EscMenuState, UnsavedChanges};
 
 mod windows;
 mod input;
@@ -151,6 +151,7 @@ impl Plugin for PlanetariumUI {
             .add_systems(OnExit(AppState::Planetarium), (
                 unload_simulation_objects,
                 presentation::cleanup_celestial_markers,
+                hide_settings_window_on_planetarium_exit,
                 cleanup_planetarium,
             ))
         ;
@@ -176,9 +177,12 @@ fn load_assets(
     mut universe: ResMut<Universe>,
     mut physics: ResMut<UniversePhysics>,
     mut sim_time: ResMut<SimTime>,
+    mut esc_menu_context: ResMut<EscMenuContext>,
     mut unsaved: ResMut<UnsavedChanges>,
 ) {
     unsaved.0 = false;
+    // Entering/loading planetarium should always start with this window hidden.
+    esc_menu_context.settings_window_visible = false;
     
     if ui_state.current_save.is_none() {
         next_app_state.set(AppState::Planetarium);
@@ -284,4 +288,10 @@ fn cleanup_planetarium(
         pcam.action = CameraAction::Free;
         fcam.bevy_pos = bevy::math::DVec3::new(20., 2., 0.);
     }
+}
+
+fn hide_settings_window_on_planetarium_exit(mut esc_menu_context: ResMut<EscMenuContext>) {
+    esc_menu_context.settings_window_visible = false;
+    esc_menu_context.restore_playing_on_close = false;
+    esc_menu_context.was_playing_before_open = false;
 }
