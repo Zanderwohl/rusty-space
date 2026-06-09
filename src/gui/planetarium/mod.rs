@@ -18,7 +18,7 @@ use crate::camera::Freecam;
 pub use crate::gui::planetarium::focused_body::FocusedBodyState;
 pub use crate::gui::planetarium::focused_body::{HoverState, HoveredTrajectoryMarkerKind, TrajectoryHitData};
 pub use crate::gui::planetarium::windows::mission_clock::{MissionClockMode, MissionClockSettings, format_sim_time_for_mode};
-use crate::presentation::{self, BodyWireframeMaterial, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, TrajectoryMesh, BodyPointMesh, FocusedTrajectoryMarker};
+use crate::presentation::{self, BodyWireframeMaterial, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, TrajectoryMesh, BodyPointMesh, FocusedTrajectoryMarker, StarLightingFrameCache};
 use crate::gui::menu::escape::{EscapeMenuPlugin, EscMenuContext, EscMenuState, UnsavedChanges};
 
 mod windows;
@@ -49,6 +49,7 @@ impl Plugin for PlanetariumUI {
             .init_resource::<PhysicsGraph>()
             .init_resource::<PositionCache>()
             .init_resource::<SimulationPerformanceMetrics>()
+            .init_resource::<StarLightingFrameCache>()
             .add_message::<CalculateTrajectory>()
             .configure_sets(Update, (
                 PlanetariumUISet.run_if(in_state(AppState::Planetarium)),
@@ -106,12 +107,16 @@ impl Plugin for PlanetariumUI {
                 presentation::spawn_body_wireframe_meshes,
                 presentation::spawn_body_occluders,
                 presentation::spawn_terminator_meshes,
+                presentation::build_star_lighting_cache
+                    .after(presentation::position_bodies),
                 presentation::update_terminator_meshes
                     .after(presentation::orient_bodies),
                 presentation::update_wireframe_lighting
-                    .after(presentation::orient_bodies),
+                    .after(presentation::orient_bodies)
+                    .after(presentation::build_star_lighting_cache),
                 presentation::update_occluder_lighting
-                    .after(presentation::orient_bodies),
+                    .after(presentation::orient_bodies)
+                    .after(presentation::build_star_lighting_cache),
                 presentation::update_wireframe_thickness
                     .after(presentation::position_bodies),
                 presentation::update_occluder_scale
@@ -122,7 +127,8 @@ impl Plugin for PlanetariumUI {
             .add_systems(Update, (
                 presentation::spawn_body_point_meshes,
                 presentation::update_body_points
-                    .after(presentation::position_bodies),
+                    .after(presentation::position_bodies)
+                    .after(presentation::build_star_lighting_cache),
                 presentation::cleanup_orphaned_body_points,
                 presentation::label_bodies
                     .after(presentation::position_bodies),

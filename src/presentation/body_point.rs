@@ -11,6 +11,7 @@ use crate::body::motive::info::BodyInfo;
 use crate::camera::PlanetariumCamera;
 
 use super::body_point_material::BodyPointMaterial;
+use super::star_cache::StarLightingFrameCache;
 use super::{BodyWireframeLink, OccluderLink, OccluderMesh};
 
 /// Angular size threshold (in pixels) below which the point is at full brightness
@@ -93,7 +94,7 @@ pub fn spawn_body_point_meshes(
 pub fn update_body_points(
     cameras: Query<(&Camera, &GlobalTransform, &Projection), With<PlanetariumCamera>>,
     bodies: Query<(Entity, &Transform, &BodyPointLink, Option<&BodyWireframeLink>, Option<&OccluderLink>, &crate::body::motive::info::BodyInfo), Without<BodyPointMesh>>,
-    stars: Query<(&Transform, &Appearance), (Without<BodyPointLink>, Without<BodyPointMesh>)>,
+    star_cache: Res<StarLightingFrameCache>,
     mut points: Query<(&BodyPointMesh, &mut Transform, &mut Visibility, &MeshMaterial3d<BodyPointMaterial>), Without<BodyPointLink>>,
     mut wireframes: Query<&mut Visibility, (With<super::BodyWireframeMesh>, Without<BodyPointMesh>, Without<OccluderMesh>)>,
     mut occluders: Query<&mut Visibility, (With<OccluderMesh>, Without<BodyPointMesh>, Without<super::BodyWireframeMesh>)>,
@@ -113,23 +114,8 @@ pub fn update_body_points(
         _ => 1.0,
     };
 
-    // Collect star data for brightness calculation
-    let star_data: Vec<(Vec3, f32)> = stars
-        .iter()
-        .filter_map(|(transform, appearance)| {
-            if let Appearance::Star(star_ball) = appearance {
-                Some((transform.translation, star_ball.intensity()))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    // Find max intensity for normalization
-    let max_intensity = star_data
-        .iter()
-        .map(|(_, intensity)| *intensity)
-        .fold(0.0f32, f32::max);
+    // Use cached star data
+    let max_intensity = star_cache.max_intensity;
 
     let camera_pos = camera_global.translation();
 
@@ -180,11 +166,11 @@ pub fn update_body_points(
             let mut total_brightness = 0.0f32;
 
             if max_intensity > 0.0 {
-                for (star_pos, star_intensity) in &star_data {
+                for star in &star_cache.stars {
                     // Direction from body to camera (camera is at origin in world space)
                     let to_camera = (-body_center).normalize();
                     // Direction from body to star
-                    let to_star = (*star_pos - body_center).normalize();
+                    let to_star = (star.bevy_position - body_center).normalize();
 
                     // Phase angle brightness: (1 + cos(phase)) / 2
                     let cos_phase = to_camera.dot(to_star);
@@ -192,13 +178,13 @@ pub fn update_body_points(
 
                     // Distance falloff: soft inverse-square
                     // At reference distance, factor = 0.5; approaches 0 at infinity
-                    let body_to_star_dist = (*star_pos - body_center).length();
+                    let body_to_star_dist = (star.bevy_position - body_center).length();
                     let dist_sq = body_to_star_dist * body_to_star_dist;
                     let ref_sq = DISTANCE_FALLOFF_REFERENCE * DISTANCE_FALLOFF_REFERENCE;
                     let distance_factor = ref_sq / (dist_sq + ref_sq);
 
                     // Weight by relative intensity
-                    let relative_intensity = star_intensity / max_intensity;
+                    let relative_intensity = star.intensity / max_intensity;
                     total_brightness += phase_brightness * distance_factor * relative_intensity;
                 }
             }

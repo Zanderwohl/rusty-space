@@ -204,8 +204,10 @@ pub fn close_when_requested(
     settings: Res<Settings>,
 ) {
     // This was inserted by us on the last frame so now we can despawn the window
+    let mut any_closing = false;
     for window in closing.iter() {
         commands.entity(window).despawn();
+        any_closing = true;
     }
     // Mark the window as closing so we can despawn it on the next frame
     for event in closed.read() {
@@ -215,5 +217,8 @@ pub fn close_when_requested(
         commands.entity(event.window).try_insert(ClosingWindow);
     }
 
-    let _ = fs::write("data/settings.toml", toml::to_string_pretty(settings.deref()).unwrap());
+    // Only write settings when they've changed or when the app is closing
+    if settings.is_changed() || any_closing {
+        let _ = fs::write("data/settings.toml", toml::to_string_pretty(settings.deref()).unwrap());
+    }
 }

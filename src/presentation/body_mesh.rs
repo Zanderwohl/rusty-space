@@ -15,6 +15,7 @@ use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::camera::PlanetariumCamera;
 
 use super::body_material::{BodyWireframeMaterial, OccluderMaterial, MAX_SUNS};
+use super::star_cache::StarLightingFrameCache;
 
 /// Number of sides for tube cross-section
 const TUBE_SIDES: u32 = 4;
@@ -734,15 +735,9 @@ fn calculate_tube_radius_for_distance(body_scale: f32, distance: f32) -> f32 {
 pub fn update_wireframe_lighting(
     wireframes: Query<(&BodyWireframeMesh, &MeshMaterial3d<BodyWireframeMaterial>, &ChildOf)>,
     bodies: Query<(&Transform, &BodyState)>,
-    stars: Query<(Entity, &Appearance, &BodyState)>,
+    star_cache: Res<StarLightingFrameCache>,
     mut materials: ResMut<Assets<BodyWireframeMaterial>>,
 ) {
-    let star_data: Vec<(Entity, &BodyState)> = stars
-        .iter()
-        .filter(|(_, app, _)| matches!(app, Appearance::Star(_)))
-        .map(|(e, _, s)| (e, s))
-        .collect();
-
     for (wireframe, material_handle, child_of) in wireframes.iter() {
         let Ok((body_transform, body_state)) = bodies.get(child_of.parent()) else {
             continue;
@@ -751,8 +746,8 @@ pub fn update_wireframe_lighting(
         let mut num_suns = 0u32;
         let mut sun_dirs = [Vec4::ZERO; MAX_SUNS];
 
-        for &(star_entity, star_state) in &star_data {
-            if star_entity == wireframe.body_entity {
+        for star in &star_cache.stars {
+            if star.entity == wireframe.body_entity {
                 continue;
             }
             if num_suns as usize >= MAX_SUNS {
@@ -760,7 +755,7 @@ pub fn update_wireframe_lighting(
             }
 
             let star_dir_sim =
-                (star_state.current_position - body_state.current_position).normalize();
+                (star.sim_position - body_state.current_position).normalize();
             let star_dir_bevy = Vec3::new(
                 star_dir_sim.x as f32,
                 star_dir_sim.z as f32,
@@ -786,15 +781,9 @@ pub fn update_wireframe_lighting(
 pub fn update_occluder_lighting(
     occluders: Query<(&OccluderMesh, &MeshMaterial3d<OccluderMaterial>, &ChildOf)>,
     bodies: Query<(&Transform, &BodyState)>,
-    stars: Query<(Entity, &Appearance, &BodyState)>,
+    star_cache: Res<StarLightingFrameCache>,
     mut materials: ResMut<Assets<OccluderMaterial>>,
 ) {
-    let star_data: Vec<(Entity, &BodyState)> = stars
-        .iter()
-        .filter(|(_, app, _)| matches!(app, Appearance::Star(_)))
-        .map(|(e, _, s)| (e, s))
-        .collect();
-
     for (occluder, material_handle, child_of) in occluders.iter() {
         let Ok((body_transform, body_state)) = bodies.get(child_of.parent()) else {
             continue;
@@ -803,8 +792,8 @@ pub fn update_occluder_lighting(
         let mut num_suns = 0u32;
         let mut sun_dirs = [Vec4::ZERO; MAX_SUNS];
 
-        for &(star_entity, star_state) in &star_data {
-            if star_entity == occluder.body_entity {
+        for star in &star_cache.stars {
+            if star.entity == occluder.body_entity {
                 continue;
             }
             if num_suns as usize >= MAX_SUNS {
@@ -812,7 +801,7 @@ pub fn update_occluder_lighting(
             }
 
             let star_dir_sim =
-                (star_state.current_position - body_state.current_position).normalize();
+                (star.sim_position - body_state.current_position).normalize();
             let star_dir_bevy = Vec3::new(
                 star_dir_sim.x as f32,
                 star_dir_sim.z as f32,

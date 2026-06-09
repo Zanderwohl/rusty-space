@@ -29,7 +29,7 @@ const THROTTLE_SPEEDS: [f64; THROTTLE_ARROW_COUNT] = [
     31536000.0, // 1 year/s
 ];
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, PartialEq)]
 pub enum MissionClockMode {
     JulianDay,
     #[default]

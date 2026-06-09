@@ -18,7 +18,7 @@ use crate::body::motive::{Motive, MotiveSelection};
 use crate::body::universe::save::{UniversePhysics, ViewSettings};
 use crate::camera::{Freecam, PlanetariumCamera};
 use crate::gui::planetarium::{FocusedBodyState, HoverState, HoveredTrajectoryMarkerKind};
-use crate::gui::planetarium::{format_sim_time_for_mode, MissionClockSettings};
+use crate::gui::planetarium::{format_sim_time_for_mode, MissionClockMode, MissionClockSettings};
 use crate::gui::settings::{DisplayGlow, Settings};
 use crate::sim::{BodySelection, CalculateTrajectory, SimTime};
 use crate::util::bevystuff::GlamVec;
@@ -48,6 +48,12 @@ pub struct FocusedTrajectoryMarker {
     pub next_time: Option<crate::foundations::time::Instant>,
     /// Refined true anomaly in radians (only used for MouseHit markers).
     pub true_anomaly: Option<f64>,
+    /// Cached formatted string for previous time (regenerated when time or clock mode changes).
+    cached_prev_str: Option<String>,
+    /// Cached formatted string for next time (regenerated when time or clock mode changes).
+    cached_next_str: Option<String>,
+    /// Clock mode used when formatting cached strings.
+    cached_clock_mode: Option<MissionClockMode>,
 }
 
 /// How often to rebuild trajectories for precessing orbits (in simulation seconds)
@@ -82,6 +88,9 @@ pub struct TrajectoryCache {
     pub last_camera_pos: Option<DVec3>,
     /// Last simulation time (J2000 seconds) used for mesh generation.
     pub last_mesh_time: f64,
+    /// Scratch buffer for working points during mesh generation.
+    /// Reused each frame to avoid repeated allocations.
+    working_points: Vec<(f64, DVec3)>,
 }
 
 pub fn build_working_trajectory_points(
@@ -485,85 +494,90 @@ pub fn build_trajectory_meshes(
             });
         
         // Build the working point list with transient point insertion
-        let mut points: Vec<(f64, DVec3)> = cache.local_points.clone();
+        // Reuse scratch buffer to avoid per-frame allocations
+        cache.working_points.clear();
         let mut transient_idx: Option<usize> = None;
         let mut transient_prime_idx: Option<usize> = None;
         
-        // Insert transient points: T (body position), T' (same position, dimmest), and neighbors
-        // for increased local resolution. Skip for precessing orbits.
-        if !cache.is_precessing {
+        // Calculate expected capacity: base points + transient points + closing point
+        let transient_count = TRANSIENT_POINT_N + 2; // neighbors + T + T'
+        let closing_extra = if cache.closed { 1 } else { 0 };
+        let expected_capacity = cache.local_points.len() + transient_count + closing_extra;
+        cache.working_points.reserve(expected_capacity);
+        
+        // Find transient insertion segment if applicable
+        let transient_info: Option<(usize, DVec3, f64, DVec3, DVec3, f64, f64)> = if !cache.is_precessing {
             if let (Some(local_pos), Some(interval_size)) = (state.current_local_position, cache.interval_size) {
                 let current_relative_time = cycle_frac * interval_size;
                 let body_radius = appearance.map(|a| a.radius()).unwrap_or(0.0);
                 
-                if let Some(seg) = points.windows(2).position(|w| {
-                    current_relative_time >= w[0].0 && current_relative_time < w[1].0
-                }) {
-                    let dist_before = (local_pos - points[seg].1).length();
-                    let dist_after = (local_pos - points[seg + 1].1).length();
+                cache.local_points.windows(2).enumerate().find_map(|(seg, w)| {
+                    if current_relative_time >= w[0].0 && current_relative_time < w[1].0 {
+                        let dist_before = (local_pos - w[0].1).length();
+                        let dist_after = (local_pos - w[1].1).length();
+                        if dist_before >= body_radius && dist_after >= body_radius {
+                            Some((seg, local_pos, current_relative_time, w[0].1, w[1].1, w[0].0, w[1].0))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
+        // Build points in a single pass, inserting transient points at the right position
+        // Use index-based iteration to avoid borrow conflicts
+        let local_points_len = cache.local_points.len();
+        for idx in 0..local_points_len {
+            // Insert transient points after the segment start point
+            if let Some((seg, local_pos, current_relative_time, pos_a, pos_b, time_a, time_b)) = transient_info {
+                if idx == seg + 1 {
+                    let neighbor_count = TRANSIENT_POINT_N / 2;
                     
-                    if dist_before >= body_radius && dist_after >= body_radius {
-                        // Get segment boundary positions
-                        let pos_a = points[seg].1;     // Position before T
-                        let pos_b = points[seg + 1].1; // Position after T
-                        let time_a = points[seg].0;
-                        let time_b = points[seg + 1].0;
-                        
-                        // Number of neighbors on each side of T
-                        let neighbor_count = TRANSIENT_POINT_N / 2;
-                        
-                        // Build transient points by interpolating within the segment
-                        // Order: wake neighbors (A toward T), T, T', future neighbors (T toward B)
-                        let mut transient_points: Vec<(f64, DVec3)> = Vec::new();
-                        
-                        // Wake neighbors: interpolate between A and T
-                        // Evenly space them, with the last one closest to T
-                        for i in (1..=neighbor_count).rev() {
-                            // t=0 at A, t=1 at T; we want positions at t = i/(neighbor_count+1)
-                            let t = i as f64 / (neighbor_count + 1) as f64;
-                            let pos = pos_a.lerp(local_pos, t);
-                            let time = time_a + (current_relative_time - time_a) * t;
-                            transient_points.push((time, pos));
-                        }
-                        
-                        // T (brightest) - body's actual position
-                        let t_local_idx = transient_points.len();
-                        transient_points.push((current_relative_time, local_pos));
-                        
-                        // T' (dimmest, same position as T)
-                        let tp_local_idx = transient_points.len();
-                        transient_points.push((current_relative_time + 0.0001, local_pos));
-                        
-                        // Future neighbors: interpolate between T and B
-                        // Evenly space them, with the first one closest to T
-                        for i in 1..=neighbor_count {
-                            // t=0 at T, t=1 at B; we want positions at t = i/(neighbor_count+1)
-                            let t = i as f64 / (neighbor_count + 1) as f64;
-                            let pos = local_pos.lerp(pos_b, t);
-                            let time = current_relative_time + (time_b - current_relative_time) * t;
-                            transient_points.push((time, pos));
-                        }
-                        
-                        // Insert all transient points at the correct position
-                        let insert_pos = seg + 1;
-                        for (i, pt) in transient_points.iter().enumerate() {
-                            points.insert(insert_pos + i, *pt);
-                        }
-                        
-                        transient_idx = Some(insert_pos + t_local_idx);
-                        transient_prime_idx = Some(insert_pos + tp_local_idx);
+                    // Wake neighbors: interpolate between A and T
+                    for i in (1..=neighbor_count).rev() {
+                        let t = i as f64 / (neighbor_count + 1) as f64;
+                        let pos = pos_a.lerp(local_pos, t);
+                        let time = time_a + (current_relative_time - time_a) * t;
+                        cache.working_points.push((time, pos));
+                    }
+                    
+                    // T (brightest) - body's actual position
+                    transient_idx = Some(cache.working_points.len());
+                    cache.working_points.push((current_relative_time, local_pos));
+                    
+                    // T' (dimmest, same position as T)
+                    transient_prime_idx = Some(cache.working_points.len());
+                    cache.working_points.push((current_relative_time + 0.0001, local_pos));
+                    
+                    // Future neighbors: interpolate between T and B
+                    for i in 1..=neighbor_count {
+                        let t = i as f64 / (neighbor_count + 1) as f64;
+                        let pos = local_pos.lerp(pos_b, t);
+                        let time = current_relative_time + (time_b - current_relative_time) * t;
+                        cache.working_points.push((time, pos));
                     }
                 }
             }
+            let pt = cache.local_points[idx];
+            cache.working_points.push(pt);
         }
         
         // For closed orbits, append first point to close the loop (A')
-        // Note: A and A' don't visually connect since the brightness fades to min at A'
-        if cache.closed && !points.is_empty() {
-            let first = points[0];
-            let close_time = points.last().map(|(t, _)| t + 0.001).unwrap_or(0.0);
-            points.push((close_time, first.1));
+        if cache.closed && !cache.working_points.is_empty() {
+            let first = cache.working_points[0];
+            let close_time = cache.working_points.last().map(|(t, _)| t + 0.001).unwrap_or(0.0);
+            cache.working_points.push((close_time, first.1));
         }
+        
+        // Use reference to avoid another copy
+        let points = &cache.working_points;
         
         if points.len() < 2 {
             *visibility = Visibility::Hidden;
@@ -778,8 +792,8 @@ pub fn update_mouse_hit_marker(
     physics: Res<UniversePhysics>,
     _fcam: Single<&Freecam, With<PlanetariumCamera>>,
     physics_graph: Res<crate::body::motive::calculate_body_positions::PhysicsGraph>,
-    bodies: Query<(Entity, &BodyInfo, &BodyState, &Motive, Option<&Appearance>)>,
-    trajectory_caches: Query<(&TrajectoryMesh, &TrajectoryCache)>,
+    bodies: Query<(&BodyInfo, &Motive, Option<&TrajectoryMeshLink>)>,
+    trajectory_caches: Query<&TrajectoryCache>,
     mut markers: Query<(Entity, &mut FocusedTrajectoryMarker, &mut Transform)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TrajectoryMaterial>>,
@@ -799,7 +813,7 @@ pub fn update_mouse_hit_marker(
         return;
     };
 
-    let Ok((_, _info, _focused_state, motive, _appearance)) = bodies.get(focused_entity) else {
+    let Ok((_info, motive, traj_link)) = bodies.get(focused_entity) else {
         despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
         return;
     };
@@ -810,25 +824,24 @@ pub fn update_mouse_hit_marker(
         return;
     };
 
-    // Find the trajectory cache for the focused body
-    let Some(_cache) = trajectory_caches.iter().find_map(|(traj_mesh, cache)| {
-        let Ok((_, info, _, _, _)) = bodies.get(traj_mesh.body_entity) else {
-            return None;
-        };
-        if info.id == focused_id && cache.valid && !cache.local_points.is_empty() {
-            Some(cache)
-        } else {
-            None
-        }
-    }) else {
+    // Get trajectory cache via O(1) link lookup instead of O(n) iterator scan
+    let Some(traj_link) = traj_link else {
         despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
         return;
     };
+    let Ok(cache) = trajectory_caches.get(traj_link.0) else {
+        despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
+        return;
+    };
+    if !cache.valid || cache.local_points.is_empty() {
+        despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
+        return;
+    }
 
     // Get primary info for mu calculation
     let primary_mass = physics_graph.id_to_entity.get(&kepler.primary_id)
         .and_then(|e| bodies.get(*e).ok())
-        .map(|(_, info, _, _, _)| info.mass)
+        .map(|(info, _, _)| info.mass)
         .unwrap_or(0.0);
 
     let mu = kepler.gravitational_parameter
@@ -954,6 +967,12 @@ fn ensure_trajectory_marker(
 
     if let Some(entity) = existing {
         if let Ok((_, mut marker, mut transform)) = markers.get_mut(entity) {
+            // Invalidate cached strings if times changed
+            if marker.previous_time != previous_time || marker.next_time != next_time {
+                marker.cached_prev_str = None;
+                marker.cached_next_str = None;
+                marker.cached_clock_mode = None;
+            }
             marker.previous_time = previous_time;
             marker.next_time = next_time;
             marker.true_anomaly = true_anomaly;
@@ -988,6 +1007,9 @@ fn ensure_trajectory_marker(
             previous_time,
             next_time,
             true_anomaly,
+            cached_prev_str: None,
+            cached_next_str: None,
+            cached_clock_mode: None,
         },
     ));
 }
@@ -1036,7 +1058,7 @@ fn repeating_event_prev_next(
 
 
 pub fn draw_trajectory_marker_labels(
-    marker_query: Query<(&FocusedTrajectoryMarker, &Transform)>,
+    mut marker_query: Query<(&mut FocusedTrajectoryMarker, &Transform)>,
     cameras: Query<(&Camera, &PlanetariumCamera, &Projection, &Transform)>,
     mut contexts: EguiContexts,
     clock_settings: Res<MissionClockSettings>,
@@ -1049,14 +1071,26 @@ pub fn draw_trajectory_marker_labels(
         egui::Order::Background,
         egui::Id::new("trajectory_marker_labels"),
     ));
+    
+    let current_mode = clock_settings.mode;
 
     for (camera, _, _, camera_transform) in &cameras {
         let fresh_camera_gt = GlobalTransform::from(*camera_transform);
-        for (marker, transform) in marker_query.iter() {
+        for (mut marker, transform) in marker_query.iter_mut() {
             let world_pos = transform.translation + Vec3::Y * (transform.scale.y * 1.6);
             let Ok(screen_pos) = camera.world_to_viewport(&fresh_camera_gt, world_pos) else {
                 continue;
             };
+
+            // Update cached strings if clock mode changed or they haven't been computed yet
+            let needs_cache_update = marker.cached_clock_mode != Some(current_mode);
+            if needs_cache_update {
+                marker.cached_next_str = marker.next_time
+                    .map(|t| format_sim_time_for_mode(current_mode, t));
+                marker.cached_prev_str = marker.previous_time
+                    .map(|t| format_sim_time_for_mode(current_mode, t));
+                marker.cached_clock_mode = Some(current_mode);
+            }
 
             let label_text = match marker.kind {
                 FocusedTrajectoryMarkerKind::MouseHit => {
@@ -1064,12 +1098,8 @@ pub fn draw_trajectory_marker_labels(
                     let anomaly_degrees = marker.true_anomaly
                         .map(|a| a.to_degrees().rem_euclid(360.0))
                         .unwrap_or(0.0);
-                    let next_line = marker.next_time
-                        .map(|t| format_sim_time_for_mode(clock_settings.mode, t))
-                        .unwrap_or_else(|| "N/A".to_string());
-                    let prev_line = marker.previous_time
-                        .map(|t| format_sim_time_for_mode(clock_settings.mode, t))
-                        .unwrap_or_else(|| "N/A".to_string());
+                    let next_line = marker.cached_next_str.as_deref().unwrap_or("N/A");
+                    let prev_line = marker.cached_prev_str.as_deref().unwrap_or("N/A");
                     format!(
                         "ν = {:.1}°\nNext: {}\nPrev: {}",
                         anomaly_degrees, next_line, prev_line
@@ -1097,12 +1127,8 @@ pub fn draw_trajectory_marker_labels(
                     };
 
                     if marker_hovered {
-                        let next_line = marker.next_time
-                            .map(|t| format_sim_time_for_mode(clock_settings.mode, t))
-                            .unwrap_or_else(|| "N/A".to_string());
-                        let prev_line = marker.previous_time
-                            .map(|t| format_sim_time_for_mode(clock_settings.mode, t))
-                            .unwrap_or_else(|| "N/A".to_string());
+                        let next_line = marker.cached_next_str.as_deref().unwrap_or("N/A");
+                        let prev_line = marker.cached_prev_str.as_deref().unwrap_or("N/A");
                         format!(
                             "{}\nNext: {}\nPrev: {}",
                             marker_name, next_line, prev_line

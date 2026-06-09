@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_egui::EguiContexts;
-use crate::body::motive::info::BodyInfo;
+use crate::body::motive::calculate_body_positions::PhysicsGraph;
 use crate::camera::{GoTo, GoToSource, PlanetariumCamera};
 use crate::gui::planetarium::FocusedBodyState;
 
@@ -8,7 +8,7 @@ pub fn handle_go_to_shortcut(
     keys: Res<ButtonInput<KeyCode>>,
     mut contexts: EguiContexts,
     focused_body_state: Res<FocusedBodyState>,
-    bodies: Query<(Entity, &BodyInfo)>,
+    physics_graph: Res<PhysicsGraph>,
     mut go_to: MessageWriter<GoTo>,
 ) {
     let go_to_source = if keys.just_pressed(KeyCode::KeyG) {
@@ -31,10 +31,8 @@ pub fn handle_go_to_shortcut(
         return;
     };
 
-    if let Some((entity, _)) = bodies
-        .iter()
-        .find(|(_, info)| info.id.as_str() == selected_id)
-    {
+    // O(1) lookup via PhysicsGraph instead of O(n) iterator scan
+    if let Some(&entity) = physics_graph.id_to_entity.get(selected_id) {
         info!("cam.input.goto source={:?} entity={:?}", source, entity);
         go_to.write(GoTo {
             entity,
