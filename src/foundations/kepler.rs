@@ -218,7 +218,7 @@ pub mod true_anomaly {
 
     /// This is the Fourier expansion up to e^3
     pub fn from_mean_anomaly(mean_anomaly: f64, eccentricity: f64) -> f64 {
-        let first_term = mean_anomaly;
+        let first_term = mean_anomaly + eccentricity * mean_anomaly.sin();
         let second_term = (2.0 - (1.0 / 4.0) * eccentricity * eccentricity * eccentricity) * f64::sin(mean_anomaly);
         let third_term = (5.0 / 4.0) * eccentricity * eccentricity * eccentricity * f64::sin(2.0 * mean_anomaly);
         let fourth_term = (13.0 / 12.0) * eccentricity * eccentricity * eccentricity * f64::sin(3.0 * mean_anomaly);
@@ -226,7 +226,7 @@ pub mod true_anomaly {
     }
 
     pub fn fourier_expansion(mean_anomaly: f64, eccentricity: f64, iterations: usize) -> f64 {
-        let mut true_anomaly = mean_anomaly;
+        let mut true_anomaly = mean_anomaly + eccentricity * mean_anomaly.sin(); // Mikkola's seed
 
         for k in 1..=iterations {
             let order = k  as i32;

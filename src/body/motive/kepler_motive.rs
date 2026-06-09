@@ -23,7 +23,16 @@ pub struct KeplerMotive {
     pub gravitational_parameter: Option<f64>,
 }
 
-const EXPANSION_ITERATIONS: usize = 10;
+#[inline(always)]
+fn expansion_iterations(eccentricity: f64) -> usize {
+    if eccentricity < 0.3 {
+        4
+    } else if eccentricity < 0.6 {
+        8
+    } else {
+        10
+    }
+}
 
 impl KeplerMotive {
     pub fn semi_major_axis(&self) -> f64 {
@@ -144,12 +153,13 @@ impl KeplerMotive {
     }
 
     pub fn true_anomaly(&self, time: Instant, gravitational_parameter: f64) -> f64 {
-        true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), self.shape.eccentricity(), EXPANSION_ITERATIONS)
+        let eccentricity = self.shape.eccentricity();
+        true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), eccentricity, expansion_iterations(eccentricity))
     }
 
     pub fn radius_from_primary_at_time(&self, time: Instant, gravitational_parameter: f64) -> Option<f64> {
         let ecc = self.shape.eccentricity();
-        let ta = true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), ecc, EXPANSION_ITERATIONS);
+        let ta = true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), ecc, expansion_iterations(ecc));
         local::radius::from_elements2(self.shape.semi_major_axis(), ecc, ta)
     }
 
@@ -159,7 +169,8 @@ impl KeplerMotive {
     }
 
     pub fn eccentric_anomaly(&self, time: Instant, gravitational_parameter: f64) -> f64 {
-        let ta = true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), self.shape.eccentricity(), EXPANSION_ITERATIONS);
+        let eccentricity = self.shape.eccentricity();
+        let ta = true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), eccentricity, expansion_iterations(eccentricity));
         eccentric_anomaly::from_true_anomaly(self.shape.eccentricity(), ta)
     }
 
@@ -169,7 +180,7 @@ impl KeplerMotive {
     /// +W (+z) normal to the other 2 according to RHR
     pub fn displacement_pqw(&self, time: Instant, gravitational_parameter: f64) -> Option<DVec3> {
         let ecc = self.shape.eccentricity();
-        let ta = true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), ecc, EXPANSION_ITERATIONS);
+        let ta = true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), ecc, expansion_iterations(ecc));
         let rad = local::radius::from_elements2(self.shape.semi_major_axis(), ecc, ta)?;
 
         Some(DVec3::new(rad * ta.cos(), rad * ta.sin(), 0.0))
