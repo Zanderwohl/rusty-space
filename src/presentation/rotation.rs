@@ -19,9 +19,7 @@ pub fn orient_bodies(
 ) {
     for (mut transform, rotation, state) in bodies.iter_mut() {
         let current_orientation = match &rotation.mode {
-            RotationMode::Spinning { .. } => {
-                rotation.orientation_at(sim_time.time)
-            }
+            RotationMode::Spinning { .. } => rotation.orientation_at(sim_time.time),
             RotationMode::TidallyLocked { primary_id, .. } => {
                 // Find the primary body's position using O(1) lookup via PhysicsGraph
                 let primary_pos = physics_graph.id_to_entity.get(primary_id)

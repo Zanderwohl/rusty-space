@@ -241,6 +241,34 @@ pub static MIGRATIONS: &[Migration] = &[
             -- SQLite cannot drop columns directly; keep column for rollback compatibility.
         "#,
     },
+    // Version 3 -> 4: Persist body rotation components
+    Migration {
+        description: "Add body_rotations table for BodyRotation persistence",
+        up: r#"
+            CREATE TABLE IF NOT EXISTS body_rotations (
+                body_id TEXT PRIMARY KEY NOT NULL,
+                mode TEXT NOT NULL, -- 'Spinning' or 'TidallyLocked'
+                -- Spinning fields
+                orientation_x REAL,
+                orientation_y REAL,
+                orientation_z REAL,
+                orientation_w REAL,
+                angular_velocity REAL,
+                epoch_type TEXT, -- 'J2000' or 'JulianDay'
+                epoch_julian_day REAL,
+                -- Tidally locked fields
+                primary_id TEXT,
+                pole_x REAL,
+                pole_y REAL,
+                pole_z REAL,
+                FOREIGN KEY (body_id) REFERENCES bodies(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_body_rotations_mode ON body_rotations(mode);
+        "#,
+        down: r#"
+            DROP TABLE IF EXISTS body_rotations;
+        "#,
+    },
 ];
 
 /// Get the current program version (number of migrations available)

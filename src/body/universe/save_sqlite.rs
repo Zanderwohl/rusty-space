@@ -4,11 +4,11 @@
 
 use std::path::PathBuf;
 use std::collections::HashMap;
-use bevy::math::DVec3;
+use bevy::math::{DQuat, DVec3};
 use rusqlite::{Connection, params};
 
 use crate::body::appearance::{Appearance, AppearanceColor, DebugBall, StarBall};
-use crate::body::motive::info::BodyInfo;
+use crate::body::motive::info::{BodyInfo, BodyRotation, RotationEpoch, RotationMode};
 use crate::body::motive::kepler_motive::{
     KeplerMotive, KeplerShape, KeplerRotation, KeplerEpoch,
     EccentricitySMA, Apsides,
@@ -369,12 +369,13 @@ fn load_bodies(conn: &Connection) -> Result<Vec<SomeBody>, SqliteSaveError> {
         
         // Load motive
         let motive = load_motive(conn, &id)?;
+        let rotation = load_body_rotation(conn, &id)?;
         
         bodies.push(SomeBody::CompoundMotiveEntry(CompoundMotiveEntry {
             info,
             motive,
             appearance,
-            rotation: None, // SQLite format doesn't store rotation yet
+            rotation,
         }));
     }
     
@@ -383,14 +384,14 @@ fn load_bodies(conn: &Connection) -> Result<Vec<SomeBody>, SqliteSaveError> {
 
 fn save_bodies(conn: &Connection, bodies: &[SomeBody]) -> Result<(), SqliteSaveError> {
     for body in bodies {
-        let (info, appearance, motive) = match body {
+        let (info, appearance, motive, rotation) = match body {
             SomeBody::FixedEntry(e) => {
                 let m = Motive::fixed(e.position);
-                (&e.info, &e.appearance, m)
+                (&e.info, &e.appearance, m, e.rotation.as_ref())
             }
             SomeBody::NewtonEntry(e) => {
                 let m = Motive::newtonian(e.position, e.velocity);
-                (&e.info, &e.appearance, m)
+                (&e.info, &e.appearance, m, e.rotation.as_ref())
             }
             SomeBody::KeplerEntry(e) => {
                 let m = match e.params.gravitational_parameter {
@@ -408,14 +409,14 @@ fn save_bodies(conn: &Connection, bodies: &[SomeBody]) -> Result<(), SqliteSaveE
                         e.params.epoch.clone(),
                     ),
                 };
-                (&e.info, &e.appearance, m)
+                (&e.info, &e.appearance, m, e.rotation.as_ref())
             }
             SomeBody::CompoundEntry(e) => {
                 let m = Motive::fixed(DVec3::ZERO);
-                (&e.info, &e.appearance, m)
+                (&e.info, &e.appearance, m, None)
             }
             SomeBody::CompoundMotiveEntry(e) => {
-                (&e.info, &e.appearance, e.motive.clone())
+                (&e.info, &e.appearance, e.motive.clone(), e.rotation.as_ref())
             }
         };
         
@@ -455,8 +456,123 @@ fn save_bodies(conn: &Connection, bodies: &[SomeBody]) -> Result<(), SqliteSaveE
         
         // Save motive
         save_motive(conn, &info.id, &motive)?;
+        save_body_rotation(conn, &info.id, rotation)?;
     }
     
+    Ok(())
+}
+
+fn load_body_rotation(conn: &Connection, body_id: &str) -> Result<Option<BodyRotation>, SqliteSaveError> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='body_rotations')",
+            [],
+            |row| row.get::<_, i32>(0),
+        )
+        .map(|v| v != 0)?;
+    if !exists {
+        return Ok(None);
+    }
+
+    let result = conn.query_row(
+        "SELECT mode, orientation_x, orientation_y, orientation_z, orientation_w,
+                angular_velocity, epoch_type, epoch_julian_day,
+                primary_id, pole_x, pole_y, pole_z
+         FROM body_rotations WHERE body_id = ?1",
+        [body_id],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<f64>>(1)?,
+                row.get::<_, Option<f64>>(2)?,
+                row.get::<_, Option<f64>>(3)?,
+                row.get::<_, Option<f64>>(4)?,
+                row.get::<_, Option<f64>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<f64>>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, Option<f64>>(9)?,
+                row.get::<_, Option<f64>>(10)?,
+                row.get::<_, Option<f64>>(11)?,
+            ))
+        },
+    );
+
+    match result {
+        Ok((mode, ox, oy, oz, ow, angular_velocity, epoch_type, epoch_jd, primary_id, px, py, pz)) => {
+            let rotation = match mode.as_str() {
+                "Spinning" => {
+                    let orientation_at_epoch = DQuat::from_xyzw(
+                        ox.unwrap_or(0.0),
+                        oy.unwrap_or(0.0),
+                        oz.unwrap_or(0.0),
+                        ow.unwrap_or(1.0),
+                    );
+                    let epoch = match epoch_type.as_deref() {
+                        Some("JulianDay") => RotationEpoch::JulianDay(epoch_jd.unwrap_or(2451545.0)),
+                        _ => RotationEpoch::J2000,
+                    };
+                    BodyRotation::spinning(orientation_at_epoch, angular_velocity.unwrap_or(0.0), epoch)
+                }
+                "TidallyLocked" => BodyRotation::tidally_locked(
+                    primary_id.unwrap_or_default(),
+                    DVec3::new(px.unwrap_or(0.0), py.unwrap_or(0.0), pz.unwrap_or(1.0)),
+                ),
+                _ => return Ok(None),
+            };
+            Ok(Some(rotation))
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn save_body_rotation(
+    conn: &Connection,
+    body_id: &str,
+    rotation: Option<&BodyRotation>,
+) -> Result<(), SqliteSaveError> {
+    let Some(rotation) = rotation else {
+        return Ok(());
+    };
+
+    match &rotation.mode {
+        RotationMode::Spinning {
+            orientation_at_epoch,
+            angular_velocity,
+            epoch,
+        } => {
+            let (epoch_type, epoch_julian_day): (&str, Option<f64>) = match epoch {
+                RotationEpoch::J2000 => ("J2000", None),
+                RotationEpoch::JulianDay(jd) => ("JulianDay", Some(*jd)),
+            };
+            conn.execute(
+                "INSERT INTO body_rotations (
+                    body_id, mode, orientation_x, orientation_y, orientation_z, orientation_w,
+                    angular_velocity, epoch_type, epoch_julian_day
+                 ) VALUES (?1, 'Spinning', ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    body_id,
+                    orientation_at_epoch.x,
+                    orientation_at_epoch.y,
+                    orientation_at_epoch.z,
+                    orientation_at_epoch.w,
+                    angular_velocity,
+                    epoch_type,
+                    epoch_julian_day,
+                ],
+            )?;
+        }
+        RotationMode::TidallyLocked { primary_id, pole } => {
+            conn.execute(
+                "INSERT INTO body_rotations (
+                    body_id, mode, primary_id, pole_x, pole_y, pole_z
+                 ) VALUES (?1, 'TidallyLocked', ?2, ?3, ?4, ?5)",
+                params![body_id, primary_id, pole.x, pole.y, pole.z],
+            )?;
+        }
+    }
+
     Ok(())
 }
 
