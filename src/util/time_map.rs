@@ -82,6 +82,15 @@ impl<V: Clone + Lerpable> TimeMap<V>
         }
     }
 
+    /// Creates a new TimeMap with preallocated capacity for the expected number of entries.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            map: HashMap::with_capacity(capacity),
+            time_keys: SortedTimes::with_capacity(capacity),
+            periodicity: None,
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.time_keys.len()
     }
@@ -89,6 +98,21 @@ impl<V: Clone + Lerpable> TimeMap<V>
     pub fn insert(&mut self, time: f64, item: V) {
         self.time_keys.insert(time);
         self.map.insert(bitfutz::f64::to_u64(time), item);
+    }
+
+    /// Inserts a time-value pair without maintaining sort order in time_keys.
+    /// Call `finalize_unordered()` after all insertions to sort and deduplicate.
+    /// More efficient than `insert()` for bulk population when insertion order is arbitrary.
+    pub fn insert_unordered(&mut self, time: f64, item: V) {
+        self.time_keys.push_unordered(time);
+        self.map.insert(bitfutz::f64::to_u64(time), item);
+    }
+
+    /// Sorts and deduplicates time_keys after bulk `insert_unordered()` calls.
+    /// Must be called before any operations that depend on sorted time keys
+    /// (e.g., `get_lerp`, `get_pair_that_surrounds`).
+    pub fn finalize_unordered(&mut self) {
+        self.time_keys.sort_and_deduplicate();
     }
 
     pub fn get(&self, time: f64) -> Option<&V> {
@@ -183,11 +207,32 @@ impl SortedTimes {
         }
     }
 
+    /// Creates a new SortedTimes with preallocated capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            in_order: Vec::with_capacity(capacity)
+        }
+    }
+
     pub fn insert(&mut self, value: f64) {
         match self.in_order.binary_search_by(|other| other.partial_cmp(&value).unwrap()) {
             Ok(_) => {},
             Err(pos) => self.in_order.insert(pos, value),
         }
+    }
+
+    /// Appends a value without maintaining sort order.
+    /// Call `sort_and_deduplicate()` after all insertions.
+    #[inline]
+    pub fn push_unordered(&mut self, value: f64) {
+        self.in_order.push(value);
+    }
+
+    /// Sorts the internal vector and removes duplicates.
+    /// Call after bulk `push_unordered()` operations.
+    pub fn sort_and_deduplicate(&mut self) {
+        self.in_order.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        self.in_order.dedup_by(|a, b| a == b);
     }
 
     pub fn has(&self, time: f64) -> bool {

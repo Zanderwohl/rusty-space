@@ -182,8 +182,8 @@ impl KeplerMotive {
         let ecc = self.shape.eccentricity();
         let ta = true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), ecc, expansion_iterations(ecc));
         let rad = local::radius::from_elements2(self.shape.semi_major_axis(), ecc, ta)?;
-
-        Some(DVec3::new(rad * ta.cos(), rad * ta.sin(), 0.0))
+        let (sin_ta, cos_ta) = ta.sin_cos();
+        Some(DVec3::new(rad * cos_ta, rad * sin_ta, 0.0))
     }
 
     pub fn displacement(&self, time: Instant, gravitational_parameter: f64) -> Option<DVec3> {
@@ -203,17 +203,65 @@ impl KeplerMotive {
     ) -> Option<DVec3> {
         let ecc = self.shape.eccentricity();
         let rad = local::radius::from_elements2(self.shape.semi_major_axis(), ecc, true_anomaly)?;
-        let perifocal_displacement = DVec3::new(rad * true_anomaly.cos(), rad * true_anomaly.sin(), 0.0);
+        let (sin_ta, cos_ta) = true_anomaly.sin_cos();
+        let perifocal_displacement = DVec3::new(rad * cos_ta, rad * sin_ta, 0.0);
         let rotated = self.perifocal_to_reference(perifocal_displacement, precession_time);
         Some(rotated)
     }
 
+    /// Computes displacement from a precomputed true anomaly for non-precessing trajectory points.
+    pub fn displacement_from_true_anomaly(&self, true_anomaly: f64, time: Instant) -> Option<DVec3> {
+        let ecc = self.shape.eccentricity();
+        let rad = local::radius::from_elements2(self.shape.semi_major_axis(), ecc, true_anomaly)?;
+        let (sin_ta, cos_ta) = true_anomaly.sin_cos();
+        let perifocal_displacement = DVec3::new(rad * cos_ta, rad * sin_ta, 0.0);
+        let rotated = self.perifocal_to_reference(perifocal_displacement, time);
+        Some(rotated)
+    }
+
+    /// Computes displacement from true anomaly using a precomputed rotation matrix.
+    /// Use this in loops where the rotation matrix is constant across all sample points.
+    #[inline]
+    pub fn displacement_with_cached_rotation(
+        &self,
+        true_anomaly: f64,
+        rotation_matrix: &DMat3,
+    ) -> Option<DVec3> {
+        let ecc = self.shape.eccentricity();
+        let rad = local::radius::from_elements2(self.shape.semi_major_axis(), ecc, true_anomaly)?;
+        let (sin_ta, cos_ta) = true_anomaly.sin_cos();
+        let perifocal_displacement = DVec3::new(rad * cos_ta, rad * sin_ta, 0.0);
+        Some(*rotation_matrix * perifocal_displacement)
+    }
+
+    /// Computes displacement from true anomaly using precomputed shape constants and rotation matrix.
+    /// Most efficient variant for tight loops with all invariants cached.
+    #[inline]
+    pub fn displacement_fully_cached(
+        sma: f64,
+        ecc: f64,
+        true_anomaly: f64,
+        rotation_matrix: &DMat3,
+    ) -> Option<DVec3> {
+        let rad = local::radius::from_elements2(sma, ecc, true_anomaly)?;
+        let (sin_ta, cos_ta) = true_anomaly.sin_cos();
+        let perifocal_displacement = DVec3::new(rad * cos_ta, rad * sin_ta, 0.0);
+        Some(*rotation_matrix * perifocal_displacement)
+    }
+
     fn perifocal_to_reference(&self, perifocal_displacement: DVec3, time: Instant) -> DVec3 {
+        let rotation_matrix = self.perifocal_to_reference_matrix(time);
+        rotation_matrix * perifocal_displacement
+    }
+
+    /// Computes the combined rotation matrix for transforming perifocal coordinates to reference frame.
+    /// Cache this matrix when computing multiple points at the same precession time.
+    pub fn perifocal_to_reference_matrix(&self, time: Instant) -> DMat3 {
         let rot_arg_peri = DMat3::from_rotation_z(self.argument_of_periapsis(time).to_radians());
         let rot_inc = DMat3::from_rotation_x(self.inclination().to_radians());
         let rot_long_asc_node = DMat3::from_rotation_z(self.longitude_of_ascending_node_infallible(time).to_radians());
 
-        rot_long_asc_node * rot_inc * rot_arg_peri * perifocal_displacement
+        rot_long_asc_node * rot_inc * rot_arg_peri
     }
 
     pub fn display(&self, ui: &mut Ui) {
@@ -577,38 +625,55 @@ fn calculate_trajectory_for_body(
         .gravitational_parameter
         .unwrap_or(physics.gravitational_constant * primary_mass);
 
-    state.trajectory = Some(TimeMap::new());
-    let map = state.trajectory.as_mut().unwrap();
     let period = kepler_motive.period(mu);
-
     let periapsis_time = kepler_motive.time_at_periapsis_passage(mu);
+
+    // Preallocate trajectory map with known capacity
+    let num_points = view_settings.trajectory_resolution + 1;
+    state.trajectory = Some(TimeMap::with_capacity(num_points));
+    let map = state.trajectory.as_mut().unwrap();
 
     if !kepler_motive.is_open() {
         map.set_periodicity(periapsis_time, period);
     }
 
-    // For precessing orbits, we want all trajectory points to share the CURRENT
-    // precession state. Otherwise, each point would have a different orbital plane
-    // orientation, causing the trajectory to not match the actual orbital path.
-    let is_precessing = kepler_motive.is_precessing();
+    // Precompute orbit invariants outside the sample loop
+    let period_s = period.to_seconds();
+    let periapsis_j2000 = periapsis_time.to_j2000_seconds();
+    let resolution = view_settings.trajectory_resolution as f64;
+    let ecc = kepler_motive.eccentricity();
+    let sma = kepler_motive.semi_major_axis();
+    let mean_anomaly_at_epoch_rad = kepler_motive.epoch.mean_anomaly_at_epoch().to_radians();
+    let epoch_j2000 = kepler_motive.epoch.epoch().to_j2000_seconds();
+    let iterations = expansion_iterations(ecc);
+    
+    // Precompute mean motion: n = sqrt(mu / a^3)
+    let mean_motion = f64::sqrt(mu / (sma * sma * sma));
+
+    // Cache the rotation matrix - it's constant for the entire trajectory pass.
+    // For precessing orbits, we use current_time for all points (per design).
+    // For non-precessing orbits, angles are constant so any time gives the same matrix.
+    let rotation_matrix = kepler_motive.perifocal_to_reference_matrix(current_time);
+
+    // Precompute Bessel/Fourier coefficients for true anomaly calculation
+    let fourier_coeffs = true_anomaly::precompute_coefficients(ecc, iterations);
 
     for i in 0..=view_settings.trajectory_resolution {
-        let relative_time = (i as f64 / view_settings.trajectory_resolution as f64) * period.to_seconds();
+        let relative_time = (i as f64 / resolution) * period_s;
+        let absolute_j2000 = periapsis_j2000 + relative_time;
         
-        let displacement = if is_precessing {
-            // For precessing orbits: compute true anomaly for this time, then apply
-            // the current time's precession rotation to all points
-            let absolute_time = Instant::from_seconds_since_j2000(periapsis_time.to_j2000_seconds() + relative_time);
-            let true_anomaly = kepler_motive.true_anomaly(absolute_time, mu);
-            kepler_motive.displacement_at_true_anomaly_with_precession(true_anomaly, current_time)
-        } else {
-            // For non-precessing orbits: use original logic (precession angles are constant)
-            let absolute_time = Instant::from_seconds_since_j2000(periapsis_time.to_j2000_seconds() + relative_time);
-            kepler_motive.displacement(absolute_time, mu)
-        };
+        // Inline mean anomaly calculation with precomputed values
+        let mean_anomaly = mean_anomaly_at_epoch_rad + mean_motion * (absolute_j2000 - epoch_j2000);
+        let ta = true_anomaly::fourier_expansion_with_precompute(mean_anomaly, ecc, &fourier_coeffs);
+        
+        // Use fully cached displacement calculation with precomputed shape constants and rotation matrix
+        let displacement = KeplerMotive::displacement_fully_cached(sma, ecc, ta, &rotation_matrix);
         
         if let Some(displacement) = displacement {
-            map.insert(relative_time, displacement);
+            map.insert_unordered(relative_time, displacement);
         }
     }
+    
+    // Finalize trajectory map by sorting time keys
+    map.finalize_unordered();
 }
