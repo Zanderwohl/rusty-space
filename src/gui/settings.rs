@@ -178,6 +178,8 @@ pub struct WindowSelections {
     pub grid: bool,
     #[serde(default = "default_false")]
     pub camera: bool,
+    #[serde(default = "default_false")]
+    pub controls: bool,
 }
 
 impl Default for WindowSelections {
@@ -189,6 +191,7 @@ impl Default for WindowSelections {
             body_info: default_false(),
             grid: default_false(),
             camera: default_false(),
+            controls: default_false(),
         }
     }
 }

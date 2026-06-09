@@ -19,6 +19,10 @@ pub fn control_window(
     view_settings: ResMut<ViewSettings>,
     perf_metrics: Res<SimulationPerformanceMetrics>,
 ) {
+    if !settings.windows.controls {
+        return;
+    }
+
     let ctx = contexts.ctx_mut();
     if ctx.is_err() { return; }
     let ctx = ctx.unwrap();

@@ -57,6 +57,7 @@ pub fn settings_panel(settings: &mut ResMut<Settings>, ui: &mut Ui) {
     ui.separator();
     ui.vertical(|ui| {
         ui.heading("Windows");
+        ui.checkbox(&mut settings.windows.controls, "Controls");
         ui.checkbox(&mut settings.windows.spin, "Spin Gravity Calculator");
         ui.checkbox(&mut settings.windows.body_edit, "Body Edit");
         ui.checkbox(&mut settings.windows.body_info, "Body Info");

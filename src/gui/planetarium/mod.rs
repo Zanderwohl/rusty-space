@@ -71,6 +71,7 @@ impl Plugin for PlanetariumUI {
                     windows::settings::settings_window,
                     windows::spin::spin_window,
                     windows::camera::camera_window,
+                    windows::show_hide_panel::show_hide_panel_widget,
                     ).run_if(in_state(AppState::Planetarium)),
                 ))
             // Core simulation and position systems
@@ -216,6 +217,8 @@ fn load_assets(
             for tag in body.tags() {
                 let default_state = if tag == "Major Moon" || tag == "Major Planet" || tag == "Minor Planet" {
                     TagState { shown: true, trajectory: true, ..Default::default() }
+                } else if tag == "Barycenter" {
+                    TagState { shown: false, trajectory: true, ..Default::default() }
                 } else {
                     TagState::default()
                 };
