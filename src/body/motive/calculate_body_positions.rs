@@ -261,6 +261,7 @@ impl Default for SimulationPerformanceMetrics {
 /// - Skips Newtonian gravity integration entirely
 pub fn calculate_body_positions(
     mut sim_time: ResMut<SimTime>,
+    time: Res<Time>,
     physics: Res<UniversePhysics>,
     settings: Res<Settings>,
     mut graph: ResMut<PhysicsGraph>,
@@ -268,6 +269,35 @@ pub fn calculate_body_positions(
     mut metrics: ResMut<SimulationPerformanceMetrics>,
     mut bodies: Query<(Entity, &BodyInfo, &Motive, &mut BodyState, Option<&Major>)>,
 ) {
+    // === Time advancement (folded from advance_time) ===
+    // Queue new simulation times based on real delta when playing.
+    // We don't early-return here because the user may have edited orbital
+    // parameters while paused, requiring a position recalculation.
+    if sim_time.playing {
+        let real_delta = time.delta_secs_f64();
+        let step = sim_time.step;
+        
+        let desired_sim_delta = sim_time.gui_speed * real_delta;
+        sim_time.accumulated_time += desired_sim_delta;
+        
+        let full_steps = (sim_time.accumulated_time / step).floor() as usize;
+        
+        if full_steps > 0 {
+            sim_time.accumulated_time -= full_steps as f64 * step;
+            
+            // If speed was reduced, trim oversized queue (keep earliest steps)
+            sim_time.previous_times.truncate(full_steps);
+            
+            let already_queued = sim_time.previous_times.len();
+            if already_queued < full_steps {
+                let steps_to_add = full_steps - already_queued;
+                let last_queued_time = sim_time.previous_times.last()
+                    .unwrap_or(sim_time.time.to_j2000_seconds());
+                sim_time.previous_times.expand(last_queued_time + step, steps_to_add, step);
+            }
+        }
+    }
+    
     // Early exit when paused with no pending work AND initial positions have been calculated.
     // This avoids recalculating the same positions every frame while paused.
     // On first load, graph.body_data is empty so we must run to calculate initial positions.

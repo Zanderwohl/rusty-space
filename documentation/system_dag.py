@@ -204,24 +204,13 @@ SYSTEMS: list[System] = [
     ),
 
     # =========================================================================
-    # PLANETARIUM - SIMULATION
-    # =========================================================================
-    System(
-        name="advance_time",
-        app_state=AppState.PLANETARIUM,
-        system_set="PlanetariumSimulationSet",
-        description="Advances SimTime based on delta and playback speed",
-    ),
-
-    # =========================================================================
     # PLANETARIUM - CORE POSITION PIPELINE
     # =========================================================================
     System(
         name="calculate_body_positions",
         app_state=AppState.PLANETARIUM,
         system_set="PlanetariumUISet",
-        description="Computes simulation positions via PhysicsGraph",
-        after=["advance_time"],
+        description="Advances time and computes simulation positions via PhysicsGraph",
     ),
     System(
         name="position_bodies",
@@ -251,14 +240,12 @@ SYSTEMS: list[System] = [
         app_state=AppState.PLANETARIUM,
         description="Animates camera GoTo movement",
         after=["calculate_body_positions"],
-        before=["position_bodies"],
     ),
     System(
         name="revolve_around",
         app_state=AppState.PLANETARIUM,
         description="Updates camera revolve-around-body behavior",
         after=["calculate_body_positions"],
-        before=["position_bodies"],
     ),
     System(
         name="update_hover_target",

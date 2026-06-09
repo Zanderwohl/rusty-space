@@ -10,7 +10,6 @@ use crate::gui::menu::UiState;
 use crate::body::universe::save::TagState;
 use crate::gui::settings::Settings;
 use crate::sim::{SimTime, unload_simulation_objects, CalculateTrajectory, BodySelection};
-use crate::body::universe;
 use crate::body::motive::calculate_body_positions::{self, PhysicsGraph, PositionCache, SimulationPerformanceMetrics};
 use crate::body::motive::kepler_motive;
 pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin, CameraAction};
@@ -27,9 +26,6 @@ mod focused_body;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 struct PlanetariumUISet;
-
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-struct PlanetariumSimulationSet;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 struct PlanetariumLoadingSet;
@@ -53,7 +49,6 @@ impl Plugin for PlanetariumUI {
             .add_message::<CalculateTrajectory>()
             .configure_sets(Update, (
                 PlanetariumUISet.run_if(in_state(AppState::Planetarium)),
-                PlanetariumSimulationSet.run_if(in_state(AppState::Planetarium)),
                 PlanetariumLoadingSet.run_if(in_state(AppState::PlanetariumLoading)),
             ))
             .add_plugins(PlanetariumCameraPlugin)
@@ -80,8 +75,7 @@ impl Plugin for PlanetariumUI {
                 presentation::adjust_lights,
                 input::handle_go_to_shortcut,
                 input::handle_revolve_frame_shortcut,
-                calculate_body_positions::calculate_body_positions
-                    .after(universe::advance_time),
+                calculate_body_positions::calculate_body_positions,
                 kepler_motive::calculate_trajectory,
                 presentation::position_bodies.after(calculate_body_positions::calculate_body_positions),
                 presentation::orient_bodies.after(presentation::position_bodies),
@@ -148,10 +142,6 @@ impl Plugin for PlanetariumUI {
                 presentation::update_starfield_brightness
                     .run_if(resource_changed::<Settings>),
             ).in_set(PlanetariumUISet))
-            // Simulation time advance
-            .add_systems(Update, (
-                universe::advance_time,
-            ).in_set(PlanetariumSimulationSet))
             // Asset loading
             .add_systems(Update, (load_assets).in_set(PlanetariumLoadingSet))
             .add_systems(OnExit(AppState::PlanetariumLoading), initial_trajectories)
