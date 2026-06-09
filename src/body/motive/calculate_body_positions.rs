@@ -22,6 +22,7 @@ use bevy::prelude::*;
 
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::{Motive, MotiveSelection};
+use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::universe::Major;
 use crate::body::universe::save::UniversePhysics;
 use crate::sim::{PreviousTimesIter, SimTime};
@@ -71,6 +72,8 @@ pub enum CachedMotiveSelection {
     Keplerian {
         /// Pre-computed gravitational parameter (G * parent_mass), constant across time steps
         mu: f64,
+        /// Cached KeplerMotive for direct displacement calculation (avoids motive_at() lookup)
+        kepler: KeplerMotive,
     },
     Newtonian {
         position: DVec3,
@@ -521,7 +524,10 @@ fn rebuild_physics_graph(
 
                 graph.cached_motives.insert(entity, CachedMotive {
                     parent_entity,
-                    selection: CachedMotiveSelection::Keplerian { mu },
+                    selection: CachedMotiveSelection::Keplerian { 
+                        mu,
+                        kepler: kepler.clone(),
+                    },
                 });
             }
             MotiveSelection::Newtonian { position, velocity } => {
@@ -561,7 +567,7 @@ fn rebuild_physics_graph(
 // ============================================================================
 
 /// Calculate positions for Fixed and Keplerian bodies in dependency order.
-/// Uses cached parent/mu data but calls motive_at() fresh for each body.
+/// Uses cached motive data directly - no motive_at() calls needed.
 fn calculate_hierarchical_positions(
     bodies: &mut Query<(Entity, &BodyInfo, &Motive, &mut BodyState, Option<&Major>)>,
     graph: &PhysicsGraph,
@@ -570,11 +576,11 @@ fn calculate_hierarchical_positions(
 ) {
     // Calculate positions in topological order
     for &entity in &graph.sorted_entities {
-        // Get cached motive data for parent info and pre-computed mu
+        // Get cached motive data for parent info and pre-computed values
         let Some(cached_motive) = graph.cached_motives.get(&entity) else { continue };
         
-        // Get the body from the query - we need the motive to calculate position
-        let Ok((_, _, motive, mut state, _)) = bodies.get_mut(entity) else { continue };
+        // Get the body state from the query
+        let Ok((_, _, _, mut state, _)) = bodies.get_mut(entity) else { continue };
         
         // Get parent position from cache (parent is guaranteed to be processed first due to topo sort)
         let parent_position = cached_motive.parent_entity
@@ -582,22 +588,15 @@ fn calculate_hierarchical_positions(
             .copied()
             .unwrap_or(DVec3::ZERO);
         
-        // Get fresh motive selection at current time
-        let (_, selection) = motive.motive_at(time);
-        
-        // Calculate local position based on motive selection
-        let local_position = match selection {
-            MotiveSelection::Fixed { position, .. } => {
+        // Calculate local position using cached motive data directly (no motive_at() call needed)
+        let local_position = match &cached_motive.selection {
+            CachedMotiveSelection::Fixed { position } => {
                 *position
             }
-            MotiveSelection::Keplerian(kepler) => {
-                let mu = match &cached_motive.selection {
-                    CachedMotiveSelection::Keplerian { mu } => *mu,
-                    _ => 0.0,
-                };
-                kepler.displacement(time, mu).unwrap_or(DVec3::ZERO)
+            CachedMotiveSelection::Keplerian { mu, kepler } => {
+                kepler.displacement(time, *mu).unwrap_or(DVec3::ZERO)
             }
-            MotiveSelection::Newtonian { .. } => {
+            CachedMotiveSelection::Newtonian { .. } => {
                 continue;
             }
         };
