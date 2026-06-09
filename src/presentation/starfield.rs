@@ -8,15 +8,11 @@ use bevy::color::Color;
 use crate::catalog::Catalogs;
 use crate::catalog::spectral::SpectralType;
 use crate::gui::settings::Settings;
-use crate::presentation::starfield_material::StarfieldMaterial;
+use crate::presentation::starfield_material::{StarfieldMaterial, StarfieldMaterialUniform};
 
 /// Marker component for the starfield sphere entity.
 #[derive(Component)]
 pub struct Starfield;
-
-/// Resource holding the settings buffer handle for runtime updates.
-#[derive(Resource)]
-pub struct StarfieldSettingsBuffer(pub Handle<ShaderStorageBuffer>);
 
 /// Spawns the starfield background sphere with all catalog stars.
 pub fn spawn_starfield(
@@ -58,19 +54,15 @@ pub fn spawn_starfield(
     let stars_buffer = buffers.add(ShaderStorageBuffer::from(star_data));
     let colors_buffer = buffers.add(ShaderStorageBuffer::from(color_data));
 
-    // Create settings buffer: [brightness, padding, padding, padding]
-    let settings_data: Vec<[f32; 4]> = vec![[settings.display.star_brightness, 0.0, 0.0, 0.0]];
-    let settings_buffer = buffers.add(ShaderStorageBuffer::from(settings_data));
-
-    // Store the settings buffer handle for runtime updates
-    commands.insert_resource(StarfieldSettingsBuffer(settings_buffer.clone()));
-
     // Create the starfield material
     let material_handle = materials.add(StarfieldMaterial {
         stars: stars_buffer,
         colors: colors_buffer,
-        settings: settings_buffer,
-        star_count,
+        uniforms: StarfieldMaterialUniform {
+            star_count,
+            brightness: settings.display.star_brightness,
+            _padding: Vec2::ZERO,
+        },
     });
 
     // Create an inverted sphere mesh (we view from inside)
@@ -85,15 +77,28 @@ pub fn spawn_starfield(
     ));
 }
 
-/// Syncs the star brightness setting to the starfield settings buffer.
+/// Syncs the star brightness setting to the starfield material uniform.
 pub fn update_starfield_brightness(
     settings: Res<Settings>,
-    handle: Option<Res<StarfieldSettingsBuffer>>,
-    mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
+    starfields: Query<&MeshMaterial3d<StarfieldMaterial>, With<Starfield>>,
+    mut materials: ResMut<Assets<StarfieldMaterial>>,
+    mut last_brightness: Local<Option<f32>>,
 ) {
-    let Some(handle) = handle else { return };
-    if let Some(buffer) = buffers.get_mut(&handle.0) {
-        let data: Vec<[f32; 4]> = vec![[settings.display.star_brightness, 0.0, 0.0, 0.0]];
-        *buffer = ShaderStorageBuffer::from(data);
+    let brightness = settings.display.star_brightness;
+
+    // Avoid rewriting the GPU buffer when the slider value has not changed.
+    if let Some(last) = *last_brightness {
+        if (last - brightness).abs() < 0.0001 {
+            return;
+        }
+    }
+    *last_brightness = Some(brightness);
+
+    for material_handle in &starfields {
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            material.uniforms.brightness = brightness;
+        } else {
+            warn!("Starfield material handle exists but asset was not found");
+        }
     }
 }

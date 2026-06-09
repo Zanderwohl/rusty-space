@@ -3,7 +3,7 @@
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
 use bevy::render::render_resource::{
-    AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError,
+    AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
 };
 use bevy::render::storage::ShaderStorageBuffer;
 use bevy::shader::ShaderRef;
@@ -14,6 +14,13 @@ use bevy_mesh::MeshVertexBufferLayoutRef;
 /// Stars are stored in a GPU buffer as `vec4(dir.x, dir.y, dir.z, mag)` where
 /// `dir` is a pre-computed unit direction vector in Bevy Y-up space.
 /// Colors are stored separately as `vec4(r, g, b, 1.0)` in linear RGB.
+#[derive(Clone, Debug, ShaderType)]
+pub struct StarfieldMaterialUniform {
+    pub star_count: u32,
+    pub brightness: f32,
+    pub _padding: Vec2,
+}
+
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
 pub struct StarfieldMaterial {
     /// Storage buffer containing star data as `[f32; 4]` per star
@@ -24,13 +31,9 @@ pub struct StarfieldMaterial {
     #[storage(1, read_only)]
     pub colors: Handle<ShaderStorageBuffer>,
 
-    /// Storage buffer containing settings as `[f32; 4]` (brightness, padding...)
-    #[storage(2, read_only)]
-    pub settings: Handle<ShaderStorageBuffer>,
-
-    /// Number of stars in the buffer
-    #[uniform(3)]
-    pub star_count: u32,
+    /// Uniform parameters for fragment shading.
+    #[uniform(2)]
+    pub uniforms: StarfieldMaterialUniform,
 }
 
 impl Material for StarfieldMaterial {

@@ -22,12 +22,13 @@ struct VertexOutput {
 
 struct StarfieldMaterialUniform {
     star_count: u32,
+    brightness: f32,
+    _padding: vec2<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<storage, read> stars: array<vec4<f32>>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var<storage, read> colors: array<vec4<f32>>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<storage, read> settings: array<vec4<f32>>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(3) var<uniform> material: StarfieldMaterialUniform;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> material: StarfieldMaterialUniform;
 
 // Dot product threshold for star visibility (controls apparent star size)
 // 0.999995 ≈ 0.18 degrees, roughly 2-3 pixels radius
@@ -85,8 +86,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    // settings[0].x contains the brightness multiplier
-    let emission_strength = settings[0].x;
+    let emission_strength = material.brightness;
     let emissive = total_color * emission_strength;
     return vec4(emissive, 1.0);
 }

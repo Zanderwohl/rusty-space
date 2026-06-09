@@ -8,7 +8,6 @@ use crate::body::universe::Universe;
 use crate::gui::app::AppState;
 use crate::gui::menu::UiState;
 use crate::body::universe::save::TagState;
-use crate::gui::settings::Settings;
 use crate::sim::{SimTime, unload_simulation_objects, CalculateTrajectory, BodySelection};
 use crate::body::motive::calculate_body_positions::{self, PhysicsGraph, PositionCache, SimulationPerformanceMetrics};
 use crate::body::motive::kepler_motive;
@@ -139,8 +138,7 @@ impl Plugin for PlanetariumUI {
             ).in_set(PlanetariumUISet))
             // Starfield brightness updates (via buffer, not material mutation)
             .add_systems(Update, (
-                presentation::update_starfield_brightness
-                    .run_if(resource_changed::<Settings>),
+                presentation::update_starfield_brightness,
             ).in_set(PlanetariumUISet))
             // Asset loading
             .add_systems(Update, (load_assets).in_set(PlanetariumLoadingSet))

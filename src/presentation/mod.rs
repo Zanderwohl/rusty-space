@@ -75,5 +75,5 @@ pub use celestial_markers::{
     CelestialMarkerCache,
 };
 pub use star_cache::{build_star_lighting_cache, CachedStarData, StarLightingFrameCache};
-pub use starfield::{spawn_starfield, update_starfield_brightness, Starfield, StarfieldSettingsBuffer};
+pub use starfield::{spawn_starfield, update_starfield_brightness, Starfield};
 pub use starfield_material::{StarfieldMaterial, StarfieldMaterialPlugin};

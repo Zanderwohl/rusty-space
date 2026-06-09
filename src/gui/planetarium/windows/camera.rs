@@ -42,7 +42,7 @@ fn camera_settings_window(ctx: &mut Context, mut camera: Single<&mut Projection,
             }
 
             ui.heading("Stars");
-            ui.add(egui::Slider::new(&mut settings.display.star_brightness, 0.1..=10.0)
+            ui.add(egui::Slider::new(&mut settings.display.star_brightness, 0.1..=100.0)
                 .logarithmic(true)
                 .text("Brightness"));
         });
