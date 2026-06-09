@@ -173,11 +173,19 @@ fn cursor_grab(
         let should_grab = grab_toggle.toggled || mouse_buttons.pressed(MouseButton::Right);
 
         if should_grab {
-            cursor_options.grab_mode = CursorGrabMode::Confined;
-            cursor_options.visible = false;
+            if cursor_options.grab_mode != CursorGrabMode::Confined {
+                cursor_options.grab_mode = CursorGrabMode::Confined;
+            }
+            if cursor_options.visible {
+                cursor_options.visible = false;
+            }
         } else {
-            cursor_options.grab_mode = CursorGrabMode::None;
-            cursor_options.visible = true;
+            if cursor_options.grab_mode != CursorGrabMode::None {
+                cursor_options.grab_mode = CursorGrabMode::None;
+            }
+            if !cursor_options.visible {
+                cursor_options.visible = true;
+            }
         }
     } else {
         warn!("Primary window not found for `cursor_grab`!");

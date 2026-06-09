@@ -93,7 +93,7 @@ pub fn spawn_body_point_meshes(
 /// System to update body point visibility, scale, and brightness.
 pub fn update_body_points(
     cameras: Query<(&Camera, &GlobalTransform, &Projection), With<PlanetariumCamera>>,
-    bodies: Query<(Entity, &Transform, &BodyPointLink, Option<&BodyWireframeLink>, Option<&OccluderLink>, &crate::body::motive::info::BodyInfo), Without<BodyPointMesh>>,
+    bodies: Query<(Entity, &GlobalTransform, &BodyPointLink, Option<&BodyWireframeLink>, Option<&OccluderLink>, &crate::body::motive::info::BodyInfo), Without<BodyPointMesh>>,
     star_cache: Res<StarLightingFrameCache>,
     mut points: Query<(&BodyPointMesh, &mut Transform, &mut Visibility, &MeshMaterial3d<BodyPointMaterial>), Without<BodyPointLink>>,
     mut wireframes: Query<&mut Visibility, (With<super::BodyWireframeMesh>, Without<BodyPointMesh>, Without<OccluderMesh>)>,
@@ -127,14 +127,15 @@ pub fn update_body_points(
         };
 
         // Calculate distance and angular size
-        let body_center = body_transform.translation;
+        let body_center = body_transform.translation();
         let distance = (body_center - camera_pos).length();
 
         if distance <= 0.0 {
             continue;
         }
 
-        let radius = body_transform.scale.x;
+        let (body_scale, _, _) = body_transform.to_scale_rotation_translation();
+        let radius = body_scale.x;
         let angular_radius = (radius / distance).min(1.0);
         let screen_radius = angular_radius / (fov_y * 0.5) * viewport_size.y * 0.5;
 

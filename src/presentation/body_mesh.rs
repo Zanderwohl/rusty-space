@@ -563,6 +563,11 @@ pub fn spawn_terminator_meshes(
 /// Canonical direction for terminator mesh generation.
 /// The mesh is generated with this normal, then rotated via Transform to the actual star direction.
 const TERMINATOR_CANONICAL_DIR: Vec3 = Vec3::Y;
+const SUN_DIR_EPSILON: f32 = 1e-4;
+
+fn vec4_approx_eq(a: Vec4, b: Vec4, epsilon: f32) -> bool {
+    (a - b).abs().max_element() <= epsilon
+}
 
 /// System to update terminator meshes based on star positions.
 /// Mesh regeneration only happens when tube radius changes significantly.
@@ -767,12 +772,24 @@ pub fn update_wireframe_lighting(
             num_suns += 1;
         }
 
-        if let Some(mat) = materials.get_mut(material_handle.id()) {
-            mat.num_suns = num_suns;
-            mat.sun_dir_0 = sun_dirs[0];
-            mat.sun_dir_1 = sun_dirs[1];
-            mat.sun_dir_2 = sun_dirs[2];
-            mat.sun_dir_3 = sun_dirs[3];
+        let needs_update = if let Some(mat) = materials.get(material_handle.id()) {
+            mat.num_suns != num_suns
+                || !vec4_approx_eq(mat.sun_dir_0, sun_dirs[0], SUN_DIR_EPSILON)
+                || !vec4_approx_eq(mat.sun_dir_1, sun_dirs[1], SUN_DIR_EPSILON)
+                || !vec4_approx_eq(mat.sun_dir_2, sun_dirs[2], SUN_DIR_EPSILON)
+                || !vec4_approx_eq(mat.sun_dir_3, sun_dirs[3], SUN_DIR_EPSILON)
+        } else {
+            false
+        };
+
+        if needs_update {
+            if let Some(mat) = materials.get_mut(material_handle.id()) {
+                mat.num_suns = num_suns;
+                mat.sun_dir_0 = sun_dirs[0];
+                mat.sun_dir_1 = sun_dirs[1];
+                mat.sun_dir_2 = sun_dirs[2];
+                mat.sun_dir_3 = sun_dirs[3];
+            }
         }
     }
 }
@@ -813,12 +830,24 @@ pub fn update_occluder_lighting(
             num_suns += 1;
         }
 
-        if let Some(mat) = materials.get_mut(material_handle.id()) {
-            mat.num_suns = num_suns;
-            mat.sun_dir_0 = sun_dirs[0];
-            mat.sun_dir_1 = sun_dirs[1];
-            mat.sun_dir_2 = sun_dirs[2];
-            mat.sun_dir_3 = sun_dirs[3];
+        let needs_update = if let Some(mat) = materials.get(material_handle.id()) {
+            mat.num_suns != num_suns
+                || !vec4_approx_eq(mat.sun_dir_0, sun_dirs[0], SUN_DIR_EPSILON)
+                || !vec4_approx_eq(mat.sun_dir_1, sun_dirs[1], SUN_DIR_EPSILON)
+                || !vec4_approx_eq(mat.sun_dir_2, sun_dirs[2], SUN_DIR_EPSILON)
+                || !vec4_approx_eq(mat.sun_dir_3, sun_dirs[3], SUN_DIR_EPSILON)
+        } else {
+            false
+        };
+
+        if needs_update {
+            if let Some(mat) = materials.get_mut(material_handle.id()) {
+                mat.num_suns = num_suns;
+                mat.sun_dir_0 = sun_dirs[0];
+                mat.sun_dir_1 = sun_dirs[1];
+                mat.sun_dir_2 = sun_dirs[2];
+                mat.sun_dir_3 = sun_dirs[3];
+            }
         }
     }
 }

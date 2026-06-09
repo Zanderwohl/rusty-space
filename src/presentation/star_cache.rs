@@ -13,7 +13,7 @@ use crate::body::motive::info::BodyState;
 #[derive(Clone)]
 pub struct CachedStarData {
     pub entity: Entity,
-    /// Position in Bevy space (Transform.translation)
+    /// Position in Bevy world space.
     pub bevy_position: Vec3,
     /// Position in simulation space (from BodyState.current_position)
     pub sim_position: DVec3,
@@ -47,16 +47,16 @@ impl StarLightingFrameCache {
 /// Must run before all systems that consume star data.
 pub fn build_star_lighting_cache(
     mut cache: ResMut<StarLightingFrameCache>,
-    stars: Query<(Entity, &Transform, &Appearance, &BodyState)>,
+    stars: Query<(Entity, &GlobalTransform, &Appearance, &BodyState)>,
 ) {
     cache.clear();
     
-    for (entity, transform, appearance, body_state) in stars.iter() {
+    for (entity, global_transform, appearance, body_state) in stars.iter() {
         if let Appearance::Star(star_ball) = appearance {
             let intensity = star_ball.intensity();
             cache.stars.push(CachedStarData {
                 entity,
-                bevy_position: transform.translation,
+                bevy_position: global_transform.translation(),
                 sim_position: body_state.current_position,
                 intensity,
             });
