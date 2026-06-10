@@ -34,6 +34,34 @@ pub fn expansion_iterations(eccentricity: f64) -> usize {
     }
 }
 
+/// Time-invariant constants for a Keplerian orbit, precomputed once per motive
+/// segment so the per-step sampling hot loop avoids recomputing them.
+///
+/// Everything here depends only on the orbit's shape/rotation/epoch and the
+/// gravitational parameter (mu), all of which are constant within a single
+/// motive segment. It is rebuilt whenever the physics graph is rebuilt (i.e.
+/// when a motive transition occurs, e.g. an SOI/primary change, or on edit/load).
+#[derive(Clone)]
+pub struct KeplerCache {
+    /// Semi-major axis (m)
+    sma: f64,
+    /// Eccentricity
+    ecc: f64,
+    /// Mean anomaly at epoch (radians)
+    mean_anomaly_at_epoch_rad: f64,
+    /// Epoch time (seconds since J2000)
+    epoch_j2000: f64,
+    /// Mean motion n = sqrt(mu / a^3) (rad/s) — bakes in the gravitational parameter
+    mean_motion: f64,
+    /// Precomputed Fourier/Bessel coefficients for the true-anomaly expansion.
+    /// These depend only on eccentricity, so they are constant across all steps.
+    fourier_coeffs: Vec<f64>,
+    /// Cached perifocal->reference rotation matrix for non-precessing orbits.
+    /// `None` for precessing orbits, where the matrix varies with time and must
+    /// be recomputed each step.
+    rotation_matrix: Option<DMat3>,
+}
+
 impl KeplerMotive {
     pub fn semi_major_axis(&self) -> f64 {
         self.shape.semi_major_axis()
@@ -191,6 +219,65 @@ impl KeplerMotive {
         let rotated = self.perifocal_to_reference(perifocal_displacement, time);
 
         Some(rotated)
+    }
+
+    /// Build the time-invariant [`KeplerCache`] for this orbit.
+    ///
+    /// Call once per motive segment (at physics-graph rebuild time). The
+    /// resulting cache is then passed to [`KeplerMotive::displacement_cached`]
+    /// in the per-step hot loop.
+    pub fn build_cache(&self, gravitational_parameter: f64) -> KeplerCache {
+        let sma = self.shape.semi_major_axis();
+        let ecc = self.shape.eccentricity();
+        let fourier_coeffs = true_anomaly::precompute_coefficients(ecc, expansion_iterations(ecc));
+        let mean_anomaly_at_epoch_rad = self.epoch.mean_anomaly_at_epoch().to_radians();
+        let epoch_j2000 = self.epoch.epoch().to_j2000_seconds();
+        // n = sqrt(mu / a^3); constant for the segment, so the per-step mean
+        // anomaly is just a fused multiply-add instead of a sqrt + division.
+        let mean_motion = f64::sqrt(gravitational_parameter / (sma * sma * sma));
+        // Non-precessing orbits have a constant orientation, so the
+        // perifocal->reference matrix can be computed once. Precessing orbits
+        // change orientation over time, so leave it `None` (computed per step).
+        let rotation_matrix = if self.is_precessing() {
+            None
+        } else {
+            Some(self.perifocal_to_reference_matrix(Instant::J2000))
+        };
+
+        KeplerCache {
+            sma,
+            ecc,
+            mean_anomaly_at_epoch_rad,
+            epoch_j2000,
+            mean_motion,
+            fourier_coeffs,
+            rotation_matrix,
+        }
+    }
+
+    /// Compute displacement using a precomputed [`KeplerCache`].
+    ///
+    /// This is the fast path used by the per-step physics loop: it reuses the
+    /// precomputed Fourier/Bessel coefficients (avoiding all Bessel evaluations)
+    /// and, for non-precessing orbits, the cached rotation matrix (avoiding
+    /// rebuilding three rotation matrices per step).
+    #[inline]
+    pub fn displacement_cached(&self, cache: &KeplerCache, time: Instant) -> Option<DVec3> {
+        let mean_anomaly = cache.mean_anomaly_at_epoch_rad
+            + cache.mean_motion * (time.to_j2000_seconds() - cache.epoch_j2000);
+        let ta = true_anomaly::fourier_expansion_with_precompute(
+            mean_anomaly,
+            cache.ecc,
+            &cache.fourier_coeffs,
+        );
+        let rad = local::radius::from_elements2(cache.sma, cache.ecc, ta)?;
+        let (sin_ta, cos_ta) = ta.sin_cos();
+        let perifocal_displacement = DVec3::new(rad * cos_ta, rad * sin_ta, 0.0);
+        match &cache.rotation_matrix {
+            Some(matrix) => Some(*matrix * perifocal_displacement),
+            // Precessing orbit: orientation depends on time, recompute each step.
+            None => Some(self.perifocal_to_reference(perifocal_displacement, time)),
+        }
     }
 
     /// Computes displacement at a given true anomaly, using precession angles for `precession_time`.

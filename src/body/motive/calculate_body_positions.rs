@@ -22,7 +22,7 @@ use bevy::prelude::*;
 
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::{Motive, MotiveSelection};
-use crate::body::motive::kepler_motive::KeplerMotive;
+use crate::body::motive::kepler_motive::{KeplerCache, KeplerMotive};
 use crate::body::universe::Major;
 use crate::body::universe::save::UniversePhysics;
 use crate::sim::{PreviousTimesIter, SimTime};
@@ -74,6 +74,9 @@ pub enum CachedMotiveSelection {
         mu: f64,
         /// Cached KeplerMotive for direct displacement calculation (avoids motive_at() lookup)
         kepler: KeplerMotive,
+        /// Pre-computed time-invariant orbit constants (Fourier coefficients, rotation
+        /// matrix for non-precessing orbits, mean motion). Built once per graph rebuild.
+        cache: KeplerCache,
     },
     Newtonian {
         position: DVec3,
@@ -522,11 +525,18 @@ fn rebuild_physics_graph(
                 let mu = kepler.gravitational_parameter
                     .unwrap_or(gravitational_constant * parent_mass);
 
+                // Precompute time-invariant orbit constants once here so the
+                // per-step hot loop avoids Bessel evaluations and rotation-matrix
+                // rebuilds. Recomputed on every graph rebuild, so a changed
+                // primary (and thus changed mu) is reflected automatically.
+                let cache = kepler.build_cache(mu);
+
                 graph.cached_motives.insert(entity, CachedMotive {
                     parent_entity,
-                    selection: CachedMotiveSelection::Keplerian { 
+                    selection: CachedMotiveSelection::Keplerian {
                         mu,
                         kepler: kepler.clone(),
+                        cache,
                     },
                 });
             }
@@ -593,8 +603,8 @@ fn calculate_hierarchical_positions(
             CachedMotiveSelection::Fixed { position } => {
                 *position
             }
-            CachedMotiveSelection::Keplerian { mu, kepler } => {
-                kepler.displacement(time, *mu).unwrap_or(DVec3::ZERO)
+            CachedMotiveSelection::Keplerian { kepler, cache, .. } => {
+                kepler.displacement_cached(cache, time).unwrap_or(DVec3::ZERO)
             }
             CachedMotiveSelection::Newtonian { .. } => {
                 continue;
