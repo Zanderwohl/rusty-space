@@ -95,18 +95,18 @@ pub struct DisplaySettings {
 }
 
 fn default_star_brightness() -> f32 {
-    15.0
+    110.0
 }
 
 /// Old fixed star size: STAR_THRESHOLD 0.999995 ≈ acos ≈ 0.00316 rad ≈ 10.9 arcmin.
 /// Defaulting both ends to this reproduces the previous uniform look (no size
-/// variation); widen the max to make brighter stars larger.
+/// variation); widen the wdwmax to make brighter stars larger.
 fn default_star_radius_min() -> f32 {
-    0.5
+    1.2
 }
 
 fn default_star_radius_max() -> f32 {
-    12.0
+    7.5
 }
 
 fn default_body_brightness_floor() -> f32 {

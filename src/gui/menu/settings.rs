@@ -107,21 +107,21 @@ fn display_tab(settings: &mut Settings, camera: Option<CameraControls>, ui: &mut
 
     ui.add_space(8.0);
     ui.label(RichText::new("Distant Objects").strong());
-    ui.add(egui::Slider::new(&mut settings.display.star_brightness, 0.1..=100.0)
+    ui.add(egui::Slider::new(&mut settings.display.star_brightness, 0.1..=500.0)
         .logarithmic(true)
         .text("Star Brightness"));
 
     // Star radius range (arcminutes). Keep min <= max while dragging either slider:
     // clamp the one that just changed against the other.
     let radius_max = settings.display.star_radius_max;
-    let min_resp = ui.add(egui::Slider::new(&mut settings.display.star_radius_min, 0.5..=25.0)
+    let min_resp = ui.add(egui::Slider::new(&mut settings.display.star_radius_min, 0.1..=10.0)
         .suffix("′")
         .text("Star Radius Min"));
     if min_resp.changed() {
         settings.display.star_radius_min = settings.display.star_radius_min.min(radius_max);
     }
     let radius_min = settings.display.star_radius_min;
-    let max_resp = ui.add(egui::Slider::new(&mut settings.display.star_radius_max, 0.5..=25.0)
+    let max_resp = ui.add(egui::Slider::new(&mut settings.display.star_radius_max, 0.5..=10.0)
         .suffix("′")
         .text("Star Radius Max"));
     if max_resp.changed() {
