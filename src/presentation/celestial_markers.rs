@@ -75,13 +75,28 @@ pub struct CelestialMarkerCache {
     last_camera_pos: Option<DVec3>,
 }
 
-pub fn spawn_celestial_markers(
+/// Spawns or despawns celestial markers to match the display settings. Currently
+/// just the Point of Aries: toggling `show_point_of_aries` spawns the marker when it
+/// becomes enabled and despawns it when disabled.
+pub fn sync_celestial_markers(
     mut commands: Commands,
-    existing: Query<&CelestialMarker>,
+    existing: Query<Entity, With<CelestialMarker>>,
+    settings: Res<crate::gui::settings::Settings>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TrajectoryMaterial>>,
 ) {
-    if !existing.is_empty() {
+    let should_show = settings.display.show_point_of_aries;
+    let exists = !existing.is_empty();
+
+    if !should_show {
+        // Marker disabled: despawn any existing markers.
+        for entity in existing.iter() {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+
+    if exists {
         return;
     }
 

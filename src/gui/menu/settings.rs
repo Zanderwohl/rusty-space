@@ -111,10 +111,27 @@ fn display_tab(settings: &mut Settings, camera: Option<CameraControls>, ui: &mut
     ui.add(egui::Slider::new(&mut settings.display.body_brightness_floor, 0.0..=0.02)
         .text("Body Brightness Floor"))
         .on_hover_text("Minimum brightness a sun-lit distant body can fade to.\n0 lets bodies in full shadow disappear.");
-    ui.add(egui::Slider::new(&mut settings.display.body_radius_min, 0.0..=5.0)
+    // Body dot radius range (screen px). Keep min <= max while dragging either slider.
+    let body_radius_max = settings.display.body_radius_max;
+    let body_min_resp = ui.add(egui::Slider::new(&mut settings.display.body_radius_min, 0.0..=1.0)
         .suffix("px")
         .text("Body Radius Min"))
-        .on_hover_text("Minimum on-screen size for distant-body dots.\nNearer bodies grow to their natural size.");
+        .on_hover_text("On-screen dot size for a 1 m object.\nLarger bodies scale up by area; smaller ones shrink below this and can vanish.");
+    if body_min_resp.changed() {
+        settings.display.body_radius_min = settings.display.body_radius_min.min(body_radius_max);
+    }
+    let body_radius_min = settings.display.body_radius_min;
+    let body_max_resp = ui.add(egui::Slider::new(&mut settings.display.body_radius_max, 0.0..=20.0)
+        .suffix("px")
+        .text("Body Radius Max"))
+        .on_hover_text("On-screen dot size for a Jupiter-sized object.\nSmaller bodies scale down by area toward the min.");
+    if body_max_resp.changed() {
+        settings.display.body_radius_max = settings.display.body_radius_max.max(body_radius_min);
+    }
+
+    ui.add_space(8.0);
+    ui.label(RichText::new("Celestial Markers").strong());
+    ui.checkbox(&mut settings.display.show_point_of_aries, "Point of Aries");
 }
 
 fn sound_tab(settings: &mut Settings, ui: &mut Ui) {

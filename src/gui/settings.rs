@@ -77,6 +77,13 @@ pub struct DisplaySettings {
     /// visible while near ones grow to their real size.
     #[serde(default = "default_body_radius_min")]
     pub body_radius_min: f32,
+    /// Maximum on-screen radius (pixels) for distant-body dots, capping how large a
+    /// near body's dot can grow before it hands off to the wireframe.
+    #[serde(default = "default_body_radius_max")]
+    pub body_radius_max: f32,
+    /// Show the Point of Aries (♈) celestial reference marker.
+    #[serde(default = "default_true")]
+    pub show_point_of_aries: bool,
 }
 
 fn default_star_brightness() -> f32 {
@@ -95,11 +102,17 @@ fn default_star_radius_max() -> f32 {
 }
 
 fn default_body_brightness_floor() -> f32 {
-    0.003
+    0.000
 }
 
 fn default_body_radius_min() -> f32 {
-    1.1
+    // Dot radius (px) for a 1 m reference object; slider range is 0..1.
+    0.87
+}
+
+fn default_body_radius_max() -> f32 {
+    // High enough to not cap within the dot's visible range by default.
+    4.5
 }
 
 fn default_trajectory_brightness_front() -> f32 {
@@ -124,6 +137,8 @@ impl Default for DisplaySettings {
             star_radius_max: default_star_radius_max(),
             body_brightness_floor: default_body_brightness_floor(),
             body_radius_min: default_body_radius_min(),
+            body_radius_max: default_body_radius_max(),
+            show_point_of_aries: default_true(),
         }
     }
 }

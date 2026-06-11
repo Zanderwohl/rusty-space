@@ -23,6 +23,19 @@ const POINT_FADE_THRESHOLD_PX: f32 = 20.0;
 
 /// Emission strength for the point material
 const POINT_EMISSION_STRENGTH: f32 = 8.0;
+/// Minimum on-screen radius for very small point bodies. Subpixel dots are
+/// expanded to this footprint and brightness is reduced by area ratio.
+const POINT_AA_MIN_RADIUS_PX: f32 = 3.0;
+
+/// Physical radius (m) of the "small" reference object (1 m sphere), mapped to
+/// the configured minimum dot radius.
+const REFERENCE_MIN_RADIUS_M: f32 = 1.0;
+/// Physical radius (m) of the "large" reference object (Jupiter, mean radius),
+/// mapped to the configured maximum dot radius.
+const REFERENCE_MAX_RADIUS_M: f32 = 6.9911e7;
+/// Cross-sectional area proxies (∝ r²) for the two reference objects.
+const REFERENCE_MIN_AREA: f32 = REFERENCE_MIN_RADIUS_M * REFERENCE_MIN_RADIUS_M;
+const REFERENCE_MAX_AREA: f32 = REFERENCE_MAX_RADIUS_M * REFERENCE_MAX_RADIUS_M;
 
 /// Reference distance for brightness falloff (in scaled Bevy units).
 /// At this distance from a star, brightness is at 50% due to distance alone.
@@ -91,7 +104,7 @@ pub fn update_body_points(
     // Read the body's `Transform` (set this frame by `position_bodies`) rather than
     // its `GlobalTransform`, which isn't propagated until PostUpdate and would lag the
     // camera/body meshes by one frame. Bodies are root entities, so Transform == world.
-    bodies: Query<(Entity, &Transform, &BodyPointLink, Option<&BodyWireframeLink>, Option<&OccluderLink>, &crate::body::motive::info::BodyInfo), Without<BodyPointMesh>>,
+    bodies: Query<(Entity, &Transform, &Appearance, &BodyPointLink, Option<&BodyWireframeLink>, Option<&OccluderLink>, &crate::body::motive::info::BodyInfo), Without<BodyPointMesh>>,
     star_cache: Res<StarLightingFrameCache>,
     mut points: Query<(&BodyPointMesh, &mut Transform, &mut Visibility, &MeshMaterial3d<BodyPointMaterial>), Without<BodyPointLink>>,
     mut wireframes: Query<&mut Visibility, (With<super::BodyWireframeMesh>, Without<BodyPointMesh>, Without<OccluderMesh>)>,
@@ -101,6 +114,7 @@ pub fn update_body_points(
 ) {
     let brightness_floor = settings.display.body_brightness_floor;
     let min_radius_px = settings.display.body_radius_min;
+    let max_radius_px = settings.display.body_radius_max;
     // Get camera info
     let Ok((camera, camera_global, projection)) = cameras.single() else {
         return;
@@ -120,7 +134,7 @@ pub fn update_body_points(
 
     let camera_pos = camera_global.translation();
 
-    for (_body_entity, body_transform, point_link, wireframe_link, occluder_link, _body_info) in bodies.iter() {
+    for (_body_entity, body_transform, appearance, point_link, wireframe_link, occluder_link, _body_info) in bodies.iter() {
         let Ok((_point_mesh, mut point_transform, mut point_visibility, point_material_handle)) =
             points.get_mut(point_link.0)
         else {
@@ -157,14 +171,33 @@ pub fn update_body_points(
             // Update point position (copy from body)
             point_transform.translation = body_center;
 
-            // Draw the dot at the larger of its natural angular size and the configured
-            // minimum, so distant bodies stay visible while near ones grow to real size.
-            let point_px = screen_radius.max(min_radius_px);
+            // Size the dot by the body's physical radius, mapped between two reference
+            // objects: a 1 m sphere -> body_radius_min, Jupiter -> body_radius_max. The
+            // dot's AREA interpolates with the object's cross-sectional area (proportional
+            // to r^2), so the drawn disc scales like the object's apparent size would.
+            // Super-Jupiter bodies cap at max; sub-1m bodies are allowed to shrink below
+            // min (no lower floor), so tiny objects can disappear.
+            let physical_radius_m = appearance.radius() as f32;
+            let area = physical_radius_m * physical_radius_m;
+            let area_t = ((area - REFERENCE_MIN_AREA) / (REFERENCE_MAX_AREA - REFERENCE_MIN_AREA))
+                .min(1.0);
+            let dot_area = min_radius_px * min_radius_px
+                + (max_radius_px * max_radius_px - min_radius_px * min_radius_px) * area_t;
+            let point_px = dot_area.max(0.0).sqrt();
+
+            // Expand very tiny dots to a minimum footprint so they do not alias/flicker.
+            // Preserve total emitted energy by compensating brightness with area ratio.
+            let render_point_px = point_px.max(POINT_AA_MIN_RADIUS_PX);
+            let aa_energy_compensation = if render_point_px > 0.0 {
+                (point_px * point_px) / (render_point_px * render_point_px)
+            } else {
+                0.0
+            };
 
             // Calculate point scale for the target screen size
             // target_px / viewport_height * fov_y = desired_radius / distance
             // desired_radius = (target_px / viewport_height) * fov_y * distance * 0.5
-            let desired_radius = (point_px / viewport_size.y) * (fov_y * 0.5) * distance;
+            let desired_radius = (render_point_px / viewport_size.y) * (fov_y * 0.5) * distance;
             point_transform.scale = Vec3::splat(desired_radius);
 
             // Calculate phase brightness from all stars with distance falloff
@@ -199,7 +232,7 @@ pub fn update_body_points(
 
             // Update material brightness (phase brightness * fade factor)
             // Only update if value changed to avoid spurious asset change detection
-            let new_brightness = total_brightness * fade_factor;
+            let new_brightness = total_brightness * fade_factor * aa_energy_compensation;
             if let Some(material) = materials.get(point_material_handle.id()) {
                 if (material.brightness - new_brightness).abs() > 0.001 {
                     if let Some(material) = materials.get_mut(point_material_handle.id()) {

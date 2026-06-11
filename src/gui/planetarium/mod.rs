@@ -134,7 +134,7 @@ impl Plugin for PlanetariumUI {
             ).in_set(PlanetariumUISet))
             // Celestial reference markers (Point of Aries, etc.)
             .add_systems(Update, (
-                presentation::spawn_celestial_markers,
+                presentation::sync_celestial_markers,
                 presentation::update_celestial_markers
                     .after(presentation::position_bodies),
             ).in_set(PlanetariumUISet))

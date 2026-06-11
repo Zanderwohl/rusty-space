@@ -69,7 +69,7 @@ pub use body_point::{
 };
 pub use body_point_material::{BodyPointMaterial, BodyPointMaterialPlugin};
 pub use celestial_markers::{
-    spawn_celestial_markers,
+    sync_celestial_markers,
     update_celestial_markers,
     cleanup_celestial_markers,
     CelestialMarker,
