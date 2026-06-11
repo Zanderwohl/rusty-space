@@ -1,23 +1,30 @@
 // Starfield background shader.
-// Renders stars as dots on a sky sphere based on pre-computed direction vectors.
-// Stars are stored as vec4(dir.x, dir.y, dir.z, mag) in Bevy Y-up space.
+//
+// Each star is drawn as a single camera-facing billboard quad (2 triangles)
+// instead of scanning every catalog star for every fragment. The quad center
+// sits on the unit sky sphere along the star's precomputed direction (the
+// camera is fixed at the world origin in this app's camera-relative scheme),
+// and the corners are expanded in view space by the star's angular radius.
+//
+// Per-vertex data baked on the CPU:
+//   POSITION : unit direction to the star (Bevy Y-up)
+//   COLOR    : vec4(linear_rgb, baked_brightness)   -- brightness folded into .a
+//   CORNER   : quad corner in [-1, 1]^2 (also the falloff coordinate)
+//   SIZE_T   : 0..1 size factor from magnitude (bright stars -> 1 -> max radius)
 
-#import bevy_pbr::{
-    mesh_functions,
-    mesh_view_bindings::view,
-    view_transformations::position_world_to_clip,
-}
+#import bevy_pbr::mesh_view_bindings::view
 
 struct Vertex {
-    @builtin(instance_index) instance_index: u32,
     @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
+    @location(1) color: vec4<f32>,
+    @location(2) corner: vec2<f32>,
+    @location(3) size_t: f32,
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @location(0) world_position: vec3<f32>,
-    @location(1) local_position: vec3<f32>,
+    @location(0) corner: vec2<f32>,
+    @location(1) color: vec4<f32>,
 }
 
 struct StarfieldMaterialUniform {
@@ -27,77 +34,48 @@ struct StarfieldMaterialUniform {
     star_radius_max: f32,
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<storage, read> stars: array<vec4<f32>>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var<storage, read> colors: array<vec4<f32>>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> material: StarfieldMaterialUniform;
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: StarfieldMaterialUniform;
 
-// Arcminutes -> radians (pi / (180 * 60)). The star radius uniforms are in arcmin;
-// the visibility test is a dot product, so radius is converted to a cosine threshold.
+// Arcminutes -> radians (pi / (180 * 60)).
 const ARCMIN_TO_RAD: f32 = 0.0002908882;
-
-// Magnitude range mapped onto the [star_radius_min, star_radius_max] size range.
-// Brighter (lower magnitude) stars are drawn larger.
-const MAG_BRIGHT: f32 = -1.5; // ~Sirius -> max radius
-const MAG_FAINT: f32 = 6.0;   // naked-eye limit -> min radius
-
-// Brightness scaling: maps magnitude to HDR output
-// Sirius (mag -1.5) -> ~2.0, naked eye limit (mag 6) -> ~0.05
-const BRIGHTNESS_SCALE: f32 = 0.15;
-const MAG_ZERO_BRIGHTNESS: f32 = 1.0;
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
 
-    var world_from_local = mesh_functions::get_world_from_local(vertex.instance_index);
+    // Star direction in view space. Using w=0 makes this translation-invariant,
+    // so the starfield depends only on camera orientation.
+    let dir_view = normalize((view.view_from_world * vec4<f32>(normalize(vertex.position), 0.0)).xyz);
 
-    let world_pos = mesh_functions::mesh_position_local_to_world(world_from_local, vec4(vertex.position, 1.0));
-    out.world_position = world_pos.xyz;
-    out.clip_position = position_world_to_clip(world_pos.xyz);
+    // Per-star angular radius (brighter stars are drawn larger).
+    let radius_rad = mix(material.star_radius_min, material.star_radius_max, vertex.size_t) * ARCMIN_TO_RAD;
 
-    // Clamp depth to far plane so starfield renders behind everything
-    out.clip_position.z = out.clip_position.w;
+    // Billboard: center sits one unit down the view direction; corners are
+    // offset in the view XY plane. At unit distance the lateral offset equals
+    // the subtended angle, so the quad spans the star's angular diameter.
+    let pos_view = dir_view + vec3<f32>(vertex.corner, 0.0) * radius_rad;
 
-    // Pass local position for direction calculation (sphere is centered at origin)
-    out.local_position = vertex.position;
+    var clip = view.clip_from_view * vec4<f32>(pos_view, 1.0);
 
+    // Clamp to background depth so the starfield renders behind the scene.
+    clip.z = clip.w;
+
+    out.clip_position = clip;
+    out.corner = vertex.corner;
+    out.color = vertex.color;
     return out;
 }
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    // View direction from camera toward this fragment on the sphere
-    let view_dir = normalize(in.local_position);
-
-    var total_color: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
-
-    // Loop through all stars and accumulate colored brightness
-    for (var i: u32 = 0u; i < material.star_count; i = i + 1u) {
-        let star = stars[i];
-        let star_dir = star.xyz;
-        let mag = star.w;
-
-        // Angular proximity: dot product of 1.0 means perfect alignment
-        let alignment = dot(view_dir, star_dir);
-
-        // Per-star angular radius: brighter stars (lower mag) are drawn larger.
-        let size_t = clamp((MAG_FAINT - mag) / (MAG_FAINT - MAG_BRIGHT), 0.0, 1.0);
-        let radius_arcmin = mix(material.star_radius_min, material.star_radius_max, size_t);
-        let threshold = cos(radius_arcmin * ARCMIN_TO_RAD);
-
-        if alignment > threshold {
-            // Convert magnitude to brightness (lower mag = brighter)
-            let brightness = MAG_ZERO_BRIGHTNESS * pow(2.512, -mag) * BRIGHTNESS_SCALE;
-
-            // Smooth falloff from center to reduce flickering/aliasing
-            let falloff = (alignment - threshold) / (1.0 - threshold);
-
-            let star_color = colors[i].rgb;
-            total_color += star_color * brightness * falloff;
-        }
+    // Radial falloff turns the square quad into a soft disc.
+    let r = length(in.corner);
+    if (r > 1.0) {
+        discard;
     }
+    let falloff = 1.0 - r;
 
-    let emission_strength = material.brightness;
-    let emissive = total_color * emission_strength;
-    return vec4(emissive, 1.0);
+    let brightness = in.color.a;
+    let emissive = in.color.rgb * brightness * falloff * material.brightness;
+    return vec4<f32>(emissive, 1.0);
 }
