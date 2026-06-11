@@ -209,11 +209,13 @@ pub fn update_body_points(
             let mut total_brightness = 0.0f32;
 
             if max_intensity > 0.0 {
+                // Body->camera direction is invariant for this body; compute once.
+                let to_camera = (-body_center).normalize();
                 for star in &star_cache.stars {
-                    // Direction from body to camera (camera is at origin in world space)
-                    let to_camera = (-body_center).normalize();
-                    // Direction from body to star
-                    let to_star = (star.bevy_position - body_center).normalize();
+                    // Reuse the body->star delta for both direction and distance.
+                    let body_to_star = star.bevy_position - body_center;
+                    let body_to_star_dist = body_to_star.length();
+                    let to_star = body_to_star / body_to_star_dist;
 
                     // Phase angle brightness: (1 + cos(phase)) / 2
                     let cos_phase = to_camera.dot(to_star);
@@ -221,7 +223,6 @@ pub fn update_body_points(
 
                     // Distance falloff: soft inverse-square
                     // At reference distance, factor = 0.5; approaches 0 at infinity
-                    let body_to_star_dist = (star.bevy_position - body_center).length();
                     let dist_sq = body_to_star_dist * body_to_star_dist;
                     let ref_sq = DISTANCE_FALLOFF_REFERENCE * DISTANCE_FALLOFF_REFERENCE;
                     let distance_factor = ref_sq / (dist_sq + ref_sq);

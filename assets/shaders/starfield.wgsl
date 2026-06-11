@@ -44,8 +44,10 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
 
     // Star direction in view space. Using w=0 makes this translation-invariant,
-    // so the starfield depends only on camera orientation.
-    let dir_view = normalize((view.view_from_world * vec4<f32>(normalize(vertex.position), 0.0)).xyz);
+    // so the starfield depends only on camera orientation. `vertex.position` is
+    // already a unit direction (baked from the catalog), so no input normalize is
+    // needed; one output normalize guards against any rounding drift.
+    let dir_view = normalize((view.view_from_world * vec4<f32>(vertex.position, 0.0)).xyz);
 
     // Per-star angular radius (brighter stars are drawn larger).
     let radius_rad = mix(material.star_radius_min, material.star_radius_max, vertex.size_t) * ARCMIN_TO_RAD;
