@@ -269,6 +269,17 @@ pub static MIGRATIONS: &[Migration] = &[
             DROP TABLE IF EXISTS body_rotations;
         "#,
     },
+    // Version 4 -> 5: Persist show/hide state for focused body toggle
+    Migration {
+        description: "Add selected-body visibility columns to view_settings",
+        up: r#"
+            ALTER TABLE view_settings ADD COLUMN show_selected_labels INTEGER NOT NULL DEFAULT 1;
+            ALTER TABLE view_settings ADD COLUMN show_selected_trajectories INTEGER NOT NULL DEFAULT 1;
+        "#,
+        down: r#"
+            -- SQLite cannot drop columns directly; keep columns for rollback compatibility.
+        "#,
+    },
 ];
 
 /// Get the current program version (number of migrations available)

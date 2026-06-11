@@ -205,6 +205,7 @@ fn default_step() -> f64 { 0.1 }
 fn default_gui_speed() -> f64 { 1.0 }
 fn default_max_frame_time() -> f64 { 0.016 }
 fn default_show_axes() -> bool { true }
+fn default_true() -> bool { true }
 
 #[derive(Resource, Serialize, Deserialize, Clone)]
 pub struct UniversePhysics {
@@ -229,6 +230,10 @@ pub struct ViewSettings {
     pub logarithmic_body_base: f64,
     pub show_labels: bool,
     pub show_trajectories: bool,
+    #[serde(default = "default_true")]
+    pub show_selected_labels: bool,
+    #[serde(default = "default_true")]
+    pub show_selected_trajectories: bool,
     #[serde(default = "default_show_axes")]
     pub show_axes: bool,
     pub tags: HashMap<String, TagState>,
@@ -246,6 +251,8 @@ impl Default for ViewSettings {
             logarithmic_distance_base: 10.0,
             show_labels: false,
             show_trajectories: false,
+            show_selected_labels: true,
+            show_selected_trajectories: true,
             show_axes: true,
             tags: HashMap::new(),
             trajectory_resolution: 120,

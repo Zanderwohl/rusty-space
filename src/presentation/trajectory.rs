@@ -413,12 +413,13 @@ pub fn build_trajectory_meshes(
         };
         
         // Check visibility conditions
+        let selected_match = focused_body_state.is_focused(&info.id);
         let should_show = cache.valid
             && !cache.local_points.is_empty()
             && (
                 view_settings.show_trajectories
                     || view_settings.body_in_any_trajectory_tag(&info.id)
-                    || focused_body_state.is_focused(&info.id)
+                    || (selected_match && view_settings.show_selected_trajectories)
                     || hover_state.is_body_hovered(&info.id)
             );
         
@@ -684,6 +685,11 @@ pub fn update_focused_trajectory_markers(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TrajectoryMaterial>>,
 ) {
+    if !view_settings.show_selected_trajectories {
+        despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
+        return;
+    }
+
     let Some(focused_id) = focused_body_state.current_body_id.as_deref() else {
         despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
         return;
@@ -814,6 +820,7 @@ pub fn update_mouse_hit_marker(
     mut commands: Commands,
     hover_state: Res<HoverState>,
     focused_body_state: Res<FocusedBodyState>,
+    view_settings: Res<ViewSettings>,
     sim_time: Res<SimTime>,
     physics: Res<UniversePhysics>,
     _fcam: Single<&Freecam, With<PlanetariumCamera>>,
@@ -824,6 +831,11 @@ pub fn update_mouse_hit_marker(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TrajectoryMaterial>>,
 ) {
+    if !view_settings.show_selected_trajectories {
+        despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
+        return;
+    }
+
     let Some(hit_data) = hover_state.hovered_trajectory_hit.as_ref() else {
         despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
         return;

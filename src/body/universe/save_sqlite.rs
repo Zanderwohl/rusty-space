@@ -193,7 +193,7 @@ fn load_view_settings(conn: &Connection) -> Result<ViewSettings, SqliteSaveError
     let row = conn.query_row(
         "SELECT distance_scale, logarithmic_distance_scale, logarithmic_distance_base,
                 body_scale, logarithmic_body_scale, logarithmic_body_base,
-                show_labels, show_trajectories, trajectory_resolution
+                show_labels, show_trajectories, show_selected_labels, show_selected_trajectories, trajectory_resolution
          FROM view_settings WHERE id = 1",
         [],
         |row| {
@@ -206,7 +206,9 @@ fn load_view_settings(conn: &Connection) -> Result<ViewSettings, SqliteSaveError
                 row.get::<_, f64>(5)?,
                 row.get::<_, i32>(6)? != 0,
                 row.get::<_, i32>(7)? != 0,
-                row.get::<_, usize>(8)?,
+                row.get::<_, i32>(8)? != 0,
+                row.get::<_, i32>(9)? != 0,
+                row.get::<_, usize>(10)?,
             ))
         },
     )?;
@@ -223,9 +225,11 @@ fn load_view_settings(conn: &Connection) -> Result<ViewSettings, SqliteSaveError
         logarithmic_body_base: row.5,
         show_labels: row.6,
         show_trajectories: row.7,
+        show_selected_labels: row.8,
+        show_selected_trajectories: row.9,
         show_axes: true, // default for legacy files without this column
         tags,
-        trajectory_resolution: row.8,
+        trajectory_resolution: row.10,
     })
 }
 
@@ -240,7 +244,9 @@ fn save_view_settings(conn: &Connection, view: &ViewSettings) -> Result<(), Sqli
             logarithmic_body_base = ?6,
             show_labels = ?7,
             show_trajectories = ?8,
-            trajectory_resolution = ?9
+            show_selected_labels = ?9,
+            show_selected_trajectories = ?10,
+            trajectory_resolution = ?11
          WHERE id = 1",
         params![
             view.distance_scale,
@@ -251,6 +257,8 @@ fn save_view_settings(conn: &Connection, view: &ViewSettings) -> Result<(), Sqli
             view.logarithmic_body_base,
             view.show_labels as i32,
             view.show_trajectories as i32,
+            view.show_selected_labels as i32,
+            view.show_selected_trajectories as i32,
             view.trajectory_resolution as i32,
         ],
     )?;

@@ -37,9 +37,10 @@ pub fn label_bodies(
         };
 
         for (_, transform, body_info) in bodies.iter() {
+            let selected_match = focused_body_state.is_focused(&body_info.id);
             let should_show = view_settings.show_labels
                 || view_settings.body_in_any_visible_tag(&body_info.id)
-                || focused_body_state.is_focused(&body_info.id)
+                || (selected_match && view_settings.show_selected_labels)
                 || hover_state.is_body_hovered(&body_info.id);
             if !should_show {
                 continue;

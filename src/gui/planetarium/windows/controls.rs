@@ -128,6 +128,12 @@ pub fn planetarium_controls(
     ui.label("Show/Hide");
 
     ui.horizontal(|ui| {
+        ui.label("Selected");
+        ui.checkbox(&mut view_settings.show_selected_labels, "");
+        ui.checkbox(&mut view_settings.show_selected_trajectories, "");
+    });
+
+    ui.horizontal(|ui| {
         ui.label("All");
         ui.checkbox(&mut view_settings.show_labels, "");
         ui.checkbox(&mut view_settings.show_trajectories, "");

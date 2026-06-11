@@ -40,10 +40,11 @@ pub fn show_hide_panel_widget(
     let button_hover = to_egui_color(vfd::BUTTON_HOVER);
 
     let ordered_tags = build_ordered_tags(&view_settings);
-    let button_count = 1 + ordered_tags.len();
+    let button_count = 2 + ordered_tags.len();
     let panel_height = button_count as f32 * (BUTTON_SIZE + BUTTON_SPACING) - BUTTON_SPACING;
 
     let mut hovered_label: Option<(egui::Pos2, String)> = None;
+    let mut selected_clicked = false;
     let mut all_clicked = false;
     let mut tag_clicks: Vec<String> = Vec::new();
 
@@ -53,6 +54,29 @@ pub fn show_hide_panel_widget(
             ui.set_min_height(panel_height);
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = BUTTON_SPACING;
+
+                let selected_response = draw_show_hide_button(
+                    ui,
+                    view_settings.show_selected_labels,
+                    view_settings.show_selected_trajectories,
+                    text_color,
+                    text_dim,
+                    button_bg,
+                    button_hover,
+                    border,
+                );
+
+                if selected_response.clicked() {
+                    selected_clicked = true;
+                }
+
+                if selected_response.hovered() {
+                    let pos = egui::pos2(
+                        selected_response.rect.right() + HOVER_LABEL_GAP,
+                        selected_response.rect.center().y,
+                    );
+                    hovered_label = Some((pos, "Selected".to_string()));
+                }
 
                 let all_response = draw_show_hide_button(
                     ui,
@@ -105,6 +129,15 @@ pub fn show_hide_panel_widget(
                 }
             });
         });
+
+    if selected_clicked {
+        let (new_labels, new_traj) = cycle_state(
+            view_settings.show_selected_labels,
+            view_settings.show_selected_trajectories,
+        );
+        view_settings.show_selected_labels = new_labels;
+        view_settings.show_selected_trajectories = new_traj;
+    }
 
     if all_clicked {
         let (new_labels, new_traj) = cycle_state(
