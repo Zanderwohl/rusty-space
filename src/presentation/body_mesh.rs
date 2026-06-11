@@ -434,21 +434,20 @@ pub fn spawn_body_occluders(
     bodies: Query<(Entity, &Appearance), (With<BodyInfo>, Without<OccluderLink>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<OccluderMaterial>>,
-    mut shared_material: Local<Option<Handle<OccluderMaterial>>>,
 ) {
-    let material_handle = shared_material
-        .get_or_insert_with(|| materials.add(OccluderMaterial::default()))
-        .clone();
-
     for (body_entity, appearance) in bodies.iter() {
         if let Appearance::DebugBall(_) = appearance {
             let mesh = Sphere::new(0.97f32).mesh().ico(5).unwrap();
             let mesh_handle = meshes.add(mesh);
+            let material_handle = materials.add(OccluderMaterial {
+                alpha_mode: AlphaMode::Blend,
+                ..Default::default()
+            });
 
             let occluder_entity = commands
                 .spawn((
                     Mesh3d(mesh_handle),
-                    MeshMaterial3d(material_handle.clone()),
+                    MeshMaterial3d(material_handle),
                     Transform::default(),
                     Visibility::Inherited,
                     OccluderMesh { body_entity },

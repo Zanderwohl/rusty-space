@@ -62,5 +62,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         lam += max(0.0, dot(n, normalize(material.sun_pos_3.xyz - p)));
     }
 
-    return vec4(material.base_color.rgb * lam, 1.0);
+    return vec4(material.base_color.rgb * lam, material.base_color.a);
 }

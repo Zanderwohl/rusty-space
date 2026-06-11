@@ -86,6 +86,26 @@ fn display_tab(settings: &mut Settings, camera: Option<CameraControls>, ui: &mut
     }
 
     ui.add_space(8.0);
+    ui.label(RichText::new("Model Fade").strong());
+    // Keep start >= end while dragging either slider.
+    let fade_end_px = settings.display.model_fade_end_px;
+    let fade_start_resp = ui.add(egui::Slider::new(&mut settings.display.model_fade_start_px, 0.0..=5.0)
+        .suffix("px")
+        .text("Fade Start"))
+        .on_hover_text("At or above this screen radius, the distant-body dot is hidden.");
+    if fade_start_resp.changed() {
+        settings.display.model_fade_start_px = settings.display.model_fade_start_px.max(fade_end_px);
+    }
+    let fade_start_px = settings.display.model_fade_start_px;
+    let fade_end_resp = ui.add(egui::Slider::new(&mut settings.display.model_fade_end_px, 0.0..=5.0)
+        .suffix("px")
+        .text("Fade End"))
+        .on_hover_text("At or below this screen radius, the distant-body dot is fully visible.");
+    if fade_end_resp.changed() {
+        settings.display.model_fade_end_px = settings.display.model_fade_end_px.min(fade_start_px);
+    }
+
+    ui.add_space(8.0);
     ui.label(RichText::new("Distant Objects").strong());
     ui.add(egui::Slider::new(&mut settings.display.star_brightness, 0.1..=100.0)
         .logarithmic(true)
@@ -113,13 +133,13 @@ fn display_tab(settings: &mut Settings, camera: Option<CameraControls>, ui: &mut
         .on_hover_text("Minimum brightness a sun-lit distant body can fade to.\n0 lets bodies in full shadow disappear.");
     // Body dot radius range (screen px). Keep min <= max while dragging either slider.
     let body_radius_max = settings.display.body_radius_max;
-    let body_min_resp = ui.add(egui::Slider::new(&mut settings.display.body_radius_min, 0.0..=1.0)
+    let body_min_resp = ui.add(egui::Slider::new(&mut settings.display.body_radius_min, 0.0..=5.0)
         .suffix("px")
         .text("Body Radius Min"))
         .on_hover_text("On-screen dot size for a 1 m object.\nLarger bodies scale up by area; smaller ones shrink below this and can vanish.");
     if body_min_resp.changed() {
         settings.display.body_radius_min = settings.display.body_radius_min.min(body_radius_max);
-    }
+    } 
     let body_radius_min = settings.display.body_radius_min;
     let body_max_resp = ui.add(egui::Slider::new(&mut settings.display.body_radius_max, 0.0..=20.0)
         .suffix("px")

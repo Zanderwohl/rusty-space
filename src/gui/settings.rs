@@ -81,6 +81,14 @@ pub struct DisplaySettings {
     /// near body's dot can grow before it hands off to the wireframe.
     #[serde(default = "default_body_radius_max")]
     pub body_radius_max: f32,
+    /// Screen-space radius (pixels) where the model->dot transition begins.
+    /// At or above this size, the distant-body dot is fully hidden.
+    #[serde(default = "default_model_fade_start_px")]
+    pub model_fade_start_px: f32,
+    /// Screen-space radius (pixels) where the model->dot transition ends.
+    /// At or below this size, the distant-body dot is fully visible.
+    #[serde(default = "default_model_fade_end_px")]
+    pub model_fade_end_px: f32,
     /// Show the Point of Aries (♈) celestial reference marker.
     #[serde(default = "default_true")]
     pub show_point_of_aries: bool,
@@ -98,7 +106,7 @@ fn default_star_radius_min() -> f32 {
 }
 
 fn default_star_radius_max() -> f32 {
-    10.9
+    12.0
 }
 
 fn default_body_brightness_floor() -> f32 {
@@ -107,12 +115,20 @@ fn default_body_brightness_floor() -> f32 {
 
 fn default_body_radius_min() -> f32 {
     // Dot radius (px) for a 1 m reference object; slider range is 0..1.
-    0.87
+    1.0
 }
 
 fn default_body_radius_max() -> f32 {
     // High enough to not cap within the dot's visible range by default.
-    4.5
+    3.5
+}
+
+fn default_model_fade_start_px() -> f32 {
+    20.0
+}
+
+fn default_model_fade_end_px() -> f32 {
+    10.0
 }
 
 fn default_trajectory_brightness_front() -> f32 {
@@ -138,6 +154,8 @@ impl Default for DisplaySettings {
             body_brightness_floor: default_body_brightness_floor(),
             body_radius_min: default_body_radius_min(),
             body_radius_max: default_body_radius_max(),
+            model_fade_start_px: default_model_fade_start_px(),
+            model_fade_end_px: default_model_fade_end_px(),
             show_point_of_aries: default_true(),
         }
     }
