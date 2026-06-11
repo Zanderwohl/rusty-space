@@ -177,12 +177,18 @@ pub fn settings_menu(
             next_menu.set(MenuState::Home)
         }
 
+        ui.add_space(8.0);
+
+        // Nest the panel in a centered, max-width column so the full-screen
+        // menu gets comfortable left/right padding without stretching edge to edge.
+        let max_width = 640.0_f32.min(ui.available_width() - 40.0);
         ui.vertical_centered(|ui| {
+            ui.set_max_width(max_width);
             ui.heading("Settings");
 
             ui.separator();
 
-            settings::settings_panel(&mut settings, ui);
+            settings::settings_panel(settings.as_mut(), None, ui);
         });
     });
 }

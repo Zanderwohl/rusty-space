@@ -61,7 +61,8 @@ pub fn spawn_starfield(
         uniforms: StarfieldMaterialUniform {
             star_count,
             brightness: settings.display.star_brightness,
-            _padding: Vec2::ZERO,
+            star_radius_min: settings.display.star_radius_min,
+            star_radius_max: settings.display.star_radius_max.max(settings.display.star_radius_min),
         },
     });
 
@@ -77,28 +78,33 @@ pub fn spawn_starfield(
     ));
 }
 
-/// Syncs the star brightness setting to the starfield material uniform.
+/// Syncs the Distant Objects settings (star brightness and star radius range)
+/// to the starfield material uniform. Only rewrites the uniform when a value
+/// actually changed, to avoid re-uploading the buffer every frame.
 pub fn update_starfield_brightness(
     settings: Res<Settings>,
     starfields: Query<&MeshMaterial3d<StarfieldMaterial>, With<Starfield>>,
     mut materials: ResMut<Assets<StarfieldMaterial>>,
-    mut last_brightness: Local<Option<f32>>,
 ) {
     let brightness = settings.display.star_brightness;
-
-    // Avoid rewriting the GPU buffer when the slider value has not changed.
-    if let Some(last) = *last_brightness {
-        if (last - brightness).abs() < 0.0001 {
-            return;
-        }
-    }
-    *last_brightness = Some(brightness);
+    let radius_min = settings.display.star_radius_min;
+    let radius_max = settings.display.star_radius_max.max(radius_min);
 
     for material_handle in &starfields {
-        if let Some(material) = materials.get_mut(&material_handle.0) {
-            material.uniforms.brightness = brightness;
-        } else {
-            warn!("Starfield material handle exists but asset was not found");
+        let needs_update = materials
+            .get(&material_handle.0)
+            .map(|m| {
+                m.uniforms.brightness != brightness
+                    || m.uniforms.star_radius_min != radius_min
+                    || m.uniforms.star_radius_max != radius_max
+            })
+            .unwrap_or(false);
+        if needs_update {
+            if let Some(material) = materials.get_mut(&material_handle.0) {
+                material.uniforms.brightness = brightness;
+                material.uniforms.star_radius_min = radius_min;
+                material.uniforms.star_radius_max = radius_max;
+            }
         }
     }
 }

@@ -194,6 +194,34 @@ impl Motive {
         self.motives.get(&key).expect(format!("Invariant violated: CompoundMotive.times gave the time {}, but CompoundMotive.time motives has no such key {}.", motive_time, key).as_ref())
     }
 
+    /// Returns the `[start, end)` window (seconds since J2000) during which the
+    /// motive segment active at `time` remains the active segment.
+    ///
+    /// `start` is `f64::NEG_INFINITY` for the earliest segment (which also
+    /// covers all earlier times) and `end` is `f64::INFINITY` for the final
+    /// segment. Used by `update_kepler_caches` to detect time-driven
+    /// transitions (the component itself is not mutated when the clock crosses
+    /// an event boundary, so `Changed<Motive>` cannot see them).
+    pub fn active_segment_range(&self, time: Instant) -> (f64, f64) {
+        let t = time.to_j2000_seconds();
+        let seg_start = match self.times.get_at_or_before(t).or_else(|| self.times.get(0).copied()) {
+            Some(s) => s,
+            // No events at all (shouldn't happen given the invariant): valid forever.
+            None => return (f64::NEG_INFINITY, f64::INFINITY),
+        };
+        // First event strictly after this segment's start time bounds it above.
+        let idx_after = self.times.get_index_after(Instant::from_seconds_since_j2000(seg_start));
+        let end = self.times.get(idx_after).copied().unwrap_or(f64::INFINITY);
+        // The earliest segment also covers all times before its start, so don't
+        // invalidate when scrubbing further back than the first event.
+        let start = if self.times.get(0).copied() == Some(seg_start) {
+            f64::NEG_INFINITY
+        } else {
+            seg_start
+        };
+        (start, end)
+    }
+
     /// Get the motive that was active just before the motive at the given time.
     /// Returns None if there is no previous motive (i.e., the motive at `time` is the first one).
     pub fn motive_before(&self, time: Instant) -> Option<&(TransitionEvent, MotiveSelection)> {

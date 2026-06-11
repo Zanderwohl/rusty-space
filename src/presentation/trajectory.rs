@@ -10,7 +10,6 @@ use bevy::camera::visibility::NoFrustumCulling;
 use bevy::math::DVec3;
 use bevy::render::view::ColorGrading;
 use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
-use num_traits::Pow;
 
 use crate::body::appearance::Appearance;
 use crate::body::motive::info::{BodyInfo, BodyState};
@@ -19,7 +18,7 @@ use crate::body::universe::save::{UniversePhysics, ViewSettings};
 use crate::camera::{Freecam, PlanetariumCamera};
 use crate::gui::planetarium::{FocusedBodyState, HoverState, HoveredTrajectoryMarkerKind};
 use crate::gui::planetarium::{format_sim_time_for_mode, MissionClockMode, MissionClockSettings};
-use crate::gui::settings::{DisplayGlow, Settings};
+use crate::gui::settings::Settings;
 use crate::sim::{BodySelection, CalculateTrajectory, SimTime};
 use crate::util::bevystuff::GlamVec;
 use bevy_egui::{egui, EguiContexts};
@@ -385,29 +384,18 @@ pub fn build_trajectory_meshes(
     view_settings: Res<ViewSettings>,
     focused_body_state: Res<FocusedBodyState>,
     hover_state: Res<HoverState>,
-    settings: Res<Settings>,
     fcam: Single<&Freecam, With<PlanetariumCamera>>,
     sim_time: Res<SimTime>,
-    color_grading: Single<&ColorGrading>,
     physics_graph: Res<crate::body::motive::calculate_body_positions::PhysicsGraph>,
     _physics: Res<UniversePhysics>,
 ) {
     let distance_scale = view_settings.distance_factor();
-    let exposure = color_grading.global.exposure;
     let current_time = sim_time.time.to_j2000_seconds();
     let camera_pos = fcam.bevy_pos;
-    
-    // Brightness range based on glow settings
-    let (min_brightness, max_brightness) = match settings.display.glow {
-        DisplayGlow::None => (0.1, 1.0),
-        DisplayGlow::Subtle => (0.25, 1.2),
-        DisplayGlow::VFD => (1.0, 4.0),
-        DisplayGlow::Defcon => (0.2, 10.0),
-    };
-    let exposure_adjust = 2f32.pow(-exposure);
-    let min_brightness = min_brightness * exposure_adjust;
-    let max_brightness = max_brightness * exposure_adjust;
-    
+    // Brightness (front/back range + exposure) is applied live in the shader via
+    // material uniforms; the mesh only bakes the geometric along-length factor `t`
+    // and per-vertex distance dimming.
+
     for (traj_mesh, mut cache, mut visibility, mesh3d, mut transform) in trajectory_meshes.iter_mut() {
         // Compensate for camera movement since last mesh rebuild so the
         // trajectory tracks bodies even when the mesh isn't regenerated.
@@ -587,8 +575,8 @@ pub fn build_trajectory_meshes(
         // Transform points to Bevy space and compute brightness + radius
         let point_count = points.len();
         
-        // Points now include: (position, brightness, radius)
-        let transformed_points: Vec<(Vec3, f32, f32)> = points.iter().enumerate().map(|(idx, (_, pos))| {
+        // Points now include: (position, t, amplitude, radius)
+        let transformed_points: Vec<(Vec3, f32, f32, f32)> = points.iter().enumerate().map(|(idx, (_, pos))| {
             // Apply primary offset
             let world_pos = match primary_offset {
                 Some(offset) => *pos + offset,
@@ -603,29 +591,27 @@ pub fn build_trajectory_meshes(
             
             // Calculate radius based on distance
             let radius = calculate_tube_radius(distance_from_camera);
-            
-            // Compute orbital brightness based on forward distance from T' around the orbit
-            let orbital_brightness = compute_brightness(
+
+            // Geometric along-length factor t (0..1); the front/back brightness lerp
+            // is applied in the shader so it stays live without rebuilding the mesh.
+            let t = compute_brightness_t(
                 idx,
                 transient_idx,
                 transient_prime_idx,
                 cache.closed,
-                min_brightness,
-                max_brightness,
                 point_count,
             );
-            
-            // Distance-based dimming: far trajectories are dimmer
+
+            // Distance-based dimming: far trajectories are dimmer (baked per-vertex
+            // amplitude; only changes when the camera moves, which rebuilds the mesh).
             let distance_dim = if distance_from_camera <= DISTANCE_DIM_REF {
                 1.0
             } else {
                 (DISTANCE_DIM_REF / distance_from_camera).powf(DISTANCE_DIM_POWER).max(DISTANCE_DIM_MIN)
             };
-            
+
             // Near-fade is handled per-fragment in the shader for pixel-accurate fading
-            let brightness = orbital_brightness * distance_dim;
-            
-            (bevy_pos, brightness, radius)
+            (bevy_pos, t, distance_dim, radius)
         }).collect();
         // Generate tube mesh with per-point radii
         let mesh = generate_tube_mesh(&transformed_points, TUBE_SIDES);
@@ -642,6 +628,46 @@ pub fn build_trajectory_meshes(
         cache.mesh_dirty = false;
         cache.last_camera_pos = Some(camera_pos);
         cache.last_mesh_time = current_time;
+    }
+}
+
+/// Push the live trajectory brightness settings (front/back percentages and camera
+/// exposure) into the tube materials' shader uniforms. This keeps brightness tweaks
+/// instant without rebuilding any meshes. Only entities with a [`TrajectoryMesh`]
+/// are touched, so markers (which use the identity range) are left alone. The
+/// material asset is only mutated when a value actually changed, to avoid
+/// re-uploading the uniform buffer every frame.
+pub fn update_trajectory_material_brightness(
+    settings: Res<Settings>,
+    color_grading: Single<&ColorGrading>,
+    tubes: Query<&MeshMaterial3d<TrajectoryMaterial>, With<TrajectoryMesh>>,
+    mut materials: ResMut<Assets<TrajectoryMaterial>>,
+) {
+    let front = (settings.display.trajectory_brightness_front / 100.0).max(0.0);
+    let back = (settings.display.trajectory_brightness_back / 100.0).max(0.0);
+    let exposure = color_grading.global.exposure;
+    let glow_gain = settings.display.glow.brightness_multiplier();
+
+    for handle in tubes.iter() {
+        // Read first; only take a mutable handle (which flags the asset for
+        // re-upload) if something is actually out of date.
+        let needs_update = materials
+            .get(&handle.0)
+            .map(|m| {
+                m.front != front
+                    || m.back != back
+                    || m.exposure != exposure
+                    || m.glow_gain != glow_gain
+            })
+            .unwrap_or(false);
+        if needs_update {
+            if let Some(material) = materials.get_mut(&handle.0) {
+                material.front = front;
+                material.back = back;
+                material.exposure = exposure;
+                material.glow_gain = glow_gain;
+            }
+        }
     }
 }
 
@@ -1150,17 +1176,16 @@ pub fn draw_trajectory_marker_labels(
     }
 }
 
-/// Compute brightness for a point based on forward distance from T' around the orbit.
-/// T' (right after body) is dimmest, going forward through the orbit brightness increases,
-/// reaching max at T (same position as T', one full orbit later).
-/// This creates a continuous gradient: T (max) → future → wake → T' (min).
-fn compute_brightness(
+/// Compute the along-length lerp factor `t` (0..1) for a point based on forward
+/// distance from T' around the orbit. `t = 0` maps to the trajectory's front
+/// brightness, `t = 1` to its back brightness (the lerp itself happens in the shader).
+/// T' (right after body) is t=0, going forward through the orbit t increases,
+/// reaching t=1 at T (same position as T', one full orbit later).
+fn compute_brightness_t(
     idx: usize,
     transient_idx: Option<usize>,
     transient_prime_idx: Option<usize>,
     closed: bool,
-    min_brightness: f32,
-    max_brightness: f32,
     point_count: usize,
 ) -> f32 {
     if closed {
@@ -1169,37 +1194,38 @@ fn compute_brightness(
             // T' = 0, going forward increases, T = point_count - 1 (just before wrapping back to T')
             let forward_dist = ((idx as isize - tp_idx as isize + point_count as isize) % point_count as isize) as f32;
             let max_dist = (point_count - 1) as f32;
-            let progress = forward_dist / max_dist;
-            // T' (progress=0) is min, T (progress≈1) is max
-            min_brightness + (max_brightness - min_brightness) * progress
+            // T' (t=0) is front, T (t≈1) is back
+            forward_dist / max_dist
         } else if let Some(t_idx) = transient_idx {
             // No T' but have T - use forward distance from T
             let forward_dist = ((idx as isize - t_idx as isize + point_count as isize) % point_count as isize) as f32;
             let max_dist = (point_count - 1) as f32;
-            let progress = 1.0 - forward_dist / max_dist;
-            min_brightness + (max_brightness - min_brightness) * progress
+            1.0 - forward_dist / max_dist
         } else {
-            // No transient point - fallback to mid brightness
-            (min_brightness + max_brightness) / 2.0
+            // No transient point - fallback to the midpoint of the range
+            0.5
         }
     } else {
         // Open orbits: simple wake bright, future dim
         if let Some(t_idx) = transient_idx {
             if idx <= t_idx {
-                max_brightness
+                1.0
             } else {
-                min_brightness
+                0.0
             }
         } else {
-            min_brightness
+            0.0
         }
     }
 }
 
 /// Generate a tube mesh from a list of points with associated brightness and radius values.
 /// Each point becomes a ring of vertices; adjacent rings are connected with triangles.
-/// Points are (position, brightness, radius).
-pub fn generate_tube_mesh(points: &[(Vec3, f32, f32)], sides: u32) -> Mesh {
+/// Points are (position, t, amplitude, radius), where `t` is the along-length lerp
+/// factor (baked into vertex alpha) and `amplitude` is a per-vertex brightness scale
+/// such as distance dimming (baked into vertex rgb). The shader turns these into the
+/// final brightness using the material's front/back/exposure uniforms.
+pub fn generate_tube_mesh(points: &[(Vec3, f32, f32, f32)], sides: u32) -> Mesh {
     if points.len() < 2 {
         return empty_trajectory_mesh();
     }
@@ -1213,7 +1239,7 @@ pub fn generate_tube_mesh(points: &[(Vec3, f32, f32)], sides: u32) -> Mesh {
     let mut colors: Vec<[f32; 4]> = Vec::with_capacity(total_verts);
     let mut indices: Vec<u32> = Vec::with_capacity((ring_count - 1) * verts_per_ring * 6);
     
-    for (ring_idx, (center, brightness, radius)) in points.iter().enumerate() {
+    for (ring_idx, (center, t, amplitude, radius)) in points.iter().enumerate() {
         // Compute tangent direction (forward along the tube)
         let tangent = if ring_idx == 0 {
             (points[1].0 - *center).normalize_or_zero()
@@ -1240,8 +1266,10 @@ pub fn generate_tube_mesh(points: &[(Vec3, f32, f32)], sides: u32) -> Mesh {
             let normal = offset.normalize_or_zero();
             normals.push([normal.x, normal.y, normal.z]);
             
-            // Color: RGB is green (base color handled by material), alpha encodes brightness
-            colors.push([1.0, 1.0, 1.0, *brightness]);
+            // RGB carries the per-vertex amplitude (distance dimming); alpha carries the
+            // along-length lerp factor t. The shader combines these with the material's
+            // front/back/exposure uniforms to produce the final brightness.
+            colors.push([*amplitude, *amplitude, *amplitude, *t]);
         }
         
         // Generate triangles connecting this ring to the next

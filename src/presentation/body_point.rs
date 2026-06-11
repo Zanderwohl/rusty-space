@@ -9,6 +9,7 @@ use bevy::prelude::*;
 use crate::body::appearance::Appearance;
 use crate::body::motive::info::BodyInfo;
 use crate::camera::PlanetariumCamera;
+use crate::gui::settings::Settings;
 
 use super::body_point_material::BodyPointMaterial;
 use super::star_cache::StarLightingFrameCache;
@@ -30,9 +31,6 @@ const POINT_EMISSION_STRENGTH: f32 = 8.0;
 /// At this distance from a star, brightness is at 50% due to distance alone.
 /// ~150 units ≈ 1 AU at default 1e-9 scale.
 const DISTANCE_FALLOFF_REFERENCE: f32 = 150.0;
-
-/// Minimum brightness floor - objects never go completely dark
-const MIN_POINT_BRIGHTNESS: f32 = 0.05;
 
 /// Marker component for body point mesh entities.
 #[derive(Component)]
@@ -99,7 +97,9 @@ pub fn update_body_points(
     mut wireframes: Query<&mut Visibility, (With<super::BodyWireframeMesh>, Without<BodyPointMesh>, Without<OccluderMesh>)>,
     mut occluders: Query<&mut Visibility, (With<OccluderMesh>, Without<BodyPointMesh>, Without<super::BodyWireframeMesh>)>,
     mut materials: ResMut<Assets<BodyPointMaterial>>,
+    settings: Res<Settings>,
 ) {
+    let brightness_floor = settings.display.body_brightness_floor;
     // Get camera info
     let Ok((camera, camera_global, projection)) = cameras.single() else {
         return;
@@ -191,7 +191,7 @@ pub fn update_body_points(
             }
 
             // Apply minimum floor and clamp
-            total_brightness = total_brightness.max(MIN_POINT_BRIGHTNESS).min(1.0);
+            total_brightness = total_brightness.max(brightness_floor).min(1.0);
 
             // Update material brightness (phase brightness * fade factor)
             // Only update if value changed to avoid spurious asset change detection

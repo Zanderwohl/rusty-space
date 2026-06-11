@@ -18,7 +18,10 @@ use bevy_mesh::MeshVertexBufferLayoutRef;
 pub struct StarfieldMaterialUniform {
     pub star_count: u32,
     pub brightness: f32,
-    pub _padding: Vec2,
+    /// Angular radius (arcminutes) of the faintest stars.
+    pub star_radius_min: f32,
+    /// Angular radius (arcminutes) of the brightest stars.
+    pub star_radius_max: f32,
 }
 
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]

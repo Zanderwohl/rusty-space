@@ -48,6 +48,7 @@ pub use trajectory::{
     draw_trajectory_marker_labels,
     update_focused_trajectory_markers,
     update_mouse_hit_marker,
+    update_trajectory_material_brightness,
     rebuild_trajectory_caches,
     refresh_precessing_trajectories,
     spawn_trajectory_mesh,

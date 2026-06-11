@@ -65,7 +65,6 @@ impl Plugin for PlanetariumUI {
                     windows::body_info::body_info_window,
                     windows::settings::settings_window,
                     windows::spin::spin_window,
-                    windows::camera::camera_window,
                     windows::show_hide_panel::show_hide_panel_widget,
                     ).run_if(in_state(AppState::Planetarium)),
                 ))
@@ -74,6 +73,8 @@ impl Plugin for PlanetariumUI {
                 presentation::adjust_lights,
                 input::handle_go_to_shortcut,
                 input::handle_revolve_frame_shortcut,
+                calculate_body_positions::update_kepler_caches
+                    .before(calculate_body_positions::calculate_body_positions),
                 calculate_body_positions::calculate_body_positions,
                 kepler_motive::calculate_trajectory,
                 presentation::position_bodies.after(calculate_body_positions::calculate_body_positions),
@@ -93,6 +94,7 @@ impl Plugin for PlanetariumUI {
                 presentation::build_trajectory_meshes
                     .after(presentation::position_bodies)
                     .after(presentation::rebuild_trajectory_caches),
+                presentation::update_trajectory_material_brightness,
                 presentation::cleanup_orphaned_trajectory_meshes,
             ).in_set(PlanetariumUISet))
             // Body wireframe, occluder, and terminator mesh systems

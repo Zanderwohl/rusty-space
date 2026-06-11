@@ -51,30 +51,56 @@ pub struct DisplaySettings {
     pub quality: DisplayQuality,
     #[serde(default)]
     pub glow: DisplayGlow,
-    /// Minimum distance (in rendered units) for trajectory fade.
-    /// Everything closer than this is fully transparent.
-    #[serde(default = "default_trajectory_fade_min")]
-    pub trajectory_fade_min: f32,
-    /// Maximum distance (in rendered units) for trajectory fade.
-    /// Everything further than this is fully opaque.
-    /// Set both to 0.0 to disable fading.
-    #[serde(default = "default_trajectory_fade_max")]
-    pub trajectory_fade_max: f32,
+    /// Brightness (percent, 0-100) at the front/leading end of a trajectory.
+    /// The trajectory lerps from this to `trajectory_brightness_back` along its length.
+    #[serde(default = "default_trajectory_brightness_front")]
+    pub trajectory_brightness_front: f32,
+    /// Brightness (percent, 0-100) at the back/trailing end of a trajectory.
+    #[serde(default = "default_trajectory_brightness_back")]
+    pub trajectory_brightness_back: f32,
     /// Brightness multiplier for background stars (0.1 to 10.0).
     #[serde(default = "default_star_brightness")]
     pub star_brightness: f32,
+    /// Angular radius (arcminutes) of the faintest catalog stars.
+    #[serde(default = "default_star_radius_min")]
+    pub star_radius_min: f32,
+    /// Angular radius (arcminutes) of the brightest catalog stars.
+    /// A star's drawn radius lerps between min and max by its magnitude.
+    #[serde(default = "default_star_radius_max")]
+    pub star_radius_max: f32,
+    /// Minimum brightness a sun-lit distant body can fade to (0.0 to 1.0).
+    /// 0.0 lets bodies in full shadow disappear entirely.
+    #[serde(default = "default_body_brightness_floor")]
+    pub body_brightness_floor: f32,
 }
 
 fn default_star_brightness() -> f32 {
-    1.0
+    15.0
 }
 
-fn default_trajectory_fade_min() -> f32 {
-    0.0
+/// Old fixed star size: STAR_THRESHOLD 0.999995 ≈ acos ≈ 0.00316 rad ≈ 10.9 arcmin.
+/// Defaulting both ends to this reproduces the previous uniform look (no size
+/// variation); widen the max to make brighter stars larger.
+fn default_star_radius_min() -> f32 {
+    10.9
 }
 
-fn default_trajectory_fade_max() -> f32 {
-    1.5
+fn default_star_radius_max() -> f32 {
+    10.9
+}
+
+fn default_body_brightness_floor() -> f32 {
+    0.05
+}
+
+fn default_trajectory_brightness_front() -> f32 {
+    // Matches the previous hardcoded "None" glow look (0.1 -> 10%).
+    10.0
+}
+
+fn default_trajectory_brightness_back() -> f32 {
+    // Matches the previous hardcoded "None" glow look (1.0 -> 100%).
+    100.0
 }
 
 impl Default for DisplaySettings {
@@ -82,9 +108,12 @@ impl Default for DisplaySettings {
         Self {
             quality: DisplayQuality::default(),
             glow: DisplayGlow::default(),
-            trajectory_fade_min: default_trajectory_fade_min(),
-            trajectory_fade_max: default_trajectory_fade_max(),
+            trajectory_brightness_front: default_trajectory_brightness_front(),
+            trajectory_brightness_back: default_trajectory_brightness_back(),
             star_brightness: default_star_brightness(),
+            star_radius_min: default_star_radius_min(),
+            star_radius_max: default_star_radius_max(),
+            body_brightness_floor: default_body_brightness_floor(),
         }
     }
 }
@@ -104,6 +133,20 @@ pub enum DisplayGlow {
     Subtle,
     VFD,
     Defcon,
+}
+
+impl DisplayGlow {
+    /// Whole-trajectory brightness multiplier applied on top of the front/back
+    /// range. `None` is the 1.0 baseline (the front/back percentages render as-is);
+    /// brighter presets push the trajectory overbright into HDR/bloom territory.
+    pub fn brightness_multiplier(self) -> f32 {
+        match self {
+            DisplayGlow::None => 1.0,
+            DisplayGlow::Subtle => 2.0,
+            DisplayGlow::VFD => 6.0,
+            DisplayGlow::Defcon => 16.0,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
@@ -177,8 +220,6 @@ pub struct WindowSelections {
     #[serde(default = "default_false")]
     pub grid: bool,
     #[serde(default = "default_false")]
-    pub camera: bool,
-    #[serde(default = "default_false")]
     pub controls: bool,
 }
 
@@ -190,7 +231,6 @@ impl Default for WindowSelections {
             body_edit: default_false(),
             body_info: default_false(),
             grid: default_false(),
-            camera: default_false(),
             controls: default_false(),
         }
     }

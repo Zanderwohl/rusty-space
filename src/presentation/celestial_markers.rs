@@ -95,6 +95,11 @@ pub fn spawn_celestial_markers(
         base_color: LinearRgba::new(0.85, 0.55, 0.15, 1.0),
         brightness_threshold: 0.3,
         emission_strength: 4.0,
+        // Identity range: markers bake their final brightness into vertex alpha.
+        front: 0.0,
+        back: 1.0,
+        exposure: 0.0,
+        glow_gain: 1.0,
         alpha_mode: AlphaMode::Blend,
     };
     let material_handle = materials.add(material);

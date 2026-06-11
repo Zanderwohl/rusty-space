@@ -23,16 +23,22 @@ struct VertexOutput {
 struct StarfieldMaterialUniform {
     star_count: u32,
     brightness: f32,
-    _padding: vec2<f32>,
+    star_radius_min: f32,
+    star_radius_max: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<storage, read> stars: array<vec4<f32>>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var<storage, read> colors: array<vec4<f32>>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> material: StarfieldMaterialUniform;
 
-// Dot product threshold for star visibility (controls apparent star size)
-// 0.999995 ≈ 0.18 degrees, roughly 2-3 pixels radius
-const STAR_THRESHOLD: f32 = 0.999995;
+// Arcminutes -> radians (pi / (180 * 60)). The star radius uniforms are in arcmin;
+// the visibility test is a dot product, so radius is converted to a cosine threshold.
+const ARCMIN_TO_RAD: f32 = 0.0002908882;
+
+// Magnitude range mapped onto the [star_radius_min, star_radius_max] size range.
+// Brighter (lower magnitude) stars are drawn larger.
+const MAG_BRIGHT: f32 = -1.5; // ~Sirius -> max radius
+const MAG_FAINT: f32 = 6.0;   // naked-eye limit -> min radius
 
 // Brightness scaling: maps magnitude to HDR output
 // Sirius (mag -1.5) -> ~2.0, naked eye limit (mag 6) -> ~0.05
@@ -74,12 +80,17 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         // Angular proximity: dot product of 1.0 means perfect alignment
         let alignment = dot(view_dir, star_dir);
 
-        if alignment > STAR_THRESHOLD {
+        // Per-star angular radius: brighter stars (lower mag) are drawn larger.
+        let size_t = clamp((MAG_FAINT - mag) / (MAG_FAINT - MAG_BRIGHT), 0.0, 1.0);
+        let radius_arcmin = mix(material.star_radius_min, material.star_radius_max, size_t);
+        let threshold = cos(radius_arcmin * ARCMIN_TO_RAD);
+
+        if alignment > threshold {
             // Convert magnitude to brightness (lower mag = brighter)
             let brightness = MAG_ZERO_BRIGHTNESS * pow(2.512, -mag) * BRIGHTNESS_SCALE;
 
             // Smooth falloff from center to reduce flickering/aliasing
-            let falloff = (alignment - STAR_THRESHOLD) / (1.0 - STAR_THRESHOLD);
+            let falloff = (alignment - threshold) / (1.0 - threshold);
 
             let star_color = colors[i].rgb;
             total_color += star_color * brightness * falloff;

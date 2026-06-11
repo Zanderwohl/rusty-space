@@ -69,15 +69,11 @@ pub enum CachedMotiveSelection {
     Fixed {
         position: DVec3,
     },
-    Keplerian {
-        /// Pre-computed gravitational parameter (G * parent_mass), constant across time steps
-        mu: f64,
-        /// Cached KeplerMotive for direct displacement calculation (avoids motive_at() lookup)
-        kepler: KeplerMotive,
-        /// Pre-computed time-invariant orbit constants (Fourier coefficients, rotation
-        /// matrix for non-precessing orbits, mean motion). Built once per graph rebuild.
-        cache: KeplerCache,
-    },
+    /// Marker: this body follows a Keplerian orbit. The per-orbit constants and
+    /// displacement live on the body's `KeplerCached` component (maintained by
+    /// `update_kepler_caches`), so the hot loop reads them via a direct
+    /// component lookup instead of a parallel HashMap.
+    Keplerian,
     Newtonian {
         position: DVec3,
         velocity: DVec3,
@@ -92,6 +88,31 @@ pub struct BodyData {
     pub entity: Entity,
     pub mass: f64,
     pub is_major: bool,
+}
+
+/// Per-body cache of Keplerian orbit constants, maintained by
+/// [`update_kepler_caches`] and read directly (by Entity, via the ECS) in the
+/// positioning hot loop — replacing the parallel `HashMap` lookup that the
+/// graph previously used.
+///
+/// Invalidation is driven by three independent triggers in `update_kepler_caches`:
+/// 1. `Changed<Motive>` — orbital parameters or the primary were edited.
+/// 2. simulation time leaving `valid_range` — a time-driven motive transition.
+///    The `Motive` component is *not* mutated when the active segment changes
+///    purely because the clock crossed an event boundary, so change detection
+///    alone is insufficient; the validity window catches forward crossings and
+///    backward scrubs alike.
+/// 3. component absence — a newly spawned (or newly Keplerian) body.
+#[derive(Component, Clone)]
+pub struct KeplerCached {
+    /// Cloned KeplerMotive, needed for the precessing-orbit displacement path.
+    pub kepler: KeplerMotive,
+    /// Precomputed time-invariant orbit constants (mu-derived mean motion,
+    /// Fourier coefficients, cached rotation matrix for non-precessing orbits).
+    pub cache: KeplerCache,
+    /// `[start, end)` in seconds-since-J2000 during which `cache` is valid.
+    /// `start` is `-inf` for the earliest segment, `end` is `+inf` for the last.
+    pub valid_range: (f64, f64),
 }
 
 /// Dependency graph for hierarchical body positioning.
@@ -274,6 +295,10 @@ pub fn calculate_body_positions(
     mut cache: ResMut<PositionCache>,
     mut metrics: ResMut<SimulationPerformanceMetrics>,
     mut bodies: Query<(Entity, &BodyInfo, &Motive, &mut BodyState, Option<&Major>)>,
+    // Read-only Keplerian orbit caches, maintained by `update_kepler_caches`
+    // (which runs before this system). Disjoint from `bodies` (different
+    // component), so the two queries don't conflict.
+    kepler_cached_q: Query<&KeplerCached>,
 ) {
     // === Time advancement (folded from advance_time) ===
     // Queue new simulation times based on real delta when playing.
@@ -343,7 +368,7 @@ pub fn calculate_body_positions(
     
     if needs_rebuild {
         let rebuild_start = StdInstant::now();
-        rebuild_physics_graph(&mut graph, &bodies, graph_build_time, physics.gravitational_constant);
+        rebuild_physics_graph(&mut graph, &bodies, graph_build_time);
         graph.needs_rebuild = false;
         graph.last_build_time = graph_build_time;
         
@@ -382,6 +407,7 @@ pub fn calculate_body_positions(
         calculate_hierarchical_positions(
             &mut bodies,
             &graph,
+            &kepler_cached_q,
             &mut cache,
             step_time,
         );
@@ -455,6 +481,81 @@ pub fn calculate_body_positions(
 }
 
 // ============================================================================
+// Keplerian Cache Maintenance
+// ============================================================================
+
+/// Maintains each Keplerian body's [`KeplerCached`] component.
+///
+/// Runs *before* [`calculate_body_positions`]. Rebuilds a body's cache only
+/// when it is stale (see [`KeplerCached`] for the three triggers), so a single
+/// body's transition no longer forces every body's orbit constants to be
+/// recomputed — unlike the all-or-nothing graph rebuild.
+///
+/// It reads `sim_time.time` (the time `calculate_body_positions` will treat as
+/// `current_time`), so for the Newtonian-enabled path the validity check uses
+/// the same time basis as the graph's own event detection.
+pub fn update_kepler_caches(
+    sim_time: Res<SimTime>,
+    physics: Res<UniversePhysics>,
+    mut commands: Commands,
+    bodies: Query<(Entity, Ref<Motive>, &BodyInfo, Option<&KeplerCached>)>,
+) {
+    let current = sim_time.time;
+    let now = current.to_j2000_seconds();
+
+    // Pass 1: classify bodies. Cheap O(n) scan every frame; in steady state
+    // nothing is stale and we return before building the mass index.
+    let mut to_rebuild: Vec<Entity> = Vec::new();
+    for (entity, motive, _info, cached) in &bodies {
+        let (_, selection) = motive.motive_at(current);
+        if let MotiveSelection::Keplerian(_) = selection {
+            let stale = match cached {
+                None => true,
+                Some(c) => motive.is_changed()           // edited params / primary
+                    || now < c.valid_range.0             // scrubbed back past segment start
+                    || now >= c.valid_range.1,           // crossed forward into next segment
+            };
+            if stale {
+                to_rebuild.push(entity);
+            }
+        } else if cached.is_some() {
+            // No longer Keplerian (e.g. released to Newtonian) — drop stale cache.
+            commands.entity(entity).remove::<KeplerCached>();
+        }
+    }
+
+    if to_rebuild.is_empty() {
+        return;
+    }
+
+    // Build id -> mass index (only when at least one cache must be rebuilt),
+    // used to resolve mu = G * primary_mass. A changed primary therefore picks
+    // up the new parent's mass here automatically.
+    let mut mass_of: HashMap<&str, f64> = HashMap::new();
+    for (_, _, info, _) in &bodies {
+        mass_of.insert(info.id.as_str(), info.mass);
+    }
+
+    for entity in to_rebuild {
+        let Ok((_, motive, _, _)) = bodies.get(entity) else { continue };
+        let (_, selection) = motive.motive_at(current);
+        let MotiveSelection::Keplerian(kepler) = selection else { continue };
+
+        let parent_mass = mass_of.get(kepler.primary_id.as_str()).copied().unwrap_or(0.0);
+        let mu = kepler.gravitational_parameter
+            .unwrap_or(physics.gravitational_constant * parent_mass);
+
+        // insert() overwrites any existing component, so this handles both
+        // first-time creation and refresh-on-transition.
+        commands.entity(entity).insert(KeplerCached {
+            kepler: kepler.clone(),
+            cache: kepler.build_cache(mu),
+            valid_range: motive.active_segment_range(current),
+        });
+    }
+}
+
+// ============================================================================
 // Physics Graph Building
 // ============================================================================
 
@@ -463,7 +564,6 @@ fn rebuild_physics_graph(
     graph: &mut PhysicsGraph,
     bodies: &Query<(Entity, &BodyInfo, &Motive, &mut BodyState, Option<&Major>)>,
     time: Instant,
-    gravitational_constant: f64,
 ) {
     // Count bodies for pre-allocation
     let body_count = bodies.iter().len();
@@ -513,31 +613,17 @@ fn rebuild_physics_graph(
             }
             MotiveSelection::Keplerian(kepler) => {
                 let parent_entity = graph.id_to_entity.get(&kepler.primary_id).copied();
-                let parent_mass = parent_entity
-                    .and_then(|pe| graph.body_data.get(&pe))
-                    .map(|d| d.mass)
-                    .unwrap_or(0.0);
 
                 dependencies.insert(entity, parent_entity);
                 hierarchical_bodies.insert(entity);
 
-                // Use explicit gravitational_parameter override if provided, otherwise compute from parent mass
-                let mu = kepler.gravitational_parameter
-                    .unwrap_or(gravitational_constant * parent_mass);
-
-                // Precompute time-invariant orbit constants once here so the
-                // per-step hot loop avoids Bessel evaluations and rotation-matrix
-                // rebuilds. Recomputed on every graph rebuild, so a changed
-                // primary (and thus changed mu) is reflected automatically.
-                let cache = kepler.build_cache(mu);
-
+                // Orbit constants (mu-derived mean motion, Fourier coefficients,
+                // rotation matrix) live on the body's KeplerCached component,
+                // maintained independently by update_kepler_caches. The graph
+                // only records topology (parent link + that this body is Keplerian).
                 graph.cached_motives.insert(entity, CachedMotive {
                     parent_entity,
-                    selection: CachedMotiveSelection::Keplerian {
-                        mu,
-                        kepler: kepler.clone(),
-                        cache,
-                    },
+                    selection: CachedMotiveSelection::Keplerian,
                 });
             }
             MotiveSelection::Newtonian { position, velocity } => {
@@ -581,6 +667,7 @@ fn rebuild_physics_graph(
 fn calculate_hierarchical_positions(
     bodies: &mut Query<(Entity, &BodyInfo, &Motive, &mut BodyState, Option<&Major>)>,
     graph: &PhysicsGraph,
+    kepler_cached: &Query<&KeplerCached>,
     cache: &mut PositionCache,
     time: Instant,
 ) {
@@ -603,8 +690,14 @@ fn calculate_hierarchical_positions(
             CachedMotiveSelection::Fixed { position } => {
                 *position
             }
-            CachedMotiveSelection::Keplerian { kepler, cache, .. } => {
-                kepler.displacement_cached(cache, time).unwrap_or(DVec3::ZERO)
+            CachedMotiveSelection::Keplerian => {
+                // Read the per-body orbit cache directly by Entity.
+                match kepler_cached.get(entity) {
+                    Ok(kc) => kc.kepler.displacement_cached(&kc.cache, time).unwrap_or(DVec3::ZERO),
+                    // Cache not built yet (e.g. first frame before maintenance
+                    // applied). Skip; it will be positioned next frame.
+                    Err(_) => continue,
+                }
             }
             CachedMotiveSelection::Newtonian { .. } => {
                 continue;

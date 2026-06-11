@@ -3,6 +3,5 @@ pub mod settings;
 pub mod spin;
 pub mod controls;
 pub mod body_info;
-pub mod camera;
 pub mod mission_clock;
 pub mod show_hide_panel;
