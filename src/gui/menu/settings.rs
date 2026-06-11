@@ -108,9 +108,13 @@ fn display_tab(settings: &mut Settings, camera: Option<CameraControls>, ui: &mut
         settings.display.star_radius_max = settings.display.star_radius_max.max(radius_min);
     }
 
-    ui.add(egui::Slider::new(&mut settings.display.body_brightness_floor, 0.0..=0.5)
+    ui.add(egui::Slider::new(&mut settings.display.body_brightness_floor, 0.0..=0.02)
         .text("Body Brightness Floor"))
         .on_hover_text("Minimum brightness a sun-lit distant body can fade to.\n0 lets bodies in full shadow disappear.");
+    ui.add(egui::Slider::new(&mut settings.display.body_radius_min, 0.0..=5.0)
+        .suffix("px")
+        .text("Body Radius Min"))
+        .on_hover_text("Minimum on-screen size for distant-body dots.\nNearer bodies grow to their natural size.");
 }
 
 fn sound_tab(settings: &mut Settings, ui: &mut Ui) {

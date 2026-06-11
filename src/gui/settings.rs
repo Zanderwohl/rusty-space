@@ -72,6 +72,11 @@ pub struct DisplaySettings {
     /// 0.0 lets bodies in full shadow disappear entirely.
     #[serde(default = "default_body_brightness_floor")]
     pub body_brightness_floor: f32,
+    /// Minimum on-screen radius (pixels) for distant-body dots. The dot is drawn at
+    /// the larger of this and the body's natural angular size, so far bodies stay
+    /// visible while near ones grow to their real size.
+    #[serde(default = "default_body_radius_min")]
+    pub body_radius_min: f32,
 }
 
 fn default_star_brightness() -> f32 {
@@ -82,7 +87,7 @@ fn default_star_brightness() -> f32 {
 /// Defaulting both ends to this reproduces the previous uniform look (no size
 /// variation); widen the max to make brighter stars larger.
 fn default_star_radius_min() -> f32 {
-    10.9
+    0.5
 }
 
 fn default_star_radius_max() -> f32 {
@@ -90,7 +95,11 @@ fn default_star_radius_max() -> f32 {
 }
 
 fn default_body_brightness_floor() -> f32 {
-    0.05
+    0.003
+}
+
+fn default_body_radius_min() -> f32 {
+    1.1
 }
 
 fn default_trajectory_brightness_front() -> f32 {
@@ -114,6 +123,7 @@ impl Default for DisplaySettings {
             star_radius_min: default_star_radius_min(),
             star_radius_max: default_star_radius_max(),
             body_brightness_floor: default_body_brightness_floor(),
+            body_radius_min: default_body_radius_min(),
         }
     }
 }
@@ -215,7 +225,7 @@ pub struct WindowSelections {
     pub spin_data: SpinData,
     #[serde(default = "default_false")]
     pub body_edit: bool,
-    #[serde(default = "default_false")]
+    #[serde(default = "default_true")]
     pub body_info: bool,
     #[serde(default = "default_false")]
     pub grid: bool,
@@ -245,4 +255,8 @@ pub struct SpinData {
 
 fn default_false() -> bool {
     false
+}
+
+fn default_true() -> bool {
+    true
 }

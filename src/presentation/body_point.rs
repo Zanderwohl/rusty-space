@@ -21,9 +21,6 @@ const POINT_FULL_THRESHOLD_PX: f32 = 10.0;
 /// Angular size threshold (in pixels) above which the point is hidden
 const POINT_FADE_THRESHOLD_PX: f32 = 20.0;
 
-/// Desired angular size of the point dot in pixels
-const POINT_SIZE_PX: f32 = 6.0;
-
 /// Emission strength for the point material
 const POINT_EMISSION_STRENGTH: f32 = 8.0;
 
@@ -91,7 +88,10 @@ pub fn spawn_body_point_meshes(
 /// System to update body point visibility, scale, and brightness.
 pub fn update_body_points(
     cameras: Query<(&Camera, &GlobalTransform, &Projection), With<PlanetariumCamera>>,
-    bodies: Query<(Entity, &GlobalTransform, &BodyPointLink, Option<&BodyWireframeLink>, Option<&OccluderLink>, &crate::body::motive::info::BodyInfo), Without<BodyPointMesh>>,
+    // Read the body's `Transform` (set this frame by `position_bodies`) rather than
+    // its `GlobalTransform`, which isn't propagated until PostUpdate and would lag the
+    // camera/body meshes by one frame. Bodies are root entities, so Transform == world.
+    bodies: Query<(Entity, &Transform, &BodyPointLink, Option<&BodyWireframeLink>, Option<&OccluderLink>, &crate::body::motive::info::BodyInfo), Without<BodyPointMesh>>,
     star_cache: Res<StarLightingFrameCache>,
     mut points: Query<(&BodyPointMesh, &mut Transform, &mut Visibility, &MeshMaterial3d<BodyPointMaterial>), Without<BodyPointLink>>,
     mut wireframes: Query<&mut Visibility, (With<super::BodyWireframeMesh>, Without<BodyPointMesh>, Without<OccluderMesh>)>,
@@ -100,6 +100,7 @@ pub fn update_body_points(
     settings: Res<Settings>,
 ) {
     let brightness_floor = settings.display.body_brightness_floor;
+    let min_radius_px = settings.display.body_radius_min;
     // Get camera info
     let Ok((camera, camera_global, projection)) = cameras.single() else {
         return;
@@ -127,15 +128,14 @@ pub fn update_body_points(
         };
 
         // Calculate distance and angular size
-        let body_center = body_transform.translation();
+        let body_center = body_transform.translation;
         let distance = (body_center - camera_pos).length();
 
         if distance <= 0.0 {
             continue;
         }
 
-        let (body_scale, _, _) = body_transform.to_scale_rotation_translation();
-        let radius = body_scale.x;
+        let radius = body_transform.scale.x;
         let angular_radius = (radius / distance).min(1.0);
         let screen_radius = angular_radius / (fov_y * 0.5) * viewport_size.y * 0.5;
 
@@ -157,10 +157,14 @@ pub fn update_body_points(
             // Update point position (copy from body)
             point_transform.translation = body_center;
 
-            // Calculate point scale for fixed screen size
-            // desired_angular_px / viewport_height * fov_y = desired_radius / distance
-            // desired_radius = (desired_angular_px / viewport_height) * fov_y * distance * 0.5
-            let desired_radius = (POINT_SIZE_PX / viewport_size.y) * (fov_y * 0.5) * distance;
+            // Draw the dot at the larger of its natural angular size and the configured
+            // minimum, so distant bodies stay visible while near ones grow to real size.
+            let point_px = screen_radius.max(min_radius_px);
+
+            // Calculate point scale for the target screen size
+            // target_px / viewport_height * fov_y = desired_radius / distance
+            // desired_radius = (target_px / viewport_height) * fov_y * distance * 0.5
+            let desired_radius = (point_px / viewport_size.y) * (fov_y * 0.5) * distance;
             point_transform.scale = Vec3::splat(desired_radius);
 
             // Calculate phase brightness from all stars with distance falloff
