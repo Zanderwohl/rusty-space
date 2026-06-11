@@ -19,7 +19,7 @@ mod trajectory;
 mod trajectory_material;
 
 pub use bodies::position_bodies;
-pub use body_material::{BodyWireframeMaterial, BodyWireframeMaterialPlugin, OccluderMaterial, OccluderMaterialPlugin};
+pub use body_material::{BodyWireframeMaterial, BodyWireframeMaterialPlugin, OccluderMaterial, OccluderMaterialPlugin, BASE_TUBE_RADIUS};
 pub use body_mesh::{
     spawn_body_wireframe_meshes,
     spawn_body_occluders,

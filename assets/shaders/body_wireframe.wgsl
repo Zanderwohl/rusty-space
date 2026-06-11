@@ -26,6 +26,8 @@ struct VertexOutput {
 struct BodyWireframeMaterialUniform {
     base_color: vec4<f32>,
     emission_strength: f32,
+    base_tube_radius: f32,
+    target_tube_radius: f32,
     num_suns: u32,
     sun_dir_0: vec4<f32>,
     sun_dir_1: vec4<f32>,
@@ -41,7 +43,11 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 
     var world_from_local = mesh_functions::get_world_from_local(vertex.instance_index);
 
-    out.world_position = mesh_functions::mesh_position_local_to_world(world_from_local, vec4(vertex.position, 1.0));
+    // Displace vertex along tube normal to adjust thickness without mesh rebuild.
+    let radius_delta = material.target_tube_radius - material.base_tube_radius;
+    let displaced_position = vertex.position + vertex.normal * radius_delta;
+
+    out.world_position = mesh_functions::mesh_position_local_to_world(world_from_local, vec4(displaced_position, 1.0));
     out.clip_position = position_world_to_clip(out.world_position.xyz);
     out.world_normal = mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex.instance_index);
     out.color = vertex.color;

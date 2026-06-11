@@ -73,8 +73,6 @@ pub struct BodyWireframeMesh {
     pub body_entity: Entity,
     /// Stored highlight latitudes for mesh regeneration
     pub highlight_latitudes: Vec<f64>,
-    /// Current tube radius used in the mesh (for change detection)
-    pub current_tube_radius: f32,
 }
 
 /// Component linking a body to its wireframe mesh entity.
@@ -86,8 +84,6 @@ pub struct BodyWireframeLink(pub Entity);
 pub struct TerminatorMesh {
     pub body_entity: Entity,
     pub star_entity: Entity,
-    /// Current tube radius used in the mesh (for change detection)
-    pub current_tube_radius: f32,
 }
 
 /// Component linking a body to its terminator mesh entities.
@@ -416,7 +412,6 @@ pub fn spawn_body_wireframe_meshes(
                     BodyWireframeMesh {
                         body_entity,
                         highlight_latitudes: highlight_lats.clone(),
-                        current_tube_radius: WIRE_TUBE_RADIUS,
                     },
                     ChildOf(body_entity),
                 ))
@@ -462,26 +457,21 @@ pub fn spawn_body_occluders(
 
 /// System to scale occluder meshes slightly smaller at distance to avoid z-fighting.
 pub fn update_occluder_scale(
-    cameras: Query<&GlobalTransform, With<PlanetariumCamera>>,
-    bodies: Query<(&Transform, Option<&BodyWireframeLink>), With<BodyInfo>>,
-    wireframes: Query<&BodyWireframeMesh>,
+    bodies: Query<Option<&BodyWireframeLink>, With<BodyInfo>>,
+    wireframes: Query<&MeshMaterial3d<BodyWireframeMaterial>, With<BodyWireframeMesh>>,
+    materials: Res<Assets<BodyWireframeMaterial>>,
     mut occluders: Query<(&OccluderMesh, &mut Transform, &ChildOf), Without<BodyInfo>>,
 ) {
-    let Ok(camera_global) = cameras.single() else {
-        return;
-    };
-    let _camera_pos = camera_global.translation();
-
     for (_occluder, mut occluder_transform, child_of) in occluders.iter_mut() {
-        let Ok((_body_transform, wireframe_link)) = bodies.get(child_of.parent()) else {
+        let Ok(wireframe_link) = bodies.get(child_of.parent()) else {
             continue;
         };
 
-        // Get the wireframe's current tube radius to know how much the lines have grown
-        // Use the BodyWireframeLink for O(1) lookup instead of iterating all wireframes
+        // Get the wireframe's current tube radius from its material uniform
         let tube_radius_ratio = wireframe_link
             .and_then(|link| wireframes.get(link.0).ok())
-            .map(|wf| wf.current_tube_radius / WIRE_TUBE_RADIUS)
+            .and_then(|mat_handle| materials.get(mat_handle.id()))
+            .map(|mat| mat.target_tube_radius / mat.base_tube_radius)
             .unwrap_or(1.0);
 
         // Scale occluder down as tube thickness increases.
@@ -549,7 +539,6 @@ pub fn spawn_terminator_meshes(
                         TerminatorMesh {
                             body_entity,
                             star_entity,
-                            current_tube_radius: WIRE_TUBE_RADIUS,
                         },
                         ChildOf(body_entity),
                     ))
@@ -573,15 +562,13 @@ fn vec4_approx_eq(a: Vec4, b: Vec4, epsilon: f32) -> bool {
 }
 
 /// System to update terminator meshes based on star positions.
-/// Mesh regeneration only happens when tube radius changes significantly.
+/// Tube thickness is updated via material uniform (vertex-shader displacement).
 /// Rotation is updated every frame via Transform (cheap).
-/// Also adjusts tube thickness based on distance from camera and fades
-/// terminators out when the body is too small on screen.
+/// Also fades terminators out when the body is too small on screen.
 pub fn update_terminator_meshes(
     cameras: Query<(&Camera, &GlobalTransform, &Projection), With<PlanetariumCamera>>,
-    mut terminators: Query<(&mut TerminatorMesh, &Mesh3d, &ChildOf, &mut Visibility, &MeshMaterial3d<BodyWireframeMaterial>, &mut Transform)>,
+    mut terminators: Query<(&TerminatorMesh, &ChildOf, &mut Visibility, &MeshMaterial3d<BodyWireframeMaterial>, &mut Transform)>,
     bodies: Query<(&Transform, &BodyState), Without<TerminatorMesh>>,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodyWireframeMaterial>>,
 ) {
     let Ok((camera, camera_global, projection)) = cameras.single() else {
@@ -599,7 +586,7 @@ pub fn update_terminator_meshes(
 
     let camera_pos = camera_global.translation();
 
-    for (mut terminator, mesh3d, child_of, mut visibility, material_handle, mut term_transform) in terminators.iter_mut() {
+    for (terminator, child_of, mut visibility, material_handle, mut term_transform) in terminators.iter_mut() {
         let Ok((body_transform, body_state)) = bodies.get(child_of.parent()) else {
             continue;
         };
@@ -632,16 +619,6 @@ pub fn update_terminator_meshes(
                 / (TERMINATOR_FADE_START_PX - TERMINATOR_FADE_END_PX)
         };
 
-        // Only update material if value changed to avoid spurious asset change detection
-        let new_emission = TERMINATOR_EMISSION_STRENGTH * fade;
-        if let Some(mat) = materials.get(material_handle.id()) {
-            if (mat.emission_strength - new_emission).abs() > 0.001 {
-                if let Some(mat) = materials.get_mut(material_handle.id()) {
-                    mat.emission_strength = new_emission;
-                }
-            }
-        }
-
         // Get star state
         let Ok((_, star_state)) = bodies.get(terminator.star_entity) else {
             continue;
@@ -666,23 +643,20 @@ pub fn update_terminator_meshes(
         let rotation = Quat::from_rotation_arc(TERMINATOR_CANONICAL_DIR, star_dir_local);
         term_transform.rotation = rotation;
 
-        // Only regenerate mesh when tube radius changes significantly (>5%)
-        let radius_ratio = tube_radius / terminator.current_tube_radius;
-        let radius_changed = radius_ratio < 0.95 || radius_ratio > 1.05;
-        
-        if !radius_changed {
-            continue;
-        }
+        // Update material uniform for emission fade and tube radius (with tolerance checks)
+        let new_emission = TERMINATOR_EMISSION_STRENGTH * fade;
+        if let Some(mat) = materials.get(material_handle.id()) {
+            let emission_changed = (mat.emission_strength - new_emission).abs() > 0.001;
+            let radius_ratio = tube_radius / mat.target_tube_radius;
+            let radius_changed = radius_ratio < 0.95 || radius_ratio > 1.05;
 
-        // Generate mesh with canonical direction - actual orientation comes from Transform
-        let new_mesh = generate_great_circle_tube(TERMINATOR_CANONICAL_DIR, tube_radius, TUBE_SIDES);
-
-        if let Some(mesh_asset) = meshes.get_mut(&mesh3d.0) {
-            *mesh_asset = new_mesh;
+            if emission_changed || radius_changed {
+                if let Some(mat) = materials.get_mut(material_handle.id()) {
+                    mat.emission_strength = new_emission;
+                    mat.target_tube_radius = tube_radius;
+                }
+            }
         }
-        
-        // Update cached tube radius
-        terminator.current_tube_radius = tube_radius;
     }
 }
 
@@ -847,20 +821,20 @@ pub fn update_occluder_lighting(
     }
 }
 
-/// System to update wireframe mesh tube thickness based on distance from camera.
-/// Regenerates meshes each frame to maintain minimum screen-space thickness.
+/// System to update wireframe tube thickness based on distance from camera.
+/// Updates the material uniform to drive vertex-shader displacement instead of regenerating meshes.
 pub fn update_wireframe_thickness(
     cameras: Query<&GlobalTransform, With<PlanetariumCamera>>,
     bodies: Query<(&Transform, &BodyInfo), With<BodyInfo>>,
-    mut wireframes: Query<(&mut BodyWireframeMesh, &Mesh3d, &ChildOf)>,
-    mut meshes: ResMut<Assets<Mesh>>,
+    wireframes: Query<(&BodyWireframeMesh, &MeshMaterial3d<BodyWireframeMaterial>, &ChildOf)>,
+    mut materials: ResMut<Assets<BodyWireframeMaterial>>,
 ) {
     let Ok(camera_global) = cameras.single() else {
         return;
     };
     let camera_pos = camera_global.translation();
 
-    for (mut wireframe, mesh3d, child_of) in wireframes.iter_mut() {
+    for (_wireframe, material_handle, child_of) in wireframes.iter() {
         let Ok((body_transform, _body_info)) = bodies.get(child_of.parent()) else {
             continue;
         };
@@ -871,21 +845,19 @@ pub fn update_wireframe_thickness(
 
         let required_radius = calculate_tube_radius_for_distance(body_scale, distance);
 
-        // Regenerate mesh if radius changed (with small tolerance to avoid unnecessary regeneration)
-        let ratio = required_radius / wireframe.current_tube_radius;
-        if ratio < 0.95 || ratio > 1.05 {
-            // Regenerate mesh with new tube radius
-            let new_mesh = generate_latlon_sphere(
-                &wireframe.highlight_latitudes,
-                required_radius,
-                TUBE_SIDES,
-            );
+        // Update material uniform if radius changed (with tolerance to avoid unnecessary uploads)
+        let needs_update = materials
+            .get(material_handle.id())
+            .map(|m| {
+                let ratio = required_radius / m.target_tube_radius;
+                ratio < 0.95 || ratio > 1.05
+            })
+            .unwrap_or(false);
 
-            if let Some(mesh_asset) = meshes.get_mut(&mesh3d.0) {
-                *mesh_asset = new_mesh;
+        if needs_update {
+            if let Some(mat) = materials.get_mut(material_handle.id()) {
+                mat.target_tube_radius = required_radius;
             }
-
-            wireframe.current_tube_radius = required_radius;
         }
     }
 }

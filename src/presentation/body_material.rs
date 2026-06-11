@@ -21,6 +21,14 @@ pub struct BodyWireframeMaterial {
     #[uniform(0)]
     pub emission_strength: f32,
 
+    /// Canonical tube radius baked into the mesh vertices.
+    #[uniform(0)]
+    pub base_tube_radius: f32,
+
+    /// Desired tube radius for this frame (shader displaces vertices along normals).
+    #[uniform(0)]
+    pub target_tube_radius: f32,
+
     #[uniform(0)]
     pub num_suns: u32,
 
@@ -39,11 +47,16 @@ pub struct BodyWireframeMaterial {
     pub alpha_mode: AlphaMode,
 }
 
+/// Canonical tube radius matching WIRE_TUBE_RADIUS in body_mesh.rs.
+pub const BASE_TUBE_RADIUS: f32 = 0.012;
+
 impl Default for BodyWireframeMaterial {
     fn default() -> Self {
         Self {
             base_color: LinearRgba::new(0.5, 0.5, 0.5, 1.0),
             emission_strength: 3.0,
+            base_tube_radius: BASE_TUBE_RADIUS,
+            target_tube_radius: BASE_TUBE_RADIUS,
             num_suns: 0,
             sun_dir_0: Vec4::ZERO,
             sun_dir_1: Vec4::ZERO,
