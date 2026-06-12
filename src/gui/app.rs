@@ -21,7 +21,7 @@ use crate::gui::util::debug::DebugPlugin;
 use crate::gui::util::ensure_folders;
 use crate::camera::{Freecam, PlanetariumCamera};
 use crate::catalog::load_catalogs;
-use crate::presentation::spawn_starfield;
+use crate::presentation::{spawn_local_starfield, spawn_starfield};
 
 pub fn run() {
     init();
@@ -46,7 +46,12 @@ pub fn run() {
             }))
         .insert_resource(settings)
         .init_resource::<Universe>()
-        .add_systems(Startup, (common_setup, load_catalogs, spawn_starfield.after(load_catalogs)))
+        .add_systems(Startup, (
+            common_setup,
+            load_catalogs,
+            spawn_starfield.after(load_catalogs),
+            spawn_local_starfield.after(spawn_starfield),
+        ))
         .add_systems(Update, close_when_requested)
         .insert_state(AppState::Splash)
         .insert_resource(ClearColor(Color::BLACK))

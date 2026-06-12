@@ -61,6 +61,12 @@ pub struct DisplaySettings {
     /// Brightness multiplier for background stars (0.1 to 10.0).
     #[serde(default = "default_star_brightness")]
     pub star_brightness: f32,
+    /// Local-star billboard brightness at 1 lightyear (inverse-square normalized floor).
+    #[serde(default = "default_local_star_brightness_min")]
+    pub local_star_brightness_min: f32,
+    /// Local-star billboard brightness at 1 meter (inverse-square normalized ceiling).
+    #[serde(default = "default_local_star_brightness_max")]
+    pub local_star_brightness_max: f32,
     /// Angular radius (arcminutes) of the faintest catalog stars.
     #[serde(default = "default_star_radius_min")]
     pub star_radius_min: f32,
@@ -95,6 +101,14 @@ pub struct DisplaySettings {
 }
 
 fn default_star_brightness() -> f32 {
+    110.0
+}
+
+fn default_local_star_brightness_min() -> f32 {
+    0.8
+}
+
+fn default_local_star_brightness_max() -> f32 {
     110.0
 }
 
@@ -149,6 +163,8 @@ impl Default for DisplaySettings {
             trajectory_brightness_front: default_trajectory_brightness_front(),
             trajectory_brightness_back: default_trajectory_brightness_back(),
             star_brightness: default_star_brightness(),
+            local_star_brightness_min: default_local_star_brightness_min(),
+            local_star_brightness_max: default_local_star_brightness_max(),
             star_radius_min: default_star_radius_min(),
             star_radius_max: default_star_radius_max(),
             body_brightness_floor: default_body_brightness_floor(),

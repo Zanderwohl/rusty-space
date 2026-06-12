@@ -11,6 +11,8 @@ mod body_point_material;
 mod celestial_markers;
 mod lights;
 mod labels;
+mod local_starfield;
+mod local_starfield_material;
 mod rotation;
 mod star_cache;
 mod starfield;
@@ -39,6 +41,8 @@ pub use body_mesh::{
 };
 pub use lights::adjust_lights;
 pub use labels::label_bodies;
+pub use local_starfield::{spawn_local_starfield, update_local_starfield, clear_local_starfield, LocalStarfield};
+pub use local_starfield_material::{LocalStarfieldMaterial, LocalStarfieldMaterialPlugin};
 pub use rotation::orient_bodies;
 pub use trajectory::{
     build_trajectory_meshes,

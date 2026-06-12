@@ -16,7 +16,7 @@ use crate::camera::Freecam;
 pub use crate::gui::planetarium::focused_body::FocusedBodyState;
 pub use crate::gui::planetarium::focused_body::{HoverState, HoveredTrajectoryMarkerKind, TrajectoryHitData};
 pub use crate::gui::planetarium::windows::mission_clock::{MissionClockMode, MissionClockSettings, format_sim_time_for_mode};
-use crate::presentation::{self, BodyWireframeMaterial, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, TrajectoryMesh, BodyPointMesh, FocusedTrajectoryMarker, StarLightingFrameCache};
+use crate::presentation::{self, BodyWireframeMaterial, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, LocalStarfieldMaterialPlugin, TrajectoryMesh, BodyPointMesh, FocusedTrajectoryMarker, StarLightingFrameCache};
 use crate::gui::menu::escape::{EscapeMenuPlugin, EscMenuContext, EscMenuState, UnsavedChanges};
 
 mod windows;
@@ -45,6 +45,7 @@ impl Plugin for PlanetariumUI {
             .init_resource::<PositionCache>()
             .init_resource::<SimulationPerformanceMetrics>()
             .init_resource::<StarLightingFrameCache>()
+            .init_resource::<windows::right_panels::RightPanels>()
             .add_message::<CalculateTrajectory>()
             .configure_sets(Update, (
                 PlanetariumUISet.run_if(in_state(AppState::Planetarium)),
@@ -56,6 +57,7 @@ impl Plugin for PlanetariumUI {
             .add_plugins(OccluderMaterialPlugin)
             .add_plugins(BodyPointMaterialPlugin)
             .add_plugins(StarfieldMaterialPlugin)
+            .add_plugins(LocalStarfieldMaterialPlugin)
             .add_plugins(EscapeMenuPlugin)
             .add_systems(EguiPrimaryContextPass, (
                 (
@@ -66,6 +68,7 @@ impl Plugin for PlanetariumUI {
                     windows::settings::settings_window,
                     windows::spin::spin_window,
                     windows::show_hide_panel::show_hide_panel_widget,
+                    windows::right_panels::right_panels_widget,
                     ).run_if(in_state(AppState::Planetarium)),
                 ))
             // Core simulation and position systems
@@ -141,15 +144,26 @@ impl Plugin for PlanetariumUI {
             // Starfield brightness updates (via buffer, not material mutation)
             .add_systems(Update, (
                 presentation::update_starfield_brightness,
+                presentation::update_local_starfield
+                    .after(presentation::position_bodies),
             ).in_set(PlanetariumUISet))
             // Asset loading
             .add_systems(Update, (load_assets).in_set(PlanetariumLoadingSet))
-            .add_systems(OnExit(AppState::PlanetariumLoading), initial_trajectories)
+            .add_systems(Update, (
+                windows::right_panels::update_right_drawer,
+                windows::right_panels::sync_panel_zones,
+            ).in_set(PlanetariumUISet))
+            .add_systems(OnExit(AppState::PlanetariumLoading), (
+                initial_trajectories,
+                windows::right_panels::spawn_right_drawer,
+            ))
             .add_systems(OnExit(AppState::Planetarium), (
                 unload_simulation_objects,
                 presentation::cleanup_celestial_markers,
                 hide_settings_window_on_planetarium_exit,
                 cleanup_planetarium,
+                presentation::clear_local_starfield,
+                windows::right_panels::despawn_right_drawer,
             ))
         ;
 

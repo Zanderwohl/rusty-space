@@ -107,6 +107,20 @@ fn display_tab(settings: &mut Settings, camera: Option<CameraControls>, ui: &mut
 
     ui.add_space(8.0);
     ui.label(RichText::new("Distant Objects").strong());
+    let local_star_max = settings.display.local_star_brightness_max;
+    let local_star_min_resp = ui.add(egui::Slider::new(&mut settings.display.local_star_brightness_min, 0.1..=500.0)
+        .logarithmic(true)
+        .text("Local Star Brightness Min"));
+    if local_star_min_resp.changed() {
+        settings.display.local_star_brightness_min = settings.display.local_star_brightness_min.min(local_star_max);
+    }
+    let local_star_min = settings.display.local_star_brightness_min;
+    let local_star_max_resp = ui.add(egui::Slider::new(&mut settings.display.local_star_brightness_max, 0.1..=500.0)
+        .logarithmic(true)
+        .text("Local Star Brightness Max"));
+    if local_star_max_resp.changed() {
+        settings.display.local_star_brightness_max = settings.display.local_star_brightness_max.max(local_star_min);
+    }
     ui.add(egui::Slider::new(&mut settings.display.star_brightness, 0.1..=500.0)
         .logarithmic(true)
         .text("Star Brightness"));
@@ -128,7 +142,7 @@ fn display_tab(settings: &mut Settings, camera: Option<CameraControls>, ui: &mut
         settings.display.star_radius_max = settings.display.star_radius_max.max(radius_min);
     }
 
-    ui.add(egui::Slider::new(&mut settings.display.body_brightness_floor, 0.0..=0.02)
+    ui.add(egui::Slider::new(&mut settings.display.body_brightness_floor, 0.0..=0.1)
         .text("Body Brightness Floor"))
         .on_hover_text("Minimum brightness a sun-lit distant body can fade to.\n0 lets bodies in full shadow disappear.");
     // Body dot radius range (screen px). Keep min <= max while dragging either slider.
