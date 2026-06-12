@@ -189,9 +189,18 @@ pub fn right_panels_widget(
     // Track if any panel was turned on or off
     let mut panel_turned_on = false;
     let mut panel_turned_off = false;
+    let mut reopen_drawer_from_open_panel_click = false;
+    let drawer_is_closed = matches!(right_panels.state, RightPanelState::Closed);
 
     for idx in clicked_indices {
         if let Some(panel) = right_panels.panels.get_mut(idx) {
+            if drawer_is_closed && panel.open {
+                // If the drawer is closed, clicking an already-open panel should reopen the drawer
+                // rather than toggling that panel off.
+                reopen_drawer_from_open_panel_click = true;
+                continue;
+            }
+
             let was_open = panel.open;
             panel.open = !panel.open;
             if panel.open && !was_open {
@@ -218,6 +227,8 @@ pub fn right_panels_widget(
     } else {
         // Auto-transition only on actual panel state changes
         right_panels.state = match &right_panels.state {
+            // Re-open drawer when user clicks a panel that is already open.
+            RightPanelState::Closed if reopen_drawer_from_open_panel_click => RightPanelState::Opening(now),
             // Auto-open when a panel is turned ON while drawer is closed
             RightPanelState::Closed if panel_turned_on => RightPanelState::Opening(now),
             // Auto-close when last panel is turned OFF while drawer is open
