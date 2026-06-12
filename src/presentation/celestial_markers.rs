@@ -15,7 +15,7 @@ use crate::body::universe::save::ViewSettings;
 use crate::camera::{Freecam, PlanetariumCamera};
 use crate::util::bevystuff::GlamVec;
 
-use super::trajectory_material::TrajectoryMaterial;
+use super::trajectory_material::{TrajectoryMaterial, TRAJECTORY_BASE_TUBE_RADIUS};
 
 const LIGHT_YEAR_M: f64 = 9.460_730_472_580_8e15;
 
@@ -110,6 +110,9 @@ pub fn sync_celestial_markers(
         base_color: LinearRgba::new(0.85, 0.55, 0.15, 1.0),
         brightness_threshold: 0.3,
         emission_strength: 4.0,
+        base_tube_radius: TRAJECTORY_BASE_TUBE_RADIUS,
+        target_tube_radius: TRAJECTORY_BASE_TUBE_RADIUS,
+        dynamic_thickness: 0.0,
         // Identity range: markers bake their final brightness into vertex alpha.
         front: 0.0,
         back: 1.0,

@@ -31,6 +31,9 @@ struct TrajectoryMaterialUniform {
     base_color: vec4<f32>,
     brightness_threshold: f32,
     emission_strength: f32,
+    base_tube_radius: f32,
+    target_tube_radius: f32,
+    dynamic_thickness: f32,
     front: f32,
     back: f32,
     exposure: f32,
@@ -45,9 +48,36 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     
     // Get the model matrix for this instance
     var world_from_local = mesh_functions::get_world_from_local(vertex.instance_index);
+
+    // Base world position for per-vertex distance-to-origin thickness scaling.
+    let base_world_position = mesh_functions::mesh_position_local_to_world(world_from_local, vec4(vertex.position, 1.0));
+    let distance_from_origin = length(base_world_position.xyz);
+
+    // Match CPU thickness curve: power-law with angular floor and hard clamps.
+    let min_tube_radius = 0.000005;
+    let max_tube_radius = 1000.0;
+    let reference_distance = 10.0;
+    let radius_scale_power = 0.75;
+    let min_angular_size = 0.0005;
+    let scale_factor = pow(max(distance_from_origin, 0.000001) / reference_distance, radius_scale_power);
+    let dynamic_radius = clamp(
+        max(material.base_tube_radius * scale_factor, min_angular_size * distance_from_origin),
+        min_tube_radius,
+        max_tube_radius
+    );
+
+    let desired_radius = select(
+        material.target_tube_radius,
+        dynamic_radius,
+        material.dynamic_thickness > 0.5
+    );
+
+    // Displace vertex along tube normal to adjust thickness without mesh rebuild.
+    let radius_delta = desired_radius - material.base_tube_radius;
+    let displaced_position = vertex.position + vertex.normal * radius_delta;
     
     // Transform position to world space
-    out.world_position = mesh_functions::mesh_position_local_to_world(world_from_local, vec4(vertex.position, 1.0));
+    out.world_position = mesh_functions::mesh_position_local_to_world(world_from_local, vec4(displaced_position, 1.0));
     
     // Transform to clip space
     out.clip_position = position_world_to_clip(out.world_position.xyz);

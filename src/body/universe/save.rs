@@ -255,7 +255,7 @@ impl Default for ViewSettings {
             show_selected_trajectories: true,
             show_axes: true,
             tags: HashMap::new(),
-            trajectory_resolution: 240,
+            trajectory_resolution: 120,
         }
     }
 }

@@ -4,6 +4,9 @@ use bevy::prelude::*;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
 
+/// Canonical tube radius baked into trajectory tube meshes.
+pub const TRAJECTORY_BASE_TUBE_RADIUS: f32 = 0.05;
+
 /// Custom material for trajectory tubes.
 /// 
 /// Brightness is encoded in vertex color alpha. The shader outputs:
@@ -22,6 +25,19 @@ pub struct TrajectoryMaterial {
     /// Emission multiplier for bright segments (controls bloom intensity)
     #[uniform(0)]
     pub emission_strength: f32,
+
+    /// Canonical tube radius baked into mesh vertices.
+    #[uniform(0)]
+    pub base_tube_radius: f32,
+
+    /// Desired tube radius for this frame (shader displaces vertices along normals).
+    #[uniform(0)]
+    pub target_tube_radius: f32,
+
+    /// When > 0.5, trajectory vertex shader computes tube thickness from each
+    /// vertex's world-space distance to the origin.
+    #[uniform(0)]
+    pub dynamic_thickness: f32,
 
     /// Brightness (0..1) at the front/leading end of the trajectory.
     /// The shader lerps `front -> back` using the per-vertex factor in vertex alpha.
@@ -54,6 +70,9 @@ impl Default for TrajectoryMaterial {
             base_color: LinearRgba::new(0.12, 0.85, 0.45, 1.0), // VFD green with slight blue tint
             brightness_threshold: 0.3,
             emission_strength: 4.0,
+            base_tube_radius: TRAJECTORY_BASE_TUBE_RADIUS,
+            target_tube_radius: TRAJECTORY_BASE_TUBE_RADIUS,
+            dynamic_thickness: 1.0,
             front: 0.0,
             back: 1.0,
             exposure: 0.0,

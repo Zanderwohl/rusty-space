@@ -7,7 +7,7 @@ use std::f32::consts::PI;
 use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
-use bevy::math::DVec3;
+use bevy::math::{DQuat, DVec3};
 use bevy::render::view::ColorGrading;
 use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 
@@ -19,12 +19,11 @@ use crate::camera::{Freecam, PlanetariumCamera};
 use crate::gui::planetarium::{FocusedBodyState, HoverState, HoveredTrajectoryMarkerKind};
 use crate::gui::planetarium::{format_sim_time_for_mode, MissionClockMode, MissionClockSettings};
 use crate::gui::settings::Settings;
-use crate::sim::{BodySelection, CalculateTrajectory, SimTime};
-use crate::util::bevystuff::GlamVec;
+use crate::sim::SimTime;
+use crate::util::bevystuff::{GlamQuat, GlamVec};
 use bevy_egui::{egui, EguiContexts};
-use bevy::ecs::message::MessageWriter;
 
-use super::trajectory_material::TrajectoryMaterial;
+use super::trajectory_material::{TrajectoryMaterial, TRAJECTORY_BASE_TUBE_RADIUS};
 
 /// Marker component for trajectory mesh entities.
 #[derive(Component)]
@@ -55,9 +54,6 @@ pub struct FocusedTrajectoryMarker {
     cached_clock_mode: Option<MissionClockMode>,
 }
 
-/// How often to rebuild trajectories for precessing orbits (in simulation seconds)
-const PRECESSION_REBUILD_INTERVAL: f64 = 86400.0; // One Julian day
-
 /// Cached trajectory data to avoid recomputing from TimeMap every frame.
 /// Only rebuilt when orbital parameters change.
 #[derive(Component, Default)]
@@ -78,6 +74,9 @@ pub struct TrajectoryCache {
     /// Whether this orbit has precession (apsidal or nodal).
     /// Precessing orbits need periodic trajectory recalculation.
     pub is_precessing: bool,
+    /// Rotation from perifocal to reference frame captured when `local_points`
+    /// were last rebuilt.
+    pub base_perifocal_to_reference: Option<DQuat>,
     /// Simulation time (J2000 seconds) when trajectory was last rebuilt.
     /// Used to trigger periodic rebuilds for precessing orbits.
     pub last_rebuild_time: f64,
@@ -94,62 +93,12 @@ pub struct TrajectoryCache {
 
 pub fn build_working_trajectory_points(
     cache: &TrajectoryCache,
-    current_local_position: Option<DVec3>,
-    body_radius: f64,
-    sim_time_seconds: f64,
+    _current_local_position: Option<DVec3>,
+    _body_radius: f64,
+    _sim_time_seconds: f64,
     include_closing_duplicate: bool,
 ) -> Vec<(f64, DVec3)> {
-    let cycle_frac = if let (Some(interval_start), Some(interval_size)) = (cache.interval_start, cache.interval_size) {
-        let elapsed = sim_time_seconds - interval_start;
-        let position_in_cycle = elapsed % interval_size;
-        let normalized = if position_in_cycle < 0.0 {
-            position_in_cycle + interval_size
-        } else {
-            position_in_cycle
-        };
-        normalized / interval_size
-    } else {
-        0.0
-    };
-
     let mut points: Vec<(f64, DVec3)> = cache.local_points.clone();
-    if !cache.is_precessing {
-        if let (Some(local_pos), Some(interval_size)) = (current_local_position, cache.interval_size) {
-            let current_relative_time = cycle_frac * interval_size;
-            if let Some(seg) = points.windows(2).position(|w| {
-                current_relative_time >= w[0].0 && current_relative_time < w[1].0
-            }) {
-                let dist_before = (local_pos - points[seg].1).length();
-                let dist_after = (local_pos - points[seg + 1].1).length();
-                if dist_before >= body_radius && dist_after >= body_radius {
-                    let pos_a = points[seg].1;
-                    let pos_b = points[seg + 1].1;
-                    let time_a = points[seg].0;
-                    let time_b = points[seg + 1].0;
-                    let neighbor_count = TRANSIENT_POINT_N / 2;
-                    let mut transient_points: Vec<(f64, DVec3)> = Vec::new();
-                    for i in (1..=neighbor_count).rev() {
-                        let t = i as f64 / (neighbor_count + 1) as f64;
-                        let pos = pos_a.lerp(local_pos, t);
-                        let time = time_a + (current_relative_time - time_a) * t;
-                        transient_points.push((time, pos));
-                    }
-                    transient_points.push((current_relative_time, local_pos));
-                    transient_points.push((current_relative_time + 0.0001, local_pos));
-                    for i in 1..=neighbor_count {
-                        let t = i as f64 / (neighbor_count + 1) as f64;
-                        let pos = local_pos.lerp(pos_b, t);
-                        let time = current_relative_time + (time_b - current_relative_time) * t;
-                        transient_points.push((time, pos));
-                    }
-                    let insert_pos = seg + 1;
-                    for (i, pt) in transient_points.iter().enumerate() {
-                        points.insert(insert_pos + i, *pt);
-                    }
-                }
-            }
-        }
-    }
 
     if include_closing_duplicate && cache.closed && !points.is_empty() {
         let first = points[0];
@@ -172,9 +121,6 @@ const MAX_TUBE_RADIUS: f32 = 1000.0;
 /// Reference distance for radius scaling (radius = base at this distance)
 const REFERENCE_DISTANCE: f32 = 10.0;
 
-/// Base radius at reference distance
-const BASE_TUBE_RADIUS: f32 = 0.015;
-
 /// Power for distance-to-radius scaling. Higher = more constant screen-space size.
 /// 1.0 would be perfectly constant angular size; 0.5 is sqrt.
 const RADIUS_SCALE_POWER: f32 = 0.75;
@@ -191,12 +137,6 @@ const DISTANCE_DIM_POWER: f32 = 0.4;
 
 /// Minimum dimming factor - distant trajectories never go fully invisible.
 const DISTANCE_DIM_MIN: f32 = 0.01;
-
-/// Number of transient points to insert (T and T' count as 2, plus neighbors on each side)
-const TRANSIENT_POINT_N: usize = 5;
-
-/// Spacing between transient point neighbors in radians (5 degrees)
-const TRANSIENT_SPACING: f64 = 0.05 * std::f64::consts::PI / 180.0;
 
 /// Build an empty mesh that still declares the vertex layout required by
 /// `trajectory.wgsl` (position, normal, color). This prevents pipeline
@@ -227,7 +167,7 @@ pub fn calculate_tube_radius(distance_from_camera: f32) -> f32 {
     
     // Power curve: closer to 1.0 = more constant screen-space appearance
     let scale_factor = (distance_from_camera / REFERENCE_DISTANCE).powf(RADIUS_SCALE_POWER);
-    let radius = BASE_TUBE_RADIUS * scale_factor;
+    let radius = TRAJECTORY_BASE_TUBE_RADIUS * scale_factor;
     
     // Floor: ensure minimum angular size to avoid sub-pixel flicker at extreme distance
     let angular_floor = MIN_ANGULAR_SIZE * distance_from_camera;
@@ -304,16 +244,17 @@ pub fn rebuild_trajectory_caches(
             continue;
         }
         
-        // Get primary_id and check for precession
-        let (primary_id, is_precessing) = match motive.motive_at(crate::foundations::time::Instant::J2000) {
+        // Get primary_id, precession flag, and current perifocal->reference rotation.
+        let (primary_id, is_precessing, base_perifocal_to_reference) = match motive.motive_at(sim_time.time) {
             (_, MotiveSelection::Keplerian(k)) => {
                 let precessing = matches!(
                     k.rotation,
                     crate::body::motive::kepler_motive::KeplerRotation::PrecessingEulerAngles(_)
                 );
-                (Some(k.primary_id.clone()), precessing)
+                let rot = DQuat::from_mat3(&k.perifocal_to_reference_matrix(sim_time.time));
+                (Some(k.primary_id.clone()), precessing, Some(rot))
             },
-            _ => (None, false),
+            _ => (None, false, None),
         };
         
         // Collect points from TimeMap (local displacements)
@@ -332,6 +273,7 @@ pub fn rebuild_trajectory_caches(
         
         cache.primary_id = primary_id.clone();
         cache.is_precessing = is_precessing;
+        cache.base_perifocal_to_reference = base_perifocal_to_reference;
         cache.last_rebuild_time = sim_time.time.to_j2000_seconds();
         cache.valid = true;
         cache.mesh_dirty = true; // Trigger mesh rebuild
@@ -339,44 +281,13 @@ pub fn rebuild_trajectory_caches(
     }
 }
 
-/// System to trigger trajectory recalculation for precessing orbits periodically.
-/// Precessing orbits drift from their cached trajectory over time.
-pub fn refresh_precessing_trajectories(
-    mut trajectory_meshes: Query<(&TrajectoryMesh, &mut TrajectoryCache)>,
-    bodies: Query<&BodyInfo>,
-    sim_time: Res<SimTime>,
-    mut calc_writer: MessageWriter<CalculateTrajectory>,
-) {
-    let current_time = sim_time.time.to_j2000_seconds();
-    
-    for (traj_mesh, mut cache) in trajectory_meshes.iter_mut() {
-        // Only check precessing orbits with valid caches
-        if !cache.is_precessing || !cache.valid {
-            continue;
-        }
-        
-        // Check if enough simulation time has passed since last rebuild
-        let time_since_rebuild = (current_time - cache.last_rebuild_time).abs();
-        if time_since_rebuild >= PRECESSION_REBUILD_INTERVAL {
-            // Get the body's ID to request trajectory recalculation
-            if let Ok(info) = bodies.get(traj_mesh.body_entity) {
-                calc_writer.write(CalculateTrajectory {
-                    selection: BodySelection::IDs(vec![info.id.clone()]),
-                });
-                
-                // Invalidate cache so rebuild_trajectory_caches will update it
-                cache.valid = false;
-            }
-        }
-    }
-}
-
-/// Threshold for camera movement before mesh rebuild (in bevy units)
-const CAMERA_MOVE_THRESHOLD: f64 = 0.005;
+/// Precession is now handled by per-frame transform rotation in
+/// `build_trajectory_meshes`, so no periodic trajectory recalculation is needed.
+pub fn refresh_precessing_trajectories() {}
 
 /// Main system to build trajectory meshes each frame.
-/// Reads cached points, inserts transient point, applies transforms, computes brightness, generates tube geometry.
-/// Skips mesh regeneration when camera and sim time haven't changed significantly.
+/// Reads cached points, applies transforms, computes brightness, generates tube geometry.
+/// Skips mesh regeneration when the cache is unchanged.
 pub fn build_trajectory_meshes(
     bodies: Query<(&BodyState, &BodyInfo, &Motive, Option<&Appearance>)>,
     mut trajectory_meshes: Query<(&TrajectoryMesh, &mut TrajectoryCache, &mut Visibility, &Mesh3d, &mut Transform)>,
@@ -390,7 +301,6 @@ pub fn build_trajectory_meshes(
     _physics: Res<UniversePhysics>,
 ) {
     let distance_scale = view_settings.distance_factor();
-    let current_time = sim_time.time.to_j2000_seconds();
     let camera_pos = fcam.bevy_pos;
     // Brightness (front/back range + exposure) is applied live in the shader via
     // material uniforms; the mesh only bakes the geometric along-length factor `t`
@@ -405,7 +315,7 @@ pub fn build_trajectory_meshes(
         }
 
         // Find the body this trajectory belongs to using direct entity lookup (O(1))
-        let Ok((state, info, _motive, appearance)) = bodies.get(traj_mesh.body_entity) else {
+        let Ok((state, info, motive, _appearance)) = bodies.get(traj_mesh.body_entity) else {
             if *visibility != Visibility::Hidden {
                 *visibility = Visibility::Hidden;
             }
@@ -436,39 +346,11 @@ pub fn build_trajectory_meshes(
             *visibility = Visibility::Visible;
             cache.mesh_dirty = true;
         }
-        
-        // Check if we need to rebuild the mesh
-        let camera_moved = cache.last_camera_pos
-            .map(|last| (last - camera_pos).length() > CAMERA_MOVE_THRESHOLD)
-            .unwrap_or(true);
-        let time_changed = (cache.last_mesh_time - current_time).abs() > 0.001;
-        let _focused_matches = focused_body_state
-            .current_body_id
-            .as_ref()
-            .map(|id| id == &info.id)
-            .unwrap_or(false);
-        
-        // Skip mesh regeneration if nothing relevant changed
-        if !cache.mesh_dirty && !camera_moved && !time_changed {
-            continue;
-        }
-        
-        // Calculate cycle fraction for brightness and transient insertion
-        let cycle_frac = if let (Some(interval_start), Some(interval_size)) = (cache.interval_start, cache.interval_size) {
-            let elapsed = sim_time.time.to_j2000_seconds() - interval_start;
-            let position_in_cycle = elapsed % interval_size;
-            let normalized = if position_in_cycle < 0.0 {
-                position_in_cycle + interval_size
-            } else {
-                position_in_cycle
-            };
-            normalized / interval_size
-        } else {
-            0.0
-        };
-        
-        // Get primary offset for Keplerian orbits using O(1) lookup via PhysicsGraph
-        let primary_offset: Option<DVec3> = cache
+
+        // Update trajectory transform every frame:
+        // - translation anchors the mesh at the primary focus
+        // - rotation applies current perifocal->reference orientation
+        let primary_world_pos = cache
             .primary_id
             .as_ref()
             .and_then(|pid| {
@@ -476,85 +358,100 @@ pub fn build_trajectory_meshes(
                     .id_to_entity
                     .get(pid)
                     .and_then(|entity| bodies.get(*entity).ok())
-                    .and_then(|(primary_state, _, _, _)| {
-                        if primary_state.trajectory.is_none() { return None; }
-                        Some(primary_state.current_position)
-                    })
-            });
+                    .map(|(primary_state, _, _, _)| primary_state.current_position)
+            })
+            .unwrap_or(DVec3::ZERO);
+        transform.translation = primary_world_pos.as_bevy_scaled_cheated(distance_scale, camera_pos);
+
+        let current_perifocal_to_reference = match motive.motive_at(sim_time.time) {
+            (_, MotiveSelection::Keplerian(k)) => Some(DQuat::from_mat3(&k.perifocal_to_reference_matrix(sim_time.time))),
+            _ => None,
+        };
+        let local_rotation = current_perifocal_to_reference.unwrap_or(DQuat::IDENTITY);
+        transform.rotation = local_rotation.as_bevy();
         
-        // Build the working point list with transient point insertion
+        // Rebuild when trajectory data changed OR simulation time advanced.
+        // Time-driven rebuild keeps the bright hotspot moving with the body.
+        let current_time = sim_time.time.to_j2000_seconds();
+        let time_changed = (cache.last_mesh_time - current_time).abs() > 0.001;
+        if !cache.mesh_dirty && !time_changed {
+            continue;
+        }
+        
+        let current_relative_time = if let (Some(interval_start), Some(interval_size)) =
+            (cache.interval_start, cache.interval_size)
+        {
+            let elapsed = current_time - interval_start;
+            let position_in_cycle = elapsed % interval_size;
+            let normalized = if position_in_cycle < 0.0 {
+                position_in_cycle + interval_size
+            } else {
+                position_in_cycle
+            };
+            Some(normalized)
+        } else {
+            None
+        };
+
+        // Build the working point list from cached trajectory points.
+        // Insert a paired transient at the exact body location to collapse the
+        // dark->bright transition into a near-zero spatial span (inside body).
         // Reuse scratch buffer to avoid per-frame allocations
         cache.working_points.clear();
-        let mut transient_idx: Option<usize> = None;
-        let mut transient_prime_idx: Option<usize> = None;
-        
-        // Calculate expected capacity: base points + transient points + closing point
-        let transient_count = TRANSIENT_POINT_N + 2; // neighbors + T + T'
+
+        // Calculate expected capacity: base points + two transients + closing point
         let closing_extra = if cache.closed { 1 } else { 0 };
-        let expected_capacity = cache.local_points.len() + transient_count + closing_extra;
+        let expected_capacity = cache.local_points.len() + 2 + closing_extra;
         cache.working_points.reserve(expected_capacity);
-        
-        // Find transient insertion segment if applicable
-        let transient_info: Option<(usize, DVec3, f64, DVec3, DVec3, f64, f64)> = if !cache.is_precessing {
-            if let (Some(local_pos), Some(interval_size)) = (state.current_local_position, cache.interval_size) {
-                let current_relative_time = cycle_frac * interval_size;
-                let body_radius = appearance.map(|a| a.radius()).unwrap_or(0.0);
-                
-                cache.local_points.windows(2).enumerate().find_map(|(seg, w)| {
-                    if current_relative_time >= w[0].0 && current_relative_time < w[1].0 {
-                        let dist_before = (local_pos - w[0].1).length();
-                        let dist_after = (local_pos - w[1].1).length();
-                        if dist_before >= body_radius && dist_after >= body_radius {
-                            Some((seg, local_pos, current_relative_time, w[0].1, w[1].1, w[0].0, w[1].0))
-                        } else {
-                            None
-                        }
+        let local_points_snapshot = cache.local_points.clone();
+
+        // Find the segment containing the current orbital phase and insert two
+        // transient samples at the body's exact current local position:
+        // - T- slightly before now (remains dark/trailing)
+        // - T  at now (bright/front anchor)
+        let transient_info: Option<(usize, f64, f64, DVec3)> = if let (Some(local_pos), Some(now_rel)) =
+            (state.current_local_position, current_relative_time)
+        {
+            // Cached trajectory points are in the cache/base reference frame.
+            // For precessing orbits, body local position is in the current frame,
+            // so convert it back into the cache/base frame before insertion.
+            let local_pos_in_cache_frame = if let Some(current_rot) = current_perifocal_to_reference {
+                let base_rot = cache.base_perifocal_to_reference.unwrap_or(current_rot);
+                let perifocal = current_rot.inverse() * local_pos;
+                base_rot * perifocal
+            } else {
+                local_pos
+            };
+
+            local_points_snapshot
+                .windows(2)
+                .enumerate()
+                .find_map(|(seg, w)| {
+                    let time_a = w[0].0;
+                    let time_b = w[1].0;
+                    let on_segment = now_rel >= time_a && now_rel < time_b;
+                    let at_endpoint = (now_rel - time_a).abs() < 1e-9 || (now_rel - time_b).abs() < 1e-9;
+                    if on_segment && !at_endpoint {
+                        let span_before = now_rel - time_a;
+                        let span_after = time_b - now_rel;
+                        let transient_dt = (span_before.min(span_after) * 0.25).max(1e-9);
+                        let t_before = now_rel - transient_dt;
+                        Some((seg, t_before, now_rel, local_pos_in_cache_frame))
                     } else {
                         None
                     }
                 })
-            } else {
-                None
-            }
         } else {
             None
         };
-        
-        // Build points in a single pass, inserting transient points at the right position
-        // Use index-based iteration to avoid borrow conflicts
-        let local_points_len = cache.local_points.len();
-        for idx in 0..local_points_len {
-            // Insert transient points after the segment start point
-            if let Some((seg, local_pos, current_relative_time, pos_a, pos_b, time_a, time_b)) = transient_info {
+
+        for (idx, pt) in local_points_snapshot.iter().copied().enumerate() {
+            if let Some((seg, transient_time_before, transient_time_now, transient_pos)) = transient_info {
                 if idx == seg + 1 {
-                    let neighbor_count = TRANSIENT_POINT_N / 2;
-                    
-                    // Wake neighbors: interpolate between A and T
-                    for i in (1..=neighbor_count).rev() {
-                        let t = i as f64 / (neighbor_count + 1) as f64;
-                        let pos = pos_a.lerp(local_pos, t);
-                        let time = time_a + (current_relative_time - time_a) * t;
-                        cache.working_points.push((time, pos));
-                    }
-                    
-                    // T (brightest) - body's actual position
-                    transient_idx = Some(cache.working_points.len());
-                    cache.working_points.push((current_relative_time, local_pos));
-                    
-                    // T' (dimmest, same position as T)
-                    transient_prime_idx = Some(cache.working_points.len());
-                    cache.working_points.push((current_relative_time + 0.0001, local_pos));
-                    
-                    // Future neighbors: interpolate between T and B
-                    for i in 1..=neighbor_count {
-                        let t = i as f64 / (neighbor_count + 1) as f64;
-                        let pos = local_pos.lerp(pos_b, t);
-                        let time = current_relative_time + (time_b - current_relative_time) * t;
-                        cache.working_points.push((time, pos));
-                    }
+                    cache.working_points.push((transient_time_before, transient_pos));
+                    cache.working_points.push((transient_time_now, transient_pos));
                 }
             }
-            let pt = cache.local_points[idx];
             cache.working_points.push(pt);
         }
         
@@ -573,32 +470,40 @@ pub fn build_trajectory_meshes(
             continue;
         }
         
-        // Transform points to Bevy space and compute brightness + radius
+        // Convert points into perifocal-space mesh-local coordinates and compute
+        // brightness + radius.
         let point_count = points.len();
-        
+        let base_perifocal_to_reference = cache.base_perifocal_to_reference.unwrap_or(DQuat::IDENTITY);
+        let base_reference_to_perifocal = base_perifocal_to_reference.inverse();
+        let current_perifocal_to_reference = current_perifocal_to_reference.unwrap_or(base_perifocal_to_reference);
+
         // Points now include: (position, t, amplitude, radius)
-        let transformed_points: Vec<(Vec3, f32, f32, f32)> = points.iter().enumerate().map(|(idx, (_, pos))| {
-            // Apply primary offset
-            let world_pos = match primary_offset {
-                Some(offset) => *pos + offset,
-                None => *pos,
-            };
+        let transformed_points: Vec<(Vec3, f32, f32, f32)> = points
+            .iter()
+            .enumerate()
+            .map(|(idx, (point_time, pos))| {
+            // Convert cached reference-space trajectory point to perifocal-space
+            // mesh-local coordinates.
+            let perifocal_pos = base_reference_to_perifocal * *pos;
+            let mesh_local_bevy = perifocal_pos.as_bevy_scaled(distance_scale);
+
+            // Estimate current world-space position for distance-based dimming.
+            let current_reference_pos = current_perifocal_to_reference * perifocal_pos;
+            let world_pos = primary_world_pos + current_reference_pos;
+            let bevy_world = world_pos.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos);
+            let distance_from_camera = bevy_world.length();
             
-            // Transform to Bevy space (camera is at origin in this space)
-            let bevy_pos = world_pos.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos);
-            
-            // Distance from camera (which is at origin in cheated space)
-            let distance_from_camera = bevy_pos.length();
-            
-            // Calculate radius based on distance
-            let radius = calculate_tube_radius(distance_from_camera);
+            // Trajectory geometry stays at a canonical radius. The shader can
+            // expand/contract along normals via material thickness uniforms.
+            let radius = TRAJECTORY_BASE_TUBE_RADIUS;
 
             // Geometric along-length factor t (0..1); the front/back brightness lerp
             // is applied in the shader so it stays live without rebuilding the mesh.
             let t = compute_brightness_t(
                 idx,
-                transient_idx,
-                transient_prime_idx,
+                *point_time,
+                current_relative_time,
+                cache.interval_size,
                 cache.closed,
                 point_count,
             );
@@ -612,8 +517,9 @@ pub fn build_trajectory_meshes(
             };
 
             // Near-fade is handled per-fragment in the shader for pixel-accurate fading
-            (bevy_pos, t, distance_dim, radius)
-        }).collect();
+            (mesh_local_bevy, t, distance_dim, radius)
+        })
+        .collect();
         // Generate tube mesh with per-point radii
         let mesh = generate_tube_mesh(&transformed_points, TUBE_SIDES);
         
@@ -622,9 +528,6 @@ pub fn build_trajectory_meshes(
             *mesh_asset = mesh;
         }
         
-        // Mesh is now built for the current camera position; clear the drift offset.
-        transform.translation = Vec3::ZERO;
-
         // Update cache tracking for dirty detection
         cache.mesh_dirty = false;
         cache.last_camera_pos = Some(camera_pos);
@@ -680,7 +583,8 @@ pub fn update_focused_trajectory_markers(
     physics: Res<UniversePhysics>,
     fcam: Single<&Freecam, With<PlanetariumCamera>>,
     physics_graph: Res<crate::body::motive::calculate_body_positions::PhysicsGraph>,
-    bodies: Query<(Entity, &BodyInfo, &BodyState, &Motive)>,
+    bodies: Query<(Entity, &BodyInfo, &BodyState, &Motive, Option<&TrajectoryMeshLink>)>,
+    trajectory_caches: Query<&TrajectoryCache>,
     mut markers: Query<(Entity, &mut FocusedTrajectoryMarker, &mut Transform)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TrajectoryMaterial>>,
@@ -700,7 +604,7 @@ pub fn update_focused_trajectory_markers(
         return;
     };
 
-    let Ok((_, _info, focused_state, motive)) = bodies.get(focused_entity) else {
+    let Ok((_, _info, focused_state, motive, traj_link)) = bodies.get(focused_entity) else {
         despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
         return;
     };
@@ -716,14 +620,14 @@ pub fn update_focused_trajectory_markers(
         return;
     };
 
-    let Ok((_, _, primary_state, _)) = bodies.get(primary_entity) else {
+    let Ok((_, _, primary_state, _, _)) = bodies.get(primary_entity) else {
         despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
         return;
     };
 
     let primary_mass = bodies
         .get(primary_entity)
-        .map(|(_, info, _, _)| info.mass)
+        .map(|(_, info, _, _, _)| info.mass)
         .unwrap_or(0.0);
     let mu = kepler
         .gravitational_parameter
@@ -759,8 +663,22 @@ pub fn update_focused_trajectory_markers(
         despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
         return;
     };
-    let periapsis_world = primary_state.current_position + periapsis_local;
-    let apoapsis_world = apoapsis_local.map(|apo| primary_state.current_position + apo);
+    let current_perifocal_to_reference = DQuat::from_mat3(&kepler.perifocal_to_reference_matrix(sim_time.time));
+    let base_perifocal_to_reference = traj_link
+        .and_then(|link| trajectory_caches.get(link.0).ok())
+        .and_then(|cache| cache.base_perifocal_to_reference)
+        .unwrap_or(current_perifocal_to_reference);
+    let base_reference_to_perifocal = base_perifocal_to_reference.inverse();
+    let map_local_from_base_to_current = |base_local: DVec3| {
+        let perifocal = base_reference_to_perifocal * base_local;
+        current_perifocal_to_reference * perifocal
+    };
+
+    let periapsis_local_current = map_local_from_base_to_current(periapsis_local);
+    let apoapsis_local_current = apoapsis_local.map(map_local_from_base_to_current);
+
+    let periapsis_world = primary_state.current_position + periapsis_local_current;
+    let apoapsis_world = apoapsis_local_current.map(|apo| primary_state.current_position + apo);
     let peri_times = repeating_event_prev_next(periapsis_base, period_seconds, sim_time.time);
     let apo_times = repeating_event_prev_next(
         crate::foundations::time::Instant::from_seconds_since_j2000(
@@ -1028,7 +946,10 @@ fn ensure_trajectory_marker(
         );
     }
     let mesh_handle = meshes.add(mesh);
-    let material_handle = materials.add(TrajectoryMaterial::default());
+    let material_handle = materials.add(TrajectoryMaterial {
+        dynamic_thickness: 0.0,
+        ..Default::default()
+    });
 
     commands.spawn((
         Mesh3d(mesh_handle),
@@ -1189,45 +1110,26 @@ pub fn draw_trajectory_marker_labels(
 }
 
 /// Compute the along-length lerp factor `t` (0..1) for a point based on forward
-/// distance from T' around the orbit. `t = 0` maps to the trajectory's front
+/// distance along the cached polyline. `t = 0` maps to the trajectory's front
 /// brightness, `t = 1` to its back brightness (the lerp itself happens in the shader).
-/// T' (right after body) is t=0, going forward through the orbit t increases,
-/// reaching t=1 at T (same position as T', one full orbit later).
 fn compute_brightness_t(
     idx: usize,
-    transient_idx: Option<usize>,
-    transient_prime_idx: Option<usize>,
-    closed: bool,
+    point_time: f64,
+    current_relative_time: Option<f64>,
+    interval_size: Option<f64>,
+    _closed: bool,
     point_count: usize,
 ) -> f32 {
-    if closed {
-        if let Some(tp_idx) = transient_prime_idx {
-            // Forward distance from T' (wrapping around the orbit)
-            // T' = 0, going forward increases, T = point_count - 1 (just before wrapping back to T')
-            let forward_dist = ((idx as isize - tp_idx as isize + point_count as isize) % point_count as isize) as f32;
-            let max_dist = (point_count - 1) as f32;
-            // T' (t=0) is front, T (t≈1) is back
-            forward_dist / max_dist
-        } else if let Some(t_idx) = transient_idx {
-            // No T' but have T - use forward distance from T
-            let forward_dist = ((idx as isize - t_idx as isize + point_count as isize) % point_count as isize) as f32;
-            let max_dist = (point_count - 1) as f32;
-            1.0 - forward_dist / max_dist
-        } else {
-            // No transient point - fallback to the midpoint of the range
-            0.5
-        }
+    if let (Some(now_rel), Some(period)) = (current_relative_time, interval_size) {
+        // Closed trajectory: brightness is anchored to the current body position.
+        // t=0 at/near the body, then increases forward along the orbit.
+        let forward_dt = (point_time - now_rel).rem_euclid(period);
+        (forward_dt / period) as f32
+    } else if point_count <= 1 {
+        0.0
     } else {
-        // Open orbits: simple wake bright, future dim
-        if let Some(t_idx) = transient_idx {
-            if idx <= t_idx {
-                1.0
-            } else {
-                0.0
-            }
-        } else {
-            0.0
-        }
+        // Open trajectory fallback: stable gradient along sampled polyline.
+        idx as f32 / (point_count - 1) as f32
     }
 }
 

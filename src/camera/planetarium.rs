@@ -405,7 +405,7 @@ struct HoverPickResult {
 fn update_hover_target(
     primary_window: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &Projection, &Transform, &Freecam), With<PlanetariumCamera>>,
-    bodies: Query<(&BodyState, &BodyInfo, &Appearance), Without<PlanetariumCamera>>,
+    bodies: Query<(&BodyState, &BodyInfo, &Appearance, &Motive), Without<PlanetariumCamera>>,
     markers: Query<(&FocusedTrajectoryMarker, &Transform)>,
     trajectory_caches: Query<(&crate::presentation::TrajectoryMesh, &crate::presentation::TrajectoryCache)>,
     view_settings: Res<ViewSettings>,
@@ -434,7 +434,7 @@ fn pick_body_on_click(
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     primary_window: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &Projection, &Transform, &Freecam), With<PlanetariumCamera>>,
-    bodies: Query<(&BodyState, &BodyInfo, &Appearance), Without<PlanetariumCamera>>,
+    bodies: Query<(&BodyState, &BodyInfo, &Appearance, &Motive), Without<PlanetariumCamera>>,
     markers: Query<(&FocusedTrajectoryMarker, &Transform)>,
     trajectory_caches: Query<(&crate::presentation::TrajectoryMesh, &crate::presentation::TrajectoryCache)>,
     view_settings: Res<ViewSettings>,
@@ -462,8 +462,8 @@ fn pick_body_on_click(
     if let Some(selected_id) = hovered.hovered_body_id {
         let info = bodies
             .iter()
-            .find(|(_, info, _)| info.id == selected_id)
-            .map(|(_, info, _)| info);
+            .find(|(_, info, _, _)| info.id == selected_id)
+            .map(|(_, info, _, _)| info);
         if let Some(info) = info {
         let now = time.elapsed().as_secs_f64();
         let is_double = pick_state.last_pick_id.as_deref() == Some(&info.id)
@@ -485,11 +485,11 @@ fn pick_body_on_click(
 fn pick_hover_target(
     primary_window: &Query<&Window, With<PrimaryWindow>>,
     cameras: &Query<(&Camera, &Projection, &Transform, &Freecam), With<PlanetariumCamera>>,
-    bodies: &Query<(&BodyState, &BodyInfo, &Appearance), Without<PlanetariumCamera>>,
+    bodies: &Query<(&BodyState, &BodyInfo, &Appearance, &Motive), Without<PlanetariumCamera>>,
     markers: &Query<(&FocusedTrajectoryMarker, &Transform)>,
     trajectory_caches: &Query<(&crate::presentation::TrajectoryMesh, &crate::presentation::TrajectoryCache)>,
     view_settings: &ViewSettings,
-    _sim_time: &SimTime,
+    sim_time: &SimTime,
     focused_body_state: &FocusedBodyState,
     egui_ctx: &mut EguiContexts,
 ) -> HoverPickResult {
@@ -520,7 +520,7 @@ fn pick_hover_target(
 
     let mut body_sphere_hits: Vec<&BodyInfo> = Vec::new();
     let mut body_pixel_hits: Vec<&BodyInfo> = Vec::new();
-    for (state, info, appearance) in bodies.iter() {
+    for (state, info, appearance, _) in bodies.iter() {
         let body_pos = state.current_position
             .as_bevy_scaled_cheated(distance_scale, freecam.bevy_pos);
 
@@ -591,6 +591,7 @@ fn pick_hover_target(
             focused_body_state,
             bodies,
             trajectory_caches,
+            sim_time,
             view_settings,
             freecam,
             camera,
@@ -614,8 +615,9 @@ fn pick_hover_target(
 /// Returns the closest hit within the pick radius threshold.
 fn pick_trajectory_segment(
     focused_body_state: &FocusedBodyState,
-    bodies: &Query<(&BodyState, &BodyInfo, &Appearance), Without<PlanetariumCamera>>,
+    bodies: &Query<(&BodyState, &BodyInfo, &Appearance, &Motive), Without<PlanetariumCamera>>,
     trajectory_caches: &Query<(&crate::presentation::TrajectoryMesh, &crate::presentation::TrajectoryCache)>,
+    sim_time: &SimTime,
     view_settings: &ViewSettings,
     freecam: &Freecam,
     camera: &Camera,
@@ -626,14 +628,39 @@ fn pick_trajectory_segment(
 ) -> Option<TrajectoryHitData> {
     let focused_id = focused_body_state.current_body_id.as_ref()?;
 
+    // Find the focused body and its current motive selection.
+    let (focused_entity, focused_motive) = bodies
+        .iter()
+        .find_map(|(_, info, _, motive)| {
+            if &info.id == focused_id {
+                Some((info.id.clone(), motive))
+            } else {
+                None
+            }
+        })
+        .and_then(|(id, motive)| {
+            trajectory_caches
+                .iter()
+                .find_map(|(traj_mesh, cache)| {
+                    let Ok((_, info, _, _)) = bodies.get(traj_mesh.body_entity) else {
+                        return None;
+                    };
+                    if info.id == id && cache.valid && !cache.local_points.is_empty() {
+                        Some((traj_mesh.body_entity, motive))
+                    } else {
+                        None
+                    }
+                })
+        })?;
+
     // Find the trajectory cache for the focused body
     let cache = trajectory_caches
         .iter()
         .find_map(|(traj_mesh, cache)| {
-            let Ok((_, info, _)) = bodies.get(traj_mesh.body_entity) else {
+            if traj_mesh.body_entity != focused_entity {
                 return None;
-            };
-            if &info.id == focused_id && cache.valid && !cache.local_points.is_empty() {
+            }
+            if cache.valid && !cache.local_points.is_empty() {
                 Some(cache)
             } else {
                 None
@@ -647,10 +674,23 @@ fn pick_trajectory_segment(
         .and_then(|pid| {
             bodies
                 .iter()
-                .find(|(_, info, _)| &info.id == pid)
-                .map(|(state, _, _)| state.current_position)
+                .find(|(_, info, _, _)| &info.id == pid)
+                .map(|(state, _, _, _)| state.current_position)
         })
         .unwrap_or(DVec3::ZERO);
+
+    // Rotate cached points by current perifocal->reference delta so picking
+    // tracks the render-time trajectory transform.
+    let current_perifocal_to_reference = match focused_motive.motive_at(sim_time.time) {
+        (_, MotiveSelection::Keplerian(k)) => Some(DQuat::from_mat3(&k.perifocal_to_reference_matrix(sim_time.time))),
+        _ => None,
+    };
+    let rotation_delta = if let Some(current_rot) = current_perifocal_to_reference {
+        let base_rot = cache.base_perifocal_to_reference.unwrap_or(current_rot);
+        current_rot * base_rot.inverse()
+    } else {
+        DQuat::IDENTITY
+    };
     
     let distance_scale = view_settings.distance_factor();
     let camera_pos = freecam.bevy_pos;
@@ -667,8 +707,8 @@ fn pick_trajectory_segment(
         let (time_b, local_b) = points[i + 1];
         
         // Transform to bevy space
-        let world_a = local_a + primary_offset;
-        let world_b = local_b + primary_offset;
+        let world_a = rotation_delta * local_a + primary_offset;
+        let world_b = rotation_delta * local_b + primary_offset;
         let bevy_a = world_a.as_bevy_scaled_cheated(distance_scale, camera_pos);
         let bevy_b = world_b.as_bevy_scaled_cheated(distance_scale, camera_pos);
         let seg_a_d = DVec3::new(bevy_a.x as f64, bevy_a.y as f64, bevy_a.z as f64);
@@ -687,7 +727,7 @@ fn pick_trajectory_segment(
         if screen_dist <= TRAJECTORY_PICK_PIXEL_RADIUS {
             if best_hit.is_none() || screen_dist < best_hit.as_ref().unwrap().0 {
                 // Interpolate local position
-                let local_hit = local_a.lerp(local_b, seg_t);
+                let local_hit = (rotation_delta * local_a).lerp(rotation_delta * local_b, seg_t);
                 let bevy_hit = bevy_a.lerp(bevy_b, seg_t as f32);
                 best_hit = Some((screen_dist, i, seg_t, time_a, time_b, local_hit, bevy_hit));
             }
@@ -699,8 +739,8 @@ fn pick_trajectory_segment(
         let (time_a, local_a) = points[points.len() - 1];
         let (time_b, local_b) = points[0];
         
-        let world_a = local_a + primary_offset;
-        let world_b = local_b + primary_offset;
+        let world_a = rotation_delta * local_a + primary_offset;
+        let world_b = rotation_delta * local_b + primary_offset;
         let bevy_a = world_a.as_bevy_scaled_cheated(distance_scale, camera_pos);
         let bevy_b = world_b.as_bevy_scaled_cheated(distance_scale, camera_pos);
         let seg_a_d = DVec3::new(bevy_a.x as f64, bevy_a.y as f64, bevy_a.z as f64);
@@ -716,7 +756,7 @@ fn pick_trajectory_segment(
 
             if screen_dist <= TRAJECTORY_PICK_PIXEL_RADIUS {
                 if best_hit.is_none() || screen_dist < best_hit.as_ref().unwrap().0 {
-                    let local_hit = local_a.lerp(local_b, seg_t);
+                    let local_hit = (rotation_delta * local_a).lerp(rotation_delta * local_b, seg_t);
                     let bevy_hit = bevy_a.lerp(bevy_b, seg_t as f32);
                     // For wrapped segment, time_b is actually the start of the period (0)
                     // but we want the logical continuation, so add period if needed
