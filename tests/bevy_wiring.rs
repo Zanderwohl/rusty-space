@@ -150,3 +150,38 @@ fn trajectories_are_produced_on_request() {
     assert!(path.closed, "a closed orbit should be marked closed");
     assert!(path.period.to_seconds() > 0.0, "a closed orbit needs a period");
 }
+
+/// The bundled save must load through the real file path and into the arena.
+///
+/// `System::from_contents` is covered above against the generated preset, which is
+/// built in memory and so proves nothing about SQLite. This drives the path the app
+/// actually takes — `.em` on disk, through the migrations and the row decoders, into
+/// the arena — and then propagates it, because elements that decode but do not
+/// propagate are the failure mode that matters.
+#[test]
+fn the_bundled_save_loads_and_propagates() {
+    use exotic_matters::body::universe::save::UniverseFile;
+    use std::path::PathBuf;
+
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/systems/solar_system.em");
+    let file = UniverseFile::load_from_path(&path).expect("the bundled save should load");
+    let mut system = System::from_contents(&file.contents).expect("and build a system");
+
+    assert!(system.len() > 150, "only {} bodies came back", system.len());
+
+    // Every body must resolve a finite position a decade out, not just at the epoch.
+    em_sim::propagate::evaluate_at(&mut system, Instant::from_julian_day(2451545.0 + 3652.5));
+    for i in system.indices() {
+        let p = system.position(i);
+        assert!(p.is_finite(), "{} propagated to {p:?}", system.name(i));
+    }
+
+    // And the hierarchy has to be real: Luna must stay near Earth, not near the Sun.
+    let earth = system.by_name("Earth").expect("Earth");
+    let luna = system.by_name("Luna").expect("Luna");
+    let separation = (system.position(luna) - system.position(earth)).length();
+    assert!(
+        (3.0e8..5.0e8).contains(&separation),
+        "Luna is {separation:e} m from Earth"
+    );
+}

@@ -29,12 +29,6 @@ impl Default for Universe {
     }
 }
 
-#[derive(Component)]
-pub struct Major;
-
-#[derive(Component)]
-pub struct Minor;
-
 impl Universe {
     pub fn from_file(
         file: &UniverseFile,
