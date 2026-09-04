@@ -57,3 +57,43 @@ Jupiter `599`, Saturn `699`, Uranus `799`, Neptune `899`, Luna `301`, Sun `10`.
 Small bodies need a trailing semicolon: Ceres `1;`, Vesta `4;`, Eris `136199;`.
 
 Note the bundled solar system has no Saturn.
+
+## Refitting mean elements
+
+Osculating elements at a single epoch are the wrong input for a fixed-element model,
+especially for the Moon, whose osculating `e` swings between roughly 0.026 and 0.077 and
+whose `i` swings around 5.0–5.3°. Fit mean elements against a dense position series
+instead.
+
+Fetch the series with `START_TIME`/`STOP_TIME`/`STEP_SIZE` rather than `TLIST`:
+
+```bash
+--data-urlencode "START_TIME='JD2451545.0'" \
+--data-urlencode "STOP_TIME='JD2469807.5'" \
+--data-urlencode "STEP_SIZE='5d'"
+```
+
+Then least-squares fit `(a, e, i, Ω₀, ω₀, M₀, apsidal_period, nodal_period)` to minimise
+position residual. Two things matter:
+
+**Fit mean motion, not `a`.** The objective is wildly multimodal in the mean motion — if
+the period is off by even 0.1%, phase error exceeds a full revolution within decades and
+the residuals go uncorrelated, so a gradient method collapses to a degenerate circle
+(`e → 0`). Parameterise by mean motion `n` directly, and use **span continuation**: fit
+over ~1.5 years first, where phase is unambiguous, then widen to 3, 6, 12, 25, 50.
+Convert back with `a = (μ/n²)^⅓` at the end.
+
+**Mean anomaly advances at the anomalistic rate.** When periapsis precesses, `M` is
+measured from a moving reference, so `n` is the anomalistic mean motion, not the sidereal
+one. The Luna fit recovers 27.554525 d against the true anomalistic month of 27.554550 d
+(2 seconds), where the sidereal month is 27.321661 d. Because the model computes
+`n = sqrt(μ/a³)`, `a` must absorb this difference and ends up 0.66% above the true value.
+
+**`argument_of_periapsis` precesses faster than the longitude of perihelion.** ω is
+measured from the node, which itself regresses, so
+`dω/dt = dϖ/dt − dΩ/dt = 0.1114 + 0.0530 = 0.1643 °/d` — a period of 2190 d, not the
+familiar 3232 d (8.85 yr) of ϖ. Fitting recovers 2190.5 d.
+
+Luna result over 2000–2050: RMS 7 989 km, max 15 556 km (~1.2°). That is the floor for
+this model class — evection alone is 1.27° and is not representable by a precessing
+ellipse.

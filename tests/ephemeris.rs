@@ -85,24 +85,18 @@ fn modelled_position(body_id: &str, jd: f64) -> Option<DVec3> {
 /// Measured relative error at the time these were set (worst of the two epochs):
 ///
 ///   mercury 1.8e-1   venus 1.1e-2   earth 2.0e-2   mars 6.6e-2
-///   jupiter 4.7e-2   uranus 4.2e-2  neptune 7.7e-3  luna 3.8e-1
+///   jupiter 4.7e-2   uranus 4.2e-2  neptune 7.7e-3  luna 4.8e-2
 ///
 /// PHASE 3 will replace the series with a Halley solve of Kepler's equation. When it
 /// lands, tighten every budget here — the residual should then be dominated by the
 /// two-body approximation (unmodelled planetary perturbations, mean rather than
 /// osculating elements) rather than by the solver.
 ///
-/// Luna is the outlier. Decomposing its error at J2000 (where precession contributes
-/// nothing, since that is its epoch) gives: 8.45 deg of angular error shipped, of which
-/// an exact Kepler solve removes only 1.8 deg. The remaining ~6.6 deg is present at the
-/// epoch itself with correct `a` and `e` (radial error is just 0.3%), so it is an error
-/// in the angular element data - M0, omega or Omega - not in the math. Phase 3 will not
-/// fix that; re-deriving Luna's elements from a proper source will.
-///
-/// Its 25-year error is dominated instead by mean-motion error, which is why switching
-/// to mu = G(M+m) cut it from 6.3e-1 to 3.8e-1. The precessing-element machinery
-/// (KeplerPrecessingEulerAngles, apsidal 3231.50 d and nodal -6798.38 d) is applied
-/// correctly and does its job; it just cannot compensate for a wrong M0 and a wrong rate.
+/// Luna's elements were refitted against 3653 Horizons samples over 2000-2050, taking it
+/// from 6.3e-1 to 4.8e-2. It is now near the floor for a precessing-ellipse model: the
+/// fit's own residual is 7 989 km RMS (~1.2 deg), and evection alone, which this model
+/// cannot represent, is 1.27 deg. Better accuracy needs a real lunar theory, not better
+/// elements. See docs/horizons-golden-vectors.md.
 ///
 /// Note ids are matched case-insensitively: `solar_system.rs` spells most ids lowercase
 /// but capitalises "Jupiter", "Uranus", "Neptune" and "Sedna".
@@ -115,7 +109,7 @@ fn tolerance(body: &str) -> f64 {
         "jupiter" => 6.0e-2,
         "mars" => 9.0e-2,
         "mercury" => 2.5e-1,
-        "luna" => 4.5e-1,
+        "luna" => 7.0e-2,
         other => panic!("no tolerance recorded for {other}"),
     }
 }
