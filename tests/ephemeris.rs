@@ -30,22 +30,22 @@ struct Reference {
 /// JPL Horizons, DE441, GEOMETRIC states, "Ecliptic of J2000.0".
 /// Planets are heliocentric (CENTER='500@10'); Luna is geocentric (CENTER='500@399').
 const REFERENCES: &[Reference] = &[
-    Reference { body: "mercury", julian_day: 2451545.0, position_km: [-1.946172635585372E+07, -6.691327526352400E+07, -3.679854343749542E+06] },
-    Reference { body: "mercury", julian_day: 2460676.5, position_km: [-5.793970539114399E+07, -2.419359515794889E+07,  3.337188220186163E+06] },
-    Reference { body: "venus",   julian_day: 2451545.0, position_km: [-1.074564940521906E+08, -4.885014975872536E+06,  6.135634299718402E+06] },
-    Reference { body: "venus",   julian_day: 2460676.5, position_km: [ 6.783048185030288E+07,  8.410632833599219E+07, -2.758788226574615E+06] },
-    Reference { body: "earth",   julian_day: 2451545.0, position_km: [-2.649903367743050E+07,  1.446972967925493E+08, -6.111494259536266E+02] },
-    Reference { body: "earth",   julian_day: 2460676.5, position_km: [-2.673066229892559E+07,  1.446585671920011E+08, -7.643589382000268E+03] },
-    Reference { body: "mars",    julian_day: 2451545.0, position_km: [ 2.080481406418420E+08, -2.007052628025221E+06, -5.156288959268022E+06] },
-    Reference { body: "mars",    julian_day: 2460676.5, position_km: [-7.804309481287776E+07,  2.281718450076631E+08,  6.695342168331429E+06] },
+    Reference { body: "Mercury", julian_day: 2451545.0, position_km: [-1.946172635585372E+07, -6.691327526352400E+07, -3.679854343749542E+06] },
+    Reference { body: "Mercury", julian_day: 2460676.5, position_km: [-5.793970539114399E+07, -2.419359515794889E+07,  3.337188220186163E+06] },
+    Reference { body: "Venus",   julian_day: 2451545.0, position_km: [-1.074564940521906E+08, -4.885014975872536E+06,  6.135634299718402E+06] },
+    Reference { body: "Venus",   julian_day: 2460676.5, position_km: [ 6.783048185030288E+07,  8.410632833599219E+07, -2.758788226574615E+06] },
+    Reference { body: "Earth",   julian_day: 2451545.0, position_km: [-2.649903367743050E+07,  1.446972967925493E+08, -6.111494259536266E+02] },
+    Reference { body: "Earth",   julian_day: 2460676.5, position_km: [-2.673066229892559E+07,  1.446585671920011E+08, -7.643589382000268E+03] },
+    Reference { body: "Mars",    julian_day: 2451545.0, position_km: [ 2.080481406418420E+08, -2.007052628025221E+06, -5.156288959268022E+06] },
+    Reference { body: "Mars",    julian_day: 2460676.5, position_km: [-7.804309481287776E+07,  2.281718450076631E+08,  6.695342168331429E+06] },
     Reference { body: "Jupiter", julian_day: 2451545.0, position_km: [ 5.985676246570644E+08,  4.396046799481729E+08, -1.522686167298746E+07] },
     Reference { body: "Jupiter", julian_day: 2460676.5, position_km: [ 1.579803698060460E+08,  7.437186577256843E+08, -6.623904060887098E+06] },
     Reference { body: "Uranus",  julian_day: 2451545.0, position_km: [ 2.158974819528798E+09, -2.054625536468218E+09, -3.562550131686962E+07] },
     Reference { body: "Uranus",  julian_day: 2460676.5, position_km: [ 1.661079227785963E+09,  2.407700523277836E+09, -1.259589127124381E+07] },
     Reference { body: "Neptune", julian_day: 2451545.0, position_km: [ 2.515046523944309E+09, -3.738714567646374E+09,  1.903221685677218E+07] },
     Reference { body: "Neptune", julian_day: 2460676.5, position_km: [ 4.469973780179410E+09, -9.487334113276581E+07, -1.010533335986975E+08] },
-    Reference { body: "luna",    julian_day: 2451545.0, position_km: [-2.916083841877129E+05, -2.749797416731504E+05,  3.627119662699287E+04] },
-    Reference { body: "luna",    julian_day: 2460676.5, position_km: [ 1.520523605713538E+05, -3.488036665045074E+05, -3.066409317095052E+04] },
+    Reference { body: "Luna",    julian_day: 2451545.0, position_km: [-2.916083841877129E+05, -2.749797416731504E+05,  3.627119662699287E+04] },
+    Reference { body: "Luna",    julian_day: 2460676.5, position_km: [ 1.520523605713538E+05, -3.488036665045074E+05, -3.066409317095052E+04] },
 ];
 
 /// Model position of `body` relative to its primary, in metres.
@@ -142,7 +142,7 @@ fn bundled_bodies_match_jpl_within_budget() {
 /// and the anomaly solve from any secular drift.
 #[test]
 fn error_does_not_grow_wildly_between_epochs() {
-    for body in ["earth", "venus", "Neptune"] {
+    for body in ["Earth", "Venus", "Neptune"] {
         let at: Vec<f64> = REFERENCES.iter().filter(|r| r.body == body).map(|r| {
             let model = modelled_position(r.body, r.julian_day).unwrap();
             let truth = DVec3::new(r.position_km[0], r.position_km[1], r.position_km[2]) * KM;
@@ -190,9 +190,9 @@ fn report_ephemeris_error() {
 fn lunar_apsides_are_physical() {
     let contents = solar_system();
     let luna = contents.bodies.iter().find_map(|b| match b {
-        SomeBody::KeplerEntry(k) if k.info.id == "luna" => Some(k),
+        SomeBody::KeplerEntry(k) if k.info.id == "Luna" => Some(k),
         _ => None,
-    }).expect("luna");
+    }).expect("Luna");
 
     let a = luna.params.semi_major_axis();
     let peri = luna.params.periapsis();
@@ -217,11 +217,11 @@ fn luna_advances_at_the_anomalistic_rate() {
         _ => None,
     }).unwrap();
     let luna = contents.bodies.iter().find_map(|b| match b {
-        SomeBody::KeplerEntry(k) if k.info.id == "luna" => Some(k),
+        SomeBody::KeplerEntry(k) if k.info.id == "Luna" => Some(k),
         _ => None,
     }).unwrap();
 
-    let mu = g * (mass_of("earth") + luna.info.mass);
+    let mu = g * (mass_of("Earth") + luna.info.mass);
     let n = luna.params.mean_angular_motion(mu); // rad/s
     let period_days = std::f64::consts::TAU / n / 86400.0;
 
@@ -240,13 +240,13 @@ fn luna_advances_at_the_anomalistic_rate() {
 fn velocities_match_jpl() {
     struct V { body: &'static str, jd: f64, primary: &'static str, kms: [f64; 3], tol: f64 }
     let refs = [
-        V { body: "earth", jd: 2451545.0, primary: "sol",
+        V { body: "Earth", jd: 2451545.0, primary: "Sol",
             kms: [-2.979426007043741E+01, -5.469294939770602E+00, 1.817836785027449E-04], tol: 1e-3 },
-        V { body: "mars", jd: 2451545.0, primary: "sol",
+        V { body: "Mars", jd: 2451545.0, primary: "Sol",
             kms: [1.162672403766088E+00, 2.629606454546266E+01, 5.222970229952857E-01], tol: 5e-3 },
-        V { body: "venus", jd: 2451545.0, primary: "sol",
+        V { body: "Venus", jd: 2451545.0, primary: "Sol",
             kms: [1.381906029263447E+00, -3.514029517644670E+01, -5.600423382820807E-01], tol: 2e-2 },
-        V { body: "luna", jd: 2451545.0, primary: "earth",
+        V { body: "Luna", jd: 2451545.0, primary: "Earth",
             kms: [6.435313889889519E-01, -7.309839826871004E-01, -1.150646473918648E-02], tol: 5e-2 },
     ];
 
@@ -284,17 +284,17 @@ fn keplerian_speeds_obey_vis_viva() {
     let contents = solar_system();
     let g = contents.physics.gravitational_constant;
     let sol_mass = contents.bodies.iter().find_map(|b| match b {
-        SomeBody::FixedEntry(f) if f.info.id == "sol" => Some(f.info.mass),
-        SomeBody::KeplerEntry(k) if k.info.id == "sol" => Some(k.info.mass),
+        SomeBody::FixedEntry(f) if f.info.id == "Sol" => Some(f.info.mass),
+        SomeBody::KeplerEntry(k) if k.info.id == "Sol" => Some(k.info.mass),
         _ => None,
     }).unwrap();
 
-    for body in ["mercury", "earth", "mars", "Neptune"] {
+    for body in ["Mercury", "Earth", "Mars", "Neptune"] {
         let entry = contents.bodies.iter().find_map(|b| match b {
             SomeBody::KeplerEntry(k) if k.info.id == body => Some(k),
             _ => None,
         }).expect(body);
-        if entry.params.primary_id != "sol" { continue; }
+        if entry.params.primary_id != "Sol" { continue; }
 
         let mu = g * (sol_mass + entry.info.mass);
         let a = entry.params.semi_major_axis();
@@ -331,7 +331,9 @@ fn every_body_has_sane_physical_data() {
     let mut seen = std::collections::HashSet::new();
     for id in &ids {
         assert!(seen.insert(*id), "duplicate body id {id:?}");
-        assert!(!id.is_empty() && !id.contains(' '), "unusable body id {id:?}");
+        // Spaces are fine — provisional designations like "S2010 J1" and structural
+        // bodies like "Pluto Barycenter" legitimately contain them.
+        assert!(!id.is_empty() && id.trim() == *id, "unusable body id {id:?}");
     }
 
     for b in &contents.bodies {
@@ -388,10 +390,10 @@ fn moons_orbit_inside_their_primarys_hill_sphere() {
 
     for b in &contents.bodies {
         let SomeBody::KeplerEntry(k) = b else { continue };
-        if k.params.primary_id == "sol" { continue; }
+        if k.params.primary_id == "Sol" { continue; }
         let (primary_mass, primary_entry) = get(&k.params.primary_id).expect("primary");
         let Some(pe) = primary_entry else { continue };
-        let (sun_mass, _) = get("sol").unwrap();
+        let (sun_mass, _) = get("Sol").unwrap();
 
         // Hill radius of the primary about the Sun.
         let hill = pe.params.semi_major_axis()

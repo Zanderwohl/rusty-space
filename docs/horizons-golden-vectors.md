@@ -132,3 +132,26 @@ python3 gen_rust.py        # -> generated_bodies.rs
   nor the SBDB API carries a diameter for Eris, Makemake, Haumea, Quaoar, Orcus or Gonggong
   — only H and a rotation period. Radii for those are estimated from absolute magnitude at an
   assumed albedo and are flagged in the generated file.
+
+## Merging an existing save
+
+`docs/scratch/{resolve,resolve2,run_new,gen2,merged_table}.py` merge a `.em` save with
+JPL. The save is authoritative for identity, mass, radius, colour, tags and rotation;
+JPL supplies only the orbital elements. `assets/systems/solar_system.em` is the input.
+
+Resolving body names to Horizons ids takes three passes:
+
+1. The name as written, against the body's own primary as CENTER.
+2. Horizons answers an ambiguous name with a table of `ID# / Name` — parse it and take the
+   exact match. "Titan" matches Titan (606), Titania (703) and a Titan-3C rocket body.
+3. Explicit NAIF ids for the planets, whose names also match their barycentres.
+
+Two traps:
+
+- **Reject cross-type matches.** Searching for the moon `S2010 J1` returns comet
+  `C/2010 J1`, and `S2011 J1` returns `251P/LINEAR`. Fitting a comet's orbit onto a moon
+  would look perfectly healthy in the output.
+- **Re-fit anything whose primary changed.** A body already fitted in an earlier pass may
+  now orbit something else — Pluto and Charon move from heliocentric and Pluto-centred to
+  the Pluto–Charon barycentre. Diff the CENTER each body was fetched with against the one
+  its current primary implies, rather than assuming a cached fit is still valid.
