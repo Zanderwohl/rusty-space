@@ -9,7 +9,7 @@ use crate::gui::menu::UiState;
 use crate::sim::SimTime;
 use crate::gui::settings::{Settings, UiTheme};
 use crate::util::format;
-use crate::util::format::seconds_to_naive_date;
+use crate::util::format::format_duration;
 
 pub fn control_window(
     mut contexts: EguiContexts,
@@ -68,7 +68,7 @@ pub fn planetarium_controls(
         if time.seconds_only {
             ui.label(format!("Time: {:.1}s", time.time.to_j2000_seconds()));
         } else {
-            ui.label(format!("Time: {}", seconds_to_naive_date(time.time.to_j2000_seconds().round() as i64)));
+            ui.label(format!("Time: {}", format_duration(time.time.to_j2000_seconds().round() as i64)));
         }
     });
     let gui_speed_current = time.gui_speed;
@@ -76,7 +76,7 @@ pub fn planetarium_controls(
         if time.seconds_only {
             ui.label(format!("Simulation speed: {:.1}s / s", gui_speed_current));
         } else {
-            ui.label(format!("Simulation speed: {} / s", seconds_to_naive_date(gui_speed_current.round() as i64)));
+            ui.label(format!("Simulation speed: {} / s", format_duration(gui_speed_current.round() as i64)));
         }
     });
     common::stepper(ui, "", &mut time.gui_speed);

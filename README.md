@@ -48,7 +48,56 @@ First-time compilation will take several minutes: about 15 minutes on my M3 Mac,
 
 ## Bug List
 
+Defects found and fixed while extracting `em-foundations` and `em-sim`. Each had a
+test reintroduced against it, so a regression fails the suite rather than quietly
+skewing an orbit.
 
+### Orbital mechanics
+
+* `semi_parameter` returned the semi-latus rectum's reciprocal relationship — the two
+  names had been used interchangeably for different quantities.
+* `apoapsis` and `periapsis` were swapped in one of the two constructors, so orbits
+  built that way ran backwards through their apsides.
+* `eccentricity::radii` took its arguments transposed relative to its callers, giving
+  a negative eccentricity for every ordinary orbit.
+* `semi_minor_axis::conic_definition1` inverted the conic relation, returning
+  `a * sqrt(1 + e^2)`.
+* True anomaly used `atan` where the quadrant mattered; it is `atan2`.
+* The equation of the centre dropped a term of its series.
+* `eccentricity_vector` had the cross product's operands reversed, flipping the
+  direction of periapsis.
+* Specific orbital energy carried the wrong sign, so bound orbits read as unbound.
+* Mean anomaly was inverted from the eccentric anomaly rather than solved for; the
+  Fourier–Bessel expansion silently diverges past the Laplace limit (e ~ 0.6627),
+  which several bundled bodies exceed. Newton and Halley solvers now cover the whole
+  range and the series is kept as an explicit export.
+
+### Data
+
+* Luna's elements were mixed-source: a semi-major axis inflated 0.66% by the absence
+  of an anomalistic period, a prograde (positive) nodal precession period where nodal
+  regression is retrograde, and a mass off by 22 orders of magnitude.
+* Bodies orbiting a barycentre took `mu = G(M_primary + m)`, which is wrong there —
+  each body's effective mu depends on the *other* body's mass. Pluto and Charon now
+  carry an explicit `gravitational_parameter`.
+
+### Application
+
+* `update_focused_trajectory_markers` returned unconditionally, so apsis markers
+  never drew.
+* `presentation::rotation::render_axes` was never registered, leaving the
+  `show_axes` setting inert.
+* `util::format::seconds_to_naive_date` did no calendar conversion despite its name;
+  it is now `format_duration`, which is what it always was.
+
+### Known and unfixed
+
+* The `earth_moon()` template in `presets.rs` (commented out) still carries the old
+  bad Luna: positive `nodal_precession_period` and `mass: 6.4171`. Fix it if that
+  template is revived.
+* Eris/Dysnomia's mass ratio has never been measured, so the explicit mu for that
+  pair is a guess. Luna/Earth's 1.23% ratio is worth a 0.48% period error, so this
+  is worth refitting per `docs/horizons-golden-vectors.md` if it matters.
 
 ## Cool Fonts
 

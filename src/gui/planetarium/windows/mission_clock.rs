@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use crate::foundations::time::Instant;
 use crate::gui::style::vfd;
 use crate::sim::SimTime;
-use crate::util::format::seconds_to_naive_date;
+use crate::util::format::format_duration;
 
 const UNIX_EPOCH_AT_J2000_UTC: f64 = 946_728_000.0;
 const SIDECAR_GAP: f32 = 8.0;
@@ -458,7 +458,7 @@ fn draw_throttle_label(
     gui_speed: f64,
     color: egui::Color32,
 ) {
-    let speed_text = seconds_to_naive_date(gui_speed.round() as i64);
+    let speed_text = format_duration(gui_speed.round() as i64);
     let label = format!("{speed_text} / s");
 
     painter.text(
