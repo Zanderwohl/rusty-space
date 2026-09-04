@@ -294,7 +294,6 @@ pub fn refresh_precessing_trajectories() {}
 pub fn build_trajectory_meshes(
     bodies: Query<&BodyRef>,
     system: Res<SimSystem>,
-    trajectories: Res<Trajectories>,
     mut trajectory_meshes: Query<(&TrajectoryMesh, &mut TrajectoryCache, &mut Visibility, &Mesh3d, &mut Transform)>,
     mut meshes: ResMut<Assets<Mesh>>,
     view_settings: Res<ViewSettings>,
@@ -585,7 +584,6 @@ pub fn update_focused_trajectory_markers(
     focused_body_state: Res<FocusedBodyState>,
     sim_time: Res<SimTime>,
     view_settings: Res<ViewSettings>,
-    physics: Res<UniversePhysics>,
     fcam: Single<&Freecam, With<PlanetariumCamera>>,
     bodies: Query<(Entity, &BodyRef, Option<&TrajectoryMeshLink>)>,
     system: Res<SimSystem>,

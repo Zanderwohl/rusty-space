@@ -839,8 +839,7 @@ pub fn update_occluder_lighting(
 /// Updates the material uniform to drive vertex-shader displacement instead of regenerating meshes.
 pub fn update_wireframe_thickness(
     cameras: Query<&GlobalTransform, With<PlanetariumCamera>>,
-    bodies: Query<(&Transform, &BodyRef)>,
-    system: Res<SimSystem>,
+    bodies: Query<&Transform>,
     wireframes: Query<(&BodyWireframeMesh, &MeshMaterial3d<BodyWireframeMaterial>, &ChildOf)>,
     mut materials: ResMut<Assets<BodyWireframeMaterial>>,
 ) {
@@ -850,7 +849,7 @@ pub fn update_wireframe_thickness(
     let camera_pos = camera_global.translation();
 
     for (_wireframe, material_handle, child_of) in wireframes.iter() {
-        let Ok((body_transform, _body_info)) = bodies.get(child_of.parent()) else {
+        let Ok(body_transform) = bodies.get(child_of.parent()) else {
             continue;
         };
 

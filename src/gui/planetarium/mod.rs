@@ -15,7 +15,7 @@ use crate::camera::Freecam;
 pub use crate::gui::planetarium::focused_body::FocusedBodyState;
 pub use crate::gui::planetarium::focused_body::{HoverState, HoveredTrajectoryMarkerKind, TrajectoryHitData};
 pub use crate::gui::planetarium::windows::mission_clock::{MissionClockMode, MissionClockSettings, format_sim_time_for_mode};
-use crate::presentation::{self, BodyWireframeMaterial, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, LocalStarfieldMaterialPlugin, TrajectoryMesh, BodyPointMesh, FocusedTrajectoryMarker, StarLightingFrameCache};
+use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, LocalStarfieldMaterialPlugin, TrajectoryMesh, BodyPointMesh, FocusedTrajectoryMarker, StarLightingFrameCache};
 use crate::gui::menu::escape::{EscapeMenuPlugin, EscMenuContext, EscMenuState, UnsavedChanges};
 
 mod windows;
@@ -141,6 +141,8 @@ impl Plugin for PlanetariumUI {
                 presentation::sync_celestial_markers,
                 presentation::update_celestial_markers
                     .after(world::sync_transforms),
+                presentation::render_axes
+                    .after(world::sync_rotations),
             ).in_set(PlanetariumUISet))
             // Starfield brightness updates (via buffer, not material mutation)
             .add_systems(Update, (

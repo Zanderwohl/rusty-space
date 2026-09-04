@@ -33,7 +33,8 @@ fn factorial(n: f64) -> f64 {
     product
 }
 
-fn gamma(n: f64) -> f64 {
+/// Stirling's approximation to the gamma function.
+pub fn gamma(n: f64) -> f64 {
     if n == 0.0 {
         return f64::INFINITY
     }

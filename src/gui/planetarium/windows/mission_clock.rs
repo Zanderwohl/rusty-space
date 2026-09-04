@@ -157,7 +157,7 @@ pub fn mission_clock_widget(
 
             egui::Frame::default()
                 .fill(panel_bg)
-                .stroke(egui::Stroke::new(1.0, border))
+                .stroke(egui::Stroke::new(1.0_f32, border))
                 .inner_margin(egui::Margin::same(8))
                 .show(ui, |ui| {
                     ui.horizontal_centered(|ui| {
@@ -234,11 +234,11 @@ fn draw_mode_cycler(
         let met_color = if matches!(mode, MissionClockMode::Met) { active } else { inactive };
 
         painter.circle_filled(top_center, radius, jd_color);
-        painter.circle_stroke(top_center, radius, egui::Stroke::new(1.0, active));
+        painter.circle_stroke(top_center, radius, egui::Stroke::new(1.0_f32, active));
         painter.circle_filled(mid_center, radius, utc_color);
-        painter.circle_stroke(mid_center, radius, egui::Stroke::new(1.0, active));
+        painter.circle_stroke(mid_center, radius, egui::Stroke::new(1.0_f32, active));
         painter.circle_filled(bottom_center, radius, met_color);
-        painter.circle_stroke(bottom_center, radius, egui::Stroke::new(1.0, active));
+        painter.circle_stroke(bottom_center, radius, egui::Stroke::new(1.0_f32, active));
 
         let label_font = egui::FontId::proportional(9.0);
         painter.text(
@@ -303,7 +303,7 @@ fn draw_play_pause_sidecar(
     painter.rect_stroke(
         sidecar_rect,
         0.0,
-        egui::Stroke::new(1.0, border_color),
+        egui::Stroke::new(1.0_f32, border_color),
         egui::StrokeKind::Middle,
     );
 
@@ -326,7 +326,7 @@ fn draw_play_pause_sidecar(
     painter.rect_stroke(
         button_rect,
         0.0,
-        egui::Stroke::new(1.0, border_color),
+        egui::Stroke::new(1.0_f32, border_color),
         egui::StrokeKind::Middle,
     );
 

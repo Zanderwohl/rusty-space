@@ -8,9 +8,9 @@ use std::f64::consts::PI;
 use glam::{DVec3, DQuat};
 use crate::appearance::{Appearance, AppearanceColor, DebugBall, StarBall};
 use crate::body::{BodyInfo, BodyRotation, RotationEpoch};
-use crate::motive::kepler::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerPrecessingEulerAngles, KeplerRotation, KeplerShape, MeanAnomalyAtEpoch, MeanAnomalyAtJ2000};
+use crate::motive::kepler::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerPrecessingEulerAngles, KeplerRotation, KeplerShape, MeanAnomalyAtJ2000};
 use crate::universe::{FixedEntry, KeplerEntry, NewtonEntry, SomeBody, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings};
-use em_foundations::time::{Instant, TimeDelta};
+use em_foundations::time::TimeDelta;
 
 // =============================================================================
 // Solar System Template Data
@@ -52,7 +52,7 @@ fn iau_rotation(ra_deg: f64, dec_deg: f64, w0_deg: f64, period_hours: f64) -> Bo
 /// - `primary_id`: ID of the body this is tidally locked to
 /// - `ra_deg`: Right ascension of north pole in ICRF (degrees)
 /// - `dec_deg`: Declination of north pole in ICRF (degrees)
-fn tidally_locked_rotation(primary_id: &str, ra_deg: f64, dec_deg: f64) -> BodyRotation {
+pub fn tidally_locked_rotation(primary_id: &str, ra_deg: f64, dec_deg: f64) -> BodyRotation {
     let pole_ecliptic = equatorial_to_ecliptic_pole(ra_deg, dec_deg);
     BodyRotation::tidally_locked(primary_id, pole_ecliptic)
 }

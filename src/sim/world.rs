@@ -7,9 +7,8 @@
 
 use std::collections::HashMap;
 
-use bevy::math::DVec3;
 use bevy::prelude::*;
-use em_foundations::time::{Instant, TimeDelta};
+use em_foundations::time::Instant;
 use em_sim::id::BodyId;
 use em_sim::propagate;
 use em_sim::system::System;

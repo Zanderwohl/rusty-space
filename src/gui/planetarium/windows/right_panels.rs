@@ -296,7 +296,7 @@ fn draw_right_panel_button(
         painter.rect_stroke(
             rect,
             2.0,
-            egui::Stroke::new(1.0, border_color),
+            egui::Stroke::new(1.0_f32, border_color),
             egui::StrokeKind::Middle,
         );
 

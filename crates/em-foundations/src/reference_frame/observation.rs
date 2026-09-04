@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use glam::{DVec3, DQuat};
 use crate::reference_frame::{ReferenceFrame};
 use crate::time::Instant;
@@ -12,6 +11,9 @@ pub struct Observation {
 }
 
 impl Observation {
+    /// When the observation was made. Bearings are frame- and time-dependent.
+    pub fn time(&self) -> Instant { self.time }
+
     pub fn from_azimuth_zenith(azimuth_rad: f64, zenith_rad: f64, frame: &ReferenceFrame, time: Instant) -> Self {
         Self {
             frame: frame.clone(),

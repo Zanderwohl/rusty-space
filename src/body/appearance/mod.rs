@@ -16,7 +16,7 @@ pub struct AssetCache {
 }
 
 /// A black unlit occluder sphere at radius 0.97. The wireframe grid is a child entity.
-pub fn debug_ball_bundle(ball: &DebugBall,
+pub fn debug_ball_bundle(_ball: &DebugBall,
                       cache: &mut ResMut<AssetCache>,
                       meshes: &mut Assets<Mesh>,
                       materials: &mut Assets<StandardMaterial>,
@@ -43,6 +43,7 @@ pub fn debug_ball_bundle(ball: &DebugBall,
     )
 }
 
+#[allow(dead_code)] // Diagnostic texture, wired up by hand when a mapping looks wrong.
 fn uv_debug_texture() -> Image {
     const TEXTURE_SIZE: usize = 8;
 

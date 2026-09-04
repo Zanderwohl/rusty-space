@@ -5,7 +5,7 @@
 
 use glam::{DMat3, DVec3};
 use serde::{Deserialize, Serialize};
-use em_foundations::kepler::{anomaly, state, angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
+use em_foundations::kepler::{anomaly, state, angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
 use em_foundations::time::{Instant, TimeDelta};
 use em_foundations::mappings;
 

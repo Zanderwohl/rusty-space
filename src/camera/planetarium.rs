@@ -28,7 +28,6 @@ use crate::gui::planetarium::{FocusedBodyState, HoverState, HoveredTrajectoryMar
 use crate::presentation::{FocusedTrajectoryMarker, FocusedTrajectoryMarkerKind};
 use crate::sim::world::{self, BodyRef, SimSystem};
 use em_sim::system::System;
-use em_sim::id::BodyIndex;
 use crate::sim::SimTime;
 use crate::camera::freecam::{FreeCamPlugin, Freecam, MovementSettings};
 use crate::presentation::render_space::ToRender;
@@ -1223,6 +1222,7 @@ fn estimate_goto_velocity(
     Some((p1 - p0) / sample_dt)
 }
 
+#[allow(dead_code)] // The frame-less counterpart to `alt_az_in_frame`, kept for debugging.
 fn alt_az_in_bevy(observer: DVec3, observed: DVec3) -> (f64, f64) {
     let diff = observed - observer;
     let r = diff.length();

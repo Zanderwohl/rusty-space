@@ -286,7 +286,6 @@ fn srgb_to_linear(c: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::catalog::spectral::SpectralType;
 
     #[test]

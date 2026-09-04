@@ -232,7 +232,6 @@ impl System {
     // ------------------------------------------------- internals for `propagate`
 
     pub(crate) fn is_dirty(&self) -> bool { self.dirty }
-    pub(crate) fn clear_dirty(&mut self) { self.dirty = false; }
     pub(crate) fn set_time(&mut self, t: Instant) { self.time = t; }
 
     pub(crate) fn topo_order(&self) -> &[BodyIndex] { &self.topo_order }

@@ -7,12 +7,11 @@ use bevy_ui_text_input::{TextInputNode, TextInputPlugin, TextInputBuffer};
 
 use crate::sim::world::SimSystem;
 use crate::body::universe::save::{
-    CompoundMotiveEntry, SaveFormat, SomeBody, UniverseFile, UniverseFileContents,
-    UniverseFileTime, UniversePhysics, ViewSettings,
+    SaveFormat, UniverseFile, UniverseFileTime, UniversePhysics, ViewSettings,
 };
 use crate::body::universe::Universe;
 use crate::gui::app::AppState;
-use crate::sim::{SimTime, SimulationObject};
+use crate::sim::SimTime;
 
 use super::{MenuState, UiState, SaveFileMeta};
 use crate::gui::style::vfd;

@@ -1,7 +1,6 @@
 use bevy_egui::{egui, EguiContexts};
 use bevy::prelude::*;
 use bevy_egui::egui::Ui;
-use num_traits::Pow;
 use crate::sim::world::SimMetrics;
 use crate::body::universe::save::ViewSettings;
 use crate::foundations::time::JD_SECONDS_PER_JULIAN_DAY;

@@ -203,7 +203,7 @@ fn draw_show_hide_button(
         painter.rect_stroke(
             rect,
             2.0,
-            egui::Stroke::new(1.0, border_color),
+            egui::Stroke::new(1.0_f32, border_color),
             egui::StrokeKind::Middle,
         );
 
@@ -213,7 +213,7 @@ fn draw_show_hide_button(
 
         let label_color = if labels_on { active_color } else { inactive_color };
         painter.circle_filled(top_left_dot, DOT_RADIUS, label_color);
-        painter.circle_stroke(top_left_dot, DOT_RADIUS, egui::Stroke::new(1.0, active_color));
+        painter.circle_stroke(top_left_dot, DOT_RADIUS, egui::Stroke::new(1.0_f32, active_color));
 
         let traj_color = if trajectory_on {
             active_color
@@ -224,7 +224,7 @@ fn draw_show_hide_button(
         painter.circle_stroke(
             bottom_right_dot,
             DOT_RADIUS,
-            egui::Stroke::new(1.0, active_color),
+            egui::Stroke::new(1.0_f32, active_color),
         );
     }
 

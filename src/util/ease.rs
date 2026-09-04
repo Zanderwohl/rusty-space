@@ -58,6 +58,7 @@ pub mod f32 {
         }
     }
 
+    #[allow(dead_code)] // Part of the easing set; kept so the family is complete.
     fn smoothstep(t: f32) -> f32 {
         t * t * (3.0 - 2.0 * t)
     }
@@ -114,6 +115,7 @@ pub mod f64 {
         }
     }
 
+    #[allow(dead_code)] // Part of the easing set; kept so the family is complete.
     fn smoothstep(t: f64) -> f64 {
         t * t * (3.0 - 2.0 * t)
     }

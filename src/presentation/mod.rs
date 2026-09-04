@@ -40,6 +40,7 @@ pub use body_mesh::{
     TerminatorLinks,
 };
 pub use lights::adjust_lights;
+pub use rotation::render_axes;
 pub use labels::label_bodies;
 pub use local_starfield::{spawn_local_starfield, update_local_starfield, clear_local_starfield, LocalStarfield};
 pub use local_starfield_material::{LocalStarfieldMaterial, LocalStarfieldMaterialPlugin};

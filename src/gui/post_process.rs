@@ -6,9 +6,11 @@ use bevy::prelude::*;
 
 /// The number of units per frame to add to or subtract from intensity when the
 /// arrow keys are held.
+#[allow(dead_code)] // For the intensity keybinding, which has no UI yet.
 const CHROMATIC_ABERRATION_INTENSITY_ADJUSTMENT_SPEED: f32 = 0.002;
 
 /// The maximum supported chromatic aberration intensity level.
+#[allow(dead_code)] // For the intensity keybinding, which has no UI yet.
 const MAX_CHROMATIC_ABERRATION_INTENSITY: f32 = 0.4;
 
 /// The settings that the user can control.
