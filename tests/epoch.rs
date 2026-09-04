@@ -61,6 +61,7 @@ fn motive(epoch: KeplerEpoch) -> KeplerMotive {
             argument_of_periapsis: 102.9,
         }),
         epoch,
+        anomalistic_period: None,
     }
 }
 

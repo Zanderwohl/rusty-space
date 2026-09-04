@@ -689,9 +689,6 @@ fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, Sql
             argument_of_periapsis: argument_of_periapsis.unwrap_or(0.0),
             apsidal_precession_period: TimeDelta::from_days(apsidal_precession_period.unwrap_or(0.0)),
             nodal_precession_period: TimeDelta::from_days(nodal_precession_period.unwrap_or(0.0)),
-            // NULL means "derive from the semi-major axis", which is right for a
-            // non-precessing orbit and wrong for this one — see KeplerRotation.
-            anomalistic_period: anomalistic_period.map(TimeDelta::from_days),
         }),
         _ => return Err(SqliteSaveError::InvalidData(format!("Unknown rotation type: {}", rotation_type))),
     };
@@ -718,6 +715,9 @@ fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, Sql
         shape,
         rotation,
         epoch,
+        // NULL means "derive the rate from the semi-major axis", correct for an ideal
+        // two-body orbit and wrong for a precessing or J2-perturbed one.
+        anomalistic_period: anomalistic_period.map(TimeDelta::from_days),
     })
 }
 
@@ -786,14 +786,12 @@ fn save_keplerian(conn: &Connection, motive_id: i64, kepler: &KeplerMotive) -> R
     
     // Extract rotation data
     let (rotation_type, inclination, longitude_of_ascending_node, argument_of_periapsis,
-         apsidal_precession_period, nodal_precession_period, longitude_of_periapsis_val,
-         anomalistic_period) = match &kepler.rotation {
+         apsidal_precession_period, nodal_precession_period, longitude_of_periapsis_val) = match &kepler.rotation {
         KeplerRotation::EulerAngles(ea) => (
             "EulerAngles",
             Some(ea.inclination),
             Some(ea.longitude_of_ascending_node),
             Some(ea.argument_of_periapsis),
-            None,
             None,
             None,
             None,
@@ -806,7 +804,6 @@ fn save_keplerian(conn: &Connection, motive_id: i64, kepler: &KeplerMotive) -> R
             None,
             None,
             Some(fa.longitude_of_periapsis),
-            None,
         ),
         KeplerRotation::PrecessingEulerAngles(pea) => (
             "PrecessingEulerAngles",
@@ -816,7 +813,6 @@ fn save_keplerian(conn: &Connection, motive_id: i64, kepler: &KeplerMotive) -> R
             Some(pea.apsidal_precession_period.to_days()),
             Some(pea.nodal_precession_period.to_days()),
             None,
-            pea.anomalistic_period.map(|p| p.to_days()),
         ),
     };
     
@@ -881,7 +877,7 @@ fn save_keplerian(conn: &Connection, motive_id: i64, kepler: &KeplerMotive) -> R
             mean_anomaly,
             true_anomaly_val,
             periapsis_time_julian_day,
-            anomalistic_period,
+            kepler.anomalistic_period.map(|p| p.to_days()),
         ],
     )?;
     

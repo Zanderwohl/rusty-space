@@ -97,3 +97,38 @@ familiar 3232 d (8.85 yr) of ϖ. Fitting recovers 2190.5 d.
 Luna result over 2000–2050: RMS 7 989 km, max 15 556 km (~1.2°). That is the floor for
 this model class — evection alone is 1.27° and is not representable by a precessing
 ellipse.
+
+## Regenerating the whole system
+
+`docs/scratch/` holds the pipeline that produced the bundled system. Run in order:
+
+```bash
+python3 fetch_phys.py      # OBJ_DATA per body -> GM, radius, rotation period
+python3 parse_phys.py      # -> phys.json
+python3 fetch_elements.py  # osculating elements at J2000 -> fit seed + period
+python3 fetch_series.py    # position series, sized from each body's own period
+python3 fit_all.py         # least-squares mean elements -> fits.json
+python3 gen_rust.py        # -> generated_bodies.rs
+```
+
+`bodies.py` is the body table: slug, display name, Horizons COMMAND, primary, tags.
+
+### Things that bite
+
+- **Comets need an apparition selector.** `COMMAND='1P;'` returns a list of per-apparition
+  records rather than an ephemeris. Use `DES=1P;CAP;` — closest apparition.
+- **Some moons orbit a barycentre, not their planet.** Nix, Hydra, Kerberos and Styx circle
+  the Pluto–Charon barycentre (`500@9`); centring them on Pluto puts Pluto's own 2100 km
+  wobble into the "orbit" and the fit fails outright. Dysnomia likewise orbits the Eris
+  system barycentre, `500@20136199`.
+- **The first continuation window must be a few orbits, not a fixed fraction.** Osculating
+  mean motion can be a percent or two off for a close-in moon — Saturn's J₂ shifts Pan's by
+  ~1.5% — and across hundreds of orbits that is several revolutions of phase error, leaving
+  no gradient to follow.
+- **Bound the semi-major axis.** Unbounded, the fit has a degenerate minimum: when the phase
+  is wrong, the cheapest way to shrink the residual is to collapse the orbit to a point.
+  Nix fitted to a = 264 km against a true 39 326 km before the box was added.
+- **JPL publishes no size or GM for the large TNOs.** Neither the Horizons small-body record
+  nor the SBDB API carries a diameter for Eris, Makemake, Haumea, Quaoar, Orcus or Gonggong
+  — only H and a rotation period. Radii for those are estimated from absolute magnitude at an
+  assumed albedo and are flagged in the generated file.

@@ -87,8 +87,8 @@ fn modelled_position(body_id: &str, jd: f64) -> Option<DVec3> {
 ///
 /// Measured relative error at the time these were set (worst of the two epochs):
 ///
-///   mercury 1.2e-2   venus 8.6e-3   earth 1.1e-4   mars 1.5e-3
-///   jupiter 3.4e-3   uranus 8.5e-4  neptune 1.9e-3  luna 2.8e-2
+///   mercury 1.1e-5   venus 7.3e-5   earth 6.7e-5   mars 1.0e-4
+///   jupiter 2.6e-3   uranus 4.3e-4  neptune 2.6e-4  luna 2.7e-2
 ///
 /// Luna's elements were refitted against 3653 Horizons samples over 2000-2050, taking it
 /// from 6.3e-1 to 4.8e-2. It is now near the floor for a precessing-ellipse model: the
@@ -100,13 +100,13 @@ fn modelled_position(body_id: &str, jd: f64) -> Option<DVec3> {
 /// but capitalises "Jupiter", "Uranus", "Neptune" and "Sedna".
 fn tolerance(body: &str) -> f64 {
     match body.to_ascii_lowercase().as_str() {
-        "venus" => 1.5e-2,
-        "neptune" => 4.0e-3,
-        "earth" => 5.0e-4,
-        "uranus" => 2.0e-3,
-        "jupiter" => 6.0e-3,
-        "mars" => 3.0e-3,
-        "mercury" => 2.0e-2,
+        "venus" => 1.5e-4,
+        "neptune" => 5.0e-4,
+        "earth" => 1.5e-4,
+        "uranus" => 8.0e-4,
+        "jupiter" => 4.0e-3,
+        "mars" => 2.0e-4,
+        "mercury" => 5.0e-5,
         "luna" => 4.0e-2,
         other => panic!("no tolerance recorded for {other}"),
     }
@@ -307,5 +307,100 @@ fn keplerian_speeds_obey_vis_viva() {
             assert!(rel < 1e-9, "{body} at +{days} d: speed {} vs vis-viva {expected} (rel {rel:e})",
                 v.length());
         }
+    }
+}
+
+/// Every bundled body must carry physically sane data.
+///
+/// This exists because the hand-maintained preset accumulated exactly these mistakes:
+/// Mars's mass was 6.4171 kg (an `e23` lost), Vesta had Luna's radius, and Eris, Sedna
+/// and Dysnomia stored diameters in a field named `radius`.
+#[test]
+fn every_body_has_sane_physical_data() {
+    let contents = solar_system();
+    let ids: Vec<&str> = contents.bodies.iter().map(|b| match b {
+        SomeBody::KeplerEntry(k) => k.info.id.as_str(),
+        SomeBody::FixedEntry(f) => f.info.id.as_str(),
+        SomeBody::NewtonEntry(n) => n.info.id.as_str(),
+        SomeBody::CompoundEntry(c) => c.info.id.as_str(),
+        SomeBody::CompoundMotiveEntry(c) => c.info.id.as_str(),
+    }).collect();
+
+    assert!(ids.len() > 100, "expected the full system, got {} bodies", ids.len());
+
+    let mut seen = std::collections::HashSet::new();
+    for id in &ids {
+        assert!(seen.insert(*id), "duplicate body id {id:?}");
+        assert!(!id.is_empty() && !id.contains(' '), "unusable body id {id:?}");
+    }
+
+    for b in &contents.bodies {
+        let SomeBody::KeplerEntry(k) = b else { continue };
+        let id = &k.info.id;
+
+        // Every primary must exist, or the body silently orbits the origin.
+        assert!(ids.contains(&k.params.primary_id.as_str()),
+            "{id} orbits {:?}, which is not in the system", k.params.primary_id);
+
+        assert!(k.info.mass >= 0.0 && k.info.mass.is_finite(), "{id} mass {}", k.info.mass);
+        // A gravitating body needs a real mass. Mars had 6.4171 kg.
+        if k.info.major {
+            assert!(k.info.mass > 1e15, "{id} is Major but has mass {} kg", k.info.mass);
+        }
+
+        let a = k.params.semi_major_axis();
+        let e = k.params.eccentricity();
+        assert!(a.is_finite() && a != 0.0, "{id} semi-major axis {a}");
+        assert!((0.0..20.0).contains(&e) && e.is_finite(), "{id} eccentricity {e}");
+        if e < 1.0 {
+            assert!(a > 0.0, "{id} is closed (e={e}) but has a = {a}");
+            let peri = k.params.periapsis();
+            let apo = k.params.apoapsis().expect("closed orbit has an apoapsis");
+            assert!(peri > 0.0 && peri <= apo, "{id} apsides {peri} / {apo}");
+        }
+
+        let radius = k.appearance.radius();
+        assert!(radius > 0.0 && radius.is_finite(), "{id} radius {radius}");
+        if e < 1.0 {
+            // A body cannot be larger than its own orbit. Vesta had Luna's radius; that
+            // would not trip this, but a diameter-for-radius on a close moon would.
+            assert!(radius < k.params.periapsis(),
+                "{id} radius {radius:e} m exceeds its periapsis {:e} m", k.params.periapsis());
+        }
+
+        assert!(k.params.inclination().is_finite(), "{id} inclination");
+        assert!(k.params.anomalistic_period.map_or(true, |p| p.to_seconds() > 0.0),
+            "{id} has a non-positive anomalistic period");
+    }
+}
+
+/// Moons must actually be bound to their planet: a satellite orbit has to sit well
+/// inside the primary's Hill sphere, or it is not a satellite.
+#[test]
+fn moons_orbit_inside_their_primarys_hill_sphere() {
+    let contents = solar_system();
+    let g = contents.physics.gravitational_constant;
+    let get = |id: &str| contents.bodies.iter().find_map(|b| match b {
+        SomeBody::KeplerEntry(k) if k.info.id == id => Some((k.info.mass, Some(k))),
+        SomeBody::FixedEntry(f) if f.info.id == id => Some((f.info.mass, None)),
+        _ => None,
+    });
+
+    for b in &contents.bodies {
+        let SomeBody::KeplerEntry(k) = b else { continue };
+        if k.params.primary_id == "sol" { continue; }
+        let (primary_mass, primary_entry) = get(&k.params.primary_id).expect("primary");
+        let Some(pe) = primary_entry else { continue };
+        let (sun_mass, _) = get("sol").unwrap();
+
+        // Hill radius of the primary about the Sun.
+        let hill = pe.params.semi_major_axis()
+            * (1.0 - pe.params.eccentricity())
+            * (primary_mass / (3.0 * sun_mass)).cbrt();
+        let apo = k.params.apoapsis().unwrap_or(f64::INFINITY);
+        assert!(apo < hill,
+            "{} reaches {:.3e} m from {}, outside its {:.3e} m Hill sphere",
+            k.info.id, apo, k.params.primary_id, hill);
+        let _ = g;
     }
 }
