@@ -201,54 +201,64 @@ fn load_assets(
     let save = (ui_state.current_save.clone()).unwrap();
     let path = save.path;
 
-    let universe_file: Option<UniverseFile> = UniverseFile::load_from_path(&path);
-    if let Some(universe_file) = universe_file {
-        let (new_universe, loaded_time) = Universe::from_file(&universe_file);
-        universe.path = new_universe.path.clone();
-        universe.clear_all();
-        let _version = &universe_file.contents.version; // TODO: Support multiple file format versions?
-
-        // Apply loaded time to the actual resource
-        sim_time.time = loaded_time.time;
-        sim_time.step = loaded_time.step;
-        sim_time.gui_speed = loaded_time.gui_speed;
-        sim_time.max_frame_time = loaded_time.max_frame_time;
-        sim_time.playing = false;
-
-        physics.gravitational_constant = universe_file.contents.physics.gravitational_constant;
-        view_settings.tags = HashMap::<String, TagState>::new();
-
-        for body in &universe_file.contents.bodies {
-            let id = body.id();
-            for tag in body.tags() {
-                let default_state = if tag == "Major Moon" || tag == "Major Planet" || tag == "Minor Planet" {
-                    TagState { shown: true, trajectory: true, ..Default::default() }
-                } else if tag == "Barycenter" {
-                    TagState { shown: false, trajectory: true, ..Default::default() }
-                } else {
-                    TagState::default()
-                };
-                view_settings.tags.entry(tag.clone()).or_insert(default_state).members.insert(id.clone());
-            }
-            universe.insert(body.name(), id);
+    let universe_file = match UniverseFile::load_from_path(&path) {
+        Ok(file) => file,
+        Err(e) => {
+            error!("{e}");
+            next_app_state.set(AppState::MainMenu);
+            return;
         }
+    };
 
-        // Bodies go into the arena, not into entities. `sync_body_entities` notices the
-        // new generation next frame and spawns the views; the presentation systems dress
-        // them from there.
-        match em_sim::system::System::from_contents(&universe_file.contents) {
-            Ok(loaded) => system.0 = loaded,
-            Err(e) => error!("could not build the simulation from {path:?}: {e}"),
+    // Build the arena before touching anything else. Everything below overwrites live
+    // state, so a failure part-way used to leave the clock, physics, tags and name map
+    // describing the new file while the simulation still held the old bodies.
+    let loaded = match em_sim::system::System::from_contents(&universe_file.contents) {
+        Ok(loaded) => loaded,
+        Err(e) => {
+            error!("could not build the simulation from {path:?}: {e}");
+            next_app_state.set(AppState::MainMenu);
+            return;
         }
+    };
+
+    let (new_universe, loaded_time) = Universe::from_file(&universe_file);
+    universe.path = new_universe.path.clone();
+    universe.clear_all();
+
+    sim_time.time = loaded_time.time;
+    sim_time.step = loaded_time.step;
+    sim_time.gui_speed = loaded_time.gui_speed;
+    sim_time.max_frame_time = loaded_time.max_frame_time;
+    sim_time.playing = false;
+
+    physics.gravitational_constant = universe_file.contents.physics.gravitational_constant;
+    view_settings.tags = HashMap::<String, TagState>::new();
+
+    for body in &universe_file.contents.bodies {
+        let id = body.id();
+        for tag in body.tags() {
+            let default_state = if tag == "Major Moon" || tag == "Major Planet" || tag == "Minor Planet" {
+                TagState { shown: true, trajectory: true, ..Default::default() }
+            } else if tag == "Barycenter" {
+                TagState { shown: false, trajectory: true, ..Default::default() }
+            } else {
+                TagState::default()
+            };
+            view_settings.tags.entry(tag.clone()).or_insert(default_state).members.insert(id.clone());
+        }
+        universe.insert(body.name(), id);
     }
+
+    // `sync_body_entities` spawns the views on the next generation bump.
+    system.0 = loaded;
 
     next_app_state.set(AppState::Planetarium);
 }
 
 fn cleanup_planetarium(
     mut commands: Commands,
-    // One query rather than three: a system may take at most sixteen parameters, and
-    // these three are despawned identically anyway.
+    // Merged because Bevy caps a system at 16 parameters.
     orphans: Query<Entity, Or<(
         With<TrajectoryMesh>,
         With<BodyPointMesh>,
@@ -275,9 +285,7 @@ fn cleanup_planetarium(
         commands.entity(entity).despawn();
     }
 
-    // Reset physics state. Dropping the arena drops every body; the entity views are
-    // despawned as `SimulationObject`s by `unload_simulation_objects`, so all that is
-    // left here is to forget which entity viewed what.
+    // `unload_simulation_objects` despawns the views; this forgets the mapping.
     *system = SimSystem::default();
     *body_entities = BodyEntities::default();
     *trajectories = Trajectories::default();

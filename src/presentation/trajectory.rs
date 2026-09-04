@@ -13,7 +13,7 @@ use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 
 use crate::body::motive::MotiveSelection;
 use crate::sim::world::{BodyRef, SimSystem, Trajectories};
-use crate::body::universe::save::{UniversePhysics, ViewSettings};
+use crate::body::universe::save::ViewSettings;
 use crate::camera::{Freecam, PlanetariumCamera};
 use crate::gui::planetarium::{FocusedBodyState, HoverState, HoveredTrajectoryMarkerKind};
 use crate::gui::planetarium::{format_sim_time_for_mode, MissionClockMode, MissionClockSettings};
@@ -216,7 +216,6 @@ pub fn rebuild_trajectory_caches(
         let Some(body_index) = system.0.index_of(body_ref.0) else { continue };
         let motive = system.0.motive(body_index);
 
-        // Check if body has a sampled path
         let Some(trajectory) = trajectories.0.get(&body_ref.0).map(|p| &p.points) else {
             if cache.valid {
                 cache.valid = false;
@@ -301,7 +300,6 @@ pub fn build_trajectory_meshes(
     hover_state: Res<HoverState>,
     fcam: Single<&Freecam, With<PlanetariumCamera>>,
     sim_time: Res<SimTime>,
-    _physics: Res<UniversePhysics>,
 ) {
     let distance_scale = view_settings.distance_factor();
     let camera_pos = fcam.bevy_pos;
@@ -359,12 +357,19 @@ pub fn build_trajectory_meshes(
         // Update trajectory transform every frame:
         // - translation anchors the mesh at the primary focus
         // - rotation applies current perifocal->reference orientation
-        let primary_world_pos = cache
-            .primary_id
-            .as_ref()
-            .and_then(|pid| system.0.by_name(pid))
-            .map(|i| system.0.position(i))
-            .unwrap_or(DVec3::ZERO);
+        // A named primary that does not resolve leaves the ellipse unplaceable. Anchoring
+        // it at the origin drew a correctly shaped orbit around the Sun, which reads as
+        // real; hide it instead.
+        let primary_world_pos = match &cache.primary_id {
+            Some(pid) => match system.0.by_name(pid) {
+                Some(i) => system.0.position(i),
+                None => {
+                    *visibility = Visibility::Hidden;
+                    continue;
+                }
+            },
+            None => DVec3::ZERO,
+        };
         transform.translation = primary_world_pos.to_render_relative(distance_scale, camera_pos);
 
         let current_perifocal_to_reference = match motive.motive_at(sim_time.time) {
@@ -624,8 +629,8 @@ pub fn update_focused_trajectory_markers(
     };
 
     let primary_position = system.0.position(primary_index);
-    // The arena already resolved mu, explicit override included — recomputing it from
-    // the primary's mass here would silently disagree for barycentric orbits.
+    // Arena mu honours the explicit override; recomputing from primary mass would be
+    // wrong for barycentric orbits.
     let mu = system.0.mu(focused_index);
     let period_seconds = kepler.period(mu).to_seconds();
     let periapsis_base = kepler.time_at_periapsis_passage(mu);
@@ -735,7 +740,6 @@ pub fn update_mouse_hit_marker(
     focused_body_state: Res<FocusedBodyState>,
     view_settings: Res<ViewSettings>,
     sim_time: Res<SimTime>,
-    physics: Res<UniversePhysics>,
     _fcam: Single<&Freecam, With<PlanetariumCamera>>,
     bodies: Query<(&BodyRef, Option<&TrajectoryMeshLink>)>,
     system: Res<SimSystem>,
@@ -790,25 +794,25 @@ pub fn update_mouse_hit_marker(
         return;
     }
 
-    // Get primary info for mu calculation
-    let primary_mass = system.0.by_name(&kepler.primary_id)
-        .map(|i| system.0.mass(i))
-        .unwrap_or(0.0);
-
-    let mu = kepler.gravitational_parameter
-        .unwrap_or(physics.gravitational_constant * primary_mass);
+    // Arena mu: G(M+m) with the explicit override honoured. Open-coding G*M here made
+    // the readout disagree with the propagated position, and an unresolved primary gave
+    // mu = 0, which feeds infinities into the period.
+    let mu = system.0.mu(focused_index);
     let period_seconds = kepler.period(mu).to_seconds();
     let periapsis_base = kepler.time_at_periapsis_passage(mu);
 
     // Compute true anomaly using Newton refinement (20 iterations in fourier_expansion)
-    let true_anomaly = refine_true_anomaly_newton(
+    let Some(true_anomaly) = refine_true_anomaly_newton(
         &kepler,
         mu,
         hit_data.start_time,
         hit_data.end_time,
         hit_data.t,
         periapsis_base,
-    );
+    ) else {
+        despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
+        return;
+    };
 
     // Calculate next and previous times for this true anomaly position
     let event_times = compute_anomaly_event_times(
@@ -848,7 +852,7 @@ fn refine_true_anomaly_newton(
     end_time: f64,
     t: f64,
     periapsis_base: crate::foundations::time::Instant,
-) -> f64 {
+) -> Option<f64> {
     // Initial guess: linear interpolation of time
     let interpolated_relative_time = start_time + t * (end_time - start_time);
     let absolute_time = crate::foundations::time::Instant::from_seconds_since_j2000(
@@ -859,10 +863,10 @@ fn refine_true_anomaly_newton(
     let ecc = kepler.eccentricity();
     let mean_anomaly = kepler.mean_anomaly(absolute_time, mu);
 
-    // Solved rather than expanded: the series this used to call diverges past the Laplace
-    // limit, and a marker on a comet's trajectory is exactly where that shows.
+    // Solved, not expanded: the series diverges past the Laplace limit, e > 0.6627.
+    // `None` at e == 1: mean anomaly is undefined for a parabola, and substituting it
+    // for the true anomaly would report a confident angle that means nothing.
     em_foundations::kepler::anomaly::true_from_mean(mean_anomaly, ecc)
-        .unwrap_or(mean_anomaly)
 }
 
 /// Compute the previous and next times when the body will be at a given true anomaly.

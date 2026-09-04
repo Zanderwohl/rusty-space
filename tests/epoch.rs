@@ -1,8 +1,5 @@
-//! Epoch and time-scale consistency.
-//!
-//! `Instant` counts SECONDS since J2000. `Instant::J2000` previously held the Julian Day
-//! *number* 2451545.0, putting the J2000 epoch 28.37 days late and shifting every body
-//! that declares a J2000 epoch (11 of the bundled planets).
+//! Epoch and time-scale consistency. `Instant` counts seconds since J2000; mixing it with
+//! a Julian Day number puts the epoch 28.37 days late.
 
 use exotic_matters::foundations::time::{Instant, JD_SECONDS_PER_JULIAN_DAY};
 use exotic_matters::body::motive::kepler_motive::{
@@ -66,8 +63,7 @@ fn motive(epoch: KeplerEpoch) -> KeplerMotive {
     }
 }
 
-/// `KeplerEpoch::J2000 { M }` must be exactly equivalent to
-/// `KeplerEpoch::MeanAnomaly { epoch: J2000, M }`. They diverged by 2451545 seconds.
+/// `KeplerEpoch::J2000 { M }` is equivalent to `MeanAnomaly { epoch: J2000, M }`.
 #[test]
 fn j2000_epoch_variant_matches_explicit_j2000_epoch() {
     const MU: f64 = 1.32712440018e20;
@@ -96,8 +92,8 @@ fn j2000_epoch_variant_matches_explicit_j2000_epoch() {
     }
 }
 
-/// `epoch()` and `time_at_periapsis_passage()` handle the J2000 variant on separate code
-/// paths. They must agree, or bodies drift off their own rendered trajectory lines.
+/// `epoch()` and `time_at_periapsis_passage()` take separate paths for the J2000 variant
+/// and must agree, or bodies drift off their own trajectory lines.
 #[test]
 fn periapsis_passage_agrees_between_epoch_variants() {
     const MU: f64 = 1.32712440018e20;
@@ -114,8 +110,8 @@ fn periapsis_passage_agrees_between_epoch_variants() {
     assert!((a - b).abs() < 1.0, "periapsis passage: {a} vs {b} (differ by {} s)", (a - b).abs());
 }
 
-/// At periapsis passage the body must actually be at periapsis distance.
-/// This ties `time_at_periapsis_passage`, `mean_anomaly` and `displacement` together.
+/// At periapsis passage the body is at periapsis distance, tying
+/// `time_at_periapsis_passage`, `mean_anomaly` and `displacement` together.
 #[test]
 fn body_is_at_periapsis_at_periapsis_passage() {
     const MU: f64 = 1.32712440018e20;
@@ -125,17 +121,13 @@ fn body_is_at_periapsis_at_periapsis_passage() {
     let r = m.displacement(t_p, MU).unwrap().length();
     let expected = m.periapsis();
 
-    // The series-based true anomaly limits accuracy here; tighten in Phase 3.
+    // Tolerance set by the series-based true anomaly.
     let rel = (r - expected).abs() / expected;
     assert!(rel < 1e-3, "at periapsis passage r = {r:e}, expected periapsis {expected:e} (rel {rel:e})");
 }
 
-/// A `TrueAnomaly` epoch must propagate rather than panicking.
-///
-/// Both `mean_anomaly_at_epoch` and `time_at_periapsis_passage` were `todo!()` for this
-/// variant, and it is not hypothetical: the SQLite and TOML decoders both build it from
-/// a save whose `epoch_type` is `'TrueAnomaly'`, so such a file loaded fine and then
-/// panicked on the first frame.
+/// A `TrueAnomaly` epoch propagates rather than panicking. Both decoders build it from a
+/// save whose `epoch_type` is `'TrueAnomaly'`.
 mod true_anomaly_epoch {
     use em_foundations::time::Instant;
     use em_sim::motive::kepler::*;
@@ -175,9 +167,8 @@ mod true_anomaly_epoch {
         }
     }
 
-    /// The epoch has to mean what it says: at the epoch instant, the body's true anomaly
-    /// must be the one that was stored. A conversion that merely returns *a* number
-    /// would pass the test above and fail this one.
+    /// At the epoch instant the body's true anomaly is the stored one, not merely some
+    /// number.
     #[test]
     fn the_body_is_where_the_stored_true_anomaly_says() {
         for &e in &[0.0, 0.15, 0.6, 0.9] {
@@ -191,14 +182,14 @@ mod true_anomaly_epoch {
         }
     }
 
-    /// Periapsis is where the true anomaly is zero, whatever epoch form was used to say so.
+    /// Periapsis is true anomaly zero, whichever epoch form states it.
     #[test]
     fn periapsis_agrees_with_the_mean_anomaly_form() {
         let e = 0.4;
         let nu = 120.0_f64;
         let by_true = orbit(e, nu);
 
-        // The same orbit, stated as the mean anomaly that true anomaly implies.
+        // The same orbit, stated as the implied mean anomaly.
         let m = em_foundations::kepler::anomaly::mean_from_eccentric(
             em_foundations::kepler::anomaly::eccentric_from_true(nu.to_radians(), e),
             e,
@@ -214,7 +205,7 @@ mod true_anomaly_epoch {
         assert!((a - b).abs() < 1e-6, "periapsis {a} vs {b}");
     }
 
-    /// An open orbit stated by true anomaly must work too.
+    /// An open orbit stated by true anomaly works too.
     #[test]
     fn hyperbolic_orbits_propagate() {
         let k = orbit(1.5, 20.0);

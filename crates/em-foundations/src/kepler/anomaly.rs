@@ -1,24 +1,14 @@
-//! Converting between mean, eccentric and true anomaly.
+//! Converting between mean, eccentric and true anomaly. All angles in radians.
 //!
-//! All angles are radians.
+//! Kepler's equation `M = E - e sin E` has no closed-form inverse; both an iterative
+//! solve and the truncated series are exported. Default to
+//! [`eccentric_from_mean_halley`], which converges cubically (2-3 iterations at
+//! planetary eccentricities).
 //!
-//! Kepler's equation `M = E - e sin E` has no closed-form inverse, so getting from mean
-//! anomaly to position needs either an iterative solve or a truncated series. Both are
-//! exported: prefer [`eccentric_from_mean_halley`] for anything that matters, and reach
-//! for the series only when you specifically want the classical expansion.
-//!
-//! # Why the series are not the default
-//!
-//! [`true_from_mean_bessel`] is a Fourier expansion in Bessel functions. It diverges past
-//! the Laplace limit `e ≈ 0.6627`, and no iteration count rescues it. Even below that it
-//! converges slowly. Measured against a converged solve, its worst-case true-anomaly
-//! error is roughly 0.96° at Earth's eccentricity, 5.4° at Mars', 12.4° at Mercury's and
-//! 31° at Eris'. An along-track angular error of `d` radians at radius `r` displaces a
-//! body by `r*d`, which made it the dominant error term in this crate.
-//!
-//! [`eccentric_from_mean_halley`] converges cubically — two or three iterations to
-//! machine precision at planetary eccentricities — and costs less than the ten Bessel
-//! evaluations it replaces.
+//! The Bessel series [`true_from_mean_bessel`] diverges past the Laplace limit
+//! `e ≈ 0.6627` at any term count, and converges slowly below it: worst-case true-anomaly
+//! error ~0.96° at Earth's eccentricity, 12.4° at Mercury's, 31° at Eris'. An along-track
+//! error of `d` rad at radius `r` displaces a body by `r*d`.
 
 use std::f64::consts::{PI, TAU};
 
@@ -26,11 +16,10 @@ use scilib::math::bessel;
 
 use crate::common::unit_circle_xy;
 
-/// Convergence tolerance in radians. Near f64 resolution for angles of order 1.
+/// Convergence tolerance, radians. Near f64 resolution for angles of order 1.
 pub const DEFAULT_TOLERANCE: f64 = 1e-13;
 
-/// Iteration ceiling. Halley reaches `DEFAULT_TOLERANCE` in 2-4 steps for `e < 0.99`;
-/// this only exists so a pathological input terminates.
+/// Iteration ceiling. Halley needs 2-4 steps for `e < 0.99`; this bounds pathological input.
 pub const DEFAULT_MAX_ITERATIONS: u32 = 64;
 
 /// Wrap an angle into `[0, 2π)`.
@@ -46,15 +35,10 @@ pub fn wrap_pi(angle: f64) -> f64 {
     if a > PI { a - TAU } else { a }
 }
 
-// ---------------------------------------------------------------------------
-// Elliptical: solving M = E - e sin E
-// ---------------------------------------------------------------------------
+// Elliptical: M = E - e sin E
 
-/// Starting guess for the elliptical solvers.
-///
-/// `E ≈ M + e sin M` is the first term of the series and is excellent for small `e`.
-/// Above `e = 0.8` it can land in a region where convergence is slow, so we use Danby's
-/// starter there instead.
+/// Starting guess: `E ≈ M + e sin M`, or Danby's starter above `e = 0.8` where the
+/// former can land where convergence is slow.
 #[inline]
 fn elliptical_seed(mean_anomaly: f64, eccentricity: f64) -> f64 {
     if eccentricity < 0.8 {
@@ -65,7 +49,7 @@ fn elliptical_seed(mean_anomaly: f64, eccentricity: f64) -> f64 {
     }
 }
 
-/// Eccentric anomaly from mean anomaly by Newton's method. Quadratic convergence.
+/// Eccentric anomaly from mean anomaly, Newton's method. Quadratic.
 ///
 /// `eccentricity` must be in `[0, 1)`; see [`hyperbolic_from_mean_newton`] for `e > 1`.
 pub fn eccentric_from_mean_newton(
@@ -88,9 +72,7 @@ pub fn eccentric_from_mean_newton(
     ea
 }
 
-/// Eccentric anomaly from mean anomaly by Halley's method. Cubic convergence.
-///
-/// This is the solver the simulation uses.
+/// Eccentric anomaly from mean anomaly, Halley's method. Cubic; the default solver.
 ///
 /// `eccentricity` must be in `[0, 1)`; see [`hyperbolic_from_mean_newton`] for `e > 1`.
 pub fn eccentric_from_mean_halley(
@@ -117,12 +99,10 @@ pub fn eccentric_from_mean_halley(
     ea
 }
 
-/// Eccentric anomaly from mean anomaly by the classical series, to `e^3`:
-///
+/// Classical series to `e^3`:
 /// `E ≈ M + e sin M + (e²/2) sin 2M + (e³/8)(3 sin 3M − sin M)`
 ///
-/// Kept because it is the textbook expansion, and because it is closed-form. Truncated,
-/// so accurate only for small `e` — prefer [`eccentric_from_mean_halley`].
+/// Truncated: accurate only for small `e`. Prefer [`eccentric_from_mean_halley`].
 pub fn eccentric_from_mean_series(mean_anomaly: f64, eccentricity: f64) -> f64 {
     let m = mean_anomaly;
     let e = eccentricity;
@@ -131,21 +111,19 @@ pub fn eccentric_from_mean_series(mean_anomaly: f64, eccentricity: f64) -> f64 {
         + (e * e * e / 8.0) * (3.0 * (3.0 * m).sin() - m.sin())
 }
 
-// ---------------------------------------------------------------------------
-// Hyperbolic: solving M = e sinh H - H
-// ---------------------------------------------------------------------------
+// Hyperbolic: M = e sinh H - H
 
-/// Hyperbolic anomaly from hyperbolic mean anomaly, by Newton's method.
+/// Hyperbolic anomaly from hyperbolic mean anomaly, Newton's method.
 ///
-/// `eccentricity` must be `> 1`. Unlike the elliptical case the mean anomaly is not
-/// periodic, so it is used unwrapped.
+/// `eccentricity` must be `> 1`. The mean anomaly is not periodic here, so it is
+/// used unwrapped.
 pub fn hyperbolic_from_mean_newton(
     mean_anomaly: f64,
     eccentricity: f64,
     tolerance: f64,
     max_iterations: u32,
 ) -> f64 {
-    // Seed: asinh for small M, the logarithmic form once M/e grows.
+    // Seed: asinh for small M, logarithmic form once M/e grows.
     let mut h = if mean_anomaly.abs() > 4.0 * eccentricity {
         let sign = if mean_anomaly >= 0.0 { 1.0 } else { -1.0 };
         sign * (2.0 * mean_anomaly.abs() / eccentricity + 1.8).ln()
@@ -165,14 +143,10 @@ pub fn hyperbolic_from_mean_newton(
     h
 }
 
-// ---------------------------------------------------------------------------
-// Anomaly conversions
-// ---------------------------------------------------------------------------
-
 /// True anomaly from eccentric anomaly, for `e < 1`.
 ///
-/// Uses the half-angle form, which is numerically better behaved near apoapsis than
-/// going through `cos ν` and keeps the quadrant without a sign fix-up.
+/// Half-angle form: better behaved near apoapsis than `cos ν`, and quadrant-correct
+/// without a sign fix-up.
 #[inline]
 pub fn true_from_eccentric(eccentric_anomaly: f64, eccentricity: f64) -> f64 {
     let half = eccentric_anomaly / 2.0;
@@ -204,29 +178,21 @@ pub fn true_from_hyperbolic(hyperbolic_anomaly: f64, eccentricity: f64) -> f64 {
 
 /// Hyperbolic anomaly from true anomaly, for `e > 1`. Inverse of [`true_from_hyperbolic`].
 ///
-/// Only true anomalies inside the asymptotes are on the trajectory: as `nu` approaches
-/// `±acos(-1/e)` the body is escaping to infinity and `H` diverges. Beyond them there is
-/// no orbit to speak of, so this returns `None` rather than a number that looks usable.
+/// `None` outside the asymptotes `±acos(-1/e)`, where `H` diverges and there is no
+/// trajectory.
 #[inline]
 pub fn hyperbolic_from_true(true_anomaly: f64, eccentricity: f64) -> Option<f64> {
     let half = (true_anomaly / 2.0).tan();
     let ratio = ((eccentricity - 1.0) / (eccentricity + 1.0)).sqrt();
     let x = ratio * half;
-    // `atanh` is defined on (-1, 1); |x| >= 1 is the asymptote and past it.
+    // `atanh` is defined on (-1, 1); |x| >= 1 is at or past the asymptote.
     if !x.is_finite() || x.abs() >= 1.0 {
         return None;
     }
     Some(2.0 * x.atanh())
 }
 
-// ---------------------------------------------------------------------------
-// Series routes from mean straight to true anomaly
-// ---------------------------------------------------------------------------
-
-/// The equation of the centre, expanded to `e^3`.
-///
-/// Truncated series; see [`super::true_anomaly::from_mean_anomaly`], which this
-/// delegates to.
+/// Equation of the centre to `e^3`. Delegates to [`super::true_anomaly::from_mean_anomaly`].
 #[inline]
 pub fn true_from_mean_series(mean_anomaly: f64, eccentricity: f64) -> f64 {
     super::true_anomaly::from_mean_anomaly(mean_anomaly, eccentricity)
@@ -234,9 +200,8 @@ pub fn true_from_mean_series(mean_anomaly: f64, eccentricity: f64) -> f64 {
 
 /// Fourier expansion of the true anomaly in Bessel functions.
 ///
-/// **Diverges for `e > 0.6627`** (the Laplace limit) no matter how many terms are used,
-/// and converges slowly below it. Retained because it is a classical result and useful
-/// for comparison; [`true_from_mean`] is what you want in practice.
+/// **Diverges for `e > 0.6627`** (the Laplace limit) at any term count, and converges
+/// slowly below it. Prefer [`true_from_mean`].
 pub fn true_from_mean_bessel(mean_anomaly: f64, eccentricity: f64, terms: usize) -> f64 {
     let mut true_anomaly = mean_anomaly;
     for k in 1..=terms {
@@ -247,15 +212,10 @@ pub fn true_from_mean_bessel(mean_anomaly: f64, eccentricity: f64, terms: usize)
     true_anomaly
 }
 
-// ---------------------------------------------------------------------------
-// The one to reach for
-// ---------------------------------------------------------------------------
-
 /// True anomaly from mean anomaly, solved to [`DEFAULT_TOLERANCE`].
 ///
-/// Dispatches on eccentricity: Halley for closed orbits, Newton on the hyperbolic form
-/// for `e > 1`. Parabolic (`e == 1`) has no mean anomaly in this parameterisation and
-/// returns `None`.
+/// Halley for `e < 1`, Newton on the hyperbolic form for `e > 1`. `None` for parabolic
+/// (`e == 1`), which has no mean anomaly in this parameterisation.
 pub fn true_from_mean(mean_anomaly: f64, eccentricity: f64) -> Option<f64> {
     if eccentricity < 1.0 {
         let ea = eccentric_from_mean_halley(
@@ -278,7 +238,7 @@ pub fn true_from_mean(mean_anomaly: f64, eccentricity: f64) -> Option<f64> {
     }
 }
 
-/// Mean anomaly from eccentric anomaly — Kepler's equation itself, `M = E - e sin E`.
+/// Kepler's equation, `M = E - e sin E`.
 #[inline]
 pub fn mean_from_eccentric(eccentric_anomaly: f64, eccentricity: f64) -> f64 {
     eccentric_anomaly - eccentricity * eccentric_anomaly.sin()
@@ -290,8 +250,7 @@ pub fn mean_from_hyperbolic(hyperbolic_anomaly: f64, eccentricity: f64) -> f64 {
     eccentricity * hyperbolic_anomaly.sinh() - hyperbolic_anomaly
 }
 
-/// `sqrt(1 - e^2)`, the factor relating the semi-minor to the semi-major axis.
-/// Re-exported here because the anomaly conversions are its main consumer.
+/// `sqrt(1 - e^2)`, relating the semi-minor to the semi-major axis.
 #[inline]
 pub fn eccentricity_factor(eccentricity: f64) -> f64 {
     unit_circle_xy(eccentricity)
@@ -309,8 +268,7 @@ mod tests {
         (0..n).map(|i| i as f64 * TAU / n as f64).collect()
     }
 
-    /// The defining property: solving Kepler's equation and substituting back must
-    /// reproduce the mean anomaly.
+    /// Solving Kepler's equation and substituting back must reproduce M.
     #[test]
     fn halley_inverts_keplers_equation() {
         for e in eccentricities() {
@@ -334,8 +292,7 @@ mod tests {
         }
     }
 
-    /// Halley should need very few steps. If the iteration count is capped low and the
-    /// answer still holds, convergence is genuinely cubic.
+    /// Capping the iteration count low must not change the answer.
     #[test]
     fn halley_converges_in_a_handful_of_iterations() {
         for e in [0.0167, 0.2056, 0.6, 0.9] {
@@ -358,8 +315,7 @@ mod tests {
         }
     }
 
-    /// The new half-angle form must agree with the existing `atan2` form in the
-    /// `eccentric_anomaly` module.
+    /// The half-angle form must agree with the `atan2` form in `eccentric_anomaly`.
     #[test]
     fn agrees_with_the_existing_eccentric_anomaly_conversion() {
         for e in eccentricities() {
@@ -371,7 +327,7 @@ mod tests {
         }
     }
 
-    /// And with `true_anomaly::at_time`, the beta-parameter form.
+    /// And with the beta-parameter form in `true_anomaly::at_time`.
     #[test]
     fn agrees_with_the_existing_true_anomaly_conversion() {
         for e in eccentricities() {
@@ -402,7 +358,7 @@ mod tests {
         assert!(true_from_mean(1.0, 1.0).is_none(), "parabolic has no mean anomaly here");
     }
 
-    /// A circular orbit has E = nu = M everywhere.
+    /// Circular: E = nu = M everywhere.
     #[test]
     fn circular_orbit_is_degenerate() {
         for m in angles(60) {
@@ -412,8 +368,7 @@ mod tests {
         }
     }
 
-    /// Quantifies why the series are not the default. The Bessel expansion is only
-    /// acceptable at small eccentricity, and is hopeless past the Laplace limit.
+    /// The Bessel expansion is acceptable only at small eccentricity.
     #[test]
     fn series_error_grows_with_eccentricity() {
         let worst = |e: f64, f: &dyn Fn(f64, f64) -> f64| {
@@ -457,7 +412,7 @@ mod tests {
 mod hyperbolic_true_tests {
     use super::*;
 
-    /// `H -> nu -> H` must come back where it started, across the open regime.
+    /// `H -> nu -> H` must round-trip across the open regime.
     #[test]
     fn hyperbolic_and_true_anomaly_round_trip() {
         for &e in &[1.05, 1.5, 2.0, 5.0] {
@@ -472,7 +427,7 @@ mod hyperbolic_true_tests {
         }
     }
 
-    /// Mean anomaly must survive the same trip, which is what the epoch conversion needs.
+    /// Mean anomaly must survive the same trip; the epoch conversion depends on it.
     #[test]
     fn mean_anomaly_survives_the_true_anomaly_round_trip() {
         let e = 1.4;
@@ -484,8 +439,7 @@ mod hyperbolic_true_tests {
         }
     }
 
-    /// At and beyond the asymptote there is no trajectory, and it must say so rather
-    /// than returning a plausible-looking number.
+    /// At and beyond the asymptote there is no trajectory.
     #[test]
     fn past_the_asymptote_is_none() {
         let e = 2.0;

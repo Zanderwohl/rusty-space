@@ -337,7 +337,15 @@ pub fn get_db_version(conn: &Connection) -> SqlResult<usize> {
     );
 
     match result {
-        Ok(version_str) => Ok(version_str.parse().unwrap_or(0)),
+        // A present-but-unparseable version is corruption. Reading it as 0 replayed the
+        // whole migration chain, ALTER TABLE steps included, against a migrated database.
+        Ok(version_str) => version_str.parse().map_err(|_| {
+            rusqlite::Error::InvalidColumnType(
+                0,
+                format!("properties.version is not a number: {version_str:?}"),
+                rusqlite::types::Type::Text,
+            )
+        }),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0),
         Err(e) => Err(e),
     }

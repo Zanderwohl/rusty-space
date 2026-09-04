@@ -1,14 +1,10 @@
 //! Advancing a [`System`] through time.
 //!
-//! Free functions over `&mut System` rather than methods, so the orbital mechanics stays
-//! separable from the container holding it.
-//!
 //! Two kinds of motion, resolved in that order:
 //!
-//! - **Hierarchical** (Fixed and Keplerian) is analytic. A body's position follows from
-//!   its primary's, so these are evaluated parents-first in topological order, and any
-//!   time can be evaluated directly without stepping through the times before it.
-//! - **Newtonian** is integrated, so it must be stepped and cannot be jumped.
+//! - **Hierarchical** (Fixed and Keplerian): analytic, evaluated parents-first in
+//!   topological order. Any instant can be evaluated without stepping to it.
+//! - **Newtonian**: integrated, so it must be stepped and cannot be jumped.
 
 use em_foundations::gravity;
 use em_foundations::time::{Instant, TimeDelta};
@@ -20,18 +16,14 @@ use crate::system::System;
 
 /// Recompute parent links, gravitational parameters and traversal order for `time`.
 ///
-/// Called automatically by [`evaluate_at`] and [`step`] when the system is dirty; call it
-/// directly only to force a rebuild.
+/// [`evaluate_at`] and [`step`] do this when the system is dirty; call it only to force one.
 pub fn rebuild(system: &mut System, time: Instant) {
     system.rebuild_derived(time);
 }
 
 /// Place every analytically-defined body at `time`.
 ///
-/// Fixed and Keplerian bodies only. Newtonian bodies are integrated and cannot jump, so
-/// they keep whatever state they already had — use [`step`] to advance them.
-///
-/// This is what an editor scrubbing a timeline wants: any instant, at the same cost.
+/// Fixed and Keplerian only; Newtonian bodies keep their current state — use [`step`].
 pub fn evaluate_at(system: &mut System, time: Instant) {
     if system.is_dirty() {
         system.rebuild_derived(time);
@@ -42,11 +34,9 @@ pub fn evaluate_at(system: &mut System, time: Instant) {
 
 /// Advance the system by `dt`.
 ///
-/// Hierarchical bodies are evaluated analytically at the new time; Newtonian bodies are
-/// integrated across the interval under gravity from bodies flagged major.
-///
-/// `dt` should be small enough for the fastest Newtonian body present — integration error
-/// grows with step size, and nothing here subdivides on your behalf.
+/// Hierarchical bodies are evaluated at the new time; Newtonian bodies are integrated
+/// under gravity from bodies flagged major. Nothing subdivides `dt`, so size it for the
+/// fastest Newtonian body present.
 pub fn step(system: &mut System, dt: TimeDelta) {
     let target = system.time() + dt;
     if system.is_dirty() {
@@ -75,8 +65,8 @@ fn evaluate_hierarchical(system: &mut System, time: Instant) {
                 MotiveSelection::Keplerian(kepler) => {
                     match kepler.state_vectors(time, system.mu(i)) {
                         Some((r, v)) => (r, v),
-                        // A degenerate orbit (parabolic, or a zero semi-latus rectum)
-                        // leaves the body at its primary rather than at NaN.
+                        // Degenerate orbit (parabolic, zero semi-latus rectum): sit on
+                        // the primary rather than produce NaN.
                         None => (DVec3::ZERO, DVec3::ZERO),
                     }
                 }
@@ -120,9 +110,8 @@ fn integrate_newtonian(system: &mut System, time: Instant, dt: TimeDelta) {
         };
 
         if h != 0.0 {
-            // Velocity Verlet. Second-order and symplectic, for one extra acceleration
-            // evaluation over semi-implicit Euler — and the second evaluation is at the
-            // new position, which is where it does the most good.
+            // Velocity Verlet: second-order and symplectic, for one extra acceleration
+            // evaluation over semi-implicit Euler.
             let a0 = acceleration(system, position, i, g);
             position += velocity * h + 0.5 * a0 * h * h;
             let a1 = acceleration(system, position, i, g);
@@ -134,10 +123,8 @@ fn integrate_newtonian(system: &mut System, time: Instant, dt: TimeDelta) {
     }
 }
 
-/// Initial state for a Newtonian body that has not been integrated yet.
-///
-/// `None` once it is running, so integration continues from its own state rather than
-/// snapping back to the motive's stored values every step.
+/// Seed state for a Newtonian body not yet integrated. `None` once running, so it does not
+/// snap back to the motive's stored values each step.
 fn seed(system: &mut System, i: BodyIndex, time: Instant) -> Option<(DVec3, DVec3)> {
     if system.newtonian_started(i) {
         return None;
@@ -152,8 +139,7 @@ fn seed(system: &mut System, i: BodyIndex, time: Instant) -> Option<(DVec3, DVec
         return Some((position, velocity));
     }
 
-    // Released from a Fixed motive: the position comes from where that motive had put the
-    // body, and the stored velocity is relative to the parent it was released from.
+    // Released from Fixed: stored velocity is relative to the parent it was released from.
     let Some((_, previous)) = system.motive(i).motive_before(time) else {
         return Some((position, velocity));
     };

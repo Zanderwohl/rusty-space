@@ -1,13 +1,8 @@
 //! Body identity: a stable hash for persistence, a dense index for the inner loop.
 //!
-//! [`BodyId`] is derived from a body's name and survives saving, loading and reordering.
-//! [`BodyIndex`] is a slot in a [`System`](crate::system::System)'s arrays, is only valid
-//! for the arena that produced it, and is invalidated whenever that arena's
-//! [`generation`](crate::system::System::generation) changes.
-//!
-//! Two levels rather than one because they want opposite things. Identity has to be
-//! stable across runs, which means hashing a name. The propagation loop wants an array
-//! offset, and must not pay for a hash lookup per body per step.
+//! [`BodyId`] is hashed from a body's name and survives save, load and reordering.
+//! [`BodyIndex`] is a slot in one [`System`](crate::system::System)'s arrays, invalidated
+//! whenever that arena's [`generation`](crate::system::System::generation) changes.
 
 use std::fmt;
 
@@ -15,13 +10,9 @@ use serde::{Deserialize, Serialize};
 
 /// A stable identifier for a body, derived from its name.
 ///
-/// Stable across processes, platforms and Rust versions, because the hash is written out
-/// here rather than borrowed from `DefaultHasher` — whose output is explicitly not
-/// guaranteed between releases.
-///
-/// Case-sensitive: `"Jupiter"` and `"jupiter"` are different bodies. That is a deliberate
-/// consequence of hashing the name verbatim, and the reason a system's names should be
-/// normalised at the point they are authored rather than at the point they are hashed.
+/// The hash is spelled out here rather than taken from `DefaultHasher`, so it is stable
+/// across processes, platforms and Rust versions. Case-sensitive: normalise names when
+/// authoring, not here.
 #[repr(transparent)]
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct BodyId(u64);
@@ -30,9 +21,7 @@ const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
 impl BodyId {
-    /// Hash a name into an id. FNV-1a, 64-bit.
-    ///
-    /// `const`, so a preset can write `const SOL: BodyId = BodyId::from_name("Sol");`.
+    /// Hash a name into an id. FNV-1a, 64-bit. `const`, so presets can use it.
     pub const fn from_name(name: &str) -> Self {
         let bytes = name.as_bytes();
         let mut hash = FNV_OFFSET_BASIS;
@@ -45,8 +34,7 @@ impl BodyId {
         Self(hash)
     }
 
-    /// The raw hash. For persistence and debugging; not meaningful to compare across
-    /// different naming schemes.
+    /// The raw hash, for persistence and debugging.
     #[inline(always)]
     pub const fn raw(self) -> u64 {
         self.0
@@ -78,9 +66,8 @@ impl fmt::Display for BodyId {
 
 /// A slot in a [`System`](crate::system::System)'s arrays.
 ///
-/// Runtime-only and arena-specific. Inserting or removing a body can move existing bodies,
-/// so an index is only valid while the system's generation is unchanged — hold a
-/// [`BodyId`] across such a change and resolve it again.
+/// Runtime-only and arena-specific. Insert or remove moves bodies, so an index is valid
+/// only while the generation is unchanged; hold a [`BodyId`] and re-resolve.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct BodyIndex(u32);
@@ -119,7 +106,6 @@ mod tests {
         let a = BodyId::from_name("Earth");
         let b = BodyId::from_name("Mars");
         assert_ne!(a, b);
-        // Case matters, deliberately.
         assert_ne!(BodyId::from_name("Jupiter"), BodyId::from_name("jupiter"));
     }
 
@@ -129,9 +115,7 @@ mod tests {
         assert_eq!(BodyId::from_raw(id.raw()), id);
     }
 
-    /// The bundled system must not contain a hash collision. 64-bit FNV over a few
-    /// hundred short names makes one vanishingly unlikely, but "unlikely" is not a thing
-    /// to leave unchecked when the consequence is two bodies silently becoming one.
+    /// No id collisions in the bundled system; a collision would merge two bodies.
     #[test]
     fn the_bundled_system_has_no_collisions() {
         use std::collections::HashMap;

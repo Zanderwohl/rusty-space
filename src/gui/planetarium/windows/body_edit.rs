@@ -52,8 +52,7 @@ pub fn body_edit_window(
                 let time = system.0.time();
                 let mut changed = body_info_section(ui, system.0.info_mut(index));
 
-                // Editing goes through `motive_mut`, which marks the arena dirty so the
-                // next propagation rebuilds this body's cache from the new elements.
+                // `motive_mut` marks the arena dirty so the cache rebuilds.
                 if let Some(selection) = system.0.motive_mut(index).motive_at_mut(time) {
                     changed |= match selection {
                         MotiveSelection::Fixed { position, .. } => fixed_motive_section(ui, position),

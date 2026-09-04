@@ -1,14 +1,9 @@
 //! A sparse, interpolating map from time to value, and the sorted key list behind it.
 //!
-//! Keys are typed rather than raw floats. `SortedTimes<Instant>` holds absolute event
-//! times (see [`crate::motive::Motive`]); [`TimeMap`] is keyed by [`TimeDelta`], since a
-//! trajectory's samples are offsets from its periapsis passage rather than absolute
-//! instants.
-//!
-//! Both used to key a `HashMap` on `f64::to_bits` and binary-search with
-//! `partial_cmp().unwrap()`. That panicked on NaN, and silently split `-0.0` from `0.0`
-//! into separate entries. `Instant` and `TimeDelta` are `Ord + Eq + Hash` with negative
-//! zero normalised, so neither is possible now.
+//! Keys are typed, not raw floats: `SortedTimes<Instant>` holds absolute event times,
+//! [`TimeMap`] is keyed by [`TimeDelta`] because trajectory samples are offsets from
+//! periapsis. `Instant` and `TimeDelta` are `Ord + Eq + Hash` with negative zero
+//! normalised, so no NaN panics and no `-0.0`/`0.0` split.
 
 use std::collections::HashMap;
 use std::slice::Iter;
@@ -25,7 +20,7 @@ pub struct TimeMap<V: Lerpable> {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Periodicity {
-    /// Absolute time the cycle starts from — for an orbit, a periapsis passage.
+    /// Absolute start of the cycle; for an orbit, a periapsis passage.
     pub interval_start: Instant,
     /// One full cycle.
     pub interval_size: TimeDelta,
@@ -88,8 +83,7 @@ impl<V: Clone + Lerpable> TimeMap<V> {
         }
     }
 
-    /// Preallocated for a known sample count. Building a trajectory knows its resolution
-    /// up front, so this avoids regrowing both the map and the key list.
+    /// Preallocated for a known sample count.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             map: HashMap::with_capacity(capacity),
@@ -111,20 +105,14 @@ impl<V: Clone + Lerpable> TimeMap<V> {
         self.map.insert(time, item);
     }
 
-    /// Insert without keeping the key list sorted. Call [`Self::finalize_unordered`]
-    /// once the bulk load is done.
-    ///
-    /// Appending and sorting once beats a binary-search insert per sample when the whole
-    /// series is being built at once, which is what trajectory generation does.
+    /// Insert without keeping the keys sorted; follow with [`Self::finalize_unordered`].
     pub fn insert_unordered(&mut self, time: TimeDelta, item: V) {
         self.time_keys.push_unordered(time);
         self.map.insert(time, item);
     }
 
-    /// Sort and deduplicate after [`Self::insert_unordered`].
-    ///
-    /// Required before anything that binary-searches the keys — `get_lerp`,
-    /// `get_pair_that_surrounds`, `range`.
+    /// Sort and deduplicate after [`Self::insert_unordered`]. Required before `get_lerp`,
+    /// `get_pair_that_surrounds` or `range`.
     pub fn finalize_unordered(&mut self) {
         self.time_keys.sort_and_deduplicate();
     }
@@ -133,8 +121,7 @@ impl<V: Clone + Lerpable> TimeMap<V> {
         self.map.get(&time)
     }
 
-    /// The value at `time`, interpolating between the two surrounding samples when
-    /// there is no exact match. `None` outside the sampled range.
+    /// Value at `time`, lerped between bracketing samples. `None` outside the range.
     pub fn get_lerp(&self, time: TimeDelta) -> Option<V> {
         if let Some(item) = self.get(time) {
             return Some(item.clone());
@@ -182,11 +169,8 @@ impl<V: Clone + Lerpable> TimeMap<V> {
         self.periodicity.as_ref()
     }
 
-    /// One cycle's worth of samples.
-    ///
-    /// Keys are offsets from `interval_start`, so this is `[0, interval_size]`. The old
-    /// version passed `interval_start` — an absolute instant — as a key bound, which
-    /// mixed the two frames; the typed keys make that a compile error. It had no callers.
+    /// One cycle's worth of samples: keys `[0, interval_size]`, offsets from
+    /// `interval_start`.
     pub fn range_one_period(&self) -> Option<TimeMap<V>> {
         let p = self.periodicity?;
         Some(self.range(TimeDelta::ZERO, p.interval_size))
@@ -261,8 +245,7 @@ impl<K: Ord + Copy> SortedTimes<K> {
         self.in_order.get(index)
     }
 
-    /// The two keys bracketing `value`, or `None` if it falls outside the range or
-    /// there are fewer than two keys to interpolate between.
+    /// The two keys bracketing `value`. `None` outside the range or with fewer than two keys.
     pub fn get_pair_that_surrounds(&self, value: K) -> Option<(K, K)> {
         let len = self.in_order.len();
         if len < 2 {
@@ -365,7 +348,7 @@ mod tests {
         assert!(!t.has(td(2.0)));
     }
 
-    /// The old implementation keyed on `f64::to_bits`, so these landed in two slots.
+    /// `-0.0` and `0.0` must be one key, not two.
     #[test]
     fn negative_zero_is_the_same_key_as_zero() {
         let mut t = SortedTimes::new();
@@ -422,11 +405,11 @@ mod tests {
         assert_eq!(p.cycle_fraction(Instant::from_seconds_since_j2000(100.0)), 0.0);
         assert_eq!(p.cycle_fraction(Instant::from_seconds_since_j2000(105.0)), 0.5);
         assert_eq!(p.cycle_fraction(Instant::from_seconds_since_j2000(115.0)), 0.5);
-        // Before the start must still land in [0, 1).
+        // Before the start still lands in [0, 1).
         assert_eq!(p.cycle_fraction(Instant::from_seconds_since_j2000(95.0)), 0.5);
     }
 
-    /// Bulk loading must end up identical to inserting one at a time.
+    /// Bulk load matches one-at-a-time insertion.
     #[test]
     fn unordered_bulk_load_matches_sorted_insertion() {
         let values = [5.0, -3.0, 5.0, 1.0, 0.0, 2.5];

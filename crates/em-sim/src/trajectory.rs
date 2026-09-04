@@ -1,12 +1,7 @@
 //! Sampling an orbit into a path.
 //!
-//! Where the points come from, not how they are drawn. Turning a path into geometry is
-//! presentation and belongs to whatever is rendering; producing it is orbital mechanics
-//! and belongs here, so a headless tool can ask for a trajectory too.
-//!
-//! Samples are keyed by offset from periapsis rather than absolute time, which is what
-//! makes a closed orbit's path reusable at any epoch: the shape does not move, only the
-//! body's position along it.
+//! Samples are keyed by offset from periapsis, not absolute time, so a closed orbit's path
+//! is reusable at any epoch.
 
 use em_foundations::time::{Instant, TimeDelta};
 use glam::DVec3;
@@ -29,8 +24,7 @@ pub struct Path {
 
 /// Sample the orbit of body `index` into `resolution` points.
 ///
-/// `None` if the body is not on a Keplerian orbit — a fixed or integrated body has no
-/// closed-form path to sample.
+/// `None` unless the body is Keplerian; fixed and integrated bodies have no closed form.
 pub fn sample(system: &System, index: BodyIndex, resolution: usize) -> Option<Path> {
     let resolution = resolution.max(1);
     let (_, selection) = system.motive(index).motive_at(system.time());
@@ -43,8 +37,7 @@ pub fn sample(system: &System, index: BodyIndex, resolution: usize) -> Option<Pa
     let periapsis = kepler.time_at_periapsis_passage(mu);
     let closed = !kepler.is_open();
 
-    // Bulk-load then sort once: the samples are generated in order anyway, and a
-    // binary-search insert per point is wasted work at this count.
+    // Bulk-load then sort once; samples are generated in order.
     let mut points = TimeMap::with_capacity(resolution + 1);
     for step in 0..=resolution {
         let offset = period * (step as f64 / resolution as f64);

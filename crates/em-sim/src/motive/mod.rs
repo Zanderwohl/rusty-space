@@ -1,5 +1,4 @@
-//! How a body moves: fixed, Keplerian, or Newtonian, and the timeline of transitions
-//! between them.
+//! How a body moves: fixed, Keplerian, or Newtonian, plus the timeline of transitions.
 
 pub mod compound;
 pub mod kepler;

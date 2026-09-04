@@ -1,9 +1,8 @@
 //! The link between the simulation arena and the Bevy world.
 //!
-//! `em_sim::System` owns simulation state. Entities are **views** onto it: a body's entity
-//! carries a [`BodyRef`] and its rendering components, and nothing else. Position,
-//! velocity, motive and mass are read from the arena through the ref, so there is exactly
-//! one place any of them can be wrong.
+//! `em_sim::System` is the single source of truth. Entities are **views**: a body's entity
+//! carries a [`BodyRef`] plus rendering components, nothing more. Position, velocity,
+//! motive and mass are read from the arena through the ref.
 
 use std::collections::HashMap;
 
@@ -15,7 +14,7 @@ use em_sim::system::System;
 
 use crate::sim::{SimTime, SimulationObject};
 
-/// The simulation. The single source of truth for where anything is.
+/// The simulation arena.
 #[derive(Resource)]
 pub struct SimSystem(pub System);
 
@@ -36,10 +35,8 @@ pub struct BodyEntities {
     generation: Option<u32>,
 }
 
-/// Sampled orbital paths, keyed by body.
-///
-/// The points come from `em_sim::trajectory`; what makes this the app's rather than the
-/// arena's is *when* and *at what resolution* to resample, which is a view decision.
+/// Sampled orbital paths, keyed by body. Points come from `em_sim::trajectory`; when and
+/// at what resolution to resample is a view decision.
 #[derive(Resource, Default)]
 pub struct Trajectories(pub HashMap<BodyId, em_sim::trajectory::Path>);
 
@@ -47,10 +44,9 @@ pub struct Trajectories(pub HashMap<BodyId, em_sim::trajectory::Path>);
 #[derive(Resource, Default, serde::Serialize)]
 pub struct SimMetrics {
     pub bodies: usize,
-    /// Bodies that must be integrated rather than evaluated.
+    /// Bodies integrated rather than evaluated.
     pub newtonian_bodies: usize,
-    /// Integration steps taken last frame. Zero when the system is fully analytic and
-    /// jumped straight to the target time.
+    /// Integration steps last frame. Zero on an analytic jump.
     pub steps: usize,
     pub step_size_seconds: f64,
     pub propagation_ms: f64,
@@ -59,13 +55,9 @@ pub struct SimMetrics {
 
 /// Advance the clock, then bring the simulation to it.
 ///
-/// Two jobs, deliberately together: queueing the steps and walking them have to agree
-/// about how far time actually got, and splitting them across systems is what lets the
-/// clock run ahead of the bodies on a slow frame.
-///
-/// Hierarchical bodies are analytic, so when nothing needs integrating the whole system
-/// jumps straight to the target instant instead of walking there. That is what makes
-/// scrubbing a timeline cost the same as playing it.
+/// Queueing the steps and walking them stay in one system: split apart, the clock runs
+/// ahead of the bodies on a slow frame. With nothing to integrate the system jumps
+/// straight to the target instant.
 pub fn advance_simulation(
     mut system: ResMut<SimSystem>,
     mut sim_time: ResMut<SimTime>,
@@ -80,8 +72,8 @@ pub fn advance_simulation(
     metrics.newtonian_bodies = system.newtonian_count();
     metrics.step_size_seconds = sim_time.step;
 
-    // Queue whole steps for the real time that has passed. Partial steps accumulate
-    // rather than rounding, so a low `gui_speed` creeps forward instead of stalling.
+    // Queue whole steps for the elapsed real time; partial steps accumulate, so a low
+    // `gui_speed` creeps forward instead of stalling.
     if sim_time.playing {
         let step = sim_time.step;
         sim_time.accumulated_time += sim_time.gui_speed * time.delta_secs_f64();
@@ -89,7 +81,7 @@ pub fn advance_simulation(
         let full_steps = (sim_time.accumulated_time / step).floor() as usize;
         if full_steps > 0 {
             sim_time.accumulated_time -= full_steps as f64 * step;
-            // If the speed was reduced, trim an oversized queue from the tail.
+            // Speed reduced: trim an oversized queue from the tail.
             sim_time.previous_times.truncate(full_steps);
             let already_queued = sim_time.previous_times.len();
             if already_queued < full_steps {
@@ -100,15 +92,14 @@ pub fn advance_simulation(
         }
     }
 
-    // Where the clock wants the bodies to be: the end of the queue when playing, and
-    // whatever the clock says otherwise — which is how scrubbing while paused works.
+    // Where the bodies should be: end of the queue when playing, the clock otherwise
+    // (scrubbing while paused).
     let target = match sim_time.previous_times.last() {
         Some(t) => Instant::from_seconds_since_j2000(t),
         None => sim_time.time,
     };
 
-    // Paused, nothing queued, and the arena is already at that instant with no edits
-    // pending. Re-propagating 221 bodies to where they already are is pure waste.
+    // Paused, nothing queued, arena already at that instant, no edits pending.
     if !sim_time.playing
         && sim_time.previous_times.is_empty()
         && !system.is_dirty()
@@ -121,8 +112,7 @@ pub fn advance_simulation(
 
     sim_time.begin_frame();
 
-    // With nothing to integrate the whole system is analytic, so it can jump straight to
-    // the target instant however far away it is.
+    // Fully analytic: jump straight to the target instant, however far away.
     if !settings.simulation.newtonian || system.newtonian_count() == 0 {
         propagate::evaluate_at(system, target);
         sim_time.time = target;
@@ -135,7 +125,7 @@ pub fn advance_simulation(
         return;
     }
 
-    // Something is being integrated, so the intervening times matter and must be walked.
+    // Integration in play: the intervening times matter and must be walked.
     metrics.analytic_jump = false;
     let mut steps = 0;
     let mut last = system.time();
@@ -145,13 +135,13 @@ pub fn advance_simulation(
         last = t;
         steps += 1;
         sim_time.step_completed();
-        // Out of budget. The rest of the queue keeps for next frame, so the bodies fall
-        // behind the wall clock rather than skipping the steps between.
+        // Out of budget. The queue keeps for next frame, so the bodies fall behind
+        // rather than skipping steps.
         if sim_time.frame_time_exceeded() {
             break;
         }
     }
-    // Nothing was queued (a scrub, or an edit while paused), so close the gap directly.
+    // Nothing queued (a scrub, or an edit while paused): close the gap directly.
     if steps == 0 && last < target {
         propagate::step(system, target - last);
         last = target;
@@ -159,7 +149,7 @@ pub fn advance_simulation(
         sim_time.step_completed();
     }
 
-    // The clock follows what was actually simulated, never what was asked for.
+    // The clock follows what was simulated, not what was asked for.
     sim_time.time = last;
     let queued = sim_time.previous_times.len();
     if steps >= queued {
@@ -173,9 +163,8 @@ pub fn advance_simulation(
     sim_time.end_frame();
 }
 
-/// Spawn an entity for every body, and despawn entities whose body has gone.
-///
-/// Runs only when the arena's structure has changed, which is what `generation` reports.
+/// Spawn an entity per body, despawn entities whose body has gone. Skipped unless the
+/// arena's `generation` changed.
 pub fn sync_body_entities(
     mut commands: Commands,
     system: Res<SimSystem>,
@@ -200,10 +189,8 @@ pub fn sync_body_entities(
         if tracked.map.contains_key(&id) {
             continue;
         }
-        // Only the entity and its link to the arena. Meshes, materials, wireframes,
-        // occluders and point sprites are attached by the presentation systems, which
-        // pick up anything carrying a `BodyRef` and lacking their own link component —
-        // so a body added at runtime gets dressed without this knowing how.
+        // Only the entity and its link to the arena. Presentation systems pick up
+        // anything with a `BodyRef` and attach their own components.
         let entity = commands.spawn((
             SimulationObject,
             BodyRef(id),
@@ -259,16 +246,13 @@ pub fn sync_rotations(
     }
 }
 
-/// A body's index, resolved for this frame. Convenience for the read-only systems.
+/// A body's index, resolved for this frame.
 pub fn resolve<'a>(system: &'a System, body: &BodyRef) -> Option<em_sim::id::BodyIndex> {
     system.index_of(body.0)
 }
 
-/// Recompute the sampled paths for the requested bodies.
-///
-/// The sampling itself is `em_sim::trajectory` — it is orbital mechanics, not rendering.
-/// This just decides *which* bodies to resample and caches the result; turning a path into
-/// geometry is `presentation::trajectory`'s job.
+/// Recompute the sampled paths for the requested bodies. Sampling is `em_sim::trajectory`;
+/// geometry is `presentation::trajectory`.
 pub fn calculate_trajectories(
     mut calcs: MessageReader<crate::sim::CalculateTrajectory>,
     system: Res<SimSystem>,
@@ -283,8 +267,7 @@ pub fn calculate_trajectories(
     let resolution = view_settings.trajectory_resolution.max(1);
 
     for calc in calcs.read() {
-        // A named selection resolves by id rather than scanning every body — the editor
-        // requests one body per keystroke, and scanning 221 for it adds up.
+        // Named selections resolve by id rather than scanning every body.
         let targets: Vec<_> = match &calc.selection {
             BodySelection::IDs(ids) => ids.iter().filter_map(|id| system.0.by_name(id)).collect(),
             _ => system.0.indices().collect(),

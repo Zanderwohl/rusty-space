@@ -1,15 +1,8 @@
-//! Saving and loading must be lossless.
+//! Saving and loading is lossless.
 //!
-//! The `.em` file is where the whole system lives between sessions, and it is the one
-//! place a body can lose an element without anything failing: the save writes, the load
-//! reads, and the orbit is quietly a little different. Every column in that schema was
-//! added by a migration, and a migration that forgets a column — or a decoder that
-//! forgets to read one — produces exactly this.
-//!
-//! So the test does not compare the file. It compares what comes back out, field by
-//! field, and then propagates both a decade forward and compares where the bodies end
-//! up, because an element that survives the round trip but is read into the wrong slot
-//! shows up as a position and nothing else.
+//! A dropped or misread column changes an orbit without failing anything. These tests
+//! compare what comes back out field by field, then propagate a decade forward and compare
+//! positions — an element read into the wrong slot shows up only there.
 
 use em_sim::appearance::Appearance;
 use em_sim::body::{BodyInfo, BodyRotation, RotationMode};
@@ -42,14 +35,9 @@ impl Drop for ScratchFile {
     }
 }
 
-/// The two corpora, which cover different halves of the format and must both be tested.
-///
-/// The bundled save is 162 `CompoundMotiveEntry` bodies — what a real save looks like,
-/// with the elements buried in a motive timeline. The generated preset is 220
-/// `KeplerEntry` bodies and is the only one of the two that carries an
-/// `anomalistic_period` at all. Testing only the first silently skips every Keplerian
-/// assertion below, which is exactly what this test did until the coverage check at the
-/// bottom was added.
+/// Both corpora are needed: the bundled save is `CompoundMotiveEntry` bodies with elements
+/// buried in a motive timeline; only the generated preset carries `KeplerEntry` bodies and
+/// an `anomalistic_period`. See the coverage check at the end.
 fn corpora() -> Vec<(&'static str, UniverseFileContents)> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/systems/solar_system.em");
     vec![
@@ -95,11 +83,8 @@ fn rotation(body: &SomeBody) -> Option<&BodyRotation> {
     }
 }
 
-/// Every Keplerian element set in a body, in timeline order.
-///
-/// A `KeplerEntry` has exactly one. A `CompoundMotiveEntry` has one per Keplerian
-/// segment of its motive, and reaching them is the only way to check a real save's
-/// elements — the bundled file has 161 of them and not a single `KeplerEntry`.
+/// Every Keplerian element set in a body, in timeline order: one for a `KeplerEntry`, one
+/// per Keplerian segment for a `CompoundMotiveEntry`.
 fn kepler_elements(body: &SomeBody) -> Vec<&KeplerMotive> {
     match body {
         SomeBody::KeplerEntry(e) => vec![&e.params],
@@ -118,8 +103,7 @@ fn kepler_elements(body: &SomeBody) -> Vec<&KeplerMotive> {
 /// Nothing about a body may change by being written down and read back.
 #[test]
 fn a_saved_body_comes_back_unchanged() {
-    // What the corpora between them actually exercised, so a test that quietly stops
-    // covering a column fails instead of passing.
+    // What the corpora actually exercised, checked at the end.
     let (mut seen_anomalistic, mut seen_mu, mut seen_precessing, mut seen_rotation) = (0, 0, 0, 0);
 
     for (label, before) in corpora() {
@@ -143,9 +127,8 @@ fn a_saved_body_comes_back_unchanged() {
             assert_eq!(ia.major, ib.major, "{label} {id}: major");
             assert_eq!(ia.designation, ib.designation, "{label} {id}: designation");
 
-            // Compared as a set, not a sequence: `tag_members` has no order column, and
-            // every consumer treats tags as a set — `contains`, a map keyed by tag name,
-            // a `HashSet` of members. The round trip does reorder them, and that is fine.
+            // Set, not sequence: `tag_members` has no order column and consumers treat
+            // tags as a set. The round trip reorders them.
             let (mut ta, mut tb) = (ia.tags.clone(), ib.tags.clone());
             ta.sort();
             tb.sort();
@@ -157,9 +140,8 @@ fn a_saved_body_comes_back_unchanged() {
                 "{label} {id}: appearance radius"
             );
 
-            // Rotation is the field this format has lost before: it went unwritten
-            // entirely until the table was added, so tidal locking and spin vanished on
-            // a round trip without anything failing.
+            // Rotation went unwritten before the table existed; losing it drops tidal
+            // locking and spin silently.
             match (rotation(a), rotation(b)) {
                 (None, None) => {}
                 (Some(ra), Some(rb)) => {
@@ -202,9 +184,8 @@ fn a_saved_body_comes_back_unchanged() {
                     seen_precessing += 1;
                 }
 
-                // Both of these are recent columns and both are `Option`, so losing one
-                // reads as "derive it from Kepler's third law" rather than as an error —
-                // silently inflating the semi-major axis, which is how Luna went wrong.
+                // Both are `Option`, so a lost column reads as "derive from Kepler's
+                // third law" and silently inflates the semi-major axis.
                 match (ka.anomalistic_period, kb.anomalistic_period) {
                     (None, None) => {}
                     (Some(pa), Some(pb)) => {
@@ -229,16 +210,14 @@ fn a_saved_body_comes_back_unchanged() {
         }
     }
 
-    // The assertions above are only worth anything if the corpora reach them. This is
-    // the check that was missing when every Keplerian assertion above was dead code,
-    // because the bundled save holds no `KeplerEntry` at all.
+    // The assertions above only count if the corpora reach them.
     assert!(seen_anomalistic > 100, "only {seen_anomalistic} anomalistic periods compared");
     assert!(seen_mu > 100, "only {seen_mu} explicit mus compared");
     assert!(seen_precessing > 100, "only {seen_precessing} precessing orbits compared");
     assert!(seen_rotation > 50, "only {seen_rotation} rotations compared");
 }
 
-/// The clock and the physics constants ride along in the same file.
+/// The clock and physics constants round-trip too.
 #[test]
 fn the_files_settings_come_back_unchanged() {
     for (label, before) in corpora() {
@@ -263,10 +242,8 @@ fn the_files_settings_come_back_unchanged() {
     }
 }
 
-/// The real test: a round-tripped system must put its bodies in the same places.
-///
-/// Comparing fields catches a dropped column. This catches a column read into the wrong
-/// slot, which the field comparison above would happily agree with.
+/// A round-tripped system puts its bodies in the same places. Catches a column read into
+/// the wrong slot, which a field comparison would accept.
 #[test]
 fn a_round_tripped_system_propagates_to_the_same_places() {
     for (label, before) in corpora() {
@@ -276,7 +253,7 @@ fn a_round_tripped_system_propagates_to_the_same_places() {
         let mut b = System::from_contents(&after).expect("round-tripped builds");
         assert_eq!(a.len(), b.len(), "{label}: body count");
 
-        // A decade out, so an element that is slightly wrong has had room to show it.
+        // A decade out, so a slightly wrong element has room to show.
         let target = Instant::from_julian_day(2451545.0 + 3652.5);
         em_sim::propagate::evaluate_at(&mut a, target);
         em_sim::propagate::evaluate_at(&mut b, target);
@@ -298,8 +275,8 @@ fn a_round_tripped_system_propagates_to_the_same_places() {
             }
         }
 
-        // A metre over ten years. Anything the round trip actually loses is orders of
-        // magnitude larger than the representation noise of writing days as REAL.
+        // One metre over ten years: far above the noise of storing days as REAL, far
+        // below anything the round trip could actually lose.
         assert!(
             worst < 1.0,
             "{label}: {worst_body} drifted {worst} m over a decade after a round trip"

@@ -1,9 +1,6 @@
 //! Orbital elements and Cartesian state, and the conversion each way.
 //!
-//! All angles are radians; distances metres, velocities m/s, and `mu` in m³/s².
-//!
-//! These are free functions over plain data. [`Elements`] carries no behaviour of its
-//! own — it is a record, not an object.
+//! Angles in radians, distances metres, velocities m/s, `mu` in m³/s².
 
 use glam::{DMat3, DVec3};
 
@@ -12,8 +9,8 @@ use crate::common::unit_circle_xy;
 
 /// Classical orbital elements, in radians and metres.
 ///
-/// `true_anomaly` places the body on the orbit; propagating it through time needs an
-/// epoch and a mean motion, which belong to the layer that owns the timeline.
+/// `true_anomaly` places the body on the orbit; propagation needs an epoch and mean
+/// motion, owned by the layer above.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Elements {
     pub semi_major_axis: f64,
@@ -24,22 +21,15 @@ pub struct Elements {
     pub true_anomaly: f64,
 }
 
-/// Below this, an orbit is treated as circular and the argument of periapsis is
-/// undefined. Chosen well above f64 noise but far below any real orbit's eccentricity.
+/// Below this eccentricity an orbit is treated as circular and the argument of periapsis
+/// is undefined. Above f64 noise, far below any real orbit's eccentricity.
 pub const CIRCULAR_TOLERANCE: f64 = 1e-11;
 
-/// Below this (radians), an orbit is treated as equatorial and the ascending node is
-/// undefined.
+/// Below this inclination (radians) an orbit is equatorial and the node is undefined.
 pub const EQUATORIAL_TOLERANCE: f64 = 1e-11;
 
-// ---------------------------------------------------------------------------
-// Perifocal frame
-// ---------------------------------------------------------------------------
-
 /// Position in the perifocal (PQW) frame: +P toward periapsis, +Q 90° along the
-/// direction of motion, +W along angular momentum.
-///
-/// `semi_latus_rectum` is `p = a(1 - e²)`.
+/// direction of motion, +W along angular momentum. `semi_latus_rectum` is `p = a(1 - e²)`.
 #[inline]
 pub fn perifocal_position(semi_latus_rectum: f64, eccentricity: f64, true_anomaly: f64) -> DVec3 {
     let (sin_nu, cos_nu) = true_anomaly.sin_cos();
@@ -60,8 +50,7 @@ pub fn perifocal_velocity(
     DVec3::new(-k * sin_nu, k * (eccentricity + cos_nu), 0.0)
 }
 
-/// Rotation from the perifocal frame to the reference frame: the 3-1-3 sequence
-/// `Rz(Omega) · Rx(i) · Rz(omega)`.
+/// Perifocal to reference frame: the 3-1-3 sequence `Rz(Omega) · Rx(i) · Rz(omega)`.
 #[inline]
 pub fn perifocal_to_inertial(
     longitude_of_ascending_node: f64,
@@ -73,14 +62,9 @@ pub fn perifocal_to_inertial(
         * DMat3::from_rotation_z(argument_of_periapsis)
 }
 
-// ---------------------------------------------------------------------------
-// Elements -> state
-// ---------------------------------------------------------------------------
-
 /// Position and velocity implied by a set of elements.
 ///
-/// `None` for a parabolic orbit (`e == 1`), where `a` is infinite and the semi-latus
-/// rectum cannot be recovered from it.
+/// `None` for parabolic (`e == 1`): `a` is infinite and `p` cannot be recovered from it.
 pub fn to_state(gravitational_parameter: f64, elements: &Elements) -> Option<(DVec3, DVec3)> {
     let e = elements.eccentricity;
     if (e - 1.0).abs() < f64::EPSILON {
@@ -102,27 +86,18 @@ pub fn to_state(gravitational_parameter: f64, elements: &Elements) -> Option<(DV
     Some((rot * r_pqw, rot * v_pqw))
 }
 
-// ---------------------------------------------------------------------------
-// State -> elements
-// ---------------------------------------------------------------------------
-
 /// Elements implied by a Cartesian state.
 ///
-/// Degenerate orbits are resolved by the usual conventions rather than left undefined:
+/// Degenerate orbits take the usual conventions, and still reproduce the input state
+/// through [`to_state`]:
 ///
-/// - **Equatorial** (`i ~ 0`): the ascending node is undefined, so `Omega` is set to 0
-///   and the argument of periapsis is measured from the reference +X axis instead. It
-///   then equals the longitude of periapsis.
-/// - **Circular** (`e ~ 0`): periapsis is undefined, so `omega` is set to 0 and the true
-///   anomaly is measured from the ascending node instead — the argument of latitude.
-/// - **Circular and equatorial**: both are 0 and the true anomaly is the true longitude,
-///   measured from +X.
+/// - **Equatorial** (`i ~ 0`): `Omega = 0`, argument of periapsis measured from +X
+///   (the longitude of periapsis).
+/// - **Circular** (`e ~ 0`): `omega = 0`, true anomaly measured from the ascending node
+///   (the argument of latitude).
+/// - **Circular and equatorial**: both 0, true anomaly is the true longitude from +X.
 ///
-/// In every case the elements still reproduce the input state through [`to_state`],
-/// which is what the round-trip test checks.
-///
-/// Returns `None` if the state is degenerate enough to have no orbit at all — zero
-/// radius, or zero angular momentum (a radial trajectory).
+/// `None` for zero radius or zero angular momentum (a radial trajectory).
 pub fn from_state(
     gravitational_parameter: f64,
     position: DVec3,
@@ -137,16 +112,15 @@ pub fn from_state(
     let h = position.cross(velocity);
     let h_len = h.length();
     if h_len == 0.0 {
-        return None; // radial trajectory: inclination and node are meaningless
+        return None; // radial: inclination and node are meaningless
     }
 
-    // Eccentricity vector, in the form that avoids a second cross product.
+    // Eccentricity vector, in the form avoiding a second cross product.
     let v2 = velocity.length_squared();
     let e_vec = ((v2 - mu / r) * position - position.dot(velocity) * velocity) / mu;
     let e = e_vec.length();
 
-    // Specific energy fixes the semi-major axis. Parabolic orbits have zero energy and
-    // therefore no finite `a`.
+    // Specific energy fixes `a`; parabolic orbits have zero energy and no finite `a`.
     let energy = v2 / 2.0 - mu / r;
     let semi_major_axis = if energy.abs() < f64::EPSILON {
         f64::INFINITY
@@ -159,7 +133,7 @@ pub fn from_state(
         || (std::f64::consts::PI - inclination) < EQUATORIAL_TOLERANCE;
     let circular = e < CIRCULAR_TOLERANCE;
 
-    // Node vector: z_hat x h, pointing at the ascending node.
+    // Node vector z_hat x h, toward the ascending node.
     let node = DVec3::new(-h.y, h.x, 0.0);
     let node_len = node.length();
 
@@ -178,7 +152,7 @@ pub fn from_state(
                 (raan, argp, nu)
             }
             (false, true) => {
-                // Circular, inclined: measure from the node (argument of latitude).
+                // Circular, inclined: argument of latitude, from the node.
                 let raan = f64::atan2(node.y, node.x);
                 let mut u = (node.dot(position) / (node_len * r)).clamp(-1.0, 1.0).acos();
                 if position.z < 0.0 {
@@ -187,7 +161,7 @@ pub fn from_state(
                 (raan, 0.0, u)
             }
             (true, false) => {
-                // Equatorial, eccentric: measure periapsis from +X (longitude of periapsis).
+                // Equatorial, eccentric: longitude of periapsis, from +X.
                 let mut lon_peri = (e_vec.x / e).clamp(-1.0, 1.0).acos();
                 if e_vec.y < 0.0 {
                     lon_peri = -lon_peri;
@@ -196,7 +170,7 @@ pub fn from_state(
                 if position.dot(velocity) < 0.0 {
                     nu = -nu;
                 }
-                // A retrograde equatorial orbit runs the other way round.
+                // Retrograde equatorial runs the other way.
                 if h.z < 0.0 {
                     lon_peri = -lon_peri;
                     nu = -nu;
@@ -260,7 +234,6 @@ mod tests {
             assert!(d < 1e-8, "{name}: {got} vs {want} (drift {d:e})");
         }
 
-        // And the state itself must come back.
         let (r2, v2) = to_state(mu, &back).unwrap();
         assert!((r2 - r).length() / r.length() < 1e-9, "position: {r2:?} vs {r:?}");
         assert!((v2 - v).length() / v.length() < 1e-9, "velocity: {v2:?} vs {v:?}");
@@ -296,8 +269,7 @@ mod tests {
         });
     }
 
-    /// Degenerate cases pick a convention rather than producing garbage; the state must
-    /// still survive the trip.
+    /// Degenerate cases pick a convention; the state must still survive the trip.
     #[test]
     fn degenerate_orbits_still_reproduce_their_state() {
         let cases = [
@@ -322,7 +294,7 @@ mod tests {
         }
     }
 
-    /// A circular orbit has constant speed `sqrt(mu/r)`, everywhere.
+    /// Circular orbits have constant speed `sqrt(mu/r)`.
     #[test]
     fn circular_orbit_has_circular_speed() {
         let a: f64 = 7.0e6;
@@ -339,7 +311,7 @@ mod tests {
         }
     }
 
-    /// Vis-viva must hold at every point of an eccentric orbit.
+    /// Vis-viva holds at every point of an eccentric orbit.
     #[test]
     fn speed_obeys_vis_viva() {
         let a: f64 = 7.0e6;
@@ -370,13 +342,12 @@ mod tests {
         close(rp.length(), a * (1.0 - e), 1e-12, "periapsis radius");
         close(ra.length(), a * (1.0 + e), 1e-12, "apoapsis radius");
         assert!(vp.length() > va.length(), "periapsis must be faster");
-        // Angular momentum is conserved: r_p v_p == r_a v_a.
+        // Conserved angular momentum: r_p v_p == r_a v_a.
         close(rp.length() * vp.length(), ra.length() * va.length(), 1e-12, "specific angular momentum");
     }
 
     #[test]
     fn radial_and_degenerate_states_are_rejected() {
-        // Zero angular momentum: straight up.
         let r = DVec3::new(7.0e6, 0.0, 0.0);
         assert!(from_state(MU_EARTH, r, DVec3::new(1000.0, 0.0, 0.0)).is_none());
         assert!(from_state(MU_EARTH, DVec3::ZERO, DVec3::new(0.0, 1000.0, 0.0)).is_none());
@@ -391,7 +362,7 @@ mod tests {
         assert!(to_state(MU_EARTH, &el).is_none());
     }
 
-    /// The rotation must be a proper rotation, not a mirror.
+    /// A proper rotation, not a mirror.
     #[test]
     fn perifocal_rotation_is_proper() {
         for (raan, inc, argp) in [(0.0, 0.0, 0.0), (1.2, 0.4, 2.3), (5.0, 3.0, 1.0)] {

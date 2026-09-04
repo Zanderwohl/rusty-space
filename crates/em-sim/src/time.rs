@@ -1,26 +1,18 @@
-//! Simulation time management.
-//!
-//! Provides `SimTime` (the simulation clock resource) and `PreviousTimes`
-//! (a queue of simulation times to be processed for physics stepping).
+//! Simulation clock and the queue of pending physics steps.
 
 use std::time::Instant as StdInstant;
 use em_foundations::time::Instant;
 
-/// Represents a queue of simulation times to be processed.
-/// Instead of storing each time value, we store the start time and count,
-/// computing values on-the-fly to avoid unbounded memory usage.
+/// A queue of simulation times, stored as start/count/step rather than as values, so a
+/// large backlog costs no memory.
 #[derive(Clone, Debug, Default)]
 pub struct PreviousTimes {
-    /// The first time in the queue
     start_time: f64,
-    /// Number of steps remaining to process
     count: usize,
-    /// Time step between each value
     step: f64,
 }
 
 impl PreviousTimes {
-    /// Create an empty queue
     pub fn new() -> Self {
         Self {
             start_time: 0.0,
@@ -29,22 +21,18 @@ impl PreviousTimes {
         }
     }
     
-    /// Create a queue with the given parameters
     pub fn with_values(start_time: f64, count: usize, step: f64) -> Self {
         Self { start_time, count, step }
     }
     
-    /// Returns true if there are no times to process
     pub fn is_empty(&self) -> bool {
         self.count == 0
     }
     
-    /// Returns the number of times remaining
     pub fn len(&self) -> usize {
         self.count
     }
     
-    /// Returns the last time in the queue (or None if empty)
     pub fn last(&self) -> Option<f64> {
         if self.count == 0 {
             None
@@ -53,7 +41,6 @@ impl PreviousTimes {
         }
     }
     
-    /// Returns the first time in the queue (or None if empty)
     pub fn first(&self) -> Option<f64> {
         if self.count == 0 {
             None
@@ -62,7 +49,6 @@ impl PreviousTimes {
         }
     }
     
-    /// Get the time at index i (0-based)
     pub fn get(&self, i: usize) -> Option<f64> {
         if i < self.count {
             Some(self.start_time + self.step * i as f64)
@@ -71,27 +57,23 @@ impl PreviousTimes {
         }
     }
     
-    /// Drain n items from the front, advancing start_time
     pub fn drain_front(&mut self, n: usize) {
         let to_drain = n.min(self.count);
         self.start_time += self.step * to_drain as f64;
         self.count -= to_drain;
     }
     
-    /// Clear all times
     pub fn clear(&mut self) {
         self.count = 0;
     }
     
-    /// Truncate to at most `max` items, dropping from the tail
     pub fn truncate(&mut self, max: usize) {
         if self.count > max {
             self.count = max;
         }
     }
     
-    /// Expand the queue by adding more steps at the end.
-    /// If the queue is empty, sets the start_time.
+    /// Append `additional_count` steps. Sets `start_time` if the queue was empty.
     pub fn expand(&mut self, new_start: f64, additional_count: usize, step: f64) {
         if self.count == 0 {
             self.start_time = new_start;
@@ -103,14 +85,12 @@ impl PreviousTimes {
         }
     }
     
-    /// Set the queue to have exactly this many steps starting from start_time
     pub fn set(&mut self, start_time: f64, count: usize, step: f64) {
         self.start_time = start_time;
         self.count = count;
         self.step = step;
     }
     
-    /// Create an iterator that yields times without modifying the queue
     pub fn iter(&self) -> PreviousTimesIter {
         PreviousTimesIter {
             current: self.start_time,
@@ -120,7 +100,6 @@ impl PreviousTimes {
     }
 }
 
-/// Iterator over PreviousTimes that yields each time value
 pub struct PreviousTimesIter {
     current: f64,
     remaining: usize,
@@ -148,47 +127,30 @@ impl Iterator for PreviousTimesIter {
 
 impl ExactSizeIterator for PreviousTimesIter {}
 
-/// The simulation clock resource.
-///
-/// Tracks the current simulation time, physics stepping queue, and performance metrics.
+/// The simulation clock.
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Resource))]
 pub struct SimTime {
-    /// Current simulation time (seconds since J2000)
     pub time: Instant,
-    /// Queue of simulation times that need to be stepped through
     pub previous_times: PreviousTimes,
-    /// Physics time step in simulation seconds
+    /// Physics step, in simulation seconds.
     pub step: f64,
-    /// GUI speed multiplier (sim seconds per real second)
+    /// Sim seconds per real second.
     pub gui_speed: f64,
-    /// Whether the simulation is currently playing
     pub playing: bool,
-    /// Display mode - seconds only vs formatted time
     pub seconds_only: bool,
-    
-    // === Performance settings ===
-    
-    /// Maximum real-world time (in seconds) to spend on physics per frame.
-    /// If exceeded, remaining steps are deferred to next frame.
-    /// The simulation will naturally slow down if it can't keep up with gui_speed.
+
+    /// Real seconds of physics per frame. Steps past the budget defer to the next frame,
+    /// so the simulation falls behind `gui_speed` rather than dropping the frame.
     pub max_frame_time: f64,
-    
-    // === Time accumulation ===
-    
-    /// Accumulated simulation time that hasn't been queued yet.
-    /// Used when gui_speed * delta_time is less than one step - we accumulate
-    /// partial time until we have enough for a full step, preventing overshoot.
+
+    /// Sim time not yet worth a whole step. Accumulated instead of queued, to avoid
+    /// overshoot when `gui_speed * delta` is below one step.
     pub accumulated_time: f64,
-    
-    // === Performance tracking ===
-    
-    /// Fraction of requested sim time that was actually simulated (1.0 = keeping up, <1.0 = falling behind)
+
+    /// Simulated over requested; below 1.0 means falling behind.
     pub sim_time_fraction: f64,
-    /// When the current frame's physics calculations started
     pub frame_start: Option<StdInstant>,
-    /// Number of physics steps completed this frame
     pub steps_completed: usize,
-    /// Number of physics steps requested this frame
     pub steps_requested: usize,
 }
 
@@ -212,14 +174,12 @@ impl Default for SimTime {
 }
 
 impl SimTime {
-    /// Start timing a new frame of physics calculations
     pub fn begin_frame(&mut self) {
         self.frame_start = Some(StdInstant::now());
         self.steps_completed = 0;
         self.steps_requested = self.previous_times.len().max(1);
     }
     
-    /// Check if we've exceeded the frame time budget
     pub fn frame_time_exceeded(&self) -> bool {
         if let Some(start) = self.frame_start {
             start.elapsed().as_secs_f64() >= self.max_frame_time
@@ -228,7 +188,6 @@ impl SimTime {
         }
     }
     
-    /// End the frame and calculate sim_time_fraction
     pub fn end_frame(&mut self) {
         if self.steps_requested > 0 {
             self.sim_time_fraction = self.steps_completed as f64 / self.steps_requested as f64;
@@ -238,7 +197,6 @@ impl SimTime {
         self.frame_start = None;
     }
     
-    /// Record that a physics step was completed
     pub fn step_completed(&mut self) {
         self.steps_completed += 1;
     }

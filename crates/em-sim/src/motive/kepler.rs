@@ -1,7 +1,4 @@
-//! Keplerian orbital elements and the position they imply.
-//!
-//! Pure data plus the functions over it. Systems that drive this from an ECS live in
-//! the app crate.
+//! Keplerian orbital elements and the position they imply. Angles are stored in degrees.
 
 use glam::{DMat3, DVec3};
 use serde::{Deserialize, Serialize};
@@ -17,7 +14,7 @@ pub struct KeplerCache {
     semi_latus_rectum: f64,
     mean_anomaly_at_epoch_rad: f64,
     epoch: Instant,
-    /// rad/s. Bakes in the gravitational parameter, so a changed primary mass invalidates.
+    /// rad/s. Bakes in mu, so a changed primary mass invalidates the cache.
     mean_motion: f64,
     /// `None` for a precessing orbit, whose rotation is time-dependent.
     rotation: Option<DMat3>,
@@ -50,37 +47,30 @@ pub struct KeplerMotive {
     pub shape: KeplerShape,
     pub rotation: KeplerRotation,
     pub epoch: KeplerEpoch,
-    /// Period for one full turn of the mean anomaly, measured from periapsis — the
-    /// anomalistic period.
+    /// Anomalistic period: one full turn of the mean anomaly from periapsis.
     ///
-    /// `None` derives the rate from the semi-major axis by Kepler's third law. That is
-    /// exact for an ideal two-body orbit, and wrong for a real one in two ways: once
-    /// periapsis precesses the anomalistic and sidereal rates differ (1.0% for Luna,
-    /// 27.5545 d against 27.3217 d), and an oblate primary shifts the rate outright
-    /// (Saturn's J2 moves Pan's by ~1.5%).
-    ///
-    /// Without this the semi-major axis has to absorb the difference, which is what
-    /// inflated Luna's `a` by 0.66% and skewed every radius read off it. Elements fitted
-    /// against an ephemeris should set it.
+    /// `None` derives the rate from the semi-major axis by Kepler's third law, exact only
+    /// for an ideal two-body orbit. Precessing periapsis splits the anomalistic from the
+    /// sidereal rate (Luna: 27.5545 d against 27.3217 d, 1.0%) and an oblate primary shifts
+    /// it outright (Saturn's J2 moves Pan's by ~1.5%). Dropping this forces the semi-major
+    /// axis to absorb the difference. Fitted elements should set it.
     #[serde(default)]
     pub anomalistic_period: Option<TimeDelta>,
-    /// Explicit gravitational parameter, m^3/s^2, overriding `G * (M_primary + m)`.
+    /// Explicit mu, m^3/s^2, overriding `G * (M_primary + m)`.
     ///
-    /// That default is right for a body orbiting its primary directly, and wrong for one
-    /// orbiting a barycentre: there each body's effective mu depends on the *other*
-    /// body's mass, not the pair's. Pluto and Charon about the Pluto-Charon barycentre
-    /// are the case in the bundled system.
+    /// Needed for a body orbiting a barycentre, where the effective mu depends on the
+    /// *other* body's mass — Pluto and Charon in the bundled system. Dropping it silently
+    /// changes the orbit.
     #[serde(default)]
     pub gravitational_parameter: Option<f64>,
 }
 
-/// Terms used by [`true_anomaly::fourier_expansion`], which is no longer the default
-/// route from mean to true anomaly. Retained for callers that explicitly want the
-/// classical series — see `KeplerMotive::true_anomaly_series`.
+/// Terms for [`true_anomaly::fourier_expansion`], no longer the default route from mean to
+/// true anomaly.
 const EXPANSION_ITERATIONS: usize = 10;
 
-/// Inclinations below this (in degrees) are treated as coplanar.
-/// `f64::EPSILON` (2.2e-16) is meaningless as an angular tolerance.
+/// Inclinations below this, in degrees, are treated as coplanar. `f64::EPSILON` is
+/// meaningless as an angular tolerance.
 const ANGLE_EPSILON_DEG: f64 = 1e-9;
 
 impl KeplerMotive {
@@ -148,8 +138,8 @@ impl KeplerMotive {
         self.rotation.inclination()
     }
 
-    /// For earth satellites, the equator.
-    /// For solar satellites, the ecliptic
+    /// Coplanar with the reference plane: the equator for Earth satellites, the ecliptic
+    /// for solar ones.
     pub fn is_coplanar(&self) -> bool {
         self.rotation.no_inclination()
     }
@@ -159,7 +149,7 @@ impl KeplerMotive {
         self.rotation.longitude_of_ascending_node(time_since_epoch)
     }
 
-    /// Lets 0.0 inclination case have long of asc node
+    /// Zero inclination yields 0 rather than `None`.
     pub fn longitude_of_ascending_node_infallible(&self, time: Instant) -> f64 {
         let time_since_epoch = self.time_since_epoch(time);
         self.rotation.longitude_of_ascending_node_infallible(time_since_epoch)
@@ -175,7 +165,7 @@ impl KeplerMotive {
         self.rotation.argument_of_periapsis(time_since_epoch)
     }
 
-    /// Returns true if this orbit has precessing orbital elements (nodal or apsidal precession).
+    /// Whether the elements precess, nodally or apsidally.
     pub fn is_precessing(&self) -> bool {
         matches!(self.rotation, KeplerRotation::PrecessingEulerAngles(_))
     }
@@ -188,13 +178,11 @@ impl KeplerMotive {
         TimeDelta::from_seconds(period::third_law(self.semi_major_axis(), gravitational_parameter))
     }
 
-    /// Rate at which the mean anomaly advances, in rad/s.
+    /// Rate at which the mean anomaly advances, rad/s.
     ///
-    /// Mean anomaly is measured from periapsis. When periapsis is fixed that is the
-    /// sidereal rate, and Kepler's third law gives it from the semi-major axis. When
-    /// periapsis precesses it is the *anomalistic* rate, which is a genuinely
-    /// independent quantity — so a precessing orbit may carry its own period, and this
-    /// prefers that when present.
+    /// Prefers `anomalistic_period` when set; otherwise Kepler's third law off the
+    /// semi-major axis, which gives the sidereal rate. The two differ once periapsis
+    /// precesses.
     pub fn mean_angular_motion(&self, gravitational_parameter: f64) -> f64 {
         match self.anomalistic_period {
             Some(period) if period.to_seconds() != 0.0 => {
@@ -204,9 +192,9 @@ impl KeplerMotive {
         }
     }
 
-    /// Returns mean anomaly at the given time in radians.
+    /// Mean anomaly at `time`, in radians.
     pub fn mean_anomaly(&self, time: Instant, gravitational_parameter: f64) -> f64 {
-        // mean_anomaly_at_epoch is stored in degrees; convert to radians for the math
+        // Stored in degrees.
         let mean_anomaly_at_epoch_rad = self.epoch.mean_anomaly_at_epoch(self.eccentricity()).to_radians();
         let n = self.mean_angular_motion(gravitational_parameter);
         let dt = (time - self.epoch.epoch()).to_seconds();
@@ -217,18 +205,15 @@ impl KeplerMotive {
         self.true_anomaly_at(self.mean_anomaly(time, gravitational_parameter))
     }
 
-    /// True anomaly from a mean anomaly, solved rather than expanded.
-    ///
-    /// Falls back to the series only for a parabolic orbit (`e == 1`), which has no mean
-    /// anomaly in this parameterisation.
+    /// True anomaly from mean, solved rather than expanded. Falls back to the series only
+    /// for `e == 1`, which has no mean anomaly here.
     fn true_anomaly_at(&self, mean_anomaly: f64) -> f64 {
         let ecc = self.shape.eccentricity();
         anomaly::true_from_mean(mean_anomaly, ecc)
             .unwrap_or_else(|| true_anomaly::fourier_expansion(mean_anomaly, ecc, EXPANSION_ITERATIONS))
     }
 
-    /// True anomaly via the classical Bessel expansion, for comparison against
-    /// [`Self::true_anomaly`]. Diverges past the Laplace limit `e ~ 0.6627`.
+    /// True anomaly via the Bessel expansion. Diverges past the Laplace limit `e ~ 0.6627`.
     pub fn true_anomaly_series(&self, time: Instant, gravitational_parameter: f64) -> f64 {
         true_anomaly::fourier_expansion(
             self.mean_anomaly(time, gravitational_parameter),
@@ -253,10 +238,8 @@ impl KeplerMotive {
         eccentric_anomaly::from_true_anomaly(self.shape.eccentricity(), ta)
     }
 
-    /// Perifocal Frame
-    /// +P (+x) points to periapsis
-    /// +Q (+y) points toward motion at periapsis, normal to P
-    /// +W (+z) normal to the other 2 according to RHR
+    /// Displacement in the perifocal frame: +P at periapsis, +Q along motion there,
+    /// +W = P × Q.
     pub fn displacement_pqw(&self, time: Instant, gravitational_parameter: f64) -> Option<DVec3> {
         let ecc = self.shape.eccentricity();
         let ta = self.true_anomaly_at(self.mean_anomaly(time, gravitational_parameter));
@@ -279,19 +262,13 @@ impl KeplerMotive {
 
     /// Velocity relative to the primary, in the reference frame, m/s.
     ///
-    /// Note this is the velocity along the osculating ellipse. For a precessing orbit the
-    /// perifocal frame is itself turning, and that contribution is not included — at
-    /// precession periods of years against orbital periods of days it is far below the
-    /// model's other errors, but it is not zero.
+    /// Along the osculating ellipse only: a precessing frame's own rotation is not included.
     pub fn velocity(&self, time: Instant, gravitational_parameter: f64) -> Option<DVec3> {
         let v_pqw = self.velocity_pqw(time, gravitational_parameter)?;
         Some(self.perifocal_to_reference(v_pqw, time))
     }
 
     /// Position and velocity relative to the primary, in the reference frame.
-    ///
-    /// This is what an impulse or a switch to Newtonian integration needs; a position
-    /// alone cannot start either.
     pub fn state_vectors(
         &self,
         time: Instant,
@@ -303,8 +280,7 @@ impl KeplerMotive {
         ))
     }
 
-    /// These elements as `em_foundations` sees them: radians, and the true anomaly
-    /// resolved for `time`.
+    /// These elements in radians, true anomaly resolved for `time`.
     pub fn elements_at(&self, time: Instant, gravitational_parameter: f64) -> state::Elements {
         state::Elements {
             semi_major_axis: self.semi_major_axis(),
@@ -325,13 +301,8 @@ impl KeplerMotive {
         Some(rotated)
     }
 
-    /// Time-invariant constants for this orbit, for the stepping loop.
-    ///
-    /// Ported from the ECS `KeplerCache`, minus the Fourier coefficients: those existed to
-    /// speed up a series expansion that a Halley solve has since replaced. What remains is
-    /// still worth caching — a square root for the mean motion, and for a non-precessing
-    /// orbit the whole perifocal-to-reference rotation, which is otherwise three matrix
-    /// constructions and two multiplies per body per step.
+    /// Time-invariant constants for the stepping loop: the mean motion, and for a
+    /// non-precessing orbit the whole perifocal-to-reference rotation.
     ///
     /// Rebuild whenever the elements, the primary's mass, or the motive segment change.
     pub fn build_cache(&self, gravitational_parameter: f64) -> KeplerCache {
@@ -559,31 +530,24 @@ pub struct KeplerPrecessingEulerAngles {
     pub inclination: f64,
     pub longitude_of_ascending_node: f64, // "Right ascension of ascending node"
     pub argument_of_periapsis: f64,
-    /// Period of one full turn of the argument of periapsis. Positive is prograde.
-    ///
-    /// Note this is measured from the (regressing) node, so it is NOT the ~8.85 yr
-    /// precession of the longitude of perihelion — see the note on Luna in `presets`.
+    /// One full turn of the argument of periapsis; positive is prograde. Measured from the
+    /// regressing node, so not the ~8.85 yr precession of the longitude of perihelion.
     #[serde(deserialize_with = "legacy_time_length")]
     pub apsidal_precession_period: TimeDelta,
-    /// Period of one full turn of the longitude of the ascending node.
-    /// Negative is retrograde, which is the usual case.
+    /// One full turn of the longitude of the ascending node; negative (retrograde) is usual.
     #[serde(deserialize_with = "legacy_time_length")]
     pub nodal_precession_period: TimeDelta,
 }
 
 impl KeplerPrecessingEulerAngles {
-    /// Degrees of apsidal precession accumulated since epoch.
-    /// Positive period = prograde (ω advances), negative = retrograde.
-    /// A zero period means "no precession" and yields 0, rather than inf/NaN.
+    /// Degrees of apsidal precession since epoch. A zero period yields 0, not inf/NaN.
     pub fn apsidal_precession_deg(&self, time_since_epoch: TimeDelta) -> f64 {
         let period = self.apsidal_precession_period.to_seconds();
         if period == 0.0 { return 0.0; }
         (time_since_epoch.to_seconds() / period) * 360.0
     }
 
-    /// Degrees of nodal precession accumulated since epoch.
-    /// Positive period = prograde (Ω advances), negative = retrograde (Ω regresses).
-    /// A zero period means "no precession" and yields 0, rather than inf/NaN.
+    /// Degrees of nodal precession since epoch. A zero period yields 0, not inf/NaN.
     pub fn nodal_precession_deg(&self, time_since_epoch: TimeDelta) -> f64 {
         let period = self.nodal_precession_period.to_seconds();
         if period == 0.0 { return 0.0; }
@@ -596,13 +560,9 @@ pub struct KeplerFlatAngles {
     pub longitude_of_periapsis: f64,
 }
 
-/// Mean anomaly from true anomaly, both in **degrees**, for either regime.
-///
-/// Closed orbits go through the eccentric anomaly, open ones through the hyperbolic.
-/// A true anomaly outside a hyperbola's asymptotes is not on the trajectory at all;
-/// there is no mean anomaly to return, so this gives back the input rather than a
-/// fabricated one — the orbit is unusable either way, and a NaN here would propagate
-/// silently into every position.
+/// Mean anomaly from true anomaly, both in **degrees**. Closed orbits go via the eccentric
+/// anomaly, open ones via the hyperbolic. A true anomaly outside a hyperbola's asymptotes
+/// has no mean anomaly; the input is returned rather than a NaN that would spread.
 fn mean_from_true_degrees(true_anomaly_deg: f64, eccentricity: f64) -> f64 {
     let nu = true_anomaly_deg.to_radians();
     let mean = if eccentricity < 1.0 {
@@ -634,13 +594,8 @@ impl KeplerEpoch {
         }
     }
 
-    /// This refers to the internal epoch of this particular orbit description.
-    /// Most orbits should share the same epoch, but they might not.
-    ///
-    /// Takes the eccentricity because one of the four forms stores a *true* anomaly, and
-    /// true to mean is not a conversion the angle can do by itself — it runs through the
-    /// eccentric (or hyperbolic) anomaly, both of which depend on the shape of the orbit.
-    /// In degrees, like the stored values.
+    /// Mean anomaly at this orbit's own epoch, in **degrees**. Needs the eccentricity
+    /// because the `TrueAnomaly` form converts via the eccentric or hyperbolic anomaly.
     pub fn mean_anomaly_at_epoch(&self, eccentricity: f64) -> f64 {
         match self {
             KeplerEpoch::MeanAnomaly(mean_anomaly) => mean_anomaly.mean_anomaly,
@@ -652,13 +607,13 @@ impl KeplerEpoch {
         }
     }
 
-    /// Also needs the eccentricity, for the same reason as
+    /// Needs the eccentricity for the same reason as
     /// [`KeplerEpoch::mean_anomaly_at_epoch`].
     pub fn time_at_periapsis_passage(&self, period: TimeDelta, eccentricity: f64) -> Instant {
         let period_seconds = period.to_seconds();
         let raw_time = match self {
             KeplerEpoch::MeanAnomaly(mean_anomaly) => {
-                // mean_anomaly is stored in degrees; convert to radians for the division by TAU
+                // Stored in degrees.
                 let mean_anomaly_rad = mean_anomaly.mean_anomaly.to_radians();
                 mean_anomaly.epoch.to_j2000_seconds() - period_seconds * (mean_anomaly_rad / std::f64::consts::TAU)
             }
@@ -670,13 +625,13 @@ impl KeplerEpoch {
                     - period_seconds * (mean_anomaly_rad / std::f64::consts::TAU)
             }
             KeplerEpoch::J2000(j2000) => {
-                // mean_anomaly is stored in degrees; convert to radians for the division by TAU
+                // Stored in degrees.
                 let mean_anomaly_rad = j2000.mean_anomaly.to_radians();
                 -period_seconds * (mean_anomaly_rad / std::f64::consts::TAU)
             }
         };
         
-        // Ensure we return the first periapsis passage at or after J2000 (>= 0.0)
+        // Normalise to the first periapsis passage at or after J2000.
         let val = if raw_time < 0.0 {
             let periods_to_add = (-raw_time / period_seconds).ceil();
             raw_time + (periods_to_add * period_seconds)
@@ -691,7 +646,7 @@ impl KeplerEpoch {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct MeanAnomalyAtEpoch {
     pub epoch: Instant,
-    /// Mean anomaly in **degrees** (converted to radians at math boundaries).
+    /// **Degrees**.
     pub mean_anomaly: f64,
 }
 
@@ -699,26 +654,19 @@ pub struct MeanAnomalyAtEpoch {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct TrueAnomalyAtEpoch {
     pub epoch: Instant,
-    /// True anomaly in **degrees** (converted to radians at math boundaries).
+    /// **Degrees**.
     pub true_anomaly: f64,
 }
 
 /// Mean anomaly at the J2000 epoch.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct MeanAnomalyAtJ2000 {
-    /// Mean anomaly in **degrees** (converted to radians at math boundaries).
+    /// **Degrees**.
     pub mean_anomaly: f64,
 }
 
-/// Accepts both the current representation of a precession period and the one written by
-/// older saves.
-///
-/// These fields used to be `TimeLength`, a tuple struct of `(f64, Includes)`, so TOML
-/// holds them as `[279201600.0, "Beginning"]`. The `Includes` tag was never read by
-/// anything, and `TimeLength` is now just `TimeDelta`, which serialises as a bare float.
-/// Both forms carry seconds, so the legacy value needs no scaling — only unwrapping.
-///
-/// (SQLite saves are unaffected: that backend already stored these as REAL days.)
+/// Accepts a precession period as a bare float or as the legacy `[seconds, tag]` pair.
+/// Both carry seconds, so the legacy form needs unwrapping, not scaling.
 fn legacy_time_length<'de, D>(deserializer: D) -> Result<TimeDelta, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -727,7 +675,7 @@ where
     #[serde(untagged)]
     enum Either {
         Seconds(f64),
-        /// `(seconds, Includes)` as written before the `Includes` tag was removed.
+        /// Legacy `(seconds, Includes)`; the tag is discarded.
         Tagged(f64, serde::de::IgnoredAny),
     }
     Ok(match Either::deserialize(deserializer)? {
@@ -738,9 +686,8 @@ where
 
 #[cfg(test)]
 mod save_compat {
-    //! Precession periods used to be `TimeLength`, a `(f64, Includes)` tuple struct.
-    //! Existing TOML saves hold them as a two-element array; new ones write a bare float.
-    //! Both must load, and to the same value.
+    //! Legacy `[seconds, tag]` and current bare-float precession periods must load to the
+    //! same value.
     use super::*;
 
     const LEGACY: &str = r#"
@@ -772,7 +719,6 @@ nodal_precession_period = -586955486.75
 
     #[test]
     fn the_discarded_includes_tag_does_not_change_the_value() {
-        // "Beginning", "End" and "Both" were all accepted; none was ever read.
         for tag in ["Beginning", "End", "Both"] {
             let src = LEGACY.replace("\"Beginning\"", &format!("\"{tag}\""));
             let parsed: KeplerPrecessingEulerAngles = toml::from_str(&src).unwrap();

@@ -19,17 +19,13 @@ pub struct BodyInfo {
 pub struct BodyState {
     pub current_position: DVec3,
     pub last_step_position: DVec3,
-    /// Current velocity.
-    ///
-    /// For a Newtonian body this is the integrated global velocity. For a Keplerian body
-    /// it is the velocity relative to the primary, from the orbit. `None` for Fixed
-    /// bodies, which have no velocity of their own.
+    /// Newtonian: integrated global velocity. Keplerian: relative to the primary.
+    /// `None` for Fixed bodies.
     pub current_velocity: Option<DVec3>,
     pub current_local_position: Option<DVec3>,
     pub current_primary_position: Option<DVec3>,
     pub trajectory: Option<TimeMap<DVec3>>,
-    /// Time at which the current Newtonian state was last initialized/updated
-    /// Used to detect motive transitions that require reinitialization
+    /// When the Newtonian state was last (re)initialised; detects motive transitions.
     pub newtonian_init_time: Option<Instant>,
 }
 
@@ -48,7 +44,7 @@ impl Default for BodyState {
 }
 
 impl BodyInfo {
-    /// Returns the display name without allocation: name if set, else designation, else id.
+    /// Name, else designation, else id.
     pub fn display_name(&self) -> &str {
         self.name.as_deref()
             .or(self.designation.as_deref())
@@ -72,14 +68,13 @@ impl Default for BodyInfo {
 /// Epoch reference for body rotation data.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
 pub enum RotationEpoch {
-    /// J2000 epoch (2000-01-01 12:00 TT)
+    /// 2000-01-01 12:00 TT.
     J2000,
-    /// Custom epoch specified as Julian Day
+    /// Julian Day.
     JulianDay(f64),
 }
 
 impl RotationEpoch {
-    /// Convert this epoch to an Instant.
     pub fn to_instant(&self) -> Instant {
         match self {
             RotationEpoch::J2000 => Instant::from_seconds_since_j2000(0.0),
@@ -93,36 +88,27 @@ impl RotationEpoch {
 pub enum RotationMode {
     /// Body spins around a fixed pole axis at constant angular velocity.
     Spinning {
-        /// Orientation quaternion at the reference epoch (Z-up sim frame).
-        /// The local Z-axis of this quaternion is the rotation pole.
+        /// Orientation at the reference epoch (Z-up sim frame); its local Z is the pole.
         orientation_at_epoch: DQuat,
-        /// Angular velocity in radians per second (positive = prograde).
+        /// Radians per second; positive is prograde.
         angular_velocity: f64,
-        /// Reference epoch for the orientation.
         epoch: RotationEpoch,
     },
-    /// Body is tidally locked to its primary - one face always points toward it.
+    /// Tidally locked: one face always points at the primary.
     TidallyLocked {
-        /// ID of the primary body this is locked to.
         primary_id: String,
-        /// Pole axis direction in simulation coordinates (Z-up ecliptic frame).
-        /// This defines the body's axial tilt - the body rotates so its +X faces
-        /// the primary while keeping this pole orientation.
+        /// Pole direction in sim coordinates (Z-up ecliptic); sets the axial tilt.
         pole: DVec3,
     },
 }
 
-/// Body rotation state component.
-///
-/// Defines how a body's orientation changes over time, either through
-/// constant spin around a pole axis or tidal locking to a primary body.
+/// How a body's orientation changes over time.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BodyRotation {
     pub mode: RotationMode,
 }
 
 impl BodyRotation {
-    /// Create a spinning rotation from IAU-style parameters.
     pub fn spinning(orientation_at_epoch: DQuat, angular_velocity: f64, epoch: RotationEpoch) -> Self {
         Self {
             mode: RotationMode::Spinning {
@@ -133,7 +119,6 @@ impl BodyRotation {
         }
     }
 
-    /// Create a tidally locked rotation.
     pub fn tidally_locked(primary_id: impl Into<String>, pole: DVec3) -> Self {
         Self {
             mode: RotationMode::TidallyLocked {
@@ -143,8 +128,8 @@ impl BodyRotation {
         }
     }
 
-    /// Compute the current orientation at the given simulation time.
-    /// For tidally locked bodies, returns None - use `orientation_tidally_locked` instead.
+    /// Orientation at `time`. `None` when tidally locked — use
+    /// `orientation_tidally_locked`.
     pub fn orientation_at(&self, time: Instant) -> Option<DQuat> {
         match &self.mode {
             RotationMode::Spinning { orientation_at_epoch, angular_velocity, epoch } => {
@@ -158,22 +143,18 @@ impl BodyRotation {
         }
     }
 
-    /// Compute orientation for a tidally locked body given its position and primary's position.
-    /// The body's local +X axis will point toward the primary.
+    /// Orientation of a tidally locked body; its local +X points at the primary.
     pub fn orientation_tidally_locked(&self, body_pos: DVec3, primary_pos: DVec3) -> Option<DQuat> {
         match &self.mode {
             RotationMode::TidallyLocked { pole, .. } => {
                 let to_primary = (primary_pos - body_pos).normalize();
                 
-                // Build orthonormal basis (right-handed):
-                // +X points toward primary
-                // +Z is the pole axis (orthogonalized to be perpendicular to +X)
-                // +Y completes the right-handed system: +Y = +Z × +X
+                // Right-handed basis: X at the primary, Z the orthogonalised pole,
+                // Y = Z × X.
                 let forward = to_primary;
-                let up = (*pole - forward * forward.dot(*pole)).normalize(); // orthogonalize pole
-                let right = up.cross(forward); // right-handed: Y = Z × X
+                let up = (*pole - forward * forward.dot(*pole)).normalize();
+                let right = up.cross(forward);
                 
-                // Construct rotation matrix: columns are where each basis axis points
                 let mat = glam::DMat3::from_cols(forward, right, up);
                 Some(DQuat::from_mat3(&mat))
             }
@@ -181,7 +162,7 @@ impl BodyRotation {
         }
     }
 
-    /// Get the rotation pole axis (north) in simulation coordinates.
+    /// North pole axis in simulation coordinates.
     pub fn pole_axis(&self) -> DVec3 {
         match &self.mode {
             RotationMode::Spinning { orientation_at_epoch, .. } => {
@@ -191,7 +172,7 @@ impl BodyRotation {
         }
     }
 
-    /// Get the primary ID if this is a tidally locked body.
+    /// Primary id, if tidally locked.
     pub fn tidally_locked_primary(&self) -> Option<&str> {
         match &self.mode {
             RotationMode::TidallyLocked { primary_id, .. } => Some(primary_id),

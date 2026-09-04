@@ -76,9 +76,7 @@ fn main() {
 }
 
 fn migrate_file(source_path: &PathBuf) -> Result<PathBuf, String> {
-    // Load the TOML file
-    let universe_file = UniverseFile::load_from_path(source_path)
-        .ok_or_else(|| format!("Failed to load file"))?;
+    let universe_file = UniverseFile::load_from_path(source_path)?;
 
     // Create the new .em path
     let new_path = source_path.with_extension("em");

@@ -1,24 +1,17 @@
 //! The boundary between simulation space and render space.
 //!
-//! Simulation space follows the astronomical convention: right-handed, **Z-up**, with the
-//! ecliptic of J2000 as the reference plane. Bevy renders **Y-up**. Everything in
-//! `em-foundations` and `em-sim` stays in simulation space; this module is the only place
-//! that converts, and every conversion in it goes through [`sim_to_render`] or
-//! [`render_to_sim`].
+//! Simulation space is right-handed, **Z-up**, ecliptic of J2000. Bevy renders **Y-up**.
+//! This is the only module that converts.
 //!
-//! The mapping is a proper rotation — −90° about +X, sending +Z to +Y and +Y to −Z — not a
-//! mirror, so handedness and cross products survive it. [`sim_to_render_rotation`] applies
-//! the same change of basis to a quaternion by conjugation, and a test pins the two
-//! against each other: converting a rotated vector must equal rotating a converted one.
+//! The mapping is a proper rotation, −90° about +X (+Z to +Y, +Y to −Z), not a mirror, so
+//! handedness and cross products survive. [`sim_to_render_rotation`] applies the same
+//! change of basis to a quaternion by conjugation.
 
 use std::f64::consts::FRAC_PI_2;
 
 use bevy::math::{DQuat, DVec3, Quat, Vec3};
 
-/// Change of basis from Z-up simulation space to Y-up render space.
-///
-/// A −90° rotation about +X. Both [`sim_to_render`] and [`sim_to_render_rotation`] are
-/// this same rotation, applied to a vector and to a rotation respectively.
+/// Change of basis from Z-up simulation space to Y-up render space: −90° about +X.
 #[inline]
 pub fn render_basis() -> DQuat {
     DQuat::from_axis_angle(DVec3::X, -FRAC_PI_2)
@@ -48,24 +41,16 @@ pub trait ToRender {
     /// Render-space direction, unscaled.
     fn to_render(&self) -> Vec3;
 
-    /// Render-space position, scaled, kept in `f64`.
-    ///
-    /// The camera works in this form: at solar-system distances a scaled position does not
-    /// survive `f32`, so it stays wide until it is made camera-relative.
+    /// Render-space position, scaled, kept in `f64`. At solar-system distances a scaled
+    /// position does not survive `f32` until it is made camera-relative.
     fn to_render_scaled(&self, scale: f64) -> DVec3;
 
-    /// Render-space position, scaled, narrowed to `f32`.
-    ///
-    /// Only safe for offsets that are already small — a mesh built around its own origin,
-    /// say. For a world position use [`Self::to_render_relative`], which subtracts the
-    /// camera first.
+    /// Render-space position, scaled, narrowed to `f32`. Only for offsets already small;
+    /// world positions need [`Self::to_render_relative`].
     fn to_render_scaled_f32(&self, scale: f64) -> Vec3;
 
-    /// Render-space position relative to the camera, scaled, in `f32`.
-    ///
-    /// This is what a `Transform` wants. Subtracting the camera's own render-space
-    /// position before narrowing is what keeps distant bodies from collapsing onto the
-    /// `f32` grid — the camera sits at the render origin and the world moves around it.
+    /// Render-space position relative to the camera, scaled, in `f32`. What a `Transform`
+    /// wants: subtracting before narrowing keeps distant bodies off the `f32` grid.
     fn to_render_relative(&self, scale: f64, camera_render_pos: DVec3) -> Vec3;
 }
 
@@ -143,8 +128,7 @@ mod tests {
         }
     }
 
-    /// The swizzle must BE the rotation, not merely resemble it. If these drift apart,
-    /// vectors and quaternions stop agreeing and orientations go subtly wrong.
+    /// The swizzle must equal the rotation, or vectors and quaternions disagree.
     #[test]
     fn the_swizzle_is_the_rotation() {
         let r = render_basis();
@@ -155,7 +139,7 @@ mod tests {
         }
     }
 
-    /// It is a rotation, so handedness survives: a right-handed triple stays right-handed.
+    /// A proper rotation, so a right-handed triple stays right-handed.
     #[test]
     fn handedness_is_preserved() {
         let (x, y, z) = (sim_to_render(DVec3::X), sim_to_render(DVec3::Y), sim_to_render(DVec3::Z));
@@ -170,8 +154,7 @@ mod tests {
         }
     }
 
-    /// The vector and quaternion paths must agree: converting a rotated vector has to
-    /// equal rotating a converted one.
+    /// Converting a rotated vector equals rotating a converted one.
     #[test]
     fn quaternion_conversion_matches_vector_conversion() {
         let rotations = [
@@ -200,8 +183,8 @@ mod tests {
         assert!(at_camera.length() < 1e-6, "a body at the camera should render at the origin, got {at_camera:?}");
     }
 
-    /// Making a position camera-relative before narrowing to f32 is what preserves
-    /// precision at solar-system distances. Narrowing first loses metres.
+    /// Camera-relative before narrowing to f32 keeps metre-scale separations at 1 AU;
+    /// narrowing first loses them.
     #[test]
     fn relative_conversion_beats_narrowing_first() {
         let scale = 1e-9;
@@ -215,6 +198,6 @@ mod tests {
         let expected = 1000.0 * scale;
         assert!((good.x as f64 - expected).abs() < expected * 1e-3,
             "camera-relative should keep the 1 km separation: {good:?}");
-        let _ = naive; // kept to document the alternative this exists to avoid
+        let _ = naive; // the alternative this guards against
     }
 }

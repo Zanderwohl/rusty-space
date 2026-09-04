@@ -1,13 +1,7 @@
-//! The Bevy side of Phase 6, exercised without a window.
+//! The Bevy wiring, exercised without a window: a real `App`, the sync systems, real
+//! frames.
 //!
-//! The library suite covers `em-sim` thoroughly, but nothing in it runs a Bevy schedule.
-//! These tests build a real `App`, register the sync systems, and run frames — so a
-//! conflicting system parameter, a missing resource, or a sync that reads the wrong body
-//! fails here rather than the first time someone opens the planetarium.
-//!
-//! Spawning is not covered: `sync_body_entities` builds meshes and materials, which needs
-//! a GPU. Entities are created directly instead, which is what that system would have
-//! produced.
+//! Mesh and material spawning needs a GPU, so entities are created directly instead.
 
 use bevy::prelude::*;
 use exotic_matters::body::universe::save::ViewSettings;
@@ -36,7 +30,7 @@ fn app_with_system() -> App {
         .init_resource::<Trajectories>()
         .add_message::<CalculateTrajectory>();
 
-    // A camera, which `sync_transforms` needs to make positions relative to.
+    // `sync_transforms` needs a camera to make positions relative to.
     app.world_mut().spawn((
         PlanetariumCamera::new(),
         Freecam { bevy_pos: bevy::math::DVec3::ZERO },
@@ -55,8 +49,7 @@ fn app_with_system() -> App {
     app
 }
 
-/// The schedule has to actually run. Bevy validates system parameters when it does, so a
-/// conflicting query or an uninitialised resource surfaces here.
+/// The schedule runs: Bevy validates system parameters and resources when it does.
 #[test]
 fn the_planetarium_schedule_runs() {
     let mut app = app_with_system();
@@ -67,8 +60,7 @@ fn the_planetarium_schedule_runs() {
     assert!(metrics.bodies > 200, "expected the full system, got {}", metrics.bodies);
 }
 
-/// With nothing to integrate the whole system is analytic, so it should evaluate directly
-/// rather than walking there — that is what makes scrubbing cheap.
+/// With nothing to integrate, the system evaluates directly rather than stepping.
 #[test]
 fn a_fully_analytic_system_jumps_rather_than_stepping() {
     let mut app = app_with_system();
@@ -82,8 +74,8 @@ fn a_fully_analytic_system_jumps_rather_than_stepping() {
     assert_eq!(metrics.newtonian_bodies, 0);
 }
 
-/// Every entity must end up at its own body's position, not some other body's. A
-/// mis-resolved `BodyRef` would leave transforms plausible but wrong.
+/// Each entity lands on its own body's position; a mis-resolved `BodyRef` would be
+/// plausible but wrong.
 #[test]
 fn transforms_track_the_right_body() {
     use exotic_matters::presentation::render_space::ToRender;
@@ -94,7 +86,6 @@ fn transforms_track_the_right_body() {
 
     let scale = app.world().resource::<ViewSettings>().distance_factor();
 
-    // Snapshot what each entity is showing, then compare against the arena.
     let mut query = app.world_mut().query::<(&BodyRef, &Transform)>();
     let seen: Vec<(BodyRef, Vec3)> = query
         .iter(app.world())
@@ -128,7 +119,7 @@ fn advancing_the_clock_moves_things() {
 
     let after = app.world().resource::<SimSystem>().0.position(earth);
     let moved = (after - before).length();
-    // Half a year: Earth should be most of an orbit diameter away.
+    // Half a year, so Earth is most of an orbit diameter away.
     assert!(moved > 2.0e11, "Earth moved only {moved:e} m in half a year");
 }
 
@@ -151,13 +142,9 @@ fn trajectories_are_produced_on_request() {
     assert!(path.period.to_seconds() > 0.0, "a closed orbit needs a period");
 }
 
-/// The bundled save must load through the real file path and into the arena.
-///
-/// `System::from_contents` is covered above against the generated preset, which is
-/// built in memory and so proves nothing about SQLite. This drives the path the app
-/// actually takes — `.em` on disk, through the migrations and the row decoders, into
-/// the arena — and then propagates it, because elements that decode but do not
-/// propagate are the failure mode that matters.
+/// The bundled `.em` loads from disk through the migrations and row decoders into the
+/// arena, and then propagates. Elements that decode but do not propagate are the failure
+/// mode.
 #[test]
 fn the_bundled_save_loads_and_propagates() {
     use exotic_matters::body::universe::save::UniverseFile;
@@ -169,14 +156,14 @@ fn the_bundled_save_loads_and_propagates() {
 
     assert!(system.len() > 150, "only {} bodies came back", system.len());
 
-    // Every body must resolve a finite position a decade out, not just at the epoch.
+    // Finite positions a decade out, not just at the epoch.
     em_sim::propagate::evaluate_at(&mut system, Instant::from_julian_day(2451545.0 + 3652.5));
     for i in system.indices() {
         let p = system.position(i);
         assert!(p.is_finite(), "{} propagated to {p:?}", system.name(i));
     }
 
-    // And the hierarchy has to be real: Luna must stay near Earth, not near the Sun.
+    // The hierarchy is real: Luna stays near Earth.
     let earth = system.by_name("Earth").expect("Earth");
     let luna = system.by_name("Luna").expect("Luna");
     let separation = (system.position(luna) - system.position(earth)).length();
@@ -186,13 +173,10 @@ fn the_bundled_save_loads_and_propagates() {
     );
 }
 
-/// A body added to the arena must acquire an entity, and that bare entity must then be
-/// dressed by the presentation systems.
+/// A new body acquires a bare entity, and the presentation systems dress it.
 ///
-/// This is the contract `sync_body_entities` relies on: it attaches nothing but a
-/// `BodyRef`, on the understanding that anything keying off `BodyRef` and the absence of
-/// its own link component will pick the body up. If that stopped holding, the app would
-/// compile and run and simply draw nothing.
+/// `sync_body_entities` attaches only a `BodyRef`; if nothing picks that up, the app
+/// compiles, runs and draws nothing.
 #[test]
 fn bodies_get_entities_and_then_get_dressed() {
     use bevy::asset::AssetPlugin;
@@ -219,8 +203,7 @@ fn bodies_get_entities_and_then_get_dressed() {
         spawn_body_point_meshes.after(sync_body_entities),
     ));
 
-    // Two frames: the first spawns the entities, the second dresses them, because
-    // `Commands` do not apply until the sync point.
+    // Two frames: `Commands` do not apply until the sync point.
     app.update();
     app.update();
 
@@ -230,7 +213,6 @@ fn bodies_get_entities_and_then_get_dressed() {
     let mut refs = app.world_mut().query::<&BodyRef>();
     assert_eq!(refs.iter(app.world()).count(), expected);
 
-    // Every DebugBall body must have picked up both a wireframe and a point sprite.
     let ball_count = {
         let system = &app.world().resource::<SimSystem>().0;
         system.indices()
@@ -244,18 +226,14 @@ fn bodies_get_entities_and_then_get_dressed() {
     let mut pointed = app.world_mut().query::<(&BodyRef, &BodyPointLink)>();
     assert_eq!(pointed.iter(app.world()).count(), ball_count);
 
-    // Running again must not dress anything twice — the link component is the guard.
+    // The link component guards against dressing twice.
     app.update();
     let mut wireframed = app.world_mut().query::<(&BodyRef, &BodyWireframeLink)>();
     assert_eq!(wireframed.iter(app.world()).count(), ball_count, "dressed twice");
 }
 
-/// Pressing play must move the clock and the bodies.
-///
-/// `advance_simulation` propagates *to* `sim_time.time`; for a long while nothing moved
-/// `sim_time.time`, so play was inert and the arena re-evaluated the same instant every
-/// frame. The clock and the propagation live in one system precisely so they cannot
-/// disagree about how far time got.
+/// Playing advances both the clock and the bodies, and the arena's time matches the
+/// clock's.
 #[test]
 fn play_advances_the_clock_and_the_bodies() {
     let mut app = app_with_system();
@@ -268,9 +246,8 @@ fn play_advances_the_clock_and_the_bodies() {
     {
         let mut sim_time = app.world_mut().resource_mut::<SimTime>();
         sim_time.playing = true;
-        // A frame here is microseconds of real time, so the rate has to be absurd for
-        // any whole step to accumulate. The test is about whether the clock moves at
-        // all, not how fast — so run frames until it does, with a cap.
+        // A frame is microseconds of real time, so the rate must be absurd for a whole
+        // step to accumulate. Frames run until the clock moves, capped.
         sim_time.gui_speed = 1.0e6;
         sim_time.step = 60.0;
     }
@@ -292,10 +269,9 @@ fn play_advances_the_clock_and_the_bodies() {
         "the clock advanced {elapsed} s but Earth did not move"
     );
 
-    // The arena must agree with the clock, not lag it.
+    // The arena agrees with the clock rather than lagging it.
     assert_eq!(app.world().resource::<SimSystem>().0.time(), end_time);
 
-    // And pausing must stop it.
     app.world_mut().resource_mut::<SimTime>().playing = false;
     let paused_at = app.world().resource::<SimTime>().time;
     for _ in 0..10 {
@@ -304,10 +280,8 @@ fn play_advances_the_clock_and_the_bodies() {
     assert_eq!(app.world().resource::<SimTime>().time, paused_at, "paused clock moved");
 }
 
-/// Scrubbing while paused must still reposition the bodies.
-///
-/// The early-exit that keeps a paused frame from re-propagating 221 bodies has to
-/// notice that the clock was dragged somewhere new.
+/// Scrubbing while paused repositions the bodies: the paused-frame early-exit must notice
+/// a moved clock.
 #[test]
 fn scrubbing_while_paused_repositions() {
     let mut app = app_with_system();

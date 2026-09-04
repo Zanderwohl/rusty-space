@@ -50,34 +50,31 @@ pub struct UniverseFile {
 }
 
 impl UniverseFile {
-    /// Load from any supported format (auto-detected from extension)
-    pub fn load_from_path(path: &PathBuf) -> Option<Self> {
-        let format = SaveFormat::from_path(path)?;
-        match format {
-            SaveFormat::Toml => Self::load_from_path_toml(path),
-            SaveFormat::Sqlite => Self::load_from_path_sqlite(path),
+    /// Load from any supported format, chosen by extension.
+    ///
+    /// Returns why it failed. These used to be `Option`, so an unknown shape type, a
+    /// missing table or a permissions error all arrived as `None` and the app carried on
+    /// into the planetarium with whatever universe was already resident.
+    pub fn load_from_path(path: &PathBuf) -> Result<Self, String> {
+        match SaveFormat::from_path(path) {
+            Some(SaveFormat::Toml) => Self::load_from_path_toml(path),
+            Some(SaveFormat::Sqlite) => Self::load_from_path_sqlite(path),
+            None => Err(format!("{path:?} has no recognised save extension")),
         }
     }
 
-    /// Load from TOML format
-    pub fn load_from_path_toml(path: &PathBuf) -> Option<Self> {
-        let file_path = path.clone();
-        let string = std::fs::read_to_string(path).ok()?;
-        let contents: UniverseFileContents = toml::from_str(&string).ok()?;
-        Some(Self {
-            file: Some(file_path),
-            contents,
-        })
+    pub fn load_from_path_toml(path: &PathBuf) -> Result<Self, String> {
+        let string = std::fs::read_to_string(path)
+            .map_err(|e| format!("could not read {path:?}: {e}"))?;
+        let contents: UniverseFileContents = toml::from_str(&string)
+            .map_err(|e| format!("could not parse {path:?}: {e}"))?;
+        Ok(Self { file: Some(path.clone()), contents })
     }
 
-    /// Load from SQLite (.em) format
-    pub fn load_from_path_sqlite(path: &PathBuf) -> Option<Self> {
-        let file_path = path.clone();
-        let contents = save_sqlite::load_from_em(path).ok()?;
-        Some(Self {
-            file: Some(file_path),
-            contents,
-        })
+    pub fn load_from_path_sqlite(path: &PathBuf) -> Result<Self, String> {
+        let contents = save_sqlite::load_from_em(path)
+            .map_err(|e| format!("could not load {path:?}: {e:?}"))?;
+        Ok(Self { file: Some(path.clone()), contents })
     }
 }
 

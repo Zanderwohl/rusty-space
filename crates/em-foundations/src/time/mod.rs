@@ -1,24 +1,18 @@
 //! Instants, durations, and the epoch scales they convert through.
 //!
-//! Every type here is `#[repr(transparent)]` over `f64`, so it costs nothing at runtime
-//! — after type checking these are just doubles.
+//! Every type is `#[repr(transparent)]` over `f64`.
 //!
-//! # The invariant that matters
+//! # The invariant
 //!
-//! [`Instant`] counts **seconds since J2000**. [`JulianDate`] counts **days since
-//! −4712-01-01 noon**. Those are different units *and* different origins, and mixing
-//! them is exactly the bug this module is shaped to prevent: `Instant::J2000` once held
-//! the Julian Day *number* 2451545.0, putting the J2000 epoch 28.37 days late and
-//! shifting every body in the bundled solar system.
+//! [`Instant`] counts **seconds since J2000**; [`JulianDate`] counts **days since
+//! −4712-01-01 noon**. Different units *and* origins: `Instant::J2000` once held the
+//! Julian Day number 2451545.0, putting the epoch 28.37 days late and shifting every
+//! body. Hence no `From<f64>`, no `Deref`, no public fields, and no arithmetic between
+//! epoch types — raw numbers enter through named constructors, epochs convert through
+//! [`From`].
 //!
-//! So: no `From<f64>`, no `Deref`, no public fields, and no arithmetic between different
-//! epoch types. A raw number only becomes a time through a named constructor, and epochs
-//! only convert through [`From`].
-//!
-//! # Time scale
-//!
-//! [`Instant`] is nominally TT. TT−TDB stays under 2 ms, which is far below the accuracy
-//! of anything here, so JPL ephemeris times in TDB are used directly.
+//! [`Instant`] is nominally TT; TT−TDB stays under 2 ms, so JPL times in TDB are used
+//! directly.
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -28,29 +22,23 @@ use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 
 use serde::{Deserialize, Serialize};
 
-/// Seconds in a Julian day. Exact by definition — Julian days do not carry leap seconds.
+/// Exact by definition; Julian days carry no leap seconds.
 pub const JD_SECONDS_PER_JULIAN_DAY: f64 = 24.0 * 60.0 * 60.0;
 
 /// Days in a Julian year, by definition.
 pub const DAYS_PER_JULIAN_YEAR: f64 = 365.25;
 
-// ---------------------------------------------------------------------------
-// Instant
-// ---------------------------------------------------------------------------
-
 /// A point in time, as **seconds since the J2000 epoch**.
 ///
-/// Precise to 1/100 s out to roughly ±1.4 million years, which is where f64 spacing at
-/// that magnitude reaches 0.01 s (see `docs/scratch/f64-time-precision-limits.py`).
+/// Precise to 0.01 s out to ~±1.4 Myr, where f64 spacing reaches 0.01 s
+/// (`docs/scratch/f64-time-precision-limits.py`).
 #[repr(transparent)]
 #[derive(Serialize, Deserialize, Clone, Copy, Default)]
 pub struct Instant(f64);
 
 impl Instant {
-    /// The J2000 epoch. `Instant` counts seconds *from* here, so this is zero.
-    ///
-    /// Its Julian Day number is [`JulianDate::J2000`]; the two are different units and
-    /// must not be interchanged.
+    /// The J2000 epoch, zero seconds. Its Julian Day number is [`JulianDate::J2000`];
+    /// different units, not interchangeable.
     pub const J2000: Self = Self(0.0);
 
     #[inline(always)]
@@ -63,13 +51,11 @@ impl Instant {
         self.0
     }
 
-    /// Convenience for `Instant::from(JulianDate::new(jd))`.
     #[inline]
     pub fn from_julian_day(julian_day: f64) -> Self {
         JulianDate::new(julian_day).into()
     }
 
-    /// Convenience for `JulianDate::from(self).days()`.
     #[inline]
     pub fn to_julian_day(self) -> f64 {
         JulianDate::from(self).days()
@@ -91,12 +77,9 @@ impl Instant {
     }
 }
 
-// Total ordering via `total_cmp`, so `Instant` can key a sorted structure or a map.
-// This orders NaN rather than poisoning comparisons; NaN is not an expected value.
-//
-// The `+ 0.0` normalises negative zero: IEEE totalOrder puts -0.0 strictly below +0.0,
-// which would make two equal instants compare unequal and break the Ord/Eq/Hash
-// agreement. Adding zero maps -0.0 to +0.0 and is the identity for every other value.
+// Total ordering via `total_cmp`, so `Instant` can key a sorted structure or map.
+// The `+ 0.0` normalises -0.0, which IEEE totalOrder puts strictly below +0.0 and would
+// otherwise break Ord/Eq/Hash agreement; it is the identity for every other value.
 impl Ord for Instant {
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
@@ -119,7 +102,7 @@ impl Eq for Instant {}
 
 impl Hash for Instant {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // Canonicalise -0.0 to 0.0 so equal values hash equally.
+        // -0.0 must hash as 0.0 to match Eq.
         let bits = if self.0 == 0.0 { 0f64.to_bits() } else { self.0.to_bits() };
         bits.hash(state);
     }
@@ -170,14 +153,7 @@ impl fmt::Debug for Instant {
     }
 }
 
-// ---------------------------------------------------------------------------
-// TimeDelta
-// ---------------------------------------------------------------------------
-
 /// A signed duration in seconds.
-///
-/// Replaces the old `TimeLength`, which was this plus an `Includes` tag that nothing
-/// ever read.
 #[repr(transparent)]
 #[derive(Serialize, Deserialize, Clone, Copy, Default)]
 pub struct TimeDelta(f64);
@@ -226,7 +202,7 @@ impl TimeDelta {
 impl Ord for TimeDelta {
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
-        // See the note on `impl Ord for Instant` for the `+ 0.0`.
+        // `+ 0.0`: see `impl Ord for Instant`.
         (self.0 + 0.0).total_cmp(&(other.0 + 0.0))
     }
 }
@@ -288,7 +264,7 @@ impl Div<f64> for TimeDelta {
     #[inline]
     fn div(self, rhs: f64) -> Self { Self(self.0 / rhs) }
 }
-/// Dividing two durations gives a dimensionless ratio — how many of `rhs` fit in `self`.
+/// Dimensionless ratio: how many of `rhs` fit in `self`.
 impl Div for TimeDelta {
     type Output = f64;
     #[inline]
@@ -311,10 +287,6 @@ impl fmt::Debug for TimeDelta {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Epoch scales
-// ---------------------------------------------------------------------------
-
 /// A Julian Day number: days since −4712-01-01 12:00.
 ///
 /// Days, not seconds, and a different origin from [`Instant`]. Convert with `From`.
@@ -323,7 +295,7 @@ impl fmt::Debug for TimeDelta {
 pub struct JulianDate(f64);
 
 impl JulianDate {
-    /// The J2000 epoch as a Julian Day number: 2000-01-01 12:00 TT.
+    /// J2000 as a Julian Day number: 2000-01-01 12:00 TT.
     pub const J2000: Self = Self(2451545.0);
     /// The B1950 (Besselian) epoch.
     pub const B1950: Self = Self(2433282.4235);

@@ -1,7 +1,5 @@
-//! The deliverable of the whole refactor: a solar system that propagates with no engine.
-//!
-//! Nothing here touches Bevy, an ECS, a window or a file. If any of it ever needs to, the
-//! separation has regressed.
+//! The bundled solar system propagating with no engine. Nothing here may touch Bevy, an
+//! ECS, a window or a file.
 
 use em_foundations::time::{Instant, TimeDelta};
 use em_sim::id::BodyId;
@@ -33,8 +31,7 @@ fn every_parent_resolves() {
     }
 }
 
-/// Positions must match what the elements say directly — the arena is plumbing, not a
-/// second implementation of the orbital mechanics.
+/// Arena positions match the elements evaluated directly.
 #[test]
 fn arena_positions_match_the_elements() {
     use em_sim::motive::MotiveSelection;
@@ -54,7 +51,7 @@ fn arena_positions_match_the_elements() {
     }
 }
 
-/// Evaluation is analytic, so any time costs the same and the route taken cannot matter.
+/// Analytic evaluation: the route to a time cannot affect the result.
 #[test]
 fn evaluation_is_order_independent() {
     let mut a = built();
@@ -73,8 +70,7 @@ fn evaluation_is_order_independent() {
     }
 }
 
-/// A year of the real system, stepped rather than evaluated, must land where evaluating
-/// directly does.
+/// Stepping a year lands where evaluating that instant directly does.
 #[test]
 fn stepping_a_year_stays_on_the_orbits() {
     let mut stepped = built();
@@ -96,8 +92,7 @@ fn stepping_a_year_stays_on_the_orbits() {
     }
 }
 
-/// Keplerian bodies conserve orbital energy exactly, because they are evaluated rather
-/// than integrated. That is what buys arbitrary time-scrubbing.
+/// Keplerian bodies are evaluated, not integrated, so specific energy is exact.
 #[test]
 fn keplerian_energy_is_exactly_conserved() {
     let mut s = built();
@@ -136,8 +131,8 @@ fn duplicate_ids_are_refused() {
     assert!(s.insert(def("Mars")).is_ok());
 }
 
-/// Removing a body swaps another into its slot, so cached indices must be re-resolved.
-/// The generation is how a caller knows to.
+/// Removal swaps another body into the freed slot and bumps the generation; ids still
+/// resolve.
 #[test]
 fn removal_bumps_the_generation_and_ids_still_resolve() {
     let mut s = built();
@@ -150,8 +145,8 @@ fn removal_bumps_the_generation_and_ids_still_resolve() {
     assert!(s.by_name("Mercury").is_none());
 }
 
-/// A Newtonian body under a single star must hold a circular orbit, and velocity Verlet
-/// must not leak energy doing it.
+/// Velocity Verlet holds a circular orbit without leaking energy. Bounds are for a
+/// one-day step over one year.
 #[test]
 fn a_newtonian_body_holds_a_circular_orbit() {
     use em_sim::body::BodyInfo;

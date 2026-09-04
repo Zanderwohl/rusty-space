@@ -1,10 +1,7 @@
 //! Gravity kernel correctness, and the integrator ordering the propagator must use.
 //!
-//! `calculate_body_positions::calculate_newtonian_positions` is a Bevy system taking
-//! `Query`/`Res`, so it cannot be called directly from a test today. This file therefore
-//! specifies the stepping rule against the same `gravity::one_body_acceleration` kernel the
-//! system uses. When Phase 5 lifts propagation into `System`, point `step_symplectic` at the
-//! real propagator and delete the local copy.
+//! The stepping rule is specified here against the same `gravity::one_body_acceleration`
+//! kernel the propagator uses, rather than by calling the propagator.
 
 use exotic_matters::foundations::gravity;
 use bevy::math::DVec3;
@@ -47,13 +44,9 @@ fn step_symplectic(pos: &mut DVec3, vel: &mut DVec3, mu: f64, dt: f64) {
     *pos += *vel * dt;
 }
 
-/// Forward (explicit) Euler: BOTH updates use state from the start of the step. This is
-/// what the code did — acceleration was evaluated at the old position, then position was
-/// advanced with the old velocity.
-///
-/// Note it is specifically evaluating the acceleration up front that makes this explicit.
-/// Advancing position first and *then* evaluating acceleration at the new position is the
-/// other semi-implicit variant, and is just as stable as `step_symplectic`.
+/// Forward (explicit) Euler: both updates use start-of-step state. Evaluating the
+/// acceleration up front is what makes it explicit; evaluating it at the new position
+/// instead gives the other semi-implicit variant, as stable as `step_symplectic`.
 fn step_forward(pos: &mut DVec3, vel: &mut DVec3, mu: f64, dt: f64) {
     let acc = gravity::one_body_acceleration(mu, *pos);
     *pos += *vel * dt;
@@ -100,8 +93,7 @@ fn symplectic_euler_keeps_the_orbit_closed() {
     }
 }
 
-/// Guards the ordering: forward Euler gains energy without bound on the same problem,
-/// so if the two lines are ever swapped back this test starts failing.
+/// Forward Euler gains energy without bound on the same problem: the guard on the ordering.
 #[test]
 fn forward_euler_is_measurably_worse() {
     let r: f64 = 7.0e6;

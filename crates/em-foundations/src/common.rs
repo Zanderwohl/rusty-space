@@ -4,7 +4,7 @@ pub fn unit_circle_xy(x: f64) -> f64 {
     f64::sqrt(1.0 - (x * x))
 }
 
-/// Beta parameter from the fourier expansion of true anomaly from mean anomaly
+/// Beta parameter of the Fourier expansion of true anomaly from mean anomaly.
 #[inline]
 pub fn beta(e: f64) -> f64 {
     (1.0 - f64::sqrt(1.0 - (e * e))) / e

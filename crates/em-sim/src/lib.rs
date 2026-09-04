@@ -1,8 +1,7 @@
 //! Simulation state and propagation for orbital mechanics.
 //!
-//! Built on [`em_foundations`]. Engine-agnostic: the optional `bevy` feature adds
-//! `Component`/`Resource`/`Message` derives, but nothing here depends on an ECS
-//! running, and the crate builds and propagates headless without it.
+//! Built on [`em_foundations`]. Engine-agnostic: the `bevy` feature only adds ECS derives;
+//! everything here builds and propagates headless.
 
 #![forbid(unsafe_code)]
 

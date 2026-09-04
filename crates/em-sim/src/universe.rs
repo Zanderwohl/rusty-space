@@ -1,7 +1,5 @@
-//! The on-disk universe model: settings, physics, and the body entries a save holds.
-//!
-//! Pure data. Reading and writing files, and turning entries into ECS entities, is the
-//! app's job — see `body/universe/save.rs` there.
+//! The on-disk universe model: settings, physics, and body entries. Pure data; file I/O
+//! is the app's job.
 
 use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
@@ -13,7 +11,7 @@ use crate::motive::kepler::KeplerMotive;
 use crate::motive::Motive;
 use glam::DVec3;
 
-/// State for a tag (group of bodies).
+/// State for a tag: a group of bodies.
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Resource))]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TagState {
@@ -32,7 +30,6 @@ impl Default for TagState {
     }
 }
 
-/// Supported save file formats
 #[derive(Serialize, Deserialize)]
 pub struct UniverseFileContents {
     pub version: String,
@@ -45,13 +42,13 @@ pub struct UniverseFileContents {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct UniverseFileTime {
     pub time_julian_days: f64, // In Julian Days
-    /// Physics time step in simulation seconds (default: 0.1)
+    /// Physics step, in simulation seconds.
     #[serde(default = "default_step")]
     pub step: f64,
-    /// GUI speed multiplier - sim seconds per real second (default: 1.0)
+    /// Sim seconds per real second.
     #[serde(default = "default_gui_speed")]
     pub gui_speed: f64,
-    /// Maximum real-world time to spend on physics per frame (default: 0.016)
+    /// Real seconds of physics per frame.
     #[serde(default = "default_max_frame_time")]
     pub max_frame_time: f64,
 }
@@ -71,7 +68,7 @@ pub struct UniversePhysics {
 impl Default for UniversePhysics {
     fn default() -> Self {
         Self {
-            gravitational_constant: 6.6743015e-11, // Standard G in m³ kg⁻¹ s⁻²
+            gravitational_constant: 6.6743015e-11, // G, m³ kg⁻¹ s⁻²
         }
     }
 }
@@ -156,15 +153,15 @@ impl ViewSettings {
 
 #[derive(Serialize, Deserialize)]
 pub enum SomeBody {
-    /// Legacy fixed motive - loaded as Motive with single Fixed entry
+    /// Legacy; widens to a single-entry Fixed motive.
     FixedEntry(FixedEntry),
-    /// Legacy newton motive - loaded as Motive with single Newtonian entry
+    /// Legacy; widens to a single-entry Newtonian motive.
     NewtonEntry(NewtonEntry),
-    /// Legacy kepler motive - loaded as Motive with single Keplerian entry
+    /// Legacy; widens to a single-entry Keplerian motive.
     KeplerEntry(KeplerEntry),
-    /// Legacy patched conics - deprecated, kept for backward compatibility
+    /// Deprecated patched conics; only the first arc survives a load.
     CompoundEntry(PatchedConicsEntry),
-    /// New compound motive format - supports multiple motive types with transitions
+    /// Current format: a motive timeline with transitions.
     CompoundMotiveEntry(CompoundMotiveEntry),
 }
 
@@ -228,7 +225,7 @@ pub struct KeplerEntry {
     pub rotation: Option<BodyRotation>,
 }
 
-/// Legacy format - use CompoundMotiveEntry for new saves
+/// Deprecated. Use `CompoundMotiveEntry`.
 #[derive(Serialize, Deserialize)]
 pub struct PatchedConicsEntry {
     pub info: BodyInfo,
@@ -236,7 +233,7 @@ pub struct PatchedConicsEntry {
     pub appearance: Appearance,
 }
 
-/// The new compound motive format that supports motive transitions over time
+/// The current entry format: a motive timeline.
 #[derive(Serialize, Deserialize)]
 pub struct CompoundMotiveEntry {
     pub info: BodyInfo,
@@ -247,6 +244,6 @@ pub struct CompoundMotiveEntry {
 }
 
 impl FixedEntry {
-    /// A legacy fixed entry has no primary field; it is positioned absolutely.
+    /// Legacy fixed entries carry no primary; they are absolute.
     pub fn info_primary(&self) -> Option<String> { None }
 }

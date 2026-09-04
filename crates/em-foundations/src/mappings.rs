@@ -4,7 +4,7 @@ pub fn log_scale<T: Float>(value: T, base: T) -> T {
     (value + (T::from(1.0).unwrap() / base)).log(base) + T::from(1.0).unwrap()
 }
 
-/// Scales a value using sigmoid, normalizing to [0, 1]
+/// Sigmoid, normalising to [0, 1].
 pub fn sigmoid_scale<T: Float>(value: T) -> T {
     T::from(1.0).unwrap() / (T::from(1.0).unwrap() + (-value).exp())
 }

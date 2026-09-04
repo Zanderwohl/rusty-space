@@ -1,7 +1,4 @@
-//! Body appearance — the serializable data half.
-//!
-//! Turning these into meshes and materials is the renderer's job and lives in the app
-//! crate; nothing here knows about Bevy assets.
+//! Body appearance — the serializable data half. Meshes and materials are the app's job.
 
 use serde::{Deserialize, Serialize};
 
@@ -55,7 +52,7 @@ pub struct StarBall {
 
 impl StarBall {
     pub fn intensity(&self) -> f32 {
-        // Convert absolute magnitude to luminous flux (lumens) relative to the Sun
+        // Absolute magnitude -> luminous flux (lumens), scaled off the Sun.
         const SUN_ABSOLUTE_MAGNITUDE: f64 = 4.83;
         const SUN_LUMINOUS_FLUX_LM: f64 = 3.5e28;
         let m = self.absolute_magnitude as f64;
@@ -64,8 +61,7 @@ impl StarBall {
     }
 
     pub fn emissive_luminance(&self) -> f32 {
-        // Approximate solar surface luminance in nits (cd/m^2), scaled by absolute magnitude
-        // L_sun ≈ 1.8e9 nits at the photosphere
+        // Nits (cd/m^2); solar photosphere ≈ 1.8e9 nits.
         const SUN_ABSOLUTE_MAGNITUDE: f64 = 4.83;
         const SUN_SURFACE_LUMINANCE_NITS: f64 = 1.83e9;
         let m = self.absolute_magnitude as f64;

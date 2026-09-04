@@ -16,25 +16,23 @@ pub enum TransitionEvent {
     Epoch,
     SOIChange,
     Impulse,
-    /// Release a Fixed motive to Newtonian physics.
-    /// The Newtonian motive's velocity is interpreted as LOCAL velocity (relative to the parent's frame).
-    /// Position is computed from the previous Fixed motive's resolved position at transition time.
+    /// Release a Fixed motive to Newtonian physics. The Newtonian velocity is local, in
+    /// the parent's frame; position comes from the previous Fixed motive.
     Release,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum MotiveSelection {
-    /// Fixed position relative to a parent body (or origin if primary_id is None)
+    /// Fixed position relative to a parent, or to the origin when `primary_id` is `None`.
     Fixed { 
         primary_id: Option<String>,
         position: DVec3,
     },
-    /// Newtonian physics - affected by gravity from Major bodies
+    /// Integrated under gravity from bodies flagged major.
     Newtonian { 
         position: DVec3, 
         velocity: DVec3,
     },
-    /// Keplerian orbit around a primary body
     Keplerian(KeplerMotive),
 }
 
@@ -48,7 +46,7 @@ impl MotiveSelection {
         }
     }
 
-    /// Get the primary_id if this motive has one (Fixed with Some or Keplerian)
+    /// The primary, if this motive has one.
     pub fn primary_id(&self) -> Option<&str> {
         match self {
             MotiveSelection::Fixed { primary_id, .. } => primary_id.as_deref(),
@@ -66,47 +64,40 @@ impl Motive {
         }
     }
 
-    /// Create an empty motive with no events (must add events before use)
+    /// No events. Add one before use: [`Motive::motive_at`] panics on an empty motive.
     pub fn empty() -> Self {
         Self::new()
     }
 
-    /// Check if this motive has no events
     pub fn is_empty(&self) -> bool {
         self.times.is_empty()
     }
 
-    /// Check if any event occurred in the time range (start, end] using binary search.
-    /// Returns true if there's at least one event with time > start AND time <= end.
-    /// This is O(log n) instead of O(n).
+    /// Whether any event falls in `(start, end]`. O(log n).
     pub fn has_event_in_range(&self, start: Instant, end: Instant) -> bool {
         if self.times.is_empty() {
             return false;
         }
         
-        // Find the first event after start
         let index_after_start = self.times.get_index_after(start);
 
-        // If there's an event at that index and it's <= end, we have a match
         match self.times.get(index_after_start) {
             Some(&event_time) => event_time <= end,
             None => false,
         }
     }
 
-    /// Iterate over all events in time order
+    /// Events in time order.
     pub fn iter_events(&self) -> impl Iterator<Item = (Instant, &TransitionEvent, &MotiveSelection)> {
         self.times.iter().filter_map(|time| {
             self.motives.get(time).map(|(event, selection)| (*time, event, selection))
         })
     }
 
-    /// Create a fixed motive at the origin (no parent)
     pub fn fixed(position: DVec3) -> Self {
         Self::fixed_with_parent(None, position)
     }
 
-    /// Create a fixed motive relative to a parent body
     pub fn fixed_with_parent(primary_id: Option<String>, position: DVec3) -> Self {
         let mut new = Self::new();
         let zero = Instant::from_seconds_since_j2000(0.0);
@@ -131,10 +122,8 @@ impl Motive {
 
     /// Build a Keplerian motive from parts, defaulting the rest.
     ///
-    /// For use only when you genuinely have parts. Given a whole [`KeplerMotive`], use
-    /// [`Motive::from_keplerian`]: this constructor names four of its six fields, so
-    /// passing one through here silently drops `anomalistic_period` and any explicit
-    /// mu. The save path did exactly that and lost every fitted period on write.
+    /// Drops `anomalistic_period` and any explicit mu, silently changing the orbit. Given a
+    /// whole [`KeplerMotive`], use [`Motive::from_keplerian`].
     pub fn keplerian(primary_id: String, shape: KeplerShape, rotation: KeplerRotation, epoch: KeplerEpoch) -> Self {
         let mut new = Self::new();
         let zero = Instant::from_seconds_since_j2000(0.0);
@@ -142,12 +131,9 @@ impl Motive {
         new
     }
 
-    /// A Keplerian motive with an explicit gravitational parameter, for an orbit whose
-    /// effective mu is not `G(M_primary + m)` — a barycentric one, for instance.
-    ///
-    /// Carries the same hazard as [`Motive::keplerian`]: it still drops
-    /// `anomalistic_period`. Prefer [`Motive::from_keplerian`] whenever you hold a
-    /// whole [`KeplerMotive`].
+    /// Keplerian with an explicit mu, for an orbit whose effective mu is not
+    /// `G(M_primary + m)` — barycentric, say. Still drops `anomalistic_period`; prefer
+    /// [`Motive::from_keplerian`].
     pub fn keplerian_with_gm(primary_id: String, shape: KeplerShape, rotation: KeplerRotation,
                              epoch: KeplerEpoch, gravitational_parameter: f64) -> Self {
         let mut new = Self::new();
@@ -176,17 +162,13 @@ impl Motive {
     
     pub fn remove_all_events_after(&mut self, time: Instant) {
         let index = self.times.get_index_after(time);
-        // get rid of all events after the index
         for time in self.times.remove_after(index) {
             self.motives.remove(&time);
         }
     }
 
-    /// The motive in force at `time`.
-    ///
-    /// Invariant: there must be at least one motive. A time before every event clamps to
-    /// the earliest one rather than failing — scrubbing a timeline backwards past the
-    /// first event is a thing an editor does, not an error.
+    /// The motive in force at `time`. Panics on an empty motive; a time before every event
+    /// clamps to the earliest.
     pub fn motive_at(&self, time: Instant) -> &(TransitionEvent, MotiveSelection) {
         let time = self.times.get_at_or_before(time)
             .or_else(|| self.times.get(0).copied())
@@ -195,33 +177,24 @@ impl Motive {
             "Invariant violated: CompoundMotive.times holds {time} but CompoundMotive.motives has no such key."))
     }
 
-    /// Mutable access to the motive in force at `time`.
-    ///
-    /// For an editor: changing these values changes how the body moves from its epoch,
-    /// not just from now.
+    /// Mutable access to the motive in force at `time`. Edits apply from its epoch, not
+    /// from `time`.
     pub fn motive_at_mut(&mut self, time: Instant) -> Option<&mut MotiveSelection> {
         let at = self.times.get_at_or_before(time)?;
         self.motives.get_mut(&at).map(|(_, selection)| selection)
     }
 
-    /// Get the motive that was active just before the motive at the given time.
-    /// Returns None if there is no previous motive (i.e., the motive at `time` is the first one).
+    /// The motive preceding the one active at `time`. `None` if that is the first.
     pub fn motive_before(&self, time: Instant) -> Option<&(TransitionEvent, MotiveSelection)> {
-        // First find the current motive's time
         let current_time = self.times.get_at_or_before(time)
             .or_else(|| self.times.get(0).copied())?;
-        // Then find the motive before that time
         let prev_time = self.times.get_before(current_time)?;
         self.motives.get(&prev_time)
     }
 
-    /// The half-open window during which the motive active at `time` stays active.
-    ///
-    /// `None` for a bound means "forever in that direction": the earliest segment also
-    /// covers every time before it, and the last runs to the end of time. A cache keyed on
-    /// the active motive can hold until the clock leaves this window — the motive itself
-    /// does not change when the clock crosses an event, so watching the data alone would
-    /// miss the transition.
+    /// The half-open window over which the motive active at `time` stays active. A `None`
+    /// bound is unbounded in that direction. Cache invalidation must key on this window:
+    /// the motive data does not change when the clock crosses an event.
     pub fn active_segment_range(&self, time: Instant) -> (Option<Instant>, Option<Instant>) {
         let Some(start) = self.times.get_at_or_before(time).or_else(|| self.times.get(0).copied())
         else {

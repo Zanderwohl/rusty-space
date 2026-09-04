@@ -1,27 +1,14 @@
-//! Keplerian orbital mechanics.
-//!
-//! **Every angle in this module is in radians**, without exception. Degrees are a
-//! storage and display convention and belong to the layer above.
+//! Keplerian orbital mechanics. **Every angle is in radians**, without exception.
 
 pub mod anomaly;
 pub mod state;
 
-/// Mean anomaly calculations.
-///
-/// All angle parameters and return values are in **radians**.
+/// Mean anomaly, in **radians**.
 pub mod mean_anomaly {
 
-    /// Calculate mean anomaly at the given time.
+    /// Mean anomaly at `current_time`, propagated from the epoch value.
     ///
-    /// # Parameters
-    /// - `mean_anomaly_at_epoch`: Mean anomaly at epoch time, in **radians**
-    /// - `gravitational_parameter`: μ = G × M, in m³/s²
-    /// - `semi_major_axis`: in meters
-    /// - `epoch_time`: epoch time in seconds since J2000
-    /// - `current_time`: current time in seconds since J2000
-    ///
-    /// # Returns
-    /// Mean anomaly at `current_time` in **radians**
+    /// Angles in radians, μ in m³/s², `a` in metres, both times in seconds since J2000.
     pub fn definition(mean_anomaly_at_epoch: f64,
                       gravitational_parameter: f64,
                       semi_major_axis: f64,
@@ -31,14 +18,7 @@ pub mod mean_anomaly {
         mean_anomaly_at_epoch + f64::sqrt(x) * (current_time - epoch_time)
     }
 
-    /// Kepler's equation: M = E - e × sin(E)
-    ///
-    /// # Parameters
-    /// - `eccentric_anomaly`: E in **radians**
-    /// - `eccentricity`: dimensionless
-    ///
-    /// # Returns
-    /// Mean anomaly M in **radians**
+    /// Kepler's equation, `M = E - e sin E`.
     pub fn kepler(eccentric_anomaly: f64, eccentricity: f64) -> f64 {
         eccentric_anomaly - eccentricity * f64::sin(eccentric_anomaly)
     }
@@ -95,12 +75,10 @@ mod third_law {
     }
 }
 
-/// Semi-major axis, from whichever pair of quantities you happen to have.
+/// Semi-major axis, from whichever pair of quantities is to hand.
 ///
-/// The functions are named for their inputs rather than numbered. When they were
-/// `conic_definition1/2/3` it was not possible to tell at a call site which one was
-/// wanted — and the wrong one did get picked: `conic_definition1` computed
-/// `sqrt(1-e²)/b` instead of `b/sqrt(1-e²)`, inverted, and nothing caught it.
+/// Named for their inputs: the previous `conic_definition1/2/3` names let an inverted
+/// form (`sqrt(1-e²)/b` for `b/sqrt(1-e²)`) be picked at a call site unnoticed.
 pub mod semi_major_axis {
     use crate::common;
     use crate::kepler::third_law;
@@ -172,11 +150,10 @@ pub mod eccentricity {
 }
 
 pub mod semi_parameter {
-    /// The semi-parameter (a.k.a. semi-latus rectum) `p = a(1 - e^2)`.
+    /// Semi-parameter (semi-latus rectum) `p = a(1 - e^2)`.
     ///
-    /// This is the same quantity as [`super::semi_latus_rectum::conic_definition`];
-    /// both names appear in the literature. It is NOT `a*sqrt(1 - e^2)`, which is the
-    /// semi-minor axis (see [`super::semi_minor_axis::conic_definition`]).
+    /// Same quantity as [`super::semi_latus_rectum::conic_definition`]. NOT
+    /// `a*sqrt(1 - e^2)`, which is the semi-minor axis.
     pub fn definition(semi_major_axis: f64, eccentricity: f64) -> f64 {
         semi_major_axis * (1.0 - eccentricity * eccentricity)
     }
@@ -202,10 +179,9 @@ pub mod apoapsis {
 pub mod eccentric_anomaly {
     use crate::common::unit_circle_xy;
 
-    /// `E = atan2(sqrt(1 - e^2) sin v, e + cos v)`, in radians.
+    /// `E = atan2(sqrt(1 - e^2) sin v, e + cos v)`, radians.
     ///
-    /// Uses `atan2` rather than `atan` of the ratio so the result lands in the correct
-    /// quadrant across the whole orbit.
+    /// `atan2` rather than `atan` of the ratio, for the correct quadrant across the orbit.
     pub fn from_true_anomaly(eccentricity: f64, true_anomaly: f64) -> f64 {
         let numerator = unit_circle_xy(eccentricity) * f64::sin(true_anomaly);
         let denominator = eccentricity + f64::cos(true_anomaly);
@@ -226,23 +202,16 @@ pub mod true_anomaly {
         eccentric_anomaly + 2.0 * f64::atan(numerator / denominator)
     }
 
-    /// True anomaly from a state vector, in radians on `[0, tau)`.
+    /// True anomaly from a state vector, radians on `[0, tau)`.
     ///
-    /// The angle is measured from periapsis, which a circular orbit does not have: as
-    /// the eccentricity vector shrinks to nothing its direction becomes meaningless, and
-    /// the naive `acos(e·r / |e||r|)` divides by zero and returns NaN. The two standard
-    /// substitutes are used instead, so the result is always a real angle:
+    /// Measured from periapsis, which a circular orbit lacks; substitutes, matching the
+    /// conventions and tolerances of [`super::state::from_state`]:
     ///
-    /// - **Circular and inclined**: the argument of latitude, measured from the
-    ///   ascending node instead of from periapsis.
-    /// - **Circular and equatorial**: there is no node either, so the true longitude,
-    ///   measured from +X.
+    /// - **Circular, inclined**: argument of latitude, from the ascending node.
+    /// - **Circular, equatorial**: true longitude, from +X.
     ///
-    /// These are the same conventions and tolerances as [`super::state::from_state`],
-    /// which returns the whole element set; this is the single angle.
-    ///
-    /// The `acos` argument is clamped, because a vector that is parallel to within
-    /// rounding otherwise produces a ratio a few ulps outside `[-1, 1]` and NaN again.
+    /// `acos` arguments are clamped: near-parallel vectors give ratios a few ulps
+    /// outside `[-1, 1]`, hence NaN.
     pub fn from_state_vectors(local_position: DVec3, local_velocity: DVec3, eccentricity_vector: DVec3) -> f64 {
         use crate::kepler::anomaly::wrap_tau;
         use crate::kepler::state::{CIRCULAR_TOLERANCE, EQUATORIAL_TOLERANCE};
@@ -257,18 +226,17 @@ pub mod true_anomaly {
             let mut nu = (eccentricity_vector.dot(local_position) / (e * r))
                 .clamp(-1.0, 1.0)
                 .acos();
-            // The first half of the orbit is outbound; past apoapsis `r` is falling.
+            // Outbound over the first half of the orbit; past apoapsis `r` falls.
             if local_position.dot(local_velocity) < 0.0 {
                 nu = -nu;
             }
             return wrap_tau(nu);
         }
 
-        // Circular: fall back to an angle that does exist.
         let h = local_position.cross(local_velocity);
         let h_len = h.length();
         if h_len == 0.0 {
-            // Radial: no orbital plane at all, so no angle within one.
+            // Radial: no orbital plane, so no angle within one.
             return 0.0;
         }
         let inclination = (h.z / h_len).clamp(-1.0, 1.0).acos();
@@ -276,7 +244,7 @@ pub mod true_anomaly {
             || (std::f64::consts::PI - inclination) < EQUATORIAL_TOLERANCE;
 
         if equatorial {
-            // True longitude from +X, running the other way for a retrograde orbit.
+            // True longitude from +X; reversed for a retrograde orbit.
             let mut lon = (local_position.x / r).clamp(-1.0, 1.0).acos();
             if local_position.y < 0.0 {
                 lon = -lon;
@@ -298,11 +266,11 @@ pub mod true_anomaly {
         }
     }
 
-    /// The equation of the centre, expanded to `e^3`:
+    /// Equation of the centre to `e^3`:
     ///
     /// `v ~= M + (2e - e^3/4) sin M + (5/4)e^2 sin 2M + (13/12)e^3 sin 3M`
     ///
-    /// Truncated series: accurate only for small `e`. Prefer solving Kepler's equation.
+    /// Truncated: accurate only for small `e`. Prefer solving Kepler's equation.
     pub fn from_mean_anomaly(mean_anomaly: f64, eccentricity: f64) -> f64 {
         let e = eccentricity;
         let first_term = mean_anomaly;
@@ -325,9 +293,8 @@ pub mod true_anomaly {
         true_anomaly
     }
 
-    /// Precomputes Fourier/Bessel coefficients for a given eccentricity and iteration count.
-    /// Returns coefficients c_k = (2/k) * J_k(e) for k = 1..=iterations.
-    /// Use with `fourier_expansion_with_precompute` in loops where eccentricity is constant.
+    /// Coefficients `c_k = (2/k) J_k(e)` for `k = 1..=iterations`, for
+    /// [`fourier_expansion_with_precompute`] where eccentricity is loop-constant.
     pub fn precompute_coefficients(eccentricity: f64, iterations: usize) -> Vec<f64> {
         (1..=iterations)
             .map(|k| {
@@ -337,13 +304,8 @@ pub mod true_anomaly {
             .collect()
     }
 
-    /// Computes true anomaly from mean anomaly using precomputed Bessel coefficients.
-    /// More efficient than `fourier_expansion` when called multiple times with the same eccentricity.
-    /// 
-    /// # Arguments
-    /// * `mean_anomaly` - Mean anomaly in radians
-    /// * `eccentricity` - Orbital eccentricity (needed for Mikkola's seed)
-    /// * `coefficients` - Precomputed coefficients from `precompute_coefficients`
+    /// True anomaly from mean anomaly, using coefficients from
+    /// [`precompute_coefficients`]. `eccentricity` is still needed for Mikkola's seed.
     #[inline]
     pub fn fourier_expansion_with_precompute(mean_anomaly: f64, eccentricity: f64, coefficients: &[f64]) -> f64 {
         let mut true_anomaly = mean_anomaly + eccentricity * mean_anomaly.sin(); // Mikkola's seed
@@ -359,8 +321,7 @@ pub mod true_anomaly {
 
 pub mod apsides {
     pub mod periapsis {
-        /// `r_p = p / (1 + e)` where `p = focal_parameter * e` is the semi-latus rectum.
-        /// Equals `a(1 - e)`.
+        /// `r_p = p / (1 + e)`, `p = focal_parameter * e`. Equals `a(1 - e)`.
         pub fn definition(focal_parameter: f64, eccentricity: f64) -> f64 {
             (focal_parameter * eccentricity) / (1.0 + eccentricity)
         }
@@ -371,8 +332,7 @@ pub mod apsides {
     }
 
     pub mod apoapsis {
-        /// `r_a = p / (1 - e)` where `p = focal_parameter * e` is the semi-latus rectum.
-        /// Equals `a(1 + e)`. Diverges as `e -> 1`.
+        /// `r_a = p / (1 - e)`, `p = focal_parameter * e`. Equals `a(1 + e)`; diverges as `e -> 1`.
         pub fn definition(focal_parameter: f64, eccentricity: f64) -> f64 {
             (focal_parameter * eccentricity) / (1.0 - eccentricity)
         }
@@ -404,8 +364,7 @@ pub mod eccentricity_vector {
 
     /// `e_vec = (v x h) / mu - r_hat`, where `h = r x v`.
     ///
-    /// Equivalent to [`super::eccentricity::vector::definition`]; both are kept because
-    /// both names are in use. They must agree (asserted in tests).
+    /// Must agree with [`super::eccentricity::vector::definition`] (asserted in tests).
     pub fn definition(mu: f64, displacement: DVec3, velocity: DVec3) -> DVec3 {
         let specific_angular_momentum = displacement.cross(velocity);
         velocity.cross(specific_angular_momentum) / mu - displacement.normalize()
@@ -418,8 +377,7 @@ pub mod energy {
 
         /// Specific orbital energy `eps = v^2/2 - mu/r`.
         ///
-        /// Note [`super::potential::specific`] already returns a negative value, so these
-        /// are *added*.
+        /// [`super::potential::specific`] is already negative, hence the addition.
         pub fn specific(velocity: f64, mu: f64, displacement: f64) -> f64 {
             kinetic::specific(velocity) + potential::specific(mu, displacement)
         }

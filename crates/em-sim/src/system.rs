@@ -1,12 +1,10 @@
 //! The simulation arena: every body, its motion, and the state propagation writes.
 //!
-//! `System` owns simulation state. It is a plain data structure with no engine behind it,
-//! so a game, an editor and a headless tool all drive the same code — propagation lives
-//! in [`crate::propagate`] as free functions over `&mut System`.
+//! `System` is the single source of truth for body state; nothing per-body lives elsewhere.
+//! Engine-free — propagation is free functions in [`crate::propagate`].
 //!
-//! Layout is struct-of-arrays keyed by [`BodyIndex`], with a `BodyId -> BodyIndex` map for
-//! lookup by identity. Derived data — parent links, topological order, gravitational
-//! parameters — is cached and rebuilt when the structure changes.
+//! Struct-of-arrays keyed by [`BodyIndex`], plus a `BodyId -> BodyIndex` map. Derived
+//! columns (parent, topological order, mu) are cached and rebuilt when the structure changes.
 
 use std::collections::HashMap;
 
@@ -22,8 +20,7 @@ use crate::motive::{Motive, MotiveSelection};
 pub enum SystemError {
     /// Two bodies share a name, and therefore an id.
     DuplicateName(String),
-    /// Two different names hashed to the same id. Vanishingly unlikely with 64-bit FNV,
-    /// but silently merging two bodies is bad enough to be worth refusing.
+    /// Different names, same id. Refused rather than silently merging two bodies.
     HashCollision { existing: String, incoming: String },
 }
 
@@ -44,8 +41,7 @@ pub struct BodyDef {
     pub info: BodyInfo,
     pub motive: Motive,
     pub rotation: Option<BodyRotation>,
-    /// How the body looks. Data, not rendering — an editor needs it as much as a renderer
-    /// does, so it belongs with the rest of the body rather than beside it.
+    /// How the body looks. Data, not rendering.
     pub appearance: Appearance,
 }
 
@@ -65,8 +61,7 @@ pub struct System {
     position: Vec<DVec3>,
     velocity: Vec<DVec3>,
     local_position: Vec<Option<DVec3>>,
-    /// Set once a Newtonian body has been seeded, so a restart is distinguishable from
-    /// a body that has simply not moved yet.
+    /// Set once a Newtonian body has been seeded; distinguishes seeded from not-yet-moved.
     newtonian_started: Vec<bool>,
 
     // --- derived, rebuilt when `dirty` ---
@@ -126,9 +121,8 @@ impl System {
         Ok(slot)
     }
 
-    /// Remove a body. **Invalidates every [`BodyIndex`]**: the last body is swapped into
-    /// the freed slot, and the generation advances so callers holding an index know to
-    /// resolve their [`BodyId`] again.
+    /// Remove a body. **Invalidates every [`BodyIndex`]**: the last body is swapped into the
+    /// freed slot and the generation advances.
     pub fn remove(&mut self, id: BodyId) -> bool {
         let Some(slot) = self.index_of.remove(&id) else { return false };
         let i = slot.get();
@@ -162,8 +156,8 @@ impl System {
     pub fn len(&self) -> usize { self.ids.len() }
     #[inline]
     pub fn is_empty(&self) -> bool { self.ids.is_empty() }
-    /// Advances whenever the set of bodies changes. A cached [`BodyIndex`] is valid only
-    /// while this is unchanged.
+    /// Advances whenever the set of bodies changes; a cached [`BodyIndex`] is valid only
+    /// while it does not.
     #[inline]
     pub fn generation(&self) -> u32 { self.generation }
     #[inline]
@@ -204,22 +198,20 @@ impl System {
     /// G(M_primary + M_body) for a Keplerian body.
     #[inline] pub fn mu(&self, i: BodyIndex) -> f64 { self.mu[i.get()] }
 
-    /// How many bodies are integrated rather than evaluated. Zero means the whole system
-    /// is analytic and any instant can be jumped to directly.
+    /// Bodies integrated rather than evaluated. Zero means any instant can be jumped to.
     #[inline] pub fn newtonian_count(&self) -> usize { self.newtonian.len() }
 
     #[inline] pub fn positions(&self) -> &[DVec3] { &self.position }
     #[inline] pub fn velocities(&self) -> &[DVec3] { &self.velocity }
 
-    /// Mutable access to a motive. Marks derived data stale, since changing a motive can
-    /// change a body's parent.
+    /// Mutable motive access. Marks derived data stale: a motive can change the parent.
     pub fn motive_mut(&mut self, i: BodyIndex) -> &mut Motive {
         self.mark_dirty();
         &mut self.motives[i.get()]
     }
 
-    /// Mutable access to a body's static data. Marks derived data stale, since the
-    /// gravitational parameter of anything orbiting this body depends on its mass.
+    /// Mutable static data. Marks derived data stale: mu of anything orbiting this body
+    /// depends on its mass.
     pub fn info_mut(&mut self, i: BodyIndex) -> &mut BodyInfo {
         self.mark_dirty();
         &mut self.info[i.get()]
@@ -231,10 +223,8 @@ impl System {
 
     // ------------------------------------------------- internals for `propagate`
 
-    /// Whether an edit has landed that the derived columns have not caught up with.
-    ///
-    /// Public because a caller deciding whether it can skip a propagation needs to know
-    /// that an element was edited since the last one, not just that the clock did not move.
+    /// An edit has landed that the derived columns have not caught up with. Public so a
+    /// caller can tell "edited since last step" from "clock did not move".
     pub fn is_dirty(&self) -> bool { self.dirty }
     pub(crate) fn set_time(&mut self, t: Instant) { self.time = t; }
 
@@ -266,8 +256,7 @@ impl System {
         self.newtonian.clear();
         self.major.clear();
 
-        // Gather first, assign after: reading a motive borrows `self`, so the columns
-        // cannot be written in the same pass.
+        // Gather first, assign after: reading a motive borrows `self`.
         enum Kind { Fixed, Kepler(Option<f64>), Newton }
         let mut plan: Vec<(BodyIndex, Option<BodyId>, Kind)> = Vec::with_capacity(n);
         for i in self.indices() {
@@ -290,8 +279,7 @@ impl System {
                 Kind::Newton => self.newtonian.push(i),
                 Kind::Kepler(explicit) => {
                     self.mu[i.get()] = match explicit {
-                        // A barycentric orbit's effective mu is not G(M+m); the motive
-                        // says what it is.
+                        // Barycentric orbits: effective mu is not G(M+m), the motive says it.
                         Some(mu) => mu,
                         None => {
                             let parent_mass = parent.map(|p| self.info[p.get()].mass).unwrap_or(0.0);
@@ -311,9 +299,8 @@ impl System {
 
 /// Order hierarchical bodies so every parent precedes its children.
 ///
-/// Bodies in a dependency cycle, or whose parent is missing, are appended in arbitrary
-/// order rather than dropped — a broken parent link should misplace one body, not remove
-/// it from the simulation.
+/// Cyclic or orphaned bodies are appended in arbitrary order rather than dropped: a broken
+/// parent link misplaces a body, it does not remove it.
 fn topological_order(bodies: &[BodyIndex], parent: &[Option<BodyIndex>]) -> Vec<BodyIndex> {
     use std::collections::{HashSet, VecDeque};
     let member: HashSet<BodyIndex> = bodies.iter().copied().collect();
@@ -342,8 +329,7 @@ fn topological_order(bodies: &[BodyIndex], parent: &[Option<BodyIndex>]) -> Vec<
     out
 }
 
-/// Apply a `Vec` method to every per-body column, so adding a column cannot silently
-/// leave one out of sync.
+/// Apply a `Vec` method to every per-body column, so a new column cannot fall out of sync.
 macro_rules! for_each_column {
     ($self:ident, $op:ident, $($arg:expr),*) => {{
         $self.ids.$op($($arg),*);
@@ -366,10 +352,8 @@ use for_each_column;
 // ---------------------------------------------------------------------------
 
 impl System {
-    /// Build a system from loaded universe contents.
-    ///
-    /// The legacy single-motive entry kinds are widened into a [`Motive`] timeline with
-    /// one event, which is how the compound form represents "this, forever".
+    /// Build a system from loaded universe contents. Legacy single-motive entries widen
+    /// into a one-event [`Motive`] timeline.
     pub fn from_contents(contents: &crate::universe::UniverseFileContents) -> Result<Self, SystemError> {
         use crate::universe::SomeBody;
         let mut system = Self::new(contents.physics.gravitational_constant);
@@ -405,14 +389,10 @@ impl System {
 }
 
 impl System {
-    /// Serialise the arena back to universe contents.
+    /// Inverse of [`System::from_contents`]. Every body round-trips as a
+    /// `CompoundMotiveEntry`, the general form legacy entries widen into.
     ///
-    /// The inverse of [`System::from_contents`]. Every body round-trips as a
-    /// `CompoundMotiveEntry`, which is the general form the legacy entry kinds widen into
-    /// on the way in — so a file saved from a system loads back to the same system.
-    ///
-    /// `time`, `physics` and `view` are the app's, not the arena's: the simulation knows
-    /// when it is, but not what step size or scale the UI was showing.
+    /// `time`, `physics` and `view` come from the app; the arena does not hold them.
     pub fn to_contents(
         &self,
         time: crate::universe::UniverseFileTime,

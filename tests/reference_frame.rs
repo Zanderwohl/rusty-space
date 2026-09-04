@@ -1,5 +1,5 @@
-//! `ReferenceFrame` must produce proper rotations (orthonormal, determinant +1),
-//! never mirrors, and must not produce NaN at the pitch singularity.
+//! `ReferenceFrame` produces proper rotations — orthonormal, determinant +1, never a
+//! mirror — and no NaN at the pitch singularity.
 
 use exotic_matters::foundations::reference_frame::ReferenceFrame;
 use bevy::math::{DMat4, DVec3};
@@ -19,7 +19,7 @@ fn assert_proper_basis(f: &ReferenceFrame, what: &str) {
     assert!(x.dot(z).abs() < 1e-12, "{what}: forward.up = {}", x.dot(z));
     assert!(y.dot(z).abs() < 1e-12, "{what}: right.up = {}", y.dot(z));
 
-    // Right-handed: det = forward . (right x up) = +1. A value of -1 is a mirror.
+    // det = forward . (right x up); +1 right-handed, -1 a mirror.
     let det = x.dot(y.cross(z));
     assert!((det - 1.0).abs() < 1e-12, "{what}: basis determinant {det} (expected +1; -1 means mirrored)");
 }
@@ -43,7 +43,7 @@ fn identity_orientation_matches_documented_convention() {
     assert!((f.local_up() - DVec3::Z).length() < 1e-12, "up = {:?}, want +Z", f.local_up());
 }
 
-/// Straight up and straight down must not produce NaN from normalizing a zero cross product.
+/// Straight up and down: no NaN from normalizing a zero cross product.
 #[test]
 fn pitch_singularity_does_not_produce_nan() {
     for pitch in [std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_2] {
@@ -67,8 +67,7 @@ fn yaw_and_pitch_round_trip() {
     }
 }
 
-/// Both `look_at_universal` variants must agree; one used to build a mirrored basis
-/// while the other built a proper rotation quaternion.
+/// Both `look_at_universal` variants agree.
 #[test]
 fn look_at_variants_agree() {
     let origin = DVec3::new(1.0e6, -2.0e6, 5.0e5);
@@ -82,14 +81,14 @@ fn look_at_variants_agree() {
         let b = frame.look_at_universal_roll_rads(target, 0.0);
         assert_proper_basis(&a, "look_at_universal");
         assert_proper_basis(&b, "look_at_universal_roll_rads");
-        // Both must at minimum point forward at the target.
+        // Both point forward at the target.
         let want = (target - origin).normalize();
         assert!((a.local_forward() - want).length() < 1e-9, "look_at_universal forward off target");
         assert!((b.local_forward() - want).length() < 1e-9, "roll variant forward off target");
     }
 }
 
-/// Translating in local coordinates then back must return to the start.
+/// Translating in local coordinates and back returns to the start.
 #[test]
 fn local_translation_round_trips() {
     let f = ReferenceFrame::from_position_yaw_pitch(DVec3::new(10.0, 20.0, 30.0), 0.7, 0.3);

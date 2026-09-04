@@ -70,8 +70,7 @@ fn display_body_info(ui: &mut Ui, system: &em_sim::system::System, index: em_sim
     ui.separator();
     body_state_section(ui, system, index);
 
-    // One motive covers all three kinds, so the section is chosen by what is active
-    // *now* rather than by which component happens to be attached.
+    // One motive covers all kinds; the section follows what is active now.
     let (_, selection) = system.motive(index).motive_at(time);
     ui.separator();
     match selection {
