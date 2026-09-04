@@ -3,7 +3,7 @@ use bevy::app::{App, Update};
 use bevy::prelude::*;
 use bevy_egui::EguiPrimaryContextPass;
 use crate::body::appearance::AssetCache;
-use crate::body::universe::save::{UniverseFile, UniversePhysics, ViewSettings};
+use crate::body::universe::save::{SpawnBody, UniverseFile, UniversePhysics, ViewSettings};
 use crate::body::universe::Universe;
 use crate::gui::app::AppState;
 use crate::gui::menu::UiState;

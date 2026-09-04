@@ -10,8 +10,10 @@ pub mod appearance;
 pub mod bitfutz;
 pub mod body;
 pub mod motive;
+pub mod presets;
 pub mod events;
 pub mod time;
 pub mod time_map;
+pub mod universe;
 
 pub use em_foundations as foundations;

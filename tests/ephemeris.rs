@@ -12,8 +12,8 @@
 //! exactly: planetary perturbations are not modelled and the elements are mean, not
 //! osculating. Tolerances below are set from the model's actual capability.
 
-use exotic_matters::body::universe::save::SomeBody;
-use exotic_matters::body::universe::solar_system::solar_system;
+use em_sim::presets::solar_system;
+use em_sim::universe::SomeBody;
 use exotic_matters::foundations::time::Instant;
 use bevy::math::DVec3;
 
@@ -49,12 +49,14 @@ const REFERENCES: &[Reference] = &[
 ];
 
 /// Model position of `body` relative to its primary, in metres.
+///
+/// Uses the bundled preset directly from `em-sim` — no engine, no file, no ECS.
 fn modelled_position(body_id: &str, jd: f64) -> Option<DVec3> {
-    let file = solar_system();
-    let g = file.contents.physics.gravitational_constant;
+    let contents = solar_system();
+    let g = contents.physics.gravitational_constant;
 
-    let mut mass_of = |id: &str| -> Option<f64> {
-        file.contents.bodies.iter().find_map(|b| match b {
+    let mass_of = |id: &str| -> Option<f64> {
+        contents.bodies.iter().find_map(|b| match b {
             SomeBody::KeplerEntry(k) if k.info.id == id => Some(k.info.mass),
             SomeBody::FixedEntry(f) if f.info.id == id => Some(f.info.mass),
             SomeBody::NewtonEntry(n) if n.info.id == id => Some(n.info.mass),
@@ -62,8 +64,8 @@ fn modelled_position(body_id: &str, jd: f64) -> Option<DVec3> {
         })
     };
 
-    let entry = file.contents.bodies.iter().find_map(|b| match b {
-        SomeBody::KeplerEntry(k) if k.info.id == body_id => Some(k.clone()),
+    let entry = contents.bodies.iter().find_map(|b| match b {
+        SomeBody::KeplerEntry(k) if k.info.id == body_id => Some(k),
         _ => None,
     })?;
 

@@ -2756,7 +2756,6 @@ dependencies = [
  "serde_json",
  "toml",
  "url",
- "uuid",
 ]
 
 [[package]]
