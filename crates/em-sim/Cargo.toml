@@ -1,0 +1,27 @@
+[package]
+name = "em-sim"
+version = "0.1.0"
+edition = "2024"
+description = "Orbital simulation state and propagation, built on em-foundations. Engine-agnostic."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[features]
+# Adds `Resource`/`Message` derives to the handful of types that really are global app
+# state — the clock, physics constants, view settings, tag state — so a Bevy app can use
+# them directly.
+#
+# Deliberately NOT Component: per-body data lives in `System`, and a body that was also an
+# ECS component would be two sources of truth for the same thing. Entities hold a
+# `BodyRef` and read through it.
+bevy = ["dep:bevy_ecs"]
+
+[dependencies]
+em-foundations = { path = "../em-foundations" }
+glam = { version = "0.30", features = ["serde"] }
+serde = { version = "1.0.215", features = ["derive"] }
+
+bevy_ecs = { version = "0.17", optional = true }
+
+[dev-dependencies]
+toml = "0.8.20"

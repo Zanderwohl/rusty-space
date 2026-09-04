@@ -1,0 +1,6 @@
+{"sessionId":"050ac7","location":"starfield.rs:spawn","message":"starfield spawning","data":{"star_count":94,"hypothesisId":"H2"},"timestamp":1780683822452}
+{"sessionId":"050ac7","location":"starfield.rs:diag","message":"starfield_entity","data":{"entity":"655v0","render_layers":"Some(RenderLayers([1]))","not_shadow_caster":true,"hypothesisId":"H2"},"timestamp":1780683822495}
+{"sessionId":"050ac7","location":"starfield.rs:diag","message":"camera_entity","data":{"entity":"14v0","is_starfield_cam":false,"render_layers":"None","hypothesisId":"H1"},"timestamp":1780683822496}
+{"sessionId":"050ac7","location":"starfield.rs:diag","message":"camera_entity","data":{"entity":"656v0","is_starfield_cam":true,"render_layers":"Some(RenderLayers([1]))","hypothesisId":"H1"},"timestamp":1780683822496}
+{"sessionId":"050ac7","location":"starfield.rs:diag","message":"point_light","data":{"entity":"12v1","shadows_enabled":true,"intensity":35000005000,"hypothesisId":"H1"},"timestamp":1780683822496}
+{"sessionId":"050ac7","location":"starfield_material.rs:specialize","message":"specialize_called","data":{"pipeline_label":"Some("alpha_blend_mesh_pipeline")","has_fragment":true,"vertex_shader":"StrongHandle<Shader>{ id: Index(AssetIndex { generation: 0, index: 111 }), path: Some(shaders/starfield.wgsl) }","hypothesisId":"H2"},"timestamp":1780683822514}

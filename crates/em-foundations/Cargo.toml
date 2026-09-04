@@ -1,0 +1,16 @@
+[package]
+name = "em-foundations"
+version = "0.1.0"
+edition = "2024"
+description = "Orbital mechanics, reference frames, and epoch handling. No engine, no ECS, no rendering."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[dependencies]
+# glam, not bevy::math. bevy_math depends on glam 0.30 and cargo unifies them, so
+# `glam::DVec3` IS `bevy::math::DVec3` — this crate drops straight into a Bevy app
+# with no conversion, and also builds standalone with no engine at all.
+glam = { version = "0.30", features = ["serde"] }
+serde = { version = "1.0.215", features = ["derive"] }
+num-traits = "0.2.18"
+scilib = "1.0.0"

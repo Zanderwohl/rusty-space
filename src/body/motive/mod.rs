@@ -1,9 +1,8 @@
-pub mod info;
-pub mod fixed_motive;
-pub mod newton_motive;
-pub mod kepler_motive;
-pub mod compound_motive;
-pub mod calculate_body_positions;
+//! Body motion. The types live in `em-sim`; nothing ECS-specific remains here.
+//!
+//! Propagation moved to `em_sim::propagate`, driven from `crate::sim::world`.
 
-pub use compound_motive::{Motive, MotiveSelection, TransitionEvent};
-pub use calculate_body_positions::{calculate_body_positions, PhysicsGraph, PositionCache, SimulationPerformanceMetrics};
+// Re-exported under their old paths so app call sites are untouched by the move.
+pub use em_sim::body as info;
+pub use em_sim::motive::kepler as kepler_motive;
+pub use em_sim::motive::{Motive, MotiveSelection, TransitionEvent};

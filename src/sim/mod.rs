@@ -1,23 +1,20 @@
-//! Simulation infrastructure: clock, events, and ECS helpers.
-//!
-//! This module owns simulation-related types that need to be shared between
-//! `body` (domain/physics) and `gui` (presentation). By placing them here,
-//! we avoid a bidirectional dependency between those modules.
+//! Simulation infrastructure shared between `body` and `gui`, so neither depends on the
+//! other.
 
 use bevy::prelude::*;
 
-pub mod time;
-pub mod events;
+pub mod world;
 
-pub use time::{SimTime, PreviousTimes, PreviousTimesIter};
-pub use events::{CalculateTrajectory, BodySelection};
 
-/// Marker component for entities that belong to the current simulation.
-/// Used to despawn all simulation entities when unloading a universe.
+// Re-exported from `em-sim` so `crate::sim::…` paths keep resolving.
+pub use em_sim::time::{SimTime, PreviousTimes, PreviousTimesIter};
+pub use em_sim::events::{CalculateTrajectory, BodySelection};
+
+/// Marks entities belonging to the current simulation, for bulk despawn on unload.
 #[derive(Component)]
 pub struct SimulationObject;
 
-/// System to despawn all simulation objects when exiting the planetarium.
+/// Despawn all simulation objects when leaving the planetarium.
 pub fn unload_simulation_objects(
     commands: Commands,
     simulation_objects: Query<Entity, With<SimulationObject>>,
@@ -25,14 +22,14 @@ pub fn unload_simulation_objects(
     despawn_entities_with::<SimulationObject>(simulation_objects, commands);
 }
 
-/// Generic helper to despawn all entities with a given component.
+/// Despawn every entity carrying `T`.
 pub fn despawn_entities_with<T: Component>(to_despawn: Query<Entity, With<T>>, mut commands: Commands) {
     for entity in &to_despawn {
         commands.entity(entity).despawn();
     }
 }
 
-/// Generic helper to despawn all entities with a given component (recursive variant).
+/// Recursive variant of [`despawn_entities_with`].
 pub fn despawn_recursive_entities_with<T: Component>(
     mut commands: Commands,
     query: Query<Entity, With<T>>,

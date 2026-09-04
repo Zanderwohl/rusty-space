@@ -6,4 +6,12 @@ mod freecam;
 mod planetarium;
 
 pub use freecam::{Freecam, FreeCamPlugin, MovementSettings, KeyBindings};
-pub use planetarium::{PlanetariumCamera, PlanetariumCameraPlugin, CameraAction, GoTo, RevolveAround};
+pub use planetarium::{
+    PlanetariumCamera,
+    PlanetariumCameraPlugin,
+    CameraAction,
+    GoTo,
+    GoToSource,
+    RevolveAround,
+    RevolveAroundFrame,
+};

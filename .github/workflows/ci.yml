@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # The workspace builds clean today. Anything new that warns is a bug worth
+  # seeing before it is merged, not after it has spread.
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Bevy needs these to link on Linux; the library crates do not, which is
+      # what the no-default-features builds below are checking.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev
+
+      - name: Test
+        run: cargo test --workspace
+
+      # The point of the split: neither library crate may reach for Bevy.
+      - name: em-foundations is engine-free
+        run: |
+          if cargo tree -p em-foundations | grep -qi bevy; then
+            echo "em-foundations depends on bevy" >&2
+            exit 1
+          fi
+      - name: Libraries build standalone
+        run: |
+          cargo build -p em-foundations --no-default-features
+          cargo build -p em-sim --no-default-features

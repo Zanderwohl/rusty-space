@@ -29,12 +29,6 @@ impl Default for Universe {
     }
 }
 
-#[derive(Component)]
-pub struct Major;
-
-#[derive(Component)]
-pub struct Minor;
-
 impl Universe {
     pub fn from_file(
         file: &UniverseFile,
@@ -69,16 +63,16 @@ impl Universe {
     }
 
     pub fn remove_by_name<T: AsRef<str>>(&mut self, name: T) {
-        self.name_to_id.remove(name.as_ref());
-        if let Some(id) = self.name_to_id.get(name.as_ref()) {
-            self.id_to_name.remove(id);
+        // Take the id out first: removing from `name_to_id` before the lookup would
+        // leave the `id_to_name` half of the bimap orphaned.
+        if let Some(id) = self.name_to_id.remove(name.as_ref()) {
+            self.id_to_name.remove(&id);
         }
     }
 
     pub fn remove_by_id<T: AsRef<str>>(&mut self, id: T) {
-        self.id_to_name.remove(id.as_ref());
-        if let Some(name) = self.id_to_name.get(id.as_ref()) {
-            self.name_to_id.remove(name);
+        if let Some(name) = self.id_to_name.remove(id.as_ref()) {
+            self.name_to_id.remove(&name);
         }
     }
 
@@ -93,49 +87,4 @@ impl Universe {
     pub fn get_by_name<T: AsRef<str>>(&self, name: T) -> Option<&String> {
         self.name_to_id.get(name.as_ref())
     }
-}
-
-pub fn advance_time(mut sim_time: ResMut<SimTime>, time: Res<Time>) {
-    if !sim_time.playing {
-        return;
-    }
-    
-    let real_delta = time.delta_secs_f64();
-    let step = sim_time.step;
-    
-    // Calculate how much sim time we WANT to advance based on gui_speed
-    let desired_sim_delta = sim_time.gui_speed * real_delta;
-    
-    // Accumulate the desired time
-    sim_time.accumulated_time += desired_sim_delta;
-    
-    // Calculate how many FULL steps one frame's worth of sim time requires
-    let full_steps = (sim_time.accumulated_time / step).floor() as usize;
-    
-    if full_steps == 0 {
-        return;
-    }
-    
-    // Consume the full amount from the accumulator
-    sim_time.accumulated_time -= full_steps as f64 * step;
-    
-    // If speed was reduced, the queue from a faster speed may be oversized — trim it.
-    // Keeps the front (earliest steps) since those must be simulated in order.
-    sim_time.previous_times.truncate(full_steps);
-    
-    // Only add enough steps to reach full_steps total — leftovers count toward the cap.
-    let already_queued = sim_time.previous_times.len();
-    if already_queued >= full_steps {
-        return;
-    }
-    let steps_to_add = full_steps - already_queued;
-    
-    // Append new steps after the last queued time (or current time if queue is empty)
-    let last_queued_time = sim_time.previous_times.last()
-        .unwrap_or(sim_time.time.to_j2000_seconds());
-    sim_time.previous_times.expand(last_queued_time + step, steps_to_add, step);
-    
-    // NOTE: We do NOT update time_seconds here.
-    // time_seconds is updated by calculate_body_positions to reflect
-    // what was actually processed, not what we're trying to reach.
 }

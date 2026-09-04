@@ -4,11 +4,11 @@
 
 use std::path::PathBuf;
 use std::collections::HashMap;
-use bevy::math::DVec3;
-use rusqlite::{Connection, Result as SqlResult, params};
+use bevy::math::{DQuat, DVec3};
+use rusqlite::{Connection, params};
 
 use crate::body::appearance::{Appearance, AppearanceColor, DebugBall, StarBall};
-use crate::body::motive::info::BodyInfo;
+use crate::body::motive::info::{BodyInfo, BodyRotation, RotationEpoch, RotationMode};
 use crate::body::motive::kepler_motive::{
     KeplerMotive, KeplerShape, KeplerRotation, KeplerEpoch,
     EccentricitySMA, Apsides,
@@ -20,7 +20,7 @@ use crate::body::universe::save::{
     UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings,
     SomeBody, CompoundMotiveEntry,
 };
-use crate::foundations::time::{Instant, TimeLength};
+use crate::foundations::time::{Instant, TimeDelta};
 use crate::body::universe::save::TagState;
 use crate::util::bitfutz;
 
@@ -193,7 +193,7 @@ fn load_view_settings(conn: &Connection) -> Result<ViewSettings, SqliteSaveError
     let row = conn.query_row(
         "SELECT distance_scale, logarithmic_distance_scale, logarithmic_distance_base,
                 body_scale, logarithmic_body_scale, logarithmic_body_base,
-                show_labels, show_trajectories, trajectory_resolution
+                show_labels, show_trajectories, show_selected_labels, show_selected_trajectories, trajectory_resolution
          FROM view_settings WHERE id = 1",
         [],
         |row| {
@@ -206,7 +206,9 @@ fn load_view_settings(conn: &Connection) -> Result<ViewSettings, SqliteSaveError
                 row.get::<_, f64>(5)?,
                 row.get::<_, i32>(6)? != 0,
                 row.get::<_, i32>(7)? != 0,
-                row.get::<_, usize>(8)?,
+                row.get::<_, i32>(8)? != 0,
+                row.get::<_, i32>(9)? != 0,
+                row.get::<_, usize>(10)?,
             ))
         },
     )?;
@@ -223,9 +225,11 @@ fn load_view_settings(conn: &Connection) -> Result<ViewSettings, SqliteSaveError
         logarithmic_body_base: row.5,
         show_labels: row.6,
         show_trajectories: row.7,
+        show_selected_labels: row.8,
+        show_selected_trajectories: row.9,
         show_axes: true, // default for legacy files without this column
         tags,
-        trajectory_resolution: row.8,
+        trajectory_resolution: row.10,
     })
 }
 
@@ -240,7 +244,9 @@ fn save_view_settings(conn: &Connection, view: &ViewSettings) -> Result<(), Sqli
             logarithmic_body_base = ?6,
             show_labels = ?7,
             show_trajectories = ?8,
-            trajectory_resolution = ?9
+            show_selected_labels = ?9,
+            show_selected_trajectories = ?10,
+            trajectory_resolution = ?11
          WHERE id = 1",
         params![
             view.distance_scale,
@@ -251,6 +257,8 @@ fn save_view_settings(conn: &Connection, view: &ViewSettings) -> Result<(), Sqli
             view.logarithmic_body_base,
             view.show_labels as i32,
             view.show_trajectories as i32,
+            view.show_selected_labels as i32,
+            view.show_selected_trajectories as i32,
             view.trajectory_resolution as i32,
         ],
     )?;
@@ -287,7 +295,7 @@ fn load_tags(conn: &Connection) -> Result<HashMap<String, TagState>, SqliteSaveE
         let mut member_stmt = conn.prepare(
             "SELECT body_id FROM tag_members WHERE tag_name = ?1"
         )?;
-        let members: Vec<String> = member_stmt
+        let members: std::collections::HashSet<String> = member_stmt
             .query_map([&name], |row| row.get(0))?
             .filter_map(|r| r.ok())
             .collect();
@@ -369,12 +377,13 @@ fn load_bodies(conn: &Connection) -> Result<Vec<SomeBody>, SqliteSaveError> {
         
         // Load motive
         let motive = load_motive(conn, &id)?;
+        let rotation = load_body_rotation(conn, &id)?;
         
         bodies.push(SomeBody::CompoundMotiveEntry(CompoundMotiveEntry {
             info,
             motive,
             appearance,
-            rotation: None, // SQLite format doesn't store rotation yet
+            rotation,
         }));
     }
     
@@ -383,30 +392,35 @@ fn load_bodies(conn: &Connection) -> Result<Vec<SomeBody>, SqliteSaveError> {
 
 fn save_bodies(conn: &Connection, bodies: &[SomeBody]) -> Result<(), SqliteSaveError> {
     for body in bodies {
-        let (info, appearance, motive) = match body {
+        let (info, appearance, motive, rotation) = match body {
             SomeBody::FixedEntry(e) => {
                 let m = Motive::fixed(e.position);
-                (&e.info, &e.appearance, m)
+                (&e.info, &e.appearance, m, e.rotation.as_ref())
             }
             SomeBody::NewtonEntry(e) => {
                 let m = Motive::newtonian(e.position, e.velocity);
-                (&e.info, &e.appearance, m)
+                (&e.info, &e.appearance, m, e.rotation.as_ref())
             }
             SomeBody::KeplerEntry(e) => {
-                let m = Motive::keplerian(
-                    e.params.primary_id.clone(),
-                    e.params.shape.clone(),
-                    e.params.rotation.clone(),
-                    e.params.epoch.clone(),
-                );
-                (&e.info, &e.appearance, m)
+                // Whole `KeplerMotive`, not field-by-field: a partial rebuild dropped
+                // `anomalistic_period` on every save.
+                let m = Motive::from_keplerian(e.params.clone());
+                (&e.info, &e.appearance, m, e.rotation.as_ref())
             }
             SomeBody::CompoundEntry(e) => {
-                let m = Motive::fixed(DVec3::ZERO);
-                (&e.info, &e.appearance, m)
+                // Deprecated patched-conics route. Take the first arc, as
+                // `System::from_contents` does; writing `fixed(ZERO)` here silently
+                // replaced the orbit with "sitting on the primary" on every save.
+                let Some(first) = e.route.values().next() else {
+                    return Err(SqliteSaveError::InvalidData(format!(
+                        "body {} is a patched-conics entry with an empty route", e.info.id
+                    )));
+                };
+                let m = Motive::from_keplerian(first.clone());
+                (&e.info, &e.appearance, m, None)
             }
             SomeBody::CompoundMotiveEntry(e) => {
-                (&e.info, &e.appearance, e.motive.clone())
+                (&e.info, &e.appearance, e.motive.clone(), e.rotation.as_ref())
             }
         };
         
@@ -425,10 +439,14 @@ fn save_bodies(conn: &Connection, bodies: &[SomeBody]) -> Result<(), SqliteSaveE
         
         // Save body's tags to tag_members
         for tag in &info.tags {
-            // Ensure the tag exists in the tags table
+            let (default_shown, default_trajectory) = if tag == "Major Moon" || tag == "Major Planet" || tag == "Minor Planet" {
+                (1, 1)
+            } else {
+                (1, 0)
+            };
             conn.execute(
-                "INSERT OR IGNORE INTO tags (name, shown, trajectory) VALUES (?1, 1, 0)",
-                [tag],
+                "INSERT OR IGNORE INTO tags (name, shown, trajectory) VALUES (?1, ?2, ?3)",
+                params![tag, default_shown, default_trajectory],
             )?;
             // Add body as member of this tag
             conn.execute(
@@ -442,8 +460,136 @@ fn save_bodies(conn: &Connection, bodies: &[SomeBody]) -> Result<(), SqliteSaveE
         
         // Save motive
         save_motive(conn, &info.id, &motive)?;
+        save_body_rotation(conn, &info.id, rotation)?;
     }
     
+    Ok(())
+}
+
+fn load_body_rotation(conn: &Connection, body_id: &str) -> Result<Option<BodyRotation>, SqliteSaveError> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='body_rotations')",
+            [],
+            |row| row.get::<_, i32>(0),
+        )
+        .map(|v| v != 0)?;
+    if !exists {
+        return Ok(None);
+    }
+
+    let result = conn.query_row(
+        "SELECT mode, orientation_x, orientation_y, orientation_z, orientation_w,
+                angular_velocity, epoch_type, epoch_julian_day,
+                primary_id, pole_x, pole_y, pole_z
+         FROM body_rotations WHERE body_id = ?1",
+        [body_id],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<f64>>(1)?,
+                row.get::<_, Option<f64>>(2)?,
+                row.get::<_, Option<f64>>(3)?,
+                row.get::<_, Option<f64>>(4)?,
+                row.get::<_, Option<f64>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<f64>>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, Option<f64>>(9)?,
+                row.get::<_, Option<f64>>(10)?,
+                row.get::<_, Option<f64>>(11)?,
+            ))
+        },
+    );
+
+    match result {
+        Ok((mode, ox, oy, oz, ow, angular_velocity, epoch_type, epoch_jd, primary_id, px, py, pz)) => {
+            let rotation = match mode.as_str() {
+                "Spinning" => {
+                    let orientation_at_epoch = DQuat::from_xyzw(
+                        ox.unwrap_or(0.0),
+                        oy.unwrap_or(0.0),
+                        oz.unwrap_or(0.0),
+                        ow.unwrap_or(1.0),
+                    );
+                    let epoch = match epoch_type.as_deref() {
+                        Some("JulianDay") => RotationEpoch::JulianDay(epoch_jd.unwrap_or(2451545.0)),
+                        _ => RotationEpoch::J2000,
+                    };
+                    BodyRotation::spinning(orientation_at_epoch, angular_velocity.unwrap_or(0.0), epoch)
+                }
+                // An empty primary name never resolves, and `sync_rotations` then skips
+                // the body silently, leaving it at whatever orientation it last held.
+                "TidallyLocked" => {
+                    let Some(primary_id) = primary_id else {
+                        return Err(SqliteSaveError::InvalidData(format!(
+                            "body {body_id} is tidally locked to a NULL primary"
+                        )));
+                    };
+                    BodyRotation::tidally_locked(
+                        primary_id,
+                        DVec3::new(px.unwrap_or(0.0), py.unwrap_or(0.0), pz.unwrap_or(1.0)),
+                    )
+                }
+                mode => {
+                    return Err(SqliteSaveError::InvalidData(format!(
+                        "body {body_id} has unknown rotation mode {mode:?}"
+                    )))
+                }
+            };
+            Ok(Some(rotation))
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn save_body_rotation(
+    conn: &Connection,
+    body_id: &str,
+    rotation: Option<&BodyRotation>,
+) -> Result<(), SqliteSaveError> {
+    let Some(rotation) = rotation else {
+        return Ok(());
+    };
+
+    match &rotation.mode {
+        RotationMode::Spinning {
+            orientation_at_epoch,
+            angular_velocity,
+            epoch,
+        } => {
+            let (epoch_type, epoch_julian_day): (&str, Option<f64>) = match epoch {
+                RotationEpoch::J2000 => ("J2000", None),
+                RotationEpoch::JulianDay(jd) => ("JulianDay", Some(*jd)),
+            };
+            conn.execute(
+                "INSERT INTO body_rotations (
+                    body_id, mode, orientation_x, orientation_y, orientation_z, orientation_w,
+                    angular_velocity, epoch_type, epoch_julian_day
+                 ) VALUES (?1, 'Spinning', ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    body_id,
+                    orientation_at_epoch.x,
+                    orientation_at_epoch.y,
+                    orientation_at_epoch.z,
+                    orientation_at_epoch.w,
+                    angular_velocity,
+                    epoch_type,
+                    epoch_julian_day,
+                ],
+            )?;
+        }
+        RotationMode::TidallyLocked { primary_id, pole } => {
+            conn.execute(
+                "INSERT INTO body_rotations (
+                    body_id, mode, primary_id, pole_x, pole_y, pole_z
+                 ) VALUES (?1, 'TidallyLocked', ?2, ?3, ?4, ?5)",
+                params![body_id, primary_id, pole.x, pole.y, pole.z],
+            )?;
+        }
+    }
+
     Ok(())
 }
 
@@ -484,6 +630,7 @@ fn load_appearance(conn: &Connection, body_id: &str) -> Result<Appearance, Sqlit
                             g: color_g.unwrap_or(255) as u16,
                             b: color_b.unwrap_or(255) as u16,
                         },
+                        highlight_latitudes: vec![],
                     }))
                 }
                 "Star" => {
@@ -583,11 +730,14 @@ fn load_motive(conn: &Connection, body_id: &str) -> Result<Motive, SqliteSaveErr
         motive.insert_event(Instant::from_seconds_since_j2000(time_seconds), event, selection);
     }
     
-    // If no motives were loaded, create a default fixed motive
+    // An empty motive set means the row is inconsistent, not that the body is fixed.
+    // Defaulting put it at the world origin, on top of the primary, with no complaint.
     if motive.is_empty() {
-        motive = Motive::fixed(DVec3::ZERO);
+        return Err(SqliteSaveError::InvalidData(format!(
+            "body {body_id} has no motive rows"
+        )));
     }
-    
+
     Ok(motive)
 }
 
@@ -620,12 +770,23 @@ fn load_motive_selection(conn: &Connection, motive_id: i64, motive_type: &str) -
     }
 }
 
+/// A column the chosen shape/rotation/epoch type requires. NULL means the row was
+/// written by an incompatible schema, not that the value is zero: an absent
+/// `semi_major_axis` used to load as a body orbiting one metre from its primary, and an
+/// absent `epoch_julian_day` silently reassigned a fitted element set to J2000.
+fn required(value: Option<f64>, column: &str, kind: &str) -> Result<f64, SqliteSaveError> {
+    value.ok_or_else(|| {
+        SqliteSaveError::InvalidData(format!("{kind} needs {column}, which is NULL"))
+    })
+}
+
 fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, SqliteSaveError> {
     let row = conn.query_row(
         "SELECT primary_id, shape_type, eccentricity, semi_major_axis, periapsis, apoapsis,
                 rotation_type, inclination, longitude_of_ascending_node, argument_of_periapsis,
                 apsidal_precession_period, nodal_precession_period, longitude_of_periapsis,
-                epoch_type, epoch_julian_day, mean_anomaly, true_anomaly, periapsis_time_julian_day
+                epoch_type, epoch_julian_day, mean_anomaly, true_anomaly, periapsis_time_julian_day,
+                gravitational_parameter, anomalistic_period
          FROM motive_keplerian WHERE motive_id = ?1",
         [motive_id],
         |row| {
@@ -648,6 +809,8 @@ fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, Sql
                 row.get::<_, Option<f64>>(15)?,  // mean_anomaly
                 row.get::<_, Option<f64>>(16)?,  // true_anomaly
                 row.get::<_, Option<f64>>(17)?,  // periapsis_time_julian_day
+                row.get::<_, Option<f64>>(18)?,  // gravitational_parameter
+                row.get::<_, Option<f64>>(19)?,  // anomalistic_period
             ))
         },
     )?;
@@ -655,17 +818,18 @@ fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, Sql
     let (primary_id, shape_type, eccentricity, semi_major_axis, periapsis, apoapsis,
          rotation_type, inclination, longitude_of_ascending_node, argument_of_periapsis,
          apsidal_precession_period, nodal_precession_period, longitude_of_periapsis,
-         epoch_type, epoch_julian_day, mean_anomaly, true_anomaly, periapsis_time_julian_day) = row;
+         epoch_type, epoch_julian_day, mean_anomaly, true_anomaly, periapsis_time_julian_day,
+         gravitational_parameter, anomalistic_period) = row;
     
     // Parse shape
     let shape = match shape_type.as_str() {
         "EccentricitySMA" => KeplerShape::EccentricitySMA(EccentricitySMA {
-            eccentricity: eccentricity.unwrap_or(0.0),
-            semi_major_axis: semi_major_axis.unwrap_or(1.0),
+            eccentricity: required(eccentricity, "eccentricity", "EccentricitySMA")?,
+            semi_major_axis: required(semi_major_axis, "semi_major_axis", "EccentricitySMA")?,
         }),
         "Apsides" => KeplerShape::Apsides(Apsides {
-            periapsis: periapsis.unwrap_or(1.0),
-            apoapsis: apoapsis.unwrap_or(2.0),
+            periapsis: required(periapsis, "periapsis", "Apsides")?,
+            apoapsis: required(apoapsis, "apoapsis", "Apsides")?,
         }),
         _ => return Err(SqliteSaveError::InvalidData(format!("Unknown shape type: {}", shape_type))),
     };
@@ -673,19 +837,19 @@ fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, Sql
     // Parse rotation
     let rotation = match rotation_type.as_str() {
         "EulerAngles" => KeplerRotation::EulerAngles(KeplerEulerAngles {
-            inclination: inclination.unwrap_or(0.0),
-            longitude_of_ascending_node: longitude_of_ascending_node.unwrap_or(0.0),
-            argument_of_periapsis: argument_of_periapsis.unwrap_or(0.0),
+            inclination: required(inclination, "inclination", "EulerAngles")?,
+            longitude_of_ascending_node: required(longitude_of_ascending_node, "longitude_of_ascending_node", "EulerAngles")?,
+            argument_of_periapsis: required(argument_of_periapsis, "argument_of_periapsis", "EulerAngles")?,
         }),
         "FlatAngles" => KeplerRotation::FlatAngles(KeplerFlatAngles {
-            longitude_of_periapsis: longitude_of_periapsis.unwrap_or(0.0),
+            longitude_of_periapsis: required(longitude_of_periapsis, "longitude_of_periapsis", "FlatAngles")?,
         }),
         "PrecessingEulerAngles" => KeplerRotation::PrecessingEulerAngles(KeplerPrecessingEulerAngles {
-            inclination: inclination.unwrap_or(0.0),
-            longitude_of_ascending_node: longitude_of_ascending_node.unwrap_or(0.0),
-            argument_of_periapsis: argument_of_periapsis.unwrap_or(0.0),
-            apsidal_precession_period: TimeLength::period_from_julian_day(apsidal_precession_period.unwrap_or(0.0)),
-            nodal_precession_period: TimeLength::period_from_julian_day(nodal_precession_period.unwrap_or(0.0)),
+            inclination: required(inclination, "inclination", "PrecessingEulerAngles")?,
+            longitude_of_ascending_node: required(longitude_of_ascending_node, "longitude_of_ascending_node", "PrecessingEulerAngles")?,
+            argument_of_periapsis: required(argument_of_periapsis, "argument_of_periapsis", "PrecessingEulerAngles")?,
+            apsidal_precession_period: TimeDelta::from_days(required(apsidal_precession_period, "apsidal_precession_period", "PrecessingEulerAngles")?),
+            nodal_precession_period: TimeDelta::from_days(required(nodal_precession_period, "nodal_precession_period", "PrecessingEulerAngles")?),
         }),
         _ => return Err(SqliteSaveError::InvalidData(format!("Unknown rotation type: {}", rotation_type))),
     };
@@ -693,16 +857,18 @@ fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, Sql
     // Parse epoch
     let epoch = match epoch_type.as_str() {
         "MeanAnomaly" => KeplerEpoch::MeanAnomaly(MeanAnomalyAtEpoch {
-            epoch: Instant::from_julian_day(epoch_julian_day.unwrap_or(2451545.0)),
-            mean_anomaly: mean_anomaly.unwrap_or(0.0),
+            epoch: Instant::from_julian_day(required(epoch_julian_day, "epoch_julian_day", "MeanAnomaly")?),
+            mean_anomaly: required(mean_anomaly, "mean_anomaly", "MeanAnomaly")?,
         }),
-        "TimeAtPeriapsisPassage" => KeplerEpoch::TimeAtPeriapsisPassage(Instant::from_julian_day(periapsis_time_julian_day.unwrap_or(2451545.0))),
+        "TimeAtPeriapsisPassage" => KeplerEpoch::TimeAtPeriapsisPassage(
+            Instant::from_julian_day(required(periapsis_time_julian_day, "periapsis_time_julian_day", "TimeAtPeriapsisPassage")?),
+        ),
         "TrueAnomaly" => KeplerEpoch::TrueAnomaly(TrueAnomalyAtEpoch {
-            epoch: Instant::from_julian_day(epoch_julian_day.unwrap_or(2451545.0)),
-            true_anomaly: true_anomaly.unwrap_or(0.0),
+            epoch: Instant::from_julian_day(required(epoch_julian_day, "epoch_julian_day", "TrueAnomaly")?),
+            true_anomaly: required(true_anomaly, "true_anomaly", "TrueAnomaly")?,
         }),
         "J2000" => KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
-            mean_anomaly: mean_anomaly.unwrap_or(0.0),
+            mean_anomaly: required(mean_anomaly, "mean_anomaly", "J2000")?,
         }),
         _ => return Err(SqliteSaveError::InvalidData(format!("Unknown epoch type: {}", epoch_type))),
     };
@@ -712,11 +878,16 @@ fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, Sql
         shape,
         rotation,
         epoch,
+        // NULL means "derive the rate from the semi-major axis", correct for an ideal
+        // two-body orbit and wrong for a precessing or J2-perturbed one.
+        anomalistic_period: anomalistic_period.map(TimeDelta::from_days),
+        gravitational_parameter,
     })
 }
 
 fn save_motive(conn: &Connection, body_id: &str, motive: &Motive) -> Result<(), SqliteSaveError> {
-    for (time_seconds, event, selection) in motive.iter_events() {
+    for (time, event, selection) in motive.iter_events() {
+        let time_seconds = time.to_j2000_seconds();
         let time_key = bitfutz::f64::to_u64(time_seconds) as i64;
         let event_str = serialize_transition_event(event);
         let motive_type = match selection {
@@ -803,8 +974,8 @@ fn save_keplerian(conn: &Connection, motive_id: i64, kepler: &KeplerMotive) -> R
             Some(pea.inclination),
             Some(pea.longitude_of_ascending_node),
             Some(pea.argument_of_periapsis),
-            Some(pea.apsidal_precession_period.to_julian_days()),
-            Some(pea.nodal_precession_period.to_julian_days()),
+            Some(pea.apsidal_precession_period.to_days()),
+            Some(pea.nodal_precession_period.to_days()),
             None,
         ),
     };
@@ -847,8 +1018,9 @@ fn save_keplerian(conn: &Connection, motive_id: i64, kepler: &KeplerMotive) -> R
             shape_type, eccentricity, semi_major_axis, periapsis, apoapsis,
             rotation_type, inclination, longitude_of_ascending_node, argument_of_periapsis,
             apsidal_precession_period, nodal_precession_period, longitude_of_periapsis,
-            epoch_type, epoch_julian_day, mean_anomaly, true_anomaly, periapsis_time_julian_day
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+            epoch_type, epoch_julian_day, mean_anomaly, true_anomaly, periapsis_time_julian_day,
+            gravitational_parameter, anomalistic_period
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
         params![
             motive_id,
             kepler.primary_id,
@@ -869,6 +1041,8 @@ fn save_keplerian(conn: &Connection, motive_id: i64, kepler: &KeplerMotive) -> R
             mean_anomaly,
             true_anomaly_val,
             periapsis_time_julian_day,
+            kepler.gravitational_parameter,
+            kepler.anomalistic_period.map(|p| p.to_days()),
         ],
     )?;
     

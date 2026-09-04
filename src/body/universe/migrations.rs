@@ -231,6 +231,80 @@ pub static MIGRATIONS: &[Migration] = &[
             ALTER TABLE sim_time_new RENAME TO sim_time;
         "#,
     },
+    // Version 2 -> 3: Persist optional Keplerian gravitational_parameter overrides
+    Migration {
+        description: "Add gravitational_parameter column to motive_keplerian",
+        up: r#"
+            ALTER TABLE motive_keplerian ADD COLUMN gravitational_parameter REAL;
+        "#,
+        down: r#"
+            -- SQLite cannot drop columns directly; keep column for rollback compatibility.
+        "#,
+    },
+    // Version 3 -> 4: Persist body rotation components
+    Migration {
+        description: "Add body_rotations table for BodyRotation persistence",
+        up: r#"
+            CREATE TABLE IF NOT EXISTS body_rotations (
+                body_id TEXT PRIMARY KEY NOT NULL,
+                mode TEXT NOT NULL, -- 'Spinning' or 'TidallyLocked'
+                -- Spinning fields
+                orientation_x REAL,
+                orientation_y REAL,
+                orientation_z REAL,
+                orientation_w REAL,
+                angular_velocity REAL,
+                epoch_type TEXT, -- 'J2000' or 'JulianDay'
+                epoch_julian_day REAL,
+                -- Tidally locked fields
+                primary_id TEXT,
+                pole_x REAL,
+                pole_y REAL,
+                pole_z REAL,
+                FOREIGN KEY (body_id) REFERENCES bodies(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_body_rotations_mode ON body_rotations(mode);
+        "#,
+        down: r#"
+            DROP TABLE IF EXISTS body_rotations;
+        "#,
+    },
+    // Version 4 -> 5: Persist show/hide state for focused body toggle
+    Migration {
+        description: "Add selected-body visibility columns to view_settings",
+        up: r#"
+            ALTER TABLE view_settings ADD COLUMN show_selected_labels INTEGER NOT NULL DEFAULT 1;
+            ALTER TABLE view_settings ADD COLUMN show_selected_trajectories INTEGER NOT NULL DEFAULT 1;
+        "#,
+        down: r#"
+            -- SQLite cannot drop columns directly; keep columns for rollback compatibility.
+        "#,
+    },
+    // Version 5 -> 6: anomalistic period, added on the refactor branch. Numbered after
+    // the shaders migrations so an existing v5 database picks it up rather than
+    // silently skipping it.
+    Migration {
+        description: "Add anomalistic_period to motive_keplerian",
+        up: r#"
+            -- Mean anomaly is measured from periapsis, so when periapsis precesses it
+            -- advances at the anomalistic rate rather than the sidereal one Kepler's
+            -- third law gives from the semi-major axis. NULL keeps the derived rate,
+            -- which is correct for any orbit whose apsides are fixed.
+            ALTER TABLE motive_keplerian ADD COLUMN anomalistic_period REAL;
+        "#,
+        down: r#"
+            CREATE TABLE motive_keplerian_new AS
+                SELECT motive_id, primary_id, shape_type, eccentricity, semi_major_axis,
+                       periapsis, apoapsis, rotation_type, inclination,
+                       longitude_of_ascending_node, argument_of_periapsis,
+                       apsidal_precession_period, nodal_precession_period,
+                       longitude_of_periapsis, epoch_type, epoch_julian_day,
+                       mean_anomaly, true_anomaly, periapsis_time_julian_day
+                FROM motive_keplerian;
+            DROP TABLE motive_keplerian;
+            ALTER TABLE motive_keplerian_new RENAME TO motive_keplerian;
+        "#,
+    },
 ];
 
 /// Get the current program version (number of migrations available)
@@ -263,7 +337,15 @@ pub fn get_db_version(conn: &Connection) -> SqlResult<usize> {
     );
 
     match result {
-        Ok(version_str) => Ok(version_str.parse().unwrap_or(0)),
+        // A present-but-unparseable version is corruption. Reading it as 0 replayed the
+        // whole migration chain, ALTER TABLE steps included, against a migrated database.
+        Ok(version_str) => version_str.parse().map_err(|_| {
+            rusqlite::Error::InvalidColumnType(
+                0,
+                format!("properties.version is not a number: {version_str:?}"),
+                rusqlite::types::Type::Text,
+            )
+        }),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0),
         Err(e) => Err(e),
     }

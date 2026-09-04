@@ -1,0 +1,90 @@
+digraph "Planetarium Update Systems" {
+    rankdir=TB;
+    node [shape=box, style=filled, fillcolor=lightblue];
+
+    "close_when_requested" [tooltip="Handles window close, saves settings on change/close"];
+    "make_visible" [tooltip="Makes window visible after frame 3"];
+    "update_post_process_settings" [tooltip="Updates bloom/tonemapping"];
+    "toggle_perf" [tooltip="Toggles debug performance UI"];
+    "player_move" [tooltip="WASD movement for free camera"];
+    "player_look" [tooltip="Mouse look for free camera"];
+    "cursor_grab" [tooltip="Handles cursor grab toggle"];
+    "handle_gotos" [tooltip="Processes GoTo messages, starts camera transitions"];
+    "run_goto" [tooltip="Animates camera GoTo movement"];
+    "revolve_around" [tooltip="Updates camera revolve-around-body behavior"];
+    "update_hover_target" [tooltip="Raycasts for body/trajectory hover detection"];
+    "pick_body_on_click" [tooltip="Handles click-to-select body"];
+    "handle_escape_key" [tooltip="Opens/closes menu on Escape"];
+    "track_unsaved_changes" [tooltip="Monitors for unsaved changes"];
+    "button_hover_system" [tooltip="Button hover effects"];
+    subgraph cluster_PlanetariumSimulationSet {
+        label="PlanetariumSimulationSet";
+        style=dashed;
+        "advance_time" [tooltip="Advances SimTime based on delta and playback speed"];
+    }
+    subgraph cluster_PlanetariumUISet {
+        label="PlanetariumUISet";
+        style=dashed;
+        "calculate_body_positions" [tooltip="Computes simulation positions via PhysicsGraph"];
+        "position_bodies" [tooltip="Copies simulation positions to Bevy Transforms"];
+        "orient_bodies" [tooltip="Applies body rotation/tilt"];
+        "handle_go_to_shortcut" [tooltip="G/F key triggers GoTo focused body"];
+        "handle_revolve_frame_shortcut" [tooltip="V key cycles revolve reference frame"];
+        "spawn_trajectory_meshes_for_bodies" [tooltip="Creates TrajectoryMesh entities for new bodies"];
+        "refresh_precessing_trajectories" [tooltip="Triggers recalc for precessing orbits"];
+        "calculate_trajectory" [tooltip="Computes orbital path points (Keplerian)"];
+        "rebuild_trajectory_caches" [tooltip="Updates TrajectoryCache from computed points"];
+        "build_trajectory_meshes" [tooltip="Generates tube mesh geometry"];
+        "update_focused_trajectory_markers" [tooltip="Updates Pe/Ap marker positions"];
+        "update_mouse_hit_marker" [tooltip="Updates mouse-hover marker on trajectory"];
+        "draw_trajectory_marker_labels" [tooltip="Renders marker labels via egui"];
+        "cleanup_orphaned_trajectory_meshes" [tooltip="Despawns meshes for removed bodies"];
+        "build_star_lighting_cache" [tooltip="Caches star positions/intensities for frame"];
+        "spawn_body_wireframe_meshes" [tooltip="Creates wireframe mesh for new bodies"];
+        "spawn_body_occluders" [tooltip="Creates occluder spheres for new bodies"];
+        "spawn_terminator_meshes" [tooltip="Creates day/night terminator rings"];
+        "update_terminator_meshes" [tooltip="Updates terminator positions/orientations"];
+        "update_wireframe_lighting" [tooltip="Updates wireframe sun direction uniforms"];
+        "update_occluder_lighting" [tooltip="Updates occluder sun direction uniforms"];
+        "update_wireframe_thickness" [tooltip="Adjusts tube thickness based on camera distance"];
+        "update_occluder_scale" [tooltip="Scales occluders to match wireframe"];
+        "cleanup_orphaned_body_wireframes" [tooltip="Despawns meshes for removed bodies"];
+        "spawn_body_point_meshes" [tooltip="Creates point-LOD meshes for distant bodies"];
+        "update_body_points" [tooltip="Updates point visibility/brightness based on distance"];
+        "cleanup_orphaned_body_points" [tooltip="Despawns points for removed bodies"];
+        "label_bodies" [tooltip="Renders body name labels via egui"];
+        "spawn_celestial_markers" [tooltip="Creates Point of Aries, etc. markers"];
+        "update_celestial_markers" [tooltip="Updates marker positions"];
+        "update_starfield_brightness" [tooltip="Updates starfield intensity from settings"];
+        "adjust_lights" [tooltip="Adjusts ambient/directional lighting"];
+    }
+
+    "advance_time" -> "calculate_body_positions";
+    "calculate_body_positions" -> "position_bodies";
+    "calculate_body_positions" -> "run_goto";
+    "calculate_body_positions" -> "revolve_around";
+    "position_bodies" -> "orient_bodies";
+    "position_bodies" -> "build_trajectory_meshes";
+    "position_bodies" -> "update_focused_trajectory_markers";
+    "position_bodies" -> "update_mouse_hit_marker";
+    "position_bodies" -> "draw_trajectory_marker_labels";
+    "position_bodies" -> "build_star_lighting_cache";
+    "position_bodies" -> "update_wireframe_thickness";
+    "position_bodies" -> "update_body_points";
+    "position_bodies" -> "label_bodies";
+    "position_bodies" -> "update_celestial_markers";
+    "orient_bodies" -> "update_terminator_meshes";
+    "orient_bodies" -> "update_wireframe_lighting";
+    "orient_bodies" -> "update_occluder_lighting";
+    "run_goto" -> "position_bodies";
+    "revolve_around" -> "position_bodies";
+    "refresh_precessing_trajectories" -> "calculate_trajectory";
+    "calculate_trajectory" -> "rebuild_trajectory_caches";
+    "rebuild_trajectory_caches" -> "build_trajectory_meshes";
+    "update_focused_trajectory_markers" -> "draw_trajectory_marker_labels";
+    "update_mouse_hit_marker" -> "draw_trajectory_marker_labels";
+    "build_star_lighting_cache" -> "update_wireframe_lighting";
+    "build_star_lighting_cache" -> "update_occluder_lighting";
+    "build_star_lighting_cache" -> "update_body_points";
+    "update_wireframe_thickness" -> "update_occluder_scale";
+}

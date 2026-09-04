@@ -2,7 +2,12 @@ use lazy_static::lazy_static;
 use num_traits::Pow;
 use regex::Regex;
 
-pub fn seconds_to_naive_date(total_seconds: i64) -> String {
+/// Format a span of seconds as `y d h m s`, largest non-zero unit first.
+///
+/// This is a *duration*, not a date: the year is a flat 365 days and there is no
+/// calendar in it. For a wall-clock date from a `Instant`, go through
+/// `em_foundations::time` instead.
+pub fn format_duration(total_seconds: i64) -> String {
     let negative = total_seconds < 0;
     let sign = if negative { "-" } else { "" };
     let total_seconds = total_seconds.abs();

@@ -1,3 +1,10 @@
+[workspace]
+members = ["crates/*"]
+
+# The app is the workspace root package so that `assets/`, `wix/` and the `[[bin]]`
+# paths resolve unchanged — Bevy's default AssetPlugin looks for `assets/` relative to
+# CARGO_MANIFEST_DIR. The libraries live under `crates/`.
+
 [package]
 name = "exotic-matters"
 version = "0.1.0"
@@ -20,15 +27,19 @@ incremental = false
 debug = false
 
 [dependencies]
+em-foundations = { path = "crates/em-foundations" }
+em-sim = { path = "crates/em-sim", features = ["bevy"] }
+
 num-traits = "0.2.18"
 scilib = "1.0.0"
 
 bevy = "0.17.2"
+bevy_mesh = "0.17"
 bevy_egui = "0.38.0"
+bevy_ui_text_input = "0.6"
 iyes_perf_ui = { git = "https://github.com/mgi388/iyes_perf_ui.git", branch = "bevy-0.17" }
 serde = { version = "1.0.215", features = ["derive"] }
 toml = "0.8.20"
-uuid = { version = "1.12.1", features = ["v4"] }
 lazy_static = "1.4.0"
 regex = "1.10.3"
 url = "2.5.4"
@@ -37,6 +48,10 @@ reqwest = { version = "0.12", features = ["blocking"] }
 serde_json = "1"
 itertools = "0.14.0"
 rusqlite = { version = "0.32", features = ["bundled"] }
+clap = { version = "4", features = ["derive"] }
+csv = "1"
+bitflags = "2"
+chrono = "0.4.45"
 
 [dependencies.eframe]
 version = "0.33.3"
@@ -59,3 +74,10 @@ path = "src/bin/horizons.rs"
 [[bin]]
 name = "migrate-saves"
 path = "src/bin/migrate_saves.rs"
+
+[[bin]]
+name = "csv-sort"
+path = "src/bin/csv_sort.rs"
+
+[dev-dependencies]
+em-sim = { path = "crates/em-sim" }

@@ -1,39 +1,22 @@
+//! Universe file I/O and spawning.
+//!
+//! The data model lives in `em_sim::universe`; this handles paths, formats, the SQLite
+//! backend, and turning `SomeBody` entries into Bevy entities.
+
 use std::path::PathBuf;
 use std::ffi::OsStr;
-use bevy::math::DVec3;
 use bevy::prelude::*;
-use std::collections::HashMap;
-use bevy::camera::visibility::NoFrustumCulling;
-use serde::{Deserialize, Serialize};
-use crate::body::appearance::Appearance;
-use crate::body::appearance::AssetCache;
-use crate::body::motive::info::{BodyInfo, BodyRotation, BodyState};
-use crate::body::motive::kepler_motive::KeplerMotive;
-use crate::body::motive::Motive;
-use crate::sim::SimulationObject;
-use crate::body::universe::{Major, Minor};
 use crate::body::universe::save_sqlite;
-use crate::util::mappings;
 
-/// State for a tag (group of bodies).
-#[derive(Serialize, Deserialize, Resource, Debug)]
-pub struct TagState {
-    pub shown: bool,
-    pub trajectory: bool,
-    pub members: Vec<String>,
-}
+/// Data types re-exported so `crate::body::universe::save::…` paths keep resolving.
+pub use em_sim::universe::{
+    TagState, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings,
+    SomeBody, FixedEntry, NewtonEntry, KeplerEntry, PatchedConicsEntry, CompoundMotiveEntry,
+};
 
-impl Default for TagState {
-    fn default() -> Self {
-        Self {
-            shown: false,
-            trajectory: false,
-            members: Vec::new(),
-        }
-    }
-}
+// Spawning moved to `crate::sim::world::sync_body_entities`, which builds entities from
+// the arena rather than from the file, so a body added at runtime gets one too.
 
-/// Supported save file formats
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveFormat {
     /// TOML format (.toml)
@@ -67,34 +50,31 @@ pub struct UniverseFile {
 }
 
 impl UniverseFile {
-    /// Load from any supported format (auto-detected from extension)
-    pub fn load_from_path(path: &PathBuf) -> Option<Self> {
-        let format = SaveFormat::from_path(path)?;
-        match format {
-            SaveFormat::Toml => Self::load_from_path_toml(path),
-            SaveFormat::Sqlite => Self::load_from_path_sqlite(path),
+    /// Load from any supported format, chosen by extension.
+    ///
+    /// Returns why it failed. These used to be `Option`, so an unknown shape type, a
+    /// missing table or a permissions error all arrived as `None` and the app carried on
+    /// into the planetarium with whatever universe was already resident.
+    pub fn load_from_path(path: &PathBuf) -> Result<Self, String> {
+        match SaveFormat::from_path(path) {
+            Some(SaveFormat::Toml) => Self::load_from_path_toml(path),
+            Some(SaveFormat::Sqlite) => Self::load_from_path_sqlite(path),
+            None => Err(format!("{path:?} has no recognised save extension")),
         }
     }
 
-    /// Load from TOML format
-    pub fn load_from_path_toml(path: &PathBuf) -> Option<Self> {
-        let file_path = path.clone();
-        let string = std::fs::read_to_string(path).ok()?;
-        let contents: UniverseFileContents = toml::from_str(&string).ok()?;
-        Some(Self {
-            file: Some(file_path),
-            contents,
-        })
+    pub fn load_from_path_toml(path: &PathBuf) -> Result<Self, String> {
+        let string = std::fs::read_to_string(path)
+            .map_err(|e| format!("could not read {path:?}: {e}"))?;
+        let contents: UniverseFileContents = toml::from_str(&string)
+            .map_err(|e| format!("could not parse {path:?}: {e}"))?;
+        Ok(Self { file: Some(path.clone()), contents })
     }
 
-    /// Load from SQLite (.em) format
-    pub fn load_from_path_sqlite(path: &PathBuf) -> Option<Self> {
-        let file_path = path.clone();
-        let contents = save_sqlite::load_from_em(path).ok()?;
-        Some(Self {
-            file: Some(file_path),
-            contents,
-        })
+    pub fn load_from_path_sqlite(path: &PathBuf) -> Result<Self, String> {
+        let contents = save_sqlite::load_from_em(path)
+            .map_err(|e| format!("could not load {path:?}: {e:?}"))?;
+        Ok(Self { file: Some(path.clone()), contents })
     }
 }
 
@@ -175,290 +155,4 @@ impl UniverseFile {
         self.file = Some(path);
         self.save()
     }
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct UniverseFileContents {
-    pub version: String,
-    pub time: UniverseFileTime,
-    pub view: ViewSettings,
-    pub physics: UniversePhysics,
-    pub bodies: Vec<SomeBody>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct UniverseFileTime {
-    pub time_julian_days: f64, // In Julian Days
-    /// Physics time step in simulation seconds (default: 0.1)
-    #[serde(default = "default_step")]
-    pub step: f64,
-    /// GUI speed multiplier - sim seconds per real second (default: 1.0)
-    #[serde(default = "default_gui_speed")]
-    pub gui_speed: f64,
-    /// Maximum real-world time to spend on physics per frame (default: 0.016)
-    #[serde(default = "default_max_frame_time")]
-    pub max_frame_time: f64,
-}
-
-fn default_step() -> f64 { 0.1 }
-fn default_gui_speed() -> f64 { 1.0 }
-fn default_max_frame_time() -> f64 { 0.016 }
-fn default_show_axes() -> bool { true }
-
-#[derive(Resource, Serialize, Deserialize)]
-pub struct UniversePhysics {
-    pub gravitational_constant: f64,
-}
-
-impl Default for UniversePhysics {
-    fn default() -> Self {
-        Self {
-            gravitational_constant: 6.6743015e-11, // Standard G in m³ kg⁻¹ s⁻²
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Resource, Debug)]
-pub struct ViewSettings {
-    pub distance_scale: f64,
-    pub logarithmic_distance_scale: bool,
-    pub logarithmic_distance_base: f64,
-    pub body_scale: f64,
-    pub logarithmic_body_scale: bool,
-    pub logarithmic_body_base: f64,
-    pub show_labels: bool,
-    pub show_trajectories: bool,
-    #[serde(default = "default_show_axes")]
-    pub show_axes: bool,
-    pub tags: HashMap<String, TagState>,
-    pub trajectory_resolution: usize,
-}
-
-impl Default for ViewSettings {
-    fn default() -> Self {
-        Self {
-            distance_scale: 1e-9,
-            logarithmic_body_scale: false,
-            logarithmic_body_base: 10.0,
-            body_scale: 1e-9,
-            logarithmic_distance_scale: false,
-            logarithmic_distance_base: 10.0,
-            show_labels: true,
-            show_trajectories: true,
-            show_axes: true,
-            tags: HashMap::new(),
-            trajectory_resolution: 120,
-        }
-    }
-}
-
-impl ViewSettings {
-    pub fn body_in_any_visible_tag<T:AsRef<str> + ToString>(&self, body_id: T) -> bool {
-        for tag in self.tags.values() {
-            if tag.shown && tag.members.contains(&body_id.to_string()) {
-                return true;
-            }
-        }
-        false
-    }
-
-    pub fn body_in_any_trajectory_tag<T:AsRef<str> + ToString>(&self, body_id: T) -> bool {
-        for tag in self.tags.values() {
-            if tag.trajectory && tag.members.contains(&body_id.to_string()) {
-                return true;
-            }
-        }
-        false
-    }
-    
-    pub fn distance_factor(&self) -> f64 {
-        if self.logarithmic_distance_scale {
-            mappings::log_scale(self.distance_scale, self.logarithmic_distance_base)
-        } else {
-            self.distance_scale
-        }
-    }
-    
-    pub fn body_scale_factor(&self, radius: f64) -> f32 {
-        let n = if self.logarithmic_body_scale {
-            mappings::log_scale(radius, self.logarithmic_body_base) * self.body_scale
-        } else {
-            radius * self.body_scale
-        } as f32;
-        n
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-pub enum SomeBody {
-    /// Legacy fixed motive - loaded as Motive with single Fixed entry
-    FixedEntry(FixedEntry),
-    /// Legacy newton motive - loaded as Motive with single Newtonian entry
-    NewtonEntry(NewtonEntry),
-    /// Legacy kepler motive - loaded as Motive with single Keplerian entry
-    KeplerEntry(KeplerEntry),
-    /// Legacy patched conics - deprecated, kept for backward compatibility
-    CompoundEntry(PatchedConicsEntry),
-    /// New compound motive format - supports multiple motive types with transitions
-    CompoundMotiveEntry(CompoundMotiveEntry),
-}
-
-impl SomeBody {
-    pub fn spawn(
-        self,
-        commands: &mut Commands,
-        cache: &mut ResMut<AssetCache>,
-        meshes: &mut ResMut<Assets<Mesh>>,
-        materials: &mut ResMut<Assets<StandardMaterial>>,
-        images: &mut ResMut<Assets<Image>>,
-    )  -> Entity {
-        let mut entity = commands.spawn((
-            SimulationObject,
-            Transform::default(),
-            BodyState::default(),
-        ));
-
-        let (info, appearance, motive, rotation) = match self {
-            SomeBody::FixedEntry(entry) => {
-                // Convert legacy FixedEntry to Motive with single Fixed entry at Epoch
-                let motive = Motive::fixed(entry.position);
-                (entry.info, entry.appearance, motive, entry.rotation)
-            },
-            SomeBody::NewtonEntry(entry) => {
-                // Convert legacy NewtonEntry to Motive with single Newtonian entry at Epoch
-                let motive = Motive::newtonian(entry.position, entry.velocity);
-                (entry.info, entry.appearance, motive, entry.rotation)
-            },
-            SomeBody::KeplerEntry(entry) => {
-                // Convert legacy KeplerEntry to Motive with single Keplerian entry at Epoch
-                let motive = Motive::keplerian(
-                    entry.params.primary_id.clone(),
-                    entry.params.shape,
-                    entry.params.rotation,
-                    entry.params.epoch,
-                );
-                (entry.info, entry.appearance, motive, entry.rotation)
-            },
-            SomeBody::CompoundEntry(entry) => {
-                // Legacy patched conics - create empty motive for now
-                // TODO: Convert old route HashMap to new Motive format if needed
-                let motive = Motive::fixed(DVec3::ZERO);
-                (entry.info, entry.appearance, motive, None)
-            },
-            SomeBody::CompoundMotiveEntry(entry) => {
-                // New compound motive format - use directly
-                (entry.info, entry.appearance, entry.motive, entry.rotation)
-            },
-        };
-
-        // Insert the compound motive
-        entity.insert(motive);
-
-        // Insert body rotation if present
-        if let Some(body_rotation) = rotation {
-            entity.insert(body_rotation);
-        }
-
-        if info.major {
-            entity.insert(Major);
-        } else {
-            entity.insert(Minor);
-        }
-        entity.insert(info);
-
-        match &appearance {
-            Appearance::Empty => {}
-            Appearance::DebugBall(debug_ball) => {
-                let (mesh, material) = debug_ball.pbr_bundle(cache, meshes, materials, images);
-                entity.insert(mesh);
-                entity.insert(material);
-            }
-            Appearance::Star(star_ball) => {
-                let (mesh, material, light) = star_ball.pbr_bundle(cache, meshes, materials, images);
-                entity.insert(mesh);
-                entity.insert(material);
-                entity.insert(light);
-                entity.insert(NoFrustumCulling);
-            }
-        }
-        entity.insert(appearance);
-
-        entity.id()
-    }
-
-    pub fn id(&self) -> String {
-        match self {
-            SomeBody::FixedEntry(entry) => (&entry.info.id).clone(),
-            SomeBody::NewtonEntry(entry) => (&entry.info.id).clone(),
-            SomeBody::KeplerEntry(entry) => (&entry.info.id).clone(),
-            SomeBody::CompoundEntry(entry) => (&entry.info.id).clone(),
-            SomeBody::CompoundMotiveEntry(entry) => (&entry.info.id).clone(),
-        }
-    }
-
-    pub fn name(&self) -> String {
-        match self {
-            SomeBody::FixedEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
-            SomeBody::NewtonEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
-            SomeBody::KeplerEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
-            SomeBody::CompoundEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
-            SomeBody::CompoundMotiveEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
-        }
-    }
-
-    pub fn tags(&self) -> &Vec<String> {
-        match self {
-            SomeBody::FixedEntry(entry) => &entry.info.tags,
-            SomeBody::NewtonEntry(entry) => &entry.info.tags,
-            SomeBody::KeplerEntry(entry) => &entry.info.tags,
-            SomeBody::CompoundEntry(entry) => &entry.info.tags,
-            SomeBody::CompoundMotiveEntry(entry) => &entry.info.tags,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct FixedEntry {
-    pub info: BodyInfo,
-    pub position: DVec3,
-    pub appearance: Appearance,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rotation: Option<BodyRotation>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct NewtonEntry {
-    pub info: BodyInfo,
-    pub position: DVec3,
-    pub velocity: DVec3,
-    pub appearance: Appearance,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rotation: Option<BodyRotation>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct KeplerEntry {
-    pub info: BodyInfo,
-    pub params: KeplerMotive,
-    pub appearance: Appearance,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rotation: Option<BodyRotation>,
-}
-
-/// Legacy format - use CompoundMotiveEntry for new saves
-#[derive(Serialize, Deserialize)]
-pub struct PatchedConicsEntry {
-    pub info: BodyInfo,
-    pub route: HashMap<u64, KeplerMotive>,
-    pub appearance: Appearance,
-}
-
-/// The new compound motive format that supports motive transitions over time
-#[derive(Serialize, Deserialize)]
-pub struct CompoundMotiveEntry {
-    pub info: BodyInfo,
-    pub motive: Motive,
-    pub appearance: Appearance,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rotation: Option<BodyRotation>,
 }

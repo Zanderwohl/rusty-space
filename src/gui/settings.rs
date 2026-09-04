@@ -51,23 +51,108 @@ pub struct DisplaySettings {
     pub quality: DisplayQuality,
     #[serde(default)]
     pub glow: DisplayGlow,
-    /// Minimum distance (in rendered units) for trajectory fade.
-    /// Everything closer than this is fully transparent.
-    #[serde(default = "default_trajectory_fade_min")]
-    pub trajectory_fade_min: f32,
-    /// Maximum distance (in rendered units) for trajectory fade.
-    /// Everything further than this is fully opaque.
-    /// Set both to 0.0 to disable fading.
-    #[serde(default = "default_trajectory_fade_max")]
-    pub trajectory_fade_max: f32,
+    /// Brightness (percent, 0-100) at the front/leading end of a trajectory.
+    /// The trajectory lerps from this to `trajectory_brightness_back` along its length.
+    #[serde(default = "default_trajectory_brightness_front")]
+    pub trajectory_brightness_front: f32,
+    /// Brightness (percent, 0-100) at the back/trailing end of a trajectory.
+    #[serde(default = "default_trajectory_brightness_back")]
+    pub trajectory_brightness_back: f32,
+    /// Brightness multiplier for background stars (0.1 to 10.0).
+    #[serde(default = "default_star_brightness")]
+    pub star_brightness: f32,
+    /// Local-star billboard brightness at 1 lightyear (inverse-square normalized floor).
+    #[serde(default = "default_local_star_brightness_min")]
+    pub local_star_brightness_min: f32,
+    /// Local-star billboard brightness at 1 meter (inverse-square normalized ceiling).
+    #[serde(default = "default_local_star_brightness_max")]
+    pub local_star_brightness_max: f32,
+    /// Angular radius (arcminutes) of the faintest catalog stars.
+    #[serde(default = "default_star_radius_min")]
+    pub star_radius_min: f32,
+    /// Angular radius (arcminutes) of the brightest catalog stars.
+    /// A star's drawn radius lerps between min and max by its magnitude.
+    #[serde(default = "default_star_radius_max")]
+    pub star_radius_max: f32,
+    /// Minimum brightness a sun-lit distant body can fade to (0.0 to 1.0).
+    /// 0.0 lets bodies in full shadow disappear entirely.
+    #[serde(default = "default_body_brightness_floor")]
+    pub body_brightness_floor: f32,
+    /// Minimum on-screen radius (pixels) for distant-body dots. The dot is drawn at
+    /// the larger of this and the body's natural angular size, so far bodies stay
+    /// visible while near ones grow to their real size.
+    #[serde(default = "default_body_radius_min")]
+    pub body_radius_min: f32,
+    /// Maximum on-screen radius (pixels) for distant-body dots, capping how large a
+    /// near body's dot can grow before it hands off to the wireframe.
+    #[serde(default = "default_body_radius_max")]
+    pub body_radius_max: f32,
+    /// Screen-space radius (pixels) where the model->dot transition begins.
+    /// At or above this size, the distant-body dot is fully hidden.
+    #[serde(default = "default_model_fade_start_px")]
+    pub model_fade_start_px: f32,
+    /// Screen-space radius (pixels) where the model->dot transition ends.
+    /// At or below this size, the distant-body dot is fully visible.
+    #[serde(default = "default_model_fade_end_px")]
+    pub model_fade_end_px: f32,
+    /// Show the Point of Aries (♈) celestial reference marker.
+    #[serde(default = "default_true")]
+    pub show_point_of_aries: bool,
 }
 
-fn default_trajectory_fade_min() -> f32 {
-    0.0
+fn default_star_brightness() -> f32 {
+    110.0
 }
 
-fn default_trajectory_fade_max() -> f32 {
-    1.5
+fn default_local_star_brightness_min() -> f32 {
+    0.8
+}
+
+fn default_local_star_brightness_max() -> f32 {
+    110.0
+}
+
+/// Old fixed star size: STAR_THRESHOLD 0.999995 ≈ acos ≈ 0.00316 rad ≈ 10.9 arcmin.
+/// Defaulting both ends to this reproduces the previous uniform look (no size
+/// variation); widen the wdwmax to make brighter stars larger.
+fn default_star_radius_min() -> f32 {
+    1.2
+}
+
+fn default_star_radius_max() -> f32 {
+    7.5
+}
+
+fn default_body_brightness_floor() -> f32 {
+    0.000
+}
+
+fn default_body_radius_min() -> f32 {
+    // Dot radius (px) for a 1 m reference object; slider range is 0..1.
+    1.0
+}
+
+fn default_body_radius_max() -> f32 {
+    // High enough to not cap within the dot's visible range by default.
+    3.5
+}
+
+fn default_model_fade_start_px() -> f32 {
+    20.0
+}
+
+fn default_model_fade_end_px() -> f32 {
+    10.0
+}
+
+fn default_trajectory_brightness_front() -> f32 {
+    // Matches the previous hardcoded "None" glow look (0.1 -> 10%).
+    10.0
+}
+
+fn default_trajectory_brightness_back() -> f32 {
+    // Matches the previous hardcoded "None" glow look (1.0 -> 100%).
+    100.0
 }
 
 impl Default for DisplaySettings {
@@ -75,8 +160,19 @@ impl Default for DisplaySettings {
         Self {
             quality: DisplayQuality::default(),
             glow: DisplayGlow::default(),
-            trajectory_fade_min: default_trajectory_fade_min(),
-            trajectory_fade_max: default_trajectory_fade_max(),
+            trajectory_brightness_front: default_trajectory_brightness_front(),
+            trajectory_brightness_back: default_trajectory_brightness_back(),
+            star_brightness: default_star_brightness(),
+            local_star_brightness_min: default_local_star_brightness_min(),
+            local_star_brightness_max: default_local_star_brightness_max(),
+            star_radius_min: default_star_radius_min(),
+            star_radius_max: default_star_radius_max(),
+            body_brightness_floor: default_body_brightness_floor(),
+            body_radius_min: default_body_radius_min(),
+            body_radius_max: default_body_radius_max(),
+            model_fade_start_px: default_model_fade_start_px(),
+            model_fade_end_px: default_model_fade_end_px(),
+            show_point_of_aries: default_true(),
         }
     }
 }
@@ -96,6 +192,20 @@ pub enum DisplayGlow {
     Subtle,
     VFD,
     Defcon,
+}
+
+impl DisplayGlow {
+    /// Whole-trajectory brightness multiplier applied on top of the front/back
+    /// range. `None` is the 1.0 baseline (the front/back percentages render as-is);
+    /// brighter presets push the trajectory overbright into HDR/bloom territory.
+    pub fn brightness_multiplier(self) -> f32 {
+        match self {
+            DisplayGlow::None => 1.0,
+            DisplayGlow::Subtle => 2.0,
+            DisplayGlow::VFD => 6.0,
+            DisplayGlow::Defcon => 16.0,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
@@ -164,12 +274,12 @@ pub struct WindowSelections {
     pub spin_data: SpinData,
     #[serde(default = "default_false")]
     pub body_edit: bool,
-    #[serde(default = "default_false")]
+    #[serde(default = "default_true")]
     pub body_info: bool,
     #[serde(default = "default_false")]
     pub grid: bool,
     #[serde(default = "default_false")]
-    pub camera: bool,
+    pub controls: bool,
 }
 
 impl Default for WindowSelections {
@@ -180,7 +290,7 @@ impl Default for WindowSelections {
             body_edit: default_false(),
             body_info: default_false(),
             grid: default_false(),
-            camera: default_false(),
+            controls: default_false(),
         }
     }
 }
@@ -194,4 +304,8 @@ pub struct SpinData {
 
 fn default_false() -> bool {
     false
+}
+
+fn default_true() -> bool {
+    true
 }

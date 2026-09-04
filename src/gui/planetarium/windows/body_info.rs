@@ -1,37 +1,23 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use bevy_egui::egui::Ui;
-use crate::body::appearance::Appearance;
-use crate::body::motive::fixed_motive::FixedMotive;
-use crate::body::motive::info::{BodyInfo, BodyState};
-use crate::body::motive::kepler_motive::KeplerMotive;
-use crate::body::motive::newton_motive::NewtonMotive;
+use em_sim::body::BodyInfo;
+use em_sim::motive::{MotiveSelection, kepler::KeplerMotive};
+use em_foundations::time::Instant;
 use crate::body::universe::Universe;
-use crate::gui::menu::UiState;
-use crate::camera::GoTo;
+use crate::camera::{GoTo, GoToSource};
+use crate::gui::planetarium::focused_body::{body_select_dropdown, sorted_body_options};
+use crate::gui::planetarium::FocusedBodyState;
 use crate::gui::settings::{Settings, UiTheme};
-use crate::util::bevystuff::GlamVec;
-
-#[derive(Resource)]
-pub struct BodyInfoState {
-    pub current_body_id: Option<String>,
-}
-
-impl Default for BodyInfoState {
-    fn default() -> Self {
-        Self {
-            current_body_id: None,
-        }
-    }
-}
+use crate::sim::world::{BodyEntities, SimSystem};
 
 pub fn body_info_window(
-    mut settings: ResMut<Settings>,
-    mut ui_state: ResMut<UiState>,
+    settings: Res<Settings>,
     universe: Res<Universe>,
-    bodies: Query<(Entity, &BodyInfo, &BodyState, Option<&FixedMotive>, Option<&KeplerMotive>, Option<&NewtonMotive>)>,
+    system: Res<SimSystem>,
+    body_entities: Res<BodyEntities>,
     mut contexts: EguiContexts,
-    mut body_info_state: ResMut<BodyInfoState>,
+    mut focused_body_state: ResMut<FocusedBodyState>,
     mut go_to: MessageWriter<GoTo>,
 ) {
     let ctx = contexts.ctx_mut();
@@ -47,30 +33,28 @@ pub fn body_info_window(
         egui::Window::new("Body Info")
             .vscroll(true)
             .show(ctx, |ui| {
-                // Create a sorted list of body names and their IDs
-                let mut body_options: Vec<(String, String)> = universe.id_to_name_iter()
-                    .map(|(id, name)| (name.clone(), id.clone()))
-                    .collect();
-                body_options.sort_by(|a, b| a.0.cmp(&b.0));
+                let body_options = sorted_body_options(&universe);
+                body_select_dropdown(&universe, &mut focused_body_state, ui, &body_options);
 
-                body_select_dropdown(universe, &mut body_info_state, ui, body_options);
-                
-                // Get the body using the BodyInfo.id from bodies query
-                let selected_body = bodies.iter().filter(|(e, info, state, fixed_motive, kepler_motive, newton_motive)| {
-                    if body_info_state.current_body_id.is_none() { return false; }
-                    <std::string::String as AsRef<str>>::as_ref(&info.id) == body_info_state.current_body_id.as_ref().unwrap()
-                }).collect::<Vec<_>>();
+                let selected = focused_body_state
+                    .current_body_id
+                    .as_deref()
+                    .and_then(|id| system.0.by_name(id));
 
-                let selected_body = selected_body.get(0);
-                match selected_body {
-                    Some((e, info, state, fixed_motive, kepler_motive, newton_motive)) => {
-                        if ui.button("Go to").clicked() {
-                            go_to.write(GoTo {
-                                entity: e.entity(),
-                            });
+                match selected {
+                    Some(index) => {
+                        let id = system.0.id(index);
+                        if let Some(entity) = body_entities.map.get(&id).copied() {
+                            if ui.button("Go to").clicked() {
+                                go_to.write(GoTo {
+                                    entity,
+                                    frame: None,
+                                    source: GoToSource::UiButton,
+                                });
+                            }
                         }
 
-                        display_body_info(ui, info, state, *fixed_motive, *kepler_motive, *newton_motive)
+                        display_body_info(ui, &system.0, index);
                     }
                     None => {
                         ui.label("No body selected.");
@@ -80,108 +64,98 @@ pub fn body_info_window(
     }
 }
 
-fn display_body_info (
-    ui: &mut Ui, 
-    info: &BodyInfo, 
-    state: &BodyState, 
-    fixed_motive: Option<&FixedMotive>, 
-    kepler_motive: Option<&KeplerMotive>, 
-    newton_motive: Option<&NewtonMotive>
-) {
-    body_info_section(ui, info);
+fn display_body_info(ui: &mut Ui, system: &em_sim::system::System, index: em_sim::id::BodyIndex) {
+    let time = system.time();
+    body_info_section(ui, system.info(index));
     ui.separator();
-    body_state_section(ui, state);
-    if let Some(fixed_motive) = fixed_motive {
-        ui.separator();
-        fixed_motive_section(ui, fixed_motive);
-    }
-    if let Some(kepler_motive) = kepler_motive {
-        ui.separator();
-        kepler_motive_section(ui, kepler_motive);
-    }
-    if let Some(newton_motive) = newton_motive {
-        ui.separator();
-        newton_motive_section(ui, newton_motive);
+    body_state_section(ui, system, index);
+
+    // One motive covers all kinds; the section follows what is active now.
+    let (_, selection) = system.motive(index).motive_at(time);
+    ui.separator();
+    match selection {
+        MotiveSelection::Fixed { primary_id, position } => {
+            ui.label("Fixed Body");
+            labelled(ui, "Primary:", primary_id.as_deref().unwrap_or("(origin)"));
+            vector_row(ui, "Offset:", *position);
+        }
+        MotiveSelection::Newtonian { position, velocity } => {
+            ui.label("Newtonian Body");
+            vector_row(ui, "Position:", *position);
+            vector_row(ui, "Velocity:", *velocity);
+        }
+        MotiveSelection::Keplerian(kepler) => {
+            ui.label("Keplerian Body");
+            kepler_motive_section(ui, kepler, system.mu(index), time);
+        }
     }
 }
 
 fn body_info_section(ui: &mut Ui, info: &BodyInfo) {
     ui.label("Body Info");
 
-    ui.horizontal(|ui| {
-        ui.label("Name:");
-        ui.label(info.display_name());
-    });
+    labelled(ui, "Name:", info.display_name());
 
     if let Some(designation) = &info.designation {
-        ui.horizontal(|ui| {
-            ui.label("Designation:");
-            ui.label(designation);
-        });
+        labelled(ui, "Designation:", designation);
     }
 
-    ui.horizontal(|ui| {
-        ui.label("System ID:");
-        ui.label(&info.id);
-    });
+    labelled(ui, "System ID:", &info.id);
 
     if !info.tags.is_empty() {
-        ui.horizontal(|ui| {
-            ui.label("Tags:");
-            ui.label(info.tags.join(", "));
-        });
+        labelled(ui, "Tags:", &info.tags.join(", "));
     }
 
     ui.separator();
     ui.label("Physical Attributes");
-    
+
+    labelled(ui, "Mass:", &format!("{} kg", crate::util::format::sci_not(info.mass)));
+}
+
+fn body_state_section(ui: &mut Ui, system: &em_sim::system::System, index: em_sim::id::BodyIndex) {
+    ui.label("Current State");
+    vector_row(ui, "Position:", system.position(index));
+    vector_row(ui, "Velocity:", system.velocity(index));
+    if let Some(local) = system.local_position(index) {
+        vector_row(ui, "Local:", local);
+    }
+}
+
+fn kepler_motive_section(ui: &mut Ui, motive: &KeplerMotive, mu: f64, time: Instant) {
+    labelled(ui, "Primary:", &motive.primary_id);
+    labelled(ui, "Semi-major axis:", &format!("{} m", crate::util::format::sci_not(motive.semi_major_axis())));
+    labelled(ui, "Eccentricity:", &format!("{:.6}", motive.eccentricity()));
+    labelled(ui, "Periapsis:", &format!("{} m", crate::util::format::sci_not(motive.periapsis())));
+    match motive.apoapsis() {
+        Some(apoapsis) => labelled(ui, "Apoapsis:", &format!("{} m", crate::util::format::sci_not(apoapsis))),
+        None => labelled(ui, "Apoapsis:", "none (open orbit)"),
+    }
+    labelled(ui, "Inclination:", &format!("{:.4}°", motive.inclination()));
+    labelled(ui, "Ascending node:", &format!("{:.4}°", motive.longitude_of_ascending_node_infallible(time)));
+    labelled(ui, "Arg. of periapsis:", &format!("{:.4}°", motive.argument_of_periapsis(time)));
+    labelled(ui, "Mean anomaly:", &format!("{:.4}°", motive.mean_anomaly(time, mu).to_degrees()));
+    labelled(ui, "True anomaly:", &format!("{:.4}°", motive.true_anomaly(time, mu).to_degrees()));
+    labelled(ui, "Period:", &format!("{} s", crate::util::format::sci_not(motive.period(mu).to_seconds())));
+    if motive.is_precessing() {
+        ui.label("Precessing elements");
+    }
+}
+
+fn labelled(ui: &mut Ui, label: &str, value: &str) {
     ui.horizontal(|ui| {
-        ui.label("Mass:");
-        ui.label(format!("{} kg", crate::util::format::sci_not(info.mass)));
+        ui.label(label);
+        ui.label(value);
     });
 }
 
-fn body_state_section(ui: &mut Ui, state: &BodyState) {
-    ui.label("Current State");
-}
-
-fn fixed_motive_section(ui: &mut Ui, motive: &FixedMotive) {
-    ui.label("Fixed Body");
-    motive.display(ui);
-}
-
-fn kepler_motive_section(ui: &mut Ui, motive: &KeplerMotive) {
-    ui.label("Keplerian Body");
-    motive.display(ui);
-}
-
-fn newton_motive_section(ui: &mut Ui, motive: &NewtonMotive) {
-    ui.label("Newtonian Body");
-    motive.display(ui);
-}
-
-pub(crate) fn body_select_dropdown(universe: Res<Universe>, mut body_info_state: &mut ResMut<BodyInfoState>, ui: &mut Ui, mut body_options: Vec<(String, String)>) {
-    egui::ComboBox::from_label("Body")
-        .selected_text(
-            body_info_state.current_body_id
-                .as_ref()
-                .and_then(|id| universe.get_by_id(id))
-                .map(|name| name.clone())
-                .unwrap_or_else(|| "Choose a body".to_string())
-        )
-        .show_ui(ui, |ui| {
-            ui.selectable_value(
-                &mut body_info_state.current_body_id,
-                None,
-                "Choose a body"
-            );
-
-            for (name, id) in body_options {
-                ui.selectable_value(
-                    &mut body_info_state.current_body_id,
-                    Some(id.clone()),
-                    name
-                );
-            }
-        });
+fn vector_row(ui: &mut Ui, label: &str, v: bevy::math::DVec3) {
+    ui.horizontal(|ui| {
+        ui.label(label);
+        ui.label(format!(
+            "{}, {}, {}",
+            crate::util::format::sci_not(v.x),
+            crate::util::format::sci_not(v.y),
+            crate::util::format::sci_not(v.z),
+        ));
+    });
 }
