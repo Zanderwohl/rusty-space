@@ -14,6 +14,7 @@ use crate::gui::app::AppState;
 use crate::sim::SimTime;
 
 use super::{MenuState, UiState, SaveFileMeta};
+use super::widgets::{spawn_button, spawn_message, spawn_panel, spawn_title};
 use crate::gui::style::vfd;
 
 // ============================================================================
@@ -65,9 +66,6 @@ pub struct NamingScreen;
 
 #[derive(Component)]
 pub struct ConfirmOverwriteScreen;
-
-#[derive(Component)]
-pub struct EscMenuButton;
 
 #[derive(Component)]
 pub struct FileNameInput;
@@ -214,64 +212,7 @@ fn spawn_overlay(commands: &mut Commands) -> Entity {
         .id()
 }
 
-fn spawn_panel(commands: &mut Commands, overlay: Entity) -> Entity {
-    let panel = commands
-        .spawn((
-            Node {
-                width: Val::Px(400.0),
-                min_height: Val::Px(200.0),
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(30.0)),
-                row_gap: Val::Px(15.0),
-                align_items: AlignItems::Center,
-                border: UiRect::all(Val::Px(2.0)),
-                ..default()
-            },
-            BackgroundColor(vfd::PANEL_BG.into()),
-            BorderColor::all(vfd::BUTTON_BORDER),
-        ))
-        .id();
-    commands.entity(overlay).add_child(panel);
-    panel
-}
-
-fn spawn_title(commands: &mut Commands, panel: Entity, text: &str) {
-    let title = commands
-        .spawn((
-            Text::new(text),
-            TextFont {
-                font_size: 28.0,
-                ..default()
-            },
-            TextColor(vfd::TEXT.into()),
-            Node {
-                margin: UiRect::bottom(Val::Px(10.0)),
-                ..default()
-            },
-        ))
-        .id();
-    commands.entity(panel).add_child(title);
-}
-
-fn spawn_message(commands: &mut Commands, panel: Entity, text: &str) {
-    let msg = commands
-        .spawn((
-            Text::new(text),
-            TextFont {
-                font_size: 18.0,
-                ..default()
-            },
-            TextColor(vfd::TEXT_DIM.into()),
-            Node {
-                margin: UiRect::bottom(Val::Px(10.0)),
-                ..default()
-            },
-        ))
-        .id();
-    commands.entity(panel).add_child(msg);
-}
-
-#[derive(Clone)]
+#[derive(Component, Clone)]
 pub enum MenuAction {
     Resume,
     Settings,
@@ -283,65 +224,6 @@ pub enum MenuAction {
     ConfirmSave,
     CancelNaming,
     Overwrite,
-}
-
-#[derive(Component)]
-pub struct MenuButtonAction(pub MenuAction);
-
-fn spawn_button(commands: &mut Commands, panel: Entity, text: &str, action: MenuAction) {
-    let btn = commands
-        .spawn((
-            Button,
-            Node {
-                width: Val::Px(250.0),
-                height: Val::Px(45.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                border: UiRect::all(Val::Px(2.0)),
-                ..default()
-            },
-            BackgroundColor(vfd::BUTTON_BG.into()),
-            BorderColor::all(vfd::BUTTON_BORDER),
-            EscMenuButton,
-            MenuButtonAction(action),
-        ))
-        .with_children(|parent| {
-            parent.spawn((
-                Text::new(text),
-                TextFont {
-                    font_size: 18.0,
-                    ..default()
-                },
-                TextColor(vfd::TEXT.into()),
-            ));
-        })
-        .id();
-    commands.entity(panel).add_child(btn);
-}
-
-// ============================================================================
-// Button Hover System
-// ============================================================================
-
-pub fn button_hover_system(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<EscMenuButton>),
-    >,
-) {
-    for (interaction, mut color) in &mut interaction_query {
-        match *interaction {
-            Interaction::Hovered => {
-                *color = vfd::BUTTON_HOVER.into();
-            }
-            Interaction::None => {
-                *color = vfd::BUTTON_BG.into();
-            }
-            Interaction::Pressed => {
-                *color = vfd::BUTTON_HOVER.into();
-            }
-        }
-    }
 }
 
 // ============================================================================
@@ -370,7 +252,7 @@ pub fn cleanup_main_menu(
 }
 
 pub fn handle_main_menu_buttons(
-    interaction_query: Query<(&Interaction, &MenuButtonAction), (Changed<Interaction>, With<Button>)>,
+    interaction_query: Query<(&Interaction, &MenuAction), (Changed<Interaction>, With<Button>)>,
     mut next_esc_state: ResMut<NextState<EscMenuState>>,
     mut next_app_state: ResMut<NextState<AppState>>,
     mut next_menu_state: ResMut<NextState<MenuState>>,
@@ -388,7 +270,7 @@ pub fn handle_main_menu_buttons(
             continue;
         }
 
-        match &action.0 {
+        match action {
             MenuAction::Resume => {
                 next_esc_state.set(EscMenuState::Closed);
             }
@@ -461,7 +343,7 @@ pub fn cleanup_save_nag(
 }
 
 pub fn handle_save_nag_buttons(
-    interaction_query: Query<(&Interaction, &MenuButtonAction), (Changed<Interaction>, With<Button>)>,
+    interaction_query: Query<(&Interaction, &MenuAction), (Changed<Interaction>, With<Button>)>,
     mut next_esc_state: ResMut<NextState<EscMenuState>>,
     mut next_app_state: ResMut<NextState<AppState>>,
     mut next_menu_state: ResMut<NextState<MenuState>>,
@@ -479,7 +361,7 @@ pub fn handle_save_nag_buttons(
             continue;
         }
 
-        match &action.0 {
+        match action {
             MenuAction::SaveAndQuit => {
                 context.quit_after_save = true;
                 context.came_from_save_nag = true;
@@ -569,7 +451,7 @@ pub fn cleanup_naming(
 }
 
 pub fn handle_naming_buttons(
-    interaction_query: Query<(&Interaction, &MenuButtonAction), (Changed<Interaction>, With<Button>)>,
+    interaction_query: Query<(&Interaction, &MenuAction), (Changed<Interaction>, With<Button>)>,
     text_input_query: Query<&TextInputBuffer, With<FileNameInput>>,
     mut next_esc_state: ResMut<NextState<EscMenuState>>,
     mut next_app_state: ResMut<NextState<AppState>>,
@@ -588,7 +470,7 @@ pub fn handle_naming_buttons(
             continue;
         }
 
-        match &action.0 {
+        match action {
             MenuAction::ConfirmSave => {
                 let name = text_input_query
                     .iter()
@@ -677,7 +559,7 @@ pub fn cleanup_confirm_overwrite(
 }
 
 pub fn handle_confirm_overwrite_buttons(
-    interaction_query: Query<(&Interaction, &MenuButtonAction), (Changed<Interaction>, With<Button>)>,
+    interaction_query: Query<(&Interaction, &MenuAction), (Changed<Interaction>, With<Button>)>,
     mut next_esc_state: ResMut<NextState<EscMenuState>>,
     mut next_app_state: ResMut<NextState<AppState>>,
     mut next_menu_state: ResMut<NextState<MenuState>>,
@@ -695,7 +577,7 @@ pub fn handle_confirm_overwrite_buttons(
             continue;
         }
 
-        match &action.0 {
+        match action {
             MenuAction::Overwrite => {
                 let path = PathBuf::from("data/saves").join(format!("{}.em", context.intended_name));
                 match perform_save(
@@ -768,7 +650,6 @@ impl Plugin for EscapeMenuPlugin {
                 (
                     handle_escape_key,
                     track_unsaved_changes,
-                    button_hover_system,
                 )
                     .run_if(in_state(AppState::Planetarium)),
             )
