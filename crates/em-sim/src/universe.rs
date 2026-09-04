@@ -238,3 +238,8 @@ pub struct CompoundMotiveEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation: Option<BodyRotation>,
 }
+
+impl FixedEntry {
+    /// A legacy fixed entry has no primary field; it is positioned absolutely.
+    pub fn info_primary(&self) -> Option<String> { None }
+}

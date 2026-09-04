@@ -122,6 +122,14 @@ impl Motive {
         new
     }
 
+    /// A motive that is this orbit for all time.
+    pub fn from_keplerian(kepler: KeplerMotive) -> Self {
+        let mut new = Self::new();
+        new.insert_event(Instant::from_seconds_since_j2000(0.0), TransitionEvent::Epoch,
+                         MotiveSelection::Keplerian(kepler));
+        new
+    }
+
     pub fn keplerian(primary_id: String, shape: KeplerShape, rotation: KeplerRotation, epoch: KeplerEpoch) -> Self {
         let mut new = Self::new();
         let zero = Instant::from_seconds_since_j2000(0.0);
