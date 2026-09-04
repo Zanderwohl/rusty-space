@@ -185,3 +185,67 @@ fn the_bundled_save_loads_and_propagates() {
         "Luna is {separation:e} m from Earth"
     );
 }
+
+/// A body added to the arena must acquire an entity, and that bare entity must then be
+/// dressed by the presentation systems.
+///
+/// This is the contract `sync_body_entities` relies on: it attaches nothing but a
+/// `BodyRef`, on the understanding that anything keying off `BodyRef` and the absence of
+/// its own link component will pick the body up. If that stopped holding, the app would
+/// compile and run and simply draw nothing.
+#[test]
+fn bodies_get_entities_and_then_get_dressed() {
+    use bevy::asset::AssetPlugin;
+    use exotic_matters::presentation::{
+        spawn_body_point_meshes, spawn_body_wireframe_meshes, BodyPointLink, BodyPointMaterial,
+        BodyWireframeLink, BodyWireframeMaterial,
+    };
+    use exotic_matters::sim::world::{sync_body_entities, BodyEntities};
+
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+        .init_asset::<Mesh>()
+        .init_asset::<BodyWireframeMaterial>()
+        .init_asset::<BodyPointMaterial>();
+
+    let system = System::from_contents(&solar_system()).expect("bundled system");
+    let expected = system.len();
+    app.insert_resource(SimSystem(system))
+        .init_resource::<BodyEntities>();
+
+    app.add_systems(Update, (
+        sync_body_entities,
+        spawn_body_wireframe_meshes.after(sync_body_entities),
+        spawn_body_point_meshes.after(sync_body_entities),
+    ));
+
+    // Two frames: the first spawns the entities, the second dresses them, because
+    // `Commands` do not apply until the sync point.
+    app.update();
+    app.update();
+
+    let tracked = app.world().resource::<BodyEntities>().map.len();
+    assert_eq!(tracked, expected, "every body should own exactly one entity");
+
+    let mut refs = app.world_mut().query::<&BodyRef>();
+    assert_eq!(refs.iter(app.world()).count(), expected);
+
+    // Every DebugBall body must have picked up both a wireframe and a point sprite.
+    let ball_count = {
+        let system = &app.world().resource::<SimSystem>().0;
+        system.indices()
+            .filter(|i| matches!(system.appearance(*i), em_sim::appearance::Appearance::DebugBall(_)))
+            .count()
+    };
+    assert!(ball_count > 100, "only {ball_count} DebugBall bodies to dress");
+
+    let mut wireframed = app.world_mut().query::<(&BodyRef, &BodyWireframeLink)>();
+    assert_eq!(wireframed.iter(app.world()).count(), ball_count);
+    let mut pointed = app.world_mut().query::<(&BodyRef, &BodyPointLink)>();
+    assert_eq!(pointed.iter(app.world()).count(), ball_count);
+
+    // Running again must not dress anything twice — the link component is the guard.
+    app.update();
+    let mut wireframed = app.world_mut().query::<(&BodyRef, &BodyWireframeLink)>();
+    assert_eq!(wireframed.iter(app.world()).count(), ball_count, "dressed twice");
+}
