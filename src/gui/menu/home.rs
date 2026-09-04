@@ -5,7 +5,6 @@ use bevy::prelude::*;
 
 use crate::gui::app::AppState;
 use crate::gui::menu::widgets::{spawn_button, spawn_panel, spawn_title};
-use crate::gui::style::vfd;
 
 use super::{MenuState, UiState};
 
@@ -58,7 +57,6 @@ fn setup_home_menu(mut commands: Commands) {
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(vfd::OVERLAY_BACKDROP.into()),
             HomeMenuScreen,
             GlobalZIndex(100),
         ))

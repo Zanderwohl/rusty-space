@@ -2,6 +2,7 @@ pub(crate) mod settings;
 mod save_load;
 pub mod escape;
 mod home;
+mod drift;
 pub mod widgets;
 
 use std::fs;
@@ -13,6 +14,7 @@ use bevy::prelude::*;
 use bevy::window::{ClosingWindow, WindowCloseRequested};
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use crate::gui::app::AppState;
+use crate::gui::menu::drift::MenuDriftPlugin;
 use crate::gui::menu::home::HomeMenuPlugin;
 use crate::gui::settings::{Settings, UiTheme};
 
@@ -46,7 +48,7 @@ pub enum MenuState {
 impl Plugin for MenuPlugin {
     fn build (&self, app: &mut App) {
         app
-            .add_plugins(HomeMenuPlugin)
+            .add_plugins((HomeMenuPlugin, MenuDriftPlugin))
             .insert_state(MenuState::Home)
             .init_resource::<UiState>()
             .init_resource::<PlanetariumFiles>()

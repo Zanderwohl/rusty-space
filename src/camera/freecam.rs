@@ -223,8 +223,7 @@ impl Plugin for FreeCamPlugin {
             .init_resource::<KeyBindings>()
             .init_resource::<CursorGrabToggle>()
             .add_systems(Startup, initial_grab_on_flycam_spawn)
-            .add_systems(Update, player_move)
-            .add_systems(Update, player_look)
+            .add_systems(Update, (player_move, player_look).run_if(in_state(AppState::Planetarium)))
             .add_systems(Update, cursor_grab);
     }
 }
