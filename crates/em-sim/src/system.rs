@@ -265,13 +265,14 @@ impl System {
 
         // Gather first, assign after: reading a motive borrows `self`, so the columns
         // cannot be written in the same pass.
-        enum Kind { Fixed, Kepler, Newton }
+        enum Kind { Fixed, Kepler(Option<f64>), Newton }
         let mut plan: Vec<(BodyIndex, Option<BodyId>, Kind)> = Vec::with_capacity(n);
         for i in self.indices() {
             let (_, selection) = self.motives[i.get()].motive_at(time);
             let (parent_name, kind) = match selection {
                 MotiveSelection::Fixed { primary_id, .. } => (primary_id.as_deref(), Kind::Fixed),
-                MotiveSelection::Keplerian(k) => (Some(k.primary_id.as_str()), Kind::Kepler),
+                MotiveSelection::Keplerian(k) => (Some(k.primary_id.as_str()),
+                                                  Kind::Kepler(k.gravitational_parameter)),
                 MotiveSelection::Newtonian { .. } => (None, Kind::Newton),
             };
             plan.push((i, parent_name.map(BodyId::from_name), kind));
@@ -284,11 +285,17 @@ impl System {
             self.parent[i.get()] = parent;
             match kind {
                 Kind::Newton => self.newtonian.push(i),
-                Kind::Kepler => {
-                    let parent_mass = parent.map(|p| self.info[p.get()].mass).unwrap_or(0.0);
-                    // Relative two-body motion: mu = G(M + m), not G*M. See KeplerMotive.
-                    self.mu[i.get()] =
-                        self.gravitational_constant * (parent_mass + self.info[i.get()].mass);
+                Kind::Kepler(explicit) => {
+                    self.mu[i.get()] = match explicit {
+                        // A barycentric orbit's effective mu is not G(M+m); the motive
+                        // says what it is.
+                        Some(mu) => mu,
+                        None => {
+                            let parent_mass = parent.map(|p| self.info[p.get()].mass).unwrap_or(0.0);
+                            // Relative two-body motion: mu = G(M + m), not G*M.
+                            self.gravitational_constant * (parent_mass + self.info[i.get()].mass)
+                        }
+                    };
                     hierarchical.push(i);
                 }
                 Kind::Fixed => hierarchical.push(i),

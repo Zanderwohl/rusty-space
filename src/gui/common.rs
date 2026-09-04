@@ -1,7 +1,7 @@
 use bevy_egui::egui;
 use crate::util::format;
 
-pub fn stepper<S: AsRef<str>>(ui: &mut egui::Ui, label: S, mut value: &mut f64) {
+pub fn stepper<S: AsRef<str>>(ui: &mut egui::Ui, label: S, value: &mut f64) {
     ui.horizontal(|ui| {
        ui.label(label.as_ref());
         if ui.button("<<").clicked() { if *value > 0.0 { *value /= 10.0; } else { *value *= 10.0; } }
@@ -10,7 +10,7 @@ pub fn stepper<S: AsRef<str>>(ui: &mut egui::Ui, label: S, mut value: &mut f64) 
             .speed(0.01)
             .range(f64::MIN..=f64::MAX)
             .fixed_decimals(1)
-            .custom_formatter(|n, range| format::sci_not(n))
+            .custom_formatter(|n, _range| format::sci_not(n))
             .custom_parser(|s| format::sci_not_parser(s))
         );
         if ui.button(">").clicked() { *value = bump_decimal(*value, 1.0); }

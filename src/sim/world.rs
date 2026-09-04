@@ -231,12 +231,18 @@ pub fn calculate_trajectories(
     let resolution = view_settings.trajectory_resolution.max(1);
 
     for calc in calcs.read() {
-        for i in system.0.indices() {
+        // A named selection resolves by id rather than scanning every body — the editor
+        // requests one body per keystroke, and scanning 221 for it adds up.
+        let targets: Vec<_> = match &calc.selection {
+            BodySelection::IDs(ids) => ids.iter().filter_map(|id| system.0.by_name(id)).collect(),
+            _ => system.0.indices().collect(),
+        };
+
+        for i in targets {
             let info = system.0.info(i);
             let wanted = match &calc.selection {
-                BodySelection::All => true,
+                BodySelection::All | BodySelection::IDs(_) => true,
                 BodySelection::Tag(tag) => info.tags.contains(tag),
-                BodySelection::IDs(ids) => ids.contains(&info.id),
             };
             if !wanted {
                 continue;

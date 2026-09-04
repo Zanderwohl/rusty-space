@@ -4,6 +4,7 @@ pub(crate) mod body;
 pub mod util;
 pub mod app;
 pub mod settings;
+pub mod style;
 mod splash;
 pub mod common;
 pub mod horizons;

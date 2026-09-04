@@ -9,6 +9,41 @@ use em_foundations::kepler::{anomaly, state, angular_motion, apoapsis, eccentric
 use em_foundations::time::{Instant, TimeDelta};
 use em_foundations::mappings;
 
+/// Time-invariant orbit constants, built by [`KeplerMotive::build_cache`].
+#[derive(Clone, Debug)]
+pub struct KeplerCache {
+    semi_major_axis: f64,
+    eccentricity: f64,
+    semi_latus_rectum: f64,
+    mean_anomaly_at_epoch_rad: f64,
+    epoch: Instant,
+    /// rad/s. Bakes in the gravitational parameter, so a changed primary mass invalidates.
+    mean_motion: f64,
+    /// `None` for a precessing orbit, whose rotation is time-dependent.
+    rotation: Option<DMat3>,
+}
+
+impl KeplerCache {
+    /// Perifocal position and velocity at `time`.
+    fn perifocal(&self, time: Instant) -> Option<(DVec3, DVec3)> {
+        if self.semi_latus_rectum <= 0.0 || !self.semi_latus_rectum.is_finite() {
+            return None;
+        }
+        let m = self.mean_anomaly_at_epoch_rad
+            + self.mean_motion * (time - self.epoch).to_seconds();
+        let nu = anomaly::true_from_mean(m, self.eccentricity)?;
+        Some((
+            state::perifocal_position(self.semi_latus_rectum, self.eccentricity, nu),
+            state::perifocal_velocity(
+                self.mean_motion * self.mean_motion * self.semi_major_axis.powi(3),
+                self.semi_latus_rectum,
+                self.eccentricity,
+                nu,
+            ),
+        ))
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct KeplerMotive {
     pub primary_id: String,
@@ -29,6 +64,14 @@ pub struct KeplerMotive {
     /// against an ephemeris should set it.
     #[serde(default)]
     pub anomalistic_period: Option<TimeDelta>,
+    /// Explicit gravitational parameter, m^3/s^2, overriding `G * (M_primary + m)`.
+    ///
+    /// That default is right for a body orbiting its primary directly, and wrong for one
+    /// orbiting a barycentre: there each body's effective mu depends on the *other*
+    /// body's mass, not the pair's. Pluto and Charon about the Pluto-Charon barycentre
+    /// are the case in the bundled system.
+    #[serde(default)]
+    pub gravitational_parameter: Option<f64>,
 }
 
 /// Terms used by [`true_anomaly::fourier_expansion`], which is no longer the default
@@ -131,6 +174,11 @@ impl KeplerMotive {
         let time_since_epoch = self.time_since_epoch(time);
         self.rotation.argument_of_periapsis(time_since_epoch)
     }
+
+    /// Returns true if this orbit has precessing orbital elements (nodal or apsidal precession).
+    pub fn is_precessing(&self) -> bool {
+        matches!(self.rotation, KeplerRotation::PrecessingEulerAngles(_))
+    }
     
     pub fn time_since_epoch(&self, time: Instant) -> TimeDelta {
         time - self.epoch.epoch()
@@ -214,7 +262,8 @@ impl KeplerMotive {
         let ta = self.true_anomaly_at(self.mean_anomaly(time, gravitational_parameter));
         let rad = local::radius::from_semi_major_axis(self.shape.semi_major_axis(), ecc, ta)?;
 
-        Some(DVec3::new(rad * ta.cos(), rad * ta.sin(), 0.0))
+        let (sin_ta, cos_ta) = ta.sin_cos();
+        Some(DVec3::new(rad * cos_ta, rad * sin_ta, 0.0))
     }
 
     /// Velocity in the perifocal frame, m/s.
@@ -276,13 +325,67 @@ impl KeplerMotive {
         Some(rotated)
     }
 
-    fn perifocal_to_reference(&self, perifocal_displacement: DVec3, time: Instant) -> DVec3 {
-        let rot_arg_peri = DMat3::from_rotation_z(self.argument_of_periapsis(time).to_radians());
-        let rot_inc = DMat3::from_rotation_x(self.inclination().to_radians());
-        let rot_long_asc_node = DMat3::from_rotation_z(self.longitude_of_ascending_node_infallible(time).to_radians());
-
-        rot_long_asc_node * rot_inc * rot_arg_peri * perifocal_displacement
+    /// Time-invariant constants for this orbit, for the stepping loop.
+    ///
+    /// Ported from the ECS `KeplerCache`, minus the Fourier coefficients: those existed to
+    /// speed up a series expansion that a Halley solve has since replaced. What remains is
+    /// still worth caching — a square root for the mean motion, and for a non-precessing
+    /// orbit the whole perifocal-to-reference rotation, which is otherwise three matrix
+    /// constructions and two multiplies per body per step.
+    ///
+    /// Rebuild whenever the elements, the primary's mass, or the motive segment change.
+    pub fn build_cache(&self, gravitational_parameter: f64) -> KeplerCache {
+        KeplerCache {
+            semi_major_axis: self.shape.semi_major_axis(),
+            eccentricity: self.shape.eccentricity(),
+            mean_anomaly_at_epoch_rad: self.epoch.mean_anomaly_at_epoch().to_radians(),
+            epoch: self.epoch.epoch(),
+            mean_motion: self.mean_angular_motion(gravitational_parameter),
+            semi_latus_rectum: self.shape.semi_latus_rectum(),
+            // A precessing orbit's rotation varies with time, so it cannot be cached.
+            rotation: (!self.is_precessing()).then(|| self.perifocal_to_reference_matrix(Instant::J2000)),
+        }
     }
+
+    /// Position relative to the primary, using precomputed constants.
+    pub fn displacement_cached(&self, cache: &KeplerCache, time: Instant) -> Option<DVec3> {
+        let (r_pqw, _) = cache.perifocal(time)?;
+        Some(match cache.rotation {
+            Some(rotation) => rotation * r_pqw,
+            None => self.perifocal_to_reference(r_pqw, time),
+        })
+    }
+
+    /// Position and velocity relative to the primary, using precomputed constants.
+    pub fn state_vectors_cached(
+        &self,
+        cache: &KeplerCache,
+        time: Instant,
+    ) -> Option<(DVec3, DVec3)> {
+        let (r_pqw, v_pqw) = cache.perifocal(time)?;
+        Some(match cache.rotation {
+            Some(rotation) => (rotation * r_pqw, rotation * v_pqw),
+            None => (
+                self.perifocal_to_reference(r_pqw, time),
+                self.perifocal_to_reference(v_pqw, time),
+            ),
+        })
+    }
+
+    /// Rotate a perifocal vector into the reference frame at `time`.
+    fn perifocal_to_reference(&self, perifocal: DVec3, time: Instant) -> DVec3 {
+        self.perifocal_to_reference_matrix(time) * perifocal
+    }
+
+    /// The perifocal-to-reference rotation at `time`: the 3-1-3 sequence.
+    pub fn perifocal_to_reference_matrix(&self, time: Instant) -> DMat3 {
+        state::perifocal_to_inertial(
+            self.longitude_of_ascending_node_infallible(time).to_radians(),
+            self.inclination().to_radians(),
+            self.argument_of_periapsis(time).to_radians(),
+        )
+    }
+
 
 }
 

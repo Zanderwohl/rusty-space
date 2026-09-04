@@ -5,9 +5,8 @@ use num_traits::Pow;
 use crate::sim::world::SimMetrics;
 use crate::body::universe::save::ViewSettings;
 use crate::foundations::time::JD_SECONDS_PER_JULIAN_DAY;
-use crate::gui::app::AppState;
 use crate::gui::common;
-use crate::gui::menu::{MenuState, UiState};
+use crate::gui::menu::UiState;
 use crate::sim::SimTime;
 use crate::gui::settings::{Settings, UiTheme};
 use crate::util::format;
@@ -15,14 +14,16 @@ use crate::util::format::seconds_to_naive_date;
 
 pub fn control_window(
     mut contexts: EguiContexts,
-    mut settings: ResMut<Settings>,
-    mut ui_state: ResMut<UiState>,
-    next_app_state: ResMut<NextState<AppState>>,
-    next_menu_state: ResMut<NextState<MenuState>>,
+    settings: Res<Settings>,
+    ui_state: Res<UiState>,
     mut time: ResMut<SimTime>,
     view_settings: ResMut<ViewSettings>,
     perf_metrics: Res<SimMetrics>,
 ) {
+    if !settings.windows.controls {
+        return;
+    }
+
     let ctx = contexts.ctx_mut();
     if ctx.is_err() { return; }
     let ctx = ctx.unwrap();
@@ -35,34 +36,25 @@ pub fn control_window(
     egui::Window::new("Controls")
         .vscroll(true)
         .show(ctx, |ui| {
-            planetarium_controls(next_app_state, next_menu_state, &mut time, ui, &mut ui_state, view_settings, &perf_metrics);
+            planetarium_controls(&mut time, ui, &ui_state, view_settings, &perf_metrics);
     });
 }
 
 pub fn planetarium_controls(
-    mut next_app_state: ResMut<NextState<AppState>>,
-    mut next_menu_state: ResMut<NextState<MenuState>>,
     time: &mut ResMut<SimTime>,
     ui: &mut Ui,
-    ui_state: &mut ResMut<UiState>,
+    ui_state: &UiState,
     mut view_settings: ResMut<ViewSettings>,
     perf_metrics: &SimMetrics,
 ) {
-    if ui.button("Quit to Main Menu").clicked() {
-        // TODO: Some kind of save nag
-        ui_state.current_save = None;
-        next_app_state.set(AppState::MainMenu);
-        next_menu_state.set(MenuState::Planetarium);
-    }
     ui.horizontal(|ui| {
+        ui.label("File:");
         match &ui_state.current_save {
             None => { ui.label("New Universe"); },
             Some(file) => { ui.label(file.file_name.clone()); }
         }
-
-        ui.disable();
-        let _ = ui.button("Save");
     });
+    ui.label("Press Esc for menu");
     ui.separator();
     ui.horizontal(|ui| {
         if time.playing {
@@ -81,13 +73,6 @@ pub fn planetarium_controls(
         }
     });
     let gui_speed_current = time.gui_speed;
-    let gui_speed_step = {
-        let s = format!("{gui_speed_current:e}");
-        let a = s.split("e").collect::<Vec<&str>>();
-        let exponent = a[1].parse::<i64>().unwrap();
-        let step = (10.0f64.pow(exponent as f64) / 10.0).abs();
-        step
-    };
     ui.horizontal(|ui| {
         if time.seconds_only {
             ui.label(format!("Simulation speed: {:.1}s / s", gui_speed_current));
@@ -142,6 +127,12 @@ pub fn planetarium_controls(
     // View settings
     ui.separator();
     ui.label("Show/Hide");
+
+    ui.horizontal(|ui| {
+        ui.label("Selected");
+        ui.checkbox(&mut view_settings.show_selected_labels, "");
+        ui.checkbox(&mut view_settings.show_selected_trajectories, "");
+    });
 
     ui.horizontal(|ui| {
         ui.label("All");

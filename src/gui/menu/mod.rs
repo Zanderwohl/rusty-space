@@ -1,14 +1,15 @@
 pub(crate) mod settings;
 mod save_load;
+pub mod escape;
 
 use std::fs;
+
 use std::ops::Deref;
 use std::path::PathBuf;
 use bevy::app::AppExit;
 use bevy::prelude::*;
 use bevy::window::{ClosingWindow, WindowCloseRequested};
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
-use serde::{Deserialize, Serialize};
 use crate::gui::app::AppState;
 use crate::gui::settings::{Settings, UiTheme};
 
@@ -176,12 +177,18 @@ pub fn settings_menu(
             next_menu.set(MenuState::Home)
         }
 
+        ui.add_space(8.0);
+
+        // Nest the panel in a centered, max-width column so the full-screen
+        // menu gets comfortable left/right padding without stretching edge to edge.
+        let max_width = 640.0_f32.min(ui.available_width() - 40.0);
         ui.vertical_centered(|ui| {
+            ui.set_max_width(max_width);
             ui.heading("Settings");
 
             ui.separator();
 
-            settings::settings_panel(&mut settings, ui);
+            settings::settings_panel(settings.as_mut(), None, ui);
         });
     });
 }
@@ -203,8 +210,10 @@ pub fn close_when_requested(
     settings: Res<Settings>,
 ) {
     // This was inserted by us on the last frame so now we can despawn the window
+    let mut any_closing = false;
     for window in closing.iter() {
         commands.entity(window).despawn();
+        any_closing = true;
     }
     // Mark the window as closing so we can despawn it on the next frame
     for event in closed.read() {
@@ -214,5 +223,8 @@ pub fn close_when_requested(
         commands.entity(event.window).try_insert(ClosingWindow);
     }
 
-    let _ = fs::write("data/settings.toml", toml::to_string_pretty(settings.deref()).unwrap());
+    // Only write settings when they've changed or when the app is closing
+    if settings.is_changed() || any_closing {
+        let _ = fs::write("data/settings.toml", toml::to_string_pretty(settings.deref()).unwrap());
+    }
 }

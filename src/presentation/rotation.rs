@@ -1,4 +1,4 @@
-//! Body rotation and axis gizmo systems.
+//! Body rotation system.
 
 use bevy::prelude::*;
 use bevy::color::Srgba;

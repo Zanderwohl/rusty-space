@@ -106,8 +106,8 @@ pub mod semi_major_axis {
     use crate::kepler::third_law;
 
     pub fn third_law(gravitational_parameter: f64, period: f64) -> f64 {
-        let x= (period * period * gravitational_parameter) / third_law::FOUR_PI_SQUARED;
-        f64::powf(x, 1.0 / 3.0)
+        let x = (period * period * gravitational_parameter) / third_law::FOUR_PI_SQUARED;
+        x.cbrt()
     }
 
     /// `a = b / sqrt(1 - e^2)`, the inverse of [`super::semi_minor_axis::conic_definition`].
@@ -220,8 +220,9 @@ pub mod true_anomaly {
 
     pub fn at_time(eccentric_anomaly: f64, eccentricity: f64) -> f64 {
         let beta = eccentricity / (1.0 + unit_circle_xy(eccentricity));
-        let numerator = beta * f64::sin(eccentric_anomaly);
-        let denominator = 1.0 - beta * f64::cos(eccentric_anomaly);
+        let (sin_ea, cos_ea) = eccentric_anomaly.sin_cos();
+        let numerator = beta * sin_ea;
+        let denominator = 1.0 - beta * cos_ea;
         eccentric_anomaly + 2.0 * f64::atan(numerator / denominator)
     }
 
@@ -252,13 +253,44 @@ pub mod true_anomaly {
     }
 
     pub fn fourier_expansion(mean_anomaly: f64, eccentricity: f64, iterations: usize) -> f64 {
-        let mut true_anomaly = mean_anomaly;
+        let mut true_anomaly = mean_anomaly + eccentricity * mean_anomaly.sin(); // Mikkola's seed
 
         for k in 1..=iterations {
             let order = k  as i32;
             let k: f64 = k as f64;
             let term = (2.0 / k) * bessel::j_n(order, eccentricity) * f64::sin(k * mean_anomaly);
             true_anomaly += term;
+        }
+
+        true_anomaly
+    }
+
+    /// Precomputes Fourier/Bessel coefficients for a given eccentricity and iteration count.
+    /// Returns coefficients c_k = (2/k) * J_k(e) for k = 1..=iterations.
+    /// Use with `fourier_expansion_with_precompute` in loops where eccentricity is constant.
+    pub fn precompute_coefficients(eccentricity: f64, iterations: usize) -> Vec<f64> {
+        (1..=iterations)
+            .map(|k| {
+                let k_f64 = k as f64;
+                (2.0 / k_f64) * bessel::j_n(k as i32, eccentricity)
+            })
+            .collect()
+    }
+
+    /// Computes true anomaly from mean anomaly using precomputed Bessel coefficients.
+    /// More efficient than `fourier_expansion` when called multiple times with the same eccentricity.
+    /// 
+    /// # Arguments
+    /// * `mean_anomaly` - Mean anomaly in radians
+    /// * `eccentricity` - Orbital eccentricity (needed for Mikkola's seed)
+    /// * `coefficients` - Precomputed coefficients from `precompute_coefficients`
+    #[inline]
+    pub fn fourier_expansion_with_precompute(mean_anomaly: f64, eccentricity: f64, coefficients: &[f64]) -> f64 {
+        let mut true_anomaly = mean_anomaly + eccentricity * mean_anomaly.sin(); // Mikkola's seed
+
+        for (idx, &coeff) in coefficients.iter().enumerate() {
+            let k = (idx + 1) as f64;
+            true_anomaly += coeff * f64::sin(k * mean_anomaly);
         }
 
         true_anomaly

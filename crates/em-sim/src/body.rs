@@ -48,14 +48,11 @@ impl Default for BodyState {
 }
 
 impl BodyInfo {
-    pub fn display_name(&self) -> String {
-        if let Some(name) = &self.name {
-            return name.clone()
-        }
-        if let Some(designation) = &self.designation {
-            return designation.clone()
-        }
-        (&self.id).clone()
+    /// Returns the display name without allocation: name if set, else designation, else id.
+    pub fn display_name(&self) -> &str {
+        self.name.as_deref()
+            .or(self.designation.as_deref())
+            .unwrap_or(&self.id)
     }
 }
 

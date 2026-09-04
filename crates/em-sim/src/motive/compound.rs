@@ -132,7 +132,7 @@ impl Motive {
     pub fn keplerian(primary_id: String, shape: KeplerShape, rotation: KeplerRotation, epoch: KeplerEpoch) -> Self {
         let mut new = Self::new();
         let zero = Instant::from_seconds_since_j2000(0.0);
-        new.insert_event(zero, TransitionEvent::Epoch, MotiveSelection::Keplerian(KeplerMotive { primary_id, shape, rotation, epoch, anomalistic_period: None }));
+        new.insert_event(zero, TransitionEvent::Epoch, MotiveSelection::Keplerian(KeplerMotive { primary_id, shape, rotation, epoch, anomalistic_period: None, gravitational_parameter: None }));
         new
     }
 
@@ -158,9 +158,14 @@ impl Motive {
         }
     }
 
-    /// Invariant: There must be at least one motive.
+    /// The motive in force at `time`.
+    ///
+    /// Invariant: there must be at least one motive. A time before every event clamps to
+    /// the earliest one rather than failing — scrubbing a timeline backwards past the
+    /// first event is a thing an editor does, not an error.
     pub fn motive_at(&self, time: Instant) -> &(TransitionEvent, MotiveSelection) {
         let time = self.times.get_at_or_before(time)
+            .or_else(|| self.times.get(0).copied())
             .expect("Invariant violated: CompoundMotive must have at least one motive.");
         self.motives.get(&time).unwrap_or_else(|| panic!(
             "Invariant violated: CompoundMotive.times holds {time} but CompoundMotive.motives has no such key."))
@@ -179,10 +184,28 @@ impl Motive {
     /// Returns None if there is no previous motive (i.e., the motive at `time` is the first one).
     pub fn motive_before(&self, time: Instant) -> Option<&(TransitionEvent, MotiveSelection)> {
         // First find the current motive's time
-        let current_time = self.times.get_at_or_before(time)?;
+        let current_time = self.times.get_at_or_before(time)
+            .or_else(|| self.times.get(0).copied())?;
         // Then find the motive before that time
         let prev_time = self.times.get_before(current_time)?;
         self.motives.get(&prev_time)
+    }
+
+    /// The half-open window during which the motive active at `time` stays active.
+    ///
+    /// `None` for a bound means "forever in that direction": the earliest segment also
+    /// covers every time before it, and the last runs to the end of time. A cache keyed on
+    /// the active motive can hold until the clock leaves this window — the motive itself
+    /// does not change when the clock crosses an event, so watching the data alone would
+    /// miss the transition.
+    pub fn active_segment_range(&self, time: Instant) -> (Option<Instant>, Option<Instant>) {
+        let Some(start) = self.times.get_at_or_before(time).or_else(|| self.times.get(0).copied())
+        else {
+            return (None, None);
+        };
+        let end = self.times.get(self.times.get_index_after(start)).copied();
+        let start = if self.times.get(0).copied() == Some(start) { None } else { Some(start) };
+        (start, end)
     }
 
     pub fn is_fixed(&self, time: Instant) -> bool {

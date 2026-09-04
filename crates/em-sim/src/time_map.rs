@@ -88,6 +88,16 @@ impl<V: Clone + Lerpable> TimeMap<V> {
         }
     }
 
+    /// Preallocated for a known sample count. Building a trajectory knows its resolution
+    /// up front, so this avoids regrowing both the map and the key list.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            map: HashMap::with_capacity(capacity),
+            time_keys: SortedTimes::with_capacity(capacity),
+            periodicity: None,
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.time_keys.len()
     }
@@ -99,6 +109,24 @@ impl<V: Clone + Lerpable> TimeMap<V> {
     pub fn insert(&mut self, time: TimeDelta, item: V) {
         self.time_keys.insert(time);
         self.map.insert(time, item);
+    }
+
+    /// Insert without keeping the key list sorted. Call [`Self::finalize_unordered`]
+    /// once the bulk load is done.
+    ///
+    /// Appending and sorting once beats a binary-search insert per sample when the whole
+    /// series is being built at once, which is what trajectory generation does.
+    pub fn insert_unordered(&mut self, time: TimeDelta, item: V) {
+        self.time_keys.push_unordered(time);
+        self.map.insert(time, item);
+    }
+
+    /// Sort and deduplicate after [`Self::insert_unordered`].
+    ///
+    /// Required before anything that binary-searches the keys — `get_lerp`,
+    /// `get_pair_that_surrounds`, `range`.
+    pub fn finalize_unordered(&mut self) {
+        self.time_keys.sort_and_deduplicate();
     }
 
     pub fn get(&self, time: TimeDelta) -> Option<&V> {
@@ -186,6 +214,22 @@ impl<K: Ord + Copy> Default for SortedTimes<K> {
 impl<K: Ord + Copy> SortedTimes<K> {
     pub fn new() -> Self {
         Self { in_order: Vec::new() }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self { in_order: Vec::with_capacity(capacity) }
+    }
+
+    /// Append without sorting. Pair with [`Self::sort_and_deduplicate`].
+    #[inline]
+    pub fn push_unordered(&mut self, value: K) {
+        self.in_order.push(value);
+    }
+
+    /// Restore the sorted, deduplicated invariant after bulk appends.
+    pub fn sort_and_deduplicate(&mut self) {
+        self.in_order.sort_unstable();
+        self.in_order.dedup();
     }
 
     pub fn as_vec(&self) -> Vec<K> {
@@ -380,6 +424,23 @@ mod tests {
         assert_eq!(p.cycle_fraction(Instant::from_seconds_since_j2000(115.0)), 0.5);
         // Before the start must still land in [0, 1).
         assert_eq!(p.cycle_fraction(Instant::from_seconds_since_j2000(95.0)), 0.5);
+    }
+
+    /// Bulk loading must end up identical to inserting one at a time.
+    #[test]
+    fn unordered_bulk_load_matches_sorted_insertion() {
+        let values = [5.0, -3.0, 5.0, 1.0, 0.0, 2.5];
+        let mut sorted: TimeMap<f64> = TimeMap::new();
+        let mut bulk: TimeMap<f64> = TimeMap::with_capacity(values.len());
+        for v in values {
+            sorted.insert(td(v), v * 10.0);
+            bulk.insert_unordered(td(v), v * 10.0);
+        }
+        bulk.finalize_unordered();
+
+        assert_eq!(sorted.len(), bulk.len());
+        assert_eq!(sorted.times(), bulk.times());
+        assert_eq!(bulk.get_lerp(td(0.5)), sorted.get_lerp(td(0.5)));
     }
 
     #[test]

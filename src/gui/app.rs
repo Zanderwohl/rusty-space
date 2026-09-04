@@ -4,7 +4,6 @@ use bevy::color::Color;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::DefaultPlugins;
 use bevy::diagnostic::FrameCount;
-use bevy::input::keyboard::Key::DVR;
 use bevy::math::DVec3;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
@@ -21,6 +20,8 @@ use crate::gui::splash::SplashPlugin;
 use crate::gui::util::debug::DebugPlugin;
 use crate::gui::util::ensure_folders;
 use crate::camera::{Freecam, PlanetariumCamera};
+use crate::catalog::load_catalogs;
+use crate::presentation::{spawn_local_starfield, spawn_starfield};
 
 pub fn run() {
     init();
@@ -45,7 +46,12 @@ pub fn run() {
             }))
         .insert_resource(settings)
         .init_resource::<Universe>()
-        .add_systems(Startup, common_setup)
+        .add_systems(Startup, (
+            common_setup,
+            load_catalogs,
+            spawn_starfield.after(load_catalogs),
+            spawn_local_starfield.after(spawn_starfield),
+        ))
         .add_systems(Update, close_when_requested)
         .insert_state(AppState::Splash)
         .insert_resource(ClearColor(Color::BLACK))
@@ -116,7 +122,7 @@ pub fn common_setup(
             fov: PI / 2.0,
             aspect_ratio: 1.0,
             near: 0.001,
-            far: 10000.0,
+            far: 1e8,
         }),
         Transform::from_rotation(rotation),
         Freecam { bevy_pos: DVec3::new(20., 2., 0.) },
