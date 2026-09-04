@@ -8,6 +8,8 @@
 
 pub mod appearance;
 pub mod bitfutz;
+pub mod body;
+pub mod motive;
 pub mod events;
 pub mod time;
 pub mod time_map;

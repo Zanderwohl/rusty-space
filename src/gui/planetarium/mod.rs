@@ -11,7 +11,7 @@ use crate::body::universe::save::TagState;
 use crate::sim::{SimTime, unload_simulation_objects, CalculateTrajectory, BodySelection};
 use crate::body::universe;
 use crate::body::motive::calculate_body_positions::{self, PhysicsGraph, PositionCache, SimulationPerformanceMetrics};
-use crate::body::motive::kepler_motive;
+use crate::body::motive::trajectory;
 use crate::foundations::time::Instant;
 pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin};
 use crate::gui::planetarium::windows::body_info::BodyInfoState;
@@ -65,7 +65,7 @@ impl Plugin for PlanetariumUI {
                     presentation::adjust_lights,
                     calculate_body_positions::calculate_body_positions
                         .after(universe::advance_time),
-                    kepler_motive::calculate_trajectory,
+                    trajectory::calculate_trajectory,
                     presentation::position_bodies.after(calculate_body_positions::calculate_body_positions),
                     presentation::orient_bodies.after(presentation::position_bodies),
                     presentation::render_axes.after(presentation::orient_bodies),

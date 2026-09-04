@@ -1,16 +1,16 @@
-use bevy::math::{DMat3, DVec3};
-use serde::{Deserialize, Serialize};
-use bevy::prelude::*;
-use bevy_egui::egui::Ui;
-use crate::body::motive::info::{BodyInfo, BodyState};
-use crate::sim::{SimulationObject, BodySelection, CalculateTrajectory, SimTime};
-use crate::body::universe::save::{UniversePhysics, ViewSettings};
-use crate::foundations::kepler::{angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
-use crate::foundations::time::{Includes, Instant, TimeDelta, TimeLength};
-use crate::util::{mappings};
-use crate::util::time_map::TimeMap;
+//! Keplerian orbital elements and the position they imply.
+//!
+//! Pure data plus the functions over it. Systems that drive this from an ECS live in
+//! the app crate.
 
-#[derive(Serialize, Deserialize, Component, Clone)]
+use glam::{DMat3, DVec3};
+use serde::{Deserialize, Serialize};
+use em_foundations::kepler::{angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
+use em_foundations::time::{Includes, Instant, TimeDelta, TimeLength};
+use em_foundations::mappings;
+
+#[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Component))]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct KeplerMotive {
     pub primary_id: String,
     pub shape: KeplerShape,
@@ -184,13 +184,6 @@ impl KeplerMotive {
         rot_long_asc_node * rot_inc * rot_arg_peri * perifocal_displacement
     }
 
-    pub fn display(&self, ui: &mut Ui) {
-        ui.label("Shape");
-
-        ui.label("Rotation");
-
-        ui.label("Epoch");
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -470,100 +463,4 @@ pub struct TrueAnomalyAtEpoch {
 pub struct MeanAnomalyAtJ2000 {
     /// Mean anomaly in **degrees** (converted to radians at math boundaries).
     pub mean_anomaly: f64,
-}
-
-pub fn calculate(
-    mut sim_time: ResMut<SimTime>,
-    mut kepler_bodies: Query<(&mut KeplerMotive, &BodyInfo, &mut BodyState)>,
-    fixed_bodies: Query<(&SimulationObject, &BodyInfo, &BodyState), Without<KeplerMotive>>,
-    physics: Res<UniversePhysics>,
-) {
-    // First collect all body IDs and masses into a HashMap to avoid borrow conflicts
-    let mut bodies_prev_frame: std::collections::HashMap<String, (f64, DVec3)> = std::collections::HashMap::new();
-    for (_, info, state) in fixed_bodies.iter() {
-        bodies_prev_frame.insert(info.id.clone(), (info.mass, state.current_position));
-    }
-    for (_, info, state) in kepler_bodies.iter() {
-        bodies_prev_frame.insert(info.id.clone(), (info.mass, state.current_position));
-    }
-
-    let time = sim_time.time;
-    for (mut motive, info, mut state) in kepler_bodies.iter_mut() {
-        let (primary_mass, primary_position) = bodies_prev_frame.get(&motive.primary_id)
-            .copied()
-            .expect("Missing body info");
-
-        // mu = G(M + m): relative two-body motion, not the primary's mu alone.
-        let mu = physics.gravitational_constant * (primary_mass + info.mass);
-        let position = motive.displacement(time, mu);
-        if let Some(position) = position {
-            state.current_position = primary_position + position;
-            state.current_local_position = Some(position);
-            state.current_primary_position = Some(primary_position);
-        }
-    }
-}
-
-pub fn calculate_trajectory(
-    mut calcs: MessageReader<CalculateTrajectory>,
-    mut bodies: Query<(&mut BodyState, &BodyInfo, &crate::body::motive::Motive)>,
-    physics: Res<UniversePhysics>,
-    view_settings: Res<ViewSettings>,
-    sim_time: Res<SimTime>,
-) {
-    if calcs.is_empty() { return; }
-
-    // First collect all body masses into a HashMap
-    let mut body_masses: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
-    for (_, info, _) in bodies.iter() {
-        body_masses.insert(info.id.clone(), info.mass);
-    }
-
-    let current_time = sim_time.time;
-
-    for calc in calcs.read() {
-        for (mut state, info, motive) in bodies.iter_mut() {
-            let do_this = match &calc.selection {
-                BodySelection::All => true,
-                BodySelection::Tag(tag) => info.tags.contains(tag),
-                BodySelection::IDs(ids) => ids.contains(&info.id),
-            };
-            if !do_this { continue; }
-
-            // Get the current motive selection
-            let (_, selection) = motive.motive_at(current_time);
-            
-            // Only calculate trajectories for Keplerian bodies
-            let kepler_motive = match selection {
-                crate::body::motive::MotiveSelection::Keplerian(k) => k,
-                _ => continue,
-            };
-
-            let primary_mass = body_masses.get(&kepler_motive.primary_id)
-                .copied()
-                .expect("Missing primary body mass");
-            // mu = G(M + m): must match the value used to propagate the body itself,
-            // or the drawn trajectory will not close on the body's actual position.
-            let mu = physics.gravitational_constant * (primary_mass + info.mass);
-
-            state.trajectory = Some(TimeMap::new());
-            let map = state.trajectory.as_mut().unwrap();
-            let period = kepler_motive.period(mu);
-
-            let periapsis_time = kepler_motive.time_at_periapsis_passage(mu);
-
-            if !kepler_motive.is_open() {
-                map.set_periodicity(periapsis_time, period);
-            }
-
-            for i in 0..=view_settings.trajectory_resolution {
-                let relative_time = (i as f64 / view_settings.trajectory_resolution as f64) * period.to_seconds();
-                let absolute_time = Instant::from_seconds_since_j2000(periapsis_time.to_j2000_seconds() + relative_time);
-                let displacement = kepler_motive.displacement(absolute_time, mu);
-                if let Some(displacement) = displacement {
-                    map.insert(relative_time, displacement); // Store using relative time as key
-                }
-            }
-        }
-    }
 }

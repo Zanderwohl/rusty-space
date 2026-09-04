@@ -1,11 +1,12 @@
-use bevy::math::{DVec3, DQuat};
-use serde::{Deserialize, Serialize};
-use bevy::prelude::*;
-use uuid::Uuid;
-use crate::foundations::time::Instant;
-use crate::util::time_map::TimeMap;
+//! Per-body identity, dynamic state, and rotation.
 
-#[derive(Serialize, Deserialize, Component, Clone)]
+use glam::{DVec3, DQuat};
+use serde::{Deserialize, Serialize};
+use em_foundations::time::Instant;
+use crate::time_map::TimeMap;
+
+#[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Component))]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct BodyInfo {
     pub name: Option<String>,
     pub id: String,
@@ -16,7 +17,7 @@ pub struct BodyInfo {
     pub tags: Vec<String>,
 }
 
-#[derive(Component)]
+#[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Component))]
 pub struct BodyState {
     pub current_position: DVec3,
     pub last_step_position: DVec3,
@@ -116,7 +117,8 @@ pub enum RotationMode {
 ///
 /// Defines how a body's orientation changes over time, either through
 /// constant spin around a pole axis or tidal locking to a primary body.
-#[derive(Serialize, Deserialize, Component, Clone, Debug)]
+#[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Component))]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BodyRotation {
     pub mode: RotationMode,
 }
@@ -174,7 +176,7 @@ impl BodyRotation {
                 let right = up.cross(forward); // right-handed: Y = Z × X
                 
                 // Construct rotation matrix: columns are where each basis axis points
-                let mat = bevy::math::DMat3::from_cols(forward, right, up);
+                let mat = glam::DMat3::from_cols(forward, right, up);
                 Some(DQuat::from_mat3(&mat))
             }
             RotationMode::Spinning { .. } => None,

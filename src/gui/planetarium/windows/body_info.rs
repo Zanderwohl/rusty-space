@@ -152,7 +152,7 @@ fn fixed_motive_section(ui: &mut Ui, motive: &FixedMotive) {
 
 fn kepler_motive_section(ui: &mut Ui, motive: &KeplerMotive) {
     ui.label("Keplerian Body");
-    motive.display(ui);
+    crate::body::motive::trajectory::display_kepler_motive(motive, ui);
 }
 
 fn newton_motive_section(ui: &mut Ui, motive: &NewtonMotive) {

@@ -1,14 +1,13 @@
 use std::collections::HashMap;
-use bevy::math::DVec3;
-use bevy::prelude::Component;
-use lazy_static::lazy_static;
+use glam::DVec3;
 use serde::{Deserialize, Serialize};
-use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerRotation, KeplerShape, MeanAnomalyAtJ2000};
-use crate::foundations::time::Instant;
-use crate::util;
-use crate::util::time_map::SortedTimes;
+use crate::motive::kepler::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerRotation, KeplerShape, MeanAnomalyAtJ2000};
+use em_foundations::time::Instant;
+use crate::bitfutz;
+use crate::time_map::SortedTimes;
 
-#[derive(Component, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Component))]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Motive {
     times: SortedTimes,
     motives: HashMap<u64, (TransitionEvent, MotiveSelection)>
@@ -102,7 +101,7 @@ impl Motive {
     /// Iterate over all events in time order
     pub fn iter_events(&self) -> impl Iterator<Item = (f64, &TransitionEvent, &MotiveSelection)> {
         self.times.iter().filter_map(|time| {
-            let key = util::bitfutz::f64::to_u64(*time);
+            let key = bitfutz::f64::to_u64(*time);
             self.motives.get(&key).map(|(event, selection)| (*time, event, selection))
         })
     }
@@ -136,14 +135,14 @@ impl Motive {
 
     pub fn insert_event(&mut self, time: Instant, event: TransitionEvent, motive_selection: MotiveSelection) {
         let time_f64 = time.to_j2000_seconds();
-        let key = util::bitfutz::f64::to_u64(time_f64);
+        let key = bitfutz::f64::to_u64(time_f64);
         self.times.insert(time_f64);
         self.motives.insert(key, (event, motive_selection));
     }
 
     pub fn remove_event(&mut self, time: Instant) -> bool {
         let time_f64 = time.to_j2000_seconds();
-        let key = util::bitfutz::f64::to_u64(time_f64);
+        let key = bitfutz::f64::to_u64(time_f64);
         if self.times.remove_time(time_f64) {
             self.motives.remove(&key);
             true
@@ -156,7 +155,7 @@ impl Motive {
         let index = self.times.get_index_after(time);
         // get rid of all events after the index
         let drained_times = self.times.remove_after(index);
-        let keys = drained_times.iter().map(|time| util::bitfutz::f64::to_u64(*time)).collect::<Vec<u64>>();
+        let keys = drained_times.iter().map(|time| bitfutz::f64::to_u64(*time)).collect::<Vec<u64>>();
         for key in keys {
             self.motives.remove(&key);
         }
@@ -166,7 +165,7 @@ impl Motive {
     pub fn motive_at(&self, time: Instant) -> &(TransitionEvent, MotiveSelection) {
         let time_f64 = time.to_j2000_seconds();
         let time = self.times.get_at_or_before(time_f64).expect("Invariant violated: CompoundMotive must have at least one motive.");
-        let key = util::bitfutz::f64::to_u64(time);
+        let key = bitfutz::f64::to_u64(time);
         self.motives.get(&key).expect(format!("Invariant violated: CompoundMotive.times gave the time {}, but CompoundMotive.time motives has no such key {}.", time, key).as_ref())
     }
 
@@ -178,40 +177,20 @@ impl Motive {
         let current_time = self.times.get_at_or_before(time_f64)?;
         // Then find the motive before that time
         let prev_time = self.times.get_before(current_time)?;
-        let key = util::bitfutz::f64::to_u64(prev_time);
+        let key = bitfutz::f64::to_u64(prev_time);
         self.motives.get(&key)
     }
 
     pub fn is_fixed(&self, time: Instant) -> bool {
-        let (_, motive) = self.motive_at(time);
-        MotiveSelection::Fixed { primary_id: None, position: DVec3::ZERO }.same_kind(motive)
+        matches!(self.motive_at(time).1, MotiveSelection::Fixed { .. })
     }
-    
+
     pub fn is_newtonian(&self, time: Instant) -> bool {
-        let (_, motive) = self.motive_at(time);
-        MotiveSelection::Newtonian { position: DVec3::ZERO, velocity: DVec3::ZERO}.same_kind(motive)
+        matches!(self.motive_at(time).1, MotiveSelection::Newtonian { .. })
     }
-    
+
     pub fn is_keplerian(&self, time: Instant) -> bool {
-        let (_, motive) = self.motive_at(time);
-        KEPLER_COMPARISON_EMPTY.same_kind(motive)
+        matches!(self.motive_at(time).1, MotiveSelection::Keplerian(_))
     }
 }
 
-lazy_static! {
-    pub static ref KEPLER_COMPARISON_EMPTY: MotiveSelection = MotiveSelection::Keplerian(KeplerMotive {
-        primary_id: String::from(""),
-        shape: KeplerShape::EccentricitySMA(EccentricitySMA {
-            eccentricity: 0.0,
-            semi_major_axis: 0.0,
-        }),
-        rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
-            inclination: 0.0,
-            longitude_of_ascending_node: 0.0,
-            argument_of_periapsis: 0.0,
-        }),
-        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
-            mean_anomaly: 0.0,
-        }),
-    });
-}
