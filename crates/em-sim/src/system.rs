@@ -231,7 +231,11 @@ impl System {
 
     // ------------------------------------------------- internals for `propagate`
 
-    pub(crate) fn is_dirty(&self) -> bool { self.dirty }
+    /// Whether an edit has landed that the derived columns have not caught up with.
+    ///
+    /// Public because a caller deciding whether it can skip a propagation needs to know
+    /// that an element was edited since the last one, not just that the clock did not move.
+    pub fn is_dirty(&self) -> bool { self.dirty }
     pub(crate) fn set_time(&mut self, t: Instant) { self.time = t; }
 
     pub(crate) fn topo_order(&self) -> &[BodyIndex] { &self.topo_order }

@@ -57,33 +57,81 @@ pub struct SimMetrics {
     pub analytic_jump: bool,
 }
 
-/// Advance the simulation to the clock's time.
+/// Advance the clock, then bring the simulation to it.
+///
+/// Two jobs, deliberately together: queueing the steps and walking them have to agree
+/// about how far time actually got, and splitting them across systems is what lets the
+/// clock run ahead of the bodies on a slow frame.
 ///
 /// Hierarchical bodies are analytic, so when nothing needs integrating the whole system
-/// can jump straight to the target instant instead of walking there.
+/// jumps straight to the target instant instead of walking there. That is what makes
+/// scrubbing a timeline cost the same as playing it.
 pub fn advance_simulation(
     mut system: ResMut<SimSystem>,
     mut sim_time: ResMut<SimTime>,
     mut metrics: ResMut<SimMetrics>,
+    time: Res<Time>,
     settings: Res<crate::gui::settings::Settings>,
 ) {
     let started = std::time::Instant::now();
-    let target = sim_time.time;
     let system = &mut system.0;
 
     metrics.bodies = system.len();
     metrics.newtonian_bodies = system.newtonian_count();
     metrics.step_size_seconds = sim_time.step;
 
+    // Queue whole steps for the real time that has passed. Partial steps accumulate
+    // rather than rounding, so a low `gui_speed` creeps forward instead of stalling.
+    if sim_time.playing {
+        let step = sim_time.step;
+        sim_time.accumulated_time += sim_time.gui_speed * time.delta_secs_f64();
+
+        let full_steps = (sim_time.accumulated_time / step).floor() as usize;
+        if full_steps > 0 {
+            sim_time.accumulated_time -= full_steps as f64 * step;
+            // If the speed was reduced, trim an oversized queue from the tail.
+            sim_time.previous_times.truncate(full_steps);
+            let already_queued = sim_time.previous_times.len();
+            if already_queued < full_steps {
+                let last = sim_time.previous_times.last()
+                    .unwrap_or(sim_time.time.to_j2000_seconds());
+                sim_time.previous_times.expand(last + step, full_steps - already_queued, step);
+            }
+        }
+    }
+
+    // Where the clock wants the bodies to be: the end of the queue when playing, and
+    // whatever the clock says otherwise — which is how scrubbing while paused works.
+    let target = match sim_time.previous_times.last() {
+        Some(t) => Instant::from_seconds_since_j2000(t),
+        None => sim_time.time,
+    };
+
+    // Paused, nothing queued, and the arena is already at that instant with no edits
+    // pending. Re-propagating 221 bodies to where they already are is pure waste.
+    if !sim_time.playing
+        && sim_time.previous_times.is_empty()
+        && !system.is_dirty()
+        && system.time() == target
+    {
+        metrics.steps = 0;
+        metrics.propagation_ms = 0.0;
+        return;
+    }
+
+    sim_time.begin_frame();
+
     // With nothing to integrate the whole system is analytic, so it can jump straight to
-    // the target instant however far away it is. This is what makes scrubbing a timeline
-    // cost the same as playing it.
+    // the target instant however far away it is.
     if !settings.simulation.newtonian || system.newtonian_count() == 0 {
         propagate::evaluate_at(system, target);
+        sim_time.time = target;
         sim_time.previous_times.clear();
+        sim_time.step_completed();
         metrics.steps = 0;
         metrics.analytic_jump = true;
         metrics.propagation_ms = started.elapsed().as_secs_f64() * 1000.0;
+        sim_time.end_frame();
         return;
     }
 
@@ -96,17 +144,33 @@ pub fn advance_simulation(
         propagate::step(system, t - last);
         last = t;
         steps += 1;
+        sim_time.step_completed();
+        // Out of budget. The rest of the queue keeps for next frame, so the bodies fall
+        // behind the wall clock rather than skipping the steps between.
         if sim_time.frame_time_exceeded() {
             break;
         }
     }
-    if last < target {
+    // Nothing was queued (a scrub, or an edit while paused), so close the gap directly.
+    if steps == 0 && last < target {
         propagate::step(system, target - last);
+        last = target;
         steps += 1;
+        sim_time.step_completed();
     }
-    sim_time.previous_times.clear();
+
+    // The clock follows what was actually simulated, never what was asked for.
+    sim_time.time = last;
+    let queued = sim_time.previous_times.len();
+    if steps >= queued {
+        sim_time.previous_times.clear();
+    } else {
+        sim_time.previous_times.drain_front(steps);
+    }
+
     metrics.steps = steps;
     metrics.propagation_ms = started.elapsed().as_secs_f64() * 1000.0;
+    sim_time.end_frame();
 }
 
 /// Spawn an entity for every body, and despawn entities whose body has gone.

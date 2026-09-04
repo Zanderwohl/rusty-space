@@ -249,3 +249,77 @@ fn bodies_get_entities_and_then_get_dressed() {
     let mut wireframed = app.world_mut().query::<(&BodyRef, &BodyWireframeLink)>();
     assert_eq!(wireframed.iter(app.world()).count(), ball_count, "dressed twice");
 }
+
+/// Pressing play must move the clock and the bodies.
+///
+/// `advance_simulation` propagates *to* `sim_time.time`; for a long while nothing moved
+/// `sim_time.time`, so play was inert and the arena re-evaluated the same instant every
+/// frame. The clock and the propagation live in one system precisely so they cannot
+/// disagree about how far time got.
+#[test]
+fn play_advances_the_clock_and_the_bodies() {
+    let mut app = app_with_system();
+    app.update();
+
+    let earth = app.world().resource::<SimSystem>().0.by_name("Earth").expect("Earth");
+    let start_time = app.world().resource::<SimTime>().time;
+    let start_pos = app.world().resource::<SimSystem>().0.position(earth);
+
+    {
+        let mut sim_time = app.world_mut().resource_mut::<SimTime>();
+        sim_time.playing = true;
+        // A frame here is microseconds of real time, so the rate has to be absurd for
+        // any whole step to accumulate. The test is about whether the clock moves at
+        // all, not how fast — so run frames until it does, with a cap.
+        sim_time.gui_speed = 1.0e6;
+        sim_time.step = 60.0;
+    }
+
+    for _ in 0..500 {
+        app.update();
+        if app.world().resource::<SimTime>().time > start_time {
+            break;
+        }
+    }
+
+    let end_time = app.world().resource::<SimTime>().time;
+    let elapsed = (end_time - start_time).to_seconds();
+    assert!(elapsed > 0.0, "the clock did not advance while playing");
+
+    let end_pos = app.world().resource::<SimSystem>().0.position(earth);
+    assert!(
+        (end_pos - start_pos).length() > 0.0,
+        "the clock advanced {elapsed} s but Earth did not move"
+    );
+
+    // The arena must agree with the clock, not lag it.
+    assert_eq!(app.world().resource::<SimSystem>().0.time(), end_time);
+
+    // And pausing must stop it.
+    app.world_mut().resource_mut::<SimTime>().playing = false;
+    let paused_at = app.world().resource::<SimTime>().time;
+    for _ in 0..10 {
+        app.update();
+    }
+    assert_eq!(app.world().resource::<SimTime>().time, paused_at, "paused clock moved");
+}
+
+/// Scrubbing while paused must still reposition the bodies.
+///
+/// The early-exit that keeps a paused frame from re-propagating 221 bodies has to
+/// notice that the clock was dragged somewhere new.
+#[test]
+fn scrubbing_while_paused_repositions() {
+    let mut app = app_with_system();
+    app.update();
+
+    let earth = app.world().resource::<SimSystem>().0.by_name("Earth").expect("Earth");
+    let before = app.world().resource::<SimSystem>().0.position(earth);
+
+    app.world_mut().resource_mut::<SimTime>().time =
+        Instant::from_julian_day(2451545.0 + 100.0);
+    app.update();
+
+    let after = app.world().resource::<SimSystem>().0.position(earth);
+    assert!((after - before).length() > 1.0e11, "scrubbing did not move Earth");
+}
