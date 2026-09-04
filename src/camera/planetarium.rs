@@ -8,12 +8,9 @@ use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use bevy_egui::EguiContexts;
 use num_traits::Float;
-use crate::body::appearance::Appearance;
-use crate::body::motive::info::BodyState;
-use crate::body::motive::calculate_body_positions;
 use crate::body::universe::save::ViewSettings;
 use crate::gui::app::AppState;
-use crate::presentation::position_bodies;
+use crate::sim::world::{self, BodyRef, SimSystem};
 use crate::camera::freecam::{FreeCamPlugin, Freecam, MovementSettings};
 use crate::presentation::render_space::ToRender;
 use crate::util::ease;
@@ -28,7 +25,7 @@ impl Plugin for PlanetariumCameraPlugin {
             .add_systems(Update, (
                 handle_gotos,
                 run_goto,
-                revolve_around.before(position_bodies).after(calculate_body_positions),
+                revolve_around.after(world::advance_simulation).before(world::sync_transforms),
                 ).run_if(in_state(AppState::Planetarium)))
         ;
     }
@@ -92,7 +89,8 @@ pub struct RevolveAround {
 fn handle_gotos (
     mut go_tos: MessageReader<GoTo>,
     mut camera: Query<(&mut Transform, &mut PlanetariumCamera, &mut Freecam)>,
-    bodies: Query<(Entity, &BodyState, &Appearance), Without<PlanetariumCamera>>,
+    bodies: Query<(Entity, &BodyRef), Without<PlanetariumCamera>>,
+    system: Res<SimSystem>,
     view_settings: Res<ViewSettings>,
     time: Res<Time>,
 ) {
@@ -101,10 +99,11 @@ fn handle_gotos (
             let start_pos = fcam.bevy_pos;
             let start_rot = cam_t.rotation;
 
-            let (entity, state, appearance) = bodies.get(event.entity).unwrap();
-            let obj_pos = state.current_position;
-            
-            let nearby_distance = 3f64 * view_settings.body_scale_factor(appearance.radius()) as f64;
+            let Ok((entity, body)) = bodies.get(event.entity) else { continue };
+            let Some(i) = system.0.index_of(body.0) else { continue };
+            let obj_pos = system.0.position(i);
+
+            let nearby_distance = 3f64 * view_settings.body_scale_factor(system.0.radius(i)) as f64;
             let (altitude, azimuth) = alt_az_in_bevy(obj_pos.to_render_scaled(view_settings.distance_factor()), fcam.bevy_pos);
 
             pcam.action = CameraAction::Goto(GoToInProgress {
@@ -122,7 +121,8 @@ fn handle_gotos (
 
 fn run_goto (
     mut camera: Query<(&mut Transform, &mut PlanetariumCamera, &mut Freecam)>,
-    bodies: Query<&BodyState, Without<PlanetariumCamera>>,
+    bodies: Query<&BodyRef, Without<PlanetariumCamera>>,
+    system: Res<SimSystem>,
     time: Res<Time>,
     view_settings: Res<ViewSettings>,
 ) {
@@ -133,11 +133,11 @@ fn run_goto (
     if let Ok((mut cam_t, mut pcam, mut fcam)) = camera.single_mut() {
         match &mut pcam.action {
             CameraAction::Goto(goto) => {
-                if let Ok(body_state) = bodies.get(goto.entity) {
+                if let Some(i) = bodies.get(goto.entity).ok().and_then(|b| system.0.index_of(b.0)) {
                     let frac = f64::min(1.0, (now - goto.start_time) / animation_time);
                     let frac = ease::f64::circ(frac);
 
-                    let body_pos_in_bevy = body_state.current_position.to_render_scaled(view_settings.distance_factor());
+                    let body_pos_in_bevy = system.0.position(i).to_render_scaled(view_settings.distance_factor());
 
                     let offset = local_to_object_in_bevy(goto.end_altitude, goto.end_azimuth, goto.end_distance);
                     let final_pos = body_pos_in_bevy + offset;
@@ -177,7 +177,8 @@ fn revolve_around(
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     mut primary_window: Query<(&mut Window, &mut CursorOptions), With<PrimaryWindow>>,
     view_settings: Res<ViewSettings>,
-    entities: Query<(Entity, &BodyState, &Transform), Without<Freecam>>,
+    entities: Query<(Entity, &BodyRef, &Transform), Without<Freecam>>,
+    system: Res<SimSystem>,
     mut egui_ctx: EguiContexts,
 ) {
     if let Ok((mut window, mut cursor_options)) = primary_window.single_mut() {
@@ -187,7 +188,8 @@ fn revolve_around(
                 CameraAction::RevolveAround(revolve) => {
 
                     match entities.get(revolve.entity) {
-                        Ok((entity, state, transform)) => {
+                        Ok((entity, body, transform)) => {
+                            let Some(i) = system.0.index_of(body.0) else { continue };
                             let window_scale = window.height().min(window.width());
 
                             if mouse_buttons.pressed(MouseButton::Left) {
@@ -210,7 +212,7 @@ fn revolve_around(
                                 cursor_options.visible = true;
                             }
 
-                            let body_pos_in_bevy = state.current_position.to_render_scaled(view_settings.distance_factor());
+                            let body_pos_in_bevy = system.0.position(i).to_render_scaled(view_settings.distance_factor());
                             let offset = local_to_object_in_bevy(revolve.altitude, revolve.azimuth, revolve.bevy_distance);
                             let camera_pos_in_bevy = body_pos_in_bevy + offset;
 

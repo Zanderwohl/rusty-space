@@ -2,45 +2,12 @@
 
 use bevy::prelude::*;
 use bevy::color::Srgba;
-use crate::body::motive::info::{BodyInfo, BodyRotation, BodyState, RotationMode};
 use crate::body::universe::save::ViewSettings;
-use crate::sim::SimTime;
-use crate::presentation::render_space::{ToRender, ToRenderRotation};
+use crate::presentation::render_space::ToRender;
+use crate::sim::world::{BodyRef, SimSystem};
 
-/// Updates body Transform rotations based on their BodyRotation component.
-///
-/// Computes the current orientation at simulation time, converts from
-/// simulation Z-up to Bevy Y-up coordinates, and applies to transform.rotation.
-/// For tidally locked bodies, orients them to face their primary.
-pub fn orient_bodies(
-    mut bodies: Query<(&mut Transform, &BodyRotation, &BodyState)>,
-    all_bodies: Query<(&BodyInfo, &BodyState)>,
-    sim_time: Res<SimTime>,
-) {
-    for (mut transform, rotation, state) in bodies.iter_mut() {
-        let current_orientation = match &rotation.mode {
-            RotationMode::Spinning { .. } => {
-                rotation.orientation_at(sim_time.time)
-            }
-            RotationMode::TidallyLocked { primary_id, .. } => {
-                // Find the primary body's position
-                let primary_pos = all_bodies.iter()
-                    .find(|(info, _)| &info.id == primary_id)
-                    .map(|(_, primary_state)| primary_state.current_position);
-                
-                if let Some(primary_pos) = primary_pos {
-                    rotation.orientation_tidally_locked(state.current_position, primary_pos)
-                } else {
-                    None
-                }
-            }
-        };
-        
-        if let Some(orientation) = current_orientation {
-            transform.rotation = orientation.to_render_rotation();
-        }
-    }
-}
+// Orientation itself is applied by `sim::world::sync_rotations`, which reads the arena.
+// What remains here is the debug gizmo.
 
 /// Renders debug axis gizmos for each body's rotation.
 ///
@@ -48,7 +15,8 @@ pub fn orient_bodies(
 /// - Red line through the rotation pole (like an "olive spear"), 3x radius above and below
 /// - Blue line pointing out of the prime meridian (local +X), 3x radius outward
 pub fn render_axes(
-    bodies: Query<(&Transform, &BodyRotation)>,
+    bodies: Query<(&BodyRef, &Transform)>,
+    system: Res<SimSystem>,
     mut gizmos: Gizmos,
     view_settings: Res<ViewSettings>,
 ) {
@@ -59,7 +27,9 @@ pub fn render_axes(
     let pole_color = Srgba::new(1.0, 0.0, 0.0, 1.0); // Red for pole axis
     let meridian_color = Srgba::new(0.0, 0.0, 1.0, 1.0); // Blue for prime meridian
 
-    for (transform, rotation) in bodies.iter() {
+    for (body, transform) in bodies.iter() {
+        let Some(i) = system.0.index_of(body.0) else { continue };
+        let Some(rotation) = system.0.rotation(i) else { continue };
         // Use transform values set by position_bodies and orient_bodies
         let center = transform.translation;
         let length = transform.scale.x * 3.0;

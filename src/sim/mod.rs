@@ -6,6 +6,8 @@
 
 use bevy::prelude::*;
 
+pub mod world;
+
 
 // The clock and the message types live in `em-sim`; re-exported here so existing
 // `crate::sim::…` paths keep resolving. What remains below is pure ECS glue.

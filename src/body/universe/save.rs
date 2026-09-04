@@ -6,14 +6,6 @@
 use std::path::PathBuf;
 use std::ffi::OsStr;
 use bevy::prelude::*;
-use bevy::camera::visibility::NoFrustumCulling;
-use crate::body::appearance::{AssetCache, PbrBundle};
-use crate::body::motive::info::{BodyInfo, BodyRotation, BodyState};
-use crate::body::motive::Motive;
-use crate::body::appearance::Appearance;
-use bevy::math::DVec3;
-use crate::sim::SimulationObject;
-use crate::body::universe::{Major, Minor};
 use crate::body::universe::save_sqlite;
 
 /// Data types re-exported so `crate::body::universe::save::…` paths keep resolving.
@@ -21,6 +13,9 @@ pub use em_sim::universe::{
     TagState, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings,
     SomeBody, FixedEntry, NewtonEntry, KeplerEntry, PatchedConicsEntry, CompoundMotiveEntry,
 };
+
+// Spawning moved to `crate::sim::world::sync_body_entities`, which builds entities from
+// the arena rather than from the file, so a body added at runtime gets one too.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveFormat {
@@ -163,104 +158,4 @@ impl UniverseFile {
         self.file = Some(path);
         self.save()
     }
-}
-
-
-/// Turns a saved body entry into a live entity. Was `SomeBody::spawn`; a trait now,
-/// because `SomeBody` lives in `em-sim` and inherent impls on foreign types are not
-/// allowed.
-pub trait SpawnBody {
-    fn spawn(
-        self,
-        commands: &mut Commands,
-        cache: &mut ResMut<AssetCache>,
-        meshes: &mut ResMut<Assets<Mesh>>,
-        materials: &mut ResMut<Assets<StandardMaterial>>,
-        images: &mut ResMut<Assets<Image>>,
-    ) -> Entity;
-}
-
-impl SpawnBody for SomeBody {
-    fn spawn(
-        self,
-        commands: &mut Commands,
-        cache: &mut ResMut<AssetCache>,
-        meshes: &mut ResMut<Assets<Mesh>>,
-        materials: &mut ResMut<Assets<StandardMaterial>>,
-        images: &mut ResMut<Assets<Image>>,
-    )  -> Entity {
-        let mut entity = commands.spawn((
-            SimulationObject,
-            Transform::default(),
-            BodyState::default(),
-        ));
-
-        let (info, appearance, motive, rotation) = match self {
-            SomeBody::FixedEntry(entry) => {
-                // Convert legacy FixedEntry to Motive with single Fixed entry at Epoch
-                let motive = Motive::fixed(entry.position);
-                (entry.info, entry.appearance, motive, entry.rotation)
-            },
-            SomeBody::NewtonEntry(entry) => {
-                // Convert legacy NewtonEntry to Motive with single Newtonian entry at Epoch
-                let motive = Motive::newtonian(entry.position, entry.velocity);
-                (entry.info, entry.appearance, motive, entry.rotation)
-            },
-            SomeBody::KeplerEntry(entry) => {
-                // Convert legacy KeplerEntry to Motive with single Keplerian entry at Epoch
-                let motive = Motive::keplerian(
-                    entry.params.primary_id.clone(),
-                    entry.params.shape,
-                    entry.params.rotation,
-                    entry.params.epoch,
-                );
-                (entry.info, entry.appearance, motive, entry.rotation)
-            },
-            SomeBody::CompoundEntry(entry) => {
-                // Legacy patched conics - create empty motive for now
-                // TODO: Convert old route HashMap to new Motive format if needed
-                let motive = Motive::fixed(DVec3::ZERO);
-                (entry.info, entry.appearance, motive, None)
-            },
-            SomeBody::CompoundMotiveEntry(entry) => {
-                // New compound motive format - use directly
-                (entry.info, entry.appearance, entry.motive, entry.rotation)
-            },
-        };
-
-        // Insert the compound motive
-        entity.insert(motive);
-
-        // Insert body rotation if present
-        if let Some(body_rotation) = rotation {
-            entity.insert(body_rotation);
-        }
-
-        if info.major {
-            entity.insert(Major);
-        } else {
-            entity.insert(Minor);
-        }
-        entity.insert(info);
-
-        match &appearance {
-            Appearance::Empty => {}
-            Appearance::DebugBall(debug_ball) => {
-                let (mesh, material) = debug_ball.pbr_bundle(cache, meshes, materials, images);
-                entity.insert(mesh);
-                entity.insert(material);
-            }
-            Appearance::Star(star_ball) => {
-                let (mesh, material, light) = star_ball.pbr_bundle(cache, meshes, materials, images);
-                entity.insert(mesh);
-                entity.insert(material);
-                entity.insert(light);
-                entity.insert(NoFrustumCulling);
-            }
-        }
-        entity.insert(appearance);
-
-        entity.id()
-    }
-
 }

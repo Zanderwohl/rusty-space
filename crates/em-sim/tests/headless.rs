@@ -129,6 +129,7 @@ fn duplicate_ids_are_refused() {
         info: BodyInfo { id: id.to_string(), mass: 1.0, ..Default::default() },
         motive: Motive::fixed(DVec3::ZERO),
         rotation: None,
+        appearance: Default::default(),
     };
     assert!(s.insert(def("Earth")).is_ok());
     assert_eq!(s.insert(def("Earth")), Err(SystemError::DuplicateName("Earth".into())));
@@ -166,12 +167,12 @@ fn a_newtonian_body_holds_a_circular_orbit() {
     let mut s = System::new(G);
     s.insert(BodyDef {
         info: BodyInfo { id: "Star".into(), mass: M, major: true, ..Default::default() },
-        motive: Motive::fixed(DVec3::ZERO), rotation: None,
+        motive: Motive::fixed(DVec3::ZERO), rotation: None, appearance: Default::default(),
     }).unwrap();
     s.insert(BodyDef {
         info: BodyInfo { id: "Probe".into(), mass: 1.0, ..Default::default() },
         motive: Motive::newtonian(DVec3::new(r, 0.0, 0.0), DVec3::new(0.0, v, 0.0)),
-        rotation: None,
+        rotation: None, appearance: Default::default(),
     }).unwrap();
 
     let probe = s.by_name("Probe").unwrap();

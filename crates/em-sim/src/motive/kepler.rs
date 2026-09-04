@@ -9,7 +9,6 @@ use em_foundations::kepler::{anomaly, state, angular_motion, apoapsis, eccentric
 use em_foundations::time::{Instant, TimeDelta};
 use em_foundations::mappings;
 
-#[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Component))]
 #[derive(Serialize, Deserialize, Clone)]
 pub struct KeplerMotive {
     pub primary_id: String,

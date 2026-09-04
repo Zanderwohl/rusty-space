@@ -7,9 +7,13 @@ license = "MIT"
 authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 
 [features]
-# Adds `Component`/`Resource`/`Message` derives so these types can be used directly in a
-# Bevy app. Nothing else in this crate assumes an engine; without the feature it builds
-# and runs headless.
+# Adds `Resource`/`Message` derives to the handful of types that really are global app
+# state — the clock, physics constants, view settings, tag state — so a Bevy app can use
+# them directly.
+#
+# Deliberately NOT Component: per-body data lives in `System`, and a body that was also an
+# ECS component would be two sources of truth for the same thing. Entities hold a
+# `BodyRef` and read through it.
 bevy = ["dep:bevy_ecs"]
 
 [dependencies]

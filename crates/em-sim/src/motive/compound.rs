@@ -5,7 +5,6 @@ use crate::motive::kepler::{KeplerMotive, KeplerRotation, KeplerShape, KeplerEpo
 use em_foundations::time::Instant;
 use crate::time_map::SortedTimes;
 
-#[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Component))]
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Motive {
     times: SortedTimes,
@@ -165,6 +164,15 @@ impl Motive {
             .expect("Invariant violated: CompoundMotive must have at least one motive.");
         self.motives.get(&time).unwrap_or_else(|| panic!(
             "Invariant violated: CompoundMotive.times holds {time} but CompoundMotive.motives has no such key."))
+    }
+
+    /// Mutable access to the motive in force at `time`.
+    ///
+    /// For an editor: changing these values changes how the body moves from its epoch,
+    /// not just from now.
+    pub fn motive_at_mut(&mut self, time: Instant) -> Option<&mut MotiveSelection> {
+        let at = self.times.get_at_or_before(time)?;
+        self.motives.get_mut(&at).map(|(_, selection)| selection)
     }
 
     /// Get the motive that was active just before the motive at the given time.

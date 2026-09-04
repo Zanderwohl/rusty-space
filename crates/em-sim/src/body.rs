@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use em_foundations::time::Instant;
 use crate::time_map::TimeMap;
 
-#[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Component))]
 #[derive(Serialize, Deserialize, Clone)]
 pub struct BodyInfo {
     pub name: Option<String>,
@@ -17,7 +16,6 @@ pub struct BodyInfo {
     pub tags: Vec<String>,
 }
 
-#[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Component))]
 pub struct BodyState {
     pub current_position: DVec3,
     pub last_step_position: DVec3,
@@ -121,7 +119,6 @@ pub enum RotationMode {
 ///
 /// Defines how a body's orientation changes over time, either through
 /// constant spin around a pole axis or tidal locking to a primary body.
-#[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Component))]
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BodyRotation {
     pub mode: RotationMode,

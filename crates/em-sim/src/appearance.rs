@@ -5,7 +5,6 @@
 
 use serde::{Deserialize, Serialize};
 
-#[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Component))]
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub enum Appearance {
     #[default]

@@ -5,10 +5,8 @@ use bevy::color::Srgba;
 use bevy::math::{DVec3, FloatExt};
 use bevy::render::view::ColorGrading;
 use num_traits::Pow;
-use crate::body::appearance::Appearance;
-use crate::body::motive::info::{BodyInfo, BodyState};
-use crate::body::motive::{Motive, MotiveSelection};
 use crate::body::universe::save::ViewSettings;
+use crate::sim::world::{BodyRef, SimSystem, Trajectories};
 use crate::camera::{PlanetariumCamera, Freecam};
 use crate::sim::SimTime;
 use crate::gui::settings::{DisplayGlow, Settings};
@@ -16,7 +14,9 @@ use crate::presentation::render_space::ToRender;
 
 /// Renders trajectory lines as Bevy gizmos with brightness variation.
 pub fn render_trajectories(
-    bodies: Query<(&BodyState, &BodyInfo, &Motive, Option<&Appearance>)>,
+    bodies: Query<&BodyRef>,
+    system: Res<SimSystem>,
+    trajectories: Res<Trajectories>,
     mut gizmos: Gizmos,
     view_settings: Res<ViewSettings>,
     settings: Res<Settings>,
@@ -40,11 +40,13 @@ pub fn render_trajectories(
     let max_brightness = max_brightness * exposure_adjust;
 
     let mut color = Srgba::new(1.0, 0.0, 0.0, 1.0);
-    for (state, info, motive, appearance) in bodies.iter() {
+    for body in bodies.iter() {
+        let Some(i) = system.0.index_of(body.0) else { continue };
+        let info = system.0.info(i);
         if !(view_settings.show_trajectories || view_settings.body_in_any_trajectory_tag(&info.id)) {
             continue;
         }
-        if let Some(trajectory) = &state.trajectory {
+        if let Some(trajectory) = trajectories.0.get(&body.0) {
             let frac = match trajectory.periodicity() {
                 None => 0.0,
                 Some(periodicity) => {
@@ -52,19 +54,15 @@ pub fn render_trajectories(
                 }
             };
 
-            // Get the primary_id if this is a Keplerian motive
-            let primary_id = match motive.motive_at(current_time) {
-                (_, MotiveSelection::Keplerian(k)) => Some(&k.primary_id),
-                _ => None,
-            };
+
 
             // Collect trajectory points; we may insert a transient point at the
             // body's current position so the line always passes through the body.
             let mut points: Vec<(f64, DVec3)> = trajectory.iter().map(|(t, d)| (t.to_seconds(), *d)).collect();
 
-            if let (Some(local_pos), Some(periodicity)) = (state.current_local_position, trajectory.periodicity()) {
+            if let (Some(local_pos), Some(periodicity)) = (system.0.local_position(i), trajectory.periodicity()) {
                 let current_relative_time = frac * periodicity.interval_size.to_seconds();
-                let body_radius = appearance.map(|a| a.radius()).unwrap_or(0.0);
+                let body_radius = system.0.radius(i);
 
                 if let Some(seg) = points.windows(2).position(|w| {
                     current_relative_time >= w[0].0 && current_relative_time < w[1].0
@@ -80,16 +78,10 @@ pub fn render_trajectories(
 
             let len = points.len();
 
-            // All trajectory displacements are relative to the primary; offset by
-            // the primary's current global position when drawing.
-            let primary_offset: Option<DVec3> = primary_id
-                .and_then(|id| {
-                    bodies.iter().find(|(_, info, _, _)| &info.id == id)
-                })
-                .and_then(|(primary_state, _, _, _)| {
-                    if primary_state.trajectory.is_none() { return None; }
-                    Some(primary_state.current_position)
-                });
+            // Trajectory samples are offsets from the primary, so shift them by where the
+            // primary is now. A direct arena lookup, where this used to be a linear scan
+            // over every body for every body that drew a trajectory.
+            let primary_offset: Option<DVec3> = system.0.parent(i).map(|p| system.0.position(p));
 
             for (idx, window) in points.windows(2).enumerate() {
                 let (d1, d2) = (window[0].1, window[1].1);

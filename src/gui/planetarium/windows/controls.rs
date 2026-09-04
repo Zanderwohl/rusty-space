@@ -2,7 +2,7 @@ use bevy_egui::{egui, EguiContexts};
 use bevy::prelude::*;
 use bevy_egui::egui::Ui;
 use num_traits::Pow;
-use crate::body::motive::calculate_body_positions::SimulationPerformanceMetrics;
+use crate::sim::world::SimMetrics;
 use crate::body::universe::save::ViewSettings;
 use crate::foundations::time::JD_SECONDS_PER_JULIAN_DAY;
 use crate::gui::app::AppState;
@@ -21,7 +21,7 @@ pub fn control_window(
     next_menu_state: ResMut<NextState<MenuState>>,
     mut time: ResMut<SimTime>,
     view_settings: ResMut<ViewSettings>,
-    perf_metrics: Res<SimulationPerformanceMetrics>,
+    perf_metrics: Res<SimMetrics>,
 ) {
     let ctx = contexts.ctx_mut();
     if ctx.is_err() { return; }
@@ -46,7 +46,7 @@ pub fn planetarium_controls(
     ui: &mut Ui,
     ui_state: &mut ResMut<UiState>,
     mut view_settings: ResMut<ViewSettings>,
-    perf_metrics: &SimulationPerformanceMetrics,
+    perf_metrics: &SimMetrics,
 ) {
     if ui.button("Quit to Main Menu").clicked() {
         // TODO: Some kind of save nag
@@ -161,46 +161,17 @@ pub fn planetarium_controls(
     // Simulation performance
     ui.separator();
     ui.collapsing("Simulation Performance", |ui| {
-        let step = perf_metrics.step_size;
-        let completed = perf_metrics.steps_completed;
-        let intended = perf_metrics.steps_intended;
-        let behind = completed < intended;
-        let actual = completed as f64 * step;
-        let target = intended as f64 * step;
-        ui.label(format!("Step: {step:.4}s"));
-        let sim_text = format!("Simulated: {actual:.4} / {target:.4}s");
-        if behind {
-            ui.colored_label(egui::Color32::RED, &sim_text);
+        ui.label(format!("Bodies: {}", perf_metrics.bodies));
+        ui.label(format!("Integrated: {}", perf_metrics.newtonian_bodies));
+        ui.separator();
+        if perf_metrics.analytic_jump {
+            // Nothing to integrate, so the system jumped straight to the target time.
+            ui.label("Fully analytic - evaluated directly");
         } else {
-            ui.label(&sim_text);
+            ui.label(format!("Step: {:.4}s", perf_metrics.step_size_seconds));
+            ui.label(format!("Steps last frame: {}", perf_metrics.steps));
         }
-        ui.separator();
-
-        // Graph rebuild info
-        ui.label(format!("Last graph rebuild: {:.4} ms", perf_metrics.last_graph_rebuild_duration_ms));
-        let rebuild_ago = perf_metrics.current_sim_time.to_j2000_seconds()
-            - perf_metrics.last_graph_rebuild_sim_time.to_j2000_seconds();
-        ui.label(format!("Rebuild sim-time ago: {rebuild_ago:.4} s"));
-
-        ui.separator();
-
-        // Steps completed / intended
-        let steps_text = format!("Steps: {completed} / {intended}");
-        if behind {
-            ui.colored_label(egui::Color32::RED, steps_text);
-        } else {
-            ui.label(steps_text);
-        }
-
-        ui.label(format!("Avg time per step: {:.4} ms", perf_metrics.avg_time_per_step_ms));
-
-        ui.separator();
-        ui.label("Step timing (avg):");
-        ui.indent("step_timing", |ui| {
-            ui.label(format!("Hierarchical: {:.4} ms", perf_metrics.avg_hierarchical_ms));
-            ui.label(format!("Cache update: {:.4} ms", perf_metrics.avg_cache_update_ms));
-            ui.label(format!("Newtonian:    {:.4} ms", perf_metrics.avg_newtonian_ms));
-        });
+        ui.label(format!("Propagation: {:.4} ms", perf_metrics.propagation_ms));
 
         ui.separator();
         if ui.button("Snapshot").clicked() {

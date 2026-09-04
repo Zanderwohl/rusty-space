@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use em_foundations::time::Instant;
 use glam::DVec3;
 
+use crate::appearance::Appearance;
 use crate::body::{BodyInfo, BodyRotation};
 use crate::id::{BodyId, BodyIndex};
 use crate::motive::{Motive, MotiveSelection};
@@ -43,6 +44,9 @@ pub struct BodyDef {
     pub info: BodyInfo,
     pub motive: Motive,
     pub rotation: Option<BodyRotation>,
+    /// How the body looks. Data, not rendering — an editor needs it as much as a renderer
+    /// does, so it belongs with the rest of the body rather than beside it.
+    pub appearance: Appearance,
 }
 
 /// The simulation arena.
@@ -55,6 +59,7 @@ pub struct System {
     // --- how each body moves ---
     motives: Vec<Motive>,
     rotations: Vec<Option<BodyRotation>>,
+    appearance: Vec<Appearance>,
 
     // --- state written by propagation ---
     position: Vec<DVec3>,
@@ -83,7 +88,7 @@ impl System {
     pub fn new(gravitational_constant: f64) -> Self {
         Self {
             ids: Vec::new(), info: Vec::new(), index_of: HashMap::new(),
-            motives: Vec::new(), rotations: Vec::new(),
+            motives: Vec::new(), rotations: Vec::new(), appearance: Vec::new(),
             position: Vec::new(), velocity: Vec::new(), local_position: Vec::new(),
             newtonian_started: Vec::new(),
             parent: Vec::new(), mu: Vec::new(), topo_order: Vec::new(),
@@ -109,6 +114,7 @@ impl System {
         self.info.push(def.info);
         self.motives.push(def.motive);
         self.rotations.push(def.rotation);
+        self.appearance.push(def.appearance);
         self.position.push(DVec3::ZERO);
         self.velocity.push(DVec3::ZERO);
         self.local_position.push(None);
@@ -185,6 +191,9 @@ impl System {
     #[inline] pub fn rotation(&self, i: BodyIndex) -> Option<&BodyRotation> {
         self.rotations[i.get()].as_ref()
     }
+    #[inline] pub fn appearance(&self, i: BodyIndex) -> &Appearance { &self.appearance[i.get()] }
+    /// Radius in metres, from the appearance.
+    #[inline] pub fn radius(&self, i: BodyIndex) -> f64 { self.appearance[i.get()].radius() }
     #[inline] pub fn position(&self, i: BodyIndex) -> DVec3 { self.position[i.get()] }
     #[inline] pub fn velocity(&self, i: BodyIndex) -> DVec3 { self.velocity[i.get()] }
     /// Position relative to the primary, for a body that has one.
@@ -195,6 +204,10 @@ impl System {
     /// G(M_primary + M_body) for a Keplerian body.
     #[inline] pub fn mu(&self, i: BodyIndex) -> f64 { self.mu[i.get()] }
 
+    /// How many bodies are integrated rather than evaluated. Zero means the whole system
+    /// is analytic and any instant can be jumped to directly.
+    #[inline] pub fn newtonian_count(&self) -> usize { self.newtonian.len() }
+
     #[inline] pub fn positions(&self) -> &[DVec3] { &self.position }
     #[inline] pub fn velocities(&self) -> &[DVec3] { &self.velocity }
 
@@ -203,6 +216,13 @@ impl System {
     pub fn motive_mut(&mut self, i: BodyIndex) -> &mut Motive {
         self.mark_dirty();
         &mut self.motives[i.get()]
+    }
+
+    /// Mutable access to a body's static data. Marks derived data stale, since the
+    /// gravitational parameter of anything orbiting this body depends on its mass.
+    pub fn info_mut(&mut self, i: BodyIndex) -> &mut BodyInfo {
+        self.mark_dirty();
+        &mut self.info[i.get()]
     }
 
     pub fn set_rotation(&mut self, i: BodyIndex, rotation: Option<BodyRotation>) {
@@ -320,6 +340,7 @@ macro_rules! for_each_column {
         $self.info.$op($($arg),*);
         $self.motives.$op($($arg),*);
         $self.rotations.$op($($arg),*);
+        $self.appearance.$op($($arg),*);
         $self.position.$op($($arg),*);
         $self.velocity.$op($($arg),*);
         $self.local_position.$op($($arg),*);
@@ -343,30 +364,31 @@ impl System {
         use crate::universe::SomeBody;
         let mut system = Self::new(contents.physics.gravitational_constant);
         for body in &contents.bodies {
-            let (info, motive, rotation) = match body {
+            let (info, motive, rotation, appearance) = match body {
                 SomeBody::FixedEntry(e) => (
                     e.info.clone(),
                     Motive::fixed_with_parent(e.info_primary(), e.position),
-                    e.rotation.clone(),
+                    e.rotation.clone(), e.appearance.clone(),
                 ),
                 SomeBody::NewtonEntry(e) => (
                     e.info.clone(), Motive::newtonian(e.position, e.velocity), e.rotation.clone(),
+                    e.appearance.clone(),
                 ),
                 SomeBody::KeplerEntry(e) => (
                     e.info.clone(),
                     Motive::from_keplerian(e.params.clone()),
-                    e.rotation.clone(),
+                    e.rotation.clone(), e.appearance.clone(),
                 ),
                 SomeBody::CompoundMotiveEntry(e) => (
-                    e.info.clone(), e.motive.clone(), e.rotation.clone(),
+                    e.info.clone(), e.motive.clone(), e.rotation.clone(), e.appearance.clone(),
                 ),
                 // Deprecated: a route of Keplerian arcs. Take the first as a plain orbit.
                 SomeBody::CompoundEntry(e) => {
                     let Some(first) = e.route.values().next() else { continue };
-                    (e.info.clone(), Motive::from_keplerian(first.clone()), None)
+                    (e.info.clone(), Motive::from_keplerian(first.clone()), None, e.appearance.clone())
                 }
             };
-            system.insert(BodyDef { info, motive, rotation })?;
+            system.insert(BodyDef { info, motive, rotation, appearance })?;
         }
         Ok(system)
     }
