@@ -1,6 +1,9 @@
 pub(crate) mod settings;
 mod save_load;
 pub mod escape;
+mod home;
+mod drift;
+pub mod widgets;
 
 use std::fs;
 
@@ -11,6 +14,8 @@ use bevy::prelude::*;
 use bevy::window::{ClosingWindow, WindowCloseRequested};
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use crate::gui::app::AppState;
+use crate::gui::menu::drift::MenuDriftPlugin;
+use crate::gui::menu::home::HomeMenuPlugin;
 use crate::gui::settings::{Settings, UiTheme};
 
 #[derive(Resource)]
@@ -43,64 +48,19 @@ pub enum MenuState {
 impl Plugin for MenuPlugin {
     fn build (&self, app: &mut App) {
         app
+            .add_plugins((HomeMenuPlugin, MenuDriftPlugin))
             .insert_state(MenuState::Home)
             .init_resource::<UiState>()
             .init_resource::<PlanetariumFiles>()
             .add_systems(OnEnter(MenuState::Planetarium), load_planetarium_files)
             .add_systems(OnEnter(AppState::MainMenu), load_planetarium_files.run_if(in_state(MenuState::Planetarium)))
             .add_systems(EguiPrimaryContextPass, (
-                (main_menu,).run_if(in_state(AppState::MainMenu).and(in_state(MenuState::Home))),
                 (save_load::planetarium_menu,).run_if(in_state(AppState::MainMenu).and(in_state(MenuState::Planetarium))),
                 (settings_menu,).run_if(in_state(AppState::MainMenu).and(in_state(MenuState::Settings))),
             ))
-            .add_systems(Update, quit_system)
+            .add_systems(Update, (quit_system, widgets::button_hover_system))
         ;
     }
-}
-
-pub fn main_menu(
-    mut contexts: EguiContexts,
-    settings: Res<Settings>,
-    mut ui_state: ResMut<UiState>,
-    mut next_menu: ResMut<NextState<MenuState>>,
-) {
-    let ctx = contexts.ctx_mut();
-    if ctx.is_err() { return; }
-    let ctx = ctx.unwrap();
-    
-    match settings.ui.theme {
-        UiTheme::Light => ctx.set_visuals(egui::Visuals::light()),
-        UiTheme::Dark => ctx.set_visuals(egui::Visuals::dark()),
-    }
-
-    egui::CentralPanel::default().show(ctx, |ui| {
-        ui.vertical_centered(|ui| {
-            ui.heading("Exotic Matters");
-            
-            // Add some spacing after the heading
-            ui.add_space(20.0);
-
-            let button_width = 200.0;
-            let button_height = 40.0;
-
-            if ui.add_sized([button_width, button_height], egui::Button::new("Planetarium")).clicked() {
-                next_menu.set(MenuState::Planetarium)
-            }
-            
-            // Add spacing between buttons
-            ui.add_space(10.0);
-
-            if ui.add_sized([button_width, button_height], egui::Button::new("Settings")).clicked() {
-                next_menu.set(MenuState::Settings)
-            }
-            
-            ui.add_space(10.0);
-
-            if ui.add_sized([button_width, button_height], egui::Button::new("Quit")).clicked() {
-                ui_state.quit_requested = true;
-            }
-        });
-    });
 }
 
 #[derive(Resource)]
