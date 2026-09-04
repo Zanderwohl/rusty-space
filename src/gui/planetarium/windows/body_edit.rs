@@ -1,22 +1,26 @@
 use bevy::prelude::*;
+use bevy::math::DVec3;
 use bevy_egui::{egui, EguiContexts};
 use bevy_egui::egui::Ui;
-use crate::body::motive::info::{BodyInfo, BodyState};
-use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEulerAngles, KeplerMotive, KeplerRotation, KeplerShape};
+use em_sim::body::BodyInfo;
+use em_sim::motive::MotiveSelection;
+use em_sim::motive::kepler::{EccentricitySMA, KeplerEulerAngles, KeplerMotive, KeplerRotation, KeplerShape};
 use crate::body::universe::Universe;
 use crate::gui::common;
 use crate::gui::menu::UiState;
 use crate::gui::planetarium::focused_body::{body_select_dropdown, sorted_body_options};
 use crate::gui::planetarium::FocusedBodyState;
 use crate::sim::{BodySelection, CalculateTrajectory};
+use crate::sim::world::SimSystem;
 use crate::gui::settings::{Settings, UiTheme};
+
 pub fn body_edit_window(
     settings: ResMut<Settings>,
     _ui_state: ResMut<UiState>,
     universe: Res<Universe>,
     mut contexts: EguiContexts,
     mut focused_body_state: ResMut<FocusedBodyState>,
-    mut bodies: Query<(Entity, &mut BodyInfo, &BodyState, Option<&mut FixedMotive>, Option<&mut KeplerMotive>, Option<&mut NewtonMotive>)>,
+    mut system: ResMut<SimSystem>,
     mut calc: MessageWriter<CalculateTrajectory>,
 ) {
     let ctx = contexts.ctx_mut();
@@ -27,7 +31,7 @@ pub fn body_edit_window(
         UiTheme::Light => ctx.set_visuals(egui::Visuals::light()),
         UiTheme::Dark => ctx.set_visuals(egui::Visuals::dark()),
     }
-    
+
     if settings.windows.body_edit {
         egui::Window::new("Body Edit")
             .vscroll(true)
@@ -35,29 +39,33 @@ pub fn body_edit_window(
                 let body_options = sorted_body_options(&universe);
                 body_select_dropdown(&universe, &mut focused_body_state, ui, &body_options);
 
-                let mut selected_body = bodies.iter_mut().filter(|(_e, info, _state, _fixed_motive, _kepler_motive, _newton_motive)| {
-                    focused_body_state.current_body_id.as_deref() == Some(info.id.as_str())
-                }).collect::<Vec<_>>();
+                let selected = focused_body_state
+                    .current_body_id
+                    .as_deref()
+                    .and_then(|id| system.0.by_name(id));
 
-                let selected_body = selected_body.get_mut(0);
-                match selected_body {
-                    None => { ui.label("No body Selected"); },
-                    Some((_entity, info, _state, fixed_motive, kepler_motive, newton_motive)) => {
-                        let mut changed = false;
-                        changed |= body_info_section(ui, info);
-                        if let Some(fixed_motive) = fixed_motive.as_mut() {
-                            changed |= fixed_motive_section(ui, fixed_motive.as_mut());
-                        }
-                        if let Some(kepler_motive) = kepler_motive.as_mut() {
-                            changed |= kepler_motive_section(ui, kepler_motive.as_mut());
-                        }
-                        if let Some(newton_motive) = newton_motive.as_mut() {
-                            changed |= newton_motive_section(ui, newton_motive.as_mut());
-                        }
-                        if changed {
-                            calc.write(CalculateTrajectory { selection: BodySelection::IDs(vec![info.id.clone()]) });
-                        }
-                    }
+                let Some(index) = selected else {
+                    ui.label("No body Selected");
+                    return;
+                };
+
+                let time = system.0.time();
+                let mut changed = body_info_section(ui, system.0.info_mut(index));
+
+                // Editing goes through `motive_mut`, which marks the arena dirty so the
+                // next propagation rebuilds this body's cache from the new elements.
+                if let Some(selection) = system.0.motive_mut(index).motive_at_mut(time) {
+                    changed |= match selection {
+                        MotiveSelection::Fixed { position, .. } => fixed_motive_section(ui, position),
+                        MotiveSelection::Newtonian { position, velocity } =>
+                            newton_motive_section(ui, position, velocity),
+                        MotiveSelection::Keplerian(kepler) => kepler_motive_section(ui, kepler),
+                    };
+                }
+
+                if changed {
+                    let id = system.0.info(index).id.clone();
+                    calc.write(CalculateTrajectory { selection: BodySelection::IDs(vec![id]) });
                 }
             });
     }
@@ -80,24 +88,28 @@ fn body_info_section(ui: &mut egui::Ui, info: &mut BodyInfo) -> bool {
     changed
 }
 
-fn fixed_motive_section(ui: &mut egui::Ui, motive: &mut FixedMotive) -> bool {
-    let pos_before = motive.position;
+fn fixed_motive_section(ui: &mut egui::Ui, position: &mut DVec3) -> bool {
+    let before = *position;
     ui.heading("Fixed Position");
     ui.vertical(|ui| {
-        ui.horizontal(|ui| {
-            common::stepper(ui, "x", &mut motive.position.x);
-            ui.label("m");
-        });
-        ui.horizontal(|ui| {
-            common::stepper(ui, "y", &mut motive.position.y);
-            ui.label("m");
-        });
-        ui.horizontal(|ui| {
-            common::stepper(ui, "z", &mut motive.position.z);
-            ui.label("m");
-        });
+        vector_steppers(ui, position, "m");
     });
-    motive.position != pos_before
+    *position != before
+}
+
+fn vector_steppers(ui: &mut egui::Ui, v: &mut DVec3, unit: &str) {
+    ui.horizontal(|ui| {
+        common::stepper(ui, "x", &mut v.x);
+        ui.label(unit);
+    });
+    ui.horizontal(|ui| {
+        common::stepper(ui, "y", &mut v.y);
+        ui.label(unit);
+    });
+    ui.horizontal(|ui| {
+        common::stepper(ui, "z", &mut v.z);
+        ui.label(unit);
+    });
 }
 
 fn kepler_motive_section(ui: &mut egui::Ui, motive: &mut KeplerMotive) -> bool {
@@ -211,39 +223,17 @@ fn kepler_motive_rotation_ea_section(ui: &mut Ui, kea: &mut KeplerEulerAngles) -
     changed
 }
 
-fn newton_motive_section(ui: &mut egui::Ui, motive: &mut NewtonMotive) -> bool {
-    let pos_before = motive.position;
-    let vel_before = motive.velocity;
-    
+fn newton_motive_section(ui: &mut egui::Ui, position: &mut DVec3, velocity: &mut DVec3) -> bool {
+    let pos_before = *position;
+    let vel_before = *velocity;
+
     ui.heading("Newtonian Body");
 
     ui.heading("Position");
-    ui.horizontal(|ui| {
-        common::stepper(ui, "x", &mut motive.position.x);
-        ui.label("m");
-    });
-    ui.horizontal(|ui| {
-        common::stepper(ui, "y", &mut motive.position.y);
-        ui.label("m");
-    });
-    ui.horizontal(|ui| {
-        common::stepper(ui, "z", &mut motive.position.z);
-        ui.label("m");
-    });
+    vector_steppers(ui, position, "m");
 
     ui.heading("Velocity");
-    ui.horizontal(|ui| {
-        common::stepper(ui, "x", &mut motive.velocity.x);
-        ui.label("m/s");
-    });
-    ui.horizontal(|ui| {
-        common::stepper(ui, "y", &mut motive.velocity.y);
-        ui.label("m/s");
-    });
-    ui.horizontal(|ui| {
-        common::stepper(ui, "z", &mut motive.velocity.z);
-        ui.label("m/s");
-    });
-    
-    motive.position != pos_before || motive.velocity != vel_before
+    vector_steppers(ui, velocity, "m/s");
+
+    *position != pos_before || *velocity != vel_before
 }

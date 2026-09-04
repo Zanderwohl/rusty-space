@@ -20,12 +20,15 @@ use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use bevy_egui::EguiContexts;
 use num_traits::Float;
 use crate::body::appearance::Appearance;
-use crate::body::motive::compound_motive::{Motive, MotiveSelection};
-use crate::body::motive::info::{BodyInfo, BodyState};
+use em_sim::motive::{Motive, MotiveSelection};
+use em_sim::body::BodyInfo;
 use crate::body::universe::save::ViewSettings;
 use crate::gui::app::AppState;
 use crate::gui::planetarium::{FocusedBodyState, HoverState, HoveredTrajectoryMarkerKind, TrajectoryHitData};
-use crate::presentation::{position_bodies, FocusedTrajectoryMarker, FocusedTrajectoryMarkerKind};
+use crate::presentation::{FocusedTrajectoryMarker, FocusedTrajectoryMarkerKind};
+use crate::sim::world::{self, BodyRef, SimSystem};
+use em_sim::system::System;
+use em_sim::id::BodyIndex;
 use crate::sim::SimTime;
 use crate::camera::freecam::{FreeCamPlugin, Freecam, MovementSettings};
 use crate::presentation::render_space::ToRender;
@@ -40,8 +43,8 @@ impl Plugin for PlanetariumCameraPlugin {
             .add_message::<GoTo>()
             .add_systems(Update, (
                 handle_gotos,
-                run_goto.before(position_bodies).after(calculate_body_positions),
-                revolve_around.before(position_bodies).after(calculate_body_positions),
+                run_goto.before(world::sync_transforms).after(world::advance_simulation),
+                revolve_around.before(world::sync_transforms).after(world::advance_simulation),
                 update_hover_target,
                 pick_body_on_click,
                 ).run_if(in_state(AppState::Planetarium)))
@@ -164,7 +167,8 @@ impl RevolveAroundFrame {
 fn handle_gotos (
     mut go_tos: MessageReader<GoTo>,
     mut camera: Query<(&mut Transform, &mut PlanetariumCamera, &mut Freecam)>,
-    bodies: Query<(Entity, &BodyState, &Appearance, &BodyInfo, &Motive, &Transform), Without<PlanetariumCamera>>,
+    bodies: Query<(Entity, &BodyRef, &Transform), Without<PlanetariumCamera>>,
+    system: Res<SimSystem>,
     view_settings: Res<ViewSettings>,
     time: Res<Time>,
     sim_time: Res<SimTime>,
@@ -181,6 +185,7 @@ fn handle_gotos (
                         current_goto,
                         now,
                         &bodies,
+                        &system.0,
                         &view_settings,
                         &sim_time,
                     ).unwrap_or(DVec3::ZERO);
@@ -203,14 +208,21 @@ fn handle_gotos (
                 },
             };
 
-            let Ok((entity, state, appearance, info, motive, transform)) = bodies.get(event.entity) else {
+            let Ok((entity, body_ref, transform)) = bodies.get(event.entity) else {
                 info!("cam.goto.missing_target source={:?} entity={:?}", event.source, event.entity);
                 continue;
             };
-            let obj_pos = state.current_position;
+            let Some(index) = system.0.index_of(body_ref.0) else {
+                info!("cam.goto.missing_body source={:?} entity={:?}", event.source, event.entity);
+                continue;
+            };
+            let appearance = system.0.appearance(index);
+            let info = system.0.info(index);
+            let motive = system.0.motive(index);
+            let obj_pos = system.0.position(index);
 
             let nearby_distance = if matches!(appearance, Appearance::Empty) {
-                let max_child_sma = find_max_child_sma(&info.id, &bodies, sim_time.time);
+                let max_child_sma = find_max_child_sma(&info.id, &system.0, sim_time.time);
                 if max_child_sma > 0.0 {
                     1.5 * max_child_sma * view_settings.distance_factor()
                 } else {
@@ -270,7 +282,8 @@ fn handle_gotos (
 
 fn run_goto (
     mut camera: Query<(&mut Transform, &mut PlanetariumCamera, &mut Freecam)>,
-    bodies: Query<(Entity, &BodyState, &Motive, &Transform), Without<PlanetariumCamera>>,
+    bodies: Query<(Entity, &BodyRef, &Transform), Without<PlanetariumCamera>>,
+    system: Res<SimSystem>,
     time: Res<Time>,
     view_settings: Res<ViewSettings>,
     sim_time: Res<SimTime>,
@@ -282,7 +295,12 @@ fn run_goto (
     if let Ok((mut cam_t, mut pcam, mut fcam)) = camera.single_mut() {
         match &mut pcam.action {
             CameraAction::Goto(goto) => {
-                if let Ok((entity, body_state, motive, transform)) = bodies.get(goto.entity) {
+                let resolved = bodies.get(goto.entity).ok()
+                    .and_then(|(entity, body_ref, transform)| {
+                        system.0.index_of(body_ref.0).map(|i| (entity, i, transform))
+                    });
+                if let Some((entity, index, transform)) = resolved {
+                    let motive = system.0.motive(index);
                     let frac = f64::min(1.0, (now - goto.start_time) / animation_time);
                     let frac = ease::f64::circ(frac);
                     let frame = resolve_frame_or_fallback(goto.end_frame, motive, sim_time.time, entity);
@@ -311,8 +329,11 @@ fn run_goto (
                             evaluated
                         }
                         GoToOrigin::Revolving(revolving) => {
-                            if let Ok((origin_entity, origin_body, origin_motive, origin_transform)) = bodies.get(revolving.entity) {
-                                let origin_pos = origin_body.current_position.to_render_scaled(view_settings.distance_factor());
+                            let origin_resolved = bodies.get(revolving.entity).ok()
+                                .and_then(|(e, r, t)| system.0.index_of(r.0).map(|i| (e, i, t)));
+                            if let Some((origin_entity, origin_index, origin_transform)) = origin_resolved {
+                                let origin_motive = system.0.motive(origin_index);
+                                let origin_pos = system.0.position(origin_index).to_render_scaled(view_settings.distance_factor());
                                 let (origin_offset, _) = offset_in_frame(
                                     revolving.frame,
                                     revolving.altitude,
@@ -330,7 +351,7 @@ fn run_goto (
                         }
                     };
 
-                    let body_pos_in_bevy = body_state.current_position.to_render_scaled(view_settings.distance_factor());
+                    let body_pos_in_bevy = system.0.position(index).to_render_scaled(view_settings.distance_factor());
 
                     let (offset, _) = offset_in_frame(
                         goto.end_frame,
@@ -404,7 +425,8 @@ struct HoverPickResult {
 fn update_hover_target(
     primary_window: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &Projection, &Transform, &Freecam), With<PlanetariumCamera>>,
-    bodies: Query<(&BodyState, &BodyInfo, &Appearance, &Motive), Without<PlanetariumCamera>>,
+    bodies: Query<(Entity, &BodyRef, &Transform), Without<PlanetariumCamera>>,
+    system: Res<SimSystem>,
     markers: Query<(&FocusedTrajectoryMarker, &Transform)>,
     trajectory_caches: Query<(&crate::presentation::TrajectoryMesh, &crate::presentation::TrajectoryCache)>,
     view_settings: Res<ViewSettings>,
@@ -417,6 +439,7 @@ fn update_hover_target(
         &primary_window,
         &cameras,
         &bodies,
+        &system.0,
         &markers,
         &trajectory_caches,
         &view_settings,
@@ -433,7 +456,8 @@ fn pick_body_on_click(
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     primary_window: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &Projection, &Transform, &Freecam), With<PlanetariumCamera>>,
-    bodies: Query<(&BodyState, &BodyInfo, &Appearance, &Motive), Without<PlanetariumCamera>>,
+    bodies: Query<(Entity, &BodyRef, &Transform), Without<PlanetariumCamera>>,
+    system: Res<SimSystem>,
     markers: Query<(&FocusedTrajectoryMarker, &Transform)>,
     trajectory_caches: Query<(&crate::presentation::TrajectoryMesh, &crate::presentation::TrajectoryCache)>,
     view_settings: Res<ViewSettings>,
@@ -451,6 +475,7 @@ fn pick_body_on_click(
         &primary_window,
         &cameras,
         &bodies,
+        &system.0,
         &markers,
         &trajectory_caches,
         &view_settings,
@@ -459,10 +484,7 @@ fn pick_body_on_click(
         &mut egui_ctx,
     );
     if let Some(selected_id) = hovered.hovered_body_id {
-        let info = bodies
-            .iter()
-            .find(|(_, info, _, _)| info.id == selected_id)
-            .map(|(_, info, _, _)| info);
+        let info = system.0.by_name(&selected_id).map(|i| system.0.info(i));
         if let Some(info) = info {
         let now = time.elapsed().as_secs_f64();
         let is_double = pick_state.last_pick_id.as_deref() == Some(&info.id)
@@ -484,7 +506,8 @@ fn pick_body_on_click(
 fn pick_hover_target(
     primary_window: &Query<&Window, With<PrimaryWindow>>,
     cameras: &Query<(&Camera, &Projection, &Transform, &Freecam), With<PlanetariumCamera>>,
-    bodies: &Query<(&BodyState, &BodyInfo, &Appearance, &Motive), Without<PlanetariumCamera>>,
+    bodies: &Query<(Entity, &BodyRef, &Transform), Without<PlanetariumCamera>>,
+    system: &System,
     markers: &Query<(&FocusedTrajectoryMarker, &Transform)>,
     trajectory_caches: &Query<(&crate::presentation::TrajectoryMesh, &crate::presentation::TrajectoryCache)>,
     view_settings: &ViewSettings,
@@ -519,11 +542,13 @@ fn pick_hover_target(
 
     let mut body_sphere_hits: Vec<&BodyInfo> = Vec::new();
     let mut body_pixel_hits: Vec<&BodyInfo> = Vec::new();
-    for (state, info, appearance, _) in bodies.iter() {
-        let body_pos = state.current_position
+    for (_, body_ref, _) in bodies.iter() {
+        let Some(index) = system.index_of(body_ref.0) else { continue };
+        let info = system.info(index);
+        let body_pos = system.position(index)
             .to_render_relative(distance_scale, freecam.bevy_pos);
 
-        let visual_radius = view_settings.body_scale_factor(appearance.radius());
+        let visual_radius = view_settings.body_scale_factor(system.radius(index));
         let pick_radius = (visual_radius * 1.5).max(MIN_PICK_RADIUS);
         if ray_hits_sphere(ray_origin, ray_dir, body_pos, pick_radius) {
             body_sphere_hits.push(info);
@@ -589,6 +614,7 @@ fn pick_hover_target(
         pick_trajectory_segment(
             focused_body_state,
             bodies,
+            system,
             trajectory_caches,
             sim_time,
             view_settings,
@@ -614,7 +640,8 @@ fn pick_hover_target(
 /// Returns the closest hit within the pick radius threshold.
 fn pick_trajectory_segment(
     focused_body_state: &FocusedBodyState,
-    bodies: &Query<(&BodyState, &BodyInfo, &Appearance, &Motive), Without<PlanetariumCamera>>,
+    bodies: &Query<(Entity, &BodyRef, &Transform), Without<PlanetariumCamera>>,
+    system: &System,
     trajectory_caches: &Query<(&crate::presentation::TrajectoryMesh, &crate::presentation::TrajectoryCache)>,
     sim_time: &SimTime,
     view_settings: &ViewSettings,
@@ -628,28 +655,20 @@ fn pick_trajectory_segment(
     let focused_id = focused_body_state.current_body_id.as_ref()?;
 
     // Find the focused body and its current motive selection.
-    let (focused_entity, focused_motive) = bodies
+    let focused_index = system.by_name(focused_id)?;
+    let focused_body = system.id(focused_index);
+    let focused_motive = system.motive(focused_index);
+    let focused_entity = trajectory_caches
         .iter()
-        .find_map(|(_, info, _, motive)| {
-            if &info.id == focused_id {
-                Some((info.id.clone(), motive))
+        .find_map(|(traj_mesh, cache)| {
+            let Ok((_, body_ref, _)) = bodies.get(traj_mesh.body_entity) else {
+                return None;
+            };
+            if body_ref.0 == focused_body && cache.valid && !cache.local_points.is_empty() {
+                Some(traj_mesh.body_entity)
             } else {
                 None
             }
-        })
-        .and_then(|(id, motive)| {
-            trajectory_caches
-                .iter()
-                .find_map(|(traj_mesh, cache)| {
-                    let Ok((_, info, _, _)) = bodies.get(traj_mesh.body_entity) else {
-                        return None;
-                    };
-                    if info.id == id && cache.valid && !cache.local_points.is_empty() {
-                        Some((traj_mesh.body_entity, motive))
-                    } else {
-                        None
-                    }
-                })
         })?;
 
     // Find the trajectory cache for the focused body
@@ -670,12 +689,8 @@ fn pick_trajectory_segment(
     let primary_offset: DVec3 = cache
         .primary_id
         .as_ref()
-        .and_then(|pid| {
-            bodies
-                .iter()
-                .find(|(_, info, _, _)| &info.id == pid)
-                .map(|(state, _, _, _)| state.current_position)
-        })
+        .and_then(|pid| system.by_name(pid))
+        .map(|i| system.position(i))
         .unwrap_or(DVec3::ZERO);
 
     // Rotate cached points by current perifocal->reference delta so picking
@@ -852,7 +867,8 @@ fn revolve_around(
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     mut primary_window: Query<(&mut Window, &mut CursorOptions), With<PrimaryWindow>>,
     view_settings: Res<ViewSettings>,
-    entities: Query<(Entity, &BodyState, &Appearance, &Motive, &Transform), Without<Freecam>>,
+    entities: Query<(Entity, &BodyRef, &Transform), Without<Freecam>>,
+    system: Res<SimSystem>,
     mut egui_ctx: EguiContexts,
     sim_time: Res<SimTime>,
 ) {
@@ -862,8 +878,12 @@ fn revolve_around(
             match &mut pcam.action {
                 CameraAction::RevolveAround(revolve) => {
 
-                    match entities.get(revolve.entity) {
-                        Ok((entity, state, appearance, motive, transform)) => {
+                    let resolved = entities.get(revolve.entity).ok()
+                        .and_then(|(e, r, t)| system.0.index_of(r.0).map(|i| (e, i, t)));
+                    match resolved {
+                        Some((entity, index, transform)) => {
+                            let appearance = system.0.appearance(index);
+                            let motive = system.0.motive(index);
                             let frame = resolve_frame_or_fallback(revolve.frame, motive, sim_time.time, entity);
                             if frame != revolve.frame {
                                 revolve.frame = frame;
@@ -932,7 +952,7 @@ fn revolve_around(
                                 cursor_options.visible = true;
                             }
 
-                            let body_pos_in_bevy = state.current_position.to_render_scaled(view_settings.distance_factor());
+                            let body_pos_in_bevy = system.0.position(index).to_render_scaled(view_settings.distance_factor());
                             let (offset, _) = offset_in_frame(
                                 revolve.frame,
                                 revolve.altitude,
@@ -954,7 +974,7 @@ fn revolve_around(
                                 }
                             }
                         }
-                        Err(_) => {
+                        None => {
                             pcam.action = CameraAction::Free;
                         }
                     }
@@ -969,12 +989,12 @@ fn revolve_around(
 /// has `target_id` as its primary. Returns 0.0 if no children are found.
 fn find_max_child_sma(
     target_id: &str,
-    bodies: &Query<(Entity, &BodyState, &Appearance, &BodyInfo, &Motive, &Transform), Without<PlanetariumCamera>>,
+    system: &System,
     time: crate::foundations::time::Instant,
 ) -> f64 {
-    bodies.iter()
-        .filter_map(|(_, _, _, _, motive, _)| {
-            let (_, ms) = motive.motive_at(time);
+    system.indices()
+        .filter_map(|i| {
+            let (_, ms) = system.motive(i).motive_at(time);
             if let MotiveSelection::Keplerian(k) = ms {
                 if k.primary_id == target_id {
                     return Some(k.semi_major_axis());
@@ -1119,20 +1139,25 @@ fn up_vector_for_frame(
 fn evaluate_goto_position(
     goto: &GoToInProgress,
     at_time: f64,
-    bodies: &Query<(Entity, &BodyState, &Appearance, &BodyInfo, &Motive, &Transform), Without<PlanetariumCamera>>,
+    bodies: &Query<(Entity, &BodyRef, &Transform), Without<PlanetariumCamera>>,
+    system: &System,
     view_settings: &ViewSettings,
     sim_time: &SimTime,
 ) -> Option<DVec3> {
-    let (entity, body_state, _, _, motive, transform) = bodies.get(goto.entity).ok()?;
-    let body_pos = body_state.current_position.to_render_scaled(view_settings.distance_factor());
+    let (entity, body_ref, transform) = bodies.get(goto.entity).ok()?;
+    let index = system.index_of(body_ref.0)?;
+    let motive = system.motive(index);
+    let body_pos = system.position(index).to_render_scaled(view_settings.distance_factor());
     let start_pos = match &goto.origin {
         GoToOrigin::Position { position, velocity, sample_time } => {
             let dt = (at_time - *sample_time).max(0.0);
             *position + *velocity * dt
         }
         GoToOrigin::Revolving(revolving) => {
-            let (origin_entity, origin_body, _, _, origin_motive, origin_transform) = bodies.get(revolving.entity).ok()?;
-            let origin_pos = origin_body.current_position.to_render_scaled(view_settings.distance_factor());
+            let (origin_entity, origin_ref, origin_transform) = bodies.get(revolving.entity).ok()?;
+            let origin_index = system.index_of(origin_ref.0)?;
+            let origin_motive = system.motive(origin_index);
+            let origin_pos = system.position(origin_index).to_render_scaled(view_settings.distance_factor());
             let (origin_offset, _) = offset_in_frame(
                 revolving.frame,
                 revolving.altitude,
@@ -1173,7 +1198,8 @@ fn evaluate_goto_position(
 fn estimate_goto_velocity(
     goto: &GoToInProgress,
     now: f64,
-    bodies: &Query<(Entity, &BodyState, &Appearance, &BodyInfo, &Motive, &Transform), Without<PlanetariumCamera>>,
+    bodies: &Query<(Entity, &BodyRef, &Transform), Without<PlanetariumCamera>>,
+    system: &System,
     view_settings: &ViewSettings,
     sim_time: &SimTime,
 ) -> Option<DVec3> {
@@ -1182,6 +1208,7 @@ fn estimate_goto_velocity(
         goto,
         now,
         bodies,
+        system,
         view_settings,
         sim_time,
     )?;
@@ -1189,6 +1216,7 @@ fn estimate_goto_velocity(
         goto,
         now + sample_dt,
         bodies,
+        system,
         view_settings,
         sim_time,
     )?;

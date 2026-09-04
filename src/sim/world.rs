@@ -13,7 +13,6 @@ use em_foundations::time::{Instant, TimeDelta};
 use em_sim::id::BodyId;
 use em_sim::propagate;
 use em_sim::system::System;
-use em_sim::time_map::TimeMap;
 
 use crate::sim::{SimTime, SimulationObject};
 
@@ -38,12 +37,12 @@ pub struct BodyEntities {
     generation: Option<u32>,
 }
 
-/// Drawn trajectories, keyed by body.
+/// Sampled orbital paths, keyed by body.
 ///
-/// A display artifact rather than physics — its resolution comes from `ViewSettings` — so
-/// it lives here rather than in the arena.
+/// The points come from `em_sim::trajectory`; what makes this the app's rather than the
+/// arena's is *when* and *at what resolution* to resample, which is a view decision.
 #[derive(Resource, Default)]
-pub struct Trajectories(pub HashMap<BodyId, TimeMap<DVec3>>);
+pub struct Trajectories(pub HashMap<BodyId, em_sim::trajectory::Path>);
 
 /// What the last propagation cost, for the controls panel.
 #[derive(Resource, Default, serde::Serialize)]
@@ -202,7 +201,11 @@ pub fn resolve<'a>(system: &'a System, body: &BodyRef) -> Option<em_sim::id::Bod
     system.index_of(body.0)
 }
 
-/// Recompute drawn trajectories for the Keplerian bodies.
+/// Recompute the sampled paths for the requested bodies.
+///
+/// The sampling itself is `em_sim::trajectory` — it is orbital mechanics, not rendering.
+/// This just decides *which* bodies to resample and caches the result; turning a path into
+/// geometry is `presentation::trajectory`'s job.
 pub fn calculate_trajectories(
     mut calcs: MessageReader<crate::sim::CalculateTrajectory>,
     system: Res<SimSystem>,
@@ -210,12 +213,10 @@ pub fn calculate_trajectories(
     mut trajectories: ResMut<Trajectories>,
 ) {
     use crate::sim::BodySelection;
-    use em_sim::motive::MotiveSelection;
 
     if calcs.is_empty() {
         return;
     }
-    let now = system.0.time();
     let resolution = view_settings.trajectory_resolution.max(1);
 
     for calc in calcs.read() {
@@ -227,40 +228,16 @@ pub fn calculate_trajectories(
         };
 
         for i in targets {
-            let info = system.0.info(i);
             let wanted = match &calc.selection {
                 BodySelection::All | BodySelection::IDs(_) => true,
-                BodySelection::Tag(tag) => info.tags.contains(tag),
+                BodySelection::Tag(tag) => system.0.info(i).tags.contains(tag),
             };
             if !wanted {
                 continue;
             }
-            let (_, selection) = system.0.motive(i).motive_at(now);
-            let MotiveSelection::Keplerian(kepler) = selection else { continue };
-
-            let mu = system.0.mu(i);
-            let period = kepler.period(mu);
-            let periapsis = kepler.time_at_periapsis_passage(mu);
-
-            let mut map = TimeMap::new();
-            if !kepler.is_open() {
-                map.set_periodicity(periapsis, period);
+            if let Some(path) = em_sim::trajectory::sample(&system.0, i, resolution) {
+                trajectories.0.insert(system.0.id(i), path);
             }
-            for step in 0..=resolution {
-                let offset = period * (step as f64 / resolution as f64);
-                if let Some(d) = kepler.displacement(periapsis + offset, mu) {
-                    map.insert(offset, d);
-                }
-            }
-            trajectories.0.insert(system.0.id(i), map);
         }
     }
-}
-
-/// Forget which entity viewed which body.
-///
-/// Runs alongside the despawn on leaving the planetarium: the entities are gone, so the
-/// map must not keep claiming they exist.
-pub fn forget_body_entities(mut tracked: ResMut<BodyEntities>) {
-    *tracked = BodyEntities::default();
 }

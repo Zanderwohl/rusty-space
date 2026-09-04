@@ -11,16 +11,15 @@ use bevy::math::{DQuat, DVec3};
 use bevy::render::view::ColorGrading;
 use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 
-use crate::body::appearance::Appearance;
-use crate::body::motive::info::{BodyInfo, BodyState};
-use crate::body::motive::{Motive, MotiveSelection};
+use crate::body::motive::MotiveSelection;
+use crate::sim::world::{BodyRef, SimSystem, Trajectories};
 use crate::body::universe::save::{UniversePhysics, ViewSettings};
 use crate::camera::{Freecam, PlanetariumCamera};
 use crate::gui::planetarium::{FocusedBodyState, HoverState, HoveredTrajectoryMarkerKind};
 use crate::gui::planetarium::{format_sim_time_for_mode, MissionClockMode, MissionClockSettings};
 use crate::gui::settings::Settings;
 use crate::sim::SimTime;
-use crate::util::bevystuff::{GlamQuat, GlamVec};
+use crate::presentation::render_space::{ToRender, ToRenderRotation};
 use bevy_egui::{egui, EguiContexts};
 
 use super::trajectory_material::{TrajectoryMaterial, TRAJECTORY_BASE_TUBE_RADIUS};
@@ -203,18 +202,22 @@ pub fn spawn_trajectory_mesh(
 /// System to rebuild trajectory caches when orbital parameters change.
 /// Only rebuilds when the trajectory data actually changes, not on every BodyState mutation.
 pub fn rebuild_trajectory_caches(
-    bodies: Query<(&BodyState, &Motive)>,
+    bodies: Query<&BodyRef>,
+    system: Res<SimSystem>,
+    trajectories: Res<Trajectories>,
     mut trajectory_meshes: Query<(&TrajectoryMesh, &mut TrajectoryCache)>,
     sim_time: Res<SimTime>,
 ) {
     for (traj_mesh, mut cache) in trajectory_meshes.iter_mut() {
         // Find the body this trajectory belongs to using direct entity lookup (O(1))
-        let Ok((state, motive)) = bodies.get(traj_mesh.body_entity) else {
+        let Ok(body_ref) = bodies.get(traj_mesh.body_entity) else {
             continue;
         };
-        
-        // Check if body has a trajectory
-        let Some(trajectory) = &state.trajectory else {
+        let Some(body_index) = system.0.index_of(body_ref.0) else { continue };
+        let motive = system.0.motive(body_index);
+
+        // Check if body has a sampled path
+        let Some(trajectory) = trajectories.0.get(&body_ref.0).map(|p| &p.points) else {
             if cache.valid {
                 cache.valid = false;
                 cache.local_points.clear();
@@ -258,13 +261,13 @@ pub fn rebuild_trajectory_caches(
         };
         
         // Collect points from TimeMap (local displacements)
-        cache.local_points = trajectory.iter().map(|(t, d)| (t, *d)).collect();
+        cache.local_points = trajectory.iter().map(|(t, d)| (t.to_seconds(), *d)).collect();
         
         // Set periodicity info
         if let Some(periodicity) = trajectory.periodicity() {
             cache.closed = true;
-            cache.interval_size = Some(periodicity.interval_size);
-            cache.interval_start = Some(periodicity.interval_start);
+            cache.interval_size = Some(periodicity.interval_size.to_seconds());
+            cache.interval_start = Some(periodicity.interval_start.to_j2000_seconds());
         } else {
             cache.closed = false;
             cache.interval_size = None;
@@ -289,7 +292,9 @@ pub fn refresh_precessing_trajectories() {}
 /// Reads cached points, applies transforms, computes brightness, generates tube geometry.
 /// Skips mesh regeneration when the cache is unchanged.
 pub fn build_trajectory_meshes(
-    bodies: Query<(&BodyState, &BodyInfo, &Motive, Option<&Appearance>)>,
+    bodies: Query<&BodyRef>,
+    system: Res<SimSystem>,
+    trajectories: Res<Trajectories>,
     mut trajectory_meshes: Query<(&TrajectoryMesh, &mut TrajectoryCache, &mut Visibility, &Mesh3d, &mut Transform)>,
     mut meshes: ResMut<Assets<Mesh>>,
     view_settings: Res<ViewSettings>,
@@ -297,7 +302,6 @@ pub fn build_trajectory_meshes(
     hover_state: Res<HoverState>,
     fcam: Single<&Freecam, With<PlanetariumCamera>>,
     sim_time: Res<SimTime>,
-    physics_graph: Res<crate::body::motive::calculate_body_positions::PhysicsGraph>,
     _physics: Res<UniversePhysics>,
 ) {
     let distance_scale = view_settings.distance_factor();
@@ -315,13 +319,19 @@ pub fn build_trajectory_meshes(
         }
 
         // Find the body this trajectory belongs to using direct entity lookup (O(1))
-        let Ok((state, info, motive, _appearance)) = bodies.get(traj_mesh.body_entity) else {
+        let Ok(body_ref) = bodies.get(traj_mesh.body_entity) else {
             if *visibility != Visibility::Hidden {
                 *visibility = Visibility::Hidden;
             }
             continue;
         };
-        
+        let Some(body_index) = system.0.index_of(body_ref.0) else {
+            if *visibility != Visibility::Hidden { *visibility = Visibility::Hidden; }
+            continue;
+        };
+        let info = system.0.info(body_index);
+        let motive = system.0.motive(body_index);
+
         // Check visibility conditions
         let selected_match = focused_body_state.is_focused(&info.id);
         let should_show = cache.valid
@@ -353,22 +363,17 @@ pub fn build_trajectory_meshes(
         let primary_world_pos = cache
             .primary_id
             .as_ref()
-            .and_then(|pid| {
-                physics_graph
-                    .id_to_entity
-                    .get(pid)
-                    .and_then(|entity| bodies.get(*entity).ok())
-                    .map(|(primary_state, _, _, _)| primary_state.current_position)
-            })
+            .and_then(|pid| system.0.by_name(pid))
+            .map(|i| system.0.position(i))
             .unwrap_or(DVec3::ZERO);
-        transform.translation = primary_world_pos.as_bevy_scaled_cheated(distance_scale, camera_pos);
+        transform.translation = primary_world_pos.to_render_relative(distance_scale, camera_pos);
 
         let current_perifocal_to_reference = match motive.motive_at(sim_time.time) {
             (_, MotiveSelection::Keplerian(k)) => Some(DQuat::from_mat3(&k.perifocal_to_reference_matrix(sim_time.time))),
             _ => None,
         };
         let local_rotation = current_perifocal_to_reference.unwrap_or(DQuat::IDENTITY);
-        transform.rotation = local_rotation.as_bevy();
+        transform.rotation = local_rotation.to_render_rotation();
         
         // Rebuild when trajectory data changed OR simulation time advanced.
         // Time-driven rebuild keeps the bright hotspot moving with the body.
@@ -410,7 +415,7 @@ pub fn build_trajectory_meshes(
         // - T- slightly before now (remains dark/trailing)
         // - T  at now (bright/front anchor)
         let transient_info: Option<(usize, f64, f64, DVec3)> = if let (Some(local_pos), Some(now_rel)) =
-            (state.current_local_position, current_relative_time)
+            (system.0.local_position(body_index), current_relative_time)
         {
             // Cached trajectory points are in the cache/base reference frame.
             // For precessing orbits, body local position is in the current frame,
@@ -485,12 +490,12 @@ pub fn build_trajectory_meshes(
             // Convert cached reference-space trajectory point to perifocal-space
             // mesh-local coordinates.
             let perifocal_pos = base_reference_to_perifocal * *pos;
-            let mesh_local_bevy = perifocal_pos.as_bevy_scaled(distance_scale);
+            let mesh_local_bevy = perifocal_pos.to_render_scaled_f32(distance_scale);
 
             // Estimate current world-space position for distance-based dimming.
             let current_reference_pos = current_perifocal_to_reference * perifocal_pos;
             let world_pos = primary_world_pos + current_reference_pos;
-            let bevy_world = world_pos.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos);
+            let bevy_world = world_pos.to_render_relative(distance_scale, fcam.bevy_pos);
             let distance_from_camera = bevy_world.length();
             
             // Trajectory geometry stays at a canonical radius. The shader can
@@ -582,8 +587,9 @@ pub fn update_focused_trajectory_markers(
     view_settings: Res<ViewSettings>,
     physics: Res<UniversePhysics>,
     fcam: Single<&Freecam, With<PlanetariumCamera>>,
-    physics_graph: Res<crate::body::motive::calculate_body_positions::PhysicsGraph>,
-    bodies: Query<(Entity, &BodyInfo, &BodyState, &Motive, Option<&TrajectoryMeshLink>)>,
+    bodies: Query<(Entity, &BodyRef, Option<&TrajectoryMeshLink>)>,
+    system: Res<SimSystem>,
+    trajectories: Res<Trajectories>,
     trajectory_caches: Query<&TrajectoryCache>,
     mut markers: Query<(Entity, &mut FocusedTrajectoryMarker, &mut Transform)>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -599,15 +605,14 @@ pub fn update_focused_trajectory_markers(
         return;
     };
 
-    let Some(focused_entity) = physics_graph.id_to_entity.get(focused_id).copied() else {
+    let Some(focused_index) = system.0.by_name(focused_id) else {
         despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
         return;
     };
-
-    let Ok((_, _info, focused_state, motive, traj_link)) = bodies.get(focused_entity) else {
-        despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
-        return;
-    };
+    let motive = system.0.motive(focused_index);
+    let traj_link = bodies.iter()
+        .find(|(_, body_ref, _)| body_ref.0 == system.0.id(focused_index))
+        .and_then(|(_, _, link)| link);
 
     let (_, selection) = motive.motive_at(sim_time.time);
     let MotiveSelection::Keplerian(kepler) = selection else {
@@ -615,27 +620,19 @@ pub fn update_focused_trajectory_markers(
         return;
     };
 
-    let Some(primary_entity) = physics_graph.id_to_entity.get(&kepler.primary_id).copied() else {
+    let Some(primary_index) = system.0.by_name(&kepler.primary_id) else {
         despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
         return;
     };
 
-    let Ok((_, _, primary_state, _, _)) = bodies.get(primary_entity) else {
-        despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
-        return;
-    };
-
-    let primary_mass = bodies
-        .get(primary_entity)
-        .map(|(_, info, _, _, _)| info.mass)
-        .unwrap_or(0.0);
-    let mu = kepler
-        .gravitational_parameter
-        .unwrap_or(physics.gravitational_constant * primary_mass);
+    let primary_position = system.0.position(primary_index);
+    // The arena already resolved mu, explicit override included — recomputing it from
+    // the primary's mass here would silently disagree for barycentric orbits.
+    let mu = system.0.mu(focused_index);
     let period_seconds = kepler.period(mu).to_seconds();
     let periapsis_base = kepler.time_at_periapsis_passage(mu);
 
-    let Some(trajectory) = focused_state.trajectory.as_ref() else {
+    let Some(trajectory) = trajectories.0.get(&system.0.id(focused_index)).map(|p| &p.points) else {
         despawn_all_focused_trajectory_markers(&mut commands, &mut markers);
         return;
     };
@@ -677,8 +674,8 @@ pub fn update_focused_trajectory_markers(
     let periapsis_local_current = map_local_from_base_to_current(periapsis_local);
     let apoapsis_local_current = apoapsis_local.map(map_local_from_base_to_current);
 
-    let periapsis_world = primary_state.current_position + periapsis_local_current;
-    let apoapsis_world = apoapsis_local_current.map(|apo| primary_state.current_position + apo);
+    let periapsis_world = primary_position + periapsis_local_current;
+    let apoapsis_world = apoapsis_local_current.map(|apo| primary_position + apo);
     let peri_times = repeating_event_prev_next(periapsis_base, period_seconds, sim_time.time);
     let apo_times = repeating_event_prev_next(
         crate::foundations::time::Instant::from_seconds_since_j2000(
@@ -689,11 +686,11 @@ pub fn update_focused_trajectory_markers(
     );
 
     let distance_scale = view_settings.distance_factor();
-    let peri_bevy = periapsis_world.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos);
+    let peri_bevy = periapsis_world.to_render_relative(distance_scale, fcam.bevy_pos);
     let peri_tube_radius = calculate_tube_radius(peri_bevy.length());
     let peri_marker_radius = 2.0 * peri_tube_radius;
 
-    let apo_bevy = apoapsis_world.map(|pos| pos.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos));
+    let apo_bevy = apoapsis_world.map(|pos| pos.to_render_relative(distance_scale, fcam.bevy_pos));
     let apo_marker_radius = apo_bevy
         .as_ref()
         .map(|pos| 2.0 * calculate_tube_radius(pos.length()));
@@ -742,8 +739,8 @@ pub fn update_mouse_hit_marker(
     sim_time: Res<SimTime>,
     physics: Res<UniversePhysics>,
     _fcam: Single<&Freecam, With<PlanetariumCamera>>,
-    physics_graph: Res<crate::body::motive::calculate_body_positions::PhysicsGraph>,
-    bodies: Query<(&BodyInfo, &Motive, Option<&TrajectoryMeshLink>)>,
+    bodies: Query<(&BodyRef, Option<&TrajectoryMeshLink>)>,
+    system: Res<SimSystem>,
     trajectory_caches: Query<&TrajectoryCache>,
     mut markers: Query<(Entity, &mut FocusedTrajectoryMarker, &mut Transform)>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -764,15 +761,16 @@ pub fn update_mouse_hit_marker(
         return;
     };
 
-    let Some(focused_entity) = physics_graph.id_to_entity.get(focused_id).copied() else {
+    let Some(focused_index) = system.0.by_name(focused_id) else {
         despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
         return;
     };
 
-    let Ok((_info, motive, traj_link)) = bodies.get(focused_entity) else {
-        despawn_trajectory_marker(&mut commands, &mut markers, FocusedTrajectoryMarkerKind::MouseHit);
-        return;
-    };
+    let motive = system.0.motive(focused_index);
+    let focused_id_hash = system.0.id(focused_index);
+    let traj_link = bodies.iter()
+        .find(|(body_ref, _)| body_ref.0 == focused_id_hash)
+        .and_then(|(_, link)| link);
 
     let (_, selection) = motive.motive_at(sim_time.time);
     let MotiveSelection::Keplerian(kepler) = selection else {
@@ -795,9 +793,8 @@ pub fn update_mouse_hit_marker(
     }
 
     // Get primary info for mu calculation
-    let primary_mass = physics_graph.id_to_entity.get(&kepler.primary_id)
-        .and_then(|e| bodies.get(*e).ok())
-        .map(|(info, _, _)| info.mass)
+    let primary_mass = system.0.by_name(&kepler.primary_id)
+        .map(|i| system.0.mass(i))
         .unwrap_or(0.0);
 
     let mu = kepler.gravitational_parameter
@@ -864,10 +861,10 @@ fn refine_true_anomaly_newton(
     let ecc = kepler.eccentricity();
     let mean_anomaly = kepler.mean_anomaly(absolute_time, mu);
 
-    let iterations = crate::body::motive::kepler_motive::expansion_iterations(ecc);
-    
-    // Apply N-iteration Fourier expansion for true anomaly refinement
-    crate::foundations::kepler::true_anomaly::fourier_expansion(mean_anomaly, ecc, iterations)
+    // Solved rather than expanded: the series this used to call diverges past the Laplace
+    // limit, and a marker on a comet's trajectory is exactly where that shows.
+    em_foundations::kepler::anomaly::true_from_mean(mean_anomaly, ecc)
+        .unwrap_or(mean_anomaly)
 }
 
 /// Compute the previous and next times when the body will be at a given true anomaly.
@@ -1236,7 +1233,7 @@ fn perpendicular_vectors(dir: Vec3) -> (Vec3, Vec3) {
 /// Runs each frame to catch newly spawned bodies.
 pub fn spawn_trajectory_meshes_for_bodies(
     mut commands: Commands,
-    bodies: Query<Entity, (With<BodyInfo>, Without<TrajectoryMeshLink>)>,
+    bodies: Query<Entity, (With<BodyRef>, Without<TrajectoryMeshLink>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TrajectoryMaterial>>,
 ) {
@@ -1255,7 +1252,7 @@ pub struct TrajectoryMeshLink(pub Entity);
 /// Uses RemovedComponents to only run when bodies are actually removed.
 pub fn cleanup_orphaned_trajectory_meshes(
     mut commands: Commands,
-    mut removed_bodies: RemovedComponents<BodyInfo>,
+    mut removed_bodies: RemovedComponents<BodyRef>,
     trajectory_meshes: Query<(Entity, &TrajectoryMesh)>,
 ) {
     // Early exit if no bodies were removed

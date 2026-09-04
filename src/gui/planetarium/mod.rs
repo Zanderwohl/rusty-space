@@ -9,8 +9,7 @@ use crate::gui::app::AppState;
 use crate::gui::menu::UiState;
 use crate::body::universe::save::TagState;
 use crate::sim::{SimTime, unload_simulation_objects, CalculateTrajectory, BodySelection};
-use crate::body::motive::calculate_body_positions::{self, PhysicsGraph, PositionCache, SimulationPerformanceMetrics};
-use crate::body::motive::kepler_motive;
+use crate::sim::world::{self, SimSystem, BodyEntities, Trajectories, SimMetrics};
 pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin, CameraAction};
 use crate::camera::Freecam;
 pub use crate::gui::planetarium::focused_body::FocusedBodyState;
@@ -41,9 +40,10 @@ impl Plugin for PlanetariumUI {
             .init_resource::<FocusedBodyState>()
             .init_resource::<HoverState>()
             .init_resource::<MissionClockSettings>()
-            .init_resource::<PhysicsGraph>()
-            .init_resource::<PositionCache>()
-            .init_resource::<SimulationPerformanceMetrics>()
+            .init_resource::<SimSystem>()
+            .init_resource::<BodyEntities>()
+            .init_resource::<Trajectories>()
+            .init_resource::<SimMetrics>()
             .init_resource::<StarLightingFrameCache>()
             .init_resource::<windows::right_panels::RightPanels>()
             .add_message::<CalculateTrajectory>()
@@ -76,26 +76,27 @@ impl Plugin for PlanetariumUI {
                 presentation::adjust_lights,
                 input::handle_go_to_shortcut,
                 input::handle_revolve_frame_shortcut,
-                calculate_body_positions::update_kepler_caches
-                    .before(calculate_body_positions::calculate_body_positions),
-                calculate_body_positions::calculate_body_positions,
-                kepler_motive::calculate_trajectory,
-                presentation::position_bodies.after(calculate_body_positions::calculate_body_positions),
-                presentation::orient_bodies.after(presentation::position_bodies),
+                world::advance_simulation,
+                world::sync_body_entities.after(world::advance_simulation),
+                world::calculate_trajectories,
+                world::sync_transforms
+                    .after(world::advance_simulation)
+                    .after(world::sync_body_entities),
+                world::sync_rotations.after(world::sync_transforms),
             ).in_set(PlanetariumUISet))
             // Trajectory mesh systems
             .add_systems(Update, (
                 presentation::spawn_trajectory_meshes_for_bodies,
                 presentation::refresh_precessing_trajectories
-                    .before(kepler_motive::calculate_trajectory),
+                    .before(world::calculate_trajectories),
                 presentation::rebuild_trajectory_caches
-                    .after(kepler_motive::calculate_trajectory),
+                    .after(world::calculate_trajectories),
                 presentation::update_focused_trajectory_markers
-                    .after(presentation::position_bodies),
+                    .after(world::sync_transforms),
                 presentation::update_mouse_hit_marker
-                    .after(presentation::position_bodies),
+                    .after(world::sync_transforms),
                 presentation::build_trajectory_meshes
-                    .after(presentation::position_bodies)
+                    .after(world::sync_transforms)
                     .after(presentation::rebuild_trajectory_caches),
                 presentation::update_trajectory_material_brightness,
                 presentation::cleanup_orphaned_trajectory_meshes,
@@ -106,17 +107,17 @@ impl Plugin for PlanetariumUI {
                 presentation::spawn_body_occluders,
                 presentation::spawn_terminator_meshes,
                 presentation::build_star_lighting_cache
-                    .after(presentation::position_bodies),
+                    .after(world::sync_transforms),
                 presentation::update_terminator_meshes
-                    .after(presentation::orient_bodies),
+                    .after(world::sync_rotations),
                 presentation::update_wireframe_lighting
-                    .after(presentation::orient_bodies)
+                    .after(world::sync_rotations)
                     .after(presentation::build_star_lighting_cache),
                 presentation::update_occluder_lighting
-                    .after(presentation::orient_bodies)
+                    .after(world::sync_rotations)
                     .after(presentation::build_star_lighting_cache),
                 presentation::update_wireframe_thickness
-                    .after(presentation::position_bodies),
+                    .after(world::sync_transforms),
                 presentation::update_occluder_scale
                     .after(presentation::update_wireframe_thickness),
                 presentation::cleanup_orphaned_body_wireframes,
@@ -125,13 +126,13 @@ impl Plugin for PlanetariumUI {
             .add_systems(Update, (
                 presentation::spawn_body_point_meshes,
                 presentation::update_body_points
-                    .after(presentation::position_bodies)
+                    .after(world::sync_transforms)
                     .after(presentation::build_star_lighting_cache),
                 presentation::cleanup_orphaned_body_points,
                 presentation::label_bodies
-                    .after(presentation::position_bodies),
+                    .after(world::sync_transforms),
                 presentation::draw_trajectory_marker_labels
-                    .after(presentation::position_bodies)
+                    .after(world::sync_transforms)
                     .after(presentation::update_focused_trajectory_markers)
                     .after(presentation::update_mouse_hit_marker),
             ).in_set(PlanetariumUISet))
@@ -139,13 +140,13 @@ impl Plugin for PlanetariumUI {
             .add_systems(Update, (
                 presentation::sync_celestial_markers,
                 presentation::update_celestial_markers
-                    .after(presentation::position_bodies),
+                    .after(world::sync_transforms),
             ).in_set(PlanetariumUISet))
             // Starfield brightness updates (via buffer, not material mutation)
             .add_systems(Update, (
                 presentation::update_starfield_brightness,
                 presentation::update_local_starfield
-                    .after(presentation::position_bodies),
+                    .after(world::sync_transforms),
             ).in_set(PlanetariumUISet))
             // Asset loading
             .add_systems(Update, (load_assets).in_set(PlanetariumLoadingSet))
@@ -176,18 +177,13 @@ fn initial_trajectories(mut calcs: MessageWriter<CalculateTrajectory>) {
 }
 
 fn load_assets(
-    mut commands: Commands,
     ui_state: ResMut<UiState>,
     mut view_settings: ResMut<ViewSettings>,
     mut next_app_state: ResMut<NextState<AppState>>,
-    mut cache: ResMut<AssetCache>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut star_materials: ResMut<Assets<BodyWireframeMaterial>>,
-    mut images: ResMut<Assets<Image>>,
     mut universe: ResMut<Universe>,
     mut physics: ResMut<UniversePhysics>,
     mut sim_time: ResMut<SimTime>,
+    mut system: ResMut<SimSystem>,
     mut esc_menu_context: ResMut<EscMenuContext>,
     mut unsaved: ResMut<UnsavedChanges>,
 ) {
@@ -208,7 +204,7 @@ fn load_assets(
         let (new_universe, loaded_time) = Universe::from_file(&universe_file);
         universe.path = new_universe.path.clone();
         universe.clear_all();
-        let _version = universe_file.contents.version; // TODO: Support multiple file format versions?
+        let _version = &universe_file.contents.version; // TODO: Support multiple file format versions?
 
         // Apply loaded time to the actual resource
         sim_time.time = loaded_time.time;
@@ -220,10 +216,8 @@ fn load_assets(
         physics.gravitational_constant = universe_file.contents.physics.gravitational_constant;
         view_settings.tags = HashMap::<String, TagState>::new();
 
-        let bodies = universe_file.contents.bodies;
-        for body in bodies {
+        for body in &universe_file.contents.bodies {
             let id = body.id();
-            let name = body.name();
             for tag in body.tags() {
                 let default_state = if tag == "Major Moon" || tag == "Major Planet" || tag == "Minor Planet" {
                     TagState { shown: true, trajectory: true, ..Default::default() }
@@ -234,9 +228,15 @@ fn load_assets(
                 };
                 view_settings.tags.entry(tag.clone()).or_insert(default_state).members.insert(id.clone());
             }
-            // info!("{:?}", view_settings);
-            universe.insert(name, id);
-            body.spawn(&mut commands, &mut cache, &mut meshes, &mut materials, &mut star_materials, &mut images);
+            universe.insert(body.name(), id);
+        }
+
+        // Bodies go into the arena, not into entities. `sync_body_entities` notices the
+        // new generation next frame and spawns the views; the presentation systems dress
+        // them from there.
+        match em_sim::system::System::from_contents(&universe_file.contents) {
+            Ok(loaded) => system.0 = loaded,
+            Err(e) => error!("could not build the simulation from {path:?}: {e}"),
         }
     }
 
@@ -245,16 +245,21 @@ fn load_assets(
 
 fn cleanup_planetarium(
     mut commands: Commands,
-    trajectory_meshes: Query<Entity, With<TrajectoryMesh>>,
-    body_point_meshes: Query<Entity, With<BodyPointMesh>>,
-    trajectory_markers: Query<Entity, With<FocusedTrajectoryMarker>>,
-    mut graph: ResMut<PhysicsGraph>,
-    mut cache: ResMut<PositionCache>,
+    // One query rather than three: a system may take at most sixteen parameters, and
+    // these three are despawned identically anyway.
+    orphans: Query<Entity, Or<(
+        With<TrajectoryMesh>,
+        With<BodyPointMesh>,
+        With<FocusedTrajectoryMarker>,
+    )>>,
+    mut system: ResMut<SimSystem>,
+    mut body_entities: ResMut<BodyEntities>,
+    mut trajectories: ResMut<Trajectories>,
     mut sim_time: ResMut<SimTime>,
     mut view_settings: ResMut<ViewSettings>,
     mut focused_body_state: ResMut<FocusedBodyState>,
     mut hover_state: ResMut<HoverState>,
-    mut metrics: ResMut<SimulationPerformanceMetrics>,
+    mut metrics: ResMut<SimMetrics>,
     mut universe: ResMut<Universe>,
     mut asset_cache: ResMut<AssetCache>,
     mut camera: Query<(&mut PlanetariumCamera, &mut Freecam)>,
@@ -264,20 +269,16 @@ fn cleanup_planetarium(
     next_esc_state.set(EscMenuState::Closed);
     unsaved.0 = false;
     // Despawn orphaned presentation entities that aren't children of SimulationObject
-    for entity in &trajectory_meshes {
-        commands.entity(entity).despawn();
-    }
-    for entity in &body_point_meshes {
-        commands.entity(entity).despawn();
-    }
-    for entity in &trajectory_markers {
+    for entity in &orphans {
         commands.entity(entity).despawn();
     }
 
-    // Reset physics state
-    graph.clear();
-    graph.needs_rebuild = true;
-    *cache = PositionCache::default();
+    // Reset physics state. Dropping the arena drops every body; the entity views are
+    // despawned as `SimulationObject`s by `unload_simulation_objects`, so all that is
+    // left here is to forget which entity viewed what.
+    *system = SimSystem::default();
+    *body_entities = BodyEntities::default();
+    *trajectories = Trajectories::default();
 
     // Reset simulation clock
     *sim_time = SimTime::default();
@@ -286,7 +287,7 @@ fn cleanup_planetarium(
     *view_settings = ViewSettings::default();
     *focused_body_state = FocusedBodyState::default();
     *hover_state = HoverState::default();
-    *metrics = SimulationPerformanceMetrics::default();
+    *metrics = SimMetrics::default();
 
     // Clear universe maps so stale IDs don't linger
     universe.clear_all();

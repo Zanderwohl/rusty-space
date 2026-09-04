@@ -54,6 +54,13 @@ pub trait ToRender {
     /// survive `f32`, so it stays wide until it is made camera-relative.
     fn to_render_scaled(&self, scale: f64) -> DVec3;
 
+    /// Render-space position, scaled, narrowed to `f32`.
+    ///
+    /// Only safe for offsets that are already small — a mesh built around its own origin,
+    /// say. For a world position use [`Self::to_render_relative`], which subtracts the
+    /// camera first.
+    fn to_render_scaled_f32(&self, scale: f64) -> Vec3;
+
     /// Render-space position relative to the camera, scaled, in `f32`.
     ///
     /// This is what a `Transform` wants. Subtracting the camera's own render-space
@@ -71,6 +78,11 @@ impl ToRender for DVec3 {
     #[inline]
     fn to_render_scaled(&self, scale: f64) -> DVec3 {
         sim_to_render(*self) * scale
+    }
+
+    #[inline]
+    fn to_render_scaled_f32(&self, scale: f64) -> Vec3 {
+        self.to_render_scaled(scale).as_vec3()
     }
 
     #[inline]

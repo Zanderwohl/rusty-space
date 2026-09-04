@@ -16,6 +16,7 @@ pub mod events;
 pub mod id;
 pub mod time;
 pub mod time_map;
+pub mod trajectory;
 pub mod universe;
 
 pub use em_foundations as foundations;

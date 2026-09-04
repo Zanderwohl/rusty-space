@@ -278,6 +278,8 @@ pub static MIGRATIONS: &[Migration] = &[
         "#,
         down: r#"
             -- SQLite cannot drop columns directly; keep columns for rollback compatibility.
+        "#,
+    },
     // Version 5 -> 6: anomalistic period, added on the refactor branch. Numbered after
     // the shaders migrations so an existing v5 database picks it up rather than
     // silently skipping it.
@@ -301,7 +303,6 @@ pub static MIGRATIONS: &[Migration] = &[
                 FROM motive_keplerian;
             DROP TABLE motive_keplerian;
             ALTER TABLE motive_keplerian_new RENAME TO motive_keplerian;
-    },
         "#,
     },
 ];

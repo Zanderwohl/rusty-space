@@ -146,6 +146,7 @@ fn trajectories_are_produced_on_request() {
     let id = em_sim::id::BodyId::from_name("Earth");
     let trajectories = app.world().resource::<Trajectories>();
     let path = trajectories.0.get(&id).expect("Earth should have a trajectory");
-    assert!(path.len() > 8, "trajectory has only {} samples", path.len());
-    assert!(path.periodicity().is_some(), "a closed orbit should be marked periodic");
+    assert!(path.points.len() > 8, "trajectory has only {} samples", path.points.len());
+    assert!(path.closed, "a closed orbit should be marked closed");
+    assert!(path.period.to_seconds() > 0.0, "a closed orbit needs a period");
 }

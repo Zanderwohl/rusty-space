@@ -2,12 +2,14 @@ use bevy::prelude::*;
 use bevy_egui::EguiContexts;
 use crate::camera::{GoTo, GoToSource, PlanetariumCamera};
 use crate::gui::planetarium::FocusedBodyState;
+use crate::sim::world::{BodyEntities, SimSystem};
 
 pub fn handle_go_to_shortcut(
     keys: Res<ButtonInput<KeyCode>>,
     mut contexts: EguiContexts,
     focused_body_state: Res<FocusedBodyState>,
-    physics_graph: Res<PhysicsGraph>,
+    system: Res<SimSystem>,
+    body_entities: Res<BodyEntities>,
     mut go_to: MessageWriter<GoTo>,
 ) {
     let go_to_source = if keys.just_pressed(KeyCode::KeyG) {
@@ -30,8 +32,11 @@ pub fn handle_go_to_shortcut(
         return;
     };
 
-    // O(1) lookup via PhysicsGraph instead of O(n) iterator scan
-    if let Some(&entity) = physics_graph.id_to_entity.get(selected_id) {
+    // Name to arena index to body id to entity: all hashed, none of it a scan.
+    let Some(index) = system.0.by_name(selected_id) else {
+        return;
+    };
+    if let Some(&entity) = body_entities.map.get(&system.0.id(index)) {
         info!("cam.input.goto source={:?} entity={:?}", source, entity);
         go_to.write(GoTo {
             entity,

@@ -62,6 +62,7 @@ fn motive(epoch: KeplerEpoch) -> KeplerMotive {
         }),
         epoch,
         anomalistic_period: None,
+        gravitational_parameter: None,
     }
 }
 
