@@ -25,8 +25,9 @@ impl GlamVec for DVec3 {
         Vec3::new(v.x, v.z, -v.y)
     }
 
+    /// Inverse of [`GlamVec::as_bevy`]: bevy(x, y, z) -> sim(x, -z, y).
     fn as_regular(&self) -> DVec3 {
-        DVec3::new(self.y, -self.z, self.x)
+        DVec3::new(self.x, -self.z, self.y)
     }
 
     fn as_bevy_scaled(&self, scale: f64) -> Vec3 {

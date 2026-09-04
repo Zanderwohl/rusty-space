@@ -20,6 +20,10 @@ pub struct KeplerMotive {
 
 const EXPANSION_ITERATIONS: usize = 10;
 
+/// Inclinations below this (in degrees) are treated as coplanar.
+/// `f64::EPSILON` (2.2e-16) is meaningless as an angular tolerance.
+const ANGLE_EPSILON_DEG: f64 = 1e-9;
+
 impl KeplerMotive {
     pub fn semi_major_axis(&self) -> f64 {
         self.shape.semi_major_axis()
@@ -303,7 +307,7 @@ impl KeplerRotation {
     }
 
     pub fn no_inclination(&self) -> bool {
-        self.inclination() < f64::EPSILON
+        self.inclination().abs() < ANGLE_EPSILON_DEG
     }
 
     pub fn longitude_of_ascending_node_infallible(&self, time_since_epoch: TimeDelta) -> f64 {
@@ -366,14 +370,20 @@ pub struct KeplerPrecessingEulerAngles {
 impl KeplerPrecessingEulerAngles {
     /// Degrees of apsidal precession accumulated since epoch.
     /// Positive period = prograde (ω advances), negative = retrograde.
+    /// A zero period means "no precession" and yields 0, rather than inf/NaN.
     pub fn apsidal_precession_deg(&self, time_since_epoch: TimeDelta) -> f64 {
-        (time_since_epoch.to_seconds() / self.apsidal_precession_period.to_seconds()) * 360.0
+        let period = self.apsidal_precession_period.to_seconds();
+        if period == 0.0 { return 0.0; }
+        (time_since_epoch.to_seconds() / period) * 360.0
     }
 
     /// Degrees of nodal precession accumulated since epoch.
     /// Positive period = prograde (Ω advances), negative = retrograde (Ω regresses).
+    /// A zero period means "no precession" and yields 0, rather than inf/NaN.
     pub fn nodal_precession_deg(&self, time_since_epoch: TimeDelta) -> f64 {
-        (time_since_epoch.to_seconds() / self.nodal_precession_period.to_seconds()) * 360.0
+        let period = self.nodal_precession_period.to_seconds();
+        if period == 0.0 { return 0.0; }
+        (time_since_epoch.to_seconds() / period) * 360.0
     }
 }
 

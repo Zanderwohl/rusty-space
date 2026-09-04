@@ -69,16 +69,16 @@ impl Universe {
     }
 
     pub fn remove_by_name<T: AsRef<str>>(&mut self, name: T) {
-        self.name_to_id.remove(name.as_ref());
-        if let Some(id) = self.name_to_id.get(name.as_ref()) {
-            self.id_to_name.remove(id);
+        // Take the id out first: removing from `name_to_id` before the lookup would
+        // leave the `id_to_name` half of the bimap orphaned.
+        if let Some(id) = self.name_to_id.remove(name.as_ref()) {
+            self.id_to_name.remove(&id);
         }
     }
 
     pub fn remove_by_id<T: AsRef<str>>(&mut self, id: T) {
-        self.id_to_name.remove(id.as_ref());
-        if let Some(name) = self.id_to_name.get(id.as_ref()) {
-            self.name_to_id.remove(name);
+        if let Some(name) = self.id_to_name.remove(id.as_ref()) {
+            self.name_to_id.remove(&name);
         }
     }
 

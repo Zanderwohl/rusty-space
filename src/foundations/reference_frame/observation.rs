@@ -44,15 +44,14 @@ impl Observation {
 /// Zenith: 0 = up (+Z), π/2 = horizontal, π = down (-Z)
 /// Azimuth: 0 = +X direction, π/2 = +Y direction
 fn quat_from_azimuth_zenith(azimuth_rad: f64, zenith_rad: f64) -> DQuat {
-    // Rotate around Z-axis by azimuth, then Y-axis by zenith
-    DQuat::from_rotation_z(azimuth_rad) * DQuat::from_rotation_y(zenith_rad)
+    // Zenith is measured down from +Z; elevation is measured up from the XY plane.
+    quat_from_azimuth_elevation(azimuth_rad, std::f64::consts::FRAC_PI_2 - zenith_rad)
 }
 
 /// Elevation: -π/2 = down, 0 = horizontal, π/2 = up
 /// Azimuth: 0 = +X direction, π/2 = +Y direction
-fn quat_from_azimuth_elevation(azimuth_rad: f64, inclination_rad: f64) -> DQuat {
-    use std::f64::consts::PI;
-
-    // Convert to zenith or rotate directly
-    DQuat::from_rotation_z(azimuth_rad) * DQuat::from_rotation_y(PI / 2.0 - inclination_rad)
+fn quat_from_azimuth_elevation(azimuth_rad: f64, elevation_rad: f64) -> DQuat {
+    // A rotation of `t` about +Y maps +X to (cos t, 0, -sin t), so raising the forward
+    // vector by `elevation` requires a rotation of `-elevation`.
+    DQuat::from_rotation_z(azimuth_rad) * DQuat::from_rotation_y(-elevation_rad)
 }

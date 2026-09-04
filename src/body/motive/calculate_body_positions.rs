@@ -663,10 +663,12 @@ fn calculate_newtonian_positions(
                     })
                     .sum();
                 
-                // Update position and velocity using simple Euler integration
-                // TODO: Consider using Verlet or RK4 for better accuracy
-                current_pos += current_vel * effective_delta;
+                // Semi-implicit (symplectic) Euler: advance velocity FIRST, then use the
+                // updated velocity to advance position. Ordering these the other way round
+                // is forward Euler, which gains energy without bound on closed orbits.
+                // TODO: Consider velocity Verlet for better accuracy (one accel per step already).
                 current_vel += acceleration * effective_delta;
+                current_pos += current_vel * effective_delta;
             }
             
             state.current_position = current_pos;

@@ -70,7 +70,7 @@ pub mod local {
         }
 
         pub fn from_elements2_infallible(semi_major_axis: f64, eccentricity: f64, true_anomaly: f64) -> f64 {
-            from_elements2(eccentricity, semi_major_axis, true_anomaly).unwrap_or(f64::INFINITY)
+            from_elements2(semi_major_axis, eccentricity, true_anomaly).unwrap_or(f64::INFINITY)
         }
 
         pub fn from_eccentric_anomaly(semi_major_axis: f64, eccentricity: f64, eccentric_anomaly: f64) -> f64 {
@@ -96,8 +96,9 @@ pub mod semi_major_axis {
         f64::powf(x, 1.0 / 3.0)
     }
 
+    /// `a = b / sqrt(1 - e^2)`, the inverse of [`super::semi_minor_axis::conic_definition`].
     pub fn conic_definition1(semi_minor_axis: f64, eccentricity: f64) -> f64 {
-        common::unit_circle_xy(eccentricity) / semi_minor_axis
+        semi_minor_axis / common::unit_circle_xy(eccentricity)
     }
 
     pub fn conic_definition2(eccentricity: f64, semi_latus_rectum: f64) -> f64 {
@@ -157,10 +158,13 @@ pub mod eccentricity {
 }
 
 pub mod semi_parameter {
-    use crate::util::common::unit_circle_xy;
-
+    /// The semi-parameter (a.k.a. semi-latus rectum) `p = a(1 - e^2)`.
+    ///
+    /// This is the same quantity as [`super::semi_latus_rectum::conic_definition`];
+    /// both names appear in the literature. It is NOT `a*sqrt(1 - e^2)`, which is the
+    /// semi-minor axis (see [`super::semi_minor_axis::conic_definition`]).
     pub fn definition(semi_major_axis: f64, eccentricity: f64) -> f64 {
-        semi_major_axis * unit_circle_xy(eccentricity)
+        semi_major_axis * (1.0 - eccentricity * eccentricity)
     }
 }
 
@@ -184,11 +188,14 @@ pub mod apoapsis {
 pub mod eccentric_anomaly {
     use crate::util::common::unit_circle_xy;
 
+    /// `E = atan2(sqrt(1 - e^2) sin v, e + cos v)`, in radians.
+    ///
+    /// Uses `atan2` rather than `atan` of the ratio so the result lands in the correct
+    /// quadrant across the whole orbit.
     pub fn from_true_anomaly(eccentricity: f64, true_anomaly: f64) -> f64 {
         let numerator = unit_circle_xy(eccentricity) * f64::sin(true_anomaly);
         let denominator = eccentricity + f64::cos(true_anomaly);
-        let fraction = numerator / denominator;
-        f64::atan(fraction)
+        f64::atan2(numerator, denominator)
     }
 }
 
@@ -216,12 +223,17 @@ pub mod true_anomaly {
         answer
     }
 
-    /// This is the Fourier expansion up to e^3
+    /// The equation of the centre, expanded to `e^3`:
+    ///
+    /// `v ~= M + (2e - e^3/4) sin M + (5/4)e^2 sin 2M + (13/12)e^3 sin 3M`
+    ///
+    /// Truncated series: accurate only for small `e`. Prefer solving Kepler's equation.
     pub fn from_mean_anomaly(mean_anomaly: f64, eccentricity: f64) -> f64 {
+        let e = eccentricity;
         let first_term = mean_anomaly;
-        let second_term = (2.0 - (1.0 / 4.0) * eccentricity * eccentricity * eccentricity) * f64::sin(mean_anomaly);
-        let third_term = (5.0 / 4.0) * eccentricity * eccentricity * eccentricity * f64::sin(2.0 * mean_anomaly);
-        let fourth_term = (13.0 / 12.0) * eccentricity * eccentricity * eccentricity * f64::sin(3.0 * mean_anomaly);
+        let second_term = (2.0 * e - (1.0 / 4.0) * e * e * e) * f64::sin(mean_anomaly);
+        let third_term = (5.0 / 4.0) * e * e * f64::sin(2.0 * mean_anomaly);
+        let fourth_term = (13.0 / 12.0) * e * e * e * f64::sin(3.0 * mean_anomaly);
         first_term + second_term + third_term + fourth_term
     }
 
@@ -241,8 +253,10 @@ pub mod true_anomaly {
 
 pub mod apsides {
     pub mod periapsis {
+        /// `r_p = p / (1 + e)` where `p = focal_parameter * e` is the semi-latus rectum.
+        /// Equals `a(1 - e)`.
         pub fn definition(focal_parameter: f64, eccentricity: f64) -> f64 {
-            (focal_parameter * eccentricity) / (1.0 - eccentricity)
+            (focal_parameter * eccentricity) / (1.0 + eccentricity)
         }
 
         pub fn from_parameters(semi_major_axis: f64, eccentricity: f64) -> f64 {
@@ -251,8 +265,10 @@ pub mod apsides {
     }
 
     pub mod apoapsis {
+        /// `r_a = p / (1 - e)` where `p = focal_parameter * e` is the semi-latus rectum.
+        /// Equals `a(1 + e)`. Diverges as `e -> 1`.
         pub fn definition(focal_parameter: f64, eccentricity: f64) -> f64 {
-            (focal_parameter * eccentricity) / (1.0 + eccentricity)
+            (focal_parameter * eccentricity) / (1.0 - eccentricity)
         }
 
         pub fn from_parameters(semi_major_axis: f64, eccentricity: f64) -> f64 {
@@ -280,9 +296,13 @@ pub mod gravitational_parameter {
 pub mod eccentricity_vector {
     use bevy::math::DVec3;
 
+    /// `e_vec = (v x h) / mu - r_hat`, where `h = r x v`.
+    ///
+    /// Equivalent to [`super::eccentricity::vector::definition`]; both are kept because
+    /// both names are in use. They must agree (asserted in tests).
     pub fn definition(mu: f64, displacement: DVec3, velocity: DVec3) -> DVec3 {
         let specific_angular_momentum = displacement.cross(velocity);
-        (1.0 / mu) * (velocity * specific_angular_momentum) - displacement.normalize()
+        velocity.cross(specific_angular_momentum) / mu - displacement.normalize()
     }
 }
 
@@ -290,8 +310,12 @@ pub mod energy {
     pub mod mechanical {
         use crate::foundations::kepler::energy::{kinetic, potential};
 
+        /// Specific orbital energy `eps = v^2/2 - mu/r`.
+        ///
+        /// Note [`super::potential::specific`] already returns a negative value, so these
+        /// are *added*.
         pub fn specific(velocity: f64, mu: f64, displacement: f64) -> f64 {
-            kinetic::specific(velocity) - potential::specific(mu, displacement)
+            kinetic::specific(velocity) + potential::specific(mu, displacement)
         }
 
         pub fn definition(mass: f64, velocity: f64, mu: f64, displacement: f64) -> f64 {

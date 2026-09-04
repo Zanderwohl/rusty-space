@@ -48,7 +48,12 @@ impl ReferenceFrame {
     }
 
     /// Computes the orthonormal basis vectors from yaw and pitch (roll = 0).
-    /// Returns (forward, right, up) vectors.
+    /// Returns (forward, right, up) vectors, forming a RIGHT-handed basis (det = +1).
+    ///
+    /// Note the order of the first cross product: `world_up x forward` yields +Y at
+    /// yaw = pitch = 0, matching the documented "+Y is right". The reverse
+    /// (`forward x world_up`) yields -Y and a determinant of -1, i.e. a mirror rather
+    /// than a rotation, which cannot be converted to a quaternion.
     fn basis_from_yaw_pitch(yaw: f64, pitch: f64) -> (DVec3, DVec3, DVec3) {
         // Forward direction from yaw and pitch
         let forward = DVec3::new(
@@ -57,14 +62,24 @@ impl ReferenceFrame {
             pitch.sin(),
         ).normalize();
 
-        // Right is perpendicular to forward and world up
         let world_up = DVec3::Z;
-        let right = forward.cross(world_up).normalize();
-
-        // Local up is perpendicular to both forward and right
-        let up = right.cross(forward).normalize();
+        let right = Self::right_from_forward(forward, world_up, yaw);
+        let up = forward.cross(right).normalize();
 
         (forward, right, up)
+    }
+
+    /// `right = world_up x forward`, falling back to a yaw-derived axis when `forward`
+    /// is parallel to `world_up` (pitch = +/-pi/2), where the cross product vanishes and
+    /// `normalize()` would yield NaN.
+    fn right_from_forward(forward: DVec3, world_up: DVec3, yaw: f64) -> DVec3 {
+        let right = world_up.cross(forward);
+        if right.length_squared() < 1e-20 {
+            // Gimbal singularity: pick the right vector implied by yaw alone.
+            DVec3::new(-yaw.sin(), yaw.cos(), 0.0)
+        } else {
+            right.normalize()
+        }
     }
 
     /// Produces a transformation from Reference Frame self to Reference frame other.
@@ -266,8 +281,11 @@ impl ReferenceFrame {
     /// universal +z is used as the up hint.
     pub fn look_at_universal(&self, universal_target: DVec3, up: DVec3) -> Self {
         let forward = (universal_target - self.universal_origin()).normalize(); // +X
-        let right = forward.cross(up).normalize(); // +Y
-        let actual_up = right.cross(forward).normalize(); // +Z
+        // Right-handed: +Y = up x forward, +Z = forward x right. Using `forward x up`
+        // here produces a mirrored (det = -1) basis that disagrees with
+        // `look_at_universal_roll_rads`, which builds a proper rotation quaternion.
+        let right = Self::right_from_forward(forward, up, self.yaw()); // +Y
+        let actual_up = forward.cross(right).normalize(); // +Z
 
         DMat4::from_cols(
             forward.extend(0.0),

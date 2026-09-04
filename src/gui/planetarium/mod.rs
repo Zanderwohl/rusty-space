@@ -12,7 +12,7 @@ use crate::sim::{SimTime, unload_simulation_objects, CalculateTrajectory, BodySe
 use crate::body::universe;
 use crate::body::motive::calculate_body_positions::{self, PhysicsGraph, PositionCache, SimulationPerformanceMetrics};
 use crate::body::motive::kepler_motive;
-use crate::foundations::time::{Instant, J2000_JD, JD_SECONDS_PER_JULIAN_DAY};
+use crate::foundations::time::Instant;
 pub(crate) use crate::camera::{PlanetariumCamera, PlanetariumCameraPlugin};
 use crate::gui::planetarium::windows::body_info::BodyInfoState;
 use crate::presentation;
@@ -116,8 +116,7 @@ fn load_assets(
         universe.clear_all();
         let version = universe_file.contents.version; // TODO: Support multiple file format versions?
 
-        let time = (universe_file.contents.time.time_julian_days - J2000_JD) * JD_SECONDS_PER_JULIAN_DAY; // Convert Julian Days to seconds
-        sim_time.time = Instant::from_seconds_since_j2000(time);
+        sim_time.time = Instant::from_julian_day(universe_file.contents.time.time_julian_days);
         sim_time.playing = false;
 
         physics.gravitational_constant = universe_file.contents.physics.gravitational_constant;

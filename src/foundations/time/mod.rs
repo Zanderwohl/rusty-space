@@ -15,7 +15,9 @@ pub const JD_SECONDS_PER_JULIAN_DAY: f64 = 24.0 * 60.0 * 60.0;
 
 
 impl Instant {
-    pub const J2000: Self = Self(J2000_JD);
+    /// The J2000 epoch itself. `Instant` counts **seconds since J2000**, so this is zero.
+    /// (It is emphatically NOT `J2000_JD`, which is a Julian Day *number*, not a second count.)
+    pub const J2000: Self = Self(0.0);
 
     #[inline(always)]
     pub fn from_julian_day(julian_day: f64) -> Self {
