@@ -21,6 +21,8 @@ pub enum SystemError {
     DuplicateName(String),
     /// Different names, same id. Refused rather than silently merging two bodies.
     HashCollision { existing: String, incoming: String },
+    /// A body orbits a primary that is not in the file.
+    UnresolvedPrimary { body: String, primary: String },
 }
 
 impl std::fmt::Display for SystemError {
@@ -29,6 +31,8 @@ impl std::fmt::Display for SystemError {
             SystemError::DuplicateName(n) => write!(f, "a body named {n:?} is already present"),
             SystemError::HashCollision { existing, incoming } =>
                 write!(f, "{incoming:?} hashes to the same id as {existing:?}"),
+            SystemError::UnresolvedPrimary { body, primary } =>
+                write!(f, "{body:?} orbits {primary:?}, which is not in the system"),
         }
     }
 }
@@ -71,6 +75,10 @@ pub struct System {
     topo_order: Vec<BodyIndex>,
     newtonian: Vec<BodyIndex>,
     major: Vec<BodyIndex>,
+    /// Bodies whose motive names a primary that is not in the arena, as (body, primary).
+    /// Their mu falls back to `G * m_self` and their orbit anchors at the origin, so they
+    /// still render and animate — this is the only record that they are wrong.
+    unresolved: Vec<(String, String)>,
 
     gravitational_constant: f64,
     time: Instant,
@@ -86,7 +94,7 @@ impl System {
             position: Vec::new(), velocity: Vec::new(), local_position: Vec::new(),
             newtonian_started: Vec::new(),
             parent: Vec::new(), mu: Vec::new(), topo_order: Vec::new(),
-            newtonian: Vec::new(), major: Vec::new(),
+            newtonian: Vec::new(), major: Vec::new(), unresolved: Vec::new(),
             gravitational_constant, time: Instant::J2000, generation: 0, dirty: true,
         }
     }
@@ -200,6 +208,14 @@ impl System {
     /// Bodies integrated rather than evaluated. Zero means any instant can be jumped to.
     #[inline] pub fn newtonian_count(&self) -> usize { self.newtonian.len() }
 
+    /// Bodies naming a primary that is not present, as (body, primary).
+    ///
+    /// Such a body keeps propagating: its mu collapses to `G * m_self`, which is smaller
+    /// than intended by the mass ratio, and its orbit anchors at the world origin instead
+    /// of its primary. It still draws, so nothing else will report it. Only meaningful
+    /// after a propagation, which is what rebuilds the list.
+    pub fn unresolved_primaries(&self) -> &[(String, String)] { &self.unresolved }
+
     #[inline] pub fn positions(&self) -> &[DVec3] { &self.position }
     #[inline] pub fn velocities(&self) -> &[DVec3] { &self.velocity }
 
@@ -254,10 +270,11 @@ impl System {
         self.topo_order.clear();
         self.newtonian.clear();
         self.major.clear();
+        self.unresolved.clear();
 
         // Gather first, assign after: reading a motive borrows `self`.
         enum Kind { Fixed, Kepler(Option<f64>), Newton }
-        let mut plan: Vec<(BodyIndex, Option<BodyId>, Kind)> = Vec::with_capacity(n);
+        let mut plan: Vec<(BodyIndex, Option<(BodyId, String)>, Kind)> = Vec::with_capacity(n);
         for i in self.indices() {
             let (_, selection) = self.motives[i.get()].motive_at(time);
             let (parent_name, kind) = match selection {
@@ -266,13 +283,22 @@ impl System {
                                                   Kind::Kepler(k.gravitational_parameter)),
                 MotiveSelection::Newtonian { .. } => (None, Kind::Newton),
             };
-            plan.push((i, parent_name.map(BodyId::from_name), kind));
+            plan.push((i, parent_name.map(|n| (BodyId::from_name(n), n.to_string())), kind));
         }
 
         let mut hierarchical = Vec::with_capacity(n);
-        for (i, parent_id, kind) in plan {
+        for (i, parent_ref, kind) in plan {
             if self.info[i.get()].major { self.major.push(i); }
-            let parent = parent_id.and_then(|pid| self.index_of.get(&pid).copied());
+            let parent = match &parent_ref {
+                Some((pid, name)) => {
+                    let found = self.index_of.get(pid).copied();
+                    if found.is_none() {
+                        self.unresolved.push((self.info[i.get()].id.clone(), name.clone()));
+                    }
+                    found
+                }
+                None => None,
+            };
             self.parent[i.get()] = parent;
             match kind {
                 Kind::Newton => self.newtonian.push(i),
@@ -379,6 +405,19 @@ impl System {
             };
             system.insert(BodyDef { info, motive, rotation, appearance })?;
         }
+        // A dangling primary is not survivable: mu collapses to G * m_self and the orbit
+        // anchors at the origin, while the body keeps drawing as though it were fine.
+        // Catch it here, where the file can still be rejected.
+        system.rebuild_derived(system.time);
+        let dangling = system.unresolved.first().cloned();
+        // `rebuild_derived` clears the dirty flag, which would claim the arena is
+        // evaluated at its epoch when no position has been computed yet — callers that
+        // skip propagating an up-to-date system would then never place the bodies.
+        system.dirty = true;
+        if let Some((body, primary)) = dangling {
+            return Err(SystemError::UnresolvedPrimary { body, primary });
+        }
+
         Ok(system)
     }
 }

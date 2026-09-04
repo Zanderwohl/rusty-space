@@ -187,3 +187,90 @@ fn a_newtonian_body_holds_a_circular_orbit() {
     assert!(worst < 1e-3, "radius wandered {worst:e} over a year");
     assert!(drift < 1e-6, "velocity Verlet leaked {drift:e} of the orbital energy");
 }
+
+/// A body naming a primary that is not present must be refused, not quietly broken.
+///
+/// Such a body keeps propagating: mu collapses from `G(M+m)` to `G*m_self` — for Earth
+/// about 3e-6 of the intended value — and the orbit anchors at the world origin. It
+/// still draws at a plausible-looking position, and `em-sim` has no logging, so nothing
+/// downstream can report it.
+mod unresolved_primary {
+    use em_foundations::time::Instant;
+    use em_sim::body::BodyInfo;
+    use em_sim::motive::Motive;
+    use em_sim::motive::kepler::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive,
+                                 KeplerRotation, KeplerShape, MeanAnomalyAtJ2000};
+    use em_sim::system::{BodyDef, System, SystemError};
+
+    fn orbiting(name: &str, primary: &str) -> BodyDef {
+        BodyDef {
+            info: BodyInfo { id: name.to_string(), mass: 5.97e24, ..Default::default() },
+            motive: Motive::from_keplerian(KeplerMotive {
+                primary_id: primary.to_string(),
+                shape: KeplerShape::EccentricitySMA(EccentricitySMA {
+                    eccentricity: 0.0167,
+                    semi_major_axis: 1.496e11,
+                }),
+                rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
+                    inclination: 0.0,
+                    longitude_of_ascending_node: 0.0,
+                    argument_of_periapsis: 0.0,
+                }),
+                epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 { mean_anomaly: 0.0 }),
+                anomalistic_period: None,
+                gravitational_parameter: None,
+            }),
+            rotation: None,
+            appearance: Default::default(),
+        }
+    }
+
+    #[test]
+    fn the_arena_reports_it() {
+        let mut system = System::new(6.6743015e-11);
+        system.insert(orbiting("Earth", "NoSuchStar")).expect("insert");
+        em_sim::propagate::evaluate_at(&mut system, Instant::J2000);
+
+        let unresolved = system.unresolved_primaries();
+        assert_eq!(unresolved.len(), 1, "expected one unresolved primary");
+        assert_eq!(unresolved[0], ("Earth".to_string(), "NoSuchStar".to_string()));
+    }
+
+    #[test]
+    fn a_resolved_hierarchy_reports_nothing() {
+        let mut system = System::new(6.6743015e-11);
+        system.insert(BodyDef {
+            info: BodyInfo { id: "Sol".into(), mass: 1.989e30, ..Default::default() },
+            motive: Motive::fixed(glam::DVec3::ZERO),
+            rotation: None,
+            appearance: Default::default(),
+        }).expect("insert");
+        system.insert(orbiting("Earth", "Sol")).expect("insert");
+        em_sim::propagate::evaluate_at(&mut system, Instant::J2000);
+
+        assert!(system.unresolved_primaries().is_empty());
+    }
+
+    /// Loading is where this can still be refused, so it is refused there.
+    #[test]
+    fn loading_a_file_with_one_fails() {
+        let mut contents = em_sim::presets::solar_system();
+        // Repoint one moon at a body that is not in the file.
+        for body in contents.bodies.iter_mut() {
+            if let em_sim::universe::SomeBody::KeplerEntry(e) = body {
+                if e.info.id == "Luna" {
+                    e.params.primary_id = "Vulcan".into();
+                    break;
+                }
+            }
+        }
+        match System::from_contents(&contents) {
+            Err(SystemError::UnresolvedPrimary { body, primary }) => {
+                assert_eq!(body, "Luna");
+                assert_eq!(primary, "Vulcan");
+            }
+            Err(e) => panic!("wrong error: {e}"),
+            Ok(_) => panic!("a dangling primary was accepted"),
+        }
+    }
+}
