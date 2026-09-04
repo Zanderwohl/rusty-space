@@ -8586,11 +8586,15 @@ pub fn earth_moon() -> UniverseFileContents {
                     }),
                     rotation: Some(iau_rotation(0.0, 90.0, 190.147, 23.9344696)),
                 }), // Earth
-                /*SomeBody::KeplerEntry(KeplerEntry {
+                // Luna, from the same JPL fit as the bundled solar system. The version
+                // that sat here commented out had a prograde (positive) nodal precession
+                // period — nodal regression is retrograde — and a mass of 6.4171, off by
+                // 22 orders of magnitude.
+                SomeBody::KeplerEntry(KeplerEntry {
                     info: BodyInfo {
                         name: Some("Luna".into()),
                         id: "luna".to_string(),
-                        mass: 6.4171,
+                        mass: 7.346e+22,
                         major: true,
                         designation: Some("Earth I".into()),
                         tags: vec!["Moon".into()],
@@ -8599,30 +8603,31 @@ pub fn earth_moon() -> UniverseFileContents {
                     params: KeplerMotive {
                         primary_id: "earth".to_string(),
                         shape: KeplerShape::EccentricitySMA(EccentricitySMA {
-                            eccentricity: 0.05490,
-                            semi_major_axis: 384400.0 * 1000.0, // Convert km to m
+                            eccentricity: 0.05483385719,
+                            semi_major_axis: 384374822.0,
                         }),
-                        rotation: KeplerRotation::PrecessingEulerAngles(KeplerPrecessingEulerAngles { // TODO: Precession https://en.wikipedia.org/wiki/Orbit_of_the_Moon#Precession
-                            inclination: 5.240010829674768e0,
-                            longitude_of_ascending_node: 1.239837028145578e2,
-                            argument_of_periapsis: 3.081359034620368e2,
-                            apsidal_precession_period: 3231.50,
-                            nodal_precession_period: 6798.38,
+                        rotation: KeplerRotation::PrecessingEulerAngles(KeplerPrecessingEulerAngles {
+                            inclination: 5.146884942,
+                            longitude_of_ascending_node: 125.0815567,
+                            argument_of_periapsis: 318.6030345,
+                            apsidal_precession_period: TimeDelta::from_days(2191.464675),
+                            nodal_precession_period: TimeDelta::from_days(-6791.621712),
                         }),
                         epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
-                            mean_anomaly: 1.407402571142365e02,
+                            mean_anomaly: 134.6348082,
                         }),
+                        anomalistic_period: Some(TimeDelta::from_days(27.55434218)),
+                        // mu implied by the fitted period and semi-major axis.
+                        gravitational_parameter: Some(3.95564176e+14),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
-                        radius: 1737.4 * 1000.0,
-                        color: AppearanceColor {
-                            r: 87,
-                            g: 87,
-                            b: 87,
-                        },
+                        radius: 1737400.0,
+                        color: AppearanceColor { r: 87, g: 87, b: 87 },
                         highlight_latitudes: Vec::new(),
                     }),
-                }),*/ // Luna
+                    rotation: Some(BodyRotation::tidally_locked("earth",
+                        DVec3::new(-3.543751263e-05, -0.0003753996676, 0.9999999289))),
+                }), // Luna
                 SomeBody::NewtonEntry(NewtonEntry {
                     info: BodyInfo {
                         name: Some("Newtonian Test Body A".into()),
