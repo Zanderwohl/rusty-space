@@ -179,12 +179,12 @@ impl KeplerMotive {
     pub fn radius_from_primary_at_time(&self, time: Instant, gravitational_parameter: f64) -> Option<f64> {
         let ecc = self.shape.eccentricity();
         let ta = self.true_anomaly_at(self.mean_anomaly(time, gravitational_parameter));
-        local::radius::from_elements2(self.shape.semi_major_axis(), ecc, ta)
+        local::radius::from_semi_major_axis(self.shape.semi_major_axis(), ecc, ta)
     }
 
     pub fn radius_from_primary_at_true_anomaly(&self, true_anomaly: f64) -> Option<f64> {
         let ecc = self.shape.eccentricity();
-        local::radius::from_elements2(self.shape.semi_major_axis(), ecc, true_anomaly)
+        local::radius::from_semi_major_axis(self.shape.semi_major_axis(), ecc, true_anomaly)
     }
 
     pub fn eccentric_anomaly(&self, time: Instant, gravitational_parameter: f64) -> f64 {
@@ -199,7 +199,7 @@ impl KeplerMotive {
     pub fn displacement_pqw(&self, time: Instant, gravitational_parameter: f64) -> Option<DVec3> {
         let ecc = self.shape.eccentricity();
         let ta = self.true_anomaly_at(self.mean_anomaly(time, gravitational_parameter));
-        let rad = local::radius::from_elements2(self.shape.semi_major_axis(), ecc, ta)?;
+        let rad = local::radius::from_semi_major_axis(self.shape.semi_major_axis(), ecc, ta)?;
 
         Some(DVec3::new(rad * ta.cos(), rad * ta.sin(), 0.0))
     }

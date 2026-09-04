@@ -117,7 +117,7 @@ fn semi_major_axis_round_trips_through_semi_minor() {
     for e in eccentricities() {
         let b = semi_minor_axis::conic_definition(a, e);
         assert_close(
-            semi_major_axis::conic_definition1(b, e),
+            semi_major_axis::from_semi_minor_and_eccentricity(b, e),
             a, TOL, &format!("a -> b -> a at e={e}"),
         );
     }
@@ -129,7 +129,7 @@ fn semi_major_axis_from_semi_latus_rectum_round_trips() {
     for e in eccentricities() {
         let p = semi_latus_rectum::conic_definition(a, e);
         assert_close(
-            semi_major_axis::conic_definition2(e, p),
+            semi_major_axis::from_eccentricity_and_semi_latus_rectum(e, p),
             a, TOL, &format!("a -> p -> a at e={e}"),
         );
     }
@@ -143,16 +143,16 @@ fn radius_overloads_agree() {
     for e in eccentricities() {
         for nu in true_anomalies() {
             let expected = a * (1.0 - e * e) / (1.0 + e * nu.cos());
-            let from2 = local::radius::from_elements2(a, e, nu).unwrap();
+            let from2 = local::radius::from_semi_major_axis(a, e, nu).unwrap();
             assert_close(from2, expected, TOL, &format!("from_elements2 e={e} nu={nu}"));
             assert_close(
-                local::radius::from_elements2_infallible(a, e, nu),
+                local::radius::from_semi_major_axis_infallible(a, e, nu),
                 expected, TOL, &format!("from_elements2_infallible e={e} nu={nu}"),
             );
             if e > 0.0 {
                 let focal_parameter = a * (1.0 - e * e) / e;
                 assert_close(
-                    local::radius::from_elements1(focal_parameter, e, nu),
+                    local::radius::from_focal_parameter(focal_parameter, e, nu),
                     expected, TOL, &format!("from_elements1 e={e} nu={nu}"),
                 );
             }
@@ -165,7 +165,7 @@ fn radius_overloads_agree() {
 fn circular_orbit_has_constant_radius() {
     let a = 7.0e6;
     for nu in true_anomalies() {
-        assert_close(local::radius::from_elements2(a, 0.0, nu).unwrap(), a, TOL, "circular radius");
+        assert_close(local::radius::from_semi_major_axis(a, 0.0, nu).unwrap(), a, TOL, "circular radius");
     }
 }
 
@@ -183,7 +183,7 @@ fn eccentric_anomaly_round_trips_to_radius() {
         for nu in true_anomalies() {
             let ea = eccentric_anomaly::from_true_anomaly(e, nu);
             let r_from_ea = local::radius::from_eccentric_anomaly(a, e, ea);
-            let r_from_nu = local::radius::from_elements2(a, e, nu).unwrap();
+            let r_from_nu = local::radius::from_semi_major_axis(a, e, nu).unwrap();
             assert_close(r_from_ea, r_from_nu, 1e-7, &format!("r(E) vs r(nu) at e={e} nu={nu}"));
         }
     }

@@ -61,13 +61,13 @@ pub mod local {
     }
 
     pub mod radius {
-        pub fn from_elements1(focal_parameter: f64, eccentricity: f64, true_anomaly: f64) -> f64 {
+        pub fn from_focal_parameter(focal_parameter: f64, eccentricity: f64, true_anomaly: f64) -> f64 {
             let numerator = focal_parameter * eccentricity;
             let denominator = 1.0 + eccentricity * f64::cos(true_anomaly);
             numerator / denominator
         }
 
-        pub fn from_elements2(semi_major_axis: f64, eccentricity: f64, true_anomaly: f64) -> Option<f64> {
+        pub fn from_semi_major_axis(semi_major_axis: f64, eccentricity: f64, true_anomaly: f64) -> Option<f64> {
             let numerator = 1.0 - eccentricity * eccentricity;
             let denominator = 1.0 + eccentricity * f64::cos(true_anomaly);
             if denominator == 0.0 {
@@ -77,8 +77,8 @@ pub mod local {
             }
         }
 
-        pub fn from_elements2_infallible(semi_major_axis: f64, eccentricity: f64, true_anomaly: f64) -> f64 {
-            from_elements2(semi_major_axis, eccentricity, true_anomaly).unwrap_or(f64::INFINITY)
+        pub fn from_semi_major_axis_infallible(semi_major_axis: f64, eccentricity: f64, true_anomaly: f64) -> f64 {
+            from_semi_major_axis(semi_major_axis, eccentricity, true_anomaly).unwrap_or(f64::INFINITY)
         }
 
         pub fn from_eccentric_anomaly(semi_major_axis: f64, eccentricity: f64, eccentric_anomaly: f64) -> f64 {
@@ -95,6 +95,12 @@ mod third_law {
     }
 }
 
+/// Semi-major axis, from whichever pair of quantities you happen to have.
+///
+/// The functions are named for their inputs rather than numbered. When they were
+/// `conic_definition1/2/3` it was not possible to tell at a call site which one was
+/// wanted — and the wrong one did get picked: `conic_definition1` computed
+/// `sqrt(1-e²)/b` instead of `b/sqrt(1-e²)`, inverted, and nothing caught it.
 pub mod semi_major_axis {
     use crate::common;
     use crate::kepler::third_law;
@@ -105,15 +111,15 @@ pub mod semi_major_axis {
     }
 
     /// `a = b / sqrt(1 - e^2)`, the inverse of [`super::semi_minor_axis::conic_definition`].
-    pub fn conic_definition1(semi_minor_axis: f64, eccentricity: f64) -> f64 {
+    pub fn from_semi_minor_and_eccentricity(semi_minor_axis: f64, eccentricity: f64) -> f64 {
         semi_minor_axis / common::unit_circle_xy(eccentricity)
     }
 
-    pub fn conic_definition2(eccentricity: f64, semi_latus_rectum: f64) -> f64 {
+    pub fn from_eccentricity_and_semi_latus_rectum(eccentricity: f64, semi_latus_rectum: f64) -> f64 {
         semi_latus_rectum / (1.0 - eccentricity * eccentricity)
     }
 
-    pub fn conic_definition3(focal_parameter: f64, eccentricity: f64) -> f64 {
+    pub fn from_focal_parameter_and_eccentricity(focal_parameter: f64, eccentricity: f64) -> f64 {
         (focal_parameter * eccentricity) / (1.0 - eccentricity * eccentricity)
     }
 

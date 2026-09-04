@@ -4,34 +4,27 @@
 //!
 //! # Unit Conventions
 //!
-//! This crate uses **SI base units** internally, with angles in **degrees** (astronomical
-//! catalog convention). Convert to radians only at math call-sites (e.g., before trig functions).
+//! SI base units throughout, and **angles are radians, without exception**.
 //!
-//! | Quantity              | Internal Unit         | Notes                                      |
-//! |-----------------------|-----------------------|--------------------------------------------|
-//! | Distance              | meters (m)            |                                            |
-//! | Mass                  | kilograms (kg)        |                                            |
-//! | Time                  | seconds since J2000   | Julian days only at persistence boundary  |
-//! | Velocity              | m/s                   |                                            |
-//! | Acceleration          | m/s²                  |                                            |
-//! | Gravitational param   | m³/s²                 | μ = G × mass                               |
-//! | Angles                | degrees               | Convert to radians at math call-sites      |
-//! | Angular velocity      | rad/s                 | Output of orbital mechanics                |
+//! | Quantity            | Unit                   |
+//! |---------------------|------------------------|
+//! | Distance            | metres                 |
+//! | Mass                | kilograms              |
+//! | Time                | see [`time`]           |
+//! | Velocity            | m/s                    |
+//! | Acceleration        | m/s²                   |
+//! | Gravitational param | m³/s² (μ = G × mass)   |
+//! | Angles              | **radians**            |
+//! | Angular velocity    | rad/s                  |
 //!
-//! ## Examples
+//! Degrees are a storage and display convention — astronomical catalogues use them, and
+//! so do this project's save files — but they stop at this crate's boundary. Callers
+//! convert once, on the way in. There are deliberately no `Radians`/`Degrees` newtypes
+//! here: one unit, consistently, is what makes them unnecessary.
 //!
-//! ```ignore
-//! // Storing an angle (degrees internally)
-//! let mean_anomaly_deg = 174.796;
+//! Time is the exception that gets types rather than a convention, because seconds and
+//! Julian days share no common origin and mixing them is silent. See [`time`].
 //!
-//! // At math boundary, convert to radians
-//! let mean_anomaly_rad = mean_anomaly_deg.to_radians();
-//! let result = mean_anomaly_rad.sin();
-//!
-//! // Time: use seconds internally, Julian days at file boundaries
-//! let seconds_since_j2000 = jd_to_seconds(julian_day);
-//! ```
-
 #![forbid(unsafe_code)]
 
 pub mod reference_frame;
