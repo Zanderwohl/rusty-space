@@ -77,22 +77,18 @@ fn modelled_position(body_id: &str, jd: f64) -> Option<DVec3> {
 
 /// Relative-position tolerance per body, as of Phase 0.
 ///
-/// These are LOOSE, and deliberately so: they record what the model can currently do,
-/// not what it should do. The dominant error is `true_anomaly::fourier_expansion`, the
-/// Bessel series used to get true anomaly from mean anomaly. Its error against an exact
-/// Kepler solve is ~0.96 deg for Earth and ~5.4 deg for Mars, and an along-track angular
-/// error of `d` radians at radius `r` displaces the body by `r*d` — which is exactly the
-/// magnitude seen below.
+/// Since Phase 3 replaced the Bessel series with a Halley solve of Kepler's equation,
+/// the residual is dominated by the two-body approximation itself — unmodelled planetary
+/// perturbations, and mean rather than osculating elements — not by the anomaly solver.
+///
+/// Mercury and Luna grow most between the two epochs, which indicates mean-motion error
+/// rather than a static offset: Mercury goes 1.7e-5 -> 1.2e-2 over 25 years (104 orbits),
+/// where a two-body model omits both planetary perturbation and relativistic precession.
 ///
 /// Measured relative error at the time these were set (worst of the two epochs):
 ///
-///   mercury 1.8e-1   venus 1.1e-2   earth 2.0e-2   mars 6.6e-2
-///   jupiter 4.7e-2   uranus 4.2e-2  neptune 7.7e-3  luna 4.8e-2
-///
-/// PHASE 3 will replace the series with a Halley solve of Kepler's equation. When it
-/// lands, tighten every budget here — the residual should then be dominated by the
-/// two-body approximation (unmodelled planetary perturbations, mean rather than
-/// osculating elements) rather than by the solver.
+///   mercury 1.2e-2   venus 8.6e-3   earth 1.1e-4   mars 1.5e-3
+///   jupiter 3.4e-3   uranus 8.5e-4  neptune 1.9e-3  luna 2.8e-2
 ///
 /// Luna's elements were refitted against 3653 Horizons samples over 2000-2050, taking it
 /// from 6.3e-1 to 4.8e-2. It is now near the floor for a precessing-ellipse model: the
@@ -104,14 +100,14 @@ fn modelled_position(body_id: &str, jd: f64) -> Option<DVec3> {
 /// but capitalises "Jupiter", "Uranus", "Neptune" and "Sedna".
 fn tolerance(body: &str) -> f64 {
     match body.to_ascii_lowercase().as_str() {
-        "venus" => 2.0e-2,
-        "neptune" => 1.5e-2,
-        "earth" => 3.0e-2,
-        "uranus" => 6.0e-2,
-        "jupiter" => 6.0e-2,
-        "mars" => 9.0e-2,
-        "mercury" => 2.5e-1,
-        "luna" => 7.0e-2,
+        "venus" => 1.5e-2,
+        "neptune" => 4.0e-3,
+        "earth" => 5.0e-4,
+        "uranus" => 2.0e-3,
+        "jupiter" => 6.0e-3,
+        "mars" => 3.0e-3,
+        "mercury" => 2.0e-2,
+        "luna" => 4.0e-2,
         other => panic!("no tolerance recorded for {other}"),
     }
 }

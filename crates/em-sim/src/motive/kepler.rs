@@ -5,7 +5,7 @@
 
 use glam::{DMat3, DVec3};
 use serde::{Deserialize, Serialize};
-use em_foundations::kepler::{angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
+use em_foundations::kepler::{anomaly, angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
 use em_foundations::time::{Instant, TimeDelta};
 use em_foundations::mappings;
 
@@ -18,6 +18,9 @@ pub struct KeplerMotive {
     pub epoch: KeplerEpoch,
 }
 
+/// Terms used by [`true_anomaly::fourier_expansion`], which is no longer the default
+/// route from mean to true anomaly. Retained for callers that explicitly want the
+/// classical series — see `KeplerMotive::true_anomaly_series`.
 const EXPANSION_ITERATIONS: usize = 10;
 
 /// Inclinations below this (in degrees) are treated as coplanar.
@@ -138,12 +141,32 @@ impl KeplerMotive {
     }
 
     pub fn true_anomaly(&self, time: Instant, gravitational_parameter: f64) -> f64 {
-        true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), self.shape.eccentricity(), EXPANSION_ITERATIONS)
+        self.true_anomaly_at(self.mean_anomaly(time, gravitational_parameter))
+    }
+
+    /// True anomaly from a mean anomaly, solved rather than expanded.
+    ///
+    /// Falls back to the series only for a parabolic orbit (`e == 1`), which has no mean
+    /// anomaly in this parameterisation.
+    fn true_anomaly_at(&self, mean_anomaly: f64) -> f64 {
+        let ecc = self.shape.eccentricity();
+        anomaly::true_from_mean(mean_anomaly, ecc)
+            .unwrap_or_else(|| true_anomaly::fourier_expansion(mean_anomaly, ecc, EXPANSION_ITERATIONS))
+    }
+
+    /// True anomaly via the classical Bessel expansion, for comparison against
+    /// [`Self::true_anomaly`]. Diverges past the Laplace limit `e ~ 0.6627`.
+    pub fn true_anomaly_series(&self, time: Instant, gravitational_parameter: f64) -> f64 {
+        true_anomaly::fourier_expansion(
+            self.mean_anomaly(time, gravitational_parameter),
+            self.shape.eccentricity(),
+            EXPANSION_ITERATIONS,
+        )
     }
 
     pub fn radius_from_primary_at_time(&self, time: Instant, gravitational_parameter: f64) -> Option<f64> {
         let ecc = self.shape.eccentricity();
-        let ta = true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), ecc, EXPANSION_ITERATIONS);
+        let ta = self.true_anomaly_at(self.mean_anomaly(time, gravitational_parameter));
         local::radius::from_elements2(self.shape.semi_major_axis(), ecc, ta)
     }
 
@@ -153,7 +176,7 @@ impl KeplerMotive {
     }
 
     pub fn eccentric_anomaly(&self, time: Instant, gravitational_parameter: f64) -> f64 {
-        let ta = true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), self.shape.eccentricity(), EXPANSION_ITERATIONS);
+        let ta = self.true_anomaly_at(self.mean_anomaly(time, gravitational_parameter));
         eccentric_anomaly::from_true_anomaly(self.shape.eccentricity(), ta)
     }
 
@@ -163,7 +186,7 @@ impl KeplerMotive {
     /// +W (+z) normal to the other 2 according to RHR
     pub fn displacement_pqw(&self, time: Instant, gravitational_parameter: f64) -> Option<DVec3> {
         let ecc = self.shape.eccentricity();
-        let ta = true_anomaly::fourier_expansion(self.mean_anomaly(time, gravitational_parameter), ecc, EXPANSION_ITERATIONS);
+        let ta = self.true_anomaly_at(self.mean_anomaly(time, gravitational_parameter));
         let rad = local::radius::from_elements2(self.shape.semi_major_axis(), ecc, ta)?;
 
         Some(DVec3::new(rad * ta.cos(), rad * ta.sin(), 0.0))

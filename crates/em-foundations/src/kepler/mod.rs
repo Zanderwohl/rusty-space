@@ -1,3 +1,10 @@
+//! Keplerian orbital mechanics.
+//!
+//! **Every angle in this module is in radians**, without exception. Degrees are a
+//! storage and display convention and belong to the layer above.
+
+pub mod anomaly;
+
 /// Mean anomaly calculations.
 ///
 /// All angle parameters and return values are in **radians**.

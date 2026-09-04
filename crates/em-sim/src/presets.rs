@@ -241,7 +241,19 @@ pub fn solar_system() -> UniverseFileContents {
                             argument_of_periapsis: 114.20783,
                         }),
                         epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
-                            mean_anomaly: 358.617,
+                            // Standard J2000 mean anomaly, consistent with the mean
+                            // longitude of perihelion above (Omega + omega = 102.94719).
+                            //
+                            // Was 358.617, which is JPL's OSCULATING value for Earth's
+                            // centre at J2000 — a different quantity from a different
+                            // element set, 1.10 deg away. Pairing it with a mean varpi
+                            // cost a constant 1.1 deg of along-track error (2.0e-2
+                            // relative); this brings it to 1.1e-4.
+                            //
+                            // A mean-element set describes the Earth-Moon barycentre, so
+                            // the residual against Earth's centre bottoms out near the
+                            // 4670 km Earth-EMB offset. Measured: 5517 km.
+                            mean_anomaly: 357.51716,
                         }),
                     },
                     appearance: Appearance::DebugBall(DebugBall{
