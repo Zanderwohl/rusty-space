@@ -173,10 +173,9 @@ fn the_bundled_save_loads_and_propagates() {
     );
 }
 
-/// A new body acquires a bare entity, and the presentation systems dress it.
-///
-/// `sync_body_entities` attaches only a `BodyRef`; if nothing picks that up, the app
-/// compiles, runs and draws nothing.
+/// A new body acquires a bare entity and the presentation systems dress it.
+/// `sync_body_entities` attaches only a `BodyRef`; if nothing picks that up, the app draws
+/// nothing.
 #[test]
 fn bodies_get_entities_and_then_get_dressed() {
     use bevy::asset::AssetPlugin;

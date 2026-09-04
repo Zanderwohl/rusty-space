@@ -8,9 +8,7 @@ use bevy::math::DVec3;
 
 const MU_EARTH: f64 = 3.986004418e14;
 
-// ---------------------------------------------------------------------------
-// The gravity kernel
-// ---------------------------------------------------------------------------
+// === The gravity kernel ===
 
 #[test]
 fn acceleration_points_at_the_attractor() {
@@ -30,9 +28,7 @@ fn acceleration_obeys_the_inverse_square_law() {
     assert!((a1 - MU_EARTH / (r * r)).abs() < 1e-6, "magnitude should be mu/r^2");
 }
 
-// ---------------------------------------------------------------------------
-// Integrator ordering
-// ---------------------------------------------------------------------------
+// === Integrator ordering ===
 
 fn specific_energy(pos: DVec3, vel: DVec3, mu: f64) -> f64 {
     vel.length_squared() / 2.0 - mu / pos.length()

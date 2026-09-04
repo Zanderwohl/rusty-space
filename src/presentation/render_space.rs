@@ -1,11 +1,9 @@
 //! The boundary between simulation space and render space.
 //!
-//! Simulation space is right-handed, **Z-up**, ecliptic of J2000. Bevy renders **Y-up**.
-//! This is the only module that converts.
-//!
-//! The mapping is a proper rotation, −90° about +X (+Z to +Y, +Y to −Z), not a mirror, so
-//! handedness and cross products survive. [`sim_to_render_rotation`] applies the same
-//! change of basis to a quaternion by conjugation.
+//! Simulation space is right-handed, **Z-up**, ecliptic of J2000; Bevy renders **Y-up**.
+//! This is the only module that converts. The mapping is a proper rotation, −90° about +X
+//! (+Z to +Y, +Y to −Z), not a mirror, so handedness and cross products survive;
+//! [`sim_to_render_rotation`] applies it to a quaternion by conjugation.
 
 use std::f64::consts::FRAC_PI_2;
 

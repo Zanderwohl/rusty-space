@@ -1,9 +1,9 @@
 //! A sparse, interpolating map from time to value, and the sorted key list behind it.
 //!
-//! Keys are typed, not raw floats: `SortedTimes<Instant>` holds absolute event times,
+//! Keys are typed, not raw floats: `SortedTimes<Instant>` holds absolute event times, while
 //! [`TimeMap`] is keyed by [`TimeDelta`] because trajectory samples are offsets from
-//! periapsis. `Instant` and `TimeDelta` are `Ord + Eq + Hash` with negative zero
-//! normalised, so no NaN panics and no `-0.0`/`0.0` split.
+//! periapsis. Both are `Ord + Eq + Hash` with negative zero normalised, so no NaN panic and
+//! no `-0.0`/`0.0` split.
 
 use std::collections::HashMap;
 use std::slice::Iter;

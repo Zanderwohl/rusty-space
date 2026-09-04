@@ -53,11 +53,9 @@ pub struct SimMetrics {
     pub analytic_jump: bool,
 }
 
-/// Advance the clock, then bring the simulation to it.
-///
-/// Queueing the steps and walking them stay in one system: split apart, the clock runs
-/// ahead of the bodies on a slow frame. With nothing to integrate the system jumps
-/// straight to the target instant.
+/// Advance the clock, then bring the simulation to it. Queueing the steps and walking them
+/// stay in one system: split apart, the clock runs ahead of the bodies on a slow frame.
+/// With nothing to integrate, the system jumps straight to the target instant.
 pub fn advance_simulation(
     mut system: ResMut<SimSystem>,
     mut sim_time: ResMut<SimTime>,

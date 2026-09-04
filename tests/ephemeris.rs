@@ -1,16 +1,9 @@
-//! Golden ephemeris: the bundled solar system checked against JPL Horizons.
+//! Golden ephemeris: the bundled solar system against JPL Horizons.
 //!
-//! Reference vectors are GEOMETRIC cartesian states in the ecliptic frame of J2000,
-//! retrieved from the Horizons API. The exact query is recorded in
-//! `docs/horizons-golden-vectors.md` so these can be regenerated.
-//!
-//! Unlike the rest of the suite, this checks the element DATA in
-//! `body/universe/solar_system.rs`, not just internal consistency. It is the only test
-//! that can catch a wrong semi-major axis or mean anomaly.
-//!
-//! Note the model is a fixed two-body Kepler orbit per body, so it cannot match DE441
-//! exactly: planetary perturbations are not modelled and the elements are mean, not
-//! osculating. Tolerances below are set from the model's actual capability.
+//! Reference vectors are GEOMETRIC cartesian states, ecliptic frame of J2000; the query is
+//! in `docs/horizons-golden-vectors.md`. Checks the element DATA. One fixed two-body Kepler
+//! orbit per body cannot match DE441 exactly — no planetary perturbations, mean rather than
+//! osculating elements — so tolerances are set from that.
 
 use em_sim::presets::solar_system;
 use em_sim::universe::SomeBody;
@@ -48,9 +41,7 @@ const REFERENCES: &[Reference] = &[
     Reference { body: "Luna",    julian_day: 2460676.5, position_km: [ 1.520523605713538E+05, -3.488036665045074E+05, -3.066409317095052E+04] },
 ];
 
-/// Model position of `body` relative to its primary, in metres.
-///
-/// Uses the bundled preset directly from `em-sim` — no engine, no file, no ECS.
+/// Model position of `body` relative to its primary, in metres, from the bundled preset.
 fn modelled_position(body_id: &str, jd: f64) -> Option<DVec3> {
     let contents = solar_system();
     let g = contents.physics.gravitational_constant;
@@ -70,34 +61,17 @@ fn modelled_position(body_id: &str, jd: f64) -> Option<DVec3> {
     })?;
 
     let primary_mass = mass_of(&entry.params.primary_id)?;
-    // Must match the propagator: relative two-body motion uses mu = G(M + m).
+    // Matches the propagator: relative two-body motion uses mu = G(M + m).
     let mu = g * (primary_mass + entry.info.mass);
     entry.params.displacement(Instant::from_julian_day(jd), mu)
 }
 
-/// Relative-position tolerance per body, as of Phase 0.
-///
-/// Since Phase 3 replaced the Bessel series with a Halley solve of Kepler's equation,
-/// the residual is dominated by the two-body approximation itself — unmodelled planetary
-/// perturbations, and mean rather than osculating elements — not by the anomaly solver.
-///
-/// Mercury and Luna grow most between the two epochs, which indicates mean-motion error
-/// rather than a static offset: Mercury goes 1.7e-5 -> 1.2e-2 over 25 years (104 orbits),
-/// where a two-body model omits both planetary perturbation and relativistic precession.
-///
-/// Measured relative error at the time these were set (worst of the two epochs):
-///
-///   mercury 1.1e-5   venus 7.3e-5   earth 6.7e-5   mars 1.0e-4
-///   jupiter 2.6e-3   uranus 4.3e-4  neptune 2.6e-4  luna 2.7e-2
-///
-/// Luna's elements were refitted against 3653 Horizons samples over 2000-2050, taking it
-/// from 6.3e-1 to 4.8e-2. It is now near the floor for a precessing-ellipse model: the
-/// fit's own residual is 7 989 km RMS (~1.2 deg), and evection alone, which this model
-/// cannot represent, is 1.27 deg. Better accuracy needs a real lunar theory, not better
-/// elements. See docs/horizons-golden-vectors.md.
-///
-/// Note ids are matched case-insensitively: `solar_system.rs` spells most ids lowercase
-/// but capitalises "Jupiter", "Uranus", "Neptune" and "Sedna".
+/// Relative-position tolerance per body, set from the two-body model's measured capability.
+/// Worst-of-two-epochs error when these were set: mercury 1.1e-5, venus 7.3e-5, earth
+/// 6.7e-5, mars 1.0e-4, jupiter 2.6e-3, uranus 4.3e-4, neptune 2.6e-4, luna 2.7e-2.
+/// Mercury's growth to 1.2e-2 over 104 orbits is mean-motion error, not a static offset;
+/// Luna is at the floor for a precessing ellipse (evection alone is 1.27 deg). See
+/// docs/horizons-golden-vectors.md. Ids match case-insensitively.
 fn tolerance(body: &str) -> f64 {
     match body.to_ascii_lowercase().as_str() {
         "venus" => 1.5e-4,
@@ -112,10 +86,8 @@ fn tolerance(body: &str) -> f64 {
     }
 }
 
-/// Every bundled body must stay within its recorded budget of the JPL position.
-///
-/// A failure here means either the element data in `solar_system.rs` is wrong, the
-/// perifocal-to-inertial rotation is wrong, or the anomaly solve regressed.
+/// Every bundled body stays within its recorded budget of the JPL position. A failure means
+/// wrong element data, a wrong perifocal-to-inertial rotation, or a regressed anomaly solve.
 #[test]
 fn bundled_bodies_match_jpl_within_budget() {
     let mut failures = Vec::new();
@@ -138,8 +110,8 @@ fn bundled_bodies_match_jpl_within_budget() {
     assert!(failures.is_empty(), "ephemeris budget exceeded:\n  {}", failures.join("\n  "));
 }
 
-/// At its own epoch a body should be at its best; error there isolates the element data
-/// and the anomaly solve from any secular drift.
+/// Error at a body's own epoch, isolating element data and the anomaly solve from secular
+/// drift.
 #[test]
 fn error_does_not_grow_wildly_between_epochs() {
     for body in ["Earth", "Venus", "Neptune"] {
@@ -179,13 +151,9 @@ fn report_ephemeris_error() {
     println!();
 }
 
-/// Semi-major axis must be the real one, so radii read off it are right.
-///
-/// Before `anomalistic_period` existed, a precessing orbit had to smuggle its mean
-/// motion into `a` — Kepler's third law gives the sidereal rate, but mean anomaly
-/// advances at the anomalistic rate once periapsis moves. Luna's fitted `a` came out
-/// 386 931 km against a true mean of 384 370 km, so every radius derived from it, the
-/// apsides included, was 0.66% high.
+/// The semi-major axis is physical, so radii read off it are right. Without
+/// `anomalistic_period` a precessing orbit must absorb its mean-motion error into `a`,
+/// inflating every derived radius.
 #[test]
 fn lunar_apsides_are_physical() {
     let contents = solar_system();
@@ -206,8 +174,8 @@ fn lunar_apsides_are_physical() {
     assert!(peri < a && a < apo);
 }
 
-/// The anomalistic period must actually drive the mean anomaly. If it were ignored,
-/// Kepler's third law would give the sidereal month instead — a 1% rate error.
+/// The anomalistic period drives the mean anomaly; ignoring it gives the sidereal month, a
+/// 1% rate error.
 #[test]
 fn luna_advances_at_the_anomalistic_rate() {
     let contents = solar_system();
@@ -231,11 +199,8 @@ fn luna_advances_at_the_anomalistic_rate() {
         "and must NOT be the sidereal month (27.3217 d)");
 }
 
-/// Velocity, checked against the same Horizons states as the positions above.
-///
-/// Position agreeing does not imply velocity does — until Phase 3c the Keplerian path
-/// produced no velocity at all, so nothing here was exercised. These are the VX/VY/VZ
-/// columns of the same query, in km/s.
+/// Velocity against the VX/VY/VZ columns of the same Horizons query, km/s. Agreeing
+/// positions do not imply agreeing velocities.
 #[test]
 fn velocities_match_jpl() {
     struct V { body: &'static str, jd: f64, primary: &'static str, kms: [f64; 3], tol: f64 }
@@ -277,8 +242,8 @@ fn velocities_match_jpl() {
     }
 }
 
-/// Speed must obey vis-viva against the body's own elements, at every point of the orbit.
-/// This is internal consistency rather than accuracy, and holds regardless of element data.
+/// Speed obeys vis-viva against the body's own elements everywhere on the orbit. Internal
+/// consistency, independent of element accuracy.
 #[test]
 fn keplerian_speeds_obey_vis_viva() {
     let contents = solar_system();
@@ -310,11 +275,8 @@ fn keplerian_speeds_obey_vis_viva() {
     }
 }
 
-/// Every bundled body must carry physically sane data.
-///
-/// This exists because the hand-maintained preset accumulated exactly these mistakes:
-/// Mars's mass was 6.4171 kg (an `e23` lost), Vesta had Luna's radius, and Eris, Sedna
-/// and Dysnomia stored diameters in a field named `radius`.
+/// Every bundled body carries physically sane data: lost exponents, borrowed radii and
+/// diameters stored as radii have all occurred.
 #[test]
 fn every_body_has_sane_physical_data() {
     let contents = solar_system();
@@ -331,8 +293,7 @@ fn every_body_has_sane_physical_data() {
     let mut seen = std::collections::HashSet::new();
     for id in &ids {
         assert!(seen.insert(*id), "duplicate body id {id:?}");
-        // Spaces are fine — provisional designations like "S2010 J1" and structural
-        // bodies like "Pluto Barycenter" legitimately contain them.
+        // Spaces are fine: "S2010 J1", "Pluto Barycenter".
         assert!(!id.is_empty() && id.trim() == *id, "unusable body id {id:?}");
     }
 
@@ -340,12 +301,12 @@ fn every_body_has_sane_physical_data() {
         let SomeBody::KeplerEntry(k) = b else { continue };
         let id = &k.info.id;
 
-        // Every primary must exist, or the body silently orbits the origin.
+        // A missing primary leaves the body silently orbiting the origin.
         assert!(ids.contains(&k.params.primary_id.as_str()),
             "{id} orbits {:?}, which is not in the system", k.params.primary_id);
 
         assert!(k.info.mass >= 0.0 && k.info.mass.is_finite(), "{id} mass {}", k.info.mass);
-        // A gravitating body needs a real mass. Mars had 6.4171 kg.
+        // A gravitating body needs a real mass.
         if k.info.major {
             assert!(k.info.mass > 1e15, "{id} is Major but has mass {} kg", k.info.mass);
         }
@@ -364,8 +325,8 @@ fn every_body_has_sane_physical_data() {
         let radius = k.appearance.radius();
         assert!(radius > 0.0 && radius.is_finite(), "{id} radius {radius}");
         if e < 1.0 {
-            // A body cannot be larger than its own orbit. Vesta had Luna's radius; that
-            // would not trip this, but a diameter-for-radius on a close moon would.
+            // A body cannot be larger than its own orbit; catches diameter-for-radius on
+            // a close moon.
             assert!(radius < k.params.periapsis(),
                 "{id} radius {radius:e} m exceeds its periapsis {:e} m", k.params.periapsis());
         }
@@ -376,8 +337,7 @@ fn every_body_has_sane_physical_data() {
     }
 }
 
-/// Moons must actually be bound to their planet: a satellite orbit has to sit well
-/// inside the primary's Hill sphere, or it is not a satellite.
+/// Satellite orbits sit well inside their primary's Hill sphere.
 #[test]
 fn moons_orbit_inside_their_primarys_hill_sphere() {
     let contents = solar_system();
@@ -395,7 +355,6 @@ fn moons_orbit_inside_their_primarys_hill_sphere() {
         let Some(pe) = primary_entry else { continue };
         let (sun_mass, _) = get("Sol").unwrap();
 
-        // Hill radius of the primary about the Sun.
         let hill = pe.params.semi_major_axis()
             * (1.0 - pe.params.eccentricity())
             * (primary_mass / (3.0 * sun_mass)).cbrt();

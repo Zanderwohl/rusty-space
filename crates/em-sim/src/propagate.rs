@@ -15,15 +15,13 @@ use crate::motive::{MotiveSelection, TransitionEvent};
 use crate::system::System;
 
 /// Recompute parent links, gravitational parameters and traversal order for `time`.
-///
-/// [`evaluate_at`] and [`step`] do this when the system is dirty; call it only to force one.
+/// [`evaluate_at`] and [`step`] do this when dirty; call it only to force a rebuild.
 pub fn rebuild(system: &mut System, time: Instant) {
     system.rebuild_derived(time);
 }
 
-/// Place every analytically-defined body at `time`.
-///
-/// Fixed and Keplerian only; Newtonian bodies keep their current state — use [`step`].
+/// Place every analytically-defined body at `time`. Fixed and Keplerian only; Newtonian
+/// bodies keep their current state — use [`step`].
 pub fn evaluate_at(system: &mut System, time: Instant) {
     if system.is_dirty() {
         system.rebuild_derived(time);
@@ -32,11 +30,9 @@ pub fn evaluate_at(system: &mut System, time: Instant) {
     evaluate_hierarchical(system, time);
 }
 
-/// Advance the system by `dt`.
-///
-/// Hierarchical bodies are evaluated at the new time; Newtonian bodies are integrated
-/// under gravity from bodies flagged major. Nothing subdivides `dt`, so size it for the
-/// fastest Newtonian body present.
+/// Advance the system by `dt`. Hierarchical bodies are evaluated at the new time; Newtonian
+/// bodies are integrated under gravity from bodies flagged major. Nothing subdivides `dt`,
+/// so size it for the fastest Newtonian body present.
 pub fn step(system: &mut System, dt: TimeDelta) {
     let target = system.time() + dt;
     if system.is_dirty() {
@@ -47,9 +43,7 @@ pub fn step(system: &mut System, dt: TimeDelta) {
     integrate_newtonian(system, target, dt);
 }
 
-// ---------------------------------------------------------------------------
-// Hierarchical: Fixed and Keplerian
-// ---------------------------------------------------------------------------
+// === Hierarchical: Fixed and Keplerian ===
 
 fn evaluate_hierarchical(system: &mut System, time: Instant) {
     for idx in 0..system.topo_order().len() {
@@ -83,9 +77,7 @@ fn evaluate_hierarchical(system: &mut System, time: Instant) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Newtonian
-// ---------------------------------------------------------------------------
+// === Newtonian ===
 
 /// Acceleration on `at` from every major body except itself.
 fn acceleration(system: &System, at: DVec3, exclude: BodyIndex, g: f64) -> DVec3 {

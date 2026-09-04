@@ -1,10 +1,9 @@
 //! The simulation arena: every body, its motion, and the state propagation writes.
 //!
 //! `System` is the single source of truth for body state; nothing per-body lives elsewhere.
-//! Engine-free — propagation is free functions in [`crate::propagate`].
-//!
-//! Struct-of-arrays keyed by [`BodyIndex`], plus a `BodyId -> BodyIndex` map. Derived
-//! columns (parent, topological order, mu) are cached and rebuilt when the structure changes.
+//! Engine-free — propagation is free functions in [`crate::propagate`]. Struct-of-arrays
+//! keyed by [`BodyIndex`], with a `BodyId -> BodyIndex` map; derived columns (parent,
+//! topological order, mu) are rebuilt when the structure changes.
 
 use std::collections::HashMap;
 
@@ -297,10 +296,8 @@ impl System {
     }
 }
 
-/// Order hierarchical bodies so every parent precedes its children.
-///
-/// Cyclic or orphaned bodies are appended in arbitrary order rather than dropped: a broken
-/// parent link misplaces a body, it does not remove it.
+/// Order hierarchical bodies so every parent precedes its children. Cyclic or orphaned ones
+/// are appended in arbitrary order rather than dropped.
 fn topological_order(bodies: &[BodyIndex], parent: &[Option<BodyIndex>]) -> Vec<BodyIndex> {
     use std::collections::{HashSet, VecDeque};
     let member: HashSet<BodyIndex> = bodies.iter().copied().collect();
@@ -347,9 +344,7 @@ macro_rules! for_each_column {
 }
 use for_each_column;
 
-// ---------------------------------------------------------------------------
-// Building a system from a save
-// ---------------------------------------------------------------------------
+// === Building a system from a save ===
 
 impl System {
     /// Build a system from loaded universe contents. Legacy single-motive entries widen
@@ -390,9 +385,7 @@ impl System {
 
 impl System {
     /// Inverse of [`System::from_contents`]. Every body round-trips as a
-    /// `CompoundMotiveEntry`, the general form legacy entries widen into.
-    ///
-    /// `time`, `physics` and `view` come from the app; the arena does not hold them.
+    /// `CompoundMotiveEntry`. `time`, `physics` and `view` come from the app.
     pub fn to_contents(
         &self,
         time: crate::universe::UniverseFileTime,

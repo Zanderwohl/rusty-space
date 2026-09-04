@@ -47,20 +47,16 @@ pub struct KeplerMotive {
     pub shape: KeplerShape,
     pub rotation: KeplerRotation,
     pub epoch: KeplerEpoch,
-    /// Anomalistic period: one full turn of the mean anomaly from periapsis.
-    ///
-    /// `None` derives the rate from the semi-major axis by Kepler's third law, exact only
-    /// for an ideal two-body orbit. Precessing periapsis splits the anomalistic from the
-    /// sidereal rate (Luna: 27.5545 d against 27.3217 d, 1.0%) and an oblate primary shifts
-    /// it outright (Saturn's J2 moves Pan's by ~1.5%). Dropping this forces the semi-major
-    /// axis to absorb the difference. Fitted elements should set it.
+    /// Anomalistic period: one full turn of the mean anomaly from periapsis. `None` derives
+    /// the rate from the semi-major axis by Kepler's third law, exact only for an ideal
+    /// two-body orbit — precessing periapsis splits the anomalistic from the sidereal rate
+    /// (Luna 27.5545 d against 27.3217 d) and an oblate primary shifts it (Saturn's J2 moves
+    /// Pan's ~1.5%). Dropping it forces `a` to absorb the difference; fitted elements set it.
     #[serde(default)]
     pub anomalistic_period: Option<TimeDelta>,
-    /// Explicit mu, m^3/s^2, overriding `G * (M_primary + m)`.
-    ///
-    /// Needed for a body orbiting a barycentre, where the effective mu depends on the
-    /// *other* body's mass — Pluto and Charon in the bundled system. Dropping it silently
-    /// changes the orbit.
+    /// Explicit mu, m^3/s^2, overriding `G * (M_primary + m)`. Needed for a body orbiting a
+    /// barycentre, where effective mu depends on the *other* body's mass (Pluto and Charon).
+    /// Dropping it silently changes the orbit.
     #[serde(default)]
     pub gravitational_parameter: Option<f64>,
 }
@@ -178,11 +174,9 @@ impl KeplerMotive {
         TimeDelta::from_seconds(period::third_law(self.semi_major_axis(), gravitational_parameter))
     }
 
-    /// Rate at which the mean anomaly advances, rad/s.
-    ///
-    /// Prefers `anomalistic_period` when set; otherwise Kepler's third law off the
-    /// semi-major axis, which gives the sidereal rate. The two differ once periapsis
-    /// precesses.
+    /// Rate at which the mean anomaly advances, rad/s. Prefers `anomalistic_period`;
+    /// otherwise Kepler's third law off `a`, giving the sidereal rate. The two differ once
+    /// periapsis precesses.
     pub fn mean_angular_motion(&self, gravitational_parameter: f64) -> f64 {
         match self.anomalistic_period {
             Some(period) if period.to_seconds() != 0.0 => {
@@ -260,9 +254,8 @@ impl KeplerMotive {
         Some(state::perifocal_velocity(gravitational_parameter, p, ecc, ta))
     }
 
-    /// Velocity relative to the primary, in the reference frame, m/s.
-    ///
-    /// Along the osculating ellipse only: a precessing frame's own rotation is not included.
+    /// Velocity relative to the primary, in the reference frame, m/s. Along the osculating
+    /// ellipse only: a precessing frame's own rotation is not included.
     pub fn velocity(&self, time: Instant, gravitational_parameter: f64) -> Option<DVec3> {
         let v_pqw = self.velocity_pqw(time, gravitational_parameter)?;
         Some(self.perifocal_to_reference(v_pqw, time))
@@ -301,10 +294,9 @@ impl KeplerMotive {
         Some(rotated)
     }
 
-    /// Time-invariant constants for the stepping loop: the mean motion, and for a
-    /// non-precessing orbit the whole perifocal-to-reference rotation.
-    ///
-    /// Rebuild whenever the elements, the primary's mass, or the motive segment change.
+    /// Time-invariant constants for the stepping loop: mean motion, plus the whole
+    /// perifocal-to-reference rotation for a non-precessing orbit. Rebuild whenever the
+    /// elements, the primary's mass, or the motive segment change.
     pub fn build_cache(&self, gravitational_parameter: f64) -> KeplerCache {
         KeplerCache {
             semi_major_axis: self.shape.semi_major_axis(),

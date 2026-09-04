@@ -1,14 +1,11 @@
 //! Algebraic identities every Kepler formula in `foundations::kepler` must satisfy.
-//!
-//! These exist because the module accumulated several formulas that were never called
-//! (and so never checked). Each test below fails against at least one pre-Phase-0 defect.
 
 use exotic_matters::foundations::kepler::*;
 use bevy::math::DVec3;
 
 const TOL: f64 = 1e-9;
 
-/// Eccentricities to sweep. Stops short of 1.0 (parabolic) deliberately.
+/// Eccentricities to sweep; stops short of 1.0 (parabolic).
 fn eccentricities() -> Vec<f64> {
     vec![0.0, 0.0067, 0.0167, 0.0934, 0.2056, 0.2488, 0.436, 0.7, 0.9, 0.95]
 }
@@ -26,11 +23,9 @@ fn assert_close(actual: f64, expected: f64, tol: f64, what: &str) {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Conic geometry
-// ---------------------------------------------------------------------------
+// === Conic geometry ===
 
-/// `p = a(1 - e^2)`. `semi_parameter` previously returned `a*sqrt(1-e^2)` (the semi-minor axis).
+/// `p = a(1 - e^2)`, not the semi-minor axis `a*sqrt(1-e^2)`.
 #[test]
 fn semi_parameter_is_the_semi_latus_rectum() {
     let a = 1.496e11;
@@ -46,7 +41,7 @@ fn semi_parameter_is_the_semi_latus_rectum() {
     }
 }
 
-/// `p` must not be confused with `b = a*sqrt(1-e^2)`. They agree only at e=0.
+/// `p` and `b = a*sqrt(1-e^2)` agree only at e=0.
 #[test]
 fn semi_parameter_differs_from_semi_minor_axis() {
     let a = 1.496e11;
@@ -71,7 +66,7 @@ fn apsides_agree_across_every_derivation() {
             expect_peri, TOL, &format!("apsides::periapsis::from_parameters e={e}"),
         );
         if e > 0.0 {
-            // focal parameter q satisfies q*e == p
+            // q*e == p
             let focal_parameter = semi_parameter::definition(a, e) / e;
             assert_close(
                 apsides::periapsis::definition(focal_parameter, e),
@@ -92,7 +87,7 @@ fn apsides_agree_across_every_derivation() {
     }
 }
 
-/// Periapsis must never exceed apoapsis. (The swapped `apsides::*::definition` pair violated this.)
+/// Periapsis never exceeds apoapsis.
 #[test]
 fn periapsis_never_exceeds_apoapsis() {
     let a = 1.496e11;
@@ -135,8 +130,7 @@ fn semi_major_axis_from_semi_latus_rectum_round_trips() {
     }
 }
 
-/// Both radius overloads must agree, and the "infallible" wrapper must not
-/// transpose its arguments on the way through.
+/// Both radius overloads agree, and the infallible wrapper does not transpose arguments.
 #[test]
 fn radius_overloads_agree() {
     let a = 1.496e11;
@@ -169,13 +163,9 @@ fn circular_orbit_has_constant_radius() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Anomalies
-// ---------------------------------------------------------------------------
+// === Anomalies ===
 
-/// `nu -> E -> r` must reproduce the radius computed straight from `nu`.
-/// The old `atan`-based `from_true_anomaly` lost the quadrant and broke this
-/// everywhere outside `nu in (-pi/2, pi/2)`.
+/// `nu -> E -> r` reproduces the radius computed straight from `nu`, in every quadrant.
 #[test]
 fn eccentric_anomaly_round_trips_to_radius() {
     let a = 1.496e11;
@@ -203,8 +193,7 @@ fn true_and_eccentric_anomaly_round_trip() {
     }
 }
 
-/// The equation of the centre must match a converged Kepler solve for small `e`.
-/// Catches the `(2.0 - ..)` / `e^3`-instead-of-`e^2` typos.
+/// The equation of the centre matches a converged Kepler solve for small `e`.
 #[test]
 fn equation_of_the_centre_matches_exact_solve_for_small_e() {
     for e in [0.0, 0.0067, 0.0167, 0.05] {
@@ -213,7 +202,7 @@ fn equation_of_the_centre_matches_exact_solve_for_small_e() {
             let exact = exact_true_anomaly(m, e);
             let diff = ((approx - exact + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU))
                 - std::f64::consts::PI;
-            // series truncated at e^3, so tolerance scales with e^4
+            // Series truncated at e^3, so the tolerance scales with e^4.
             let tol = 50.0 * e.powi(4) + 1e-12;
             assert!(diff.abs() < tol, "eq. of centre at e={e} M={m}: err {diff:e} > {tol:e}");
         }
@@ -236,9 +225,7 @@ fn exact_true_anomaly(m: f64, e: f64) -> f64 {
     )
 }
 
-// ---------------------------------------------------------------------------
-// Third law
-// ---------------------------------------------------------------------------
+// === Third law ===
 
 #[test]
 fn third_law_round_trips() {
@@ -250,13 +237,9 @@ fn third_law_round_trips() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Vector quantities
-// ---------------------------------------------------------------------------
+// === Vector quantities ===
 
-/// The two eccentricity-vector implementations must agree, and both must
-/// reproduce the scalar eccentricity. `eccentricity_vector::definition` used a
-/// component-wise multiply where a cross product was required.
+/// Both eccentricity-vector implementations agree and reproduce the scalar eccentricity.
 #[test]
 fn eccentricity_vector_implementations_agree() {
     let mu = 3.986e14; // Earth
@@ -273,7 +256,7 @@ fn eccentricity_vector_implementations_agree() {
             "eccentricity vector impls disagree: {a:?} vs {b:?}"
         );
 
-        // magnitude must equal the eccentricity implied by energy and angular momentum
+        // Magnitude equals the eccentricity implied by energy and angular momentum.
         let h = r.cross(v);
         let energy = v.length_squared() / 2.0 - mu / r.length();
         let e_scalar = (1.0 + 2.0 * energy * h.length_squared() / (mu * mu)).max(0.0).sqrt();
@@ -291,12 +274,9 @@ fn circular_orbit_has_zero_eccentricity_vector() {
     assert!(e.length() < 1e-9, "circular orbit eccentricity vector {e:?} should vanish");
 }
 
-// ---------------------------------------------------------------------------
-// Energy
-// ---------------------------------------------------------------------------
+// === Energy ===
 
-/// Specific orbital energy is `-mu/2a`, and is NEGATIVE for a bound orbit.
-/// `mechanical::specific` subtracted an already-negative potential term.
+/// Specific orbital energy is `-mu/2a`, negative for a bound orbit.
 #[test]
 fn specific_energy_is_negative_and_matches_vis_viva() {
     let mu: f64 = 3.986e14;
@@ -320,16 +300,16 @@ fn escape_velocity_has_zero_specific_energy() {
     assert!(eps.abs() < 1e-3, "escape velocity should give ~zero energy, got {eps:e}");
 }
 
-/// `true_anomaly::from_state_vectors` must return an angle for every orbit, including
-/// the degenerate ones where periapsis does not exist.
+/// `true_anomaly::from_state_vectors` returns an angle for every orbit, including the
+/// degenerate ones with no periapsis.
 mod true_anomaly_from_state {
     use exotic_matters::foundations::kepler::{eccentricity_vector, state, true_anomaly};
     use bevy::math::DVec3;
 
     const MU_EARTH: f64 = 3.986004418e14;
 
-    /// Build a state vector from elements, so the test states an orbit in the terms the
-    /// function is supposed to recover.
+    /// State vector from elements, so a test can state an orbit in the terms the function
+    /// recovers.
     fn state_of(eccentricity: f64, inclination: f64, true_anomaly: f64) -> (DVec3, DVec3, DVec3) {
         let elements = state::Elements {
             semi_major_axis: 7.0e6,
@@ -344,15 +324,9 @@ mod true_anomaly_from_state {
         (r, v, e_vec)
     }
 
-    /// The case the old code got wrong: a circular orbit has no eccentricity vector to
-    /// measure from, and dividing by its length gave NaN.
-    ///
-    /// Passed as an exact zero, which is what a caller holding an analytically circular
-    /// orbit has. Recovering the vector from a state instead leaves a residue of about
-    /// 1e-17, which does not divide by zero — it just points nowhere in particular, so
-    /// the naive version returns a plausible and entirely wrong angle rather than NaN.
-    /// That failure is caught by `it_agrees_with_the_full_element_recovery`; this one is
-    /// about the division.
+    /// A circular orbit has no eccentricity vector; dividing by its length gives NaN. Passed
+    /// as an exact zero here. Recovered from a state it is ~1e-17 and points nowhere, giving
+    /// a plausible wrong angle — that case is `it_agrees_with_the_full_element_recovery`.
     #[test]
     fn circular_orbits_do_not_produce_nan() {
         for &inclination in &[0.0, 0.5, std::f64::consts::PI / 2.0] {
@@ -369,9 +343,8 @@ mod true_anomaly_from_state {
         }
     }
 
-    /// And the answer must be the right angle, not merely a finite one. For a circular
-    /// orbit that is the argument of latitude, which is what `from_state` also reports
-    /// as the true anomaly — so the two must agree everywhere.
+    /// The angle is right, not merely finite: for a circular orbit it is the argument of
+    /// latitude, which `from_state` also reports as the true anomaly.
     #[test]
     fn it_agrees_with_the_full_element_recovery() {
         for &e in &[0.0, 0.01, 0.3, 0.8] {
@@ -393,7 +366,7 @@ mod true_anomaly_from_state {
         }
     }
 
-    /// An eccentric orbit still has to come back where it started.
+    /// An eccentric orbit comes back where it started.
     #[test]
     fn eccentric_orbits_round_trip() {
         for &e in &[0.05, 0.4, 0.85] {
@@ -407,12 +380,12 @@ mod true_anomaly_from_state {
         }
     }
 
-    /// Degenerate inputs must not produce NaN either.
+    /// Degenerate inputs produce no NaN either.
     #[test]
     fn degenerate_inputs_are_finite() {
         let z = DVec3::ZERO;
         assert!(true_anomaly::from_state_vectors(z, z, z).is_finite(), "all zero");
-        // Purely radial: there is no orbital plane to measure an angle in.
+        // Purely radial: no orbital plane to measure an angle in.
         let r = DVec3::new(7.0e6, 0.0, 0.0);
         let v = DVec3::new(1.0e3, 0.0, 0.0);
         assert!(true_anomaly::from_state_vectors(r, v, z).is_finite(), "radial");

@@ -1,8 +1,6 @@
-//! Saving and loading is lossless.
-//!
-//! A dropped or misread column changes an orbit without failing anything. These tests
-//! compare what comes back out field by field, then propagate a decade forward and compare
-//! positions — an element read into the wrong slot shows up only there.
+//! Saving and loading is lossless. A dropped or misread column changes an orbit without
+//! failing anything, so these compare field by field and then propagate a decade forward:
+//! an element read into the wrong slot shows up only as a position.
 
 use em_sim::appearance::Appearance;
 use em_sim::body::{BodyInfo, BodyRotation, RotationMode};
