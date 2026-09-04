@@ -230,3 +230,82 @@ fn luna_advances_at_the_anomalistic_rate() {
     assert!((period_days - 27.321661).abs() > 0.1,
         "and must NOT be the sidereal month (27.3217 d)");
 }
+
+/// Velocity, checked against the same Horizons states as the positions above.
+///
+/// Position agreeing does not imply velocity does — until Phase 3c the Keplerian path
+/// produced no velocity at all, so nothing here was exercised. These are the VX/VY/VZ
+/// columns of the same query, in km/s.
+#[test]
+fn velocities_match_jpl() {
+    struct V { body: &'static str, jd: f64, primary: &'static str, kms: [f64; 3], tol: f64 }
+    let refs = [
+        V { body: "earth", jd: 2451545.0, primary: "sol",
+            kms: [-2.979426007043741E+01, -5.469294939770602E+00, 1.817836785027449E-04], tol: 1e-3 },
+        V { body: "mars", jd: 2451545.0, primary: "sol",
+            kms: [1.162672403766088E+00, 2.629606454546266E+01, 5.222970229952857E-01], tol: 5e-3 },
+        V { body: "venus", jd: 2451545.0, primary: "sol",
+            kms: [1.381906029263447E+00, -3.514029517644670E+01, -5.600423382820807E-01], tol: 2e-2 },
+        V { body: "luna", jd: 2451545.0, primary: "earth",
+            kms: [6.435313889889519E-01, -7.309839826871004E-01, -1.150646473918648E-02], tol: 5e-2 },
+    ];
+
+    let contents = solar_system();
+    let g = contents.physics.gravitational_constant;
+    let mass_of = |id: &str| contents.bodies.iter().find_map(|b| match b {
+        SomeBody::KeplerEntry(k) if k.info.id == id => Some(k.info.mass),
+        SomeBody::FixedEntry(f) if f.info.id == id => Some(f.info.mass),
+        _ => None,
+    }).unwrap();
+
+    for r in refs {
+        let entry = contents.bodies.iter().find_map(|b| match b {
+            SomeBody::KeplerEntry(k) if k.info.id == r.body => Some(k),
+            _ => None,
+        }).expect(r.body);
+
+        let mu = g * (mass_of(r.primary) + entry.info.mass);
+        let (_, v) = entry.params
+            .state_vectors(Instant::from_julian_day(r.jd), mu)
+            .expect("Keplerian motive must produce a state vector");
+
+        let truth = DVec3::new(r.kms[0], r.kms[1], r.kms[2]) * KM;
+        let rel = (v - truth).length() / truth.length();
+        assert!(rel < r.tol,
+            "{} velocity off by {rel:.3e} (budget {:.0e}): got {:?} m/s, expected {:?} m/s",
+            r.body, r.tol, v, truth);
+    }
+}
+
+/// Speed must obey vis-viva against the body's own elements, at every point of the orbit.
+/// This is internal consistency rather than accuracy, and holds regardless of element data.
+#[test]
+fn keplerian_speeds_obey_vis_viva() {
+    let contents = solar_system();
+    let g = contents.physics.gravitational_constant;
+    let sol_mass = contents.bodies.iter().find_map(|b| match b {
+        SomeBody::FixedEntry(f) if f.info.id == "sol" => Some(f.info.mass),
+        SomeBody::KeplerEntry(k) if k.info.id == "sol" => Some(k.info.mass),
+        _ => None,
+    }).unwrap();
+
+    for body in ["mercury", "earth", "mars", "Neptune"] {
+        let entry = contents.bodies.iter().find_map(|b| match b {
+            SomeBody::KeplerEntry(k) if k.info.id == body => Some(k),
+            _ => None,
+        }).expect(body);
+        if entry.params.primary_id != "sol" { continue; }
+
+        let mu = g * (sol_mass + entry.info.mass);
+        let a = entry.params.semi_major_axis();
+
+        for days in [0.0, 40.0, 500.0, 3000.0, 9000.0] {
+            let t = Instant::from_julian_day(2451545.0 + days);
+            let (r, v) = entry.params.state_vectors(t, mu).unwrap();
+            let expected = (mu * (2.0 / r.length() - 1.0 / a)).sqrt();
+            let rel = (v.length() - expected).abs() / expected;
+            assert!(rel < 1e-9, "{body} at +{days} d: speed {} vs vis-viva {expected} (rel {rel:e})",
+                v.length());
+        }
+    }
+}

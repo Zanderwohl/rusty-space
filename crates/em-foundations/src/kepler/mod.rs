@@ -4,6 +4,7 @@
 //! storage and display convention and belong to the layer above.
 
 pub mod anomaly;
+pub mod state;
 
 /// Mean anomaly calculations.
 ///

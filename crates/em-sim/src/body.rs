@@ -21,7 +21,11 @@ pub struct BodyInfo {
 pub struct BodyState {
     pub current_position: DVec3,
     pub last_step_position: DVec3,
-    /// Current velocity for Newtonian bodies (None for Fixed/Keplerian)
+    /// Current velocity.
+    ///
+    /// For a Newtonian body this is the integrated global velocity. For a Keplerian body
+    /// it is the velocity relative to the primary, from the orbit. `None` for Fixed
+    /// bodies, which have no velocity of their own.
     pub current_velocity: Option<DVec3>,
     pub current_local_position: Option<DVec3>,
     pub current_primary_position: Option<DVec3>,

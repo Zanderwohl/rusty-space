@@ -541,17 +541,19 @@ fn calculate_hierarchical_positions(
         // Get fresh motive selection at current time
         let (_, selection) = motive.motive_at(time);
         
-        // Calculate local position based on motive selection
-        let local_position = match selection {
-            MotiveSelection::Fixed { position, .. } => {
-                *position
-            }
+        // Calculate local position (and velocity, where the motive defines one) based
+        // on the motive selection.
+        let (local_position, local_velocity) = match selection {
+            MotiveSelection::Fixed { position, .. } => (*position, None),
             MotiveSelection::Keplerian(kepler) => {
                 let mu = match &cached_motive.selection {
                     CachedMotiveSelection::Keplerian { mu } => *mu,
                     _ => 0.0,
                 };
-                kepler.displacement(time, mu).unwrap_or(DVec3::ZERO)
+                match kepler.state_vectors(time, mu) {
+                    Some((r, v)) => (r, Some(v)),
+                    None => (DVec3::ZERO, None),
+                }
             }
             MotiveSelection::Newtonian { .. } => {
                 continue;
@@ -563,6 +565,9 @@ fn calculate_hierarchical_positions(
         // Update body state
         state.current_position = global_position;
         state.current_local_position = Some(local_position);
+        // Velocity relative to the primary. Keplerian bodies have one now; Fixed bodies
+        // do not. This is what an impulse or a Release into Newtonian motion starts from.
+        state.current_velocity = local_velocity;
         state.current_primary_position = if cached_motive.parent_entity.is_some() { 
             Some(parent_position)
         } else { 

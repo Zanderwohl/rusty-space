@@ -5,7 +5,7 @@
 
 use glam::{DMat3, DVec3};
 use serde::{Deserialize, Serialize};
-use em_foundations::kepler::{anomaly, angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
+use em_foundations::kepler::{anomaly, state, angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
 use em_foundations::time::{Instant, TimeDelta};
 use em_foundations::mappings;
 
@@ -202,6 +202,58 @@ impl KeplerMotive {
         let rad = local::radius::from_elements2(self.shape.semi_major_axis(), ecc, ta)?;
 
         Some(DVec3::new(rad * ta.cos(), rad * ta.sin(), 0.0))
+    }
+
+    /// Velocity in the perifocal frame, m/s.
+    pub fn velocity_pqw(&self, time: Instant, gravitational_parameter: f64) -> Option<DVec3> {
+        let ecc = self.shape.eccentricity();
+        let p = self.shape.semi_latus_rectum();
+        if p <= 0.0 || !p.is_finite() {
+            return None;
+        }
+        let ta = self.true_anomaly_at(self.mean_anomaly(time, gravitational_parameter));
+        Some(state::perifocal_velocity(gravitational_parameter, p, ecc, ta))
+    }
+
+    /// Velocity relative to the primary, in the reference frame, m/s.
+    ///
+    /// Note this is the velocity along the osculating ellipse. For a precessing orbit the
+    /// perifocal frame is itself turning, and that contribution is not included — at
+    /// precession periods of years against orbital periods of days it is far below the
+    /// model's other errors, but it is not zero.
+    pub fn velocity(&self, time: Instant, gravitational_parameter: f64) -> Option<DVec3> {
+        let v_pqw = self.velocity_pqw(time, gravitational_parameter)?;
+        Some(self.perifocal_to_reference(v_pqw, time))
+    }
+
+    /// Position and velocity relative to the primary, in the reference frame.
+    ///
+    /// This is what an impulse or a switch to Newtonian integration needs; a position
+    /// alone cannot start either.
+    pub fn state_vectors(
+        &self,
+        time: Instant,
+        gravitational_parameter: f64,
+    ) -> Option<(DVec3, DVec3)> {
+        Some((
+            self.displacement(time, gravitational_parameter)?,
+            self.velocity(time, gravitational_parameter)?,
+        ))
+    }
+
+    /// These elements as `em_foundations` sees them: radians, and the true anomaly
+    /// resolved for `time`.
+    pub fn elements_at(&self, time: Instant, gravitational_parameter: f64) -> state::Elements {
+        state::Elements {
+            semi_major_axis: self.semi_major_axis(),
+            eccentricity: self.eccentricity(),
+            inclination: self.inclination().to_radians(),
+            longitude_of_ascending_node: self
+                .longitude_of_ascending_node_infallible(time)
+                .to_radians(),
+            argument_of_periapsis: self.argument_of_periapsis(time).to_radians(),
+            true_anomaly: self.true_anomaly(time, gravitational_parameter),
+        }
     }
 
     pub fn displacement(&self, time: Instant, gravitational_parameter: f64) -> Option<DVec3> {
