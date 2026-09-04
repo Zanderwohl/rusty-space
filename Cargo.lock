@@ -2529,6 +2529,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "em-sim"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "em-foundations",
+ "glam",
+ "serde",
+]
+
+[[package]]
 name = "emath"
 version = "0.33.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2732,6 +2742,7 @@ dependencies = [
  "bevy_egui",
  "eframe",
  "em-foundations",
+ "em-sim",
  "http",
  "itertools 0.14.0",
  "iyes_perf_ui",

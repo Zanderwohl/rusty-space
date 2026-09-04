@@ -4,8 +4,7 @@
 //! (a queue of simulation times to be processed for physics stepping).
 
 use std::time::Instant as StdInstant;
-use bevy::prelude::*;
-use crate::foundations::time::Instant;
+use em_foundations::time::Instant;
 
 /// Represents a queue of simulation times to be processed.
 /// Instead of storing each time value, we store the start time and count,
@@ -152,7 +151,7 @@ impl ExactSizeIterator for PreviousTimesIter {}
 /// The simulation clock resource.
 ///
 /// Tracks the current simulation time, physics stepping queue, and performance metrics.
-#[derive(Resource)]
+#[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Resource))]
 pub struct SimTime {
     /// Current simulation time (seconds since J2000)
     pub time: Instant,

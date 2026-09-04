@@ -28,6 +28,7 @@ debug = false
 
 [dependencies]
 em-foundations = { path = "crates/em-foundations" }
+em-sim = { path = "crates/em-sim", features = ["bevy"] }
 
 num-traits = "0.2.18"
 scilib = "1.0.0"

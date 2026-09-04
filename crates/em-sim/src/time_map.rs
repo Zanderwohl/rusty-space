@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 use std::slice::Iter;
-use bevy::math::DVec3;
-use bevy::prelude::*;
+use glam::{DVec3, Vec3};
 use serde::{Deserialize, Serialize};
-use crate::foundations::time::{Instant, TimeLength};
-use crate::util::bitfutz;
+use em_foundations::time::{Instant, TimeLength};
+use crate::bitfutz;
 
 #[derive(Debug, Clone)]
 pub struct TimeMap<V: Lerpable>
@@ -26,13 +25,15 @@ pub trait Lerpable {
 
 impl Lerpable for f64 {
     fn lerp__(&self, rhs: &Self, t: f64) -> Self {
-        self.lerp(*rhs, t)
+        // Was glam's FloatExt::lerp, which arrived via `bevy::prelude::*`.
+        self + (rhs - self) * t
     }
 }
 
 impl Lerpable for f32 {
     fn lerp__(&self, rhs: &Self, t: f64) -> Self {
-        self.lerp(*rhs, t as f32)
+        let t = t as f32;
+        self + (rhs - self) * t
     }
 }
 

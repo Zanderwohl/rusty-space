@@ -4,7 +4,25 @@ use bevy::color::LinearRgba;
 use bevy::math::DVec3;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use serde::{Deserialize, Serialize};
+
+/// Appearance *data* lives in `em-sim`; this module holds the Bevy-side rendering of it.
+pub use em_sim::appearance::{Appearance, AppearanceColor, DebugBall, StarBall};
+
+/// Turns appearance data into Bevy render components.
+///
+/// A trait rather than inherent methods because the data types now live in `em-sim`,
+/// and Rust does not allow inherent impls on foreign types. The associated output lets
+/// a star also contribute a `PointLight`.
+pub trait PbrBundle {
+    type Output;
+    fn pbr_bundle(
+        &self,
+        cache: &mut ResMut<AssetCache>,
+        meshes: &mut Assets<Mesh>,
+        materials: &mut Assets<StandardMaterial>,
+        images: &mut ResMut<Assets<Image>>,
+    ) -> Self::Output;
+}
 
 #[derive(Resource, Default)]
 pub struct AssetCache {
@@ -12,44 +30,14 @@ pub struct AssetCache {
     pub materials: HashMap<String, Handle<StandardMaterial>>,
 }
 
-#[derive(Serialize, Deserialize, Default, Component, Clone)]
-pub enum Appearance {
-    #[default]
-    Empty,
-    DebugBall(DebugBall),
-    Star(StarBall),
-}
-
-#[derive(Serialize, Deserialize, Default, Clone)]
-pub struct AppearanceColor {
-    pub r: u16,
-    pub g: u16,
-    pub b: u16,
-}
-
-impl Appearance {
-    pub fn radius(&self) -> f64 {
-        match self {
-            Appearance::Empty => 1.0,
-            Appearance::DebugBall(DebugBall { radius, .. }) => *radius,
-            Appearance::Star(StarBall { radius, ..}) => *radius,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct DebugBall {
-    pub radius: f64,
-    pub color: AppearanceColor,
-}
-
-impl DebugBall {
-    pub fn pbr_bundle(&self,
+impl PbrBundle for DebugBall {
+    type Output = (Mesh3d, MeshMaterial3d<StandardMaterial>);
+    fn pbr_bundle(&self,
                       cache: &mut ResMut<AssetCache>,
                       meshes: &mut Assets<Mesh>,
                       materials: &mut Assets<StandardMaterial>,
-                      mut images: &mut ResMut<Assets<Image>>,
-    ) -> (Mesh3d, MeshMaterial3d<StandardMaterial>) {
+                      images: &mut ResMut<Assets<Image>>,
+    ) -> Self::Output {
         let color = Color::srgb(self.color.r as f32 / 255.0, self.color.g as f32 / 255.0, self.color.b as f32 / 255.0);
         let mesh_key = format!("icosphere_{}", self.radius);
         let material_key = format!("color_{:02x}{:02x}{:02x}", self.color.r, self.color.g, self.color.b);
@@ -102,40 +90,14 @@ fn uv_debug_texture() -> Image {
     )
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct StarBall {
-    pub radius: f64,
-    pub color: AppearanceColor,
-    pub light: AppearanceColor,
-    pub absolute_magnitude: f32,
-}
-
-impl StarBall {
-    pub fn intensity(&self) -> f32 {
-        // Convert absolute magnitude to luminous flux (lumens) relative to the Sun
-        const SUN_ABSOLUTE_MAGNITUDE: f64 = 4.83;
-        const SUN_LUMINOUS_FLUX_LM: f64 = 3.5e28;
-        let m = self.absolute_magnitude as f64;
-        let luminosity_ratio = 10f64.powf(0.4 * (SUN_ABSOLUTE_MAGNITUDE - m));
-        (SUN_LUMINOUS_FLUX_LM * luminosity_ratio) as f32
-    }
-
-    pub fn emissive_luminance(&self) -> f32 {
-        // Approximate solar surface luminance in nits (cd/m^2), scaled by absolute magnitude
-        // L_sun ≈ 1.8e9 nits at the photosphere
-        const SUN_ABSOLUTE_MAGNITUDE: f64 = 4.83;
-        const SUN_SURFACE_LUMINANCE_NITS: f64 = 1.83e9;
-        let m = self.absolute_magnitude as f64;
-        let luminosity_ratio = 10f64.powf(0.4 * (SUN_ABSOLUTE_MAGNITUDE - m));
-        (SUN_SURFACE_LUMINANCE_NITS * luminosity_ratio) as f32
-    }
-    
-    pub fn pbr_bundle(&self,
+impl PbrBundle for StarBall {
+    type Output = (Mesh3d, MeshMaterial3d<StandardMaterial>, PointLight);
+    fn pbr_bundle(&self,
                       cache: &mut ResMut<AssetCache>,
                       meshes: &mut Assets<Mesh>,
                       materials: &mut Assets<StandardMaterial>,
-                      mut images: &mut ResMut<Assets<Image>>,
-    ) -> (Mesh3d, MeshMaterial3d<StandardMaterial>, PointLight) {
+                      images: &mut ResMut<Assets<Image>>,
+    ) -> Self::Output {
         let color = Color::srgb(self.color.r as f32 / 255.0, self.color.g as f32 / 255.0, self.color.b as f32 / 255.0);
         let mesh_key = format!("icosphere_{}", self.radius);
         let material_key = format!("color_{:02x}{:02x}{:02x}_{:03x}:{:03x}:{:03x}", self.color.r, self.color.g, self.color.b, self.light.r, self.light.g, self.light.b);

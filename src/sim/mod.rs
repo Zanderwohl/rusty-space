@@ -6,11 +6,11 @@
 
 use bevy::prelude::*;
 
-pub mod time;
-pub mod events;
 
-pub use time::{SimTime, PreviousTimes, PreviousTimesIter};
-pub use events::{CalculateTrajectory, BodySelection};
+// The clock and the message types live in `em-sim`; re-exported here so existing
+// `crate::sim::…` paths keep resolving. What remains below is pure ECS glue.
+pub use em_sim::time::{SimTime, PreviousTimes, PreviousTimesIter};
+pub use em_sim::events::{CalculateTrajectory, BodySelection};
 
 /// Marker component for entities that belong to the current simulation.
 /// Used to despawn all simulation entities when unloading a universe.

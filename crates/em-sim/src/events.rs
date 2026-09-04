@@ -1,11 +1,10 @@
 //! Simulation events and messages.
 //!
-//! These are Bevy messages used to communicate between simulation systems.
-
-use bevy::prelude::*;
+//! `CalculateTrajectory` becomes a Bevy message under the `bevy` feature; without it
+//! these are plain types a headless caller can use directly.
 
 /// Message to request trajectory calculation for bodies.
-#[derive(Message)]
+#[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Message))]
 pub struct CalculateTrajectory {
     pub selection: BodySelection,
 }

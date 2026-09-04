@@ -1,0 +1,20 @@
+[package]
+name = "em-sim"
+version = "0.1.0"
+edition = "2024"
+description = "Orbital simulation state and propagation, built on em-foundations. Engine-agnostic."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[features]
+# Adds `Component`/`Resource`/`Message` derives so these types can be used directly in a
+# Bevy app. Nothing else in this crate assumes an engine; without the feature it builds
+# and runs headless.
+bevy = ["dep:bevy_ecs"]
+
+[dependencies]
+em-foundations = { path = "../em-foundations" }
+glam = { version = "0.30", features = ["serde"] }
+serde = { version = "1.0.215", features = ["derive"] }
+
+bevy_ecs = { version = "0.17", optional = true }

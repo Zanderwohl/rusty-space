@@ -1,11 +1,11 @@
-pub mod bitfutz;
-pub mod time_map;
 pub mod format;
 pub mod bevystuff;
 pub mod ease;
 
 /// Moved into `em-foundations`; re-exported so `crate::util::…` paths keep resolving.
 pub use em_foundations::{common, mappings, patched_conics};
+/// Moved into `em-sim`; re-exported so `crate::util::…` paths keep resolving.
+pub use em_sim::{bitfutz, time_map};
 
 use std::fs;
 use std::path::PathBuf;

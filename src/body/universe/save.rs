@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use bevy::camera::visibility::NoFrustumCulling;
 use serde::{Deserialize, Serialize};
 use crate::body::appearance::Appearance;
-use crate::body::appearance::AssetCache;
+use crate::body::appearance::{AssetCache, PbrBundle};
 use crate::body::motive::info::{BodyInfo, BodyRotation, BodyState};
 use crate::body::motive::kepler_motive::KeplerMotive;
 use crate::body::motive::Motive;
