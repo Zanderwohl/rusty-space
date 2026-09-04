@@ -488,12 +488,13 @@ pub fn calculate(
     }
 
     let time = sim_time.time;
-    for (mut motive, _, mut state) in kepler_bodies.iter_mut() {
+    for (mut motive, info, mut state) in kepler_bodies.iter_mut() {
         let (primary_mass, primary_position) = bodies_prev_frame.get(&motive.primary_id)
             .copied()
             .expect("Missing body info");
 
-        let mu = physics.gravitational_constant * primary_mass;
+        // mu = G(M + m): relative two-body motion, not the primary's mu alone.
+        let mu = physics.gravitational_constant * (primary_mass + info.mass);
         let position = motive.displacement(time, mu);
         if let Some(position) = position {
             state.current_position = primary_position + position;
@@ -541,7 +542,9 @@ pub fn calculate_trajectory(
             let primary_mass = body_masses.get(&kepler_motive.primary_id)
                 .copied()
                 .expect("Missing primary body mass");
-            let mu = physics.gravitational_constant * primary_mass;
+            // mu = G(M + m): must match the value used to propagate the body itself,
+            // or the drawn trajectory will not close on the body's actual position.
+            let mu = physics.gravitational_constant * (primary_mass + info.mass);
 
             state.trajectory = Some(TimeMap::new());
             let map = state.trajectory.as_mut().unwrap();

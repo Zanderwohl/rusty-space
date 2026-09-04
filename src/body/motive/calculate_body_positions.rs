@@ -441,7 +441,7 @@ fn rebuild_physics_graph(
     
     // Second pass: build cached motives and dependencies
     // This is the ONLY place we call motive_at() - results are cached
-    for (entity, _info, motive, _, _) in bodies.iter() {
+    for (entity, info, motive, _, _) in bodies.iter() {
         let (event, selection) = motive.motive_at(time);
         
         match selection {
@@ -471,7 +471,12 @@ fn rebuild_physics_graph(
                 graph.cached_motives.insert(entity, CachedMotive {
                     parent_entity,
                     selection: CachedMotiveSelection::Keplerian {
-                        mu: gravitational_constant * parent_mass,
+                        // Relative two-body motion is governed by mu = G(M + m), not G*M.
+                        // Dropping the secondary's mass makes the period too long by about
+                        // half the mass ratio: negligible for a planet about the Sun, but
+                        // 0.48% for Luna about Earth, which is a whole lunar month of phase
+                        // error every ~20 years.
+                        mu: gravitational_constant * (parent_mass + info.mass),
                     },
                 });
             }
