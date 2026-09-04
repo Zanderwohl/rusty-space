@@ -1,4 +1,4 @@
-use bevy::math::DVec3;
+use glam::DVec3;
 
 /// Compute gravitational acceleration from a single body.
 ///

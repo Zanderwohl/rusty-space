@@ -45,7 +45,7 @@ pub mod angular_motion {
 
 pub mod local {
     pub mod angular_momentum {
-        use bevy::math::DVec3;
+        use glam::DVec3;
 
         pub fn specific(displacement: DVec3, velocity: DVec3) -> DVec3 {
             displacement.cross(velocity)
@@ -88,8 +88,8 @@ mod third_law {
 }
 
 pub mod semi_major_axis {
-    use crate::util::common;
-    use crate::foundations::kepler::third_law;
+    use crate::common;
+    use crate::kepler::third_law;
 
     pub fn third_law(gravitational_parameter: f64, period: f64) -> f64 {
         let x= (period * period * gravitational_parameter) / third_law::FOUR_PI_SQUARED;
@@ -124,14 +124,14 @@ pub mod semi_latus_rectum {
 }
 
 pub mod semi_minor_axis {
-    use crate::util::common;
+    use crate::common;
     pub fn conic_definition(semi_major_axis: f64, eccentricity: f64) -> f64 {
         semi_major_axis * common::unit_circle_xy(eccentricity)
     }
 }
 
 pub mod eccentricity {
-    use crate::util::common;
+    use crate::common;
 
     pub fn from_axes(semi_major_axis: f64, semi_minor_axis: f64) -> f64 {
         common::unit_circle_xy(semi_minor_axis / semi_major_axis)
@@ -146,8 +146,8 @@ pub mod eccentricity {
     }
 
     pub mod vector {
-        use bevy::math::DVec3;
-        use crate::foundations::kepler::local;
+        use glam::DVec3;
+        use crate::kepler::local;
 
         pub fn definition(local_position: DVec3, local_velocity: DVec3, gravitational_parameter: f64) -> DVec3 {
             let term1 = local_velocity.cross(local::angular_momentum::specific(local_position, local_velocity)) / gravitational_parameter;
@@ -169,7 +169,7 @@ pub mod semi_parameter {
 }
 
 pub mod periapsis {
-    use crate::foundations::kepler::semi_parameter;
+    use crate::kepler::semi_parameter;
 
     pub fn definition(semi_major_axis: f64, eccentricity: f64) -> f64 {
         semi_parameter::definition(semi_major_axis, eccentricity) / (1.0 + eccentricity)
@@ -177,7 +177,7 @@ pub mod periapsis {
 }
 
 pub mod apoapsis {
-    use crate::foundations::kepler::semi_parameter;
+    use crate::kepler::semi_parameter;
 
     pub fn definition(semi_major_axis: f64, eccentricity: f64) -> Option<f64> {
         if eccentricity >= 1.0 { return None; }
@@ -186,7 +186,7 @@ pub mod apoapsis {
 }
 
 pub mod eccentric_anomaly {
-    use crate::util::common::unit_circle_xy;
+    use crate::common::unit_circle_xy;
 
     /// `E = atan2(sqrt(1 - e^2) sin v, e + cos v)`, in radians.
     ///
@@ -200,8 +200,8 @@ pub mod eccentric_anomaly {
 }
 
 pub mod true_anomaly {
-    use bevy::math::DVec3;
-    use crate::util::common::{unit_circle_xy};
+    use glam::DVec3;
+    use crate::common::{unit_circle_xy};
     use scilib::math::bessel;
 
     pub fn at_time(eccentric_anomaly: f64, eccentricity: f64) -> f64 {
@@ -278,7 +278,7 @@ pub mod apsides {
 }
 
 pub mod period {
-    use crate::foundations::kepler::third_law::reused_term;
+    use crate::kepler::third_law::reused_term;
     pub fn third_law(semi_major_axis: f64, gravitational_parameter: f64) -> f64 {
         let x = reused_term(semi_major_axis) / gravitational_parameter;
         x.sqrt()
@@ -286,7 +286,7 @@ pub mod period {
 }
 
 pub mod gravitational_parameter {
-    use crate::foundations::kepler::third_law::reused_term;
+    use crate::kepler::third_law::reused_term;
 
     pub fn third_law(period: f64, semi_major_axis: f64) -> f64 {
         reused_term(semi_major_axis) / (period * period)
@@ -294,7 +294,7 @@ pub mod gravitational_parameter {
 }
 
 pub mod eccentricity_vector {
-    use bevy::math::DVec3;
+    use glam::DVec3;
 
     /// `e_vec = (v x h) / mu - r_hat`, where `h = r x v`.
     ///
@@ -308,7 +308,7 @@ pub mod eccentricity_vector {
 
 pub mod energy {
     pub mod mechanical {
-        use crate::foundations::kepler::energy::{kinetic, potential};
+        use crate::kepler::energy::{kinetic, potential};
 
         /// Specific orbital energy `eps = v^2/2 - mu/r`.
         ///

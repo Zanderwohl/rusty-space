@@ -2,7 +2,7 @@ pub mod conversions;
 pub mod transformation;
 pub mod observation;
 
-use bevy::math::{DMat4, DQuat, DVec3};
+use glam::{DMat4, DQuat, DVec3};
 use transformation::Transformation;
 
 
@@ -19,7 +19,7 @@ use transformation::Transformation;
 /// - Roll: rotation around the forward (X) axis
 #[derive(Clone)]
 pub struct ReferenceFrame {
-    pub(in crate::foundations::reference_frame) mat: DMat4,
+    pub(in crate::reference_frame) mat: DMat4,
 }
 
 impl ReferenceFrame {

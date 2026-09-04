@@ -1,11 +1,11 @@
-pub mod common;
-pub mod patched_conics;
 pub mod bitfutz;
 pub mod time_map;
 pub mod format;
-pub mod mappings;
 pub mod bevystuff;
 pub mod ease;
+
+/// Moved into `em-foundations`; re-exported so `crate::util::…` paths keep resolving.
+pub use em_foundations::{common, mappings, patched_conics};
 
 use std::fs;
 use std::path::PathBuf;

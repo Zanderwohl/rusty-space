@@ -1,3 +1,10 @@
+[workspace]
+members = ["crates/*"]
+
+# The app is the workspace root package so that `assets/`, `wix/` and the `[[bin]]`
+# paths resolve unchanged — Bevy's default AssetPlugin looks for `assets/` relative to
+# CARGO_MANIFEST_DIR. The libraries live under `crates/`.
+
 [package]
 name = "exotic-matters"
 version = "0.1.0"
@@ -20,6 +27,8 @@ incremental = false
 debug = false
 
 [dependencies]
+em-foundations = { path = "crates/em-foundations" }
+
 num-traits = "0.2.18"
 scilib = "1.0.0"
 

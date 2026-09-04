@@ -1,6 +1,6 @@
-use bevy::math::{DMat4, DQuat, DVec3};
-use crate::foundations::reference_frame::ReferenceFrame;
-use crate::foundations::reference_frame::transformation::Transformation;
+use glam::{DMat4, DQuat, DVec3};
+use crate::reference_frame::ReferenceFrame;
+use crate::reference_frame::transformation::Transformation;
 
 impl ReferenceFrame {
     pub fn from_dvec3(dvec: DVec3) -> Self {
