@@ -129,6 +129,12 @@ impl Motive {
         new
     }
 
+    /// Build a Keplerian motive from parts, defaulting the rest.
+    ///
+    /// For use only when you genuinely have parts. Given a whole [`KeplerMotive`], use
+    /// [`Motive::from_keplerian`]: this constructor names four of its six fields, so
+    /// passing one through here silently drops `anomalistic_period` and any explicit
+    /// mu. The save path did exactly that and lost every fitted period on write.
     pub fn keplerian(primary_id: String, shape: KeplerShape, rotation: KeplerRotation, epoch: KeplerEpoch) -> Self {
         let mut new = Self::new();
         let zero = Instant::from_seconds_since_j2000(0.0);
@@ -138,6 +144,10 @@ impl Motive {
 
     /// A Keplerian motive with an explicit gravitational parameter, for an orbit whose
     /// effective mu is not `G(M_primary + m)` — a barycentric one, for instance.
+    ///
+    /// Carries the same hazard as [`Motive::keplerian`]: it still drops
+    /// `anomalistic_period`. Prefer [`Motive::from_keplerian`] whenever you hold a
+    /// whole [`KeplerMotive`].
     pub fn keplerian_with_gm(primary_id: String, shape: KeplerShape, rotation: KeplerRotation,
                              epoch: KeplerEpoch, gravitational_parameter: f64) -> Self {
         let mut new = Self::new();

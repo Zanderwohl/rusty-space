@@ -402,21 +402,12 @@ fn save_bodies(conn: &Connection, bodies: &[SomeBody]) -> Result<(), SqliteSaveE
                 (&e.info, &e.appearance, m, e.rotation.as_ref())
             }
             SomeBody::KeplerEntry(e) => {
-                let m = match e.params.gravitational_parameter {
-                    Some(gm) => Motive::keplerian_with_gm(
-                        e.params.primary_id.clone(),
-                        e.params.shape.clone(),
-                        e.params.rotation.clone(),
-                        e.params.epoch.clone(),
-                        gm,
-                    ),
-                    None => Motive::keplerian(
-                        e.params.primary_id.clone(),
-                        e.params.shape.clone(),
-                        e.params.rotation.clone(),
-                        e.params.epoch.clone(),
-                    ),
-                };
+                // Take the whole `KeplerMotive`, never a field-by-field rebuild. This
+                // used to name primary/shape/rotation/epoch/gm one at a time and so
+                // dropped `anomalistic_period` on every save, which reads back as
+                // "derive the rate from the semi-major axis" and moved Saturn's small
+                // moons by gigametres over a decade.
+                let m = Motive::from_keplerian(e.params.clone());
                 (&e.info, &e.appearance, m, e.rotation.as_ref())
             }
             SomeBody::CompoundEntry(e) => {
