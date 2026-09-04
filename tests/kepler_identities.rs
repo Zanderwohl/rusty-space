@@ -319,3 +319,102 @@ fn escape_velocity_has_zero_specific_energy() {
     let eps = energy::mechanical::specific(v_esc, mu, r);
     assert!(eps.abs() < 1e-3, "escape velocity should give ~zero energy, got {eps:e}");
 }
+
+/// `true_anomaly::from_state_vectors` must return an angle for every orbit, including
+/// the degenerate ones where periapsis does not exist.
+mod true_anomaly_from_state {
+    use exotic_matters::foundations::kepler::{eccentricity_vector, state, true_anomaly};
+    use bevy::math::DVec3;
+
+    const MU_EARTH: f64 = 3.986004418e14;
+
+    /// Build a state vector from elements, so the test states an orbit in the terms the
+    /// function is supposed to recover.
+    fn state_of(eccentricity: f64, inclination: f64, true_anomaly: f64) -> (DVec3, DVec3, DVec3) {
+        let elements = state::Elements {
+            semi_major_axis: 7.0e6,
+            eccentricity,
+            inclination,
+            longitude_of_ascending_node: 0.4,
+            argument_of_periapsis: if eccentricity > 0.0 { 0.9 } else { 0.0 },
+            true_anomaly,
+        };
+        let (r, v) = state::to_state(MU_EARTH, &elements).expect("a closed orbit has a state");
+        let e_vec = eccentricity_vector::definition(MU_EARTH, r, v);
+        (r, v, e_vec)
+    }
+
+    /// The case the old code got wrong: a circular orbit has no eccentricity vector to
+    /// measure from, and dividing by its length gave NaN.
+    ///
+    /// Passed as an exact zero, which is what a caller holding an analytically circular
+    /// orbit has. Recovering the vector from a state instead leaves a residue of about
+    /// 1e-17, which does not divide by zero — it just points nowhere in particular, so
+    /// the naive version returns a plausible and entirely wrong angle rather than NaN.
+    /// That failure is caught by `it_agrees_with_the_full_element_recovery`; this one is
+    /// about the division.
+    #[test]
+    fn circular_orbits_do_not_produce_nan() {
+        for &inclination in &[0.0, 0.5, std::f64::consts::PI / 2.0] {
+            for &nu in &[0.0, 1.0, 3.0, 5.5] {
+                let (r, v, recovered) = state_of(0.0, inclination, nu);
+                for (what, e) in [("exactly zero", DVec3::ZERO), ("recovered", recovered)] {
+                    let got = true_anomaly::from_state_vectors(r, v, e);
+                    assert!(
+                        got.is_finite(),
+                        "circular ({what}) i={inclination} nu={nu} gave {got}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// And the answer must be the right angle, not merely a finite one. For a circular
+    /// orbit that is the argument of latitude, which is what `from_state` also reports
+    /// as the true anomaly — so the two must agree everywhere.
+    #[test]
+    fn it_agrees_with_the_full_element_recovery() {
+        for &e in &[0.0, 0.01, 0.3, 0.8] {
+            for &inclination in &[0.0, 0.3, 1.2] {
+                for &nu in &[0.2, 1.7, 3.4, 5.9] {
+                    let (r, v, e_vec) = state_of(e, inclination, nu);
+                    let got = true_anomaly::from_state_vectors(r, v, e_vec);
+                    let expected = state::from_state(MU_EARTH, r, v)
+                        .expect("elements recover")
+                        .true_anomaly;
+                    let diff = (got - expected).abs();
+                    let diff = diff.min(std::f64::consts::TAU - diff);
+                    assert!(
+                        diff < 1e-9,
+                        "e={e} i={inclination} nu={nu}: {got} vs {expected}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// An eccentric orbit still has to come back where it started.
+    #[test]
+    fn eccentric_orbits_round_trip() {
+        for &e in &[0.05, 0.4, 0.85] {
+            for &nu in &[0.1, 2.0, 4.5, 6.0] {
+                let (r, v, e_vec) = state_of(e, 0.7, nu);
+                let got = true_anomaly::from_state_vectors(r, v, e_vec);
+                let diff = (got - nu).abs();
+                let diff = diff.min(std::f64::consts::TAU - diff);
+                assert!(diff < 1e-9, "e={e}: stored nu={nu}, got {got}");
+            }
+        }
+    }
+
+    /// Degenerate inputs must not produce NaN either.
+    #[test]
+    fn degenerate_inputs_are_finite() {
+        let z = DVec3::ZERO;
+        assert!(true_anomaly::from_state_vectors(z, z, z).is_finite(), "all zero");
+        // Purely radial: there is no orbital plane to measure an angle in.
+        let r = DVec3::new(7.0e6, 0.0, 0.0);
+        let v = DVec3::new(1.0e3, 0.0, 0.0);
+        assert!(true_anomaly::from_state_vectors(r, v, z).is_finite(), "radial");
+    }
+}

@@ -129,3 +129,96 @@ fn body_is_at_periapsis_at_periapsis_passage() {
     let rel = (r - expected).abs() / expected;
     assert!(rel < 1e-3, "at periapsis passage r = {r:e}, expected periapsis {expected:e} (rel {rel:e})");
 }
+
+/// A `TrueAnomaly` epoch must propagate rather than panicking.
+///
+/// Both `mean_anomaly_at_epoch` and `time_at_periapsis_passage` were `todo!()` for this
+/// variant, and it is not hypothetical: the SQLite and TOML decoders both build it from
+/// a save whose `epoch_type` is `'TrueAnomaly'`, so such a file loaded fine and then
+/// panicked on the first frame.
+mod true_anomaly_epoch {
+    use em_foundations::time::Instant;
+    use em_sim::motive::kepler::*;
+
+    const MU_SOL: f64 = 1.32712440018e20;
+
+    fn orbit(eccentricity: f64, true_anomaly_deg: f64) -> KeplerMotive {
+        KeplerMotive {
+            primary_id: "Sol".into(),
+            shape: KeplerShape::EccentricitySMA(EccentricitySMA {
+                eccentricity,
+                semi_major_axis: 1.495978707e11,
+            }),
+            rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
+                inclination: 0.0,
+                longitude_of_ascending_node: 0.0,
+                argument_of_periapsis: 0.0,
+            }),
+            epoch: KeplerEpoch::TrueAnomaly(TrueAnomalyAtEpoch {
+                epoch: Instant::J2000,
+                true_anomaly: true_anomaly_deg,
+            }),
+            anomalistic_period: None,
+            gravitational_parameter: None,
+        }
+    }
+
+    #[test]
+    fn it_propagates_at_all() {
+        for &e in &[0.0, 0.3, 0.9] {
+            for &nu in &[0.0, 45.0, 180.0, 300.0] {
+                let k = orbit(e, nu);
+                let p = k.displacement(Instant::J2000, MU_SOL);
+                assert!(p.is_some(), "e={e} nu={nu}: no displacement");
+                assert!(p.unwrap().is_finite(), "e={e} nu={nu}: non-finite");
+            }
+        }
+    }
+
+    /// The epoch has to mean what it says: at the epoch instant, the body's true anomaly
+    /// must be the one that was stored. A conversion that merely returns *a* number
+    /// would pass the test above and fail this one.
+    #[test]
+    fn the_body_is_where_the_stored_true_anomaly_says() {
+        for &e in &[0.0, 0.15, 0.6, 0.9] {
+            for &nu in &[0.0, 30.0, 90.0, 200.0, 359.0] {
+                let k = orbit(e, nu);
+                let got = k.true_anomaly(Instant::J2000, MU_SOL).to_degrees().rem_euclid(360.0);
+                let want = nu.rem_euclid(360.0);
+                let diff = (got - want).abs().min(360.0 - (got - want).abs());
+                assert!(diff < 1e-6, "e={e}: stored nu={want}, got {got}");
+            }
+        }
+    }
+
+    /// Periapsis is where the true anomaly is zero, whatever epoch form was used to say so.
+    #[test]
+    fn periapsis_agrees_with_the_mean_anomaly_form() {
+        let e = 0.4;
+        let nu = 120.0_f64;
+        let by_true = orbit(e, nu);
+
+        // The same orbit, stated as the mean anomaly that true anomaly implies.
+        let m = em_foundations::kepler::anomaly::mean_from_eccentric(
+            em_foundations::kepler::anomaly::eccentric_from_true(nu.to_radians(), e),
+            e,
+        );
+        let mut by_mean = orbit(e, 0.0);
+        by_mean.epoch = KeplerEpoch::MeanAnomaly(MeanAnomalyAtEpoch {
+            epoch: Instant::J2000,
+            mean_anomaly: m.to_degrees(),
+        });
+
+        let a = by_true.time_at_periapsis_passage(MU_SOL).to_j2000_seconds();
+        let b = by_mean.time_at_periapsis_passage(MU_SOL).to_j2000_seconds();
+        assert!((a - b).abs() < 1e-6, "periapsis {a} vs {b}");
+    }
+
+    /// An open orbit stated by true anomaly must work too.
+    #[test]
+    fn hyperbolic_orbits_propagate() {
+        let k = orbit(1.5, 20.0);
+        let p = k.displacement(Instant::J2000, MU_SOL);
+        assert!(p.is_some_and(|p| p.is_finite()), "hyperbolic true-anomaly epoch");
+    }
+}

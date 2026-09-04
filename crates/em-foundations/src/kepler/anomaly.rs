@@ -202,6 +202,23 @@ pub fn true_from_hyperbolic(hyperbolic_anomaly: f64, eccentricity: f64) -> f64 {
     )
 }
 
+/// Hyperbolic anomaly from true anomaly, for `e > 1`. Inverse of [`true_from_hyperbolic`].
+///
+/// Only true anomalies inside the asymptotes are on the trajectory: as `nu` approaches
+/// `±acos(-1/e)` the body is escaping to infinity and `H` diverges. Beyond them there is
+/// no orbit to speak of, so this returns `None` rather than a number that looks usable.
+#[inline]
+pub fn hyperbolic_from_true(true_anomaly: f64, eccentricity: f64) -> Option<f64> {
+    let half = (true_anomaly / 2.0).tan();
+    let ratio = ((eccentricity - 1.0) / (eccentricity + 1.0)).sqrt();
+    let x = ratio * half;
+    // `atanh` is defined on (-1, 1); |x| >= 1 is the asymptote and past it.
+    if !x.is_finite() || x.abs() >= 1.0 {
+        return None;
+    }
+    Some(2.0 * x.atanh())
+}
+
 // ---------------------------------------------------------------------------
 // Series routes from mean straight to true anomaly
 // ---------------------------------------------------------------------------
@@ -433,5 +450,48 @@ mod tests {
         assert!((wrap_tau(-0.5) - (TAU - 0.5)).abs() < 1e-12);
         assert!((wrap_pi(TAU - 0.5) - -0.5).abs() < 1e-12);
         assert!((wrap_pi(PI) - PI).abs() < 1e-12);
+    }
+}
+
+#[cfg(test)]
+mod hyperbolic_true_tests {
+    use super::*;
+
+    /// `H -> nu -> H` must come back where it started, across the open regime.
+    #[test]
+    fn hyperbolic_and_true_anomaly_round_trip() {
+        for &e in &[1.05, 1.5, 2.0, 5.0] {
+            for &h in &[-2.0, -0.5, 0.0, 0.5, 2.0] {
+                let nu = true_from_hyperbolic(h, e);
+                let back = hyperbolic_from_true(nu, e).expect("inside the asymptotes");
+                assert!(
+                    (back - h).abs() < 1e-12,
+                    "e={e} H={h}: came back {back} via nu={nu}"
+                );
+            }
+        }
+    }
+
+    /// Mean anomaly must survive the same trip, which is what the epoch conversion needs.
+    #[test]
+    fn mean_anomaly_survives_the_true_anomaly_round_trip() {
+        let e = 1.4;
+        for &h in &[-1.5, -0.25, 0.0, 0.25, 1.5] {
+            let expected = mean_from_hyperbolic(h, e);
+            let nu = true_from_hyperbolic(h, e);
+            let got = mean_from_hyperbolic(hyperbolic_from_true(nu, e).unwrap(), e);
+            assert!((got - expected).abs() < 1e-11, "e={e} H={h}: {got} vs {expected}");
+        }
+    }
+
+    /// At and beyond the asymptote there is no trajectory, and it must say so rather
+    /// than returning a plausible-looking number.
+    #[test]
+    fn past_the_asymptote_is_none() {
+        let e = 2.0;
+        let asymptote = (-1.0f64 / e).acos();
+        assert!(hyperbolic_from_true(asymptote, e).is_none(), "at the asymptote");
+        assert!(hyperbolic_from_true(asymptote + 0.1, e).is_none(), "past it");
+        assert!(hyperbolic_from_true(asymptote - 0.05, e).is_some(), "just inside it");
     }
 }

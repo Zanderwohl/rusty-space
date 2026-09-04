@@ -226,16 +226,76 @@ pub mod true_anomaly {
         eccentric_anomaly + 2.0 * f64::atan(numerator / denominator)
     }
 
+    /// True anomaly from a state vector, in radians on `[0, tau)`.
+    ///
+    /// The angle is measured from periapsis, which a circular orbit does not have: as
+    /// the eccentricity vector shrinks to nothing its direction becomes meaningless, and
+    /// the naive `acos(e·r / |e||r|)` divides by zero and returns NaN. The two standard
+    /// substitutes are used instead, so the result is always a real angle:
+    ///
+    /// - **Circular and inclined**: the argument of latitude, measured from the
+    ///   ascending node instead of from periapsis.
+    /// - **Circular and equatorial**: there is no node either, so the true longitude,
+    ///   measured from +X.
+    ///
+    /// These are the same conventions and tolerances as [`super::state::from_state`],
+    /// which returns the whole element set; this is the single angle.
+    ///
+    /// The `acos` argument is clamped, because a vector that is parallel to within
+    /// rounding otherwise produces a ratio a few ulps outside `[-1, 1]` and NaN again.
     pub fn from_state_vectors(local_position: DVec3, local_velocity: DVec3, eccentricity_vector: DVec3) -> f64 {
-        // TODO: I don't think this works for circular orbits.
-        // or circular orbits with zero inclination?
-        let numerator = eccentricity_vector.dot(local_position);
-        let denominator = eccentricity_vector.length() * local_position.length();
-        let answer = f64::acos(numerator / denominator);
-        if local_position.dot(local_velocity) < 0.0 {
-            return (2.0 * std::f64::consts::PI) - answer;
+        use crate::kepler::anomaly::wrap_tau;
+        use crate::kepler::state::{CIRCULAR_TOLERANCE, EQUATORIAL_TOLERANCE};
+
+        let r = local_position.length();
+        let e = eccentricity_vector.length();
+        if r == 0.0 {
+            return 0.0;
         }
-        answer
+
+        if e >= CIRCULAR_TOLERANCE {
+            let mut nu = (eccentricity_vector.dot(local_position) / (e * r))
+                .clamp(-1.0, 1.0)
+                .acos();
+            // The first half of the orbit is outbound; past apoapsis `r` is falling.
+            if local_position.dot(local_velocity) < 0.0 {
+                nu = -nu;
+            }
+            return wrap_tau(nu);
+        }
+
+        // Circular: fall back to an angle that does exist.
+        let h = local_position.cross(local_velocity);
+        let h_len = h.length();
+        if h_len == 0.0 {
+            // Radial: no orbital plane at all, so no angle within one.
+            return 0.0;
+        }
+        let inclination = (h.z / h_len).clamp(-1.0, 1.0).acos();
+        let equatorial = inclination < EQUATORIAL_TOLERANCE
+            || (std::f64::consts::PI - inclination) < EQUATORIAL_TOLERANCE;
+
+        if equatorial {
+            // True longitude from +X, running the other way for a retrograde orbit.
+            let mut lon = (local_position.x / r).clamp(-1.0, 1.0).acos();
+            if local_position.y < 0.0 {
+                lon = -lon;
+            }
+            if h.z < 0.0 {
+                lon = -lon;
+            }
+            wrap_tau(lon)
+        } else {
+            // Argument of latitude, from the ascending node z_hat x h.
+            let node = DVec3::new(-h.y, h.x, 0.0);
+            let mut u = (node.dot(local_position) / (node.length() * r))
+                .clamp(-1.0, 1.0)
+                .acos();
+            if local_position.z < 0.0 {
+                u = -u;
+            }
+            wrap_tau(u)
+        }
     }
 
     /// The equation of the centre, expanded to `e^3`:

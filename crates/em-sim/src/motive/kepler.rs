@@ -106,7 +106,7 @@ impl KeplerMotive {
 
     pub fn time_at_periapsis_passage(&self, gravitational_parameter: f64) -> Instant {
         let period = self.period(gravitational_parameter);
-        self.epoch.time_at_periapsis_passage(period)
+        self.epoch.time_at_periapsis_passage(period, self.eccentricity())
     }
 
     pub fn semi_latus_rectum(&self) -> f64 {
@@ -207,7 +207,7 @@ impl KeplerMotive {
     /// Returns mean anomaly at the given time in radians.
     pub fn mean_anomaly(&self, time: Instant, gravitational_parameter: f64) -> f64 {
         // mean_anomaly_at_epoch is stored in degrees; convert to radians for the math
-        let mean_anomaly_at_epoch_rad = self.epoch.mean_anomaly_at_epoch().to_radians();
+        let mean_anomaly_at_epoch_rad = self.epoch.mean_anomaly_at_epoch(self.eccentricity()).to_radians();
         let n = self.mean_angular_motion(gravitational_parameter);
         let dt = (time - self.epoch.epoch()).to_seconds();
         mean_anomaly_at_epoch_rad + n * dt
@@ -338,7 +338,7 @@ impl KeplerMotive {
         KeplerCache {
             semi_major_axis: self.shape.semi_major_axis(),
             eccentricity: self.shape.eccentricity(),
-            mean_anomaly_at_epoch_rad: self.epoch.mean_anomaly_at_epoch().to_radians(),
+            mean_anomaly_at_epoch_rad: self.epoch.mean_anomaly_at_epoch(self.eccentricity()).to_radians(),
             epoch: self.epoch.epoch(),
             mean_motion: self.mean_angular_motion(gravitational_parameter),
             semi_latus_rectum: self.shape.semi_latus_rectum(),
@@ -596,6 +596,26 @@ pub struct KeplerFlatAngles {
     pub longitude_of_periapsis: f64,
 }
 
+/// Mean anomaly from true anomaly, both in **degrees**, for either regime.
+///
+/// Closed orbits go through the eccentric anomaly, open ones through the hyperbolic.
+/// A true anomaly outside a hyperbola's asymptotes is not on the trajectory at all;
+/// there is no mean anomaly to return, so this gives back the input rather than a
+/// fabricated one — the orbit is unusable either way, and a NaN here would propagate
+/// silently into every position.
+fn mean_from_true_degrees(true_anomaly_deg: f64, eccentricity: f64) -> f64 {
+    let nu = true_anomaly_deg.to_radians();
+    let mean = if eccentricity < 1.0 {
+        anomaly::mean_from_eccentric(anomaly::eccentric_from_true(nu, eccentricity), eccentricity)
+    } else {
+        match anomaly::hyperbolic_from_true(nu, eccentricity) {
+            Some(h) => anomaly::mean_from_hyperbolic(h, eccentricity),
+            None => return true_anomaly_deg,
+        }
+    };
+    mean.to_degrees()
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub enum KeplerEpoch {
     MeanAnomaly(MeanAnomalyAtEpoch),
@@ -616,16 +636,25 @@ impl KeplerEpoch {
 
     /// This refers to the internal epoch of this particular orbit description.
     /// Most orbits should share the same epoch, but they might not.
-    pub fn mean_anomaly_at_epoch(&self) -> f64 {
+    ///
+    /// Takes the eccentricity because one of the four forms stores a *true* anomaly, and
+    /// true to mean is not a conversion the angle can do by itself — it runs through the
+    /// eccentric (or hyperbolic) anomaly, both of which depend on the shape of the orbit.
+    /// In degrees, like the stored values.
+    pub fn mean_anomaly_at_epoch(&self, eccentricity: f64) -> f64 {
         match self {
             KeplerEpoch::MeanAnomaly(mean_anomaly) => mean_anomaly.mean_anomaly,
             KeplerEpoch::TimeAtPeriapsisPassage(_) => 0.0,
-            KeplerEpoch::TrueAnomaly(_) => { todo!() }
+            KeplerEpoch::TrueAnomaly(taae) => {
+                mean_from_true_degrees(taae.true_anomaly, eccentricity)
+            }
             KeplerEpoch::J2000(j2000) => j2000.mean_anomaly,
         }
     }
 
-    pub fn time_at_periapsis_passage(&self, period: TimeDelta) -> Instant {
+    /// Also needs the eccentricity, for the same reason as
+    /// [`KeplerEpoch::mean_anomaly_at_epoch`].
+    pub fn time_at_periapsis_passage(&self, period: TimeDelta, eccentricity: f64) -> Instant {
         let period_seconds = period.to_seconds();
         let raw_time = match self {
             KeplerEpoch::MeanAnomaly(mean_anomaly) => {
@@ -634,7 +663,12 @@ impl KeplerEpoch {
                 mean_anomaly.epoch.to_j2000_seconds() - period_seconds * (mean_anomaly_rad / std::f64::consts::TAU)
             }
             KeplerEpoch::TimeAtPeriapsisPassage(tapp) => tapp.to_j2000_seconds(),
-            KeplerEpoch::TrueAnomaly(_) => { todo!() }
+            KeplerEpoch::TrueAnomaly(taae) => {
+                let mean_anomaly_rad = mean_from_true_degrees(taae.true_anomaly, eccentricity)
+                    .to_radians();
+                taae.epoch.to_j2000_seconds()
+                    - period_seconds * (mean_anomaly_rad / std::f64::consts::TAU)
+            }
             KeplerEpoch::J2000(j2000) => {
                 // mean_anomaly is stored in degrees; convert to radians for the division by TAU
                 let mean_anomaly_rad = j2000.mean_anomaly.to_radians();
