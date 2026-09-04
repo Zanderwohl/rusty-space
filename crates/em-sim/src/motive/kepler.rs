@@ -6,7 +6,7 @@
 use glam::{DMat3, DVec3};
 use serde::{Deserialize, Serialize};
 use em_foundations::kepler::{angular_motion, apoapsis, eccentric_anomaly, eccentricity, local, mean_anomaly, periapsis, period, semi_latus_rectum, semi_major_axis, semi_minor_axis, semi_parameter, true_anomaly};
-use em_foundations::time::{Includes, Instant, TimeDelta, TimeLength};
+use em_foundations::time::{Instant, TimeDelta};
 use em_foundations::mappings;
 
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Component))]
@@ -120,8 +120,8 @@ impl KeplerMotive {
         time - self.epoch.epoch()
     }
 
-    pub fn period(&self, gravitational_parameter: f64) -> TimeLength {
-        TimeLength::from_seconds(period::third_law(self.semi_major_axis(), gravitational_parameter), Includes::Beginning)
+    pub fn period(&self, gravitational_parameter: f64) -> TimeDelta {
+        TimeDelta::from_seconds(period::third_law(self.semi_major_axis(), gravitational_parameter))
     }
 
     pub fn mean_angular_motion(&self, gravitational_parameter: f64) -> f64 {
@@ -356,8 +356,16 @@ pub struct KeplerPrecessingEulerAngles {
     pub inclination: f64,
     pub longitude_of_ascending_node: f64, // "Right ascension of ascending node"
     pub argument_of_periapsis: f64,
-    pub apsidal_precession_period: TimeLength, // Julian Days
-    pub nodal_precession_period: TimeLength, // Julian Days
+    /// Period of one full turn of the argument of periapsis. Positive is prograde.
+    ///
+    /// Note this is measured from the (regressing) node, so it is NOT the ~8.85 yr
+    /// precession of the longitude of perihelion — see the note on Luna in `presets`.
+    #[serde(deserialize_with = "legacy_time_length")]
+    pub apsidal_precession_period: TimeDelta,
+    /// Period of one full turn of the longitude of the ascending node.
+    /// Negative is retrograde, which is the usual case.
+    #[serde(deserialize_with = "legacy_time_length")]
+    pub nodal_precession_period: TimeDelta,
 }
 
 impl KeplerPrecessingEulerAngles {
@@ -414,7 +422,7 @@ impl KeplerEpoch {
         }
     }
 
-    pub fn time_at_periapsis_passage(&self, period: TimeLength) -> Instant {
+    pub fn time_at_periapsis_passage(&self, period: TimeDelta) -> Instant {
         let period_seconds = period.to_seconds();
         let raw_time = match self {
             KeplerEpoch::MeanAnomaly(mean_anomaly) => {
@@ -463,4 +471,85 @@ pub struct TrueAnomalyAtEpoch {
 pub struct MeanAnomalyAtJ2000 {
     /// Mean anomaly in **degrees** (converted to radians at math boundaries).
     pub mean_anomaly: f64,
+}
+
+/// Accepts both the current representation of a precession period and the one written by
+/// older saves.
+///
+/// These fields used to be `TimeLength`, a tuple struct of `(f64, Includes)`, so TOML
+/// holds them as `[279201600.0, "Beginning"]`. The `Includes` tag was never read by
+/// anything, and `TimeLength` is now just `TimeDelta`, which serialises as a bare float.
+/// Both forms carry seconds, so the legacy value needs no scaling — only unwrapping.
+///
+/// (SQLite saves are unaffected: that backend already stored these as REAL days.)
+fn legacy_time_length<'de, D>(deserializer: D) -> Result<TimeDelta, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Either {
+        Seconds(f64),
+        /// `(seconds, Includes)` as written before the `Includes` tag was removed.
+        Tagged(f64, serde::de::IgnoredAny),
+    }
+    Ok(match Either::deserialize(deserializer)? {
+        Either::Seconds(s) => TimeDelta::from_seconds(s),
+        Either::Tagged(s, _) => TimeDelta::from_seconds(s),
+    })
+}
+
+#[cfg(test)]
+mod save_compat {
+    //! Precession periods used to be `TimeLength`, a `(f64, Includes)` tuple struct.
+    //! Existing TOML saves hold them as a two-element array; new ones write a bare float.
+    //! Both must load, and to the same value.
+    use super::*;
+
+    const LEGACY: &str = r#"
+inclination = 5.1450041826
+longitude_of_ascending_node = 125.0636775505
+argument_of_periapsis = 318.5214307952
+apsidal_precession_period = [189259918.81, "Beginning"]
+nodal_precession_period = [-586955486.75, "Both"]
+"#;
+
+    const CURRENT: &str = r#"
+inclination = 5.1450041826
+longitude_of_ascending_node = 125.0636775505
+argument_of_periapsis = 318.5214307952
+apsidal_precession_period = 189259918.81
+nodal_precession_period = -586955486.75
+"#;
+
+    #[test]
+    fn both_representations_load_identically() {
+        let old: KeplerPrecessingEulerAngles = toml::from_str(LEGACY).expect("legacy save must load");
+        let new: KeplerPrecessingEulerAngles = toml::from_str(CURRENT).expect("current save must load");
+
+        assert_eq!(old.apsidal_precession_period, new.apsidal_precession_period);
+        assert_eq!(old.nodal_precession_period, new.nodal_precession_period);
+        assert_eq!(old.apsidal_precession_period.to_seconds(), 189259918.81);
+        assert_eq!(old.nodal_precession_period.to_seconds(), -586955486.75);
+    }
+
+    #[test]
+    fn the_discarded_includes_tag_does_not_change_the_value() {
+        // "Beginning", "End" and "Both" were all accepted; none was ever read.
+        for tag in ["Beginning", "End", "Both"] {
+            let src = LEGACY.replace("\"Beginning\"", &format!("\"{tag}\""));
+            let parsed: KeplerPrecessingEulerAngles = toml::from_str(&src).unwrap();
+            assert_eq!(parsed.apsidal_precession_period.to_seconds(), 189259918.81);
+        }
+    }
+
+    #[test]
+    fn round_trips_through_the_current_form() {
+        let original: KeplerPrecessingEulerAngles = toml::from_str(LEGACY).unwrap();
+        let written = toml::to_string(&original).unwrap();
+        assert!(!written.contains('['), "should now write a bare float, got: {written}");
+        let back: KeplerPrecessingEulerAngles = toml::from_str(&written).unwrap();
+        assert_eq!(original.apsidal_precession_period, back.apsidal_precession_period);
+        assert_eq!(original.nodal_precession_period, back.nodal_precession_period);
+    }
 }

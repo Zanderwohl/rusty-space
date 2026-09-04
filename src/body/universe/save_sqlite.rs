@@ -20,7 +20,7 @@ use crate::body::universe::save::{
     UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings,
     SomeBody, CompoundMotiveEntry,
 };
-use crate::foundations::time::{Instant, TimeLength};
+use crate::foundations::time::{Instant, TimeDelta};
 use crate::body::universe::save::TagState;
 use crate::util::bitfutz;
 
@@ -684,8 +684,8 @@ fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, Sql
             inclination: inclination.unwrap_or(0.0),
             longitude_of_ascending_node: longitude_of_ascending_node.unwrap_or(0.0),
             argument_of_periapsis: argument_of_periapsis.unwrap_or(0.0),
-            apsidal_precession_period: TimeLength::period_from_julian_day(apsidal_precession_period.unwrap_or(0.0)),
-            nodal_precession_period: TimeLength::period_from_julian_day(nodal_precession_period.unwrap_or(0.0)),
+            apsidal_precession_period: TimeDelta::from_days(apsidal_precession_period.unwrap_or(0.0)),
+            nodal_precession_period: TimeDelta::from_days(nodal_precession_period.unwrap_or(0.0)),
         }),
         _ => return Err(SqliteSaveError::InvalidData(format!("Unknown rotation type: {}", rotation_type))),
     };
@@ -803,8 +803,8 @@ fn save_keplerian(conn: &Connection, motive_id: i64, kepler: &KeplerMotive) -> R
             Some(pea.inclination),
             Some(pea.longitude_of_ascending_node),
             Some(pea.argument_of_periapsis),
-            Some(pea.apsidal_precession_period.to_julian_days()),
-            Some(pea.nodal_precession_period.to_julian_days()),
+            Some(pea.apsidal_precession_period.to_days()),
+            Some(pea.nodal_precession_period.to_days()),
             None,
         ),
     };

@@ -2536,6 +2536,7 @@ dependencies = [
  "em-foundations",
  "glam",
  "serde",
+ "toml",
 ]
 
 [[package]]

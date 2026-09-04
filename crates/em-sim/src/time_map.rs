@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::slice::Iter;
 use glam::{DVec3, Vec3};
 use serde::{Deserialize, Serialize};
-use em_foundations::time::{Instant, TimeLength};
+use em_foundations::time::{Instant, TimeDelta};
 use crate::bitfutz;
 
 #[derive(Debug, Clone)]
@@ -138,7 +138,7 @@ impl<V: Clone + Lerpable> TimeMap<V>
         self.periodicity.is_some()
     }
 
-    pub fn set_periodicity(&mut self, interval_start: Instant, interval_size: TimeLength) {
+    pub fn set_periodicity(&mut self, interval_start: Instant, interval_size: TimeDelta) {
         self.periodicity = Some(Periodicity {
             interval_start: interval_start.to_j2000_seconds(),
             interval_size: interval_size.to_seconds(),

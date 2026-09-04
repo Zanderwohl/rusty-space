@@ -10,7 +10,7 @@ use crate::appearance::{Appearance, AppearanceColor, DebugBall, StarBall};
 use crate::body::{BodyInfo, BodyRotation, RotationEpoch};
 use crate::motive::kepler::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerPrecessingEulerAngles, KeplerRotation, KeplerShape, MeanAnomalyAtEpoch, MeanAnomalyAtJ2000};
 use crate::universe::{FixedEntry, KeplerEntry, NewtonEntry, SomeBody, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings};
-use em_foundations::time::{Instant, TimeLength};
+use em_foundations::time::{Instant, TimeDelta};
 
 // =============================================================================
 // Solar System Template Data
@@ -405,8 +405,8 @@ pub fn solar_system() -> UniverseFileContents {
                             // omega advances at d(varpi)/dt - d(Omega)/dt = 0.1114 + 0.0530
                             // = 0.1643 deg/d, i.e. 2190 d — not the 3232 d (8.85 yr) period
                             // of the longitude of perihelion.
-                            apsidal_precession_period: TimeLength::period_from_julian_day(2190.5083196467),
-                            nodal_precession_period: TimeLength::period_from_julian_day(-6793.4662703353), // retrograde, ~18.6 yr
+                            apsidal_precession_period: TimeDelta::from_days(2190.5083196467),
+                            nodal_precession_period: TimeDelta::from_days(-6793.4662703353), // retrograde, ~18.6 yr
                         }),
                         epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
                             mean_anomaly: 134.7309316978,
