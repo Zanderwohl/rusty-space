@@ -3,6 +3,8 @@
 //! This module handles the visual representation of simulation entities,
 //! separate from the GUI (egui panels) and the simulation logic itself.
 
+pub mod render_space;
+
 mod bodies;
 mod lights;
 mod labels;

@@ -5,7 +5,7 @@ use bevy::color::Srgba;
 use crate::body::motive::info::{BodyInfo, BodyRotation, BodyState, RotationMode};
 use crate::body::universe::save::ViewSettings;
 use crate::sim::SimTime;
-use crate::util::bevystuff::GlamQuat;
+use crate::presentation::render_space::{ToRender, ToRenderRotation};
 
 /// Updates body Transform rotations based on their BodyRotation component.
 ///
@@ -37,7 +37,7 @@ pub fn orient_bodies(
         };
         
         if let Some(orientation) = current_orientation {
-            transform.rotation = orientation.as_bevy();
+            transform.rotation = orientation.to_render_rotation();
         }
     }
 }
@@ -64,9 +64,9 @@ pub fn render_axes(
         let center = transform.translation;
         let length = transform.scale.x * 3.0;
         
-        // Get pole axis in simulation space, convert direction to Bevy space
-        let pole_sim = rotation.pole_axis();
-        let pole_bevy = Vec3::new(pole_sim.x as f32, pole_sim.z as f32, -pole_sim.y as f32).normalize();
+        // Pole axis is a simulation-space direction; convert through the one funnel
+        // rather than open-coding the swizzle, so it cannot drift from the quaternion path.
+        let pole_bevy = rotation.pole_axis().to_render().normalize();
         
         // Red pole axis line (through the body)
         let pole_start = center - pole_bevy * length;

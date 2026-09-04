@@ -12,7 +12,7 @@ use crate::body::universe::save::ViewSettings;
 use crate::camera::{PlanetariumCamera, Freecam};
 use crate::sim::SimTime;
 use crate::gui::settings::{DisplayGlow, Settings};
-use crate::util::bevystuff::GlamVec;
+use crate::presentation::render_space::ToRender;
 
 /// Renders trajectory lines as Bevy gizmos with brightness variation.
 pub fn render_trajectories(
@@ -128,7 +128,7 @@ pub fn render_trajectories(
                 };
                 
                 color = Srgba::new(0.0, 1.0, 0.0, min_brightness.lerp(max_brightness, brightness_factor));
-                gizmos.line(d1.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos), d2.as_bevy_scaled_cheated(distance_scale, fcam.bevy_pos), color);
+                gizmos.line(d1.to_render_relative(distance_scale, fcam.bevy_pos), d2.to_render_relative(distance_scale, fcam.bevy_pos), color);
             }
         }
     }

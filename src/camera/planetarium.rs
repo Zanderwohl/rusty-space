@@ -15,7 +15,7 @@ use crate::body::universe::save::ViewSettings;
 use crate::gui::app::AppState;
 use crate::presentation::position_bodies;
 use crate::camera::freecam::{FreeCamPlugin, Freecam, MovementSettings};
-use crate::util::bevystuff::GlamVec;
+use crate::presentation::render_space::ToRender;
 use crate::util::ease;
 
 pub struct PlanetariumCameraPlugin;
@@ -105,7 +105,7 @@ fn handle_gotos (
             let obj_pos = state.current_position;
             
             let nearby_distance = 3f64 * view_settings.body_scale_factor(appearance.radius()) as f64;
-            let (altitude, azimuth) = alt_az_in_bevy(obj_pos.as_bevy_scaled_dvec(view_settings.distance_factor()), fcam.bevy_pos);
+            let (altitude, azimuth) = alt_az_in_bevy(obj_pos.to_render_scaled(view_settings.distance_factor()), fcam.bevy_pos);
 
             pcam.action = CameraAction::Goto(GoToInProgress {
                 start_pos,
@@ -137,7 +137,7 @@ fn run_goto (
                     let frac = f64::min(1.0, (now - goto.start_time) / animation_time);
                     let frac = ease::f64::circ(frac);
 
-                    let body_pos_in_bevy = body_state.current_position.as_bevy_scaled_dvec(view_settings.distance_factor());
+                    let body_pos_in_bevy = body_state.current_position.to_render_scaled(view_settings.distance_factor());
 
                     let offset = local_to_object_in_bevy(goto.end_altitude, goto.end_azimuth, goto.end_distance);
                     let final_pos = body_pos_in_bevy + offset;
@@ -210,7 +210,7 @@ fn revolve_around(
                                 cursor_options.visible = true;
                             }
 
-                            let body_pos_in_bevy = state.current_position.as_bevy_scaled_dvec(view_settings.distance_factor());
+                            let body_pos_in_bevy = state.current_position.to_render_scaled(view_settings.distance_factor());
                             let offset = local_to_object_in_bevy(revolve.altitude, revolve.azimuth, revolve.bevy_distance);
                             let camera_pos_in_bevy = body_pos_in_bevy + offset;
 

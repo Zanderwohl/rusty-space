@@ -2,7 +2,6 @@ pub mod format;
 /// Float bit-punning. Only used to derive the SQLite `time_key` column — a stable
 /// integer key for an exact float time. Not a domain concern.
 pub mod bitfutz;
-pub mod bevystuff;
 pub mod ease;
 
 /// Moved into `em-foundations`; re-exported so `crate::util::…` paths keep resolving.

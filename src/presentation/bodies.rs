@@ -7,7 +7,7 @@ use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::universe::save::ViewSettings;
 use crate::camera::{PlanetariumCamera, Freecam};
 use crate::sim::SimulationObject;
-use crate::util::bevystuff::GlamVec;
+use crate::presentation::render_space::ToRender;
 use crate::util::mappings;
 
 /// Maps simulation positions (in meters) to Bevy transforms with view scaling.
@@ -28,7 +28,7 @@ pub fn position_bodies(
             let primary_position = state.current_primary_position.unwrap();
             primary_position + local_position
         };
-        transform.translation = global_position.as_bevy_scaled_cheated(distance_scale, freecam.bevy_pos);
+        transform.translation = global_position.to_render_relative(distance_scale, freecam.bevy_pos);
 
         let body_scale = if view_settings.logarithmic_body_scale {
             mappings::log_scale(appearance.radius(), view_settings.logarithmic_body_base) * view_settings.body_scale

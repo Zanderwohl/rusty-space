@@ -6,7 +6,15 @@ use glam::{DMat4, DQuat, DVec3};
 use transformation::Transformation;
 
 
-/// Right-handed, Z-up coordinate system.
+/// A position and orientation in simulation space.
+///
+/// # The convention
+///
+/// Simulation space is right-handed and **Z-up**, with the ecliptic of J2000 as the
+/// reference plane and +X toward the vernal equinox. This is the astronomical convention,
+/// and it is the only frame `em-foundations` and `em-sim` use. Renderers that want Y-up
+/// convert at their own boundary, on the way out — see `presentation::render_space` in the
+/// application crate.
 ///
 /// Axis conventions:
 /// - +X is forward

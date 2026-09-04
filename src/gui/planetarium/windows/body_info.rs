@@ -10,7 +10,6 @@ use crate::body::universe::Universe;
 use crate::gui::menu::UiState;
 use crate::camera::GoTo;
 use crate::gui::settings::{Settings, UiTheme};
-use crate::util::bevystuff::GlamVec;
 
 #[derive(Resource)]
 pub struct BodyInfoState {
