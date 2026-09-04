@@ -13,7 +13,7 @@ use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 
 use crate::body::universe::save::ViewSettings;
 use crate::camera::{Freecam, PlanetariumCamera};
-use crate::util::bevystuff::GlamVec;
+use crate::presentation::render_space::ToRender;
 
 use super::trajectory_material::{TrajectoryMaterial, TRAJECTORY_BASE_TUBE_RADIUS};
 
@@ -157,7 +157,7 @@ pub fn update_celestial_markers(
 
         // Marker center in camera-relative Bevy space
         let bevy_center =
-            marker.sim_position.as_bevy_scaled_cheated(distance_scale, camera_pos);
+            marker.sim_position.to_render_relative(distance_scale, camera_pos);
         let distance = bevy_center.length();
 
         if distance < 0.001 {

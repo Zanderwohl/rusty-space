@@ -3,7 +3,7 @@
 //! Pure data. Reading and writing files, and turning entries into ECS entities, is the
 //! app's job — see `body/universe/save.rs` there.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use em_foundations::mappings;
 
@@ -15,11 +15,11 @@ use glam::DVec3;
 
 /// State for a tag (group of bodies).
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Resource))]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TagState {
     pub shown: bool,
     pub trajectory: bool,
-    pub members: Vec<String>,
+    pub members: HashSet<String>,
 }
 
 impl Default for TagState {
@@ -27,7 +27,7 @@ impl Default for TagState {
         Self {
             shown: false,
             trajectory: false,
-            members: Vec::new(),
+            members: HashSet::new(),
         }
     }
 }
@@ -42,7 +42,7 @@ pub struct UniverseFileContents {
     pub bodies: Vec<SomeBody>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct UniverseFileTime {
     pub time_julian_days: f64, // In Julian Days
     /// Physics time step in simulation seconds (default: 0.1)
@@ -60,9 +60,10 @@ fn default_step() -> f64 { 0.1 }
 fn default_gui_speed() -> f64 { 1.0 }
 fn default_max_frame_time() -> f64 { 0.016 }
 fn default_show_axes() -> bool { true }
+fn default_true() -> bool { true }
 
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Resource))]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct UniversePhysics {
     pub gravitational_constant: f64,
 }
@@ -76,7 +77,7 @@ impl Default for UniversePhysics {
 }
 
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Resource))]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ViewSettings {
     pub distance_scale: f64,
     pub logarithmic_distance_scale: bool,
@@ -86,6 +87,10 @@ pub struct ViewSettings {
     pub logarithmic_body_base: f64,
     pub show_labels: bool,
     pub show_trajectories: bool,
+    #[serde(default = "default_true")]
+    pub show_selected_labels: bool,
+    #[serde(default = "default_true")]
+    pub show_selected_trajectories: bool,
     #[serde(default = "default_show_axes")]
     pub show_axes: bool,
     pub tags: HashMap<String, TagState>,
@@ -103,6 +108,8 @@ impl Default for ViewSettings {
             logarithmic_distance_base: 10.0,
             show_labels: true,
             show_trajectories: true,
+            show_selected_labels: true,
+            show_selected_trajectories: true,
             show_axes: true,
             tags: HashMap::new(),
             trajectory_resolution: 120,

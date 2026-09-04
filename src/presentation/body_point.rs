@@ -7,7 +7,7 @@ use bevy::camera::visibility::NoFrustumCulling;
 use bevy::prelude::*;
 
 use crate::body::appearance::Appearance;
-use crate::body::motive::info::BodyInfo;
+use crate::sim::world::{BodyRef, SimSystem};
 use crate::camera::PlanetariumCamera;
 use crate::gui::settings::Settings;
 
@@ -51,12 +51,14 @@ pub struct BodyPointLink(pub Entity);
 /// System to spawn body point meshes for DebugBall bodies.
 pub fn spawn_body_point_meshes(
     mut commands: Commands,
-    bodies: Query<(Entity, &Appearance), (With<BodyInfo>, Without<BodyPointLink>)>,
+    bodies: Query<(Entity, &BodyRef), Without<BodyPointLink>>,
+    system: Res<SimSystem>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodyPointMaterial>>,
 ) {
-    for (body_entity, appearance) in bodies.iter() {
-        if let Appearance::DebugBall(debug_ball) = appearance {
+    for (body_entity, body_ref) in bodies.iter() {
+        let Some(bi) = system.0.index_of(body_ref.0) else { continue };
+        if let Appearance::DebugBall(debug_ball) = system.0.appearance(bi) {
             // Create low-poly icosphere for the point
             let mesh = Sphere::new(1.0f32).mesh().ico(2).unwrap();
             let mesh_handle = meshes.add(mesh);
@@ -100,7 +102,8 @@ pub fn update_body_points(
     // Read the body's `Transform` (set this frame by `position_bodies`) rather than
     // its `GlobalTransform`, which isn't propagated until PostUpdate and would lag the
     // camera/body meshes by one frame. Bodies are root entities, so Transform == world.
-    bodies: Query<(Entity, &Transform, &Appearance, &BodyPointLink, Option<&BodyWireframeLink>, Option<&OccluderLink>, &crate::body::motive::info::BodyInfo), Without<BodyPointMesh>>,
+    bodies: Query<(Entity, &Transform, &BodyPointLink, Option<&BodyWireframeLink>, Option<&OccluderLink>, &BodyRef), Without<BodyPointMesh>>,
+    system: Res<SimSystem>,
     star_cache: Res<StarLightingFrameCache>,
     mut points: Query<(&BodyPointMesh, &mut Transform, &mut Visibility, &MeshMaterial3d<BodyPointMaterial>), Without<BodyPointLink>>,
     mut wireframes: Query<(&mut Visibility, &MeshMaterial3d<BodyWireframeMaterial>), (With<super::BodyWireframeMesh>, Without<BodyPointMesh>, Without<OccluderMesh>)>,
@@ -137,7 +140,9 @@ pub fn update_body_points(
 
     let camera_pos = camera_global.translation();
 
-    for (_body_entity, body_transform, appearance, point_link, wireframe_link, occluder_link, _body_info) in bodies.iter() {
+    for (_body_entity, body_transform, point_link, wireframe_link, occluder_link, body_ref) in bodies.iter() {
+        let Some(bi) = system.0.index_of(body_ref.0) else { continue };
+        let appearance = system.0.appearance(bi);
         let Ok((_point_mesh, mut point_transform, mut point_visibility, point_material_handle)) =
             points.get_mut(point_link.0)
         else {
@@ -326,7 +331,7 @@ pub fn update_body_points(
 /// Uses RemovedComponents to only run when bodies are actually removed.
 pub fn cleanup_orphaned_body_points(
     mut commands: Commands,
-    mut removed_bodies: RemovedComponents<BodyInfo>,
+    mut removed_bodies: RemovedComponents<BodyRef>,
     points: Query<(Entity, &BodyPointMesh)>,
 ) {
     // Early exit if no bodies were removed

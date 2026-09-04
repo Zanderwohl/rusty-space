@@ -7,7 +7,7 @@ use bevy::math::DVec3;
 use bevy::prelude::*;
 
 use crate::body::appearance::Appearance;
-use crate::body::motive::info::BodyState;
+use crate::sim::world::{BodyRef, SimSystem};
 
 /// Cached star data for a single star entity.
 #[derive(Clone)]
@@ -47,17 +47,19 @@ impl StarLightingFrameCache {
 /// Must run before all systems that consume star data.
 pub fn build_star_lighting_cache(
     mut cache: ResMut<StarLightingFrameCache>,
-    stars: Query<(Entity, &GlobalTransform, &Appearance, &BodyState)>,
+    stars: Query<(Entity, &GlobalTransform, &BodyRef)>,
+    system: Res<SimSystem>,
 ) {
     cache.clear();
     
-    for (entity, global_transform, appearance, body_state) in stars.iter() {
-        if let Appearance::Star(star_ball) = appearance {
+    for (entity, global_transform, body_ref) in stars.iter() {
+        let Some(si) = system.0.index_of(body_ref.0) else { continue };
+        if let Appearance::Star(star_ball) = system.0.appearance(si) {
             let intensity = star_ball.intensity();
             cache.stars.push(CachedStarData {
                 entity,
                 bevy_position: global_transform.translation(),
-                sim_position: body_state.current_position,
+                sim_position: system.0.position(si),
                 intensity,
             });
             

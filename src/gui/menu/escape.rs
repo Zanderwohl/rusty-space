@@ -5,9 +5,7 @@ use bevy::prelude::*;
 use bevy_egui::EguiContexts;
 use bevy_ui_text_input::{TextInputNode, TextInputPlugin, TextInputBuffer};
 
-use crate::body::appearance::Appearance;
-use crate::body::motive::info::{BodyInfo, BodyRotation};
-use crate::body::motive::Motive;
+use crate::sim::world::SimSystem;
 use crate::body::universe::save::{
     CompoundMotiveEntry, SaveFormat, SomeBody, UniverseFile, UniverseFileContents,
     UniverseFileTime, UniversePhysics, ViewSettings,
@@ -99,7 +97,7 @@ pub fn reconstruct_universe_file(
     sim_time: &SimTime,
     physics: &UniversePhysics,
     view_settings: &ViewSettings,
-    bodies: &[(BodyInfo, Motive, Appearance, Option<BodyRotation>)],
+    system: &em_sim::system::System,
     path: Option<PathBuf>,
 ) -> UniverseFile {
     let time = UniverseFileTime {
@@ -108,28 +106,9 @@ pub fn reconstruct_universe_file(
         gui_speed: sim_time.gui_speed,
         max_frame_time: sim_time.max_frame_time,
     };
-
-    let bodies_vec: Vec<SomeBody> = bodies
-        .iter()
-        .map(|(info, motive, appearance, rotation)| {
-            SomeBody::CompoundMotiveEntry(CompoundMotiveEntry {
-                info: info.clone(),
-                motive: motive.clone(),
-                appearance: appearance.clone(),
-                rotation: rotation.clone(),
-            })
-        })
-        .collect();
-
     UniverseFile {
         file: path,
-        contents: UniverseFileContents {
-            version: "0.0".to_string(),
-            time,
-            view: view_settings.clone(),
-            physics: physics.clone(),
-            bodies: bodies_vec,
-        },
+        contents: system.to_contents(time, physics.clone(), view_settings.clone()),
     }
 }
 
@@ -138,17 +117,10 @@ pub fn perform_save(
     physics: &UniversePhysics,
     view_settings: &ViewSettings,
     universe: &mut Universe,
-    body_query: &Query<(&BodyInfo, &Motive, &Appearance, Option<&BodyRotation>), With<SimulationObject>>,
+    system: &em_sim::system::System,
     path: PathBuf,
 ) -> Result<(), String> {
-    let bodies: Vec<_> = body_query
-        .iter()
-        .map(|(info, motive, appearance, rotation)| {
-            (info.clone(), motive.clone(), appearance.clone(), rotation.cloned())
-        })
-        .collect();
-
-    eprintln!("Saving {} bodies to {:?}", bodies.len(), path);
+    eprintln!("Saving {} bodies to {:?}", system.len(), path);
     eprintln!("  Time: {} Julian days (J2000 seconds: {})", 
         sim_time.time.to_julian_day(), 
         sim_time.time.to_j2000_seconds());
@@ -157,7 +129,7 @@ pub fn perform_save(
         sim_time,
         physics,
         view_settings,
-        &bodies,
+        system,
         Some(path.clone()),
     );
 
@@ -410,7 +382,7 @@ pub fn handle_main_menu_buttons(
     sim_time: Res<SimTime>,
     physics: Res<UniversePhysics>,
     view_settings: Res<ViewSettings>,
-    body_query: Query<(&BodyInfo, &Motive, &Appearance, Option<&BodyRotation>), With<SimulationObject>>,
+    system: Res<SimSystem>,
 ) {
     for (interaction, action) in &interaction_query {
         if *interaction != Interaction::Pressed {
@@ -437,7 +409,7 @@ pub fn handle_main_menu_buttons(
                             &physics,
                             &view_settings,
                             &mut universe,
-                            &body_query,
+                            &system.0,
                             path,
                         ).is_ok() {
                             unsaved.0 = false;
@@ -501,7 +473,7 @@ pub fn handle_save_nag_buttons(
     sim_time: Res<SimTime>,
     physics: Res<UniversePhysics>,
     view_settings: Res<ViewSettings>,
-    body_query: Query<(&BodyInfo, &Motive, &Appearance, Option<&BodyRotation>), With<SimulationObject>>,
+    system: Res<SimSystem>,
 ) {
     for (interaction, action) in &interaction_query {
         if *interaction != Interaction::Pressed {
@@ -521,7 +493,7 @@ pub fn handle_save_nag_buttons(
                             &physics,
                             &view_settings,
                             &mut universe,
-                            &body_query,
+                            &system.0,
                             path,
                         ).is_ok() {
                             unsaved.0 = false;
@@ -609,7 +581,7 @@ pub fn handle_naming_buttons(
     sim_time: Res<SimTime>,
     physics: Res<UniversePhysics>,
     view_settings: Res<ViewSettings>,
-    body_query: Query<(&BodyInfo, &Motive, &Appearance, Option<&BodyRotation>), With<SimulationObject>>,
+    system: Res<SimSystem>,
     mut universe: ResMut<Universe>,
 ) {
     for (interaction, action) in &interaction_query {
@@ -640,7 +612,7 @@ pub fn handle_naming_buttons(
                         &physics,
                         &view_settings,
                         &mut universe,
-                        &body_query,
+                        &system.0,
                         path.clone(),
                     ) {
                         Ok(()) => {
@@ -716,7 +688,7 @@ pub fn handle_confirm_overwrite_buttons(
     sim_time: Res<SimTime>,
     physics: Res<UniversePhysics>,
     view_settings: Res<ViewSettings>,
-    body_query: Query<(&BodyInfo, &Motive, &Appearance, Option<&BodyRotation>), With<SimulationObject>>,
+    system: Res<SimSystem>,
     mut universe: ResMut<Universe>,
 ) {
     for (interaction, action) in &interaction_query {
@@ -732,7 +704,7 @@ pub fn handle_confirm_overwrite_buttons(
                     &physics,
                     &view_settings,
                     &mut universe,
-                    &body_query,
+                    &system.0,
                     path.clone(),
                 ) {
                     Ok(()) => {

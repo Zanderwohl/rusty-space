@@ -1,10 +1,8 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use bevy_egui::egui::Ui;
-use crate::body::motive::fixed_motive::FixedMotive;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::kepler_motive::KeplerMotive;
-use crate::body::motive::newton_motive::NewtonMotive;
 use crate::body::universe::Universe;
 use crate::camera::{GoTo, GoToSource};
 use crate::gui::planetarium::focused_body::{body_select_dropdown, sorted_body_options};

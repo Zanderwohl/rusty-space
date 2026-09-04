@@ -120,7 +120,7 @@ def emit(slug, name, cmd, prim, tags, center):
     desig_s = f'Some("{desig}".into())' if desig else "None"
     appearance = (f"Appearance::DebugBall(DebugBall {{\n"
                   f"                        radius: {fmt(r_m or 1000.0)},\n"
-                  f"                        color: AppearanceColor {{ r: {rgb[0]}, g: {rgb[1]}, b: {rgb[2]} }},\n"
+                  f"                        color: AppearanceColor {{ r: {rgb[0]}, g: {rgb[1]}, b: {rgb[2]} }},\n                        highlight_latitudes: Vec::new(),\n"
                   f"                    }})")
     return f"""                {note_block}
                 SomeBody::KeplerEntry(KeplerEntry {{

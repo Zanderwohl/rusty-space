@@ -15,7 +15,6 @@ use em_sim::propagate;
 use em_sim::system::System;
 use em_sim::time_map::TimeMap;
 
-use crate::body::appearance::{AssetCache, PbrBundle};
 use crate::sim::{SimTime, SimulationObject};
 
 /// The simulation. The single source of truth for where anything is.
@@ -119,10 +118,6 @@ pub fn sync_body_entities(
     mut commands: Commands,
     system: Res<SimSystem>,
     mut tracked: ResMut<BodyEntities>,
-    mut cache: ResMut<AssetCache>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut images: ResMut<Assets<Image>>,
 ) {
     let generation = system.0.generation();
     if tracked.generation == Some(generation) {
@@ -143,24 +138,17 @@ pub fn sync_body_entities(
         if tracked.map.contains_key(&id) {
             continue;
         }
-        let mut entity = commands.spawn((
+        // Only the entity and its link to the arena. Meshes, materials, wireframes,
+        // occluders and point sprites are attached by the presentation systems, which
+        // pick up anything carrying a `BodyRef` and lacking their own link component —
+        // so a body added at runtime gets dressed without this knowing how.
+        let entity = commands.spawn((
             SimulationObject,
             BodyRef(id),
             Transform::default(),
             Visibility::default(),
             bevy::camera::visibility::NoFrustumCulling,
         ));
-        match system.0.appearance(i) {
-            em_sim::appearance::Appearance::DebugBall(ball) => {
-                let (mesh, material) = ball.pbr_bundle(&mut cache, &mut meshes, &mut materials, &mut images);
-                entity.insert((mesh, material));
-            }
-            em_sim::appearance::Appearance::Star(star) => {
-                let (mesh, material, light) = star.pbr_bundle(&mut cache, &mut meshes, &mut materials, &mut images);
-                entity.insert((mesh, material, light));
-            }
-            em_sim::appearance::Appearance::Empty => {}
-        }
         tracked.map.insert(id, entity.id());
     }
     tracked.generation = Some(generation);

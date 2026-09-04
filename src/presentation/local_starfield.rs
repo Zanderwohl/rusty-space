@@ -83,7 +83,8 @@ pub fn update_local_starfield(
     settings: Res<Settings>,
     view_settings: Res<ViewSettings>,
     cameras: Query<(&Camera, &GlobalTransform, &Projection), With<PlanetariumCamera>>,
-    stars: Query<(&Transform, &Appearance)>,
+    stars: Query<(&Transform, &crate::sim::world::BodyRef)>,
+    system: Res<crate::sim::world::SimSystem>,
     local_starfield: Query<(&Mesh3d, &MeshMaterial3d<LocalStarfieldMaterial>), With<LocalStarfield>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<LocalStarfieldMaterial>>,
@@ -113,8 +114,9 @@ pub fn update_local_starfield(
     let mut indices: Vec<u32> = Vec::new();
     let mut max_intensity = 0.0f32;
 
-    for (transform, appearance) in stars.iter() {
-        let Appearance::Star(star_ball) = appearance else {
+    for (transform, body_ref) in stars.iter() {
+        let Some(si) = system.0.index_of(body_ref.0) else { continue };
+        let Appearance::Star(star_ball) = system.0.appearance(si) else {
             continue;
         };
 

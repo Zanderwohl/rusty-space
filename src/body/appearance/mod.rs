@@ -5,7 +5,8 @@ use bevy::color::LinearRgba;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
-use serde::{Deserialize, Serialize};
+/// Appearance *data* lives in `em-sim`; this module renders it.
+pub use em_sim::appearance::{Appearance, AppearanceColor, DebugBall, StarBall};
 use crate::presentation::BodyWireframeMaterial;
 
 #[derive(Resource, Default)]
@@ -14,51 +15,8 @@ pub struct AssetCache {
     pub materials: HashMap<String, Handle<StandardMaterial>>,
 }
 
-#[derive(Serialize, Deserialize, Default, Component, Clone)]
-pub enum Appearance {
-    #[default]
-    Empty,
-    DebugBall(DebugBall),
-    Star(StarBall),
-}
-
-#[derive(Serialize, Deserialize, Default, Clone)]
-pub struct AppearanceColor {
-    pub r: u16,
-    pub g: u16,
-    pub b: u16,
-}
-
-impl Appearance {
-    pub fn radius(&self) -> f64 {
-        match self {
-            Appearance::Empty => 1.0,
-            Appearance::DebugBall(DebugBall { radius, .. }) => *radius,
-            Appearance::Star(StarBall { radius, ..}) => *radius,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct DebugBall {
-    pub radius: f64,
-    pub color: AppearanceColor,
-    #[serde(default)]
-    pub highlight_latitudes: Vec<f64>,
-}
-
-impl DebugBall {
-    /// Get highlight latitudes (for wireframe rendering).
-    /// Returns the stored values, or empty if none configured.
-    pub fn highlight_latitudes(&self) -> Vec<f64> {
-        self.highlight_latitudes.clone()
-    }
-}
-
-impl DebugBall {
-    /// Creates a black unlit occluder sphere at radius 0.97.
-    /// The wireframe grid is spawned separately as a child entity.
-    pub fn pbr_bundle(&self,
+/// A black unlit occluder sphere at radius 0.97. The wireframe grid is a child entity.
+pub fn debug_ball_bundle(ball: &DebugBall,
                       cache: &mut ResMut<AssetCache>,
                       meshes: &mut Assets<Mesh>,
                       materials: &mut Assets<StandardMaterial>,
@@ -79,11 +37,10 @@ impl DebugBall {
             })
         }).clone();
 
-        (
-            Mesh3d(mesh_handle),
-            MeshMaterial3d(material_handle),
-        )
-    }
+    (
+        Mesh3d(mesh_handle),
+        MeshMaterial3d(material_handle),
+    )
 }
 
 fn uv_debug_texture() -> Image {
@@ -271,40 +228,13 @@ fn generate_icosphere_wireframe_mesh(subdivisions: u32, tube_radius: f32, tube_s
     mesh
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct StarBall {
-    pub radius: f64,
-    pub color: AppearanceColor,
-    pub light: AppearanceColor,
-    pub absolute_magnitude: f32,
-}
+const STAR_WIREFRAME_SUBDIVISIONS: u32 = 2;
+const STAR_WIREFRAME_TUBE_RADIUS: f32 = 0.015;
+const STAR_WIREFRAME_TUBE_SIDES: u32 = 4;
+const STAR_GLOW_EMISSION_STRENGTH: f32 = 10.0;
 
-impl StarBall {
-    const STAR_WIREFRAME_SUBDIVISIONS: u32 = 2;
-    const STAR_WIREFRAME_TUBE_RADIUS: f32 = 0.015;
-    const STAR_WIREFRAME_TUBE_SIDES: u32 = 4;
-    const STAR_GLOW_EMISSION_STRENGTH: f32 = 10.0;
-
-    pub fn intensity(&self) -> f32 {
-        // Convert absolute magnitude to luminous flux (lumens) relative to the Sun
-        const SUN_ABSOLUTE_MAGNITUDE: f64 = 4.83;
-        const SUN_LUMINOUS_FLUX_LM: f64 = 3.5e28;
-        let m = self.absolute_magnitude as f64;
-        let luminosity_ratio = 10f64.powf(0.4 * (SUN_ABSOLUTE_MAGNITUDE - m));
-        (SUN_LUMINOUS_FLUX_LM * luminosity_ratio) as f32
-    }
-
-    pub fn emissive_luminance(&self) -> f32 {
-        // Approximate solar surface luminance in nits (cd/m^2), scaled by absolute magnitude
-        // L_sun ≈ 1.8e9 nits at the photosphere
-        const SUN_ABSOLUTE_MAGNITUDE: f64 = 4.83;
-        const SUN_SURFACE_LUMINANCE_NITS: f64 = 1.83e9;
-        let m = self.absolute_magnitude as f64;
-        let luminosity_ratio = 10f64.powf(0.4 * (SUN_ABSOLUTE_MAGNITUDE - m));
-        (SUN_SURFACE_LUMINANCE_NITS * luminosity_ratio) as f32
-    }
-    
-    pub fn pbr_bundle(&self,
+/// A star's wireframe shell and its light.
+pub fn star_ball_bundle(star: &StarBall,
                       cache: &mut ResMut<AssetCache>,
                       meshes: &mut Assets<Mesh>,
                       materials: &mut Assets<BodyWireframeMaterial>,
@@ -312,37 +242,37 @@ impl StarBall {
     ) -> (Mesh3d, MeshMaterial3d<BodyWireframeMaterial>, PointLight) {
         let mesh_key = format!(
             "star_wire_ico_sub{}_tube{}_sides{}",
-            Self::STAR_WIREFRAME_SUBDIVISIONS,
-            Self::STAR_WIREFRAME_TUBE_RADIUS,
-            Self::STAR_WIREFRAME_TUBE_SIDES
+            STAR_WIREFRAME_SUBDIVISIONS,
+            STAR_WIREFRAME_TUBE_RADIUS,
+            STAR_WIREFRAME_TUBE_SIDES
         );
 
         let mesh_handle = cache.meshes.entry(mesh_key.clone()).or_insert_with(|| {
             let mesh = generate_icosphere_wireframe_mesh(
-                Self::STAR_WIREFRAME_SUBDIVISIONS,
-                Self::STAR_WIREFRAME_TUBE_RADIUS,
-                Self::STAR_WIREFRAME_TUBE_SIDES,
+                STAR_WIREFRAME_SUBDIVISIONS,
+                STAR_WIREFRAME_TUBE_RADIUS,
+                STAR_WIREFRAME_TUBE_SIDES,
             );
             meshes.add(mesh)
         }).clone();
 
         let material_handle = materials.add(BodyWireframeMaterial {
             base_color: LinearRgba::new(
-                self.color.r as f32 / 255.0,
-                self.color.g as f32 / 255.0,
-                self.color.b as f32 / 255.0,
+                star.color.r as f32 / 255.0,
+                star.color.g as f32 / 255.0,
+                star.color.b as f32 / 255.0,
                 1.0,
             ),
-            emission_strength: Self::STAR_GLOW_EMISSION_STRENGTH,
+            emission_strength: STAR_GLOW_EMISSION_STRENGTH,
             alpha_mode: AlphaMode::Opaque,
             ..Default::default()
         });
 
-        let light_color = Color::srgb(self.light.r as f32 / 255.0, self.light.g as f32 / 255.0, self.light.b as f32 / 255.0);
+        let light_color = Color::srgb(star.light.r as f32 / 255.0, star.light.g as f32 / 255.0, star.light.b as f32 / 255.0);
         // Initialize intensity for the default scale (1e-9). It will be updated dynamically.
         let light = PointLight {
             color: light_color,
-            intensity: self.intensity() * (1e-9f32 * 1e-9f32),
+            intensity: star.intensity() * (1e-9f32 * 1e-9f32),
             range: 1e14 * 1e-9,
             radius: 0.1,
             shadows_enabled: true,
@@ -354,5 +284,4 @@ impl StarBall {
             MeshMaterial3d(material_handle),
             light
         )
-    }
 }

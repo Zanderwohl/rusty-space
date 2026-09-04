@@ -186,6 +186,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2439700.0,
                         color: AppearanceColor { r: 145, g: 145, b: 145 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::spinning(
                         DQuat::from_xyzw(-0.02744466869, -0.05489161633, 0.261705058, -0.9631947691),
@@ -225,6 +226,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 6051800.0,
                         color: AppearanceColor { r: 224, g: 224, b: 224 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::spinning(
                         DQuat::from_xyzw(0.008272079686, 0.00696246615, 0.9850517432, 0.1719190505),
@@ -262,6 +264,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 6371000.0,
                         color: AppearanceColor { r: 59, g: 179, b: 75 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::spinning(
                         DQuat::from_xyzw(0.01796290283, 0.2023272178, 0.9753169712, -0.08659005037),
@@ -301,6 +304,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 3389500.0,
                         color: AppearanceColor { r: 242, g: 66, b: 17 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::spinning(
                         DQuat::from_xyzw(0.2195423474, -0.01220482989, 0.9749468313, 0.0336284986),
@@ -340,6 +344,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 11100.0,
                         color: AppearanceColor { r: 120, g: 105, b: 90 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Mars",
                         DVec3::new(0.446041664, -0.05554849573, 0.8932867393))),
@@ -376,6 +381,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 6200.0,
                         color: AppearanceColor { r: 120, g: 105, b: 90 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Mars",
                         DVec3::new(0.4322335342, -0.05447956625, 0.9001145198))),
@@ -412,6 +418,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 966200.0,
                         color: AppearanceColor { r: 145, g: 107, b: 54 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::spinning(
                         DQuat::from_xyzw(0.07082251626, 0.02015065352, 0.9939674524, 0.08128238407),
@@ -449,6 +456,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 262700.0,
                         color: AppearanceColor { r: 145, g: 107, b: 54 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::spinning(
                         DQuat::from_xyzw(0.0003590324921, -0.2750046731, 0.5376320034, -0.7970722237),
@@ -488,6 +496,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 1737400.0,
                         color: AppearanceColor { r: 87, g: 87, b: 87 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Earth",
                         DVec3::new(-3.543751263e-05, -0.0003753996676, 0.9999999289))),
@@ -526,6 +535,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 69911100.0,
                         color: AppearanceColor { r: 176, g: 127, b: 53 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::spinning(
                         DQuat::from_xyzw(-0.01865334277, -0.005120364307, 0.6089935726, -0.7929392557),
@@ -565,6 +575,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 21500.0,
                         color: AppearanceColor { r: 100, g: 100, b: 100 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Jupiter",
                         DVec3::new(-0.01464915199, -0.03572966593, 0.9992541185))),
@@ -603,6 +614,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 8200.0,
                         color: AppearanceColor { r: 100, g: 100, b: 100 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Jupiter",
                         DVec3::new(-0.01464915199, -0.03572966593, 0.9992541185))),
@@ -639,6 +651,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 83500.0,
                         color: AppearanceColor { r: 170, g: 100, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Jupiter",
                         DVec3::new(-0.01464915199, -0.03572966593, 0.9992541185))),
@@ -677,6 +690,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 49300.0,
                         color: AppearanceColor { r: 100, g: 100, b: 100 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Jupiter",
                         DVec3::new(-0.01464915199, -0.03572966593, 0.9992541185))),
@@ -715,6 +729,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 1821490.0,
                         color: AppearanceColor { r: 220, g: 200, b: 60 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Jupiter",
                         DVec3::new(-0.01464915199, -0.03572966593, 0.9992541185))),
@@ -753,6 +768,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 1560800.0,
                         color: AppearanceColor { r: 220, g: 220, b: 230 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Jupiter",
                         DVec3::new(-0.0144185873, -0.03556230971, 0.999263442))),
@@ -791,6 +807,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2631200.0,
                         color: AppearanceColor { r: 180, g: 170, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Jupiter",
                         DVec3::new(-0.01348803311, -0.03454303226, 0.9993121894))),
@@ -829,6 +846,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2410300.0,
                         color: AppearanceColor { r: 100, g: 90, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Jupiter",
                         DVec3::new(-0.00950062501, -0.03010460531, 0.9995016012))),
@@ -868,6 +886,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 4000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -905,6 +924,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 5000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -942,6 +962,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 85000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -979,6 +1000,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 12000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1017,6 +1039,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 40000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1055,6 +1078,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 10000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1093,6 +1117,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2500.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1131,6 +1156,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 14000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1169,6 +1195,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 4300.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1207,6 +1234,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 18000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1245,6 +1273,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 15000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1283,6 +1312,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2700.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1321,6 +1351,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1359,6 +1390,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1397,6 +1429,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1435,6 +1468,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1473,6 +1507,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1511,6 +1546,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1549,6 +1585,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1587,6 +1624,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1625,6 +1663,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1663,6 +1702,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1701,6 +1741,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1739,6 +1780,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1777,6 +1819,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1814,6 +1857,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1852,6 +1896,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1890,6 +1935,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1928,6 +1974,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -1966,6 +2013,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2004,6 +2052,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2042,6 +2091,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2080,6 +2130,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2118,6 +2169,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2156,6 +2208,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2194,6 +2247,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2232,6 +2286,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2270,6 +2325,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2308,6 +2364,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2346,6 +2403,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2384,6 +2442,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2422,6 +2481,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2457,6 +2517,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2492,6 +2553,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2530,6 +2592,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2565,6 +2628,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2600,6 +2664,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2635,6 +2700,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2673,6 +2739,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2711,6 +2778,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2746,6 +2814,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2784,6 +2853,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2819,6 +2889,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2857,6 +2928,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2892,6 +2964,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2927,6 +3000,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2964,6 +3038,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -2999,6 +3074,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -3034,6 +3110,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -3069,6 +3146,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -3104,6 +3182,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -3139,6 +3218,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -3176,6 +3256,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -3211,6 +3292,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -3246,6 +3328,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 58232000.0,
                         color: AppearanceColor { r: 200, g: 171, b: 90 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::spinning(
                         DQuat::from_xyzw(-0.210056825, 0.1208977584, 0.32305636, 0.9148193541),
@@ -3285,6 +3368,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 198800.0,
                         color: AppearanceColor { r: 200, g: 200, b: 210 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Saturn",
                         DVec3::new(0.08547883186, 0.4624416774, 0.8825197246))),
@@ -3323,6 +3407,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 252300.0,
                         color: AppearanceColor { r: 230, g: 230, b: 240 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Saturn",
                         DVec3::new(0.08547883186, 0.4624416774, 0.8825197246))),
@@ -3361,6 +3446,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 536300.0,
                         color: AppearanceColor { r: 200, g: 200, b: 200 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Saturn",
                         DVec3::new(0.08547883186, 0.4624416774, 0.8825197246))),
@@ -3399,6 +3485,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 562500.0,
                         color: AppearanceColor { r: 190, g: 190, b: 200 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Saturn",
                         DVec3::new(0.08547883186, 0.4624416774, 0.8825197246))),
@@ -3435,6 +3522,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 764500.0,
                         color: AppearanceColor { r: 195, g: 195, b: 200 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Saturn",
                         DVec3::new(0.08547883186, 0.4624416774, 0.8825197246))),
@@ -3473,6 +3561,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2575500.0,
                         color: AppearanceColor { r: 210, g: 170, b: 60 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Saturn",
                         DVec3::new(0.08547883186, 0.4624416774, 0.8825197246))),
@@ -3512,6 +3601,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 133000.0,
                         color: AppearanceColor { r: 160, g: 140, b: 120 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -3549,6 +3639,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 734500.0,
                         color: AppearanceColor { r: 150, g: 130, b: 100 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Saturn",
                         DVec3::new(0.08547883186, 0.4624416774, 0.8825197246))),
@@ -3587,6 +3678,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 106600.0,
                         color: AppearanceColor { r: 90, g: 85, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -3624,6 +3716,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 90000.0,
                         color: AppearanceColor { r: 150, g: 150, b: 150 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Saturn",
                         DVec3::new(0.08547883186, 0.4624416774, 0.8825197246))),
@@ -3662,6 +3755,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 58000.0,
                         color: AppearanceColor { r: 150, g: 150, b: 150 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Saturn",
                         DVec3::new(0.08547883186, 0.4624416774, 0.8825197246))),
@@ -3699,6 +3793,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 16000.0,
                         color: AppearanceColor { r: 150, g: 150, b: 150 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Saturn",
                         DVec3::new(0.08547883186, 0.4624416774, 0.8825197246))),
@@ -3737,6 +3832,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 12600.0,
                         color: AppearanceColor { r: 150, g: 150, b: 150 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Saturn",
                         DVec3::new(0.08547883186, 0.4624416774, 0.8825197246))),
@@ -3773,6 +3869,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 10300.0,
                         color: AppearanceColor { r: 150, g: 150, b: 150 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Saturn",
                         DVec3::new(0.08547883186, 0.4624416774, 0.8825197246))),
@@ -3811,6 +3908,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 15900.0,
                         color: AppearanceColor { r: 150, g: 150, b: 150 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Saturn",
                         DVec3::new(0.08547883186, 0.4624416774, 0.8825197246))),
@@ -3849,6 +3947,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 46000.0,
                         color: AppearanceColor { r: 150, g: 150, b: 150 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Saturn",
                         DVec3::new(0.08547883186, 0.4624416774, 0.8825197246))),
@@ -3887,6 +3986,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 41500.0,
                         color: AppearanceColor { r: 150, g: 150, b: 150 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Saturn",
                         DVec3::new(0.08547883186, 0.4624416774, 0.8825197246))),
@@ -3925,6 +4025,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 14300.0,
                         color: AppearanceColor { r: 150, g: 150, b: 150 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Saturn",
                         DVec3::new(0.08547883186, 0.4624416774, 0.8825197246))),
@@ -3964,6 +4065,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4002,6 +4104,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4040,6 +4143,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4078,6 +4182,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4115,6 +4220,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4152,6 +4258,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4189,6 +4296,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4227,6 +4335,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4265,6 +4374,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4303,6 +4413,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4341,6 +4452,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4379,6 +4491,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4417,6 +4530,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4452,6 +4566,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4489,6 +4604,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4525,6 +4641,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4562,6 +4679,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4600,6 +4718,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4638,6 +4757,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4675,6 +4795,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4713,6 +4834,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4751,6 +4873,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4788,6 +4911,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4826,6 +4950,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4864,6 +4989,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4902,6 +5028,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4940,6 +5067,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -4977,6 +5105,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5015,6 +5144,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5053,6 +5183,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5090,6 +5221,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5127,6 +5259,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5165,6 +5298,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5203,6 +5337,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5238,6 +5373,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5275,6 +5411,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5312,6 +5449,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5350,6 +5488,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5388,6 +5527,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5423,6 +5563,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5460,6 +5601,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5495,6 +5637,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5532,6 +5675,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5570,6 +5714,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5608,6 +5753,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5643,6 +5789,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5681,6 +5828,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5719,6 +5867,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 80, g: 80, b: 80 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5754,6 +5903,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 25362000.0,
                         color: AppearanceColor { r: 60, g: 186, b: 180 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::spinning(
                         DQuat::from_xyzw(-0.2702946672, -0.5997992937, 0.7369158477, -0.1553596912),
@@ -5791,6 +5941,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 24622000.0,
                         color: AppearanceColor { r: 60, g: 186, b: 180 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::spinning(
                         DQuat::from_xyzw(0.05300821663, -0.2362720466, 0.7790265757, -0.5783452631),
@@ -5828,6 +5979,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 1000.0,
                         color: AppearanceColor { r: 120, g: 120, b: 120 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5865,6 +6017,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 1188300.0,
                         color: AppearanceColor { r: 200, g: 180, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Charon",
                         DVec3::new(-0.678037266, 0.6236690791, -0.388976022))),
@@ -5903,6 +6056,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 606000.0,
                         color: AppearanceColor { r: 140, g: 140, b: 140 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Pluto",
                         DVec3::new(-0.6780373547, 0.6236688671, -0.3889762073))),
@@ -5939,6 +6093,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 5200.0,
                         color: AppearanceColor { r: 100, g: 100, b: 100 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -5976,6 +6131,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 18000.0,
                         color: AppearanceColor { r: 100, g: 100, b: 100 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6013,6 +6169,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 6000.0,
                         color: AppearanceColor { r: 100, g: 100, b: 100 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6050,6 +6207,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 18500.0,
                         color: AppearanceColor { r: 100, g: 100, b: 100 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6086,6 +6244,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 1163000.0,
                         color: AppearanceColor { r: 200, g: 200, b: 200 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::spinning(
                         DQuat::from_xyzw(-0.2582014006, 0.01073896545, 0.0, 0.9660314236),
@@ -6125,6 +6284,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 615000.0,
                         color: AppearanceColor { r: 200, g: 200, b: 200 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::tidally_locked("Eris",
                         DVec3::new(0.02074835616, 0.4988613332, 0.8664334227))),
@@ -6162,6 +6322,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 453000.0,
                         color: AppearanceColor { r: 200, g: 200, b: 200 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(BodyRotation::spinning(
                         DQuat::from_xyzw(-0.2031230389, 3.12680072e-17, 0.0, 0.9791532214),
@@ -6199,6 +6360,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 578897.9067,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6234,6 +6396,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 584700.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6269,6 +6432,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 788900.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6304,6 +6468,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 761400.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6339,6 +6504,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 235679.8973,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6375,6 +6541,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 77000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6412,6 +6579,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 1352600.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6448,6 +6616,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 170000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6485,6 +6654,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 74000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6520,6 +6690,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 96000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6555,6 +6726,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 208000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6590,6 +6762,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 256500.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6626,6 +6799,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 123298.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6661,6 +6835,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 203560.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6697,6 +6872,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 115844.5,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6732,6 +6908,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 111000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6767,6 +6944,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 49000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6803,6 +6981,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 151959.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6841,6 +7020,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 126525.5,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6877,6 +7057,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 61000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6912,6 +7093,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 16000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6947,6 +7129,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 26400.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -6982,6 +7165,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 8420.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7020,6 +7204,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 135163.5,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7055,6 +7240,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 153156.5,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7093,6 +7279,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 6100.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7129,6 +7316,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 500.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7165,6 +7353,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 1280.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7201,6 +7390,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2580.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7237,6 +7427,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 3125.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7274,6 +7465,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2700.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7309,6 +7501,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 165.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7346,6 +7539,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 170.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7382,6 +7576,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 241.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7418,6 +7613,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 448.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7455,6 +7651,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2485270.876,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7492,6 +7689,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2076699.845,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7529,6 +7727,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 730085.5125,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7566,6 +7765,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 830565.2,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7603,6 +7803,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 958018.1357,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7640,6 +7841,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 448098.7481,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7676,6 +7878,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 450000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7713,6 +7916,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 13594.82841,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7750,6 +7954,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 243990.9571,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7787,6 +7992,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 450167.0779,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7824,6 +8030,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 332180.1911,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7860,6 +8067,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 83000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7896,6 +8104,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 95000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7932,6 +8141,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 151000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -7968,6 +8178,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 5500.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -8004,6 +8215,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2400.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -8041,6 +8253,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 3000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -8077,6 +8290,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2400.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -8113,6 +8327,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 1700.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -8150,6 +8365,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -8186,6 +8402,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 800.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -8222,6 +8439,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 30000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -8259,6 +8477,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 84.99115488,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -8295,6 +8514,7 @@ pub fn solar_system() -> UniverseFileContents {
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 1000.0,
                         color: AppearanceColor { r: 170, g: 165, b: 160 },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }),
@@ -8362,6 +8582,7 @@ pub fn earth_moon() -> UniverseFileContents {
                             g: 179,
                             b: 75
                         },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: Some(iau_rotation(0.0, 90.0, 190.147, 23.9344696)),
                 }), // Earth
@@ -8399,6 +8620,7 @@ pub fn earth_moon() -> UniverseFileContents {
                             g: 87,
                             b: 87,
                         },
+                        highlight_latitudes: Vec::new(),
                     }),
                 }),*/ // Luna
                 SomeBody::NewtonEntry(NewtonEntry {
@@ -8419,6 +8641,7 @@ pub fn earth_moon() -> UniverseFileContents {
                             g: 0,
                             b: 0,
                         },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }), // Test Newtonian Body A
@@ -8440,6 +8663,7 @@ pub fn earth_moon() -> UniverseFileContents {
                             g: 0,
                             b: 0,
                         },
+                        highlight_latitudes: Vec::new(),
                     }),
                     rotation: None,
                 }), // Test Newtonian Body B

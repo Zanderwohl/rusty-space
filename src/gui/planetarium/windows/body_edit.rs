@@ -1,10 +1,8 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use bevy_egui::egui::Ui;
-use crate::body::motive::fixed_motive::FixedMotive;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::body::motive::kepler_motive::{EccentricitySMA, KeplerEulerAngles, KeplerMotive, KeplerRotation, KeplerShape};
-use crate::body::motive::newton_motive::NewtonMotive;
 use crate::body::universe::Universe;
 use crate::gui::common;
 use crate::gui::menu::UiState;

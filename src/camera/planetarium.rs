@@ -22,14 +22,13 @@ use num_traits::Float;
 use crate::body::appearance::Appearance;
 use crate::body::motive::compound_motive::{Motive, MotiveSelection};
 use crate::body::motive::info::{BodyInfo, BodyState};
-use crate::body::motive::calculate_body_positions;
 use crate::body::universe::save::ViewSettings;
 use crate::gui::app::AppState;
 use crate::gui::planetarium::{FocusedBodyState, HoverState, HoveredTrajectoryMarkerKind, TrajectoryHitData};
 use crate::presentation::{position_bodies, FocusedTrajectoryMarker, FocusedTrajectoryMarkerKind};
 use crate::sim::SimTime;
 use crate::camera::freecam::{FreeCamPlugin, Freecam, MovementSettings};
-use crate::util::bevystuff::GlamVec;
+use crate::presentation::render_space::ToRender;
 use crate::util::ease;
 
 pub struct PlanetariumCameraPlugin;
@@ -220,7 +219,7 @@ fn handle_gotos (
             } else {
                 3.0 * view_settings.body_scale_factor(appearance.radius()) as f64
             };
-            let body_pos = obj_pos.as_bevy_scaled_dvec(view_settings.distance_factor());
+            let body_pos = obj_pos.to_render_scaled(view_settings.distance_factor());
             let current_distance = (fcam.bevy_pos - body_pos).length();
             let preserve_distance = matches!(event.source, GoToSource::KeyboardV | GoToSource::KeyboardF)
                 && current_distance.is_finite()
@@ -313,7 +312,7 @@ fn run_goto (
                         }
                         GoToOrigin::Revolving(revolving) => {
                             if let Ok((origin_entity, origin_body, origin_motive, origin_transform)) = bodies.get(revolving.entity) {
-                                let origin_pos = origin_body.current_position.as_bevy_scaled_dvec(view_settings.distance_factor());
+                                let origin_pos = origin_body.current_position.to_render_scaled(view_settings.distance_factor());
                                 let (origin_offset, _) = offset_in_frame(
                                     revolving.frame,
                                     revolving.altitude,
@@ -331,7 +330,7 @@ fn run_goto (
                         }
                     };
 
-                    let body_pos_in_bevy = body_state.current_position.as_bevy_scaled_dvec(view_settings.distance_factor());
+                    let body_pos_in_bevy = body_state.current_position.to_render_scaled(view_settings.distance_factor());
 
                     let (offset, _) = offset_in_frame(
                         goto.end_frame,
@@ -522,7 +521,7 @@ fn pick_hover_target(
     let mut body_pixel_hits: Vec<&BodyInfo> = Vec::new();
     for (state, info, appearance, _) in bodies.iter() {
         let body_pos = state.current_position
-            .as_bevy_scaled_cheated(distance_scale, freecam.bevy_pos);
+            .to_render_relative(distance_scale, freecam.bevy_pos);
 
         let visual_radius = view_settings.body_scale_factor(appearance.radius());
         let pick_radius = (visual_radius * 1.5).max(MIN_PICK_RADIUS);
@@ -709,8 +708,8 @@ fn pick_trajectory_segment(
         // Transform to bevy space
         let world_a = rotation_delta * local_a + primary_offset;
         let world_b = rotation_delta * local_b + primary_offset;
-        let bevy_a = world_a.as_bevy_scaled_cheated(distance_scale, camera_pos);
-        let bevy_b = world_b.as_bevy_scaled_cheated(distance_scale, camera_pos);
+        let bevy_a = world_a.to_render_relative(distance_scale, camera_pos);
+        let bevy_b = world_b.to_render_relative(distance_scale, camera_pos);
         let seg_a_d = DVec3::new(bevy_a.x as f64, bevy_a.y as f64, bevy_a.z as f64);
         let seg_b_d = DVec3::new(bevy_b.x as f64, bevy_b.y as f64, bevy_b.z as f64);
         let ray_hit = ray_segment_closest_point(ray_origin_d, ray_dir_d, seg_a_d, seg_b_d);
@@ -741,8 +740,8 @@ fn pick_trajectory_segment(
         
         let world_a = rotation_delta * local_a + primary_offset;
         let world_b = rotation_delta * local_b + primary_offset;
-        let bevy_a = world_a.as_bevy_scaled_cheated(distance_scale, camera_pos);
-        let bevy_b = world_b.as_bevy_scaled_cheated(distance_scale, camera_pos);
+        let bevy_a = world_a.to_render_relative(distance_scale, camera_pos);
+        let bevy_b = world_b.to_render_relative(distance_scale, camera_pos);
         let seg_a_d = DVec3::new(bevy_a.x as f64, bevy_a.y as f64, bevy_a.z as f64);
         let seg_b_d = DVec3::new(bevy_b.x as f64, bevy_b.y as f64, bevy_b.z as f64);
         let ray_hit = ray_segment_closest_point(ray_origin_d, ray_dir_d, seg_a_d, seg_b_d);
@@ -933,7 +932,7 @@ fn revolve_around(
                                 cursor_options.visible = true;
                             }
 
-                            let body_pos_in_bevy = state.current_position.as_bevy_scaled_dvec(view_settings.distance_factor());
+                            let body_pos_in_bevy = state.current_position.to_render_scaled(view_settings.distance_factor());
                             let (offset, _) = offset_in_frame(
                                 revolve.frame,
                                 revolve.altitude,
@@ -1085,8 +1084,8 @@ fn frame_basis(
             let p_sim = k.periapsis_vec(sim_time).normalize();
             let w_sim = (sim_rot * DVec3::Z).normalize();
 
-            let p = p_sim.as_bevy_scaled_dvec(1.0).normalize();
-            let mut w = w_sim.as_bevy_scaled_dvec(1.0).normalize();
+            let p = p_sim.to_render_scaled(1.0).normalize();
+            let mut w = w_sim.to_render_scaled(1.0).normalize();
             let mut q = w.cross(p);
             if q.length_squared() <= f64::EPSILON {
                 return (DMat3::IDENTITY, RevolveAroundFrame::Global);
@@ -1125,7 +1124,7 @@ fn evaluate_goto_position(
     sim_time: &SimTime,
 ) -> Option<DVec3> {
     let (entity, body_state, _, _, motive, transform) = bodies.get(goto.entity).ok()?;
-    let body_pos = body_state.current_position.as_bevy_scaled_dvec(view_settings.distance_factor());
+    let body_pos = body_state.current_position.to_render_scaled(view_settings.distance_factor());
     let start_pos = match &goto.origin {
         GoToOrigin::Position { position, velocity, sample_time } => {
             let dt = (at_time - *sample_time).max(0.0);
@@ -1133,7 +1132,7 @@ fn evaluate_goto_position(
         }
         GoToOrigin::Revolving(revolving) => {
             let (origin_entity, origin_body, _, _, origin_motive, origin_transform) = bodies.get(revolving.entity).ok()?;
-            let origin_pos = origin_body.current_position.as_bevy_scaled_dvec(view_settings.distance_factor());
+            let origin_pos = origin_body.current_position.to_render_scaled(view_settings.distance_factor());
             let (origin_offset, _) = offset_in_frame(
                 revolving.frame,
                 revolving.altitude,

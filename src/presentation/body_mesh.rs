@@ -12,7 +12,7 @@ use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 
 use crate::body::appearance::Appearance;
-use crate::body::motive::info::{BodyInfo, BodyState};
+use crate::sim::world::{BodyRef, SimSystem};
 use crate::camera::PlanetariumCamera;
 
 use super::body_material::{BodyWireframeMaterial, OccluderMaterial, MAX_SUNS};
@@ -378,11 +378,14 @@ pub fn generate_great_circle_tube(normal: Vec3, tube_radius: f32, tube_sides: u3
 /// System to spawn body wireframe meshes for DebugBall bodies.
 pub fn spawn_body_wireframe_meshes(
     mut commands: Commands,
-    bodies: Query<(Entity, &Appearance), (With<BodyInfo>, Without<BodyWireframeLink>)>,
+    bodies: Query<(Entity, &BodyRef), Without<BodyWireframeLink>>,
+    system: Res<SimSystem>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodyWireframeMaterial>>,
 ) {
-    for (body_entity, appearance) in bodies.iter() {
+    for (body_entity, body_ref) in bodies.iter() {
+        let Some(bi) = system.0.index_of(body_ref.0) else { continue };
+        let appearance = system.0.appearance(bi);
         if let Appearance::DebugBall(debug_ball) = appearance {
             let highlight_lats = debug_ball.highlight_latitudes();
             let mesh = generate_latlon_sphere(&highlight_lats, WIRE_TUBE_RADIUS, TUBE_SIDES);
@@ -426,11 +429,14 @@ pub fn spawn_body_wireframe_meshes(
 /// This allows independent scaling of the occluder to avoid z-fighting at distance.
 pub fn spawn_body_occluders(
     mut commands: Commands,
-    bodies: Query<(Entity, &Appearance), (With<BodyInfo>, Without<OccluderLink>)>,
+    bodies: Query<(Entity, &BodyRef), Without<OccluderLink>>,
+    system: Res<SimSystem>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<OccluderMaterial>>,
 ) {
-    for (body_entity, appearance) in bodies.iter() {
+    for (body_entity, body_ref) in bodies.iter() {
+        let Some(bi) = system.0.index_of(body_ref.0) else { continue };
+        let appearance = system.0.appearance(bi);
         if let Appearance::DebugBall(_) = appearance {
             let mesh = Sphere::new(0.97f32).mesh().ico(5).unwrap();
             let mesh_handle = meshes.add(mesh);
@@ -457,10 +463,10 @@ pub fn spawn_body_occluders(
 
 /// System to scale occluder meshes slightly smaller at distance to avoid z-fighting.
 pub fn update_occluder_scale(
-    bodies: Query<Option<&BodyWireframeLink>, With<BodyInfo>>,
+    bodies: Query<Option<&BodyWireframeLink>, With<BodyRef>>,
     wireframes: Query<&MeshMaterial3d<BodyWireframeMaterial>, With<BodyWireframeMesh>>,
     materials: Res<Assets<BodyWireframeMaterial>>,
-    mut occluders: Query<(&OccluderMesh, &mut Transform, &ChildOf), Without<BodyInfo>>,
+    mut occluders: Query<(&OccluderMesh, &mut Transform, &ChildOf), Without<BodyRef>>,
 ) {
     for (_occluder, mut occluder_transform, child_of) in occluders.iter_mut() {
         let Ok(wireframe_link) = bodies.get(child_of.parent()) else {
@@ -485,29 +491,29 @@ pub fn update_occluder_scale(
 /// System to spawn terminator meshes for each star-body pair.
 pub fn spawn_terminator_meshes(
     mut commands: Commands,
-    bodies: Query<(Entity, &Appearance), (With<BodyInfo>, Without<TerminatorLinks>)>,
-    stars: Query<Entity, With<BodyInfo>>,
-    star_appearances: Query<&Appearance>,
+    bodies: Query<(Entity, &BodyRef), Without<TerminatorLinks>>,
+    system: Res<SimSystem>,
+    stars: Query<(Entity, &BodyRef)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodyWireframeMaterial>>,
 ) {
     // Find all star entities
     let star_entities: Vec<Entity> = stars
         .iter()
-        .filter(|&e| {
-            if let Ok(app) = star_appearances.get(e) {
-                matches!(app, Appearance::Star(_))
-            } else {
-                false
-            }
+        .filter(|(_, body_ref)| {
+            system.0.index_of(body_ref.0)
+                .is_some_and(|i| matches!(system.0.appearance(i), Appearance::Star(_)))
         })
+        .map(|(entity, _)| entity)
         .collect();
 
     if star_entities.is_empty() {
         return;
     }
 
-    for (body_entity, appearance) in bodies.iter() {
+    for (body_entity, body_ref) in bodies.iter() {
+        let Some(bi) = system.0.index_of(body_ref.0) else { continue };
+        let appearance = system.0.appearance(bi);
         if let Appearance::DebugBall(_) = appearance {
             let mut terminator_entities = Vec::new();
 
@@ -568,7 +574,8 @@ fn vec4_approx_eq(a: Vec4, b: Vec4, epsilon: f32) -> bool {
 pub fn update_terminator_meshes(
     cameras: Query<(&Camera, &GlobalTransform, &Projection), With<PlanetariumCamera>>,
     mut terminators: Query<(&TerminatorMesh, &ChildOf, &mut Visibility, &MeshMaterial3d<BodyWireframeMaterial>, &mut Transform)>,
-    bodies: Query<(&Transform, &BodyState), Without<TerminatorMesh>>,
+    bodies: Query<(&Transform, &BodyRef), Without<TerminatorMesh>>,
+    system: Res<SimSystem>,
     mut materials: ResMut<Assets<BodyWireframeMaterial>>,
 ) {
     let Ok((camera, camera_global, projection)) = cameras.single() else {
@@ -587,9 +594,11 @@ pub fn update_terminator_meshes(
     let camera_pos = camera_global.translation();
 
     for (terminator, child_of, mut visibility, material_handle, mut term_transform) in terminators.iter_mut() {
-        let Ok((body_transform, body_state)) = bodies.get(child_of.parent()) else {
+        let Ok((body_transform, body_ref)) = bodies.get(child_of.parent()) else {
             continue;
         };
+        let Some(body_i) = system.0.index_of(body_ref.0) else { continue };
+        let body_position = system.0.position(body_i);
 
         let body_center = body_transform.translation;
         let distance = (body_center - camera_pos).length();
@@ -620,14 +629,16 @@ pub fn update_terminator_meshes(
         };
 
         // Get star state
-        let Ok((_, star_state)) = bodies.get(terminator.star_entity) else {
+        let Ok((_, star_ref)) = bodies.get(terminator.star_entity) else {
             continue;
         };
+        let Some(star_i) = system.0.index_of(star_ref.0) else { continue };
+        let star_position = system.0.position(star_i);
 
         let tube_radius = calculate_tube_radius_for_distance(body_scale, distance);
 
         // Compute star direction in simulation space (Z-up)
-        let star_dir_sim = (star_state.current_position - body_state.current_position).normalize();
+        let star_dir_sim = (star_position - body_position).normalize();
 
         // Convert from simulation space (Z-up) to Bevy space (Y-up): (x, y, z) -> (x, z, -y)
         let star_dir_bevy = Vec3::new(
@@ -664,7 +675,7 @@ pub fn update_terminator_meshes(
 /// Uses RemovedComponents to only run when bodies are actually removed.
 pub fn cleanup_orphaned_body_wireframes(
     mut commands: Commands,
-    mut removed_bodies: RemovedComponents<BodyInfo>,
+    mut removed_bodies: RemovedComponents<BodyRef>,
     wireframes: Query<(Entity, &BodyWireframeMesh)>,
     terminators: Query<(Entity, &TerminatorMesh)>,
 ) {
@@ -716,14 +727,17 @@ fn calculate_tube_radius_for_distance(body_scale: f32, distance: f32) -> f32 {
 /// Computes star directions in body-local space and writes them into the material uniform.
 pub fn update_wireframe_lighting(
     wireframes: Query<(&BodyWireframeMesh, &MeshMaterial3d<BodyWireframeMaterial>, &ChildOf)>,
-    bodies: Query<(&Transform, &BodyState)>,
+    bodies: Query<(&Transform, &BodyRef)>,
+    system: Res<SimSystem>,
     star_cache: Res<StarLightingFrameCache>,
     mut materials: ResMut<Assets<BodyWireframeMaterial>>,
 ) {
     for (wireframe, material_handle, child_of) in wireframes.iter() {
-        let Ok((body_transform, body_state)) = bodies.get(child_of.parent()) else {
+        let Ok((body_transform, body_ref)) = bodies.get(child_of.parent()) else {
             continue;
         };
+        let Some(body_i) = system.0.index_of(body_ref.0) else { continue };
+        let body_position = system.0.position(body_i);
 
         let mut num_suns = 0u32;
         let mut sun_dirs = [Vec4::ZERO; MAX_SUNS];
@@ -737,7 +751,7 @@ pub fn update_wireframe_lighting(
             }
 
             let star_dir_sim =
-                (star.sim_position - body_state.current_position).normalize();
+                (star.sim_position - body_position).normalize();
             let star_dir_bevy = Vec3::new(
                 star_dir_sim.x as f32,
                 star_dir_sim.z as f32,
@@ -825,7 +839,8 @@ pub fn update_occluder_lighting(
 /// Updates the material uniform to drive vertex-shader displacement instead of regenerating meshes.
 pub fn update_wireframe_thickness(
     cameras: Query<&GlobalTransform, With<PlanetariumCamera>>,
-    bodies: Query<(&Transform, &BodyInfo), With<BodyInfo>>,
+    bodies: Query<(&Transform, &BodyRef)>,
+    system: Res<SimSystem>,
     wireframes: Query<(&BodyWireframeMesh, &MeshMaterial3d<BodyWireframeMaterial>, &ChildOf)>,
     mut materials: ResMut<Assets<BodyWireframeMaterial>>,
 ) {

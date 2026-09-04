@@ -34,6 +34,15 @@ impl Appearance {
 pub struct DebugBall {
     pub radius: f64,
     pub color: AppearanceColor,
+    /// Latitudes to pick out on the wireframe, in degrees. Empty for none.
+    #[serde(default)]
+    pub highlight_latitudes: Vec<f64>,
+}
+
+impl DebugBall {
+    pub fn highlight_latitudes(&self) -> Vec<f64> {
+        self.highlight_latitudes.clone()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]

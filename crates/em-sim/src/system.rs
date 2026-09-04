@@ -400,3 +400,39 @@ impl System {
         Ok(system)
     }
 }
+
+impl System {
+    /// Serialise the arena back to universe contents.
+    ///
+    /// The inverse of [`System::from_contents`]. Every body round-trips as a
+    /// `CompoundMotiveEntry`, which is the general form the legacy entry kinds widen into
+    /// on the way in — so a file saved from a system loads back to the same system.
+    ///
+    /// `time`, `physics` and `view` are the app's, not the arena's: the simulation knows
+    /// when it is, but not what step size or scale the UI was showing.
+    pub fn to_contents(
+        &self,
+        time: crate::universe::UniverseFileTime,
+        physics: crate::universe::UniversePhysics,
+        view: crate::universe::ViewSettings,
+    ) -> crate::universe::UniverseFileContents {
+        use crate::universe::{CompoundMotiveEntry, SomeBody, UniverseFileContents};
+        UniverseFileContents {
+            version: "0.0".to_string(),
+            time,
+            view,
+            physics,
+            bodies: self
+                .indices()
+                .map(|i| {
+                    SomeBody::CompoundMotiveEntry(CompoundMotiveEntry {
+                        info: self.info[i.get()].clone(),
+                        motive: self.motives[i.get()].clone(),
+                        appearance: self.appearance[i.get()].clone(),
+                        rotation: self.rotations[i.get()].clone(),
+                    })
+                })
+                .collect(),
+        }
+    }
+}

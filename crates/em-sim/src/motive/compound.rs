@@ -136,6 +136,20 @@ impl Motive {
         new
     }
 
+    /// A Keplerian motive with an explicit gravitational parameter, for an orbit whose
+    /// effective mu is not `G(M_primary + m)` — a barycentric one, for instance.
+    pub fn keplerian_with_gm(primary_id: String, shape: KeplerShape, rotation: KeplerRotation,
+                             epoch: KeplerEpoch, gravitational_parameter: f64) -> Self {
+        let mut new = Self::new();
+        new.insert_event(Instant::from_seconds_since_j2000(0.0), TransitionEvent::Epoch,
+            MotiveSelection::Keplerian(KeplerMotive {
+                primary_id, shape, rotation, epoch,
+                anomalistic_period: None,
+                gravitational_parameter: Some(gravitational_parameter),
+            }));
+        new
+    }
+
     pub fn insert_event(&mut self, time: Instant, event: TransitionEvent, motive_selection: MotiveSelection) {
         self.times.insert(time);
         self.motives.insert(time, (event, motive_selection));

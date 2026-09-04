@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use bevy_egui::EguiContexts;
-use crate::body::motive::calculate_body_positions::PhysicsGraph;
 use crate::camera::{GoTo, GoToSource, PlanetariumCamera};
 use crate::gui::planetarium::FocusedBodyState;
 
