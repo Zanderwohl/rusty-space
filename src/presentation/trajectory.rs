@@ -48,7 +48,7 @@ pub fn render_trajectories(
             let frac = match trajectory.periodicity() {
                 None => 0.0,
                 Some(periodicity) => {
-                    periodicity.cycle_fraction(sim_time.time.to_j2000_seconds())
+                    periodicity.cycle_fraction(sim_time.time)
                 }
             };
 
@@ -60,10 +60,10 @@ pub fn render_trajectories(
 
             // Collect trajectory points; we may insert a transient point at the
             // body's current position so the line always passes through the body.
-            let mut points: Vec<(f64, DVec3)> = trajectory.iter().map(|(t, d)| (t, *d)).collect();
+            let mut points: Vec<(f64, DVec3)> = trajectory.iter().map(|(t, d)| (t.to_seconds(), *d)).collect();
 
             if let (Some(local_pos), Some(periodicity)) = (state.current_local_position, trajectory.periodicity()) {
-                let current_relative_time = frac * periodicity.interval_size;
+                let current_relative_time = frac * periodicity.interval_size.to_seconds();
                 let body_radius = appearance.map(|a| a.radius()).unwrap_or(0.0);
 
                 if let Some(seg) = points.windows(2).position(|w| {

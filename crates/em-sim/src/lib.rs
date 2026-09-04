@@ -7,7 +7,6 @@
 #![forbid(unsafe_code)]
 
 pub mod appearance;
-pub mod bitfutz;
 pub mod body;
 pub mod motive;
 pub mod presets;

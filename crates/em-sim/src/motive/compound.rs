@@ -1,16 +1,15 @@
 use std::collections::HashMap;
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
-use crate::motive::kepler::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerRotation, KeplerShape, MeanAnomalyAtJ2000};
+use crate::motive::kepler::{KeplerMotive, KeplerRotation, KeplerShape, KeplerEpoch};
 use em_foundations::time::Instant;
-use crate::bitfutz;
 use crate::time_map::SortedTimes;
 
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Component))]
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Motive {
     times: SortedTimes,
-    motives: HashMap<u64, (TransitionEvent, MotiveSelection)>
+    motives: HashMap<Instant, (TransitionEvent, MotiveSelection)>
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -88,21 +87,18 @@ impl Motive {
         
         // Find the first event after start
         let index_after_start = self.times.get_index_after(start);
-        
-        let end = end.to_j2000_seconds();
+
         // If there's an event at that index and it's <= end, we have a match
-        if let Some(&event_time) = self.times.get(index_after_start) {
-            event_time <= end
-        } else {
-            false
+        match self.times.get(index_after_start) {
+            Some(&event_time) => event_time <= end,
+            None => false,
         }
     }
 
     /// Iterate over all events in time order
-    pub fn iter_events(&self) -> impl Iterator<Item = (f64, &TransitionEvent, &MotiveSelection)> {
+    pub fn iter_events(&self) -> impl Iterator<Item = (Instant, &TransitionEvent, &MotiveSelection)> {
         self.times.iter().filter_map(|time| {
-            let key = bitfutz::f64::to_u64(*time);
-            self.motives.get(&key).map(|(event, selection)| (*time, event, selection))
+            self.motives.get(time).map(|(event, selection)| (*time, event, selection))
         })
     }
 
@@ -134,17 +130,13 @@ impl Motive {
     }
 
     pub fn insert_event(&mut self, time: Instant, event: TransitionEvent, motive_selection: MotiveSelection) {
-        let time_f64 = time.to_j2000_seconds();
-        let key = bitfutz::f64::to_u64(time_f64);
-        self.times.insert(time_f64);
-        self.motives.insert(key, (event, motive_selection));
+        self.times.insert(time);
+        self.motives.insert(time, (event, motive_selection));
     }
 
     pub fn remove_event(&mut self, time: Instant) -> bool {
-        let time_f64 = time.to_j2000_seconds();
-        let key = bitfutz::f64::to_u64(time_f64);
-        if self.times.remove_time(time_f64) {
-            self.motives.remove(&key);
+        if self.times.remove_time(time) {
+            self.motives.remove(&time);
             true
         } else {
             false
@@ -154,31 +146,27 @@ impl Motive {
     pub fn remove_all_events_after(&mut self, time: Instant) {
         let index = self.times.get_index_after(time);
         // get rid of all events after the index
-        let drained_times = self.times.remove_after(index);
-        let keys = drained_times.iter().map(|time| bitfutz::f64::to_u64(*time)).collect::<Vec<u64>>();
-        for key in keys {
-            self.motives.remove(&key);
+        for time in self.times.remove_after(index) {
+            self.motives.remove(&time);
         }
     }
 
     /// Invariant: There must be at least one motive.
     pub fn motive_at(&self, time: Instant) -> &(TransitionEvent, MotiveSelection) {
-        let time_f64 = time.to_j2000_seconds();
-        let time = self.times.get_at_or_before(time_f64).expect("Invariant violated: CompoundMotive must have at least one motive.");
-        let key = bitfutz::f64::to_u64(time);
-        self.motives.get(&key).expect(format!("Invariant violated: CompoundMotive.times gave the time {}, but CompoundMotive.time motives has no such key {}.", time, key).as_ref())
+        let time = self.times.get_at_or_before(time)
+            .expect("Invariant violated: CompoundMotive must have at least one motive.");
+        self.motives.get(&time).unwrap_or_else(|| panic!(
+            "Invariant violated: CompoundMotive.times holds {time} but CompoundMotive.motives has no such key."))
     }
 
     /// Get the motive that was active just before the motive at the given time.
     /// Returns None if there is no previous motive (i.e., the motive at `time` is the first one).
     pub fn motive_before(&self, time: Instant) -> Option<&(TransitionEvent, MotiveSelection)> {
         // First find the current motive's time
-        let time_f64 = time.to_j2000_seconds();
-        let current_time = self.times.get_at_or_before(time_f64)?;
+        let current_time = self.times.get_at_or_before(time)?;
         // Then find the motive before that time
         let prev_time = self.times.get_before(current_time)?;
-        let key = bitfutz::f64::to_u64(prev_time);
-        self.motives.get(&key)
+        self.motives.get(&prev_time)
     }
 
     pub fn is_fixed(&self, time: Instant) -> bool {

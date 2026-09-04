@@ -716,7 +716,8 @@ fn load_keplerian(conn: &Connection, motive_id: i64) -> Result<KeplerMotive, Sql
 }
 
 fn save_motive(conn: &Connection, body_id: &str, motive: &Motive) -> Result<(), SqliteSaveError> {
-    for (time_seconds, event, selection) in motive.iter_events() {
+    for (time, event, selection) in motive.iter_events() {
+        let time_seconds = time.to_j2000_seconds();
         let time_key = bitfutz::f64::to_u64(time_seconds) as i64;
         let event_str = serialize_transition_event(event);
         let motive_type = match selection {

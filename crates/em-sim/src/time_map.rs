@@ -1,22 +1,34 @@
+//! A sparse, interpolating map from time to value, and the sorted key list behind it.
+//!
+//! Keys are typed rather than raw floats. `SortedTimes<Instant>` holds absolute event
+//! times (see [`crate::motive::Motive`]); [`TimeMap`] is keyed by [`TimeDelta`], since a
+//! trajectory's samples are offsets from its periapsis passage rather than absolute
+//! instants.
+//!
+//! Both used to key a `HashMap` on `f64::to_bits` and binary-search with
+//! `partial_cmp().unwrap()`. That panicked on NaN, and silently split `-0.0` from `0.0`
+//! into separate entries. `Instant` and `TimeDelta` are `Ord + Eq + Hash` with negative
+//! zero normalised, so neither is possible now.
+
 use std::collections::HashMap;
 use std::slice::Iter;
 use glam::{DVec3, Vec3};
 use serde::{Deserialize, Serialize};
 use em_foundations::time::{Instant, TimeDelta};
-use crate::bitfutz;
 
 #[derive(Debug, Clone)]
-pub struct TimeMap<V: Lerpable>
-{
-    map: HashMap<u64, V>,
-    time_keys: SortedTimes,
+pub struct TimeMap<V: Lerpable> {
+    map: HashMap<TimeDelta, V>,
+    time_keys: SortedTimes<TimeDelta>,
     periodicity: Option<Periodicity>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Periodicity {
-    pub interval_start: f64,
-    pub interval_size: f64,
+    /// Absolute time the cycle starts from — for an orbit, a periapsis passage.
+    pub interval_start: Instant,
+    /// One full cycle.
+    pub interval_size: TimeDelta,
 }
 
 pub trait Lerpable {
@@ -25,7 +37,6 @@ pub trait Lerpable {
 
 impl Lerpable for f64 {
     fn lerp__(&self, rhs: &Self, t: f64) -> Self {
-        // Was glam's FloatExt::lerp, which arrived via `bevy::prelude::*`.
         self + (rhs - self) * t
     }
 }
@@ -50,20 +61,15 @@ impl Lerpable for DVec3 {
 }
 
 impl Periodicity {
-    /// Returns the fraction (0.0 to 1.0) of the way through the current cycle
-    /// for the given time (seconds since J2000)
-    pub fn cycle_fraction(&self, time: f64) -> f64 {
-        let elapsed = time - self.interval_start;
-        let position_in_cycle = elapsed % self.interval_size;
-        
-        // Ensure result is always positive (handle negative modulo)
-        let normalized_position = if position_in_cycle < 0.0 {
-            position_in_cycle + self.interval_size
-        } else {
-            position_in_cycle
-        };
-        
-        normalized_position / self.interval_size
+    /// How far through the current cycle `time` falls, in `[0, 1)`.
+    pub fn cycle_fraction(&self, time: Instant) -> f64 {
+        let size = self.interval_size.to_seconds();
+        if size == 0.0 {
+            return 0.0;
+        }
+        let elapsed = (time - self.interval_start).to_seconds();
+        // rem_euclid keeps the result non-negative for times before interval_start.
+        (elapsed.rem_euclid(size)) / size
     }
 }
 
@@ -73,8 +79,7 @@ impl<V: Clone + Lerpable> Default for TimeMap<V> {
     }
 }
 
-impl<V: Clone + Lerpable> TimeMap<V>
-{
+impl<V: Clone + Lerpable> TimeMap<V> {
     pub fn new() -> Self {
         Self {
             map: HashMap::new(),
@@ -87,50 +92,53 @@ impl<V: Clone + Lerpable> TimeMap<V>
         self.time_keys.len()
     }
 
-    pub fn insert(&mut self, time: f64, item: V) {
+    pub fn is_empty(&self) -> bool {
+        self.time_keys.is_empty()
+    }
+
+    pub fn insert(&mut self, time: TimeDelta, item: V) {
         self.time_keys.insert(time);
-        self.map.insert(bitfutz::f64::to_u64(time), item);
+        self.map.insert(time, item);
     }
 
-    pub fn get(&self, time: f64) -> Option<&V> {
-        let key = bitfutz::f64::to_u64(time);
-        self.map.get(&key)
+    pub fn get(&self, time: TimeDelta) -> Option<&V> {
+        self.map.get(&time)
     }
 
-    pub fn get_lerp(&self, time: f64) -> Option<V> {
+    /// The value at `time`, interpolating between the two surrounding samples when
+    /// there is no exact match. `None` outside the sampled range.
+    pub fn get_lerp(&self, time: TimeDelta) -> Option<V> {
         if let Some(item) = self.get(time) {
             return Some(item.clone());
         }
 
-        if let Some((a, b)) = self.time_keys.get_pair_that_surrounds(time) {
-            let t = (time - a) / (b - a);
-            let value = self.get(a)?.lerp__(self.get(b)?, t);
-            return Some(value);
+        let (a, b) = self.time_keys.get_pair_that_surrounds(time)?;
+        let span = (b - a).to_seconds();
+        if span == 0.0 {
+            return self.get(a).cloned();
         }
-
-        None
+        let t = (time - a).to_seconds() / span;
+        Some(self.get(a)?.lerp__(self.get(b)?, t))
     }
 
-    pub fn times(&self) -> Vec<f64> {
+    pub fn times(&self) -> Vec<TimeDelta> {
         self.time_keys.as_vec()
     }
 
-    pub fn range(&self, start_time: f64, end_time: f64) -> TimeMap<V> {
+    pub fn range(&self, start_time: TimeDelta, end_time: TimeDelta) -> TimeMap<V> {
         let restricted_times = self.time_keys.range(start_time, end_time);
         let mut map = HashMap::new();
 
         for key in restricted_times.iter() {
-            let key = bitfutz::f64::to_u64(*key);
-            if let Some(value) = self.map.get(&key) {
-                let value = (*value).clone();
-                map.insert(key, value);
+            if let Some(value) = self.map.get(key) {
+                map.insert(*key, value.clone());
             }
         }
 
         Self {
             map,
             time_keys: restricted_times,
-            periodicity: self.periodicity.clone(),
+            periodicity: self.periodicity,
         }
     }
 
@@ -139,64 +147,64 @@ impl<V: Clone + Lerpable> TimeMap<V>
     }
 
     pub fn set_periodicity(&mut self, interval_start: Instant, interval_size: TimeDelta) {
-        self.periodicity = Some(Periodicity {
-            interval_start: interval_start.to_j2000_seconds(),
-            interval_size: interval_size.to_seconds(),
-        });
+        self.periodicity = Some(Periodicity { interval_start, interval_size });
     }
 
     pub fn periodicity(&self) -> Option<&Periodicity> {
         self.periodicity.as_ref()
     }
 
+    /// One cycle's worth of samples.
+    ///
+    /// Keys are offsets from `interval_start`, so this is `[0, interval_size]`. The old
+    /// version passed `interval_start` — an absolute instant — as a key bound, which
+    /// mixed the two frames; the typed keys make that a compile error. It had no callers.
     pub fn range_one_period(&self) -> Option<TimeMap<V>> {
-        match &self.periodicity {
-            None => None,
-            Some(periodicity) => {
-                Some(self.range(periodicity.interval_start, periodicity.interval_start + periodicity.interval_size))
-            }
-        }
+        let p = self.periodicity?;
+        Some(self.range(TimeDelta::ZERO, p.interval_size))
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (f64, &V)> {
-        self.time_keys.in_order
+    pub fn iter(&self) -> impl Iterator<Item = (TimeDelta, &V)> {
+        self.time_keys
             .iter()
-            .map(|f| bitfutz::f64::to_u64(*f))
-            .filter_map(move |k| self.map.get(&k).map(|v| (bitfutz::u64::to_f64(k), v)))
+            .filter_map(move |k| self.map.get(k).map(|v| (*k, v)))
     }
 }
 
+/// A sorted, deduplicated list of keys supporting binary-search lookups.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SortedTimes {
-    in_order: Vec<f64>,
+pub struct SortedTimes<K = Instant> {
+    in_order: Vec<K>,
 }
 
-impl SortedTimes {
-    pub fn as_vec(&self) -> Vec<f64> {
+impl<K: Ord + Copy> Default for SortedTimes<K> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<K: Ord + Copy> SortedTimes<K> {
+    pub fn new() -> Self {
+        Self { in_order: Vec::new() }
+    }
+
+    pub fn as_vec(&self) -> Vec<K> {
         self.in_order.clone()
     }
-}
 
-impl SortedTimes {
-    pub fn new() -> Self {
-        Self{
-            in_order: Vec::new()
+    /// Insert, keeping the list sorted. A duplicate is a no-op.
+    pub fn insert(&mut self, value: K) {
+        if let Err(pos) = self.in_order.binary_search(&value) {
+            self.in_order.insert(pos, value);
         }
     }
 
-    pub fn insert(&mut self, value: f64) {
-        match self.in_order.binary_search_by(|other| other.partial_cmp(&value).unwrap()) {
-            Ok(_) => {},
-            Err(pos) => self.in_order.insert(pos, value),
-        }
+    pub fn has(&self, time: K) -> bool {
+        self.in_order.binary_search(&time).is_ok()
     }
 
-    pub fn has(&self, time: f64) -> bool {
-        self.in_order.binary_search_by(|other| other.partial_cmp(&time).unwrap()).is_ok()
-    }
-
-    pub fn remove_time(&mut self, time: f64) -> bool {
-        match self.in_order.binary_search_by(|other| other.partial_cmp(&time).unwrap()) {
+    pub fn remove_time(&mut self, time: K) -> bool {
+        match self.in_order.binary_search(&time) {
             Ok(pos) => {
                 self.in_order.remove(pos);
                 true
@@ -205,80 +213,55 @@ impl SortedTimes {
         }
     }
 
-    pub fn get(&self, index: usize) -> Option<&f64> {
+    pub fn get(&self, index: usize) -> Option<&K> {
         self.in_order.get(index)
     }
 
-    pub fn get_pair_that_surrounds(&self, value: f64) -> Option<(f64, f64)> {
-        if self.in_order.len() < 2 { // If too short, we can't really interpolate anything
+    /// The two keys bracketing `value`, or `None` if it falls outside the range or
+    /// there are fewer than two keys to interpolate between.
+    pub fn get_pair_that_surrounds(&self, value: K) -> Option<(K, K)> {
+        let len = self.in_order.len();
+        if len < 2 {
+            return None;
+        }
+        if value < self.in_order[0] || value > self.in_order[len - 1] {
             return None;
         }
 
-        if value < self.in_order[0] || value > self.in_order[self.in_order.len() - 1] { // outside bounds
-            return None;
-        }
-
-        // Binary search for the insertion point where value would go
-        let insertion_point = self.in_order.partition_point(|&x| x <= value);
+        let insertion_point = self.in_order.partition_point(|x| *x <= value);
 
         if insertion_point == 0 {
-            // This shouldn't happen given our bounds check
-            None
-        } else if insertion_point == self.in_order.len() {
-            // value equals the last element, return last two values
-            let len = self.in_order.len();
-            Some((self.in_order[len-2], self.in_order[len-1]))
+            Some((self.in_order[0], self.in_order[1]))
+        } else if insertion_point == len {
+            Some((self.in_order[len - 2], self.in_order[len - 1]))
         } else {
-            // Normal case: value is between two elements
-            Some((self.in_order[insertion_point-1], self.in_order[insertion_point]))
+            Some((self.in_order[insertion_point - 1], self.in_order[insertion_point]))
         }
     }
 
-    pub fn get_at_or_before(&self, time: f64) -> Option<f64> {
-        if self.in_order.is_empty() {
-            return None;
-        }
-
-        // partition_point returns the first index where x > time
-        // So insertion_point - 1 is the last index where x <= time
-        let insertion_point = self.in_order.partition_point(|&x| x <= time);
-        
+    /// The greatest key `<= time`.
+    pub fn get_at_or_before(&self, time: K) -> Option<K> {
+        let insertion_point = self.in_order.partition_point(|x| *x <= time);
         if insertion_point == 0 {
-            // No element is <= time, so there's nothing "at or before"
             None
         } else {
             Some(self.in_order[insertion_point - 1])
         }
     }
 
-    /// Get the time strictly before the given time (not equal to)
-    pub fn get_before(&self, time: f64) -> Option<f64> {
-        if self.in_order.is_empty() {
-            return None;
-        }
-
-        // partition_point returns the first index where x >= time
-        let insertion_point = self.in_order.partition_point(|&x| x < time);
-        
+    /// The greatest key strictly `< time`.
+    pub fn get_before(&self, time: K) -> Option<K> {
+        let insertion_point = self.in_order.partition_point(|x| *x < time);
         if insertion_point == 0 {
-            // No element is < time
             None
         } else {
             Some(self.in_order[insertion_point - 1])
         }
     }
 
-    /// Gets the index of the lowest time which is after the given time
-    pub fn get_index_after(&self, time: Instant) -> usize {
-        let time = time.to_j2000_seconds();
-        if self.in_order.len() == 0 || self.in_order[self.in_order.len() - 1] < time {
-            return self.in_order.len();
-        }
-        if self.in_order[0] > time {
-            return 0;
-        }
-
-        self.in_order.partition_point(|&x| x <= time)
+    /// Index of the first key strictly greater than `time`, or `len()` if there is none.
+    pub fn get_index_after(&self, time: K) -> usize {
+        self.in_order.partition_point(|x| *x <= time)
     }
 
     pub fn len(&self) -> usize {
@@ -289,7 +272,7 @@ impl SortedTimes {
         self.in_order.is_empty()
     }
 
-    pub fn remove(&mut self, index: usize) -> Option<f64> {
+    pub fn remove(&mut self, index: usize) -> Option<K> {
         if index < self.in_order.len() {
             Some(self.in_order.remove(index))
         } else {
@@ -297,21 +280,113 @@ impl SortedTimes {
         }
     }
 
-    pub fn remove_after(&mut self, index: usize) -> Vec<f64> {
-        self.in_order.drain(index..).collect::<Vec<f64>>()
+    pub fn remove_after(&mut self, index: usize) -> Vec<K> {
+        if index >= self.in_order.len() {
+            return Vec::new();
+        }
+        self.in_order.drain(index..).collect()
     }
 
-    pub fn range(&self, start: f64, end: f64) -> SortedTimes {
-        let values = self.in_order.iter()
-            .filter(|&&x| x >= start && x <= end)
-            .cloned()
-            .collect();
+    pub fn range(&self, start: K, end: K) -> SortedTimes<K> {
         Self {
-            in_order: values,
+            in_order: self
+                .in_order
+                .iter()
+                .filter(|&&x| x >= start && x <= end)
+                .copied()
+                .collect(),
         }
     }
 
-    pub fn iter(&self) -> Iter<'_, f64> {
+    pub fn iter(&self) -> Iter<'_, K> {
         self.in_order.iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn td(s: f64) -> TimeDelta { TimeDelta::from_seconds(s) }
+
+    #[test]
+    fn sorted_times_stays_sorted_and_deduplicates() {
+        let mut t = SortedTimes::new();
+        for v in [5.0, -3.0, 5.0, 1.0, 0.0] {
+            t.insert(td(v));
+        }
+        assert_eq!(t.as_vec().iter().map(|x| x.to_seconds()).collect::<Vec<_>>(),
+                   vec![-3.0, 0.0, 1.0, 5.0]);
+        assert!(t.has(td(1.0)));
+        assert!(!t.has(td(2.0)));
+    }
+
+    /// The old implementation keyed on `f64::to_bits`, so these landed in two slots.
+    #[test]
+    fn negative_zero_is_the_same_key_as_zero() {
+        let mut t = SortedTimes::new();
+        t.insert(td(0.0));
+        t.insert(td(-0.0));
+        assert_eq!(t.len(), 1);
+
+        let mut m: TimeMap<f64> = TimeMap::new();
+        m.insert(td(-0.0), 1.0);
+        m.insert(td(0.0), 2.0);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m.get(td(0.0)), Some(&2.0));
+    }
+
+    #[test]
+    fn lookups_bracket_correctly() {
+        let mut t = SortedTimes::new();
+        for v in [0.0, 10.0, 20.0] { t.insert(td(v)); }
+
+        assert_eq!(t.get_at_or_before(td(10.0)).map(|x| x.to_seconds()), Some(10.0));
+        assert_eq!(t.get_at_or_before(td(15.0)).map(|x| x.to_seconds()), Some(10.0));
+        assert_eq!(t.get_at_or_before(td(-1.0)), None);
+
+        assert_eq!(t.get_before(td(10.0)).map(|x| x.to_seconds()), Some(0.0));
+        assert_eq!(t.get_before(td(0.0)), None);
+
+        assert_eq!(t.get_index_after(td(-1.0)), 0);
+        assert_eq!(t.get_index_after(td(10.0)), 2);
+        assert_eq!(t.get_index_after(td(99.0)), 3);
+
+        let (a, b) = t.get_pair_that_surrounds(td(15.0)).unwrap();
+        assert_eq!((a.to_seconds(), b.to_seconds()), (10.0, 20.0));
+        assert!(t.get_pair_that_surrounds(td(25.0)).is_none());
+        assert!(t.get_pair_that_surrounds(td(-1.0)).is_none());
+    }
+
+    #[test]
+    fn interpolates_between_samples() {
+        let mut m: TimeMap<f64> = TimeMap::new();
+        m.insert(td(0.0), 0.0);
+        m.insert(td(10.0), 100.0);
+        assert_eq!(m.get_lerp(td(0.0)), Some(0.0));
+        assert_eq!(m.get_lerp(td(10.0)), Some(100.0));
+        assert_eq!(m.get_lerp(td(2.5)), Some(25.0));
+        assert_eq!(m.get_lerp(td(11.0)), None);
+    }
+
+    #[test]
+    fn cycle_fraction_wraps_in_both_directions() {
+        let p = Periodicity {
+            interval_start: Instant::from_seconds_since_j2000(100.0),
+            interval_size: TimeDelta::from_seconds(10.0),
+        };
+        assert_eq!(p.cycle_fraction(Instant::from_seconds_since_j2000(100.0)), 0.0);
+        assert_eq!(p.cycle_fraction(Instant::from_seconds_since_j2000(105.0)), 0.5);
+        assert_eq!(p.cycle_fraction(Instant::from_seconds_since_j2000(115.0)), 0.5);
+        // Before the start must still land in [0, 1).
+        assert_eq!(p.cycle_fraction(Instant::from_seconds_since_j2000(95.0)), 0.5);
+    }
+
+    #[test]
+    fn remove_after_past_the_end_is_empty() {
+        let mut t = SortedTimes::new();
+        t.insert(td(1.0));
+        assert!(t.remove_after(5).is_empty());
+        assert_eq!(t.len(), 1);
     }
 }

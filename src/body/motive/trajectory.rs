@@ -9,7 +9,7 @@ use em_sim::motive::kepler::KeplerMotive;
 use crate::body::motive::info::{BodyInfo, BodyState};
 use crate::sim::{BodySelection, CalculateTrajectory, SimTime};
 use crate::body::universe::save::{UniversePhysics, ViewSettings};
-use em_foundations::time::Instant;
+use em_foundations::time::{Instant, TimeDelta};
 use em_sim::time_map::TimeMap;
 use bevy_egui::egui::Ui;
 
@@ -75,11 +75,10 @@ pub fn calculate_trajectory(
             }
 
             for i in 0..=view_settings.trajectory_resolution {
-                let relative_time = (i as f64 / view_settings.trajectory_resolution as f64) * period.to_seconds();
-                let absolute_time = Instant::from_seconds_since_j2000(periapsis_time.to_j2000_seconds() + relative_time);
-                let displacement = kepler_motive.displacement(absolute_time, mu);
+                let relative_time = period * (i as f64 / view_settings.trajectory_resolution as f64);
+                let displacement = kepler_motive.displacement(periapsis_time + relative_time, mu);
                 if let Some(displacement) = displacement {
-                    map.insert(relative_time, displacement); // Store using relative time as key
+                    map.insert(relative_time, displacement); // keyed by offset from periapsis
                 }
             }
         }
