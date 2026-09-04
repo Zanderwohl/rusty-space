@@ -231,6 +231,28 @@ pub static MIGRATIONS: &[Migration] = &[
             ALTER TABLE sim_time_new RENAME TO sim_time;
         "#,
     },
+    Migration {
+        description: "Add anomalistic_period to motive_keplerian",
+        up: r#"
+            -- Mean anomaly is measured from periapsis, so when periapsis precesses it
+            -- advances at the anomalistic rate rather than the sidereal one Kepler's
+            -- third law gives from the semi-major axis. NULL keeps the derived rate,
+            -- which is correct for any orbit whose apsides are fixed.
+            ALTER TABLE motive_keplerian ADD COLUMN anomalistic_period REAL;
+        "#,
+        down: r#"
+            CREATE TABLE motive_keplerian_new AS
+                SELECT motive_id, primary_id, shape_type, eccentricity, semi_major_axis,
+                       periapsis, apoapsis, rotation_type, inclination,
+                       longitude_of_ascending_node, argument_of_periapsis,
+                       apsidal_precession_period, nodal_precession_period,
+                       longitude_of_periapsis, epoch_type, epoch_julian_day,
+                       mean_anomaly, true_anomaly, periapsis_time_julian_day
+                FROM motive_keplerian;
+            DROP TABLE motive_keplerian;
+            ALTER TABLE motive_keplerian_new RENAME TO motive_keplerian;
+        "#,
+    },
 ];
 
 /// Get the current program version (number of migrations available)

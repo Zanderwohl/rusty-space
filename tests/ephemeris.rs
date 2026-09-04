@@ -178,3 +178,55 @@ fn report_ephemeris_error() {
     }
     println!();
 }
+
+/// Semi-major axis must be the real one, so radii read off it are right.
+///
+/// Before `anomalistic_period` existed, a precessing orbit had to smuggle its mean
+/// motion into `a` — Kepler's third law gives the sidereal rate, but mean anomaly
+/// advances at the anomalistic rate once periapsis moves. Luna's fitted `a` came out
+/// 386 931 km against a true mean of 384 370 km, so every radius derived from it, the
+/// apsides included, was 0.66% high.
+#[test]
+fn lunar_apsides_are_physical() {
+    let contents = solar_system();
+    let luna = contents.bodies.iter().find_map(|b| match b {
+        SomeBody::KeplerEntry(k) if k.info.id == "luna" => Some(k),
+        _ => None,
+    }).expect("luna");
+
+    let a = luna.params.semi_major_axis();
+    let peri = luna.params.periapsis();
+    let apo = luna.params.apoapsis().expect("closed orbit");
+
+    // Mean perigee 363 300 km, mean apogee 405 500 km, mean a 384 400 km.
+    let km = |m: f64| m / 1000.0;
+    assert!((km(a) - 384_400.0).abs() < 1_000.0, "semi-major axis {} km", km(a));
+    assert!((km(peri) - 363_300.0).abs() < 2_000.0, "perigee {} km", km(peri));
+    assert!((km(apo) - 405_500.0).abs() < 2_000.0, "apogee {} km", km(apo));
+    assert!(peri < a && a < apo);
+}
+
+/// The anomalistic period must actually drive the mean anomaly. If it were ignored,
+/// Kepler's third law would give the sidereal month instead — a 1% rate error.
+#[test]
+fn luna_advances_at_the_anomalistic_rate() {
+    let contents = solar_system();
+    let g = contents.physics.gravitational_constant;
+    let mass_of = |id: &str| contents.bodies.iter().find_map(|b| match b {
+        SomeBody::KeplerEntry(k) if k.info.id == id => Some(k.info.mass),
+        _ => None,
+    }).unwrap();
+    let luna = contents.bodies.iter().find_map(|b| match b {
+        SomeBody::KeplerEntry(k) if k.info.id == "luna" => Some(k),
+        _ => None,
+    }).unwrap();
+
+    let mu = g * (mass_of("earth") + luna.info.mass);
+    let n = luna.params.mean_angular_motion(mu); // rad/s
+    let period_days = std::f64::consts::TAU / n / 86400.0;
+
+    assert!((period_days - 27.554533).abs() < 1e-3,
+        "mean anomaly should advance at the anomalistic month (27.5545 d), got {period_days:.6} d");
+    assert!((period_days - 27.321661).abs() > 0.1,
+        "and must NOT be the sidereal month (27.3217 d)");
+}

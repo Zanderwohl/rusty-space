@@ -386,12 +386,12 @@ pub fn solar_system() -> UniverseFileContents {
                         primary_id: "earth".to_string(),
                         // Mean elements fitted by least squares to 3653 JPL Horizons
                         // geocentric ecliptic positions at 5-day cadence, 2000-2050.
-                        // RMS 7 989 km, max 15 556 km — about 1.2 deg, which is the floor
+                        // RMS 7 563 km, max 15 134 km — about 1.2 deg, which is the floor
                         // for any precessing-ellipse model of the Moon (evection alone is
                         // 1.27 deg and is not representable here).
                         //
-                        // The previous values mixed sources and were wrong three ways:
-                        //   - M0 was 5.93 deg off, giving 6.6 deg of error at the epoch itself
+                        // The original values mixed sources and were wrong three ways:
+                        //   - M0 was 5.93 deg off, giving 6.6 deg of error at the epoch
                         //   - the period came out as the SIDEREAL month; with a precessing
                         //     periapsis, mean anomaly advances at the ANOMALISTIC rate
                         //   - apsidal_precession_period held the 8.85 yr precession of the
@@ -399,29 +399,28 @@ pub fn solar_system() -> UniverseFileContents {
                         //     periapsis, measured from the (regressing) node
                         // See docs/horizons-golden-vectors.md for the fitting procedure.
                         shape: KeplerShape::EccentricitySMA(EccentricitySMA {
-                            eccentricity: 0.0545733937,
-                            // NOT the true mean semi-major axis (384 400 km). The model derives
-                            // mean motion as sqrt(mu/a^3), so with a precessing periapsis `a`
-                            // has to carry the anomalistic rate instead of the true scale.
-                            // This inflates it by 0.66%, and radii read 0.66% high.
-                            // TODO(phase 3): give the precessing rotation its own mean-motion
-                            // field so `a` can go back to 384 370 km. Measured gain is small
-                            // (RMS 7 989 -> 7 563 km); the point is that `a` would mean what
-                            // it says, and periapsis/apoapsis readouts would be correct.
-                            semi_major_axis: 386931.0849 * 1000.0, // gives P = 27.554525 d
+                            eccentricity: 0.0548131627,
+                            // The true mean value. It can be honest here because
+                            // `anomalistic_period` below carries the rate; before that
+                            // field existed `a` had to encode it and came out 0.66% high.
+                            semi_major_axis: 384370.0252 * 1000.0,
                         }),
                         rotation: KeplerRotation::PrecessingEulerAngles(KeplerPrecessingEulerAngles {
-                            inclination: 5.1450041826,          // mean, not the 5.24 osculating at J2000
-                            longitude_of_ascending_node: 125.0636775505,
-                            argument_of_periapsis: 318.5214307952,
+                            inclination: 5.1457887442,          // mean, not the 5.24 osculating at J2000
+                            longitude_of_ascending_node: 125.0580112298,
+                            argument_of_periapsis: 318.3781176006,
                             // omega advances at d(varpi)/dt - d(Omega)/dt = 0.1114 + 0.0530
                             // = 0.1643 deg/d, i.e. 2190 d — not the 3232 d (8.85 yr) period
                             // of the longitude of perihelion.
-                            apsidal_precession_period: TimeDelta::from_days(2190.5083196467),
-                            nodal_precession_period: TimeDelta::from_days(-6793.4662703353), // retrograde, ~18.6 yr
+                            apsidal_precession_period: TimeDelta::from_days(2190.4378062869),
+                            nodal_precession_period: TimeDelta::from_days(-6793.2680938670), // retrograde, ~18.6 yr
+                            // The anomalistic month, 27.5545 d. Kepler's third law would
+                            // give the sidereal month, 27.3217 d, which is the wrong
+                            // quantity once periapsis precesses.
+                            anomalistic_period: Some(TimeDelta::from_days(27.554533)),
                         }),
                         epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
-                            mean_anomaly: 134.7309316978,
+                            mean_anomaly: 134.8840397530,
                         }),
                     },
                     appearance: Appearance::DebugBall(DebugBall {

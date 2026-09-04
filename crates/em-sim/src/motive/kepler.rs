@@ -127,17 +127,29 @@ impl KeplerMotive {
         TimeDelta::from_seconds(period::third_law(self.semi_major_axis(), gravitational_parameter))
     }
 
+    /// Rate at which the mean anomaly advances, in rad/s.
+    ///
+    /// Mean anomaly is measured from periapsis. When periapsis is fixed that is the
+    /// sidereal rate, and Kepler's third law gives it from the semi-major axis. When
+    /// periapsis precesses it is the *anomalistic* rate, which is a genuinely
+    /// independent quantity — so a precessing orbit may carry its own period, and this
+    /// prefers that when present.
     pub fn mean_angular_motion(&self, gravitational_parameter: f64) -> f64 {
-        angular_motion::mean(gravitational_parameter, self.semi_major_axis())
+        match self.rotation.anomalistic_period() {
+            Some(period) if period.to_seconds() != 0.0 => {
+                std::f64::consts::TAU / period.to_seconds()
+            }
+            _ => angular_motion::mean(gravitational_parameter, self.semi_major_axis()),
+        }
     }
 
     /// Returns mean anomaly at the given time in radians.
     pub fn mean_anomaly(&self, time: Instant, gravitational_parameter: f64) -> f64 {
         // mean_anomaly_at_epoch is stored in degrees; convert to radians for the math
         let mean_anomaly_at_epoch_rad = self.epoch.mean_anomaly_at_epoch().to_radians();
-        let sma = self.shape.semi_major_axis();
-        let epoch_time = self.epoch.epoch();
-        mean_anomaly::definition(mean_anomaly_at_epoch_rad, gravitational_parameter, sma, epoch_time.to_j2000_seconds(), time.to_j2000_seconds())
+        let n = self.mean_angular_motion(gravitational_parameter);
+        let dt = (time - self.epoch.epoch()).to_seconds();
+        mean_anomaly_at_epoch_rad + n * dt
     }
 
     pub fn true_anomaly(&self, time: Instant, gravitational_parameter: f64) -> f64 {
@@ -355,6 +367,18 @@ impl KeplerRotation {
         self.longitude_of_ascending_node(time_since_epoch).unwrap_or(0.0) + self.argument_of_periapsis(time_since_epoch)
     }
 
+    /// An explicitly specified anomalistic period, when precession makes the mean
+    /// anomaly advance at a rate the semi-major axis cannot supply.
+    ///
+    /// `None` for the non-precessing variants, where sidereal and anomalistic coincide
+    /// and Kepler's third law is exactly right.
+    pub fn anomalistic_period(&self) -> Option<TimeDelta> {
+        match self {
+            KeplerRotation::EulerAngles(_) | KeplerRotation::FlatAngles(_) => None,
+            KeplerRotation::PrecessingEulerAngles(pea) => pea.anomalistic_period,
+        }
+    }
+
     pub fn argument_of_periapsis(&self, time_since_epoch: TimeDelta) -> f64 {
         match self {
             KeplerRotation::EulerAngles(ea) => ea.argument_of_periapsis,
@@ -389,6 +413,16 @@ pub struct KeplerPrecessingEulerAngles {
     /// Negative is retrograde, which is the usual case.
     #[serde(deserialize_with = "legacy_time_length")]
     pub nodal_precession_period: TimeDelta,
+    /// Period for one full turn of the mean anomaly, measured from the *precessing*
+    /// periapsis — the anomalistic period.
+    ///
+    /// `None` derives the rate from the semi-major axis via Kepler's third law, which is
+    /// the sidereal rate and therefore wrong whenever periapsis moves. For Luna the two
+    /// differ by 1.0%: 27.5545 d anomalistic against 27.3217 d sidereal. Without this
+    /// field the semi-major axis has to absorb the difference, which inflated Luna's `a`
+    /// by 0.66% and skewed every radius read off it.
+    #[serde(default)]
+    pub anomalistic_period: Option<TimeDelta>,
 }
 
 impl KeplerPrecessingEulerAngles {
