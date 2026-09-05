@@ -431,7 +431,9 @@ pub fn build_trajectory_meshes(
             .collect();
 
         if let Some(mesh_asset) = meshes.get_mut(&mesh3d.0) {
-            *mesh_asset = generate_tube_mesh(&vertices, TUBE_SIDES);
+            // The samples are in perifocal space, so the orbit's plane normal is the
+            // render image of simulation +Z.
+            *mesh_asset = generate_tube_mesh(&vertices, TUBE_SIDES, Some(DVec3::Z.to_render()));
         }
 
         cache.mesh_dirty = false;
@@ -1027,12 +1029,25 @@ fn orbit_phase(current_time: f64, interval_start: Option<f64>, interval_size: Op
 /// factor (baked into vertex alpha) and `amplitude` is a per-vertex brightness scale
 /// such as distance dimming (baked into vertex rgb). The shader turns these into the
 /// final brightness using the material's front/back/exposure uniforms.
-pub fn generate_tube_mesh(points: &[(Vec3, f32, f32, f32)], sides: u32) -> Mesh {
+/// `plane_normal` is the normal of the plane the curve lies in, if it lies in one. Passing
+/// it is what keeps the tube from pinching; see [`ring_basis`].
+pub fn generate_tube_mesh(
+    points: &[(Vec3, f32, f32, f32)],
+    sides: u32,
+    plane_normal: Option<Vec3>,
+) -> Mesh {
     if points.len() < 2 {
         return empty_trajectory_mesh();
     }
     
     let ring_count = points.len();
+
+    // A closed orbit is sampled at both ends of its period, so the last point sits on the
+    // first. Wrapping the tangent difference across that join gives those two rings the
+    // same frame, and the tube meets itself instead of creasing at periapsis.
+    let wraps = ring_count >= 3
+        && (points[0].0 - points[ring_count - 1].0).length_squared()
+            <= 1e-12 * points[0].0.length_squared().max(1.0);
     let verts_per_ring = sides as usize;
     let total_verts = ring_count * verts_per_ring;
     
@@ -1043,7 +1058,11 @@ pub fn generate_tube_mesh(points: &[(Vec3, f32, f32, f32)], sides: u32) -> Mesh 
     
     for (ring_idx, (center, t, amplitude, radius)) in points.iter().enumerate() {
         // Compute tangent direction (forward along the tube)
-        let tangent = if ring_idx == 0 {
+        let tangent = if wraps {
+            let previous = if ring_idx == 0 { ring_count - 2 } else { ring_idx - 1 };
+            let next = if ring_idx == ring_count - 1 { 1 } else { ring_idx + 1 };
+            (points[next].0 - points[previous].0).normalize_or_zero()
+        } else if ring_idx == 0 {
             (points[1].0 - *center).normalize_or_zero()
         } else if ring_idx == ring_count - 1 {
             (*center - points[ring_idx - 1].0).normalize_or_zero()
@@ -1052,7 +1071,7 @@ pub fn generate_tube_mesh(points: &[(Vec3, f32, f32, f32)], sides: u32) -> Mesh 
         };
         
         // Find perpendicular vectors to form the ring plane
-        let (perp1, perp2) = perpendicular_vectors(tangent);
+        let (perp1, perp2) = ring_basis(tangent, plane_normal);
         
         // Generate ring vertices with per-point radius
         for i in 0..sides {
@@ -1106,6 +1125,32 @@ pub fn generate_tube_mesh(points: &[(Vec3, f32, f32, f32)], sides: u32) -> Mesh 
 }
 
 /// Find two perpendicular vectors to form a plane orthogonal to the given direction.
+/// The orthonormal pair spanning one ring of a tube.
+///
+/// For a curve that lies in a known plane — every Keplerian orbit does, in perifocal
+/// space — the plane's normal anchors the frame: `perp1` stays in the plane and `perp2`
+/// along the normal, so consecutive rings agree and the frame returns to itself around a
+/// closed orbit.
+///
+/// Without that anchor the frame comes from [`perpendicular_vectors`], which picks
+/// whichever axis is least parallel to the tangent. That both drifts continuously along
+/// the tube and jumps outright when the choice of axis flips, which on an ellipse happens
+/// several times per revolution — the visible kink where a ring's vertices suddenly
+/// reorder.
+fn ring_basis(tangent: Vec3, plane_normal: Option<Vec3>) -> (Vec3, Vec3) {
+    if let Some(normal) = plane_normal {
+        let perp1 = tangent.cross(normal);
+        // Degenerate only if the tangent left the plane, which a planar curve's cannot.
+        if perp1.length_squared() > 1e-12 {
+            let perp1 = perp1.normalize();
+            // Same handedness as the fallback below, so winding and outward normals are
+            // unchanged.
+            return (perp1, tangent.cross(perp1).normalize_or_zero());
+        }
+    }
+    perpendicular_vectors(tangent)
+}
+
 fn perpendicular_vectors(dir: Vec3) -> (Vec3, Vec3) {
     // Choose a vector that's not parallel to dir
     let not_parallel = if dir.x.abs() < 0.9 {
@@ -1164,11 +1209,99 @@ pub fn cleanup_orphaned_trajectory_meshes(
 
 #[cfg(test)]
 mod tests {
-    use super::orbit_phase;
+    use super::{generate_tube_mesh, orbit_phase, ring_basis, TUBE_SIDES};
+    use bevy::prelude::*;
+    use bevy_mesh::VertexAttributeValues;
 
-    /// The shader's half of the pair: `t` for a vertex baked at `phase`.
+    /// The shader's half of the phase pair: `t` for a vertex baked at `phase`.
     fn wrapped_t(phase: f32, phase_now: f32) -> f32 {
         (phase - phase_now).rem_euclid(1.0)
+    }
+
+    fn angle_between(a: Vec3, b: Vec3) -> f32 {
+        a.normalize().dot(b.normalize()).clamp(-1.0, 1.0).acos()
+    }
+
+    /// Tangents around one revolution of an orbit lying in the XZ plane, which is where
+    /// perifocal space puts it once converted to render space.
+    fn tangent_at(step: usize, steps: usize) -> Vec3 {
+        let a = step as f32 / steps as f32 * std::f32::consts::TAU;
+        Vec3::new(a.cos(), 0.0, a.sin())
+    }
+
+    /// The ring frame turns with the curve and nothing else. Anchored to the orbital
+    /// plane it tracks the sampling step; left to pick its own axis it jumps 90 degrees
+    /// between adjacent rings where the choice of axis flips, which is the pinch.
+    #[test]
+    fn the_ring_frame_follows_the_curve_instead_of_jumping() {
+        let steps = 720;
+        let step_angle = std::f32::consts::TAU / steps as f32;
+        let (mut worst_anchored, mut worst_free) = (0.0f32, 0.0f32);
+        for i in 0..steps {
+            let (a, _) = ring_basis(tangent_at(i, steps), Some(Vec3::Y));
+            let (b, _) = ring_basis(tangent_at(i + 1, steps), Some(Vec3::Y));
+            worst_anchored = worst_anchored.max(angle_between(a, b));
+            let (c, _) = ring_basis(tangent_at(i, steps), None);
+            let (d, _) = ring_basis(tangent_at(i + 1, steps), None);
+            worst_free = worst_free.max(angle_between(c, d));
+        }
+        assert!(worst_anchored <= step_angle * 1.01,
+            "anchored frame turned {worst_anchored} between rings a step of {step_angle} apart");
+        assert!(worst_free > 1.0,
+            "the unanchored frame is supposed to be the bad case, but only turned {worst_free}");
+    }
+
+    /// The anchored frame is orthonormal and square to the tangent, with one axis in the
+    /// orbital plane and one along its normal.
+    #[test]
+    fn the_ring_frame_is_orthonormal_and_square_to_the_curve() {
+        for i in 0..64 {
+            let tangent = tangent_at(i, 64);
+            let (perp1, perp2) = ring_basis(tangent, Some(Vec3::Y));
+            assert!((perp1.length() - 1.0).abs() < 1e-5);
+            assert!((perp2.length() - 1.0).abs() < 1e-5);
+            assert!(perp1.dot(tangent).abs() < 1e-5, "perp1 square to the tangent");
+            assert!(perp1.dot(perp2).abs() < 1e-5, "perps square to each other");
+            assert!(perp1.y.abs() < 1e-5, "perp1 stays in the orbital plane");
+            assert!(perp2.x.abs() < 1e-5 && perp2.z.abs() < 1e-5, "perp2 stays along the normal");
+            // Same handedness as the fallback, so winding and outward normals are unchanged.
+            assert!((perp2 - tangent.cross(perp1)).length() < 1e-5);
+        }
+    }
+
+    /// An ellipse sampled at both ends of its period closes on itself, and so must the
+    /// tube: every ring meets its neighbour, including the last meeting the first.
+    #[test]
+    fn a_closed_orbits_tube_meets_itself() {
+        // A sampled ellipse in the plane perifocal space puts the orbit in, with the
+        // duplicated end sample `em_sim::trajectory::sample` produces.
+        let resolution = 120;
+        let points: Vec<(Vec3, f32, f32, f32)> = (0..=resolution)
+            .map(|i| {
+                let a = i as f32 / resolution as f32 * std::f32::consts::TAU;
+                (Vec3::new(3.0 * a.cos(), 0.0, 2.0 * a.sin()), 0.0, 1.0, 0.05)
+            })
+            .collect();
+
+        let mesh = generate_tube_mesh(&points, TUBE_SIDES, Some(Vec3::Y));
+        let Some(VertexAttributeValues::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+        else { panic!("tube mesh must carry normals") };
+
+        // Vertex 0 of each ring sits at angle 0, so its outward normal is that ring's perp1.
+        let sides = TUBE_SIDES as usize;
+        let perp1_of = |ring: usize| Vec3::from_array(normals[ring * sides]);
+
+        let mut worst = 0.0f32;
+        for ring in 0..resolution {
+            worst = worst.max(angle_between(perp1_of(ring), perp1_of(ring + 1)));
+        }
+        // Neighbouring rings on a 120-sample ellipse are ~3 degrees apart; anything
+        // approaching a right angle is the frame flipping rather than the curve turning.
+        assert!(worst < 0.2, "worst turn between neighbouring rings was {worst} rad");
+
+        // The duplicated end sample lands on the first, so their frames must agree exactly.
+        let seam = angle_between(perp1_of(0), perp1_of(resolution));
+        assert!(seam < 1e-4, "the tube creases at periapsis by {seam} rad");
     }
 
     /// Phase advances linearly through the cycle and wraps, and lands back on 0 exactly one
