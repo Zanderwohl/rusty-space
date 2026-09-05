@@ -202,6 +202,20 @@ impl System {
         self.local_position[i.get()]
     }
     #[inline] pub fn parent(&self, i: BodyIndex) -> Option<BodyIndex> { self.parent[i.get()] }
+
+    /// Bodies whose primary is `i`, in index order.
+    ///
+    /// A scan of the derived parent column rather than a stored index: one more column to
+    /// rebuild is one more column to get wrong, and this is a few hundred comparisons.
+    pub fn children_of(&self, i: BodyIndex) -> impl Iterator<Item = BodyIndex> + '_ {
+        self.indices().filter(move |&c| self.parent[c.get()] == Some(i))
+    }
+
+    /// Bodies with no primary.
+    pub fn roots(&self) -> impl Iterator<Item = BodyIndex> + '_ {
+        self.indices().filter(move |&c| self.parent[c.get()].is_none())
+    }
+
     /// G(M_primary + M_body) for a Keplerian body.
     #[inline] pub fn mu(&self, i: BodyIndex) -> f64 { self.mu[i.get()] }
 

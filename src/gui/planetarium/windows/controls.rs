@@ -139,6 +139,12 @@ pub fn planetarium_controls(
         ui.checkbox(&mut view_settings.show_trajectories, "");
     });
 
+    ui.horizontal(|ui| {
+        ui.label("Spheres of Influence");
+        ui.checkbox(&mut view_settings.show_spheres_of_influence, "");
+        ui.checkbox(&mut view_settings.show_child_spheres_of_influence, "Children");
+    });
+
     for (tag_name, tag_state) in &mut view_settings.tags {
         ui.horizontal(|ui| {
             ui.label(tag_name);

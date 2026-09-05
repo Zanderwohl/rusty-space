@@ -305,6 +305,21 @@ pub static MIGRATIONS: &[Migration] = &[
             ALTER TABLE motive_keplerian_new RENAME TO motive_keplerian;
         "#,
     },
+    // Version 6 -> 7: sphere-of-influence visibility, plus the `show_axes` column that
+    // was never added. `show_axes` reached `ViewSettings` without a migration, so the
+    // loader hardcoded it and the saver skipped it — the toggle silently reset on every
+    // load. Giving it a column here fixes that alongside the new pair.
+    Migration {
+        description: "Add sphere-of-influence and axis visibility columns to view_settings",
+        up: r#"
+            ALTER TABLE view_settings ADD COLUMN show_axes INTEGER NOT NULL DEFAULT 1;
+            ALTER TABLE view_settings ADD COLUMN show_spheres_of_influence INTEGER NOT NULL DEFAULT 1;
+            ALTER TABLE view_settings ADD COLUMN show_child_spheres_of_influence INTEGER NOT NULL DEFAULT 1;
+        "#,
+        down: r#"
+            -- SQLite cannot drop columns directly; keep columns for rollback compatibility.
+        "#,
+    },
 ];
 
 /// Get the current program version (number of migrations available)

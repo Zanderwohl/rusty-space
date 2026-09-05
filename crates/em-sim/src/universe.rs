@@ -90,6 +90,13 @@ pub struct ViewSettings {
     pub show_selected_trajectories: bool,
     #[serde(default = "default_show_axes")]
     pub show_axes: bool,
+    /// Draw the focused body's sphere of influence.
+    #[serde(default = "default_true")]
+    pub show_spheres_of_influence: bool,
+    /// Also draw the spheres of the focused body's direct children, so a transfer to a
+    /// moon is visible before it is flown.
+    #[serde(default = "default_true")]
+    pub show_child_spheres_of_influence: bool,
     pub tags: HashMap<String, TagState>,
     pub trajectory_resolution: usize,
 }
@@ -108,6 +115,8 @@ impl Default for ViewSettings {
             show_selected_labels: true,
             show_selected_trajectories: true,
             show_axes: true,
+            show_spheres_of_influence: true,
+            show_child_spheres_of_influence: true,
             tags: HashMap::new(),
             trajectory_resolution: 120,
         }
