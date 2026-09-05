@@ -46,6 +46,7 @@ impl Plugin for PlanetariumUI {
             .init_resource::<SimMetrics>()
             .init_resource::<StarLightingFrameCache>()
             .init_resource::<windows::right_panels::RightPanels>()
+            .init_resource::<windows::body_panel::BodyPickerState>()
             .add_message::<CalculateTrajectory>()
             .configure_sets(Update, (
                 PlanetariumUISet.run_if(in_state(AppState::Planetarium)),
@@ -63,8 +64,8 @@ impl Plugin for PlanetariumUI {
                 (
                     windows::mission_clock::mission_clock_widget,
                     windows::controls::control_window,
-                    windows::body_edit::body_edit_window,
-                    windows::body_info::body_info_window,
+                    windows::body_panel::viewer_window,
+                    windows::body_panel::editor_window,
                     windows::settings::settings_window,
                     windows::spin::spin_window,
                     windows::show_hide_panel::show_hide_panel_widget,

@@ -49,8 +49,8 @@ impl Default for RightPanels {
     fn default() -> Self {
         Self {
             panels: vec![
-                RightPanel { open: false, name: "Body Info".to_string(), abbr: "I".to_string() },
-                RightPanel { open: false, name: "Body Edit".to_string(), abbr: "E".to_string() },
+                RightPanel { open: false, name: "Viewer".to_string(), abbr: "V".to_string() },
+                RightPanel { open: false, name: "Editor".to_string(), abbr: "E".to_string() },
                 RightPanel { open: false, name: "One Letter".to_string(), abbr: "A".to_string() },
                 RightPanel { open: false, name: "Two Letters".to_string(), abbr: "AB".to_string() },
                 RightPanel { open: false, name: "Three Letters".to_string(), abbr: "ABC".to_string() },

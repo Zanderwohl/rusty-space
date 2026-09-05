@@ -232,6 +232,18 @@ impl System {
         &mut self.info[i.get()]
     }
 
+    /// Mutable appearance. Nothing derived depends on it — radius reaches the renderer
+    /// through `radius`, read every frame — so this does not mark the arena dirty.
+    pub fn appearance_mut(&mut self, i: BodyIndex) -> &mut Appearance {
+        &mut self.appearance[i.get()]
+    }
+
+    /// Mutable rotation, for a body that has one. Orientation is presentation-only, so
+    /// like `appearance_mut` this leaves the derived columns alone.
+    pub fn rotation_mut(&mut self, i: BodyIndex) -> Option<&mut BodyRotation> {
+        self.rotations[i.get()].as_mut()
+    }
+
     pub fn set_rotation(&mut self, i: BodyIndex, rotation: Option<BodyRotation>) {
         self.rotations[i.get()] = rotation;
     }
