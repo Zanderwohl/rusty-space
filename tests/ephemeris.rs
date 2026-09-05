@@ -355,9 +355,12 @@ fn moons_orbit_inside_their_primarys_hill_sphere() {
         let Some(pe) = primary_entry else { continue };
         let (sun_mass, _) = get("Sol").unwrap();
 
-        let hill = pe.params.semi_major_axis()
-            * (1.0 - pe.params.eccentricity())
-            * (primary_mass / (3.0 * sun_mass)).cbrt();
+        let hill = em_foundations::patched_conics::hill_at_periapsis(
+            pe.params.semi_major_axis(),
+            pe.params.eccentricity(),
+            primary_mass,
+            sun_mass,
+        );
         let apo = k.params.apoapsis().unwrap_or(f64::INFINITY);
         assert!(apo < hill,
             "{} reaches {:.3e} m from {}, outside its {:.3e} m Hill sphere",

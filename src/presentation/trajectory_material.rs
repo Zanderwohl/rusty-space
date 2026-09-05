@@ -60,6 +60,24 @@ pub struct TrajectoryMaterial {
     #[uniform(0)]
     pub glow_gain: f32,
 
+    /// Where the body currently sits along its own sampled cycle, as a fraction in
+    /// `0..1`. Only read when `phase_wrap` is set; updating it is how the bright hotspot
+    /// tracks the body without touching a single vertex.
+    #[uniform(0)]
+    pub phase_now: f32,
+
+    /// When > 0.5, vertex alpha is a *static* along-orbit phase and the shader derives
+    /// `t` from it as `fract(phase - phase_now)`. When 0, vertex alpha is `t` itself —
+    /// which is what open trajectories and markers bake.
+    #[uniform(0)]
+    pub phase_wrap: f32,
+
+    /// When > 0.5, the shader computes distance dimming from each vertex's range to the
+    /// camera. When 0, the per-vertex amplitude in vertex rgb is used unchanged, so
+    /// markers stay at full brightness however far away they are.
+    #[uniform(0)]
+    pub distance_dim: f32,
+
     /// Alpha blending mode
     pub alpha_mode: AlphaMode,
 }
@@ -77,6 +95,9 @@ impl Default for TrajectoryMaterial {
             back: 1.0,
             exposure: 0.0,
             glow_gain: 1.0,
+            phase_now: 0.0,
+            phase_wrap: 0.0,
+            distance_dim: 0.0,
             alpha_mode: AlphaMode::Blend,
         }
     }

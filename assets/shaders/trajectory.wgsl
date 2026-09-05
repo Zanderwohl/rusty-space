@@ -23,6 +23,7 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) world_position: vec4<f32>,
     @location(1) world_normal: vec3<f32>,
+    @location(2) distance_dim: f32,
     @location(5) color: vec4<f32>,
 }
 
@@ -38,7 +39,17 @@ struct TrajectoryMaterialUniform {
     back: f32,
     exposure: f32,
     glow_gain: f32,
+    phase_now: f32,
+    phase_wrap: f32,
+    distance_dim: f32,
 }
+
+// Distance (bevy metres) at/below which trajectories are at full brightness, and the
+// falloff past it. These live here rather than on the CPU: baking dimming into vertices
+// meant every camera move rebuilt the mesh.
+const DISTANCE_DIM_REF: f32 = 5.0;
+const DISTANCE_DIM_POWER: f32 = 0.4;
+const DISTANCE_DIM_MIN: f32 = 0.01;
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: TrajectoryMaterialUniform;
 
@@ -85,7 +96,16 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // Transform normal to world space
     out.world_normal = mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex.instance_index);
     
-    // Pass through vertex color (contains brightness in alpha)
+    // Distance dimming, from the same range the thickness curve above already measured.
+    // This used to be baked into vertex rgb on the CPU, which meant every camera move
+    // rebuilt the mesh.
+    out.distance_dim = select(
+        1.0,
+        max(pow(DISTANCE_DIM_REF / max(distance_from_origin, 0.000001), DISTANCE_DIM_POWER), DISTANCE_DIM_MIN),
+        distance_from_origin > DISTANCE_DIM_REF
+    );
+
+    // Pass through vertex color (contains brightness or phase in alpha)
     out.color = vertex.color;
     
     return out;
@@ -96,13 +116,17 @@ const NEAR_FADE_DISTANCE: f32 = 1.0;
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Vertex color carries two per-vertex factors:
-    //   alpha = along-length lerp factor t (0..1)
-    //   rgb   = per-vertex amplitude (e.g. distance dimming); 1.0 = no attenuation
+    //   alpha = along-length lerp factor t (0..1), or a static phase when phase_wrap is set
+    //   rgb   = per-vertex amplitude; superseded by the shader's own dimming when
+    //           distance_dim is set. 1.0 = no attenuation
     // Final brightness lerps front->back by t, scaled by amplitude and exposure.
     // Markers bake a final brightness into alpha and use the identity range
     // (front=0, back=1, exposure=0), so mix(0, 1, alpha) == alpha leaves them unchanged.
-    let t = in.color.a;
-    let amp = in.color.r;
+    // Vertex alpha is either `t` itself or a static along-orbit phase; `phase_wrap` says
+    // which. Deriving `t` per fragment is also what puts the dark->bright seam exactly at
+    // the body, with no help from the geometry.
+    let t = select(in.color.a, fract(in.color.a - material.phase_now), material.phase_wrap > 0.5);
+    let amp = select(in.color.r, in.distance_dim, material.distance_dim > 0.5);
     var brightness = mix(material.front, material.back, t) * amp * pow(2.0, -material.exposure) * material.glow_gain;
 
     // Per-fragment near-fade: smooth fade by distance² below 1 bevy meter

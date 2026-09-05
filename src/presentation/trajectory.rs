@@ -79,15 +79,12 @@ pub struct TrajectoryCache {
     /// Simulation time (J2000 seconds) when trajectory was last rebuilt.
     /// Used to trigger periodic rebuilds for precessing orbits.
     pub last_rebuild_time: f64,
-    /// Whether the mesh needs to be regenerated (set true when cache, camera, or time changes).
+    /// Whether the mesh needs to be regenerated. The geometry is in mesh-local perifocal
+    /// space and does not depend on the clock or the camera, so this is set only when the
+    /// sampled points themselves change.
     pub mesh_dirty: bool,
-    /// Last camera position (cheated bevy space) used for mesh generation.
-    pub last_camera_pos: Option<DVec3>,
-    /// Last simulation time (J2000 seconds) used for mesh generation.
-    pub last_mesh_time: f64,
-    /// Scratch buffer for working points during mesh generation.
-    /// Reused each frame to avoid repeated allocations.
-    working_points: Vec<(f64, DVec3)>,
+    /// World scale the geometry was baked at. The only other thing that can invalidate it.
+    pub last_distance_scale: Option<f64>,
 }
 
 pub fn build_working_trajectory_points(
@@ -128,14 +125,8 @@ const RADIUS_SCALE_POWER: f32 = 0.75;
 /// ~0.001 rad ≈ 1-2 pixels on typical displays.
 const MIN_ANGULAR_SIZE: f32 = 0.0005;
 
-/// Distance (bevy meters) at/below which trajectories are at full brightness.
-const DISTANCE_DIM_REF: f32 = 5.0;
-
-/// Power for distance-based dimming. Lower = more gradual fade over distance.
-const DISTANCE_DIM_POWER: f32 = 0.4;
-
-/// Minimum dimming factor - distant trajectories never go fully invisible.
-const DISTANCE_DIM_MIN: f32 = 0.01;
+// Distance-based dimming now lives entirely in `trajectory.wgsl` (DISTANCE_DIM_*), so
+// that a camera move no longer invalidates any geometry.
 
 /// Build an empty mesh that still declares the vertex layout required by
 /// `trajectory.wgsl` (position, normal, color). This prevents pipeline
@@ -185,8 +176,11 @@ pub fn spawn_trajectory_mesh(
     let mesh = empty_trajectory_mesh();
     let mesh_handle = meshes.add(mesh);
     
-    let material = TrajectoryMaterial::default();
-    let material_handle = materials.add(material);
+    // Trajectory tubes dim with range; markers do not.
+    let material_handle = materials.add(TrajectoryMaterial {
+        distance_dim: 1.0,
+        ..Default::default()
+    });
     
     commands.spawn((
         Mesh3d(mesh_handle),
@@ -293,8 +287,16 @@ pub fn refresh_precessing_trajectories() {}
 pub fn build_trajectory_meshes(
     bodies: Query<&BodyRef>,
     system: Res<SimSystem>,
-    mut trajectory_meshes: Query<(&TrajectoryMesh, &mut TrajectoryCache, &mut Visibility, &Mesh3d, &mut Transform)>,
+    mut trajectory_meshes: Query<(
+        &TrajectoryMesh,
+        &mut TrajectoryCache,
+        &mut Visibility,
+        &Mesh3d,
+        &MeshMaterial3d<TrajectoryMaterial>,
+        &mut Transform,
+    )>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<TrajectoryMaterial>>,
     view_settings: Res<ViewSettings>,
     focused_body_state: Res<FocusedBodyState>,
     hover_state: Res<HoverState>,
@@ -303,18 +305,15 @@ pub fn build_trajectory_meshes(
 ) {
     let distance_scale = view_settings.distance_factor();
     let camera_pos = fcam.bevy_pos;
-    // Brightness (front/back range + exposure) is applied live in the shader via
-    // material uniforms; the mesh only bakes the geometric along-length factor `t`
-    // and per-vertex distance dimming.
+    // The mesh bakes only what is genuinely static about an orbit: its shape in
+    // mesh-local perifocal space and each vertex's phase along it. Everything that moves
+    // — the primary's position and the precession (transform), the body's phase and the
+    // brightness range (uniforms), distance dimming (vertex shader) — is applied without
+    // touching a vertex, so the clock advancing and the camera moving both cost nothing.
 
-    for (traj_mesh, mut cache, mut visibility, mesh3d, mut transform) in trajectory_meshes.iter_mut() {
-        // Compensate for camera movement since last mesh rebuild so the
-        // trajectory tracks bodies even when the mesh isn't regenerated.
-        if let Some(last_cam) = cache.last_camera_pos {
-            let delta = last_cam - camera_pos;
-            transform.translation = delta.as_vec3();
-        }
-
+    for (traj_mesh, mut cache, mut visibility, mesh3d, material_handle, mut transform) in
+        trajectory_meshes.iter_mut()
+    {
         // Find the body this trajectory belongs to using direct entity lookup (O(1))
         let Ok(body_ref) = bodies.get(traj_mesh.body_entity) else {
             if *visibility != Visibility::Hidden {
@@ -339,19 +338,16 @@ pub fn build_trajectory_meshes(
                     || (selected_match && view_settings.show_selected_trajectories)
                     || hover_state.is_body_hovered(&info.id)
             );
-        
+
         if !should_show {
             if *visibility != Visibility::Hidden {
                 *visibility = Visibility::Hidden;
             }
             continue;
         }
-        
-        // Track if visibility just changed to visible (needs rebuild)
-        let was_hidden = *visibility == Visibility::Hidden;
-        if was_hidden {
+
+        if *visibility == Visibility::Hidden {
             *visibility = Visibility::Visible;
-            cache.mesh_dirty = true;
         }
 
         // Update trajectory transform every frame:
@@ -376,171 +372,72 @@ pub fn build_trajectory_meshes(
             (_, MotiveSelection::Keplerian(k)) => Some(DQuat::from_mat3(&k.perifocal_to_reference_matrix(sim_time.time))),
             _ => None,
         };
-        let local_rotation = current_perifocal_to_reference.unwrap_or(DQuat::IDENTITY);
-        transform.rotation = local_rotation.to_render_rotation();
-        
-        // Rebuild when trajectory data changed OR simulation time advanced.
-        // Time-driven rebuild keeps the bright hotspot moving with the body.
+        let base_perifocal_to_reference = cache.base_perifocal_to_reference.unwrap_or(DQuat::IDENTITY);
+        transform.rotation = current_perifocal_to_reference
+            .unwrap_or(base_perifocal_to_reference)
+            .to_render_rotation();
+
+        // Where the body is along its own sampled cycle, 0..1. This is the only thing the
+        // passage of time changes about a trajectory, and it is one float in a uniform —
+        // the geometry below is untouched by it.
         let current_time = sim_time.time.to_j2000_seconds();
-        let time_changed = (cache.last_mesh_time - current_time).abs() > 0.001;
-        if !cache.mesh_dirty && !time_changed {
+        let (phase_now, phase_wrap) = match orbit_phase(current_time, cache.interval_start, cache.interval_size) {
+            Some(phase) => (phase, 1.0),
+            None => (0.0, 0.0),
+        };
+        // Guarded, like every other material write here: an unchanged uniform must not be
+        // re-uploaded.
+        let phase_changed = materials
+            .get(&material_handle.0)
+            .map(|m| (m.phase_now - phase_now).abs() > 1e-7 || m.phase_wrap != phase_wrap)
+            .unwrap_or(false);
+        if phase_changed && let Some(material) = materials.get_mut(&material_handle.0) {
+            material.phase_now = phase_now;
+            material.phase_wrap = phase_wrap;
+        }
+
+        // The geometry lives in mesh-local perifocal space, which the transform and the
+        // uniforms above account for entirely. So it survives both the clock advancing and
+        // the camera moving, and is rebuilt only when the sampled points or the world
+        // scale actually change.
+        let scale_changed = cache.last_distance_scale != Some(distance_scale);
+        if !cache.mesh_dirty && !scale_changed {
             continue;
         }
-        
-        let current_relative_time = if let (Some(interval_start), Some(interval_size)) =
-            (cache.interval_start, cache.interval_size)
-        {
-            let elapsed = current_time - interval_start;
-            let position_in_cycle = elapsed % interval_size;
-            let normalized = if position_in_cycle < 0.0 {
-                position_in_cycle + interval_size
-            } else {
-                position_in_cycle
-            };
-            Some(normalized)
-        } else {
-            None
-        };
 
-        // Build the working point list from cached trajectory points.
-        // Insert a paired transient at the exact body location to collapse the
-        // dark->bright transition into a near-zero spatial span (inside body).
-        // Reuse scratch buffer to avoid per-frame allocations
-        cache.working_points.clear();
-
-        // Calculate expected capacity: base points + two transients + closing point
-        let closing_extra = if cache.closed { 1 } else { 0 };
-        let expected_capacity = cache.local_points.len() + 2 + closing_extra;
-        cache.working_points.reserve(expected_capacity);
-        let local_points_snapshot = cache.local_points.clone();
-
-        // Find the segment containing the current orbital phase and insert two
-        // transient samples at the body's exact current local position:
-        // - T- slightly before now (remains dark/trailing)
-        // - T  at now (bright/front anchor)
-        let transient_info: Option<(usize, f64, f64, DVec3)> = if let (Some(local_pos), Some(now_rel)) =
-            (system.0.local_position(body_index), current_relative_time)
-        {
-            // Cached trajectory points are in the cache/base reference frame.
-            // For precessing orbits, body local position is in the current frame,
-            // so convert it back into the cache/base frame before insertion.
-            let local_pos_in_cache_frame = if let Some(current_rot) = current_perifocal_to_reference {
-                let base_rot = cache.base_perifocal_to_reference.unwrap_or(current_rot);
-                let perifocal = current_rot.inverse() * local_pos;
-                base_rot * perifocal
-            } else {
-                local_pos
-            };
-
-            local_points_snapshot
-                .windows(2)
-                .enumerate()
-                .find_map(|(seg, w)| {
-                    let time_a = w[0].0;
-                    let time_b = w[1].0;
-                    let on_segment = now_rel >= time_a && now_rel < time_b;
-                    let at_endpoint = (now_rel - time_a).abs() < 1e-9 || (now_rel - time_b).abs() < 1e-9;
-                    if on_segment && !at_endpoint {
-                        let span_before = now_rel - time_a;
-                        let span_after = time_b - now_rel;
-                        let transient_dt = (span_before.min(span_after) * 0.25).max(1e-9);
-                        let t_before = now_rel - transient_dt;
-                        Some((seg, t_before, now_rel, local_pos_in_cache_frame))
-                    } else {
-                        None
-                    }
-                })
-        } else {
-            None
-        };
-
-        for (idx, pt) in local_points_snapshot.iter().copied().enumerate() {
-            if let Some((seg, transient_time_before, transient_time_now, transient_pos)) = transient_info {
-                if idx == seg + 1 {
-                    cache.working_points.push((transient_time_before, transient_pos));
-                    cache.working_points.push((transient_time_now, transient_pos));
-                }
-            }
-            cache.working_points.push(pt);
-        }
-        
-        // For closed orbits, append first point to close the loop (A')
-        if cache.closed && !cache.working_points.is_empty() {
-            let first = cache.working_points[0];
-            let close_time = cache.working_points.last().map(|(t, _)| t + 0.001).unwrap_or(0.0);
-            cache.working_points.push((close_time, first.1));
-        }
-        
-        // Use reference to avoid another copy
-        let points = &cache.working_points;
-        
-        if points.len() < 2 {
+        let point_count = cache.local_points.len();
+        if point_count < 2 {
             *visibility = Visibility::Hidden;
             continue;
         }
-        
-        // Convert points into perifocal-space mesh-local coordinates and compute
-        // brightness + radius.
-        let point_count = points.len();
-        let base_perifocal_to_reference = cache.base_perifocal_to_reference.unwrap_or(DQuat::IDENTITY);
-        let base_reference_to_perifocal = base_perifocal_to_reference.inverse();
-        let current_perifocal_to_reference = current_perifocal_to_reference.unwrap_or(base_perifocal_to_reference);
 
-        // Points now include: (position, t, amplitude, radius)
-        let transformed_points: Vec<(Vec3, f32, f32, f32)> = points
+        let base_reference_to_perifocal = base_perifocal_to_reference.inverse();
+        let vertices: Vec<(Vec3, f32, f32, f32)> = cache
+            .local_points
             .iter()
             .enumerate()
             .map(|(idx, (point_time, pos))| {
-            // Convert cached reference-space trajectory point to perifocal-space
-            // mesh-local coordinates.
-            let perifocal_pos = base_reference_to_perifocal * *pos;
-            let mesh_local_bevy = perifocal_pos.to_render_scaled_f32(distance_scale);
+                let mesh_local = (base_reference_to_perifocal * *pos).to_render_scaled_f32(distance_scale);
+                // A closed orbit bakes its static phase and lets the shader wrap it against
+                // the body's; an open one has no cycle to wrap, so it bakes `t` directly.
+                let alpha = match cache.interval_size {
+                    Some(size) if phase_wrap > 0.5 && size != 0.0 => (point_time / size) as f32,
+                    _ => idx as f32 / (point_count - 1) as f32,
+                };
+                // Amplitude is the shader's job now; the tube stays at its canonical radius
+                // and the vertex shader displaces it along the normals.
+                (mesh_local, alpha, 1.0, TRAJECTORY_BASE_TUBE_RADIUS)
+            })
+            .collect();
 
-            // Estimate current world-space position for distance-based dimming.
-            let current_reference_pos = current_perifocal_to_reference * perifocal_pos;
-            let world_pos = primary_world_pos + current_reference_pos;
-            let bevy_world = world_pos.to_render_relative(distance_scale, fcam.bevy_pos);
-            let distance_from_camera = bevy_world.length();
-            
-            // Trajectory geometry stays at a canonical radius. The shader can
-            // expand/contract along normals via material thickness uniforms.
-            let radius = TRAJECTORY_BASE_TUBE_RADIUS;
-
-            // Geometric along-length factor t (0..1); the front/back brightness lerp
-            // is applied in the shader so it stays live without rebuilding the mesh.
-            let t = compute_brightness_t(
-                idx,
-                *point_time,
-                current_relative_time,
-                cache.interval_size,
-                cache.closed,
-                point_count,
-            );
-
-            // Distance-based dimming: far trajectories are dimmer (baked per-vertex
-            // amplitude; only changes when the camera moves, which rebuilds the mesh).
-            let distance_dim = if distance_from_camera <= DISTANCE_DIM_REF {
-                1.0
-            } else {
-                (DISTANCE_DIM_REF / distance_from_camera).powf(DISTANCE_DIM_POWER).max(DISTANCE_DIM_MIN)
-            };
-
-            // Near-fade is handled per-fragment in the shader for pixel-accurate fading
-            (mesh_local_bevy, t, distance_dim, radius)
-        })
-        .collect();
-        // Generate tube mesh with per-point radii
-        let mesh = generate_tube_mesh(&transformed_points, TUBE_SIDES);
-        
-        // Update the mesh asset
         if let Some(mesh_asset) = meshes.get_mut(&mesh3d.0) {
-            *mesh_asset = mesh;
+            // The samples are in perifocal space, so the orbit's plane normal is the
+            // render image of simulation +Z.
+            *mesh_asset = generate_tube_mesh(&vertices, TUBE_SIDES, Some(DVec3::Z.to_render()));
         }
-        
-        // Update cache tracking for dirty detection
+
         cache.mesh_dirty = false;
-        cache.last_camera_pos = Some(camera_pos);
-        cache.last_mesh_time = current_time;
+        cache.last_distance_scale = Some(distance_scale);
     }
 }
 
@@ -1111,25 +1008,19 @@ pub fn draw_trajectory_marker_labels(
 /// Compute the along-length lerp factor `t` (0..1) for a point based on forward
 /// distance along the cached polyline. `t = 0` maps to the trajectory's front
 /// brightness, `t = 1` to its back brightness (the lerp itself happens in the shader).
-fn compute_brightness_t(
-    idx: usize,
-    point_time: f64,
-    current_relative_time: Option<f64>,
-    interval_size: Option<f64>,
-    _closed: bool,
-    point_count: usize,
-) -> f32 {
-    if let (Some(now_rel), Some(period)) = (current_relative_time, interval_size) {
-        // Closed trajectory: brightness is anchored to the current body position.
-        // t=0 at/near the body, then increases forward along the orbit.
-        let forward_dt = (point_time - now_rel).rem_euclid(period);
-        (forward_dt / period) as f32
-    } else if point_count <= 1 {
-        0.0
-    } else {
-        // Open trajectory fallback: stable gradient along sampled polyline.
-        idx as f32 / (point_count - 1) as f32
+/// Where the body sits along its own sampled cycle, as a fraction in `0..1`, or `None` for
+/// a trajectory with no cycle to be a fraction of.
+///
+/// This is the whole of what the clock contributes to a trajectory's appearance. The
+/// shader pairs it with each vertex's baked phase as `fract(phase - phase_now)`, which is
+/// the offset *forward* along the orbit from the body to that vertex — so `t` is 0 at the
+/// body and approaches 1 coming back round to it.
+fn orbit_phase(current_time: f64, interval_start: Option<f64>, interval_size: Option<f64>) -> Option<f32> {
+    let (start, size) = (interval_start?, interval_size?);
+    if size == 0.0 || !size.is_finite() {
+        return None;
     }
+    Some(((current_time - start) / size).rem_euclid(1.0) as f32)
 }
 
 /// Generate a tube mesh from a list of points with associated brightness and radius values.
@@ -1138,12 +1029,25 @@ fn compute_brightness_t(
 /// factor (baked into vertex alpha) and `amplitude` is a per-vertex brightness scale
 /// such as distance dimming (baked into vertex rgb). The shader turns these into the
 /// final brightness using the material's front/back/exposure uniforms.
-pub fn generate_tube_mesh(points: &[(Vec3, f32, f32, f32)], sides: u32) -> Mesh {
+/// `plane_normal` is the normal of the plane the curve lies in, if it lies in one. Passing
+/// it is what keeps the tube from pinching; see [`ring_basis`].
+pub fn generate_tube_mesh(
+    points: &[(Vec3, f32, f32, f32)],
+    sides: u32,
+    plane_normal: Option<Vec3>,
+) -> Mesh {
     if points.len() < 2 {
         return empty_trajectory_mesh();
     }
     
     let ring_count = points.len();
+
+    // A closed orbit is sampled at both ends of its period, so the last point sits on the
+    // first. Wrapping the tangent difference across that join gives those two rings the
+    // same frame, and the tube meets itself instead of creasing at periapsis.
+    let wraps = ring_count >= 3
+        && (points[0].0 - points[ring_count - 1].0).length_squared()
+            <= 1e-12 * points[0].0.length_squared().max(1.0);
     let verts_per_ring = sides as usize;
     let total_verts = ring_count * verts_per_ring;
     
@@ -1154,7 +1058,11 @@ pub fn generate_tube_mesh(points: &[(Vec3, f32, f32, f32)], sides: u32) -> Mesh 
     
     for (ring_idx, (center, t, amplitude, radius)) in points.iter().enumerate() {
         // Compute tangent direction (forward along the tube)
-        let tangent = if ring_idx == 0 {
+        let tangent = if wraps {
+            let previous = if ring_idx == 0 { ring_count - 2 } else { ring_idx - 1 };
+            let next = if ring_idx == ring_count - 1 { 1 } else { ring_idx + 1 };
+            (points[next].0 - points[previous].0).normalize_or_zero()
+        } else if ring_idx == 0 {
             (points[1].0 - *center).normalize_or_zero()
         } else if ring_idx == ring_count - 1 {
             (*center - points[ring_idx - 1].0).normalize_or_zero()
@@ -1163,7 +1071,7 @@ pub fn generate_tube_mesh(points: &[(Vec3, f32, f32, f32)], sides: u32) -> Mesh 
         };
         
         // Find perpendicular vectors to form the ring plane
-        let (perp1, perp2) = perpendicular_vectors(tangent);
+        let (perp1, perp2) = ring_basis(tangent, plane_normal);
         
         // Generate ring vertices with per-point radius
         for i in 0..sides {
@@ -1217,6 +1125,32 @@ pub fn generate_tube_mesh(points: &[(Vec3, f32, f32, f32)], sides: u32) -> Mesh 
 }
 
 /// Find two perpendicular vectors to form a plane orthogonal to the given direction.
+/// The orthonormal pair spanning one ring of a tube.
+///
+/// For a curve that lies in a known plane — every Keplerian orbit does, in perifocal
+/// space — the plane's normal anchors the frame: `perp1` stays in the plane and `perp2`
+/// along the normal, so consecutive rings agree and the frame returns to itself around a
+/// closed orbit.
+///
+/// Without that anchor the frame comes from [`perpendicular_vectors`], which picks
+/// whichever axis is least parallel to the tangent. That both drifts continuously along
+/// the tube and jumps outright when the choice of axis flips, which on an ellipse happens
+/// several times per revolution — the visible kink where a ring's vertices suddenly
+/// reorder.
+fn ring_basis(tangent: Vec3, plane_normal: Option<Vec3>) -> (Vec3, Vec3) {
+    if let Some(normal) = plane_normal {
+        let perp1 = tangent.cross(normal);
+        // Degenerate only if the tangent left the plane, which a planar curve's cannot.
+        if perp1.length_squared() > 1e-12 {
+            let perp1 = perp1.normalize();
+            // Same handedness as the fallback below, so winding and outward normals are
+            // unchanged.
+            return (perp1, tangent.cross(perp1).normalize_or_zero());
+        }
+    }
+    perpendicular_vectors(tangent)
+}
+
 fn perpendicular_vectors(dir: Vec3) -> (Vec3, Vec3) {
     // Choose a vector that's not parallel to dir
     let not_parallel = if dir.x.abs() < 0.9 {
@@ -1269,6 +1203,150 @@ pub fn cleanup_orphaned_trajectory_meshes(
     for (traj_entity, traj_mesh) in trajectory_meshes.iter() {
         if removed.contains(&traj_mesh.body_entity) {
             commands.entity(traj_entity).despawn();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{generate_tube_mesh, orbit_phase, ring_basis, TUBE_SIDES};
+    use bevy::prelude::*;
+    use bevy_mesh::VertexAttributeValues;
+
+    /// The shader's half of the phase pair: `t` for a vertex baked at `phase`.
+    fn wrapped_t(phase: f32, phase_now: f32) -> f32 {
+        (phase - phase_now).rem_euclid(1.0)
+    }
+
+    fn angle_between(a: Vec3, b: Vec3) -> f32 {
+        a.normalize().dot(b.normalize()).clamp(-1.0, 1.0).acos()
+    }
+
+    /// Tangents around one revolution of an orbit lying in the XZ plane, which is where
+    /// perifocal space puts it once converted to render space.
+    fn tangent_at(step: usize, steps: usize) -> Vec3 {
+        let a = step as f32 / steps as f32 * std::f32::consts::TAU;
+        Vec3::new(a.cos(), 0.0, a.sin())
+    }
+
+    /// The ring frame turns with the curve and nothing else. Anchored to the orbital
+    /// plane it tracks the sampling step; left to pick its own axis it jumps 90 degrees
+    /// between adjacent rings where the choice of axis flips, which is the pinch.
+    #[test]
+    fn the_ring_frame_follows_the_curve_instead_of_jumping() {
+        let steps = 720;
+        let step_angle = std::f32::consts::TAU / steps as f32;
+        let (mut worst_anchored, mut worst_free) = (0.0f32, 0.0f32);
+        for i in 0..steps {
+            let (a, _) = ring_basis(tangent_at(i, steps), Some(Vec3::Y));
+            let (b, _) = ring_basis(tangent_at(i + 1, steps), Some(Vec3::Y));
+            worst_anchored = worst_anchored.max(angle_between(a, b));
+            let (c, _) = ring_basis(tangent_at(i, steps), None);
+            let (d, _) = ring_basis(tangent_at(i + 1, steps), None);
+            worst_free = worst_free.max(angle_between(c, d));
+        }
+        assert!(worst_anchored <= step_angle * 1.01,
+            "anchored frame turned {worst_anchored} between rings a step of {step_angle} apart");
+        assert!(worst_free > 1.0,
+            "the unanchored frame is supposed to be the bad case, but only turned {worst_free}");
+    }
+
+    /// The anchored frame is orthonormal and square to the tangent, with one axis in the
+    /// orbital plane and one along its normal.
+    #[test]
+    fn the_ring_frame_is_orthonormal_and_square_to_the_curve() {
+        for i in 0..64 {
+            let tangent = tangent_at(i, 64);
+            let (perp1, perp2) = ring_basis(tangent, Some(Vec3::Y));
+            assert!((perp1.length() - 1.0).abs() < 1e-5);
+            assert!((perp2.length() - 1.0).abs() < 1e-5);
+            assert!(perp1.dot(tangent).abs() < 1e-5, "perp1 square to the tangent");
+            assert!(perp1.dot(perp2).abs() < 1e-5, "perps square to each other");
+            assert!(perp1.y.abs() < 1e-5, "perp1 stays in the orbital plane");
+            assert!(perp2.x.abs() < 1e-5 && perp2.z.abs() < 1e-5, "perp2 stays along the normal");
+            // Same handedness as the fallback, so winding and outward normals are unchanged.
+            assert!((perp2 - tangent.cross(perp1)).length() < 1e-5);
+        }
+    }
+
+    /// An ellipse sampled at both ends of its period closes on itself, and so must the
+    /// tube: every ring meets its neighbour, including the last meeting the first.
+    #[test]
+    fn a_closed_orbits_tube_meets_itself() {
+        // A sampled ellipse in the plane perifocal space puts the orbit in, with the
+        // duplicated end sample `em_sim::trajectory::sample` produces.
+        let resolution = 120;
+        let points: Vec<(Vec3, f32, f32, f32)> = (0..=resolution)
+            .map(|i| {
+                let a = i as f32 / resolution as f32 * std::f32::consts::TAU;
+                (Vec3::new(3.0 * a.cos(), 0.0, 2.0 * a.sin()), 0.0, 1.0, 0.05)
+            })
+            .collect();
+
+        let mesh = generate_tube_mesh(&points, TUBE_SIDES, Some(Vec3::Y));
+        let Some(VertexAttributeValues::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+        else { panic!("tube mesh must carry normals") };
+
+        // Vertex 0 of each ring sits at angle 0, so its outward normal is that ring's perp1.
+        let sides = TUBE_SIDES as usize;
+        let perp1_of = |ring: usize| Vec3::from_array(normals[ring * sides]);
+
+        let mut worst = 0.0f32;
+        for ring in 0..resolution {
+            worst = worst.max(angle_between(perp1_of(ring), perp1_of(ring + 1)));
+        }
+        // Neighbouring rings on a 120-sample ellipse are ~3 degrees apart; anything
+        // approaching a right angle is the frame flipping rather than the curve turning.
+        assert!(worst < 0.2, "worst turn between neighbouring rings was {worst} rad");
+
+        // The duplicated end sample lands on the first, so their frames must agree exactly.
+        let seam = angle_between(perp1_of(0), perp1_of(resolution));
+        assert!(seam < 1e-4, "the tube creases at periapsis by {seam} rad");
+    }
+
+    /// Phase advances linearly through the cycle and wraps, and lands back on 0 exactly one
+    /// period on. Anchoring on the periapsis epoch rather than the clock is what lets the
+    /// geometry outlive the frame.
+    #[test]
+    fn phase_walks_the_cycle_and_wraps() {
+        let (start, size) = (1_000.0, 400.0);
+        for (t, expected) in [(1_000.0, 0.0), (1_100.0, 0.25), (1_300.0, 0.75), (1_400.0, 0.0), (1_700.0, 0.75)] {
+            let got = orbit_phase(t, Some(start), Some(size)).unwrap();
+            assert!((got - expected).abs() < 1e-6, "at {t}: {got} != {expected}");
+        }
+        // Before the epoch wraps forward rather than going negative.
+        assert!((orbit_phase(900.0, Some(start), Some(size)).unwrap() - 0.75).abs() < 1e-6);
+    }
+
+    /// An open trajectory has no cycle, and a degenerate period is not one either.
+    #[test]
+    fn a_trajectory_without_a_cycle_has_no_phase() {
+        assert!(orbit_phase(0.0, None, Some(400.0)).is_none());
+        assert!(orbit_phase(0.0, Some(0.0), None).is_none());
+        assert!(orbit_phase(0.0, Some(0.0), Some(0.0)).is_none());
+        assert!(orbit_phase(0.0, Some(0.0), Some(f64::INFINITY)).is_none());
+    }
+
+    /// `t` is 0 at the body and rises to just under 1 immediately behind it, so the
+    /// front-to-back gradient has its seam exactly where the body is — which is what the
+    /// pair of transient vertices used to buy on the CPU.
+    #[test]
+    fn brightness_seam_sits_on_the_body() {
+        let phase_now = orbit_phase(1_100.0, Some(1_000.0), Some(400.0)).unwrap();
+        assert!(wrapped_t(phase_now, phase_now).abs() < 1e-6, "t is 0 at the body");
+
+        let just_ahead = wrapped_t(phase_now + 0.001, phase_now);
+        let just_behind = wrapped_t(phase_now - 0.001, phase_now);
+        assert!(just_ahead < 0.01, "just ahead of the body is the bright end: {just_ahead}");
+        assert!(just_behind > 0.99, "just behind it is the dim end: {just_behind}");
+    }
+
+    /// A vertex baked at phase 1.0 (the sample closing the loop) and one at 0.0 land on the
+    /// same `t`, so the closed orbit has no seam of its own.
+    #[test]
+    fn the_closing_sample_matches_the_opening_one() {
+        for phase_now in [0.0, 0.3, 0.75, 0.999] {
+            assert!((wrapped_t(1.0, phase_now) - wrapped_t(0.0, phase_now)).abs() < 1e-6);
         }
     }
 }

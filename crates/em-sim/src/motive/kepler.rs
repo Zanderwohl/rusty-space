@@ -6,41 +6,6 @@ use em_foundations::kepler::{anomaly, state, angular_motion, apoapsis, eccentric
 use em_foundations::time::{Instant, TimeDelta};
 use em_foundations::mappings;
 
-/// Time-invariant orbit constants, built by [`KeplerMotive::build_cache`].
-#[derive(Clone, Debug)]
-pub struct KeplerCache {
-    semi_major_axis: f64,
-    eccentricity: f64,
-    semi_latus_rectum: f64,
-    mean_anomaly_at_epoch_rad: f64,
-    epoch: Instant,
-    /// rad/s. Bakes in mu, so a changed primary mass invalidates the cache.
-    mean_motion: f64,
-    /// `None` for a precessing orbit, whose rotation is time-dependent.
-    rotation: Option<DMat3>,
-}
-
-impl KeplerCache {
-    /// Perifocal position and velocity at `time`.
-    fn perifocal(&self, time: Instant) -> Option<(DVec3, DVec3)> {
-        if self.semi_latus_rectum <= 0.0 || !self.semi_latus_rectum.is_finite() {
-            return None;
-        }
-        let m = self.mean_anomaly_at_epoch_rad
-            + self.mean_motion * (time - self.epoch).to_seconds();
-        let nu = anomaly::true_from_mean(m, self.eccentricity)?;
-        Some((
-            state::perifocal_position(self.semi_latus_rectum, self.eccentricity, nu),
-            state::perifocal_velocity(
-                self.mean_motion * self.mean_motion * self.semi_major_axis.powi(3),
-                self.semi_latus_rectum,
-                self.eccentricity,
-                nu,
-            ),
-        ))
-    }
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 pub struct KeplerMotive {
     pub primary_id: String,
@@ -262,15 +227,31 @@ impl KeplerMotive {
     }
 
     /// Position and velocity relative to the primary, in the reference frame.
+    ///
+    /// This is the propagation hot path, so it does not go through [`Self::displacement`]
+    /// and [`Self::velocity`]: those each solve Kepler's equation and each build the
+    /// perifocal-to-reference rotation, and both results are shared here. Same answer,
+    /// half the work.
     pub fn state_vectors(
         &self,
         time: Instant,
         gravitational_parameter: f64,
     ) -> Option<(DVec3, DVec3)> {
-        Some((
-            self.displacement(time, gravitational_parameter)?,
-            self.velocity(time, gravitational_parameter)?,
-        ))
+        let ecc = self.shape.eccentricity();
+        let p = self.shape.semi_latus_rectum();
+        // Matches `velocity_pqw`: a degenerate semi-latus rectum has no state vector.
+        if p <= 0.0 || !p.is_finite() {
+            return None;
+        }
+        let ta = self.true_anomaly_at(self.mean_anomaly(time, gravitational_parameter));
+        let rad = local::radius::from_semi_major_axis(self.shape.semi_major_axis(), ecc, ta)?;
+
+        let (sin_ta, cos_ta) = ta.sin_cos();
+        let r_pqw = DVec3::new(rad * cos_ta, rad * sin_ta, 0.0);
+        let v_pqw = state::perifocal_velocity(gravitational_parameter, p, ecc, ta);
+
+        let rotation = self.perifocal_to_reference_matrix(time);
+        Some((rotation * r_pqw, rotation * v_pqw))
     }
 
     /// These elements in radians, true anomaly resolved for `time`.
@@ -292,47 +273,6 @@ impl KeplerMotive {
         let rotated = self.perifocal_to_reference(perifocal_displacement, time);
 
         Some(rotated)
-    }
-
-    /// Time-invariant constants for the stepping loop: mean motion, plus the whole
-    /// perifocal-to-reference rotation for a non-precessing orbit. Rebuild whenever the
-    /// elements, the primary's mass, or the motive segment change.
-    pub fn build_cache(&self, gravitational_parameter: f64) -> KeplerCache {
-        KeplerCache {
-            semi_major_axis: self.shape.semi_major_axis(),
-            eccentricity: self.shape.eccentricity(),
-            mean_anomaly_at_epoch_rad: self.epoch.mean_anomaly_at_epoch(self.eccentricity()).to_radians(),
-            epoch: self.epoch.epoch(),
-            mean_motion: self.mean_angular_motion(gravitational_parameter),
-            semi_latus_rectum: self.shape.semi_latus_rectum(),
-            // A precessing orbit's rotation varies with time, so it cannot be cached.
-            rotation: (!self.is_precessing()).then(|| self.perifocal_to_reference_matrix(Instant::J2000)),
-        }
-    }
-
-    /// Position relative to the primary, using precomputed constants.
-    pub fn displacement_cached(&self, cache: &KeplerCache, time: Instant) -> Option<DVec3> {
-        let (r_pqw, _) = cache.perifocal(time)?;
-        Some(match cache.rotation {
-            Some(rotation) => rotation * r_pqw,
-            None => self.perifocal_to_reference(r_pqw, time),
-        })
-    }
-
-    /// Position and velocity relative to the primary, using precomputed constants.
-    pub fn state_vectors_cached(
-        &self,
-        cache: &KeplerCache,
-        time: Instant,
-    ) -> Option<(DVec3, DVec3)> {
-        let (r_pqw, v_pqw) = cache.perifocal(time)?;
-        Some(match cache.rotation {
-            Some(rotation) => (rotation * r_pqw, rotation * v_pqw),
-            None => (
-                self.perifocal_to_reference(r_pqw, time),
-                self.perifocal_to_reference(v_pqw, time),
-            ),
-        })
     }
 
     /// Rotate a perifocal vector into the reference frame at `time`.
