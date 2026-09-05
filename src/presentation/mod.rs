@@ -15,6 +15,8 @@ mod labels;
 mod local_starfield;
 mod local_starfield_material;
 mod rotation;
+mod soi;
+mod soi_material;
 mod star_cache;
 mod starfield;
 mod starfield_material;
@@ -72,6 +74,22 @@ pub use body_point::{
     BodyPointLink,
 };
 pub use body_point_material::{BodyPointMaterial, BodyPointMaterialPlugin};
+pub use soi::{
+    spawn_soi_meshes,
+    update_soi_shells,
+    cleanup_orphaned_soi_meshes,
+    SoiMeshes,
+    SoiPointsMesh,
+    SoiRingMesh,
+    SoiLink,
+};
+pub use soi_material::{
+    SoiPointsMaterial,
+    SoiPointsMaterialPlugin,
+    SoiRingMaterial,
+    SoiRingMaterialPlugin,
+    SoiShapeUniform,
+};
 pub use celestial_markers::{
     sync_celestial_markers,
     update_celestial_markers,

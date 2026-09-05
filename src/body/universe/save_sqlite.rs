@@ -189,48 +189,46 @@ fn save_time(conn: &Connection, time: &UniverseFileTime) -> Result<(), SqliteSav
 // View Settings
 // ============================================================================
 
+/// Read the row by column name rather than by tuple position.
+///
+/// The positional form this replaces is what let `show_axes` go unpersisted for several
+/// versions: the SELECT list, the tuple, and the struct literal all had to be edited in
+/// lockstep, and one of the three was missed with no compiler error to show for it.
 fn load_view_settings(conn: &Connection) -> Result<ViewSettings, SqliteSaveError> {
-    let row = conn.query_row(
+    let mut view = conn.query_row(
         "SELECT distance_scale, logarithmic_distance_scale, logarithmic_distance_base,
                 body_scale, logarithmic_body_scale, logarithmic_body_base,
-                show_labels, show_trajectories, show_selected_labels, show_selected_trajectories, trajectory_resolution
+                show_labels, show_trajectories, show_selected_labels,
+                show_selected_trajectories, show_axes, show_spheres_of_influence,
+                show_child_spheres_of_influence, trajectory_resolution
          FROM view_settings WHERE id = 1",
         [],
         |row| {
-            Ok((
-                row.get::<_, f64>(0)?,
-                row.get::<_, i32>(1)? != 0,
-                row.get::<_, f64>(2)?,
-                row.get::<_, f64>(3)?,
-                row.get::<_, i32>(4)? != 0,
-                row.get::<_, f64>(5)?,
-                row.get::<_, i32>(6)? != 0,
-                row.get::<_, i32>(7)? != 0,
-                row.get::<_, i32>(8)? != 0,
-                row.get::<_, i32>(9)? != 0,
-                row.get::<_, usize>(10)?,
-            ))
+            let flag = |name: &str| -> rusqlite::Result<bool> {
+                Ok(row.get::<_, i32>(name)? != 0)
+            };
+            Ok(ViewSettings {
+                distance_scale: row.get("distance_scale")?,
+                logarithmic_distance_scale: flag("logarithmic_distance_scale")?,
+                logarithmic_distance_base: row.get("logarithmic_distance_base")?,
+                body_scale: row.get("body_scale")?,
+                logarithmic_body_scale: flag("logarithmic_body_scale")?,
+                logarithmic_body_base: row.get("logarithmic_body_base")?,
+                show_labels: flag("show_labels")?,
+                show_trajectories: flag("show_trajectories")?,
+                show_selected_labels: flag("show_selected_labels")?,
+                show_selected_trajectories: flag("show_selected_trajectories")?,
+                show_axes: flag("show_axes")?,
+                show_spheres_of_influence: flag("show_spheres_of_influence")?,
+                show_child_spheres_of_influence: flag("show_child_spheres_of_influence")?,
+                tags: Default::default(),
+                trajectory_resolution: row.get("trajectory_resolution")?,
+            })
         },
     )?;
-    
-    // Load tags
-    let tags = load_tags(conn)?;
-    
-    Ok(ViewSettings {
-        distance_scale: row.0,
-        logarithmic_distance_scale: row.1,
-        logarithmic_distance_base: row.2,
-        body_scale: row.3,
-        logarithmic_body_scale: row.4,
-        logarithmic_body_base: row.5,
-        show_labels: row.6,
-        show_trajectories: row.7,
-        show_selected_labels: row.8,
-        show_selected_trajectories: row.9,
-        show_axes: true, // default for legacy files without this column
-        tags,
-        trajectory_resolution: row.10,
-    })
+
+    view.tags = load_tags(conn)?;
+    Ok(view)
 }
 
 fn save_view_settings(conn: &Connection, view: &ViewSettings) -> Result<(), SqliteSaveError> {
@@ -246,7 +244,10 @@ fn save_view_settings(conn: &Connection, view: &ViewSettings) -> Result<(), Sqli
             show_trajectories = ?8,
             show_selected_labels = ?9,
             show_selected_trajectories = ?10,
-            trajectory_resolution = ?11
+            show_axes = ?11,
+            show_spheres_of_influence = ?12,
+            show_child_spheres_of_influence = ?13,
+            trajectory_resolution = ?14
          WHERE id = 1",
         params![
             view.distance_scale,
@@ -259,6 +260,9 @@ fn save_view_settings(conn: &Connection, view: &ViewSettings) -> Result<(), Sqli
             view.show_trajectories as i32,
             view.show_selected_labels as i32,
             view.show_selected_trajectories as i32,
+            view.show_axes as i32,
+            view.show_spheres_of_influence as i32,
+            view.show_child_spheres_of_influence as i32,
             view.trajectory_resolution as i32,
         ],
     )?;
