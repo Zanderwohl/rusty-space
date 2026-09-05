@@ -33,14 +33,27 @@ pub fn evaluate_at(system: &mut System, time: Instant) {
 /// Advance the system by `dt`. Hierarchical bodies are evaluated at the new time; Newtonian
 /// bodies are integrated under gravity from bodies flagged major. Nothing subdivides `dt`,
 /// so size it for the fastest Newtonian body present.
+///
+/// The hierarchy's advance happens *inside* the Verlet step, between the two acceleration
+/// samples: `a0` is measured against the attractors where they were at the start of the
+/// step and `a1` where they are at the end. Advancing them first and sampling both from
+/// there is what costs the scheme its symplectic property.
 pub fn step(system: &mut System, dt: TimeDelta) {
-    let target = system.time() + dt;
+    let start = system.time();
+    let target = start + dt;
     if system.is_dirty() {
         system.rebuild_derived(target);
+        // The derived columns were stale, so the positions standing in the arena are not
+        // trustworthy at `start` either — and `a0` is measured against them.
+        evaluate_hierarchical(system, start);
     }
+
+    let a0 = newtonian_drift(system, target, dt);
+
     system.set_time(target);
     evaluate_hierarchical(system, target);
-    integrate_newtonian(system, target, dt);
+
+    newtonian_kick(system, dt, &a0);
 }
 
 // === Hierarchical: Fixed and Keplerian ===
@@ -89,29 +102,63 @@ fn acceleration(system: &System, at: DVec3, exclude: BodyIndex, g: f64) -> DVec3
         .sum()
 }
 
-fn integrate_newtonian(system: &mut System, time: Instant, dt: TimeDelta) {
+/// First half of velocity Verlet, with the attractors still where they were at the start
+/// of the step: seed anything not yet running, sample `a0`, and drift positions to the end
+/// of the step. Velocities are left alone until [`newtonian_kick`].
+///
+/// Sampling is a separate pass from writing, so a Newtonian body that is itself flagged
+/// major cannot contribute its drifted position to another body's `a0`.
+///
+/// `time` selects which motive is in force, matching the rebuild above; the accelerations
+/// it measures come from the arena as it stands.
+fn newtonian_drift(system: &mut System, time: Instant, dt: TimeDelta) -> Vec<(BodyIndex, DVec3)> {
     let g = system.gravitational_constant();
     let h = dt.to_seconds();
 
     for idx in 0..system.newtonian_indices().len() {
         let i = system.newtonian_indices()[idx];
-
-        let (mut position, mut velocity) = match seed(system, i, time) {
-            Some(seeded) => seeded,
-            None => (system.position(i), system.velocity(i)),
-        };
-
-        if h != 0.0 {
-            // Velocity Verlet: second-order and symplectic, for one extra acceleration
-            // evaluation over semi-implicit Euler.
-            let a0 = acceleration(system, position, i, g);
-            position += velocity * h + 0.5 * a0 * h * h;
-            let a1 = acceleration(system, position, i, g);
-            velocity += 0.5 * (a0 + a1) * h;
+        if let Some((position, velocity)) = seed(system, i, time) {
+            system.write_state(i, position, velocity, None);
         }
-
-        system.write_state(i, position, velocity, None);
         system.set_newtonian_started(i, true);
+    }
+
+    if h == 0.0 {
+        // Seeding was the whole job; nothing drifts and no acceleration is needed.
+        return Vec::new();
+    }
+
+    let mut sampled: Vec<(BodyIndex, DVec3)> =
+        Vec::with_capacity(system.newtonian_indices().len());
+    for idx in 0..system.newtonian_indices().len() {
+        let i = system.newtonian_indices()[idx];
+        sampled.push((i, acceleration(system, system.position(i), i, g)));
+    }
+
+    for &(i, a0) in &sampled {
+        let position = system.position(i) + system.velocity(i) * h + 0.5 * a0 * h * h;
+        system.write_state(i, position, system.velocity(i), None);
+    }
+    sampled
+}
+
+/// Second half of velocity Verlet, with the attractors now at the end of the step: sample
+/// `a1` at the drifted positions and complete the velocity update.
+fn newtonian_kick(system: &mut System, dt: TimeDelta, a0: &[(BodyIndex, DVec3)]) {
+    let g = system.gravitational_constant();
+    let h = dt.to_seconds();
+    if h == 0.0 {
+        return;
+    }
+
+    // Sample before writing, for the same reason as the `a0` pass.
+    let mut sampled: Vec<(BodyIndex, DVec3, DVec3)> = Vec::with_capacity(a0.len());
+    for &(i, a0) in a0 {
+        sampled.push((i, a0, acceleration(system, system.position(i), i, g)));
+    }
+    for (i, a0, a1) in sampled {
+        let velocity = system.velocity(i) + 0.5 * (a0 + a1) * h;
+        system.write_state(i, system.position(i), velocity, None);
     }
 }
 

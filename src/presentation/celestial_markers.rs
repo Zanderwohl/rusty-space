@@ -118,6 +118,10 @@ pub fn sync_celestial_markers(
         back: 1.0,
         exposure: 0.0,
         glow_gain: 1.0,
+        // No orbital cycle to wrap against, and markers hold full brightness at any range.
+        phase_now: 0.0,
+        phase_wrap: 0.0,
+        distance_dim: 0.0,
         alpha_mode: AlphaMode::Blend,
     };
     let material_handle = materials.add(material);

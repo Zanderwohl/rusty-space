@@ -2587,7 +2587,7 @@ pub fn solar_system() -> UniverseFileContents {
                         }),
                         anomalistic_period: Some(TimeDelta::from_days(278.9921249)),
                         // mu implied by the fitted period and semi-major axis.
-                        gravitational_parameter: Some(7.668109229e+17),
+                        gravitational_parameter: Some(1.252424036e+17),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
@@ -2734,7 +2734,7 @@ pub fn solar_system() -> UniverseFileContents {
                         }),
                         anomalistic_period: Some(TimeDelta::from_days(731.3478203)),
                         // mu implied by the fitted period and semi-major axis.
-                        gravitational_parameter: Some(8.325524034e+16),
+                        gravitational_parameter: Some(1.239339455e+17),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
@@ -2848,7 +2848,7 @@ pub fn solar_system() -> UniverseFileContents {
                         }),
                         anomalistic_period: Some(TimeDelta::from_days(614.8119862)),
                         // mu implied by the fitted period and semi-major axis.
-                        gravitational_parameter: Some(1.62406631e+17),
+                        gravitational_parameter: Some(1.245503512e+17),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
@@ -2923,7 +2923,7 @@ pub fn solar_system() -> UniverseFileContents {
                         }),
                         anomalistic_period: Some(TimeDelta::from_days(537.9189012)),
                         // mu implied by the fitted period and semi-major axis.
-                        gravitational_parameter: Some(2.42752517e+17),
+                        gravitational_parameter: Some(1.190801010e+17),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
@@ -3033,7 +3033,7 @@ pub fn solar_system() -> UniverseFileContents {
                         }),
                         anomalistic_period: Some(TimeDelta::from_days(252.4070788)),
                         // mu implied by the fitted period and semi-major axis.
-                        gravitational_parameter: Some(8.908078201e+17),
+                        gravitational_parameter: Some(1.257539514e+17),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
@@ -3251,7 +3251,7 @@ pub fn solar_system() -> UniverseFileContents {
                         }),
                         anomalistic_period: Some(TimeDelta::from_days(249.9654657)),
                         // mu implied by the fitted period and semi-major axis.
-                        gravitational_parameter: Some(1.129252994e+18),
+                        gravitational_parameter: Some(1.256355645e+17),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
@@ -3323,7 +3323,7 @@ pub fn solar_system() -> UniverseFileContents {
                         }),
                         anomalistic_period: Some(TimeDelta::from_days(10753.82418)),
                         // mu implied by the fitted period and semi-major axis.
-                        gravitational_parameter: Some(5.581249855e+14),
+                        gravitational_parameter: Some(1.329264314e+20),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 58232000.0,
@@ -5596,7 +5596,7 @@ pub fn solar_system() -> UniverseFileContents {
                         }),
                         anomalistic_period: Some(TimeDelta::from_days(1055.445076)),
                         // mu implied by the fitted period and semi-major axis.
-                        gravitational_parameter: Some(9.456348211e+16),
+                        gravitational_parameter: Some(3.750352777e+16),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
@@ -5670,7 +5670,7 @@ pub fn solar_system() -> UniverseFileContents {
                         }),
                         anomalistic_period: Some(TimeDelta::from_days(1121.416588)),
                         // mu implied by the fitted period and semi-major axis.
-                        gravitational_parameter: Some(2.014360417e+16),
+                        gravitational_parameter: Some(3.772850166e+16),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
@@ -5823,7 +5823,7 @@ pub fn solar_system() -> UniverseFileContents {
                         }),
                         anomalistic_period: Some(TimeDelta::from_days(1236.074057)),
                         // mu implied by the fitted period and semi-major axis.
-                        gravitational_parameter: Some(4.995691732e+16),
+                        gravitational_parameter: Some(3.735506516e+16),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 2000.0,
