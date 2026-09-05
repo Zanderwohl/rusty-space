@@ -185,8 +185,8 @@ fn gui_tab(settings: &mut Settings, ui: &mut Ui) {
     ui.label(RichText::new("Windows").strong());
     ui.checkbox(&mut settings.windows.controls, "Controls");
     ui.checkbox(&mut settings.windows.spin, "Spin Gravity Calculator");
-    ui.checkbox(&mut settings.windows.body_edit, "Body Edit");
-    ui.checkbox(&mut settings.windows.body_info, "Body Info");
+    ui.checkbox(&mut settings.windows.body_edit, "Editor");
+    ui.checkbox(&mut settings.windows.body_info, "Viewer");
 }
 
 fn simulation_tab(settings: &mut Settings, ui: &mut Ui) {
