@@ -14,7 +14,7 @@
 //! [`Soi::radius_toward`].
 
 use em_foundations::patched_conics;
-use em_foundations::time::Instant;
+use em_foundations::time::{Instant, TimeDelta};
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
@@ -232,7 +232,7 @@ fn build(
         _ => (separation, 0.0),
     };
 
-    Some(Soi {
+    let soi = Soi {
         body: i,
         model,
         centre,
@@ -243,7 +243,17 @@ fn build(
         body_mass: system.mass(i),
         primary_mass: system.mass(primary),
         gravitational_constant: system.gravitational_constant(),
-    })
+    };
+
+    // A sphere smaller than the body it belongs to is not a boundary anything can cross:
+    // you would hit the surface first. A 1000 kg spacecraft around Earth works out at
+    // about 40 cm, which is not a region of space, and treating it as one costs a search
+    // per frame for every craft in the system.
+    if soi.bounding_radius() <= system.radius(i) {
+        return None;
+    }
+
+    Some(soi)
 }
 
 /// The deepest body whose sphere of influence contains `point` at `time`.
@@ -287,6 +297,298 @@ pub fn containment_chain(system: &System, point: DVec3, time: Instant) -> Vec<Bo
         }
     }
     chain
+}
+
+/// A moment at which a body's path meets the edge of a sphere of influence.
+#[derive(Debug, Clone, Copy)]
+pub struct Crossing {
+    /// Whose sphere was crossed.
+    pub body: BodyIndex,
+    pub time: Instant,
+    /// The travelling body's position in simulation space, on the boundary.
+    pub position: DVec3,
+    /// The same point measured from the traveller's own primary.
+    ///
+    /// This, not [`position`](Self::position), is what a marker is drawn at: a trajectory
+    /// is drawn as an osculating ellipse anchored at the primary's *current* place, so a
+    /// crossing a fortnight out would otherwise be placed where the primary will be by
+    /// then — for a craft at Earth, some 3.6e10 m off the drawn path.
+    pub local_position: DVec3,
+    /// Its velocity there. A marker drawn at the crossing faces along this, so the craft
+    /// meets it square on.
+    pub velocity: DVec3,
+    /// Normal of the traveller's orbital plane at the crossing, from `r x v` about its own
+    /// primary. Together with [`velocity`](Self::velocity) this orients a marker.
+    /// [`DVec3::ZERO`] for a degenerate orbit.
+    pub plane_normal: DVec3,
+    /// `true` when the path passes from outside the sphere to inside.
+    pub entering: bool,
+}
+
+/// Samples per revolution used to bracket a root.
+///
+/// A crossing is a transversal root of a smooth function, so the only way to miss a pair
+/// is for an entry and its exit to fall inside a single step. At this density that means
+/// passing through a sphere in under a seven-hundredth of an orbit.
+pub const SAMPLES_PER_REVOLUTION: f64 = 512.0;
+
+/// Ceiling on the bracketing pass, so a long window cannot become an unbounded loop.
+const MAX_SAMPLES: usize = 200_000;
+
+/// Bisection stops here. Well below a simulation step, and far below the accuracy of the
+/// elements themselves.
+const CROSSING_TOLERANCE_SECONDS: f64 = 1.0e-3;
+
+/// Signed distance from the boundary of `target`'s sphere, in metres: negative inside.
+///
+/// `None` when either body's position is not analytic at `time`, or `target` has no
+/// sphere. This is the scalar every search below is a root of.
+pub fn boundary_distance(
+    system: &System,
+    traveller: BodyIndex,
+    target: BodyIndex,
+    time: Instant,
+) -> Option<f64> {
+    let soi = soi_at(system, target, time)?;
+    let position = propagate::position_at(system, traveller, time)?;
+    let offset = position - soi.centre;
+    Some(offset.length() - soi.radius_toward(offset))
+}
+
+/// Every crossing of `target`'s sphere by `traveller` within `window`, in time order.
+///
+/// `window` is `(start, end)` with `start < end`. The search is analytic in `t`, so a
+/// window in the past costs exactly what one in the future costs.
+///
+/// Coarse-samples to bracket sign changes, then bisects each bracket. Only **transversal**
+/// crossings are found: a path that grazes the boundary and turns back without passing
+/// through leaves no sign change and is not reported. That is the honest limit of a
+/// sign-change search, and it is the case where "did it enter?" has no useful answer
+/// anyway.
+pub fn crossings(
+    system: &System,
+    traveller: BodyIndex,
+    target: BodyIndex,
+    window: (Instant, Instant),
+) -> Vec<Crossing> {
+    let (start, end) = window;
+    let span = end - start;
+    if !span.is_finite() || span.to_seconds() <= 0.0 {
+        return Vec::new();
+    }
+
+    let steps = bracketing_steps(system, traveller, start, span);
+    let step = span / steps as f64;
+
+    let mut found = Vec::new();
+    let mut previous: Option<(Instant, f64)> = None;
+
+    for i in 0..=steps {
+        let time = start + step * i as f64;
+        let Some(distance) = boundary_distance(system, traveller, target, time) else {
+            // A gap in what can be evaluated is not a crossing; do not bracket across it.
+            previous = None;
+            continue;
+        };
+
+        if let Some((previous_time, previous_distance)) = previous {
+            // Strictly opposite signs. A sample sitting exactly on the boundary is picked
+            // up by the neighbouring interval instead of counting twice.
+            if (previous_distance < 0.0) != (distance < 0.0) {
+                if let Some(crossing) = refine(
+                    system, traveller, target,
+                    (previous_time, previous_distance), (time, distance),
+                ) {
+                    found.push(crossing);
+                }
+            }
+        }
+        previous = Some((time, distance));
+    }
+
+    found
+}
+
+/// How much of an orbit to search at a time when stepping outward from `from`.
+///
+/// [`crossings`] samples at a fixed density per revolution, so splitting the horizon into
+/// chunks does not change what is found — it only stops early. The nearest crossing is
+/// usually a fraction of an orbit away, and paying for the whole horizon every time made
+/// this the most expensive thing in the frame.
+const SEARCH_CHUNK_REVOLUTIONS: f64 = 0.25;
+
+/// The first crossing strictly after `from`, within `horizon`.
+pub fn next_crossing(
+    system: &System,
+    traveller: BodyIndex,
+    target: BodyIndex,
+    from: Instant,
+    horizon: TimeDelta,
+) -> Option<Crossing> {
+    let chunk = search_chunk(system, traveller, horizon);
+    let end = from + horizon;
+    let mut cursor = from;
+    while cursor < end {
+        let stop = (cursor + chunk).min(end);
+        if let Some(found) = crossings(system, traveller, target, (cursor, stop)).into_iter().next() {
+            return Some(found);
+        }
+        cursor = stop;
+    }
+    None
+}
+
+/// The last crossing strictly before `from`, within `horizon`.
+pub fn previous_crossing(
+    system: &System,
+    traveller: BodyIndex,
+    target: BodyIndex,
+    from: Instant,
+    horizon: TimeDelta,
+) -> Option<Crossing> {
+    let chunk = search_chunk(system, traveller, horizon);
+    let start = from - horizon;
+    let mut cursor = from;
+    while cursor > start {
+        let stop = (cursor - chunk).max(start);
+        if let Some(found) = crossings(system, traveller, target, (stop, cursor)).into_iter().next_back() {
+            return Some(found);
+        }
+        cursor = stop;
+    }
+    None
+}
+
+/// A quarter of the traveller's revolution, or the whole horizon if it has no period.
+fn search_chunk(system: &System, traveller: BodyIndex, horizon: TimeDelta) -> TimeDelta {
+    let now = system.time();
+    let (_, selection) = system.motive(traveller).motive_at(now);
+    if let MotiveSelection::Keplerian(kepler) = selection {
+        let period = kepler.period(propagate::gravitational_parameter_at(system, traveller, now));
+        if period.to_seconds() > 0.0 && period.is_finite() {
+            return period * SEARCH_CHUNK_REVOLUTIONS;
+        }
+    }
+    horizon
+}
+
+/// Spheres worth testing a body against: the one it orbits inside, and its siblings.
+///
+/// That is the set a body can actually reach without first leaving its primary — the
+/// primary's own boundary on the way out, and a sibling moon's on the way past.
+pub fn crossing_candidates(system: &System, traveller: BodyIndex) -> Vec<BodyIndex> {
+    let Some(primary) = system.parent(traveller) else { return Vec::new() };
+    crossing_candidates_about(system, traveller, primary)
+}
+
+/// As [`crossing_candidates`], with the primary given rather than read from the derived
+/// parent column.
+///
+/// A patched chain changes primary partway along, so the column — which holds one primary
+/// per body, for the arena's last rebuild time — cannot answer for an arc the clock is not
+/// currently in.
+pub fn crossing_candidates_about(
+    system: &System,
+    traveller: BodyIndex,
+    primary: BodyIndex,
+) -> Vec<BodyIndex> {
+    let mut candidates = Vec::new();
+    if soi_now(system, primary).is_some() {
+        candidates.push(primary);
+    }
+    candidates.extend(
+        system.children_of(primary)
+            .filter(|&sibling| sibling != traveller)
+            .filter(|&sibling| soi_now(system, sibling).is_some()),
+    );
+    candidates
+}
+
+/// How many samples to bracket `span` with, from the traveller's own orbit.
+///
+/// Keyed on the arc in force at `start`, not at the arena's current time. Those differ the
+/// moment a body has a patched chain, and getting it wrong is expensive both ways: a
+/// six-year heliocentric window measured against a ten-day parking orbit asks for a
+/// hundred thousand samples, and the reverse silently under-samples.
+fn bracketing_steps(
+    system: &System,
+    traveller: BodyIndex,
+    start: Instant,
+    span: TimeDelta,
+) -> usize {
+    let (_, selection) = system.motive(traveller).motive_at(start);
+    let revolutions = match selection {
+        MotiveSelection::Keplerian(kepler) => {
+            let mu = propagate::gravitational_parameter_at(system, traveller, start);
+            let period = kepler.period(mu).to_seconds();
+            if period > 0.0 && period.is_finite() {
+                span.to_seconds().abs() / period
+            } else {
+                // A hyperbolic arc has no period, but it has the same time constant, and
+                // the traverse of a sphere is a fraction of it.
+                let a = kepler.semi_major_axis().abs();
+                let timescale = (a * a * a / mu).sqrt();
+                span.to_seconds().abs() / (std::f64::consts::TAU * timescale)
+            }
+        }
+        // Nothing periodic to key on; a fixed budget still brackets a smooth function.
+        _ => 1.0,
+    };
+    ((revolutions * SAMPLES_PER_REVOLUTION).ceil() as usize).clamp(64, MAX_SAMPLES)
+}
+
+/// Bisect a bracketed sign change down to [`CROSSING_TOLERANCE_SECONDS`].
+fn refine(
+    system: &System,
+    traveller: BodyIndex,
+    target: BodyIndex,
+    mut low: (Instant, f64),
+    mut high: (Instant, f64),
+) -> Option<Crossing> {
+    // `entering` is fixed by the bracket, not by the refined endpoint: the sign either
+    // side of the root is what says which way the boundary was crossed.
+    let entering = low.1 > 0.0;
+
+    while (high.0 - low.0).to_seconds().abs() > CROSSING_TOLERANCE_SECONDS {
+        let middle = low.0 + (high.0 - low.0) / 2.0;
+        let Some(distance) = boundary_distance(system, traveller, target, middle) else {
+            return None;
+        };
+        if (distance < 0.0) == (low.1 < 0.0) {
+            low = (middle, distance);
+        } else {
+            high = (middle, distance);
+        }
+    }
+
+    let time = low.0 + (high.0 - low.0) / 2.0;
+    let (position, velocity) = propagate::state_at(system, traveller, time)?;
+    let (local_position, local_velocity) = propagate::local_state_at(system, traveller, time)
+        .unwrap_or((DVec3::ZERO, DVec3::ZERO));
+
+    // The orbital plane is taken about the traveller's own primary, not about whichever
+    // sphere is being crossed, so a marker lies flat in the drawn trajectory whether the
+    // boundary belongs to that primary or to a sibling moon.
+    let normal = local_position.cross(local_velocity);
+    let plane_normal = if normal.length_squared() > 0.0 { normal.normalize() } else { DVec3::ZERO };
+
+    Some(Crossing { body: target, time, position, local_position, velocity, plane_normal, entering })
+}
+
+/// A reasonable window for "the next crossing": three of the traveller's revolutions.
+///
+/// Three rather than one because an orbit can sit wholly inside a sphere for a revolution
+/// and still meet a moon on the next.
+pub fn default_horizon(system: &System, traveller: BodyIndex) -> TimeDelta {
+    let now = system.time();
+    let (_, selection) = system.motive(traveller).motive_at(now);
+    if let MotiveSelection::Keplerian(kepler) = selection {
+        let period = kepler.period(propagate::gravitational_parameter_at(system, traveller, now));
+        if period.to_seconds() > 0.0 && period.is_finite() {
+            return period * 3.0;
+        }
+    }
+    TimeDelta::from_days(365.0)
 }
 
 #[cfg(test)]
@@ -353,7 +655,9 @@ mod tests {
             SoiModel::HillPeriapsis,
             SoiModel::Laplace,
             SoiModel::LaplaceIntegrated,
-            SoiModel::Bondi { velocity_dispersion: 1.0e5 },
+            // Slow enough that the accretion radius clears Earth's surface. At a real
+            // galactic-centre dispersion it would be 40 km, i.e. underground.
+            SoiModel::Bondi { velocity_dispersion: 1.0e3 },
             SoiModel::Fixed(1.0e9),
         ] {
             let soi = soi_of(&s, "Earth", model);
@@ -412,6 +716,21 @@ mod tests {
         assert_eq!(chain.last(), Some(&luna), "chain was {:?}",
             chain.iter().map(|&i| s.name(i)).collect::<Vec<_>>());
         assert!(chain.contains(&s.by_name("Earth").unwrap()));
+    }
+
+    /// A sphere buried inside its own body is not a boundary: nothing can cross it
+    /// without hitting the surface first, and every spacecraft in a system would
+    /// otherwise carry one and be searched against.
+    #[test]
+    fn a_sphere_smaller_than_its_body_is_not_reported() {
+        let s = built();
+        let earth = s.by_name("Earth").unwrap();
+
+        // Earth's radius is 6371 km; a metre-scale sphere is meaningless.
+        assert!(soi_now_with(&s, earth, SoiModel::Fixed(1.0)).is_none());
+        assert!(soi_now_with(&s, earth, SoiModel::Fixed(s.radius(earth) * 0.5)).is_none());
+        // Just outside the surface still counts.
+        assert!(soi_now_with(&s, earth, SoiModel::Fixed(s.radius(earth) * 1.5)).is_some());
     }
 
     /// The two constructors must not drift apart.

@@ -25,8 +25,17 @@ pub mod mean_anomaly {
 }
 
 pub mod angular_motion {
+    /// Rate the mean anomaly advances, rad/s: `n = sqrt(mu / |a|^3)`.
+    ///
+    /// The magnitude of `a` is deliberate. A hyperbolic orbit has a negative semi-major
+    /// axis, and `sqrt(mu / a^3)` on it is NaN — which would then propagate silently
+    /// through the anomaly to the position, even though the solver in
+    /// [`anomaly::true_from_mean`](super::anomaly::true_from_mean) handles `e > 1`
+    /// perfectly well. Every capture into a sphere of influence is a hyperbola, so this is
+    /// the common case, not the exotic one.
     pub fn mean(gravitational_parameter: f64, semi_major_axis: f64) -> f64 {
-        f64::sqrt(gravitational_parameter / (semi_major_axis * semi_major_axis * semi_major_axis))
+        let a = semi_major_axis.abs();
+        f64::sqrt(gravitational_parameter / (a * a * a))
     }
 }
 
@@ -405,5 +414,37 @@ pub mod energy {
         pub fn definition(mass: f64, mu: f64, displacement: f64) -> f64 {
             mass * specific(mu, displacement)
         }
+    }
+}
+
+#[cfg(test)]
+mod hyperbolic_tests {
+    use super::*;
+
+    /// A flyby is a hyperbola, and it has to advance rather than turn into NaN.
+    #[test]
+    fn mean_motion_is_finite_on_a_hyperbola() {
+        const MU: f64 = 4.9028695e12; // Luna
+        let n = angular_motion::mean(MU, -6.75e6);
+        assert!(n.is_finite() && n > 0.0, "hyperbolic mean motion was {n}");
+
+        // Same magnitude of `a` gives the same rate either side of the parabolic limit.
+        let closed = angular_motion::mean(MU, 6.75e6);
+        assert!((n - closed).abs() < 1e-12 * closed);
+    }
+
+    /// And it must carry all the way to a true anomaly, which is where the NaN showed up.
+    #[test]
+    fn a_hyperbolic_arc_advances_to_a_real_anomaly() {
+        const MU: f64 = 4.9028695e12;
+        let (a, e) = (-6.75e6, 1.7879);
+        let n = angular_motion::mean(MU, a);
+        let mean = n * 3600.0; // an hour past periapsis
+        let true_anomaly = anomaly::true_from_mean(mean, e).expect("e > 1 is solvable");
+        assert!(true_anomaly.is_finite(), "true anomaly was {true_anomaly}");
+
+        let radius = local::radius::from_semi_major_axis(a, e, true_anomaly)
+            .expect("a hyperbola has a radius");
+        assert!(radius.is_finite() && radius > 0.0, "radius was {radius}");
     }
 }

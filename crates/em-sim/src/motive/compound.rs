@@ -8,7 +8,43 @@ use crate::time_map::SortedTimes;
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Motive {
     times: SortedTimes,
-    motives: HashMap<Instant, (TransitionEvent, MotiveSelection)>
+    motives: HashMap<Instant, (TransitionEvent, MotiveSelection)>,
+    /// How far the sphere-of-influence chain has been worked out. Solver progress, not
+    /// authored data, so it is rebuilt on load rather than stored.
+    #[serde(skip)]
+    frontier: Frontier,
+}
+
+/// How far into the future a timeline has been solved for sphere-of-influence changes.
+///
+/// The arcs are evaluable at any instant whatever this says — a body always has a position.
+/// What this records is how far the search for the *next* join has got, so the work can be
+/// handed out a slice at a time and picked up again next frame instead of stopping the
+/// world.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
+pub enum Frontier {
+    /// Never looked at.
+    #[default]
+    Unsolved,
+    /// Searched up to here. Any further join lies beyond it.
+    Reached(Instant),
+    /// Searched as far as the solver intends to look. Nothing more will be found.
+    Complete,
+}
+
+impl Frontier {
+    /// Where a search should pick up, if it is not finished.
+    pub fn resume_from(self) -> Option<Instant> {
+        match self {
+            Frontier::Unsolved => None,
+            Frontier::Reached(time) => Some(time),
+            Frontier::Complete => None,
+        }
+    }
+
+    pub fn is_complete(self) -> bool {
+        matches!(self, Frontier::Complete)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -60,7 +96,8 @@ impl Motive {
     fn new() -> Self {
         Self {
             times: SortedTimes::new(),
-            motives: HashMap::new()
+            motives: HashMap::new(),
+            frontier: Frontier::Unsolved,
         }
     }
 
@@ -160,6 +197,67 @@ impl Motive {
         }
     }
     
+    /// Remove every solver-derived [`TransitionEvent::SOIChange`] at or after `time`,
+    /// leaving authored events — the epoch, impulses, releases — alone.
+    ///
+    /// This is what makes re-solving cheap: an edit rewrites the tail of the timeline, and
+    /// the player's own decisions in that tail survive it.
+    /// How far this timeline has been solved.
+    pub fn frontier(&self) -> Frontier {
+        self.frontier
+    }
+
+    /// Record solver progress. Only [`crate::patch`] should be moving this.
+    pub fn set_frontier(&mut self, frontier: Frontier) {
+        self.frontier = frontier;
+    }
+
+    pub fn remove_derived_events_after(&mut self, time: Instant) -> usize {
+        let doomed: Vec<Instant> = self
+            .times
+            .iter()
+            .filter(|t| **t >= time)
+            .filter(|t| matches!(self.motives.get(t), Some((TransitionEvent::SOIChange, _))))
+            .copied()
+            .collect();
+        for time in &doomed {
+            self.times.remove_time(*time);
+            self.motives.remove(time);
+        }
+
+        // Rewriting the tail un-solves it. Anything already worked out before `time` still
+        // stands, so the search resumes from there rather than from the beginning.
+        self.frontier = match self.times.get(0).copied() {
+            Some(first) if time > first => Frontier::Reached(time),
+            _ => Frontier::Unsolved,
+        };
+        doomed.len()
+    }
+
+    /// The event exactly at `time`, if there is one. Unlike [`Motive::motive_at`] this does
+    /// not fall back to the event before.
+    pub fn event_at(&self, time: Instant) -> Option<&TransitionEvent> {
+        self.motives.get(&time).map(|(event, _)| event)
+    }
+
+    /// The sphere-of-influence changes that begin and end the arc in force at `time`.
+    ///
+    /// A join only means anything while you are on one of the two arcs it joins, so this is
+    /// what a marker should be drawn from. `None` on either side where the arc is bounded by
+    /// something else — its epoch, an impulse — or not bounded at all.
+    pub fn bounding_soi_changes(&self, time: Instant) -> (Option<Instant>, Option<Instant>) {
+        let (start, end) = self.active_segment_range(time);
+        let is_soi_change = |t: &Instant| matches!(self.event_at(*t), Some(TransitionEvent::SOIChange));
+        (start.filter(is_soi_change), end.filter(is_soi_change))
+    }
+
+    /// Every sphere-of-influence change on the timeline, in time order.
+    pub fn soi_changes(&self) -> impl Iterator<Item = (Instant, &MotiveSelection)> {
+        self.iter_events().filter_map(|(time, event, selection)| {
+            matches!(event, TransitionEvent::SOIChange).then_some((time, selection))
+        })
+    }
+
     pub fn remove_all_events_after(&mut self, time: Instant) {
         let index = self.times.get_index_after(time);
         for time in self.times.remove_after(index) {
