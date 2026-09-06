@@ -56,8 +56,10 @@ impl KeplerMotive {
     }
 
     pub fn time_at_periapsis_passage(&self, gravitational_parameter: f64) -> Instant {
-        let period = self.period(gravitational_parameter);
-        self.epoch.time_at_periapsis_passage(period, self.eccentricity())
+        self.epoch.time_at_periapsis_passage(
+            self.mean_angular_motion(gravitational_parameter),
+            self.eccentricity(),
+        )
     }
 
     pub fn semi_latus_rectum(&self) -> f64 {
@@ -541,36 +543,41 @@ impl KeplerEpoch {
 
     /// Needs the eccentricity for the same reason as
     /// [`KeplerEpoch::mean_anomaly_at_epoch`].
-    pub fn time_at_periapsis_passage(&self, period: TimeDelta, eccentricity: f64) -> Instant {
-        let period_seconds = period.to_seconds();
+    /// When the body last passed periapsis, from the mean anomaly at this epoch.
+    ///
+    /// Takes the mean angular motion rather than the period, because `t = epoch - M / n` is
+    /// the general form and a hyperbola has no period — expressed through one, every
+    /// capture arc came out NaN. It is also the rate propagation actually advances the mean
+    /// anomaly at, which a period derived from the semi-major axis is not when an
+    /// anomalistic period is recorded.
+    pub fn time_at_periapsis_passage(&self, mean_angular_motion: f64, eccentricity: f64) -> Instant {
+        let n = mean_angular_motion;
         let raw_time = match self {
             KeplerEpoch::MeanAnomaly(mean_anomaly) => {
                 // Stored in degrees.
-                let mean_anomaly_rad = mean_anomaly.mean_anomaly.to_radians();
-                mean_anomaly.epoch.to_j2000_seconds() - period_seconds * (mean_anomaly_rad / std::f64::consts::TAU)
+                mean_anomaly.epoch.to_j2000_seconds() - mean_anomaly.mean_anomaly.to_radians() / n
             }
             KeplerEpoch::TimeAtPeriapsisPassage(tapp) => tapp.to_j2000_seconds(),
             KeplerEpoch::TrueAnomaly(taae) => {
-                let mean_anomaly_rad = mean_from_true_degrees(taae.true_anomaly, eccentricity)
-                    .to_radians();
-                taae.epoch.to_j2000_seconds()
-                    - period_seconds * (mean_anomaly_rad / std::f64::consts::TAU)
+                let mean_anomaly_rad =
+                    mean_from_true_degrees(taae.true_anomaly, eccentricity).to_radians();
+                taae.epoch.to_j2000_seconds() - mean_anomaly_rad / n
             }
             KeplerEpoch::J2000(j2000) => {
                 // Stored in degrees.
-                let mean_anomaly_rad = j2000.mean_anomaly.to_radians();
-                -period_seconds * (mean_anomaly_rad / std::f64::consts::TAU)
+                -j2000.mean_anomaly.to_radians() / n
             }
         };
-        
-        // Normalise to the first periapsis passage at or after J2000.
-        let val = if raw_time < 0.0 {
+
+        // Normalise to the first periapsis passage at or after J2000. Only a repeating
+        // orbit has more than one to choose from; a hyperbola passes periapsis once, and
+        // sliding that passage forward by a "period" would move the whole arc.
+        if eccentricity < 1.0 && n > 0.0 && raw_time < 0.0 && raw_time.is_finite() {
+            let period_seconds = std::f64::consts::TAU / n;
             let periods_to_add = (-raw_time / period_seconds).ceil();
-            raw_time + (periods_to_add * period_seconds)
-        } else {
-            raw_time
-        };
-        Instant::from_seconds_since_j2000(val)
+            return Instant::from_seconds_since_j2000(raw_time + periods_to_add * period_seconds);
+        }
+        Instant::from_seconds_since_j2000(raw_time)
     }
 }
 

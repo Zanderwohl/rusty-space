@@ -15,6 +15,7 @@ mod labels;
 mod local_starfield;
 mod local_starfield_material;
 mod rotation;
+mod chain_path;
 mod encounter_marker;
 mod encounter_marker_material;
 mod soi;
@@ -84,6 +85,12 @@ pub use soi::{
     SoiPointsMesh,
     SoiRingMesh,
     SoiLink,
+};
+pub use chain_path::{
+    spawn_chain_legs,
+    update_chain_legs,
+    update_chain_leg_thickness,
+    ChainLeg,
 };
 pub use encounter_marker::{
     spawn_encounter_markers,

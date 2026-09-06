@@ -15,7 +15,7 @@ use crate::camera::Freecam;
 pub use crate::gui::planetarium::focused_body::FocusedBodyState;
 pub use crate::gui::planetarium::focused_body::{HoverState, HoveredTrajectoryMarkerKind, TrajectoryHitData};
 pub use crate::gui::planetarium::windows::mission_clock::{MissionClockMode, MissionClockSettings, format_sim_time_for_mode};
-use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, LocalStarfieldMaterialPlugin, SoiPointsMaterialPlugin, SoiRingMaterialPlugin, SoiMeshes, EncounterMarkerMaterialPlugin, EncounterMarkerMesh, EncounterMarker, FlightPlans, TrajectoryMesh, BodyPointMesh, SoiPointsMesh, SoiRingMesh, FocusedTrajectoryMarker, StarLightingFrameCache};
+use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, LocalStarfieldMaterialPlugin, SoiPointsMaterialPlugin, SoiRingMaterialPlugin, SoiMeshes, EncounterMarkerMaterialPlugin, EncounterMarkerMesh, EncounterMarker, FlightPlans, ChainLeg, TrajectoryMesh, BodyPointMesh, SoiPointsMesh, SoiRingMesh, FocusedTrajectoryMarker, StarLightingFrameCache};
 use crate::gui::menu::escape::{EscapeMenuPlugin, EscMenuContext, EscMenuState, UnsavedChanges};
 
 mod windows;
@@ -157,6 +157,11 @@ impl Plugin for PlanetariumUI {
                     .before(world::advance_simulation),
                 presentation::update_encounter_markers
                     .after(world::sync_transforms),
+                presentation::spawn_chain_legs,
+                presentation::update_chain_legs
+                    .after(world::sync_transforms),
+                presentation::update_chain_leg_thickness
+                    .after(presentation::update_chain_legs),
             ).in_set(PlanetariumUISet))
             // Celestial reference markers (Point of Aries, etc.)
             .add_systems(Update, (
@@ -288,6 +293,7 @@ fn cleanup_planetarium(
         With<SoiPointsMesh>,
         With<SoiRingMesh>,
         With<EncounterMarker>,
+        With<ChainLeg>,
     )>>,
     mut system: ResMut<SimSystem>,
     mut body_entities: ResMut<BodyEntities>,
