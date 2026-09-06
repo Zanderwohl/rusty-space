@@ -277,8 +277,19 @@ impl System {
     /// it: scrub across one without rebuilding and a craft is still placed about the
     /// primary it has already left.
     pub fn crosses_event(&self, from: Instant, to: Instant) -> bool {
+        self.bodies_crossing_event(from, to).next().is_some()
+    }
+
+    /// The bodies whose motive has an event between `from` and `to`, in either direction —
+    /// that is, the ones now on a different arc than they were.
+    pub fn bodies_crossing_event(
+        &self,
+        from: Instant,
+        to: Instant,
+    ) -> impl Iterator<Item = BodyIndex> + '_ {
         let (low, high) = if from <= to { (from, to) } else { (to, from) };
-        self.motives.iter().any(|motive| motive.has_event_in_range(low, high))
+        self.indices()
+            .filter(move |i| self.motives[i.get()].has_event_in_range(low, high))
     }
     pub(crate) fn set_time(&mut self, t: Instant) { self.time = t; }
 

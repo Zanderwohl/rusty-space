@@ -251,6 +251,35 @@ pub fn resolve<'a>(system: &'a System, body: &BodyRef) -> Option<em_sim::id::Bod
 
 /// Recompute the sampled paths for the requested bodies. Sampling is `em_sim::trajectory`;
 /// geometry is `presentation::trajectory`.
+/// Resample a body's path when the clock moves it onto a different arc.
+///
+/// Paths are sampled on request — at load, and when a body is edited — because an orbit
+/// does not change on its own. An arc on a patched chain does: crossing a join swaps both
+/// the conic and the frame it is measured in, and nothing else asks for a fresh sample, so
+/// a craft entering a moon's sphere kept the path drawn for the orbit it had left.
+pub fn refresh_trajectories_on_arc_change(
+    system: Res<SimSystem>,
+    mut previous: Local<Option<em_foundations::time::Instant>>,
+    mut calcs: MessageWriter<crate::sim::CalculateTrajectory>,
+) {
+    let now = system.0.time();
+    let Some(before) = previous.replace(now) else { return };
+    if before == now {
+        return;
+    }
+
+    let changed: Vec<String> = system
+        .0
+        .bodies_crossing_event(before, now)
+        .map(|i| system.0.info(i).id.clone())
+        .collect();
+    if !changed.is_empty() {
+        calcs.write(crate::sim::CalculateTrajectory {
+            selection: crate::sim::BodySelection::IDs(changed),
+        });
+    }
+}
+
 pub fn calculate_trajectories(
     mut calcs: MessageReader<crate::sim::CalculateTrajectory>,
     system: Res<SimSystem>,

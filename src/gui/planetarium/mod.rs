@@ -86,6 +86,9 @@ impl Plugin for PlanetariumUI {
                 world::advance_simulation,
                 world::sync_body_entities.after(world::advance_simulation),
                 world::calculate_trajectories,
+                world::refresh_trajectories_on_arc_change
+                    .after(world::advance_simulation)
+                    .before(world::calculate_trajectories),
                 world::sync_transforms
                     .after(world::advance_simulation)
                     .after(world::sync_body_entities),
