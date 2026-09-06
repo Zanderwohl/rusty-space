@@ -234,6 +234,23 @@ impl Motive {
         doomed.len()
     }
 
+    /// The event exactly at `time`, if there is one. Unlike [`Motive::motive_at`] this does
+    /// not fall back to the event before.
+    pub fn event_at(&self, time: Instant) -> Option<&TransitionEvent> {
+        self.motives.get(&time).map(|(event, _)| event)
+    }
+
+    /// The sphere-of-influence changes that begin and end the arc in force at `time`.
+    ///
+    /// A join only means anything while you are on one of the two arcs it joins, so this is
+    /// what a marker should be drawn from. `None` on either side where the arc is bounded by
+    /// something else — its epoch, an impulse — or not bounded at all.
+    pub fn bounding_soi_changes(&self, time: Instant) -> (Option<Instant>, Option<Instant>) {
+        let (start, end) = self.active_segment_range(time);
+        let is_soi_change = |t: &Instant| matches!(self.event_at(*t), Some(TransitionEvent::SOIChange));
+        (start.filter(is_soi_change), end.filter(is_soi_change))
+    }
+
     /// Every sphere-of-influence change on the timeline, in time order.
     pub fn soi_changes(&self) -> impl Iterator<Item = (Instant, &MotiveSelection)> {
         self.iter_events().filter_map(|(time, event, selection)| {

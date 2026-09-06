@@ -188,8 +188,11 @@ pub fn spawn_encounter_markers(
 
 /// Place the markers on the crossings either side of the clock.
 ///
-/// No search: the chain was solved when the plan changed, so this walks the traveller's
-/// own event list and evaluates two instants.
+/// Only the joins bounding the arc in force are shown: a target marks where *this* orbit
+/// begins and ends, so it has no meaning while a different arc is being flown.
+///
+/// No search: the chain was solved when the plan changed, so this reads the traveller's own
+/// event list and evaluates two instants.
 pub fn update_encounter_markers(
     system: Res<SimSystem>,
     view_settings: Res<ViewSettings>,
@@ -216,23 +219,12 @@ pub fn update_encounter_markers(
     // every marker is anchored in — whichever arc the crossing itself belongs to.
     let anchor = traveller.and_then(|t| system.0.parent(t));
 
-    let (previous, next) = match traveller {
-        Some(t) => {
-            let changes = system.0.motive(t).soi_changes();
-            let mut previous = None;
-            let mut next = None;
-            for (time, _) in changes {
-                if time <= now {
-                    previous = Some(time);
-                } else {
-                    next = Some(time);
-                    break;
-                }
-            }
-            (previous, next)
-        }
-        None => (None, None),
-    };
+    // Only the two joins that bound the arc actually being flown. A join further along the
+    // chain belongs to an arc that is not happening yet, and one further back to an arc
+    // already left; drawing either puts a target on a trajectory that is not on screen.
+    let (previous, next) = traveller
+        .map(|t| system.0.motive(t).bounding_soi_changes(now))
+        .unwrap_or((None, None));
 
     for (mut marker, mut transform, mut visibility, handle) in markers.iter_mut() {
         let time = match marker.kind {

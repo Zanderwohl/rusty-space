@@ -267,6 +267,19 @@ impl System {
     /// An edit has landed that the derived columns have not caught up with. Public so a
     /// caller can tell "edited since last step" from "clock did not move".
     pub fn is_dirty(&self) -> bool { self.dirty }
+
+    /// Whether moving the clock between `from` and `to` crosses any body's motive event,
+    /// in either direction.
+    ///
+    /// The derived columns hold one parent and one mu per body, for whichever arcs were in
+    /// force when they were last rebuilt. That was safe while a body's primary never
+    /// changed with time. It is not safe once a timeline has sphere-of-influence changes on
+    /// it: scrub across one without rebuilding and a craft is still placed about the
+    /// primary it has already left.
+    pub fn crosses_event(&self, from: Instant, to: Instant) -> bool {
+        let (low, high) = if from <= to { (from, to) } else { (to, from) };
+        self.motives.iter().any(|motive| motive.has_event_in_range(low, high))
+    }
     pub(crate) fn set_time(&mut self, t: Instant) { self.time = t; }
 
     pub(crate) fn topo_order(&self) -> &[BodyIndex] { &self.topo_order }

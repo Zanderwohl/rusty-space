@@ -555,6 +555,38 @@ mod tests {
         assert_eq!(report.outcome, PatchOutcome::Settled);
     }
 
+    /// The arena has to follow the chain as the clock moves, not just when something is
+    /// edited. A body's primary never used to change with time, so `evaluate_at` rebuilt
+    /// its derived columns only when dirty; scrubbing across a join left a craft placed
+    /// about a primary it had already left — an AU out, for a craft that had reached a
+    /// heliocentric arc.
+    #[test]
+    fn the_arena_follows_the_chain_when_the_clock_moves() {
+        let mut s = built();
+        let craft = s.by_name("SC-LUN").unwrap();
+        solve(&mut s, craft, DEFAULT_PATCH_BUDGET);
+
+        let mut seen = Vec::new();
+        for day in [0.0, 13.0, 15.0, 25.0, 520.0] {
+            let t = Instant::J2000 + TimeDelta::from_days(day);
+            propagate::evaluate_at(&mut s, t);
+
+            let derived = s.parent(craft).map(|p| s.name(p).to_string());
+            let (_, selection) = s.motive(craft).motive_at(t);
+            assert_eq!(derived.as_deref(), selection.primary_id(),
+                "at day {day} the arena says {derived:?} and the timeline says {:?}",
+                selection.primary_id());
+
+            // And the position it writes must be the position the timeline describes.
+            let drift = (s.position(craft) - propagate::position_at(&s, craft, t).unwrap()).length();
+            assert!(drift < 1.0, "at day {day} the arena is {drift:e} m from the timeline");
+            seen.push(derived);
+        }
+
+        assert!(seen.iter().flatten().any(|p| p == "Luna"), "should pass through Luna: {seen:?}");
+        assert!(seen.iter().flatten().any(|p| p == "Sol"), "should reach Sol: {seen:?}");
+    }
+
     /// Time is only a cursor: the chain answers any instant, in any order, identically.
     #[test]
     fn scrubbing_is_free_and_order_independent() {

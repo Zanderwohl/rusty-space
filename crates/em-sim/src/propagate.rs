@@ -23,7 +23,9 @@ pub fn rebuild(system: &mut System, time: Instant) {
 /// Place every analytically-defined body at `time`. Fixed and Keplerian only; Newtonian
 /// bodies keep their current state — use [`step`].
 pub fn evaluate_at(system: &mut System, time: Instant) {
-    if system.is_dirty() {
+    // Crossing an event changes which arcs are in force, and the derived columns describe
+    // arcs. Scrubbing is not an edit, so `is_dirty` alone would not catch it.
+    if system.is_dirty() || system.crosses_event(system.time(), time) {
         system.rebuild_derived(time);
     }
     system.set_time(time);
@@ -133,7 +135,7 @@ fn mu_at(system: &System, i: BodyIndex, time: Instant) -> f64 {
 pub fn step(system: &mut System, dt: TimeDelta) {
     let start = system.time();
     let target = start + dt;
-    if system.is_dirty() {
+    if system.is_dirty() || system.crosses_event(start, target) {
         system.rebuild_derived(target);
         // The derived columns were stale, so the positions standing in the arena are not
         // trustworthy at `start` either — and `a0` is measured against them.
