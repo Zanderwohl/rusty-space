@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use crate::body::universe::save::UniverseFile;
 use crate::gui::util::ensure_folders;
 
-pub use em_sim::presets::{earth_moon, solar_system, EARTH_MOON_PATH, SOLAR_SYSTEM_PATH};
+pub use em_sim::presets::{earth_moon, soi_test, solar_system, EARTH_MOON_PATH, SOI_TEST_PATH, SOLAR_SYSTEM_PATH};
 
 fn write_preset(contents: em_sim::universe::UniverseFileContents, path: &str) {
     let dir = PathBuf::from("data/templates");
@@ -22,4 +22,8 @@ pub fn write_temp_system_file() {
 
 pub fn write_earth_moon_file() {
     write_preset(earth_moon(), EARTH_MOON_PATH);
+}
+
+pub fn write_soi_test_file() {
+    write_preset(soi_test(), SOI_TEST_PATH);
 }

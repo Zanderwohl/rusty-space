@@ -10,7 +10,7 @@ use bevy::prelude::*;
 use bevy::render::view::Hdr;
 use bevy::window::{ExitCondition, PresentMode};
 use bevy_egui::EguiPlugin;
-use crate::body::universe::solar_system::{write_temp_system_file, write_earth_moon_file};
+use crate::body::universe::solar_system::{write_temp_system_file, write_earth_moon_file, write_soi_test_file};
 use crate::body::universe::Universe;
 use crate::gui::menu::{close_when_requested, MenuPlugin};
 use crate::gui::planetarium::PlanetariumUI;
@@ -28,6 +28,7 @@ pub fn run() {
     let settings = settings::load();
     write_temp_system_file();
     write_earth_moon_file();
+    write_soi_test_file();
 
     App::new()
         .add_plugins(DefaultPlugins

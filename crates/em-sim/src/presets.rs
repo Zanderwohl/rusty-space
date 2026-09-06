@@ -8676,3 +8676,197 @@ pub fn earth_moon() -> UniverseFileContents {
     };
     earth_moon
 }
+
+pub const SOI_TEST_PATH: &str = "data/templates/soi_test.toml";
+
+/// Argument of periapsis, in degrees, that puts `Lunar Ranger`'s apoapsis where Luna will
+/// be when it arrives.
+///
+/// Found by scanning, not derived: see `crates/em-sim/tests/soi_crossings.rs`, which pins
+/// the encounter this value produces and so fails if the number is ever perturbed.
+const LUNAR_RANGER_ARGUMENT_OF_PERIAPSIS: f64 = 88.5;
+
+/// Sol, Earth, Luna and three spacecraft, for exercising sphere-of-influence crossings.
+///
+/// A cut-down system rather than the full one: the crossing search is analytic in time, so
+/// what matters is having orbits that provably cross a boundary, not having 112 bodies.
+/// Earth and Luna carry the same fitted elements as the bundled system, so the spheres are
+/// the real sizes — Earth's Laplace sphere is 9.25e8 m, Luna's 6.6e7 m.
+///
+/// The craft are Keplerian, not integrated: `propagate::position_at` has no closed form for
+/// an integrated body, so a Newtonian craft could not be searched over at all. They keep
+/// orbiting Earth straight through the boundary, which is exactly what is wanted while
+/// there are no transfers yet — the crossing is a geometric fact about the path, and
+/// nothing acts on it.
+pub fn soi_test() -> UniverseFileContents {
+    UniverseFileContents {
+        version: "0.0".into(),
+        time: UniverseFileTime {
+            time_julian_days: 2451544.5, // Midnight 2000 January 1 00:00
+            step: 1.0,
+            gui_speed: 1.0,
+            max_frame_time: 0.016,
+        },
+        physics: UniversePhysics::default(),
+        view: ViewSettings::default(),
+        bodies: vec![
+            SomeBody::FixedEntry(FixedEntry {
+                info: BodyInfo {
+                    name: Some("Sol".into()),
+                    id: "Sol".to_string(),
+                    mass: 1.988416e+30,
+                    major: true,
+                    designation: None,
+                    tags: vec!["Star".into()],
+                },
+                position: DVec3::ZERO,
+                appearance: Appearance::Star(StarBall {
+                    radius: 695700000.0,
+                    color: AppearanceColor { r: 219, g: 222, b: 35 },
+                    light: AppearanceColor { r: 3570, g: 3570, b: 3570 },
+                    absolute_magnitude: 4.83,
+                }),
+                rotation: Some(BodyRotation::spinning(
+                    DQuat::from_xyzw(0.05262721038, 0.03506855909, 0.6689295119, 0.7406307318),
+                    2.865329085e-06, RotationEpoch::J2000)),
+            }),
+            // Earth, so that it has a primary and therefore a sphere at all. A root body's
+            // influence is unbounded and has no surface to cross.
+            SomeBody::KeplerEntry(KeplerEntry {
+                info: BodyInfo {
+                    name: Some("Earth".into()),
+                    id: "Earth".to_string(),
+                    mass: 5.972168e+24,
+                    major: true,
+                    designation: None,
+                    tags: vec!["Planet".into(), "Major Planet".into()],
+                },
+                params: KeplerMotive {
+                    primary_id: "Sol".to_string(),
+                    shape: KeplerShape::EccentricitySMA(EccentricitySMA {
+                        eccentricity: 0.01669575226,
+                        semi_major_axis: 1.495979431e+11,
+                    }),
+                    rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
+                        inclination: 0.003937064881,
+                        longitude_of_ascending_node: 174.5779073,
+                        argument_of_periapsis: 288.4566314,
+                    }),
+                    epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
+                        mean_anomaly: 357.4294398,
+                    }),
+                    anomalistic_period: Some(TimeDelta::from_days(365.2563638)),
+                    gravitational_parameter: Some(1.327130212e+20),
+                },
+                appearance: Appearance::DebugBall(DebugBall {
+                    radius: 6371000.0,
+                    color: AppearanceColor { r: 59, g: 179, b: 75 },
+                    highlight_latitudes: Vec::new(),
+                }),
+                rotation: Some(BodyRotation::spinning(
+                    DQuat::from_xyzw(0.01796290283, 0.2023272178, 0.9753169712, -0.08659005037),
+                    7.292115853e-05, RotationEpoch::J2000)),
+            }),
+            SomeBody::KeplerEntry(KeplerEntry {
+                info: BodyInfo {
+                    name: Some("Luna".into()),
+                    id: "Luna".to_string(),
+                    mass: 7.346e+22,
+                    major: true,
+                    designation: Some("Earth I".into()),
+                    tags: vec!["Moon".into()],
+                },
+                params: KeplerMotive {
+                    primary_id: "Earth".to_string(),
+                    shape: KeplerShape::EccentricitySMA(EccentricitySMA {
+                        eccentricity: 0.05483385719,
+                        semi_major_axis: 384374822.0,
+                    }),
+                    rotation: KeplerRotation::PrecessingEulerAngles(KeplerPrecessingEulerAngles {
+                        inclination: 5.146884942,
+                        longitude_of_ascending_node: 125.0815567,
+                        argument_of_periapsis: 318.6030345,
+                        apsidal_precession_period: TimeDelta::from_days(2191.464675),
+                        nodal_precession_period: TimeDelta::from_days(-6791.621712),
+                    }),
+                    epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
+                        mean_anomaly: 134.6348082,
+                    }),
+                    anomalistic_period: Some(TimeDelta::from_days(27.55434218)),
+                    gravitational_parameter: Some(3.95564176e+14),
+                },
+                appearance: Appearance::DebugBall(DebugBall {
+                    radius: 1737400.0,
+                    color: AppearanceColor { r: 87, g: 87, b: 87 },
+                    highlight_latitudes: Vec::new(),
+                }),
+                rotation: Some(BodyRotation::tidally_locked("Earth",
+                    DVec3::new(-3.543751263e-05, -0.0003753996676, 0.9999999289))),
+            }),
+            // Apogee 1.2e6 km, well outside Earth's 9.25e5 km sphere; perigee 3.0e5 km,
+            // well inside it. So it leaves and returns twice per revolution, every
+            // revolution, which is the simplest possible thing for the search to find.
+            test_craft("Apogee Ranger", "SC-APO", 7.5e8, 0.6, 12.0, 30.0, 0.0, 0.0,
+                       AppearanceColor { r: 255, g: 120, b: 40 }),
+            // Coplanar with Luna and reaching its orbit: apoapsis is placed to arrive where
+            // Luna will be, so this one crosses a *moving* boundary — the case that would
+            // pass a static test and fail a real one.
+            test_craft("Lunar Ranger", "SC-LUN", 1.9559e8, 0.9652,
+                       5.146884942, 125.0815567, LUNAR_RANGER_ARGUMENT_OF_PERIAPSIS, 0.0,
+                       AppearanceColor { r: 90, g: 200, b: 255 }),
+            // Entirely inside Earth's sphere: the control. A search over this must return
+            // nothing, which is what catches a detector that reports spurious roots.
+            test_craft("Inner Ranger", "SC-INN", 2.0e7, 0.15, 28.0, 60.0, 0.0, 0.0,
+                       AppearanceColor { r: 180, g: 180, b: 180 }),
+        ],
+    }
+}
+
+/// A 1-tonne Keplerian spacecraft in orbit around Earth. Angles in degrees.
+#[allow(clippy::too_many_arguments)]
+fn test_craft(
+    name: &str,
+    id: &str,
+    semi_major_axis: f64,
+    eccentricity: f64,
+    inclination: f64,
+    longitude_of_ascending_node: f64,
+    argument_of_periapsis: f64,
+    mean_anomaly: f64,
+    color: AppearanceColor,
+) -> SomeBody {
+    SomeBody::KeplerEntry(KeplerEntry {
+        info: BodyInfo {
+            name: Some(name.into()),
+            id: id.to_string(),
+            mass: 1000.0,
+            // Not `major`: a spacecraft must not pull on anything.
+            major: false,
+            designation: None,
+            tags: vec!["Spacecraft".into()],
+        },
+        params: KeplerMotive {
+            primary_id: "Earth".to_string(),
+            shape: KeplerShape::EccentricitySMA(EccentricitySMA {
+                eccentricity,
+                semi_major_axis,
+            }),
+            rotation: KeplerRotation::EulerAngles(KeplerEulerAngles {
+                inclination,
+                longitude_of_ascending_node,
+                argument_of_periapsis,
+            }),
+            epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 { mean_anomaly }),
+            anomalistic_period: None,
+            // Derived: G(M_earth + m). A tonne against six ronnagrams changes nothing,
+            // but stating it here would freeze the orbit if Earth's mass were ever edited.
+            gravitational_parameter: None,
+        },
+        appearance: Appearance::DebugBall(DebugBall {
+            radius: 30000.0, // Visible at planetarium scale; not a physical hull.
+            color,
+            highlight_latitudes: Vec::new(),
+        }),
+        rotation: None,
+    })
+}

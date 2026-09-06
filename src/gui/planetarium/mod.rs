@@ -15,7 +15,7 @@ use crate::camera::Freecam;
 pub use crate::gui::planetarium::focused_body::FocusedBodyState;
 pub use crate::gui::planetarium::focused_body::{HoverState, HoveredTrajectoryMarkerKind, TrajectoryHitData};
 pub use crate::gui::planetarium::windows::mission_clock::{MissionClockMode, MissionClockSettings, format_sim_time_for_mode};
-use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, LocalStarfieldMaterialPlugin, SoiPointsMaterialPlugin, SoiRingMaterialPlugin, SoiMeshes, TrajectoryMesh, BodyPointMesh, SoiPointsMesh, SoiRingMesh, FocusedTrajectoryMarker, StarLightingFrameCache};
+use crate::presentation::{self, TrajectoryMaterialPlugin, BodyWireframeMaterialPlugin, OccluderMaterialPlugin, BodyPointMaterialPlugin, StarfieldMaterialPlugin, LocalStarfieldMaterialPlugin, SoiPointsMaterialPlugin, SoiRingMaterialPlugin, SoiMeshes, EncounterMarkerMaterialPlugin, EncounterMarkerMesh, EncounterMarker, FlightPlans, TrajectoryMesh, BodyPointMesh, SoiPointsMesh, SoiRingMesh, FocusedTrajectoryMarker, StarLightingFrameCache};
 use crate::gui::menu::escape::{EscapeMenuPlugin, EscMenuContext, EscMenuState, UnsavedChanges};
 
 mod windows;
@@ -46,6 +46,8 @@ impl Plugin for PlanetariumUI {
             .init_resource::<SimMetrics>()
             .init_resource::<StarLightingFrameCache>()
             .init_resource::<SoiMeshes>()
+            .init_resource::<EncounterMarkerMesh>()
+            .init_resource::<FlightPlans>()
             .init_resource::<windows::right_panels::RightPanels>()
             .init_resource::<windows::body_panel::BodyPickerState>()
             .add_message::<CalculateTrajectory>()
@@ -62,6 +64,7 @@ impl Plugin for PlanetariumUI {
             .add_plugins(LocalStarfieldMaterialPlugin)
             .add_plugins(SoiPointsMaterialPlugin)
             .add_plugins(SoiRingMaterialPlugin)
+            .add_plugins(EncounterMarkerMaterialPlugin)
             .add_plugins(EscapeMenuPlugin)
             .add_systems(EguiPrimaryContextPass, (
                 (
@@ -146,6 +149,14 @@ impl Plugin for PlanetariumUI {
                 presentation::update_soi_shells
                     .after(world::sync_transforms),
                 presentation::cleanup_orphaned_soi_meshes,
+            ).in_set(PlanetariumUISet))
+            // Sphere-of-influence crossing markers for the focused body
+            .add_systems(Update, (
+                presentation::spawn_encounter_markers,
+                presentation::advance_flight_plan
+                    .before(world::advance_simulation),
+                presentation::update_encounter_markers
+                    .after(world::sync_transforms),
             ).in_set(PlanetariumUISet))
             // Celestial reference markers (Point of Aries, etc.)
             .add_systems(Update, (
@@ -276,6 +287,7 @@ fn cleanup_planetarium(
         With<FocusedTrajectoryMarker>,
         With<SoiPointsMesh>,
         With<SoiRingMesh>,
+        With<EncounterMarker>,
     )>>,
     mut system: ResMut<SimSystem>,
     mut body_entities: ResMut<BodyEntities>,
@@ -332,4 +344,3 @@ fn hide_settings_window_on_planetarium_exit(mut esc_menu_context: ResMut<EscMenu
     esc_menu_context.restore_playing_on_close = false;
     esc_menu_context.was_playing_before_open = false;
 }
-

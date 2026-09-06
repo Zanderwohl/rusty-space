@@ -8,6 +8,7 @@
 pub mod appearance;
 pub mod body;
 pub mod motive;
+pub mod patch;
 pub mod presets;
 pub mod propagate;
 pub mod system;

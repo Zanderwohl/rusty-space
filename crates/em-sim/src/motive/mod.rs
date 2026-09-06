@@ -3,4 +3,4 @@
 pub mod compound;
 pub mod kepler;
 
-pub use compound::{Motive, MotiveSelection, TransitionEvent};
+pub use compound::{Frontier, Motive, MotiveSelection, TransitionEvent};

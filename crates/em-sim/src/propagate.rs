@@ -102,6 +102,14 @@ fn primary_at(system: &System, i: BodyIndex, time: Instant) -> Option<BodyIndex>
 
 /// Gravitational parameter for `i` at `time`, computed rather than read from the derived
 /// column, for the same reason as [`primary_at`]. Mirrors `System::rebuild_derived`.
+///
+/// Public because anything reasoning about an arc the clock is not currently in needs it:
+/// [`System::mu`] holds one value per body, for the arena's last rebuild time, and using it
+/// for another arc silently mixes the wrong primary's mass into the answer.
+pub fn gravitational_parameter_at(system: &System, i: BodyIndex, time: Instant) -> f64 {
+    mu_at(system, i, time)
+}
+
 fn mu_at(system: &System, i: BodyIndex, time: Instant) -> f64 {
     let (_, selection) = system.motive(i).motive_at(time);
     let MotiveSelection::Keplerian(kepler) = selection else { return 0.0 };
