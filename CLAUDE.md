@@ -58,3 +58,16 @@ The bundled system is generated, not hand-maintained. Elements are least-squares
 against JPL Horizons series, and every body records its own fit residual. The pipeline and
 its pitfalls are in `docs/horizons-golden-vectors.md`, with scripts in `docs/scratch/`.
 `tests/ephemeris.rs` pins positions and velocities against JPL.
+
+## The other project
+
+`lightcone/` holds design documents for a separate product — a relativistic sandbox MMO
+built on the same shared crates. It has no code yet. Exotic Matters must never depend on
+anything from it:
+
+```bash
+cargo tree -p exotic-matters | grep -E '^\s*lc-'     # must be empty
+```
+
+Game-specific crates will be `crates/lc-*`. Shared libraries stay `em-*` and must keep both
+products building. Start at [lightcone/README.md](lightcone/README.md).
