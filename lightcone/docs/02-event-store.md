@@ -163,6 +163,7 @@ raises its fan-out cost, which is a fair place for a game-balance knob to live.
 | starlight | read-time, analytic | continuous; a function, not an event stream |
 | transit dimming | read-time, analytic | derived from the star's occluder list |
 | swarm reconfiguration | event, then read-time | the event changes the function's parameters |
+| mining a belt or cloud | event, then read-time | the same thing with the sign reversed: extraction lowers the population's count, so its transit probability falls |
 
 ## The light-cone cursor
 
@@ -215,7 +216,12 @@ so archival must be reversible, not destructive.
 - `cube` versus PostGIS 3D. `cube` is contrib and sufficient for bounding-box pruning;
   PostGIS brings real spatial operators and a much larger dependency. Decide once the
   source count is known.
+**Decided: event IDs are `(shard, coordinate_time, sequence)`**, snowflake-style. Locally
+generated, time-ordered, no coordination, and it works unchanged whether or not sharding ever
+happens.
+
+Still open:
+
 - Whether the source BVH lives in Postgres at all, or is rebuilt in server memory at start
-  and maintained incrementally, with Postgres holding only the durable positions.
-- Event ID allocation across shards, if sharding happens. A snowflake-style
-  `(shard, time, seq)` layout keeps the primary key locally generated and time-ordered.
+  with Postgres holding only the durable positions. Under discussion; not blocking, because
+  the durable positions are needed either way.

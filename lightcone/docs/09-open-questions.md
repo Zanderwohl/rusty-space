@@ -3,6 +3,21 @@
 Decisions not yet made, grouped by what they block. Each topic document carries its own
 "Open" section; this is the index and the ordering.
 
+## Resolved
+
+| question | decision |
+|---|---|
+| Star proper motion | Planned, not implemented. Catalogue frozen; stars still get a `Worldline`, currently constant, so nothing reads a position as a field. |
+| World boundary | Terminates. The galaxy fits inside 36 500 ly; a skybox of distant galaxies lies beyond it. A third coordinate tier is possible and not expected. |
+| Multi-star systems | A binary is a barycentre with two children — a hierarchical decomposition `em-sim` already propagates. One shell per system, two emission sources, and coherent mutual eclipses on the analytic path. Contact binaries excluded from generation. |
+| Shell radius | Immutable world geometry. |
+| Swarm sub-populations | They exist and nest. One record per wave or per band; deficits add, so a meta-population needs no separate representation. |
+| Oort and Kuiper generation | Scaled by stellar generation and metallicity, with metallicity synthesised from galactic kinematics since the catalogue lacks `[Fe/H]`. |
+| Deposit granularity | Per-body totals. |
+| Event ID allocation | `(shard, coordinate_time, sequence)`, snowflake-style. Locally generated and time-ordered whether or not sharding happens. |
+| Von Neumann termination | Replication orders carry a generation TTL. Drift can corrupt the counter, producing self-perpetuating drifters, which is a mechanic rather than a bug. |
+| Superluminal travel | Not built, not foreclosed. Three cheap signature decisions keep the option open; see [10-superluminal.md](10-superluminal.md). |
+
 ## Blocking the first line of code
 
 | question | options | blocks |
@@ -18,18 +33,15 @@ database schema, the wire format and every stored coordinate. Decide it first.
 
 | question | notes |
 |---|---|
-| Multi-star systems | The catalogue is full of binaries. `em-sim` propagates about a primary; close binaries need a hierarchical decomposition. Excluding them removes a large fraction of real stars. |
-| Star proper motion | Frozen stars make interstellar retarded-time solves exact and cheap. Moving stars are correct, and Barnard's Star moves visibly within a single session at 8766x. |
-| Playable volume | How many stars, out to what distance. Sets the source count, the BVH size, and the maximum light delay. |
-| Shell radius rules | Fixed by stellar mass, or mutable by sufficiently large construction. |
-| Deposit granularity | Per-body totals, or per-site with surface positions. |
+| Playable volume | How many stars, out to what distance. Sets the source count, the BVH size, and the maximum light delay. Bounded above by the 36 500 ly coordinate invariant, and expected to be far smaller. |
+| Drift rate, TTL depth, branching factor | The three numbers that tune von Neumann expansion and drifters. All need calibrating against how long a player should take to notice and to respond. |
+| Metallicity synthesis | The correlation between kinematics and `[Fe/H]` is real and strong; the mapping still needs writing and the resource yield curve calibrating. |
 
 ## Blocking the event store
 
 | question | notes |
 |---|---|
 | `cube` versus PostGIS | `cube` is contrib and adequate for bounding-box pruning; PostGIS is heavier and gives real spatial operators. |
-| Source index location | In Postgres, or an in-memory BVH rebuilt at start with Postgres holding only durable positions. |
 | Partition cadence | One in-game month is 3.6 real hours. Partition maintenance must be automated either way. |
 | Retention and archival | When an event becomes unreachable, and whether archival must stay reversible for replays. |
 

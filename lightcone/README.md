@@ -37,7 +37,8 @@ cross-reference except where a shared crate is the subject.
 | [06-crate-layout.md](docs/06-crate-layout.md) | crate boundaries, dependency rules, what gets extracted from the app |
 | [07-rendering.md](docs/07-rendering.md) | Bevy, scale tiers, WASM and native shader constraints, view modes |
 | [08-networking.md](docs/08-networking.md) | transport, authority, tick model, interest management |
-| [09-open-questions.md](docs/09-open-questions.md) | decisions not yet made |
+| [09-open-questions.md](docs/09-open-questions.md) | decisions made and still outstanding |
+| [10-superluminal.md](docs/10-superluminal.md) | analysis only: what FTL trajectories would cost, and why the design is already paradox-free |
 
 ## Status
 

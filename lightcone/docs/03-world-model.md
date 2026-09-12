@@ -47,6 +47,28 @@ Because everything crossing is an event on a known surface, a system can be simu
 paused, archived, or moved to another server process without any other domain noticing
 beyond the latency of the crossing.
 
+## Multi-star systems
+
+**Decided: a binary is a barycentre with two children.** The barycentre carries the system,
+and each star is a body orbiting it, which is a hierarchical two-body decomposition that
+`em-sim` already propagates without modification. Planets orbit either a star (S-type) or the
+barycentre (P-type), and the same decomposition covers both.
+
+Consequences worth planning for:
+
+- One shell per system, not per star. The shell radius is sized from the total mass.
+- Two emission sources on that shell. Radiance is the sum, and it is not axisymmetric about
+  anything, so a binary's shell has real angular structure independent of any occluder.
+- **Mutual eclipses are coherent and periodic**, so they take the analytic path of
+  [04-stellar-photometry.md](04-stellar-photometry.md), and they are enormous — an eclipsing
+  binary dims by a fraction of order unity where a planet dims by 1e-4. Any observer at a
+  suitable angle gets the orbital period, the mass ratio and the inclination for free, long
+  before they could detect a planet. This is the strongest photometric signal in the game and
+  it comes from real catalogue data.
+- Close binaries whose separation is comparable to their radii need more than two-body
+  Keplerian motion. Exclude contact and near-contact systems from generation rather than
+  modelling them.
+
 ## Systems and star data
 
 The starting catalogue is HYG v4.2, already in `assets/catalogs/hygdata_v42.csv` and read by
@@ -122,6 +144,17 @@ anything:
 | Kuiper analogue | wide `a`, low inclination, many small bodies | near the detection floor |
 | Oort cloud | very wide `a`, isotropic inclination, `e` near 1 | invisible |
 
+**Decided: population mass scales with stellar generation and metallicity.** A later-generation
+star formed from enriched gas has more solid material available, so it gets more massive belts,
+a denser Kuiper analogue, and richer volatiles. A Population II star gets almost nothing.
+
+The catalogue does not carry `[Fe/H]`, so metallicity is synthesised rather than read: seed it
+from galactic position — thin disc, thick disc, halo — plus the star's kinematics, which HYG
+does carry as proper motion and radial velocity. Halo stars move fast relative to the local
+standard of rest and are metal-poor; that correlation is strong enough to generate from and it
+costs nothing. This also makes metal-rich systems worth travelling to, which is a resource
+gradient derived from real data rather than sprinkled on top.
+
 The Oort cloud earns its record for reasons that have nothing to do with light. It is
 invisible in transit — a mean deficit of 2.8e-14, see
 [04-stellar-photometry.md](04-stellar-photometry.md) — but it defines the shell radius, it
@@ -191,9 +224,32 @@ Population growth is bounded by resource availability and by the light-delay on 
 order, which is the interesting constraint: a self-replicating fleet 40 ly out cannot be
 stopped in under 40 in-game years.
 
-Practical limit: the server must cap the total object count per player, or the source table
-and the BVH grow without bound. Cap by energy and mass conservation first, and impose a hard
-numeric cap as a backstop.
+### Generation limits and drift
+
+**Decided: replication orders carry a TTL.** A probe is built with a generation counter; it may
+build children, which are one generation deeper, and at generation `N` the replication order
+shuts itself down. The probe keeps working — it mines, builds, observes — it simply stops
+making more of itself.
+
+This bounds the population by construction rather than by a cap bolted on afterwards. With
+branching factor `b`, a lineage totals `(b^(N+1) - 1) / (b - 1)` probes, so the limit is
+exponential in `N` and both parameters need choosing together: `b = 2, N = 10` gives 2047;
+`b = 2, N = 20` gives 2.1 million. Energy and mass conservation bound it further and should
+bind first in normal play; the TTL is what guarantees termination when they do not.
+
+**Drifters.** A replication has a small probability of copying the order set incorrectly. The
+interesting corruption is a generation counter that fails to decrement: that lineage never
+terminates, and it expands until something stops it. A drifter is not scripted hostility — it
+is a probe running a slightly wrong copy of the player's own program, which is exactly what a
+von Neumann failure mode looks like.
+
+What makes it a real mechanic rather than a nuisance is the light delay. A drifter lineage 40
+light-years out is discovered 40 in-game years after it started, by which point it has had 40
+years to expand, and any order to stop it takes another 40 to arrive. A player's own probes
+become the thing they have to hunt, and the hunt is bounded below by the speed of light.
+
+Drift rates, TTL depth and branching factor are the three numbers that tune this, and all
+three are per-design-decision rather than per-player.
 
 ## Persistence
 
@@ -215,12 +271,14 @@ those events over the generated baseline reconstructs the system exactly.
 - Multi-star systems. `em-sim` propagates Keplerian orbits about a primary; a close binary
   needs either a hierarchical two-body decomposition or a restricted three-body treatment.
   The catalogue has many binaries and ignoring them removes a large fraction of real stars.
-- Whether a system's shell radius can be changed by players (a large enough swarm arguably
-  redefines what escapes), or is immutable world geometry.
-- Granularity of swarm sub-populations. One record per swarm is simplest; a swarm built in
-  distinct campaigns has several inclination bands, and forcing them into one distribution
-  loses the structure an observer could otherwise see.
-- Whether generated Oort and Kuiper populations vary per system or are scaled from one
-  template by stellar mass. They are invisible to photometry either way, so the question is
-  entirely about what harvesting them should yield.
-- Deposit granularity: per-body totals, or per-site with positions on the surface.
+- ~~Whether a system's shell radius can be changed by players.~~ **Decided: immutable.** The
+  shell is world geometry. A swarm large enough to argue otherwise is a later problem.
+- ~~Granularity of swarm sub-populations.~~ **Decided: sub-populations exist and nest.** A
+  population may belong to a meta-population, so a swarm built in waves keeps one record per
+  wave, and a superstructure assembled from several orbital bands keeps one per band. Deficits
+  add, so a meta-population's contribution is the sum of its members' and needs no separate
+  representation. Observers see the superposition; the owner sees the parts.
+- ~~Whether generated Oort and Kuiper populations vary per system.~~ **Decided: by stellar
+  generation and metallicity**, as above. What remains is calibrating the yield curve.
+- ~~Deposit granularity.~~ **Decided: per-body totals.** Enough resolution for the
+  extraction loop, and it keeps a body's resource state to a handful of numbers.

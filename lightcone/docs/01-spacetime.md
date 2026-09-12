@@ -141,7 +141,14 @@ Newton on `f(t_r) = t_r + |x_o - x_s(t_r)| - t_o` instead, whose derivative is
 steps at any `beta < 1`.
 
 There is exactly one solution for any sub-luminal worldline, because `f` is strictly
-increasing. Assert that; a second root means a worldline went superluminal and is a bug.
+increasing. Assert it as a debug assertion gated on `Worldline::is_subluminal()`, so the
+invariant is checked where it holds rather than assumed everywhere. A second root means a
+worldline exceeded `c`, which today is a bug and is the only thing that would have to change
+if it ever were not — see [10-superluminal.md](10-superluminal.md).
+
+`position_at(t)` being a total, single-valued function of server-frame `t` is also what makes
+closed causal loops unrepresentable: nothing can move backward in `t`, so no effect can be
+placed before its cause. That property is free, and it is worth not losing.
 
 ## What relativity actually does in the game
 
@@ -178,13 +185,22 @@ pub fn interval2(a: Coord, b: Coord) -> i128;
 
 pub enum Separation { Timelike, Lightlike, Spacelike }
 
-/// Solve t_r + |x_o - w(t_r)| = t_o. Returns None if the worldline has no coverage there.
-pub fn retarded_time(observer: Coord, w: &dyn Worldline) -> Option<f64>;
+/// Solve t_r + |x_o - w(t_r)| = t_o.
+///
+/// Returns a collection, not an Option. For a sub-luminal worldline it always holds 0 or 1
+/// root and the caller pays nothing for the generality. The signature is chosen now because
+/// changing it later touches every call site, and superluminal motion would make it 0, 1 or
+/// more. See 10-superluminal.md.
+pub fn retarded_times(observer: Coord, w: &dyn Worldline) -> SmallVec<[f64; 2]>;
 
 pub trait Worldline {
     fn position_at(&self, t: f64) -> DVec3;   // local metres, or global if unparented
     fn velocity_at(&self, t: f64) -> DVec3;
     fn defined_over(&self) -> Range<f64>;
+
+    /// Every worldline in the current design returns true. The single-root invariant is
+    /// asserted against this, not assumed globally.
+    fn is_subluminal(&self) -> bool { true }
 }
 ```
 
@@ -192,11 +208,23 @@ pub trait Worldline {
 duration with an instant — the same discipline `em_foundations::time` applies to `Instant`
 and `JulianDate`, and for the same reason.
 
-## Open
+## Decided
 
-- Do stars get proper motion, or is the catalogue frozen? Proper motion makes every
-  interstellar retarded-time solve iterative instead of exact. Barnard's Star moves 10.3
-  arcsec/yr, which at 8766x is visible within a session.
-- Does the world wrap or terminate at a boundary? The `2^60` invariant permits 36 500 ly,
-  far past any plausible playable volume, so a soft boundary is a design choice rather than
-  a representation limit.
+**Stars get proper motion eventually, not yet.** The catalogue is frozen for now, so every
+interstellar retarded-time solve is exact and closed-form. It is planned, so the architecture
+must not assume static stars: a star gets a `Worldline` like everything else, currently
+returning a constant. Nothing may read a star's position as a field. When proper motion is
+switched on, every interstellar solve becomes iterative and the cost is real — Barnard's Star
+moves 10.3 arcsec/yr, which at 8766x is visible inside a single session, so it is worth
+having.
+
+**The world terminates at a boundary.** The playable galaxy fits inside the `2^60` invariant's
+36 500 ly. Beyond the boundary is a skybox of distant galaxies, which are rendered and never
+simulated. A third coordinate tier for intergalactic range is possible and is not expected to
+be needed; the boundary is a design choice made early so that nothing comes to depend on its
+absence.
+
+**Causality is frame-independent because nothing is superluminal.** State it that way in the
+code rather than as an unconditional fact — the two differ the moment anything exceeds `c`.
+See [10-superluminal.md](10-superluminal.md) for what that would cost and for the three
+cheap decisions that keep the option open.

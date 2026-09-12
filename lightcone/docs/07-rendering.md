@@ -19,6 +19,25 @@ replay, and it destroys the game's premise if a player has it. Gate it behind a 
 capability, not a client flag. Treat any client that requests it without the capability as
 a client to disconnect.
 
+**God view draws causality explicitly.** For every event still in flight, draw a line from the
+event's coordinate to each observer it is currently travelling toward, with the fraction
+travelled shown along it. The single most common class of bug in this design is an observer
+learning something early or late, and it is invisible in any view that only shows positions.
+Rendered this way it is obvious: a line that reaches an observer before the client reacted, or
+a reception with no line feeding it, is the bug drawn on screen.
+
+Supporting overlays in the same mode:
+
+| overlay | shows |
+|---|---|
+| in-flight event lines | which observers each live event is heading for, and how far along |
+| expanding shells | the light cone of a selected event as a sphere of radius `c (t - t_emit)` |
+| reception log, spatially anchored | what each observer received and when, at their position |
+| knowledge diff | what observer A knows that observer B does not, at the same `t` |
+
+These are debug instruments, so they may be expensive. Correctness of the delay model is worth
+more than the frame rate of the mode nobody ships.
+
 Both modes share one scene graph. The difference is the time at which each worldline is
 sampled, which is a parameter of the extract step, not a separate renderer.
 
@@ -62,6 +81,17 @@ starfield and the science instrument must not be two implementations.
 Note the existing catalogue rotation: HYG is equatorial, the sim is ecliptic. That
 conversion already exists and is the sort of thing that silently puts everything 23.4 degrees
 out of place if duplicated.
+
+## The boundary and the skybox
+
+The playable volume terminates at a boundary well inside the `2^60` coordinate invariant. What
+lies beyond it is a skybox of distant galaxies: rendered, never simulated, never a source, never
+in the BVH. It exists so the sky is not empty at the edge and so the boundary reads as distance
+rather than as a wall.
+
+The skybox is the one thing in the renderer exempt from retarded-time evaluation, because it has
+no worldline and no state. Keep it in its own pass so that exemption is structural and cannot
+leak into anything that does have a worldline.
 
 ## Light cones as geometry
 
