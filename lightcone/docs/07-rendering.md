@@ -117,9 +117,11 @@ bottleneck.
 The object count per frame is bounded by what is *visible*, not by what exists. The
 light-cone cursor from [02-event-store.md](02-event-store.md) already yields sources in
 arrival order and prunes by strength, so the renderer takes the first N and stops. A sky
-with 120 000 catalogue stars draws as one instanced point cloud; a system with 10 000 swarm
-elements draws as one instanced mesh with per-instance orbital phase computed on the GPU
-from elements uploaded once.
+with 120 000 catalogue stars draws as one instanced point cloud. A swarm is not drawn from
+its members, because it has none: the renderer samples the population's distribution to
+generate as many representative instances as the current LOD calls for, seeded so the same
+swarm looks the same every frame and from every client. Instance count is a rendering
+budget, not a world-state quantity.
 
 `PERF_AUDIT.md` in the repo root records the existing app's measured hot spots. Read it
 before assuming where time goes in the shared crates.

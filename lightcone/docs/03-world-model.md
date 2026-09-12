@@ -102,12 +102,33 @@ Kinds, and the one property of each that matters to the physics rather than the 
 | receiver | effective area, noise floor |
 | solar collector | area, distance from the star, occlusion it casts |
 | refinery, fabricator | none; pure economy |
-| swarm element | area and orbit, contributing to the star's occlusion map |
+| swarm population | a distribution over orbital elements, not a roster; see below |
 | ringworld, shell segment | large fixed occlusion over a solid angle |
 
 Solar collectors, swarm elements and megastructures are the same thing to the light model:
 area that blocks a fraction of the star's output in some set of directions. That is what
 makes a rival's industry detectable from another system.
+
+### Swarms are populations, not entities
+
+A swarm of a million collectors is stored as **one** record: a distribution over semi-major
+axis, eccentricity and inclination, a pole, an element count, and a cross-section. The
+orientation angles — node, argument of periapsis, mean anomaly — are not stored, because
+assuming them uniform is what makes the swarm statistically steady and turns its occultation
+into a closed-form integral. See [04-stellar-photometry.md](04-stellar-photometry.md).
+
+The element count is an `f64` and may be fractional. Nothing enumerates the members.
+Construction adds to the count and to the cross-section; losses subtract. Both are events.
+
+An element leaves the population only when a player selects it for something specific — a
+manoeuvre, a transfer, a detachment — at which point it becomes a tracked body until it
+rejoins. Bulk operations on a swarm are operations on the distribution's parameters, so
+reconfiguring a million collectors is one event carrying a new inclination spread, not a
+million events.
+
+This is a hard rule, not an optimisation. A design where a player can address individual
+swarm members as entities has an unbounded object count, an unbounded source table, and an
+observation cost that scales with someone else's industry.
 
 ## Ships
 
@@ -173,4 +194,7 @@ those events over the generated baseline reconstructs the system exactly.
   The catalogue has many binaries and ignoring them removes a large fraction of real stars.
 - Whether a system's shell radius can be changed by players (a large enough swarm arguably
   redefines what escapes), or is immutable world geometry.
+- Granularity of swarm sub-populations. One record per swarm is simplest; a swarm built in
+  distinct campaigns has several inclination bands, and forcing them into one distribution
+  loses the structure an observer could otherwise see.
 - Deposit granularity: per-body totals, or per-site with positions on the surface.

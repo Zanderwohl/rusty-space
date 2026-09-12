@@ -29,12 +29,13 @@ Reference numbers, V band, where `V = 0` is about `1e10 photons/m^2/s`:
 
 Transit depths are `(R_body / R_star)^2`:
 
-| body around a Sun-like star | depth |
+| occluder around a Sun-like star | depth |
 |---|---|
 | Jupiter | 1.06e-2 |
 | Neptune | 1.3e-3 |
 | Earth | 8.4e-5 |
-| a swarm covering 1% of the sky as seen from the star | 1e-2 |
+| swarm covering 1% of the sky as seen from the star | 1e-2, steady |
+| 1.5e6 collectors of 1e6 km^2 at 1 AU | 5.3e-6 mean, 1.9e-6 rms flicker |
 
 Required exposure for an Earth-analogue at 10 pc with `eta = 0.5`:
 
@@ -59,7 +60,7 @@ Two tools, for two kinds of signal. Use the right one.
 | signal | shape | tool |
 |---|---|---|
 | stellar rotation, pulsation | near-sinusoidal, high duty cycle | FFT / Lomb-Scargle |
-| dense swarm, ring | quasi-continuous modulation | FFT / Lomb-Scargle |
+| swarm or belt flicker | stationary noise with a spectral knee | power spectrum, fitted |
 | planetary transit | box-shaped, duty cycle 1e-3 to 1e-2 | box least squares (BLS) |
 
 An FFT is the wrong instrument for a narrow transit: the power of a box of duty cycle `q`
@@ -71,15 +72,49 @@ Unevenly sampled series — which is what a telescope with gaps produces — nee
 Lomb-Scargle rather than a plain FFT. Assume gaps; the sampling is driven by whatever else
 the player was doing.
 
+A population is the case where the FFT is not looking for a period at all. A swarm produces
+no line, because its elements are uniformly distributed in phase; it produces **stationary
+noise with a mean offset**, and the shape of that noise carries the information. The power
+spectrum is flat below a knee at `f = v_perp / (2 * pi * R_star)` and falls above it, so
+fitting the knee gives the orbital velocity and therefore the semi-major axis, without any
+periodicity existing to find.
+
+This is the transition worth building the UI around. A star with four planets shows four
+lines in a periodogram. A star with a swarm shows no lines and a raised, structured noise
+floor. A star mid-construction shows both, and the lines disappearing one by one into the
+floor as the swarm fills in is the most legible signal in the game that someone is building
+something.
+
 ### What is inferable
+
+Coherent occluders, from a periodogram or a BLS search:
 
 | measurement | yields |
 |---|---|
 | period `P` | semi-major axis, via the star's mass and Kepler's third law |
-| depth `d` | occluder radius, or total swarm area |
+| depth `d` | occluder radius |
 | duration and ingress shape | impact parameter, therefore inclination |
-| depth versus band | occluder temperature; a solid body and a hot swarm differ |
+| depth versus band | occluder temperature; a solid body and a hot structure differ |
 | IR excess | waste heat, therefore engineering rather than a planet |
+
+Populations, from the first two moments of the light curve and the spectral knee. Using
+`d` for the mean deficit and `f` for the rms flicker, as derived in
+[04-stellar-photometry.md](04-stellar-photometry.md):
+
+| measurement | yields |
+|---|---|
+| mean deficit `d` | covering fraction, `N * sigma / (4 pi a^2)` |
+| `k = f^2 / d` | deficit contributed by one element |
+| `sigma = k * pi * R_star^2` | **size of an individual element** |
+| `m = d / k` | elements on the disc at any instant |
+| spectral knee | orbital velocity, therefore `a` |
+| `N = 4 m a^2 / R_star^2` | **total element count** |
+| deficit versus latitude, across several observers | the population's inclination spread and pole |
+
+Element size and element count separate because the mean and the variance of a Poisson
+process scale differently. One telescope, one long enough stare, and an observer knows how
+many objects of what size orbit a star 30 light-years away — not merely that something is
+there.
 
 All at the retarded time. A measurement of a system 30 ly away describes that system 30
 in-game years ago, and the UI must label it that way everywhere, without exception.

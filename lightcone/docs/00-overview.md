@@ -79,6 +79,6 @@ Out:
 |---|---|
 | Light-cone queries over a large event table are not indexable in general | [02-event-store.md](02-event-store.md) — query sources, not events |
 | f64 metres lose precision at interstellar range | [01-spacetime.md](01-spacetime.md) — integer light-microsecond grid |
-| Baking directional emission at transit resolution is prohibitively large | [04-stellar-photometry.md](04-stellar-photometry.md) — analytic occluders |
+| Per-element occultation does not scale to swarms of 1e6+ | [04-stellar-photometry.md](04-stellar-photometry.md) — populations are distributions, not rosters |
 | Browser targets restrict shaders and transport | [07-rendering.md](07-rendering.md), [08-networking.md](08-networking.md) |
 | Client-side prediction must agree with the server bit-for-bit where rules depend on it | [08-networking.md](08-networking.md) — shared `libm` |
