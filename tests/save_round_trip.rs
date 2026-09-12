@@ -10,36 +10,21 @@ use em_sim::system::System;
 use em_sim::universe::{SomeBody, UniverseFileContents};
 use em_foundations::time::Instant;
 use exotic_matters::body::universe::save_sqlite;
-use std::path::PathBuf;
 
-/// A temp path that cleans up after itself even when the test fails.
-struct ScratchFile(PathBuf);
-
-impl ScratchFile {
-    fn new(tag: &str) -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "em-round-trip-{tag}-{}-{:?}.em",
-            std::process::id(),
-            std::thread::current().id(),
-        ));
-        let _ = std::fs::remove_file(&path);
-        Self(path)
-    }
-}
-
-impl Drop for ScratchFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
-}
+mod common;
+use common::ScratchFile;
 
 /// Both corpora are needed: the bundled save is `CompoundMotiveEntry` bodies with elements
 /// buried in a motive timeline; only the generated preset carries `KeplerEntry` bodies and
 /// an `anomalistic_period`. See the coverage check at the end.
 fn corpora() -> Vec<(&'static str, UniverseFileContents)> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/systems/solar_system.em");
+    // A copy, never the asset itself: loading migrates the file it opened.
+    let bundled = ScratchFile::bundled_solar_system("corpus");
     vec![
-        ("bundled save", save_sqlite::load_from_em(&path).expect("the bundled save should load")),
+        (
+            "bundled save",
+            save_sqlite::load_from_em(&bundled.to_path_buf()).expect("the bundled save should load"),
+        ),
         ("generated preset", em_sim::presets::solar_system()),
     ]
 }
@@ -47,8 +32,8 @@ fn corpora() -> Vec<(&'static str, UniverseFileContents)> {
 /// Save and load it back.
 fn round_trip(contents: &UniverseFileContents, tag: &str) -> UniverseFileContents {
     let scratch = ScratchFile::new(tag);
-    save_sqlite::save_to_em(&scratch.0, contents).expect("save should succeed");
-    save_sqlite::load_from_em(&scratch.0).expect("and load back")
+    save_sqlite::save_to_em(&scratch.to_path_buf(), contents).expect("save should succeed");
+    save_sqlite::load_from_em(&scratch.to_path_buf()).expect("and load back")
 }
 
 fn info(body: &SomeBody) -> &BodyInfo {

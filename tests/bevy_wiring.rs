@@ -14,6 +14,8 @@ use em_foundations::time::Instant;
 use em_sim::presets::solar_system;
 use em_sim::system::System;
 
+mod common;
+
 /// An app with the simulation loaded and one entity viewing each body.
 fn app_with_system() -> App {
     let mut app = App::new();
@@ -148,10 +150,11 @@ fn trajectories_are_produced_on_request() {
 #[test]
 fn the_bundled_save_loads_and_propagates() {
     use exotic_matters::body::universe::save::UniverseFile;
-    use std::path::PathBuf;
 
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/systems/solar_system.em");
-    let file = UniverseFile::load_from_path(&path).expect("the bundled save should load");
+    // A copy, never the asset itself: loading migrates the file it opened.
+    let bundled = common::ScratchFile::bundled_solar_system("wiring");
+    let file =
+        UniverseFile::load_from_path(&bundled.to_path_buf()).expect("the bundled save should load");
     let mut system = System::from_contents(&file.contents).expect("and build a system");
 
     assert!(system.len() > 150, "only {} bodies came back", system.len());

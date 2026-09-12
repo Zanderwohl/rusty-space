@@ -1,17 +1,21 @@
 pub mod spectral;
 pub mod spectral_color;
 
-use std::f32::consts::PI;
+use std::f64::consts::PI as PI_F64;
 use bevy::prelude::*;
 use csv::ReaderBuilder;
+use em_foundations::reference_frame::equatorial;
 use spectral::SpectralType;
+
+use crate::presentation::render_space::ToRender;
 
 /// GPU-ready star data: pre-computed direction vector + apparent magnitude.
 /// 16 bytes total, maps directly to a WGSL `vec4<f32>`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StarGpuData {
-    /// Unit direction vector in Bevy Y-up space (pre-computed from RA/dec)
+    /// Unit direction vector in Bevy Y-up render space, rotated out of the catalogue's
+    /// equatorial frame into the ecliptic first, so it agrees with the simulation.
     pub dir: [f32; 3],
     /// Apparent magnitude as seen from Earth
     pub mag: f32,
@@ -91,17 +95,14 @@ fn load_csv(path: &str) -> Vec<DistantStar> {
             let dec = f(dec_col);
             let mag = f(mag_col);
 
-            // Convert RA (hours) and Dec (degrees) to radians
-            let ra_rad = ra * PI / 12.0;
-            let dec_rad = dec * PI / 180.0;
+            // RA arrives in hours and dec in degrees; the catalogue frame is equatorial
+            // J2000, so the direction has to be tilted into the ecliptic before it can
+            // share a sky with the simulation. Then the usual sim -> render conversion.
+            let ra_rad = (ra as f64) * PI_F64 / 12.0;
+            let dec_rad = (dec as f64).to_radians();
 
-            // Compute direction vector in Z-up astronomical coordinates
-            let x = dec_rad.cos() * ra_rad.cos();
-            let y = dec_rad.cos() * ra_rad.sin();
-            let z = dec_rad.sin();
-
-            // Swizzle to Bevy Y-up: (x, z, -y)
-            let dir = [x, z, -y];
+            let ecliptic = equatorial::ecliptic_direction(ra_rad, dec_rad);
+            let dir = ecliptic.to_render().to_array();
 
             let spect_str = r.get(spect_col).unwrap_or("").to_string();
             let spectral = SpectralType::parse(&spect_str);
@@ -119,4 +120,67 @@ fn load_csv(path: &str) -> Vec<DistantStar> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::presentation::render_space::ToSim;
+    use bevy::math::DVec3;
+
+    /// Ecliptic latitude of a loaded star, in degrees: undo the render swizzle, then read
+    /// the angle out of the ecliptic plane.
+    fn ecliptic_latitude(star: &DistantStar) -> f64 {
+        let render = DVec3::new(star.gpu.dir[0] as f64, star.gpu.dir[1] as f64, star.gpu.dir[2] as f64);
+        render.to_sim().normalize().z.asin().to_degrees()
+    }
+
+    /// The catalogue is equatorial and the simulation is ecliptic, so the import has to
+    /// rotate by the obliquity. These are published ecliptic latitudes; without the
+    /// rotation each star lands at its *declination* instead, which for Sirius is 23° out
+    /// and for Polaris is 23° out in the other direction.
+    #[test]
+    fn stars_land_at_their_published_ecliptic_latitude() {
+        let stars = load_csv("assets/catalogs/hygdata_v42_mag_sort.csv");
+        let expected = [
+            ("Sirius", -39.605),
+            ("Vega", 61.733),
+            ("Aldebaran", -5.467),
+            ("Regulus", 0.465),
+            ("Spica", -2.055),
+            ("Polaris", 66.099),
+        ];
+        for (name, latitude) in expected {
+            let star = stars
+                .iter()
+                .find(|s| s.proper == name)
+                .unwrap_or_else(|| panic!("{name} is not in the brightest-stars catalogue"));
+            let found = ecliptic_latitude(star);
+            assert!(
+                (found - latitude).abs() < 0.01,
+                "{name}: ecliptic latitude {found:.3}°, expected {latitude:.3}° \
+                 (declination is {:.3}° — if that is what came out, the obliquity \
+                 rotation was skipped)",
+                star.dec,
+            );
+        }
+    }
+
+    /// Every loaded direction must be exactly what the frame conversion and the render
+    /// conversion produce together, and must stay a unit vector.
+    #[test]
+    fn the_import_agrees_with_the_render_conversion() {
+        use crate::presentation::render_space::sim_to_render;
+        let stars = load_csv("assets/catalogs/hygdata_v42_dist_sort.csv");
+        for star in stars.iter().take(50) {
+            let sim = equatorial::ecliptic_direction(
+                (star.ra as f64) * PI_F64 / 12.0,
+                (star.dec as f64).to_radians(),
+            );
+            let expected = sim_to_render(sim);
+            let dir = DVec3::new(star.gpu.dir[0] as f64, star.gpu.dir[1] as f64, star.gpu.dir[2] as f64);
+            assert!((dir - expected).length() < 1e-6, "{}: {dir:?} vs {expected:?}", star.proper);
+            assert!((dir.length() - 1.0).abs() < 1e-6, "{} is not a unit vector", star.proper);
+        }
+    }
 }

@@ -10,6 +10,7 @@ use crate::appearance::{Appearance, AppearanceColor, DebugBall, StarBall};
 use crate::body::{BodyInfo, BodyRotation, RotationEpoch};
 use crate::motive::kepler::{EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerPrecessingEulerAngles, KeplerRotation, KeplerShape, MeanAnomalyAtJ2000};
 use crate::universe::{FixedEntry, KeplerEntry, NewtonEntry, SomeBody, UniverseFileContents, UniverseFileTime, UniversePhysics, ViewSettings};
+use em_foundations::reference_frame::equatorial;
 use em_foundations::time::TimeDelta;
 
 // =============================================================================
@@ -29,9 +30,6 @@ use em_foundations::time::TimeDelta;
 // Source data is often in km; we convert to meters with `* 1000.0` at the point of entry.
 // Outer planets (Jupiter+) have values entered directly in meters since the source data varies.
 // =============================================================================
-
-// Obliquity of the ecliptic at J2000 in radians (~23.4393 degrees)
-const OBLIQUITY_J2000_RAD: f64 = 23.4392911_f64 * PI / 180.0;
 
 /// Create a BodyRotation from IAU pole parameters.
 ///
@@ -57,30 +55,12 @@ pub fn tidally_locked_rotation(primary_id: &str, ra_deg: f64, dec_deg: f64) -> B
     BodyRotation::tidally_locked(primary_id, pole_ecliptic)
 }
 
-/// Convert equatorial (ICRF) pole direction to ecliptic J2000 unit vector.
+/// Convert an equatorial (ICRF) pole direction to a simulation-space unit vector.
 ///
-/// Input: RA and Dec in degrees (J2000 equatorial frame)
-/// Output: Unit vector in ecliptic J2000 frame (Z-up = ecliptic north)
+/// Degrees in, because IAU pole tables are published that way; the conversion to radians
+/// is this crate's boundary. The rotation itself lives in `em_foundations`.
 fn equatorial_to_ecliptic_pole(ra_deg: f64, dec_deg: f64) -> DVec3 {
-    let ra = ra_deg.to_radians();
-    let dec = dec_deg.to_radians();
-    
-    // Unit vector in equatorial frame
-    let eq_x = dec.cos() * ra.cos();
-    let eq_y = dec.cos() * ra.sin();
-    let eq_z = dec.sin();
-    
-    // Rotate from equatorial to ecliptic: rotation around X by obliquity
-    // Equatorial Z (celestial north) tilts toward equatorial +Y by obliquity angle
-    // This is equivalent to rotating the coordinate system by -obliquity around X
-    let cos_obl = OBLIQUITY_J2000_RAD.cos();
-    let sin_obl = OBLIQUITY_J2000_RAD.sin();
-    
-    let ecl_x = eq_x;
-    let ecl_y = eq_y * cos_obl + eq_z * sin_obl;
-    let ecl_z = -eq_y * sin_obl + eq_z * cos_obl;
-    
-    DVec3::new(ecl_x, ecl_y, ecl_z).normalize()
+    equatorial::ecliptic_direction(ra_deg.to_radians(), dec_deg.to_radians()).normalize()
 }
 
 /// Create an orientation DQuat that aligns local +Z with the given pole direction,
