@@ -41,6 +41,7 @@ database schema, the wire format and every stored coordinate. Decide it first.
 | Caustic edge term | A thin ring's turning latitudes carry an integrable spike that a level-5 shell smears. An analytic correction is cheaper than raising the whole shell's level, and is unwritten. |
 | Optical depth | Deficits are summed linearly, which fails as a swarm approaches full coverage — exactly the end state the game is about. Switch to `1 - exp(-tau)` past a few percent. |
 | Non-Poisson flicker | Real swarms have resonances, gaps and clumps, so the noise is correlated and its spectrum says more than the current model admits. |
+| The `m ~ 1` transition band | Neither the Gaussian nor the Poisson branch of the flicker synthesiser is right there, and a Kuiper analogue sits in it. Generating the true event train is affordable at `m ~ 1`; decide whether to. |
 | Limb darkening | Bundle Claret tables, or fit a two-parameter function of `Teff`. |
 | Band set | Four bands assumed, including a thermal IR band so waste heat is visible. More bands cost linearly in baked shell size and nothing on the analytic path. |
 | Reflected light and phase curves | 1e-5 of stellar flux at best. Probably out; it is an information channel if in. |

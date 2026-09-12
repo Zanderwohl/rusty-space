@@ -198,6 +198,81 @@ Detection at 10 pc with a 1 m^2 aperture at 50% throughput: the mean deficit nee
 `1/d^2 = 3.5e10` photons, so 600 s of in-game integration, 0.07 real seconds. The flicker
 needs 4900 s in-game. Both are cheap nearby and scale as `d^2` with distance.
 
+### The sparse limit
+
+`m` is not always large. The same population record and the same integral cover the case
+where elements almost never overlap, but the **description** of the signal changes, and a
+synthesiser that assumes Gaussian fluctuation about a mean is simply wrong there.
+
+The diagnostic is already stored: `rms / mean = 1 / sqrt(m)`. When it exceeds about 1/3, the
+fluctuation is comparable to the thing it is fluctuating about, and the signal is not noise
+around a mean — it is a sequence of isolated events.
+
+| regime | `m` | character | what an observer measures |
+|---|---|---|---|
+| dense | >> 1 | elements overlap continuously | mean deficit, flicker amplitude, spectral knee |
+| transition | ~ 1 | events merge and separate | both, badly |
+| sparse | << 1 | isolated occultations, mostly nothing | event rate, per-event depth, per-event duration |
+
+The solar system spans all three:
+
+| population | `m` | mean deficit | single-event depth | event rate | duration |
+|---|---|---|---|---|---|
+| swarm, 1.5e6 x 1e6 km^2 at 1 AU | 8.1 | 5.3e-6 | 6.6e-7 | continuous | 13 h |
+| Kuiper analogue, 1e9 x 50 km at 40 AU | 3.4 | 1.7e-8 | 5.2e-9 | continuous | 3.4 d |
+| Hills cloud, 1e12 x 1 km at 5000 AU | 0.22 | 4.5e-13 | 2.1e-12 | 1 per 0.5 yr | 38 d |
+| Oort cloud, 1e12 x 1 km at 20 000 AU | 0.014 | 2.8e-14 | 2.1e-12 | 1 per 15.5 yr | 77 d |
+
+The Oort cloud is a population like any other. It is stored as one record, evaluated by the
+same closed form, and costs nothing at runtime that the swarm does not also cost. It is also
+photometrically invisible: a mean deficit of 2.8e-14 needs 1.3e27 photons to reach SNR 1,
+and its individual events are 2.1e-12 deep and 77 in-game days long. This is the correct
+answer — real Oort clouds around other stars are not detectable in transit either.
+
+### Why the sparse branch has to exist anyway
+
+The mean deficit is a fiction when `m << 1`. The star is not dimmed by that amount; it is
+undimmed almost always and dimmed by the single-event depth occasionally. For the Oort cloud
+both numbers are below every threshold, so the distinction does not matter. For a sparse
+population of **large** elements it matters by three orders of magnitude, in the direction
+that loses the signal:
+
+| 1000 fragments of 1000 km radius at 2 AU | value |
+|---|---|
+| `m` | 1.4e-3 |
+| mean deficit | 2.8e-9 — undetectable |
+| single-event depth | **2.1e-6 — comfortably detectable** |
+| event rate | 1 per 1.5 in-game years |
+| event duration | 0.8 in-game days, 8 real seconds |
+
+A synthesiser that reported the mean would declare this population invisible. What an
+observer actually sees is a deep, isolated, unexplained dip once every year or two: the
+signature of something large and artificial in an orbit, and one of the more alarming things
+the game can show a player.
+
+So the flicker synthesiser branches on `m`, which the shell already stores:
+
+```
+m >> 1   Gaussian noise, variance d^2/m, correlation time t_cross
+m << 1   Poisson event train, rate m/t_cross, depth sigma/(pi R*^2), width t_cross
+```
+
+Both are O(1) to evaluate and both are seeded, so client and server agree on when the rare
+events happened.
+
+### Coherence, restated
+
+The sparse limit sharpens the rule that separates the two paths. A single Oort body has a
+period, so its signature is formally coherent — but the period is millions of years and it
+will be seen once. Coherence is only useful if it **repeats within an observable baseline**.
+
+| | repeats within a baseline | does not |
+|---|---|---|
+| single body | analytic: planets, moons, stations | statistical: one member of a sparse population |
+| population | — | statistical: swarms, belts, clouds |
+
+That is the test. Not size, not element count, not angular scale.
+
 ## Path 3: the baked shell
 
 The shell is where path 2's populations are accumulated. It exists because summing is
@@ -344,6 +419,7 @@ An object moves between paths when its coherence does.
 | transition | trigger |
 |---|---|
 | discrete -> population | the group's expected count on the disc `m` approaches 1, so individual events overlap and stop being separable |
+| discrete -> population | the body's period exceeds any observable baseline, so its coherence is unusable |
 | population -> discrete | a player selects specific elements for a manoeuvre; they leave the distribution and become tracked bodies until they rejoin |
 
 The threshold is observational as well as computational: a sufficiently good telescope can
@@ -360,6 +436,9 @@ rather than by switching representations per observer.
 - Correlated rather than Poisson statistics. Real swarms have structure — resonances, gaps,
   clumps — which makes the flicker non-Poisson and its spectrum informative in ways the
   current model does not capture. Probably a later refinement, and a good one.
+- The transition band, `m` of roughly 0.3 to 3, where neither branch of the synthesiser is
+  right. A Kuiper analogue sits there. Either interpolate, or generate the true Poisson event
+  train in that band and accept the cost, since `m ~ 1` means few events to generate.
 - Whether populations shadow each other. Two overlapping swarms at different radii are not
   independent; the optically-thin sum is wrong once total deficit approaches 1, which is
   precisely the regime a completed Dyson swarm occupies. Use `1 - exp(-tau)` with

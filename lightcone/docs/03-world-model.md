@@ -27,8 +27,9 @@ shell does three jobs:
    Domains interact only through light crossing the shell and objects crossing the shell.
 3. **Coordinate boundary.** Local f64 metres are valid inside the shell and only inside it.
 
-Sizing. The Sun's Oort cloud reaches roughly 1e5 AU = 1.58 ly, and the nearest star is
-4.25 ly away, so shells at that radius do not intersect for typical spacings. Shell radius
+Sizing. The shell sits outside the system's outermost population — in the solar system's
+case the Oort cloud, at roughly 1e5 AU = 1.58 ly, against a nearest star 4.25 ly away, so
+shells at that radius do not intersect for typical spacings. Shell radius
 scales with the star's mass and is clamped so that no two shells overlap: if two stars are
 closer than the sum of their nominal radii, both shrink to half the separation, or they are
 merged into one multi-star system.
@@ -108,6 +109,28 @@ Kinds, and the one property of each that matters to the physics rather than the 
 Solar collectors, swarm elements and megastructures are the same thing to the light model:
 area that blocks a fraction of the star's output in some set of directions. That is what
 makes a rival's industry detectable from another system.
+
+### Populations
+
+A population is the model for any group of objects too numerous to track and statistically
+steady in aggregate. Three come with every generated system, before a player builds
+anything:
+
+| population | typical parameters | photometrically |
+|---|---|---|
+| asteroid belt | narrow `a`, low inclination spread, moderate `e` | marginal |
+| Kuiper analogue | wide `a`, low inclination, many small bodies | near the detection floor |
+| Oort cloud | very wide `a`, isotropic inclination, `e` near 1 | invisible |
+
+The Oort cloud earns its record for reasons that have nothing to do with light. It is
+invisible in transit — a mean deficit of 2.8e-14, see
+[04-stellar-photometry.md](04-stellar-photometry.md) — but it defines the shell radius, it
+is a navigation consideration for anything crossing it, and it is where the volatiles are.
+A player harvesting comets is harvesting a distribution: extraction reduces the population's
+count, which is an event, and nothing is ever enumerated.
+
+Player-built swarms use the same record with different parameters. So does dust, so does
+debris from anything destroyed. One type, one integral, one storage cost.
 
 ### Swarms are populations, not entities
 
@@ -197,4 +220,7 @@ those events over the generated baseline reconstructs the system exactly.
 - Granularity of swarm sub-populations. One record per swarm is simplest; a swarm built in
   distinct campaigns has several inclination bands, and forcing them into one distribution
   loses the structure an observer could otherwise see.
+- Whether generated Oort and Kuiper populations vary per system or are scaled from one
+  template by stellar mass. They are invisible to photometry either way, so the question is
+  entirely about what harvesting them should yield.
 - Deposit granularity: per-body totals, or per-site with positions on the surface.
