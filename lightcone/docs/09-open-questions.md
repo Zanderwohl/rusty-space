@@ -65,6 +65,8 @@ database schema, the wire format and every stored coordinate. Decide it first.
 | Threading in WASM | Cross-origin isolation breaks embeds. Single-threaded Bevy until profiling says otherwise. |
 | Interferometry displays | `u-v` coverage and correlation views are charts, so they belong to `em-plot`, but they need a place in the UI. |
 | Dust versus swarm appearance | Dust is chromatic and a swarm is grey. The shader probably needs two looks, which is the visual form of the photometric diagnostic. |
+| A sixth band, R or I | Would make natural colour measured rather than inferred from `B-V`. The inference is good for stars and fails informatively for reddened ones, so this is not obviously an improvement. |
+| Presenting an unavailable band | Masking to zero makes a scene look dark rather than uninstrumented, and the player needs the difference to decide what to build. |
 
 ## Blocking the server
 

@@ -236,6 +236,95 @@ between them. It is unusable for navigation, which is correct, and it is the mos
 the renderer can produce. Capturing a still from a ship in transit is worth making an explicit
 affordance.
 
+## Bands and the display mapping
+
+The renderer computes radiance in the five bands of
+[04-stellar-photometry.md](04-stellar-photometry.md) and ends in three. The interesting part is
+the ending, not the computing.
+
+### Channel count is not the constraint
+
+Carrying five bands through a fragment shader is free — they are registers. If a deferred path
+ever needs them in a G-buffer, WebGPU's base limits allow `maxColorAttachmentBytesPerSample` of
+32, which at `rgba16float` is four attachments, or **16 float channels per pass within the
+guaranteed limits**. Half-float render targets are core; the `shader-f16` extension is only
+needed for f16 arithmetic, which this does not require.
+
+The constraint is the display: three primaries and a trichromat viewer. Wide-gamut and HDR
+panels give more saturated primaries, not more dimensions.
+
+So the design question is the mapping, and the mapping belongs to the player.
+
+### The player configures it
+
+**Decided: the band-to-display matrix is user-controlled, with presets.** The player is a ship
+with no eyes, looking at the output of its own processing pipeline. Letting them reconfigure it
+is characterisation, not a compromise — and it is exactly what observational astronomy does,
+where every published image is a choice of filters mapped to three channels.
+
+```rust
+pub struct BandMapping {
+    /// 3 x BANDS. Rows are display R, G, B; columns are physical bands.
+    pub matrix: [[f32; BANDS]; 3],
+    /// Bands the viewing instrument cannot sense are masked to zero and shown as
+    /// unavailable, not as black.
+    pub available: BandMask,
+    pub bloom_band: Option<BandIndex>,
+    pub bloom_gain: f32,
+}
+```
+
+| preset | mapping | shows |
+|---|---|---|
+| natural | B, V, and `Teff` reconstructed from `B-V` | what a human would see, with the reddening degeneracy intact |
+| thermal | 10 um, K, V | industry and waste heat; a rival's swarm becomes a colour |
+| dust penetration | 21 cm, 10 um, K | through clouds that are opaque in V |
+| composition | B, V, K | the grey-versus-reddening diagnostic, made visible: dust reads orange, a swarm reads neutral |
+| survey | V as luminance, 10 um as chroma | a monochrome sky in which only excess heat is coloured |
+
+The composition preset is the one worth building first. It turns the photometric diagnostic
+into something the player sees rather than reads, and the whole point of computing occlusion
+chromatically is that the difference is visible.
+
+### Bloom is a fourth channel
+
+The tone-mapping decision below already routes overflow into glow, so halo radius is a display
+dimension that reads independently of pixel colour. Assigning it a band of its own is nearly
+free, and thermal IR is the obvious candidate: a structure radiating waste heat gets a halo
+that a cold body of the same brightness does not.
+
+Realistic ceiling for simultaneously legible channels is about five — three colour, one bloom,
+one riding in fine luminance detail, since acuity is far higher in luminance than in chroma.
+Past that, viewers stop reading it as information. Temporal cycling of channels is excluded: it
+is nauseating and it destroys the ability to read a static frame, which is most of what this
+game asks.
+
+### Sensors are hardware
+
+**Decided: the available band set is a property of the viewing instrument.** The ship's own
+suite starts narrow — V alone, a greyscale sky — and widens as sensors are built. Looking
+through a remote telescope uses that telescope's bands, so the view changes depending on which
+instrument the player is looking through.
+
+This is progression that is diegetic and costs nothing: the mechanism already exists because
+instruments already carry a band mask for observation purposes, per
+[05-observation.md](05-observation.md). The view and the science read the same field.
+
+It also means two players can look at the same star and be working from genuinely different
+data. That is correct and intended; see the same document for why it is load-bearing rather
+than a UI hazard.
+
+### What is deliberately not built
+
+Full spectral rendering — dozens of bins, spectral transport, dispersion — buys nothing here.
+There is no refraction worth modelling and the occlusion model is band-integrated by
+construction. Generating more spectral resolution than the photometry has is inventing data.
+
+Integration cost stays low because the scene is emissive-dominated: stars, point sources,
+glowing structures. Emissive sources never enter Bevy's RGB-centric PBR path at all — compute
+per-band radiance, apply the 3xN matrix at the end, done. **Collapse to three channels at the
+end of the lighting calculation, never in the middle.**
+
 ## Tone mapping
 
 **Decided: 2-3 stops of displayed luminance, with everything above that driving glow.**
@@ -261,3 +350,8 @@ optic, and leaves the 2-3 stop window free for the things that have detail in th
 - Whether the layered-swarm shader needs a second appearance for dust, given that dust is
   chromatic and a swarm is grey. Probably yes, and it is the visual form of the diagnostic in
   [04-stellar-photometry.md](04-stellar-photometry.md).
+- Whether a sixth band, R or I, is worth adding so that natural colour is measured rather than
+  inferred from `B-V`. The inference is good for stars and fails informatively for reddened
+  objects, so this is not obviously an improvement.
+- How to present an unavailable band. Masking it to zero makes a scene look dark rather than
+  uninstrumented, and the difference matters when the player is deciding what to build.

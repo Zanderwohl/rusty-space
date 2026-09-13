@@ -396,6 +396,31 @@ means making it out of small particles, which means giving up the structural int
 made it a collector. The disguise has a physical price, and the game does not have to invent
 one.
 
+### Natural colour without a red band
+
+The five bands have no R, so "what would a human eye see" is reconstructed rather than
+measured. For a star that works, because stars are near-blackbodies and `B - V` is the
+standard colour index: it determines effective temperature, and the temperature determines
+the whole visible spectrum. Ballesteros' formula is accurate enough and cheap:
+
+```
+Teff = 4600 * ( 1/(0.92*(B-V) + 1.70) + 1/(0.92*(B-V) + 0.62) )
+```
+
+Checked against real values: `B-V = 0.65` returns 5778 K for the Sun, against an actual
+5772 K. `B-V = 0.00` returns 10 125 K for an A0 star, `+1.40` returns 3950 K for an M0.
+
+**The reconstruction fails exactly where it should.** Reddening and cooling are degenerate:
+`B - V` responds to dust and to temperature identically, so an A0 star at 10 125 K behind
+`E(B-V) = 0.3` of dust reads as 7462 K — an F star. The natural-colour view of a reddened
+object is honestly ambiguous, which is the same degeneracy real photometry has and the same
+one a civilisation could hide behind. Breaking it needs K band, which is nearly
+extinction-free, so the ambiguity is a consequence of which instruments the observer owns.
+
+Adding an R or I band would make natural colour a measurement instead of an inference. It is
+not obviously worth a sixth band; the inference is good for stars and its failure mode is
+interesting rather than wrong.
+
 The radio band also stops the game from being a pure line-of-sight problem. A system behind a
 dense cloud is invisible optically and perfectly ordinary at 21 cm, so dust is cover against
 one kind of observation and no cover at all against another. See

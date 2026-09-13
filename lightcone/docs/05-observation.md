@@ -53,6 +53,73 @@ detection at 100 pc needs 100x the aperture-time product, and at 1 kpc, 10 000x.
 That is the intended shape of the mechanic. A small telescope surveys nearby stars. Reaching
 further means building a bigger one, or many, and committing them for in-game years.
 
+### Instruments do not see every band
+
+An instrument covers some subset of the five bands, and which subset is a property of how it
+was built. This is where most of the instrument variety in the game comes from, and all of it
+is physical rather than assigned.
+
+| instrument | bands | what constrains it |
+|---|---|---|
+| optical telescope | B, V | mirror figure and detector; the cheap baseline |
+| near-IR telescope | B, V, K | detector cooling, tens of K; moderate cost |
+| thermal-IR observatory | 10 um | the instrument's own heat, see below |
+| radio dish or array | 21 cm | collecting area, and resolution it cannot have |
+
+**Thermal IR blinds itself if it is warm.** A blackbody at 300 K peaks at 9.66 um, which is
+the 10 um band almost exactly, so a room-temperature telescope is a brighter source than
+anything it is pointed at. It has to be cold, and cold is a placement problem:
+
+| distance from a Sun-like star | passive equilibrium temperature |
+|---|---|
+| 1 AU | 279 K |
+| 5 AU | 125 K |
+| 30 AU | 51 K |
+| 50 AU | 39 K |
+| 200 AU | 20 K |
+| 780 AU | 10 K |
+
+So a passively cooled 10 um observatory belongs beyond about 50 AU. Closer in it needs active
+cryocooling, which costs power continuously, or a sunshield, which costs mass and constrains
+pointing. Either way the band that reveals a rival's waste heat is the band that is hardest to
+place, and an observatory built far enough out to be cold is far from the infrastructure that
+would build and supply it.
+
+There is a pleasing consequence: a thermal telescope inside your own system sees **your own**
+industry glowing. Waste heat is not a property of rivals.
+
+**Radio cannot resolve anything.** Diffraction scales with wavelength, and 21 cm is six orders
+of magnitude longer than visible light:
+
+| aperture | resolution at 550 nm | at 21 cm |
+|---|---|---|
+| 1 m | 0.11 arcsec | 12 degrees |
+| 10 m | 0.011 arcsec | 1.2 degrees |
+| 100 m | 0.0011 arcsec | 0.12 degrees |
+| 1000 m | 0.00011 arcsec | 0.012 degrees |
+
+A 100 m dish at 21 cm is worse than the naked eye. Matching a 1 m optical telescope's
+resolution would take a 384 km aperture. So single-dish radio is photometry and spectroscopy
+only — it measures flux and shift, never an image — and the way to get resolution in that band
+is interferometry, which is also the only kind that works across interstellar baselines. The
+band's weakness and its unique strength come from the same number.
+
+### Band coverage is part of the observation record
+
+Two observers watching the same star with different instruments are looking at different data,
+not different renderings of the same data. That is not a UI problem; it is the same asymmetry
+the game already has with time, one column wider.
+
+It is also load-bearing. The grey-versus-reddening diagnostic of
+[04-stellar-photometry.md](04-stellar-photometry.md) needs at least two bands to exist at all.
+**An observer with V alone cannot distinguish a swarm from a dust cloud**, and no amount of
+integration time fixes it — the information is not in the measurement. The disguise works
+against observers who have not built the right instrument, which makes instrument choice a
+real commitment rather than a tier list.
+
+Every measurement therefore carries the band mask it was taken with, and the UI says which
+bands a conclusion rests on.
+
 ### Survey regimes
 
 A telescope, or a group of them acting together, commits to a regime for a period of time.
