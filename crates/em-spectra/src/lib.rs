@@ -25,6 +25,7 @@ pub mod cie;
 pub mod colour_index;
 pub mod extinction;
 pub mod mapping;
+pub mod stellar;
 
 pub use bands::{BANDS, Band, BandMask, PerBand};
 pub use colour_index::teff_from_bv;

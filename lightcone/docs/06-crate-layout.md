@@ -8,9 +8,9 @@
 | `crates/em-sim` | simulation state and propagation | em-foundations; `bevy_ecs` behind the `bevy` feature |
 | `crates/em-render` | **new.** reusable Bevy rendering for orbital scenes | em-foundations, em-sim, bevy |
 | `crates/em-plot` | **new.** charts, curves, heat maps; see [11-plotting.md](11-plotting.md) | glam; bevy and egui behind features |
-| `crates/em-spectra` | **new.** bands, blackbody, extinction, colour, band-to-display mapping | serde only; no engine, no glam |
+| `crates/em-spectra` | **new.** bands, blackbody, extinction, colour, stellar relations, band-to-display mapping | serde only; no engine, no glam |
 | `crates/lc-spacetime` | event coordinates, intervals, retarded time, worldlines | glam, serde; no engine |
-| `crates/lc-world` | game rules, systems, structures, ships, resources, photometry | em-foundations, em-sim, lc-spacetime |
+| `crates/lc-world` | game rules, systems, structures, ships, resources, photometry | em-foundations, em-sim, em-spectra, lc-spacetime |
 | `crates/lc-proto` | wire messages, serialisation, versioning | serde, lc-spacetime, lc-world types |
 | `crates/lc-store` | Postgres schema, migrations, queries, the light-cone cursor | sqlx, lc-spacetime, lc-world |
 | `crates/lc-server` | authoritative server binary | lc-store, lc-world, lc-proto, tokio |
@@ -58,11 +58,29 @@ whether a module belongs: **does it know any game or TTRPG rule?** If not, it mo
 | `src/presentation/celestial_markers.rs` | yes | generic orbital markers |
 | `src/presentation/encounter_marker.rs`, `encounter_marker_material.rs` | judgment | encounter markers are patched-conic concepts, which `em-sim` owns, so they move |
 | `src/camera/freecam.rs`, `planetarium.rs` | yes | controllers parameterised by scale |
-| `src/catalog/` | yes | HYG parsing, spectral class to colour and temperature |
+| `src/catalog/` | **no, revised** | see below |
 | `src/gui/` | no | egui panels encode Exotic Matters' workflows; the game needs different ones |
 
 Everything that moves keeps its public API and gains a `Plugin` per subsystem, so the app
 composes what it wants rather than getting an all-or-nothing plugin group.
+
+### `src/catalog/` does not move
+
+An earlier draft sent it to `em-render`. Phase 4 made that wrong: catalogue parsing is not a
+rendering concern, and putting it in the render crate would have given the project two HYG
+parsers, one for the starfield and one for world generation.
+
+The responsibilities split three ways instead:
+
+| concern | home |
+|---|---|
+| colour, temperature, blackbody, extinction | `em-spectra` |
+| catalogue parsing, star identity, world data | `lc-world::sky`, behind `StarProvider` |
+| drawing a list of stars it is handed | `em-render` |
+
+`em-render` therefore parses nothing. Exotic Matters keeps `src/catalog/` as its own loader
+and hands the result over, which is one fewer crate boundary to move and leaves the app
+working unchanged.
 
 Extraction order, one commit each, app building at every step:
 
@@ -117,8 +135,8 @@ Game rules and state transitions, engine-free so the server can run it headless 
 client can run the same code for prediction.
 
 ```
+sky/           StarProvider, synthetic ids, the HYG importer, generation, metallicity
 system.rs      System, wrapping em_sim::System, plus structures and ships
-generate.rs    deterministic procedural generation from a seed
 photometry.rs  the emission model of 04-stellar-photometry.md
 shell.rs       Oort shell geometry, crossings, baking
 ship.rs        worldlines, orders, proper time

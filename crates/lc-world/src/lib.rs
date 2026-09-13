@@ -15,6 +15,7 @@ pub mod occluder;
 pub mod population;
 pub mod rng;
 pub mod shell;
+pub mod sky;
 pub mod star;
 
 pub use distribution::{Distribution, Inclination};
@@ -24,5 +25,6 @@ pub use instrument::{Instrument, SurveyRegime};
 pub use observation::{Observation, Target, observe};
 pub use occluder::{Occluder, transit_depth};
 pub use population::Population;
+pub use sky::{CatalogueStar, StarId, StarProvider};
 pub use shell::{Shell, ShellSample};
 pub use star::Star;

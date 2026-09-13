@@ -4112,7 +4112,9 @@ dependencies = [
 name = "lc-world"
 version = "0.1.0"
 dependencies = [
+ "csv",
  "em-foundations",
+ "em-sim",
  "em-spectra",
  "glam",
  "lc-spacetime",
