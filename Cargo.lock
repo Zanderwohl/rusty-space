@@ -4122,6 +4122,7 @@ name = "lc-client"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_egui",
  "em-plot",
  "em-render",
  "em-sim",

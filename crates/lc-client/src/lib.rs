@@ -6,8 +6,11 @@
 //! from the drawing.
 
 pub mod action;
+pub mod app;
 pub mod curve;
 pub mod hud;
+pub mod input;
+pub mod panels;
 pub mod session;
 pub mod tonemap;
 pub mod ui;

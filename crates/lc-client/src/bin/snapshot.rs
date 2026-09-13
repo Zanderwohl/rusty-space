@@ -6,11 +6,11 @@
 
 use std::process::ExitCode;
 
-use em_plot::chart::{Axis, Chart, Marker, Rect, Style};
+use em_plot::chart::{Axis, Chart, Rect, Style};
 use em_plot::colormap::ColorMap;
 use em_plot::primitives::{Anchor, Label, Point, Primitives, Rgba};
 use em_plot::{raster, scale::Scale};
-use em_spectra::{Band, BandMask, presets};
+use em_spectra::BandMask;
 use lc_client::session::{Session, TIME_RATE};
 use lc_world::instrument::Instrument;
 use lc_world::sky::{AuthoredStars, StarProvider};

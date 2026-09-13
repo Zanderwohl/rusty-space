@@ -12,16 +12,24 @@ em-render = { path = "../em-render" }
 em-spectra = { path = "../em-spectra" }
 em-sim = { path = "../em-sim", features = ["bevy"] }
 lc-spacetime = { path = "../lc-spacetime" }
-lc-world = { path = "../lc-world" }
+lc-world = { path = "../lc-world", default-features = false }
 bevy = "0.17.2"
+bevy_egui = "0.38.0"
 glam = { version = "0.30", features = ["serde"] }
+
+[[bin]]
+name = "lightcone"
+path = "src/bin/lightcone.rs"
 
 [[bin]]
 name = "snapshot"
 path = "src/bin/snapshot.rs"
 
 [features]
-default = []
+default = ["hyg"]
+# The HYG importer, forwarded from lc-world. Off for a build that only ever loads an authored
+# galaxy, which is what the shipped game will use.
+hyg = ["lc-world/hyg"]
 # Development only, and absent from any shipped build. Compiling it out is about binary size
 # and about not handing anyone the client half of the mechanism; the server gate is what
 # actually enforces it.
