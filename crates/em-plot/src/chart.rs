@@ -90,7 +90,9 @@ impl<'a> Chart<'a> {
             width: self.style.line_width,
         });
 
-        for v in self.x.scale.ticks(self.x.range, self.x.ticks) {
+        let xt = self.x.scale.ticks(self.x.range, self.x.ticks);
+        let xf = TickFormat::for_axis(self.x.scale, &xt);
+        for v in xt {
             let at = self.px(v, self.y.range.0);
             out.polylines.push(Polyline {
                 points: vec![Point::new(at.x, bottom), Point::new(at.x, bottom + 4.0)],
@@ -99,13 +101,15 @@ impl<'a> Chart<'a> {
             });
             out.labels.push(Label {
                 at: Point::new(at.x, bottom + 6.0 + self.style.text_size),
-                text: format_tick(v),
+                text: xf.apply(v),
                 size: self.style.text_size,
                 anchor: Anchor::Middle,
                 colour: self.style.axis,
             });
         }
-        for v in self.y.scale.ticks(self.y.range, self.y.ticks) {
+        let yt = self.y.scale.ticks(self.y.range, self.y.ticks);
+        let yf = TickFormat::for_axis(self.y.scale, &yt);
+        for v in yt {
             let at = self.px(self.x.range.0, v);
             out.polylines.push(Polyline {
                 points: vec![Point::new(left - 4.0, at.y), Point::new(left, at.y)],
@@ -114,7 +118,7 @@ impl<'a> Chart<'a> {
             });
             out.labels.push(Label {
                 at: Point::new(left - 6.0, at.y + self.style.text_size * 0.35),
-                text: format_tick(v),
+                text: yf.apply(v),
                 size: self.style.text_size,
                 anchor: Anchor::End,
                 colour: self.style.axis,
@@ -125,11 +129,11 @@ impl<'a> Chart<'a> {
 
     /// Width the y-axis labels need, so a caller can size the margin before drawing.
     pub fn y_label_width(&self) -> f32 {
-        self.y
-            .scale
-            .ticks(self.y.range, self.y.ticks)
+        let ticks = self.y.scale.ticks(self.y.range, self.y.ticks);
+        let f = TickFormat::for_axis(self.y.scale, &ticks);
+        ticks
             .iter()
-            .map(|v| self.metrics.measure(&format_tick(*v), self.style.text_size).0)
+            .map(|v| self.metrics.measure(&f.apply(*v), self.style.text_size).0)
             .fold(0.0, f32::max)
     }
 
@@ -153,20 +157,75 @@ impl<'a> Chart<'a> {
         }
         out
     }
+
+    /// A line through the per-column mean.
+    ///
+    /// A dense envelope is a solid block, which is honest about the extremes and silent about
+    /// everything between them. The mean track is what puts the shape back.
+    pub fn mean_track(&self, points: &[(f64, f64)], colour: Rgba) -> Primitives {
+        let means = decimate::means(points, self.x.range, self.area.width.max(1.0) as u32);
+        if means.len() < 2 {
+            return Primitives::default();
+        }
+        let pts = means
+            .iter()
+            .map(|(i, v)| {
+                Point::new(self.area.x + *i as f32 + 0.5, self.px(self.x.range.0, *v).y)
+            })
+            .collect();
+        Primitives {
+            polylines: vec![Polyline { points: pts, colour, width: self.style.line_width }],
+            ..Primitives::default()
+        }
+    }
 }
 
-fn format_tick(v: f64) -> String {
-    let a = v.abs();
-    if v == 0.0 {
-        "0".to_string()
-    } else if a >= 1e5 || a < 1e-3 {
-        format!("{v:.1e}")
-    } else if a >= 100.0 {
-        format!("{v:.0}")
-    } else if a >= 1.0 {
-        format!("{v:.2}")
-    } else {
-        format!("{v:.4}")
+/// How a whole axis's ticks are written.
+///
+/// Precision comes from the tick *spacing*, not from each value's own magnitude. Deciding
+/// per value gives an axis reading "1.00, 1.0000, 0.9999", where the same quantity is
+/// written three ways and the reader cannot tell whether the first two differ.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TickFormat {
+    decimals: usize,
+    scientific: bool,
+}
+
+impl TickFormat {
+    /// Log ticks are powers of ten and read as such; `0.0001, 0.0010, 0.0100` is the same
+    /// information spelled at four times the width.
+    pub fn for_axis(scale: Scale, ticks: &[f64]) -> Self {
+        match scale {
+            Scale::Log10 => Self { decimals: 0, scientific: true },
+            _ => Self::for_ticks(ticks),
+        }
+    }
+
+    pub fn for_ticks(ticks: &[f64]) -> Self {
+        let step = ticks
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .filter(|d| *d > 0.0)
+            .fold(f64::INFINITY, f64::min);
+        let largest = ticks.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        if !step.is_finite() || step <= 0.0 {
+            return Self { decimals: 2, scientific: false };
+        }
+        if largest >= 1e5 || (largest > 0.0 && largest < 1e-3) {
+            return Self { decimals: 2, scientific: true };
+        }
+        Self { decimals: (-step.log10()).ceil().clamp(0.0, 9.0) as usize, scientific: false }
+    }
+
+    pub fn apply(&self, v: f64) -> String {
+        // Rounding a tick at the edge of a padded range can land on -0.0, which prints as
+        // "-0.00e0". Adding zero normalises it and is the identity for everything else.
+        let v = v + 0.0;
+        if self.scientific {
+            format!("{:.*e}", self.decimals, v)
+        } else {
+            format!("{:.*}", self.decimals, v)
+        }
     }
 }
 
@@ -230,11 +289,42 @@ mod tests {
     }
 
     #[test]
-    fn ticks_format_across_the_ranges_a_light_curve_spans() {
-        assert_eq!(format_tick(0.0), "0");
-        assert_eq!(format_tick(1.0), "1.00");
-        assert_eq!(format_tick(1234.0), "1234");
-        assert!(format_tick(5.3e-6).contains('e'));
-        assert!(format_tick(1.2e8).contains('e'));
+    fn an_axis_writes_all_its_ticks_the_same_way() {
+        // The failure this replaces: an axis reading "1.00, 1.0000, 0.9999".
+        let near_one = [0.99990, 0.99995, 1.00000, 1.00005];
+        let f = TickFormat::for_ticks(&near_one);
+        let rendered: Vec<String> = near_one.iter().map(|v| f.apply(*v)).collect();
+        assert!(
+            rendered.iter().all(|s| s.len() == rendered[0].len()),
+            "inconsistent widths: {rendered:?}"
+        );
+        assert!(rendered.iter().collect::<std::collections::HashSet<_>>().len() == 4,
+            "ticks must stay distinguishable: {rendered:?}");
+
+        assert_eq!(TickFormat::for_ticks(&[0.0, 50.0, 100.0]).apply(50.0), "50");
+        // Negative zero is still zero.
+        assert_eq!(TickFormat::for_ticks(&[-1.0, 0.0, 1.0]).apply(-0.0), "0");
+        assert!(!TickFormat::for_axis(Scale::Log10, &[1.0]).apply(-0.0).starts_with('-'));
+        assert!(TickFormat::for_ticks(&[1e-9, 2e-9]).apply(1e-9).contains('e'));
+        // A log axis writes powers of ten, whatever their magnitude.
+        let log = TickFormat::for_axis(Scale::Log10, &[1e-4, 1e-3, 1e-2]);
+        assert_eq!(log.apply(1e-4), "1e-4");
+        assert_eq!(log.apply(100.0), "1e2");
+        assert!(TickFormat::for_ticks(&[1e7, 2e7]).apply(1e7).contains('e'));
+    }
+
+    #[test]
+    fn a_mean_track_follows_the_middle_of_the_envelope() {
+        let m = Monospace::default();
+        let c = chart(&m);
+        let points: Vec<(f64, f64)> = (0..100_000)
+            .map(|i| (i as f64 / 1e5, if i % 2 == 0 { 0.0 } else { 1.0 }))
+            .collect();
+        let track = c.mean_track(&points, Rgba::BLACK);
+        assert_eq!(track.polylines.len(), 1);
+        let line = &track.polylines[0];
+        assert_eq!(line.points.len(), 800);
+        let want = c.px(0.0, 0.5).y;
+        assert!(line.points.iter().all(|p| (p.y - want).abs() < 0.5), "the track should sit at 0.5");
     }
 }

@@ -13,8 +13,11 @@
 pub mod chart;
 pub mod colormap;
 pub mod decimate;
+pub mod font;
 pub mod primitives;
 pub mod scale;
+#[cfg(feature = "raster")]
+pub mod raster;
 pub mod svg;
 
 pub use chart::{Axis, Chart, Rect};

@@ -50,15 +50,50 @@ impl Scale {
         }
     }
 
+    /// A range this scale can actually represent.
+    ///
+    /// A log axis cannot show zero or negative values, and silently producing an infinite
+    /// transform draws an empty chart rather than reporting anything.
+    pub fn valid_range(&self, range: (f64, f64)) -> (f64, f64) {
+        let (lo, hi) = range;
+        match self {
+            Self::Log10 => {
+                let hi = if hi > 0.0 { hi } else { 1.0 };
+                let lo = if lo > 0.0 { lo.min(hi) } else { hi * 1e-9 };
+                (lo, hi)
+            }
+            _ => (lo, hi),
+        }
+    }
+
+    /// Widen a range by a fraction of its span, in the scale's own space.
+    ///
+    /// Additive padding is wrong for a log axis: five percent of a span that reaches 1.0
+    /// takes a lower bound of 1e-6 negative, and everything after that is an infinity. Padding
+    /// in the transformed space is multiplicative where it should be and additive where it
+    /// should be, with no special cases at the call site.
+    pub fn pad(&self, range: (f64, f64), fraction: f64) -> (f64, f64) {
+        let (lo, hi) = self.valid_range(range);
+        let (flo, fhi) = (self.forward(lo), self.forward(hi));
+        if !flo.is_finite() || !fhi.is_finite() {
+            return (lo, hi);
+        }
+        let mut span = fhi - flo;
+        if span <= 0.0 {
+            span = flo.abs().max(1.0) * 0.1;
+        }
+        (self.inverse(flo - span * fraction), self.inverse(fhi + span * fraction))
+    }
+
     /// Tick positions across `range`, at most `target` of them.
     pub fn ticks(&self, range: (f64, f64), target: usize) -> Vec<f64> {
-        let (lo, hi) = range;
+        let (lo, hi) = self.valid_range(range);
         if !(hi > lo) || target == 0 {
             return Vec::new();
         }
         match self {
             Self::Log10 => {
-                let (a, b) = (lo.max(f64::MIN_POSITIVE).log10().floor(), hi.log10().ceil());
+                let (a, b) = (lo.log10().floor(), hi.log10().ceil());
                 let step = (((b - a) / target as f64).ceil() as i32).max(1);
                 let mut out = Vec::new();
                 let mut e = a as i32;
@@ -160,6 +195,39 @@ mod tests {
         assert_eq!(t, vec![1.0, 10.0, 100.0, 1000.0]);
         // A wide range thins them out rather than emitting hundreds.
         assert!(Scale::Log10.ticks((1e-20, 1e20), 5).len() <= 12);
+    }
+
+    #[test]
+    fn padding_a_log_axis_stays_positive() {
+        // The bug this exists for: additive padding on (1e-6, 1.0) gives a negative lower
+        // bound, log10 of that is -inf, and the chart renders empty.
+        let (lo, hi) = Scale::Log10.pad((1e-6, 1.0), 0.06);
+        assert!(lo > 0.0 && lo < 1e-6, "lower bound {lo} must widen downward and stay positive");
+        assert!(hi > 1.0);
+        // And it is multiplicative: equal padding in decades at both ends.
+        let decades_below = (1e-6f64 / lo).log10();
+        let decades_above = (hi / 1.0f64).log10();
+        assert!((decades_below - decades_above).abs() < 1e-9);
+    }
+
+    #[test]
+    fn padding_a_linear_axis_is_additive() {
+        let (lo, hi) = Scale::Linear.pad((0.0, 10.0), 0.1);
+        assert!((lo + 1.0).abs() < 1e-9 && (hi - 11.0).abs() < 1e-9);
+        // A flat range still opens up rather than staying a point.
+        let (a, b) = Scale::Linear.pad((5.0, 5.0), 0.1);
+        assert!(b > a);
+    }
+
+    #[test]
+    fn a_log_axis_refuses_an_impossible_range_rather_than_producing_infinities() {
+        let (lo, hi) = Scale::Log10.valid_range((-3.0, 100.0));
+        assert!(lo > 0.0 && hi == 100.0);
+        assert!(!Scale::Log10.ticks((-3.0, 100.0), 5).is_empty(), "ticks must survive it");
+        for v in Scale::Log10.ticks((-3.0, 100.0), 5) {
+            assert!(v > 0.0 && v.is_finite());
+        }
+        assert!(Scale::Log10.normalise(1.0, Scale::Log10.valid_range((-3.0, 100.0))).is_finite());
     }
 
     #[test]
