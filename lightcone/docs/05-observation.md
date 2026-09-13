@@ -55,16 +55,25 @@ further means building a bigger one, or many, and committing them for in-game ye
 
 ### Instruments do not see every band
 
-An instrument covers some subset of the five bands, and which subset is a property of how it
-was built. This is where most of the instrument variety in the game comes from, and all of it
-is physical rather than assigned.
+An instrument covers some subset of the seven bands, and the subsets are not arbitrary. They
+are set by detector physics, which gives four hardware families and therefore four instrument
+tiers that nobody had to invent.
 
-| instrument | bands | what constrains it |
+| family | bands | why the boundary is there |
 |---|---|---|
-| optical telescope | B, V | mirror figure and detector; the cheap baseline |
-| near-IR telescope | B, V, K | detector cooling, tens of K; moderate cost |
-| thermal-IR observatory | 10 um | the instrument's own heat, see below |
-| radio dish or array | 21 cm | collecting area, and resolution it cannot have |
+| silicon CCD | B, V, R, I | silicon's 1.12 eV bandgap stops responding past ~1100 nm |
+| narrow-gap detector, cooled to ~80 K | K | 2.19 um needs HgCdTe or InSb, and cooling to keep dark current down |
+| cryogenic bolometer, below ~40 K | 10 um | the instrument's own thermal emission, see below |
+| antenna and receiver | 21 cm | a different technology entirely; not a photon counter |
+
+The silicon row is the important one. **All four optical bands come free with one detector**,
+so the entry-level telescope is not a one-band instrument — it sees B, V, R and I, which is
+enough for natural colour, enough to find M dwarfs where they are actually bright, and enough
+to attempt the reddening-versus-temperature separation of
+[04-stellar-photometry.md](04-stellar-photometry.md). It just cannot finish that separation for
+red stars, which is what the K-band tier is for.
+
+Each step up is a different detector, not a bigger version of the last one.
 
 **Thermal IR blinds itself if it is warm.** A blackbody at 300 K peaks at 9.66 um, which is
 the 10 um band almost exactly, so a room-temperature telescope is a brighter source than
@@ -111,11 +120,12 @@ not different renderings of the same data. That is not a UI problem; it is the s
 the game already has with time, one column wider.
 
 It is also load-bearing. The grey-versus-reddening diagnostic of
-[04-stellar-photometry.md](04-stellar-photometry.md) needs at least two bands to exist at all.
-**An observer with V alone cannot distinguish a swarm from a dust cloud**, and no amount of
-integration time fixes it — the information is not in the measurement. The disguise works
-against observers who have not built the right instrument, which makes instrument choice a
-real commitment rather than a tier list.
+[04-stellar-photometry.md](04-stellar-photometry.md) needs colour to exist at all, and needs K
+to be conclusive about red stars. **A silicon camera can usually tell a swarm from a dust
+cloud, and fails exactly where most stars are**, because the reddening vector and the stellar
+locus nearly coincide over the K-to-M range. No amount of integration time fixes that; the
+information is not in the measurement. The disguise works against observers who have not built
+the right detector, which makes instrument choice a real commitment rather than a tier list.
 
 Every measurement therefore carries the band mask it was taken with, and the UI says which
 bands a conclusion rests on.

@@ -238,17 +238,17 @@ affordance.
 
 ## Bands and the display mapping
 
-The renderer computes radiance in the five bands of
+The renderer computes radiance in the seven bands of
 [04-stellar-photometry.md](04-stellar-photometry.md) and ends in three. The interesting part is
 the ending, not the computing.
 
 ### Channel count is not the constraint
 
-Carrying five bands through a fragment shader is free — they are registers. If a deferred path
+Carrying seven bands through a fragment shader is free — they are registers. If a deferred path
 ever needs them in a G-buffer, WebGPU's base limits allow `maxColorAttachmentBytesPerSample` of
 32, which at `rgba16float` is four attachments, or **16 float channels per pass within the
-guaranteed limits**. Half-float render targets are core; the `shader-f16` extension is only
-needed for f16 arithmetic, which this does not require.
+guaranteed limits**, against seven needed. Half-float render targets are core; the
+`shader-f16` extension is only needed for f16 arithmetic, which this does not require.
 
 The constraint is the display: three primaries and a trichromat viewer. Wide-gamut and HDR
 panels give more saturated primaries, not more dimensions.
@@ -276,11 +276,22 @@ pub struct BandMapping {
 
 | preset | mapping | shows |
 |---|---|---|
-| natural | B, V, and `Teff` reconstructed from `B-V` | what a human would see, with the reddening degeneracy intact |
+| natural | R, V, B to display R, G, B | what a human would see, measured rather than inferred |
+| deep natural | R+I, V, B | natural colour with M dwarfs at their real brightness |
 | thermal | 10 um, K, V | industry and waste heat; a rival's swarm becomes a colour |
 | dust penetration | 21 cm, 10 um, K | through clouds that are opaque in V |
-| composition | B, V, K | the grey-versus-reddening diagnostic, made visible: dust reads orange, a swarm reads neutral |
+| composition | K, V, B | the grey-versus-reddening diagnostic, made visible: dust reads orange, a swarm reads neutral |
 | survey | V as luminance, 10 um as chroma | a monochrome sky in which only excess heat is coloured |
+
+**The natural preset is the default and exists for the player, not for the science.** It buys
+no information the others do not, and a human looking at a sky that looks like a sky is worth
+a band. B, V and R are close enough to the display primaries that a direct assignment works.
+
+Strictly it is not exact: photometric B, V, R are narrower and offset from the CIE colour
+matching functions, and `x-bar` has a secondary lobe in the blue that a direct mapping misses,
+so direct assignment oversaturates slightly. The correct route treats the optical bands as
+samples of a spectrum, integrates against CIE, and converts XYZ to sRGB — worth doing for the
+natural preset alone, where fidelity is the entire point, and not worth doing anywhere else.
 
 The composition preset is the one worth building first. It turns the photometric diagnostic
 into something the player sees rather than reads, and the whole point of computing occlusion
@@ -350,8 +361,5 @@ optic, and leaves the 2-3 stop window free for the things that have detail in th
 - Whether the layered-swarm shader needs a second appearance for dust, given that dust is
   chromatic and a swarm is grey. Probably yes, and it is the visual form of the diagnostic in
   [04-stellar-photometry.md](04-stellar-photometry.md).
-- Whether a sixth band, R or I, is worth adding so that natural colour is measured rather than
-  inferred from `B-V`. The inference is good for stars and fails informatively for reddened
-  objects, so this is not obviously an improvement.
 - How to present an unavailable band. Masking it to zero makes a scene look dark rather than
   uninstrumented, and the difference matters when the player is deciding what to build.

@@ -300,15 +300,18 @@ Contents, per vertex:
 | `d_b` | f32 x bands | mean fractional deficit, per band |
 | `t_cross` | f32 | mean disc crossing time; gives the flicker's correlation time |
 
-At level 5 (10 242 vertices, 2.0 degree edges) with four bands that is 24 bytes per vertex,
-240 KB per star, and only stars that actually have a population get one.
+At level 5 (10 242 vertices, 2.0 degree edges) with seven bands that is nine `f32` per vertex,
+36 bytes, 360 KB per star, and only stars that actually have a population get one.
 
-| level | vertices | edge | size, 4 bands |
+| level | vertices | edge | size, 7 bands |
 |---|---|---|---|
-| 3 | 642 | 7.9 deg | 15 KB |
-| 4 | 2 562 | 4.0 deg | 60 KB |
-| 5 | 10 242 | 2.0 deg | 240 KB |
-| 6 | 40 962 | 0.99 deg | 960 KB |
+| 3 | 642 | 7.9 deg | 23 KB |
+| 4 | 2 562 | 4.0 deg | 90 KB |
+| 5 | 10 242 | 2.0 deg | 360 KB |
+| 6 | 40 962 | 0.99 deg | 1.4 MB |
+
+A note on the radio channel: nothing reddens at 21 cm, so `d_radio` is the pure geometric
+blocking fraction. It doubles as the shell's record of how much of a population is solid.
 
 Pick the level from the population's inclination spread. Most swarms sit at 4 or 5.
 
@@ -345,15 +348,32 @@ disagree about what a star did and a light curve stops being reproducible.
 
 ## Bands
 
-Five, and the fifth changes the model.
+Seven. The first four are the Johnson-Cousins optical run, which is what a real observatory
+has; the last three each buy something the optical bands cannot.
 
-| band | roughly | why it is there |
+| band | centre | why it is there |
 |---|---|---|
-| B | 440 nm | colour, and the most extinction-sensitive band |
-| V | 550 nm | the workhorse; magnitudes and depths are quoted here |
-| K | 2.2 um | sees through dust that V cannot |
+| B | 445 nm | the most extinction-sensitive band; half of the colour index |
+| V | 551 nm | the workhorse; magnitudes and depths are quoted here |
+| R | 658 nm | natural colour becomes measured rather than inferred |
+| I | 806 nm | where M dwarfs actually peak, and cheap dust penetration |
+| K | 2.19 um | breaks the reddening degeneracy; sees through dust that V cannot |
 | thermal IR | 10 um | waste heat |
 | radio | 21 cm | sees through everything, and carries signals |
+
+**R is for the player.** With B, V and R measured, the natural view is a measurement instead
+of a reconstruction, and a human looking at a human-looking sky is worth a band. It buys no
+science the others do not, and that is fine — the game is played by people.
+
+**I earns its place on the physics.** M dwarfs are around 70% of stars, and they peak between
+R and I: an M0 at 3950 K peaks at 734 nm, an M5 at 3050 K peaks at 950 nm. Without I, the most
+common star in the galaxy is measured only on its faint blue shoulder. I is also the cheapest
+dust penetration available — `A_I/A_V = 0.48`, so it transmits 11% through `A_V = 5` where V
+transmits 1%, a factor of eleven for no change in detector technology.
+
+That last point is the useful one, because it is where the instrument tiers come from. Silicon
+has a 1.12 eV bandgap and stops responding past about 1100 nm, so **B, V, R and I are all one
+detector** and K is not. See [05-observation.md](05-observation.md).
 
 The thermal IR band is not decoration. Total output is conserved, so light a swarm intercepts
 reappears as waste heat; a player watching only V sees a star that is slightly dim, and a
@@ -369,9 +389,9 @@ in the radio:
 
 | band | `A_lambda / A_V` | flux through `A_V = 1` | through `A_V = 5` |
 |---|---|---|---|
-| U | 1.53 | 0.244 | 0.0009 |
 | B | 1.32 | 0.297 | 0.0023 |
 | V | 1.00 | 0.398 | 0.0100 |
+| R | 0.75 | 0.501 | 0.032 |
 | I | 0.48 | 0.643 | 0.110 |
 | K | 0.11 | 0.904 | 0.603 |
 | 10 um | 0.06 | 0.946 | 0.759 |
@@ -396,30 +416,43 @@ means making it out of small particles, which means giving up the structural int
 made it a collector. The disguise has a physical price, and the game does not have to invent
 one.
 
-### Natural colour without a red band
+### Temperature, and the reddening degeneracy
 
-The five bands have no R, so "what would a human eye see" is reconstructed rather than
-measured. For a star that works, because stars are near-blackbodies and `B - V` is the
-standard colour index: it determines effective temperature, and the temperature determines
-the whole visible spectrum. Ballesteros' formula is accurate enough and cheap:
+`B - V` is the standard colour index and gives effective temperature directly. Ballesteros'
+formula is accurate enough and cheap:
 
 ```
 Teff = 4600 * ( 1/(0.92*(B-V) + 1.70) + 1/(0.92*(B-V) + 0.62) )
 ```
 
-Checked against real values: `B-V = 0.65` returns 5778 K for the Sun, against an actual
-5772 K. `B-V = 0.00` returns 10 125 K for an A0 star, `+1.40` returns 3950 K for an M0.
+Checked against real values: `B-V = 0.65` returns 5778 K for the Sun against an actual 5772 K,
+`0.00` returns 10 125 K for an A0, `+1.40` returns 3950 K for an M0.
 
-**The reconstruction fails exactly where it should.** Reddening and cooling are degenerate:
-`B - V` responds to dust and to temperature identically, so an A0 star at 10 125 K behind
-`E(B-V) = 0.3` of dust reads as 7462 K — an F star. The natural-colour view of a reddened
-object is honestly ambiguous, which is the same degeneracy real photometry has and the same
-one a civilisation could hide behind. Breaking it needs K band, which is nearly
-extinction-free, so the ambiguity is a consequence of which instruments the observer owns.
+**One colour index cannot separate a cool star from a reddened one.** Dust and temperature move
+`B - V` the same direction, so an A0 at 10 125 K behind `E(B-V) = 0.3` reads as 7462 K, an F
+star. This is the real degeneracy of real photometry, and it is a deception vector: a
+civilisation that wants to look like something else can lean on it.
 
-Adding an R or I band would make natural colour a measurement instead of an inference. It is
-not obviously worth a sixth band; the inference is good for stars and its failure mode is
-interesting rather than wrong.
+Breaking it is graduated, which makes it a better mechanic than a single gate:
+
+| bands held | how far the degeneracy breaks |
+|---|---|
+| two, `B - V` only | not at all; dust and temperature are the same number |
+| four optical, `B-V` against `V-I` | partially — the reddening vector is not parallel to the stellar locus, but it is not far off either |
+| add K, `B-V` against `V-K` | decisively |
+
+The middle row is the interesting one. In a `(B-V)` versus `(V-I)` diagram the reddening
+vector has slope `E(B-V)/E(V-I) = 0.32/0.52 = 0.615`, while the main sequence runs at 0.8 to
+0.95 over most of its length. Different, so high-SNR optical photometry can separate them —
+but over the K0 to M0 stretch the locus slope is 0.590, almost exactly the reddening slope.
+**The degeneracy is worst for red stars, and red stars are the majority.**
+
+K band settles it because the baseline is longer: `E(V-K)/A_V = 0.89` against `E(B-V)/A_V =
+0.32`, so the same extinction produces 2.8 times the displacement, well clear of the locus.
+
+So an observer with a silicon camera can usually tell dust from temperature, struggles exactly
+where most stars are, and needs a cooled near-IR detector to be certain. That is a real
+instrument decision with a real payoff.
 
 The radio band also stops the game from being a pure line-of-sight problem. A system behind a
 dense cloud is invisible optically and perfectly ordinary at 21 cm, so dust is cover against
