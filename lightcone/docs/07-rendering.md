@@ -287,11 +287,16 @@ pub struct BandMapping {
 no information the others do not, and a human looking at a sky that looks like a sky is worth
 a band. B, V and R are close enough to the display primaries that a direct assignment works.
 
-Strictly it is not exact: photometric B, V, R are narrower and offset from the CIE colour
-matching functions, and `x-bar` has a secondary lobe in the blue that a direct mapping misses,
-so direct assignment oversaturates slightly. The correct route treats the optical bands as
-samples of a spectrum, integrates against CIE, and converts XYZ to sRGB — worth doing for the
-natural preset alone, where fidelity is the entire point, and not worth doing anywhere else.
+Strictly it is not exact, and the error is concentrated where it is most visible.
+Photometric B, V and R are narrower than the CIE matching functions and `x-bar` has a blue
+secondary lobe a direct map misses, so direct assignment **fails to converge to neutral near
+white**: measured against the CIE route, a 5772 K star comes out about 1.5 times as saturated
+as it should be. At the extremes the two agree within a few percent — a 2500 K or 20 000 K
+star is strongly coloured either way.
+
+So the CIE route — integrate the optical bands against the matching functions, convert XYZ to
+sRGB — is worth it for the natural preset, where a colour cast on a sun-like star is exactly
+what a player would notice, and not worth it anywhere else.
 
 The composition preset is the one worth building first. It turns the photometric diagnostic
 into something the player sees rather than reads, and the whole point of computing occlusion

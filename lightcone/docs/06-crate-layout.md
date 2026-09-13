@@ -8,7 +8,7 @@
 | `crates/em-sim` | simulation state and propagation | em-foundations; `bevy_ecs` behind the `bevy` feature |
 | `crates/em-render` | **new.** reusable Bevy rendering for orbital scenes | em-foundations, em-sim, bevy |
 | `crates/em-plot` | **new.** charts, curves, heat maps; see [11-plotting.md](11-plotting.md) | glam; bevy and egui behind features |
-| `crates/em-spectra` | **new.** bands, blackbody, extinction, colour, band-to-display mapping | glam, serde; no engine |
+| `crates/em-spectra` | **new.** bands, blackbody, extinction, colour, band-to-display mapping | serde only; no engine, no glam |
 | `crates/lc-spacetime` | event coordinates, intervals, retarded time, worldlines | glam, serde; no engine |
 | `crates/lc-world` | game rules, systems, structures, ships, resources, photometry | em-foundations, em-sim, lc-spacetime |
 | `crates/lc-proto` | wire messages, serialisation, versioning | serde, lc-spacetime, lc-world types |

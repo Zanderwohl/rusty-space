@@ -433,26 +433,34 @@ Checked against real values: `B-V = 0.65` returns 5778 K for the Sun against an 
 star. This is the real degeneracy of real photometry, and it is a deception vector: a
 civilisation that wants to look like something else can lean on it.
 
-Breaking it is graduated, which makes it a better mechanic than a single gate:
+Breaking it needs a second colour, so that reddening and cooling can be told apart by
+*direction* rather than magnitude. In a colour-colour diagram the reddening vector points one
+way, fixed by the extinction law, and the stellar locus runs another. Where the two are not
+parallel, photometry separates them; where they are, nothing does.
 
-| bands held | how far the degeneracy breaks |
+Measured, in a `(V-I)` versus `(B-V)` diagram — the angles are between the reddening vector
+and the local main-sequence tangent:
+
+| spectral range | separation |
 |---|---|
-| two, `B - V` only | not at all; dust and temperature are the same number |
-| four optical, `B-V` against `V-I` | partially — the reddening vector is not parallel to the stellar locus, but it is not far off either |
-| add K, `B-V` against `V-K` | decisively |
+| A0 to G5 | 10 to 17 degrees; separates well |
+| K0 to M0 | **under 5 degrees; degenerate** |
+| M2 to M5 | 15 to 23 degrees; separates again |
 
-The middle row is the interesting one. In a `(B-V)` versus `(V-I)` diagram the reddening
-vector has slope `E(B-V)/E(V-I) = 0.32/0.52 = 0.615`, while the main sequence runs at 0.8 to
-0.95 over most of its length. Different, so high-SNR optical photometry can separate them —
-but over the K0 to M0 stretch the locus slope is 0.590, almost exactly the reddening slope.
-**The degeneracy is worst for red stars, and red stars are the majority.**
+**There is a specific blind zone at late K to early M**, where the main sequence happens to
+run along the reddening vector. Hotter stars and later M dwarfs are both fine.
 
-K band settles it because the baseline is longer: `E(V-K)/A_V = 0.89` against `E(B-V)/A_V =
-0.32`, so the same extinction produces 2.8 times the displacement, well clear of the locus.
+**Adding K band does not rescue the blind zone**, and an earlier draft of this document said
+it did. `V-K` gives 1.55 times the displacement per magnitude of extinction, which is real
+signal against measurement noise — but the locus rotates with it, and over K0 to M0 the
+angular separation is under one degree in *both* diagrams. A longer baseline buys reach, not
+angle.
 
-So an observer with a silicon camera can usually tell dust from temperature, struggles exactly
-where most stars are, and needs a cooled near-IR detector to be certain. That is a real
-instrument decision with a real payoff.
+So the blind zone is not an instrument tier to buy past. It is a genuine hole in what
+continuum photometry can know, and closing it needs spectroscopy — line features rather than
+the shape of the continuum. That gives the spectrograph of
+[05-observation.md](05-observation.md) a specific job, and it gives a civilisation that wants
+to hide behind dust a reason to prefer a late-K star.
 
 The radio band also stops the game from being a pure line-of-sight problem. A system behind a
 dense cloud is invisible optically and perfectly ordinary at 21 cm, so dust is cover against

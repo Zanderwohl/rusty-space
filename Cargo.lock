@@ -2691,6 +2691,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "em-spectra"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "emath"
 version = "0.33.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
