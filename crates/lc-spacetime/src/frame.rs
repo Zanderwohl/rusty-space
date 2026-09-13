@@ -1,10 +1,7 @@
-//! The boundaries between coordinate systems: the global grid, a system's local frame, and
-//! the time `em-sim` propagates against.
+//! The global grid, a system's local frame, and the time `em-sim` propagates against.
 //!
-//! **The global grid is the index; local arithmetic is the truth.** Causality within a system
-//! is evaluated in local `f64` seconds and metres; causality between systems is evaluated on
-//! the integer grid. A query that spans the boundary uses the grid to select candidates and
-//! local arithmetic to refine, in that order.
+//! **The grid is the index; local arithmetic is the truth.** A query spanning the boundary
+//! selects candidates on the grid, then refines locally.
 
 use em_foundations::time::Instant;
 use glam::DVec3;
@@ -24,11 +21,8 @@ pub fn light_micros_to_metres(lus: f64) -> f64 {
     lus * LIGHT_MICROSECOND_M
 }
 
-/// Where a system's local frame sits on the global grid.
-///
-/// `epoch` is the coordinate time that the system's own time base calls zero. It exists so
-/// that the `f64` seconds handed to `em-sim` are always a small difference — see
-/// [`SystemFrame::propagation_time`].
+/// Where a system's local frame sits on the global grid. `origin.t` is what the system's own
+/// time base calls zero.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SystemFrame {
     /// Global grid position of the system's barycentre.
@@ -40,11 +34,8 @@ impl SystemFrame {
         Self { origin }
     }
 
-    /// Local metres about the barycentre to a global grid coordinate.
-    ///
-    /// Rounding costs up to 150 m, which is 0.5 us of coordinate time and below the
-    /// resolution of every gameplay rule. The local value remains authoritative; this is for
-    /// indexing.
+    /// Local metres to a global grid coordinate, for indexing. Rounding costs up to 150 m,
+    /// or 0.5 us; the local value stays authoritative.
     pub fn to_global(&self, t: Micros, local_m: DVec3) -> Result<Coord, OutOfBounds> {
         let l = local_m / LIGHT_MICROSECOND_M;
         Coord::new(
@@ -64,23 +55,19 @@ impl SystemFrame {
         ) * LIGHT_MICROSECOND_M
     }
 
-    /// The time to hand `em-sim`, as an **offset from this system's epoch** — never an
-    /// absolute epoch.
+    /// The time to hand `em-sim`: an **offset from this system's epoch**, never an absolute
+    /// one.
     ///
-    /// `em_foundations::Instant` is documented as seconds since J2000, and for a system built
-    /// from real ephemerides that is literally what this returns. For a generated system,
-    /// J2000 is simply the name of that system's zero, and the system's `BodyDef` element
-    /// epochs must use the same base. Getting that wrong is the 28-days-out-of-position bug
-    /// the repository already has a scar from, which is why this conversion exists in exactly
-    /// one place and nothing else is permitted to construct an `Instant` from coordinate
-    /// time.
+    /// For a system built from real ephemerides the result is literally seconds since J2000.
+    /// For a generated one, J2000 is just the name of that system's zero, and its `BodyDef`
+    /// element epochs must use the same base. Nothing else may build an `Instant` from
+    /// coordinate time — this is the 28-days-out-of-position bug's only door.
     #[inline]
     pub fn propagation_time(&self, t: Micros) -> Instant {
         Instant::from_seconds_since_j2000((t - self.origin.t).as_seconds())
     }
 
-    /// The inverse of [`SystemFrame::propagation_time`], for turning a propagation result
-    /// back into coordinate time.
+    /// Inverse of [`SystemFrame::propagation_time`].
     #[inline]
     pub fn coordinate_time(&self, instant: Instant) -> Micros {
         let micros = (instant.to_j2000_seconds() * MICROS_PER_SECOND as f64).round() as i64;

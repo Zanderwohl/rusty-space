@@ -2,25 +2,22 @@
 
 use crate::coord::Coord;
 
-/// How two events are separated. Frame-independent **because nothing in this design moves
-/// faster than light**; state it that way rather than as an unconditional fact, because the
-/// two differ the moment anything does.
+/// How two events are separated. Frame-independent *because nothing here moves faster than
+/// light* — not unconditionally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Separation {
-    /// `s^2 > 0`. Causally connected, and the order of the pair is the same in every frame.
+    /// `s^2 > 0`. Causally connected, and ordered the same in every frame.
     Timelike,
     /// `s^2 == 0`. Connected by light exactly.
     Lightlike,
-    /// `s^2 < 0`. No causal contact. **Their order is frame-dependent and nothing may depend
-    /// on it.**
+    /// `s^2 < 0`. No causal contact, and the order is frame-dependent: depend on neither.
     Spacelike,
 }
 
-/// The invariant interval squared, `dt^2 - dr^2`, in squared microseconds.
+/// The invariant interval squared, `dt^2 - dr^2`, in squared microseconds. Exact.
 ///
-/// Exact. `c = 1` in these units, so there is no constant in the expression. `i128` is used
-/// rather than `i64` because the squares overflow it; the `2^60` construction bound on
-/// [`Coord`] is what keeps `i128` sufficient.
+/// `i128` because the squares overflow `i64`; [`crate::COORD_BOUND`] is what keeps `i128`
+/// sufficient.
 #[inline]
 pub fn interval2(a: Coord, b: Coord) -> i128 {
     let dt = (b.t - a.t).get() as i128;
@@ -37,23 +34,18 @@ pub fn classify(a: Coord, b: Coord) -> Separation {
     }
 }
 
-/// True when `a` could have influenced `b`: `b` is at or after `a` in coordinate time, and
-/// the two are not spacelike separated.
+/// True when `a` could have influenced `b`.
 ///
-/// This is the only ordering a rule may depend on. It is reflexive, antisymmetric, and
-/// transitive over the events of any sub-luminal world, and it is frame-independent, so a
-/// rule written against it means the same thing to every observer.
+/// The only ordering a rule may depend on: reflexive, antisymmetric, transitive, and
+/// frame-independent, so it means the same thing to every observer.
 #[inline]
 pub fn precedes(a: Coord, b: Coord) -> bool {
     b.t >= a.t && interval2(a, b) >= 0
 }
 
-// There is deliberately no `simultaneous` function.
-//
-// Equal `t` is `a.t == b.t` and needs no help. Dressing it up as a physics predicate would
-// invite code that treats a frame convention as a fact: two spacelike-separated events the
-// server calls simultaneous are not simultaneous in a moving ship's frame, and their order
-// can be reversed by a boost. Simultaneity of spacelike pairs is not defined.
+// There is deliberately no `simultaneous`. Equal `t` is `a.t == b.t`; naming it as a physics
+// predicate would invite code that treats a frame convention as a fact, and the order of a
+// spacelike pair can be reversed by a boost.
 
 #[cfg(test)]
 mod tests {

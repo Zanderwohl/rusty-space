@@ -1,13 +1,11 @@
 //! Event coordinates, Minkowski intervals, worldlines and retarded time.
 //!
-//! Depends on `glam`, `serde`, `smallvec` and `em-foundations` — no engine, no ECS, no
-//! rendering. The server links this crate and the server must not link Bevy.
+//! No engine, no ECS, no rendering: the server links this crate.
 //!
 //! # Units
 //!
-//! One frame is privileged by fiat: the **server frame**. Its origin is arbitrary and fixed
-//! at world creation. All stored coordinates are server-frame coordinates; no other frame is
-//! ever stored, transmitted, or shown to a player.
+//! All coordinates are in one privileged frame, the **server frame**, whose origin is fixed
+//! at world creation. No other frame is stored, transmitted, or shown to a player.
 //!
 //! | Quantity | Unit |
 //! |---|---|
@@ -16,22 +14,17 @@
 //! | Velocity | `beta`, dimensionless |
 //! | Local position inside a system | metres, `f64`, about the barycentre |
 //!
-//! With these units **`c = 1`**, so the light-cone test is integer arithmetic with no
-//! constant in it. Spatial resolution is 299.79 m and temporal resolution is 1 us.
+//! So **`c = 1`** and the light-cone test is integer arithmetic. Resolution is 299.79 m and
+//! 1 us.
 //!
-//! Time is stored once. There is no per-system epoch and no second absolute origin; `f64`
-//! seconds exist only as a locally computed difference, which is what Kepler propagation
-//! consumes and where `f64` is precise. See [`frame::SystemFrame::propagation_time`], which
-//! is the only place that knows how coordinate time relates to `em_foundations::Instant`.
+//! [`frame::SystemFrame::propagation_time`] is the only place that relates coordinate time to
+//! `em_foundations::Instant`.
 //!
 //! # Causality
 //!
-//! [`interval::precedes`] is frame-independent **because nothing in this design moves faster
-//! than light**, and it is the only ordering a rule may depend on. Simultaneity of spacelike
-//! pairs is not defined and there is deliberately no function offering it.
-//!
-//! A [`worldline::Worldline`] is a total, single-valued function of coordinate time, which is
-//! what makes closed causal loops unrepresentable rather than merely checked for.
+//! [`interval::precedes`] is frame-independent *because nothing here moves faster than
+//! light*, and is the only ordering a rule may depend on. Simultaneity of spacelike pairs is
+//! not defined.
 
 #![forbid(unsafe_code)]
 

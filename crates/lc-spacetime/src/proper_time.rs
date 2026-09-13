@@ -1,14 +1,9 @@
 //! Proper time, and motion under constant proper acceleration.
 //!
-//! A ship accumulates `tau = integral dt / gamma`, and onboard processes — construction,
-//! refining, computation — advance on `tau`. The player's clock is always coordinate time
-//! `t`. The UI shows both, labelled, and never transforms the world into the ship's frame.
-//!
-//! Units are natural: `c = 1`, times in microseconds, lengths in light-microseconds, so a
-//! proper acceleration `alpha` has units of inverse microseconds.
+//! Onboard processes advance on `tau = integral dt / gamma`; the player's clock is always
+//! coordinate time. Units are natural, so `alpha` is in inverse microseconds.
 
-/// Convert an SI proper acceleration in m/s^2 to the natural units used here, inverse
-/// microseconds.
+/// SI m/s^2 to inverse microseconds.
 #[inline]
 pub fn proper_acceleration_from_si(a_m_per_s2: f64) -> f64 {
     // a / c gives inverse seconds; divide by 1e6 microseconds per second.
@@ -25,34 +20,29 @@ pub fn gamma_from_beta(beta: f64) -> f64 {
     (1.0 - beta * beta).sqrt().recip()
 }
 
-/// The fastest representable `beta`: the largest `f64` strictly below 1.
+/// The largest `f64` strictly below 1.
 ///
-/// `at / sqrt(1 + at^2)` rounds to exactly 1.0 once `at` exceeds about 1e8, because `1 + at^2`
-/// loses the 1. Saturating here instead keeps every downstream `gamma` finite and keeps the
-/// physical claim honest — indistinguishable from `c`, and not equal to it.
+/// `at / sqrt(1 + at^2)` rounds to exactly 1.0 past `at` of about 1e8, because `1 + at^2`
+/// loses the 1, and that makes `gamma` infinite. Saturating here keeps it finite.
 pub const MAX_BETA: f64 = 1.0 - f64::EPSILON / 2.0;
 
-/// Velocity after coordinate time `t` under constant proper acceleration `alpha`, starting
-/// from rest. Asymptotes to `c` and never reaches it.
+/// Velocity from rest after coordinate time `t`. Asymptotes to `c`.
 #[inline]
 pub fn hyperbolic_velocity(alpha: f64, t: f64) -> f64 {
     let at = alpha * t;
     (at / (1.0 + at * at).sqrt()).clamp(-MAX_BETA, MAX_BETA)
 }
 
-/// Displacement after coordinate time `t` under constant proper acceleration `alpha`, from
-/// rest. Reduces to `alpha t^2 / 2` in the non-relativistic limit.
+/// Displacement from rest after coordinate time `t`.
 #[inline]
 pub fn hyperbolic_position(alpha: f64, t: f64) -> f64 {
     let at = alpha * t;
-    // sqrt(1 + u^2) - 1 loses nine digits to cancellation when u is small, and u is small for
-    // most of any realistic burn. The algebraically identical u^2 / (sqrt(1 + u^2) + 1) does
-    // not cancel.
+    // sqrt(1 + u^2) - 1 loses nine digits to cancellation for small u, and u is small for
+    // most of any realistic burn. The identical u^2 / (sqrt(1 + u^2) + 1) does not.
     alpha * t * t / ((1.0 + at * at).sqrt() + 1.0)
 }
 
-/// Proper time elapsed aboard, over coordinate time `t` under constant proper acceleration
-/// `alpha` from rest. Always less than `t`.
+/// Proper time elapsed aboard over coordinate time `t`, from rest. Always less than `t`.
 #[inline]
 pub fn hyperbolic_proper_time(alpha: f64, t: f64) -> f64 {
     (alpha * t).asinh() / alpha

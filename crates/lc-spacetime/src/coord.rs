@@ -8,19 +8,13 @@ use crate::units::Micros;
 /// One light-microsecond, in metres. Exact: `c` is defined as 299 792 458 m/s.
 pub const LIGHT_MICROSECOND_M: f64 = 299.792458;
 
-/// Every coordinate component satisfies `|c| < COORD_BOUND`.
+/// Every coordinate component satisfies `|c| < COORD_BOUND`: 36 534 light-years and years.
 ///
-/// `2^60` light-microseconds is 36 534 light-years, and `2^60` microseconds is 36 534 years.
-/// The bound exists so that [`crate::interval::interval2`] cannot overflow `i128`: component
-/// *differences* are then below `2^61`, their squares below `2^122`, and the sum of four
-/// below `2^124`, against an `i128` ceiling of `2^127`.
+/// The bound is what keeps [`crate::interval::interval2`] inside `i128`. Differences are then
+/// below `2^61`, their squares below `2^122`, and the sum of four below `2^124`.
 pub const COORD_BOUND: i64 = 1 << 60;
 
-/// A point in server-frame spacetime.
-///
-/// Time is microseconds from the world origin; `x`, `y`, `z` are **light-microseconds** from
-/// it. In these units `c = 1`, so the light-cone test is integer arithmetic with no constant
-/// in it. Spatial resolution is 299.79 m; temporal resolution is 1 us of coordinate time.
+/// A point in server-frame spacetime: microseconds, and light-microseconds.
 ///
 /// Ordering is by `t` alone, so a `Coord` can key a time-sorted structure. It is deliberately
 /// *not* a causal order — see [`crate::interval`].
@@ -61,8 +55,7 @@ impl std::error::Error for OutOfBounds {}
 impl Coord {
     pub const ORIGIN: Self = Self { t: Micros::ORIGIN, x: 0, y: 0, z: 0 };
 
-    /// Checked construction. This is the only place the bound is enforced, so that the
-    /// comparison operators below can assume it and stay branch-free.
+    /// The only place [`COORD_BOUND`] is enforced, so everything downstream may assume it.
     pub fn new(t: Micros, x: i64, y: i64, z: i64) -> Result<Self, OutOfBounds> {
         check(Axis::T, t.get())?;
         check(Axis::X, x)?;
@@ -71,23 +64,22 @@ impl Coord {
         Ok(Self { t, x, y, z })
     }
 
-    /// Unchecked construction, for values a caller has already bounded.
+    /// For values a caller has already bounded; debug builds still assert.
     ///
-    /// Debug builds still assert. Release builds do not, and a coordinate past the bound will
-    /// silently give wrong interval signs rather than overflowing, which is worse than a
-    /// panic — hence [`Coord::new`] everywhere a value could come from outside.
+    /// Past the bound a release build gives wrong interval signs rather than overflowing,
+    /// which is worse than a panic. Use [`Coord::new`] for anything from outside.
     #[inline]
     pub fn new_unchecked(t: Micros, x: i64, y: i64, z: i64) -> Self {
         debug_assert!(in_bounds(t.get()) && in_bounds(x) && in_bounds(y) && in_bounds(z));
         Self { t, x, y, z }
     }
 
-    /// Spatial part, in light-microseconds, as floating point. Exact: `2^60` is well inside
-    /// `f64`'s 53-bit integer range only up to `2^53`, so this is *not* exact at the bound —
-    /// values past `2^53` light-microseconds (285 ly) lose the low bits. That is acceptable
-    /// because the continuous solvers work in light-microseconds where 285 ly is 3e-5 of the
-    /// bound, and interstellar work does not need sub-300 m precision. Integer comparisons
-    /// stay exact regardless; only this conversion is lossy.
+    /// Spatial part in light-microseconds, for the continuous solvers.
+    ///
+    /// Lossy past `2^53` light-microseconds (285 ly), where the low bits fall off the end of
+    /// `f64`'s integer range. Harmless: the error stays proportional, reaching 2.4 km at
+    /// 1100 ly, and nothing at that distance needs sub-300 m precision. Integer comparisons
+    /// are unaffected.
     #[inline]
     pub fn position(self) -> DVec3 {
         DVec3::new(self.x as f64, self.y as f64, self.z as f64)
@@ -108,8 +100,7 @@ impl Coord {
         dx * dx + dy * dy + dz * dz
     }
 
-    /// Spatial separation in light-microseconds, which is also the light travel time between
-    /// the two points in microseconds.
+    /// Also the light travel time between the two points, in microseconds.
     #[inline]
     pub fn spatial_distance(self, other: Self) -> f64 {
         (self.spatial_distance2(other) as f64).sqrt()
@@ -127,7 +118,6 @@ fn check(axis: Axis, v: i64) -> Result<(), OutOfBounds> {
 }
 
 impl Ord for Coord {
-    /// By `t` only. Not a causal order.
     #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.t.cmp(&other.t)

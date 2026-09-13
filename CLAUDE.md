@@ -38,6 +38,41 @@ speedup you will not notice while testing a change.
 Use `cargo run` (and `cargo run --bin exotic-matters`). Reach for `--release` only when
 actually profiling the simulation at high body counts or high time-warp.
 
+## Comments
+
+Comments are a cost. Write the minimum a competent reader with the code in front of them
+actually needs.
+
+Delete:
+
+- restatements of the code — `// increment i`, `/// Returns the name.` on `fn name()`
+- section banners and decorative rules
+- narration of obvious control flow
+- commented-out code; git remembers it
+- design-document prose. The docs exist; link to them instead of inlining them.
+
+Keep:
+
+- **why**, where the why is not derivable: a constraint, a discarded alternative, a bug this
+  shape prevents
+- units, ranges and frames the type does not carry
+- numerical hazards — cancellation, overflow, saturation, tolerance choices
+- invariants a caller must uphold
+
+One line is usually enough. A paragraph needs a reason. Module docs carry shared context so
+items do not repeat it. Prefer making the code say it: a named constant, a smaller function,
+or a better type removes the comment that would have explained it.
+
+## File size
+
+Cap a module at **1000 lines of code**, tests excluded. Past that, split by responsibility.
+
+```bash
+python3 tools/api_surface.py crates/<name>      # public surface, and the line counts
+```
+
+Run it at the end of any phase of work — the printout is the review artifact.
+
 ## Conventions
 
 - **`em-foundations` is radians-only, without exception.** Degrees are a storage and

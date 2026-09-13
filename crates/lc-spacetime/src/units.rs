@@ -1,15 +1,8 @@
-//! Typed time.
+//! Typed time: `i64` microseconds from the world origin, stored once, with no second origin.
 //!
-//! Coordinate time is stored once, as **`i64` microseconds from the world origin**, and
-//! nothing else. There is no second absolute origin and no per-system epoch. `f64` seconds
-//! exist only as a locally computed *difference*, which is what Kepler propagation consumes
-//! and the regime where `f64` is precise. See `frame`.
-//!
-//! [`Micros`] is an instant and [`Span`] is a duration. They do not mix: two instants
-//! subtract to a span, a span adds to an instant, and `Micros + Micros` does not compile.
-//! This is the same discipline `em_foundations::time` applies to `Instant` and `JulianDate`,
-//! and it exists for the same reason — mixing them once put a whole solar system 28 days out
-//! of position.
+//! [`Micros`] is an instant, [`Span`] a duration, and they do not mix — `Micros + Micros`
+//! does not compile. Same discipline as `em_foundations::time`, for the same reason: mixing
+//! them once put a whole solar system 28 days out of position.
 
 use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 
@@ -37,8 +30,7 @@ impl Micros {
         self.0
     }
 
-    /// Seconds as `f64`. Lossy past a few decades from the origin; use only for display, or
-    /// where the magnitude is known to be small. For propagation, take a difference first.
+    /// Lossy past a few decades from the origin. For propagation, take a [`Span`] first.
     #[inline]
     pub fn as_seconds_lossy(self) -> f64 {
         self.0 as f64 / MICROS_PER_SECOND as f64
@@ -68,8 +60,7 @@ impl Span {
         Self(seconds * MICROS_PER_SECOND)
     }
 
-    /// Seconds as `f64`. A span is a difference and is therefore small in the cases that
-    /// matter, so this is the precise direction to convert in.
+    /// Exact in the cases that matter, a span being a difference.
     #[inline]
     pub fn as_seconds(self) -> f64 {
         self.0 as f64 / MICROS_PER_SECOND as f64

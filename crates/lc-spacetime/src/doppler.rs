@@ -1,6 +1,4 @@
-//! Doppler shift, aberration and relativistic beaming.
-//!
-//! Velocities are `beta`: dimensionless, light-microseconds per microsecond.
+//! Doppler shift, aberration and relativistic beaming. Velocities are `beta`.
 
 use glam::DVec3;
 
@@ -12,19 +10,16 @@ pub fn gamma(beta: DVec3) -> f64 {
     (1.0 - b2).sqrt().recip()
 }
 
-/// Observed frequency over emitted frequency, for an observer moving at `beta` looking in
-/// direction `to_source` (a unit vector pointing from the observer toward the source).
+/// Observed over emitted frequency, for an observer at `beta` looking along `to_source`.
 ///
-/// Greater than 1 is a blueshift. Moving toward a source gives `sqrt((1+b)/(1-b))`; moving
-/// across one still gives `gamma`, the transverse blueshift, because the observer's own clock
-/// runs slow.
+/// Above 1 is a blueshift. Approaching gives `sqrt((1+b)/(1-b))`; moving across still gives
+/// `gamma`, the observer's own clock running slow.
 #[inline]
 pub fn doppler_factor(to_source: DVec3, beta: DVec3) -> f64 {
     gamma(beta) * (1.0 + beta.dot(to_source))
 }
 
-/// How a direction of light *propagation* transforms into the frame of an observer moving at
-/// `beta`.
+/// How a direction of light *propagation* transforms into a moving observer's frame.
 #[inline]
 pub fn aberrate_propagation(n: DVec3, beta: DVec3) -> DVec3 {
     let g = gamma(beta);
@@ -33,18 +28,15 @@ pub fn aberrate_propagation(n: DVec3, beta: DVec3) -> DVec3 {
     (num / (g * (1.0 - ndb))).normalize()
 }
 
-/// Where a source actually in direction `to_source` appears to be, for an observer moving at
-/// `beta`.
+/// Where a source actually along `to_source` appears to be.
 ///
-/// The sky compresses toward the direction of travel: at `beta = 0.5` a source 90 degrees off
-/// the bow appears at 60 degrees.
+/// The sky compresses forward: at `beta = 0.5` a source 90 degrees off the bow appears at 60.
 #[inline]
 pub fn apparent_source_direction(to_source: DVec3, beta: DVec3) -> DVec3 {
     -aberrate_propagation(-to_source, beta)
 }
 
-/// Bolometric intensity scaling. Intensity goes as the fourth power of the Doppler factor, so
-/// forward sources brighten sharply while shifting out of the band they were observed in.
+/// Bolometric intensity, as the fourth power of the Doppler factor.
 #[inline]
 pub fn beaming_factor(to_source: DVec3, beta: DVec3) -> f64 {
     doppler_factor(to_source, beta).powi(4)

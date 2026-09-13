@@ -5,56 +5,42 @@ use smallvec::SmallVec;
 
 use crate::coord::Coord;
 
-/// An object's position as a function of server-frame coordinate time.
+/// An object's position as a function of server-frame coordinate time, in microseconds and
+/// light-microseconds.
 ///
-/// Working units are **microseconds and light-microseconds**, so `c = 1` and a velocity is
-/// dimensionless `beta`.
-///
-/// The signature is the hard constraint of the design, in two ways.
-///
-/// It must be evaluable at *arbitrary past* time, because solving for retarded time visits
-/// times that are not the current tick and were not necessarily visited in order. That
-/// forbids storing motion only as an integrator state; a worldline is a closed form or a
-/// stored spline.
-///
-/// It is also total and single-valued in `t`, which is what makes closed causal loops
-/// unrepresentable: nothing can move backward in coordinate time, so no effect can be placed
-/// before its cause. That property is free and is worth not losing.
+/// Two constraints ride on this signature. It must be evaluable at *arbitrary past* time,
+/// because retarded-time solving visits times out of order — so motion may not be stored as
+/// an integrator state, only as a closed form or a spline. And being total and single-valued
+/// in `t` is what makes causal loops unrepresentable rather than merely checked for.
 pub trait Worldline {
     /// Position in light-microseconds, in the frame the caller is solving in.
     fn position_at(&self, t: f64) -> DVec3;
 
-    /// Velocity as `beta`, dimensionless. `|velocity_at| < 1` for every sub-luminal
-    /// worldline.
+    /// Velocity as `beta`, dimensionless.
     fn velocity_at(&self, t: f64) -> DVec3;
 
     /// The inclusive range of coordinate time over which this worldline is defined.
     fn defined_over(&self) -> (f64, f64);
 
-    /// Every worldline in the current design returns `true`. The single-root invariant of
-    /// [`retarded_times`] is asserted against this rather than assumed globally, so that the
-    /// day it stops holding, the affected code is already identified.
+    /// Everything returns `true` today. [`retarded_times`] asserts its single-root invariant
+    /// against this rather than assuming it, so the affected code is already identified.
     fn is_subluminal(&self) -> bool {
         true
     }
 }
 
-/// Solve `t_r + |x_o - w(t_r)| = t_o` for the emission times whose light reaches an observer
-/// at `observer`.
+/// Solve `t_r + |x_o - w(t_r)| = t_o` for the emission times whose light reaches `observer`.
 ///
-/// Returns a collection rather than an `Option`. For a sub-luminal worldline it always holds
-/// zero or one root and the caller pays nothing for the generality; the signature is chosen
-/// now because changing it later would touch every call site, and superluminal motion makes
-/// the count zero, one or more. See `lightcone/docs/10-superluminal.md`.
+/// A collection rather than an `Option`: sub-luminal worldlines always give zero or one root,
+/// but superluminal motion folds `f` and gives zero, one or more, and changing the signature
+/// later would touch every call site. See `lightcone/docs/10-superluminal.md`.
 ///
-/// Empty means the light has not arrived yet, or has already passed, or the worldline is not
-/// defined over the interval that would have emitted it.
+/// Empty means the light has not arrived, has already passed, or was never emitted.
 pub fn retarded_times(observer: Coord, w: &dyn Worldline) -> SmallVec<[f64; 2]> {
     retarded_times_at(observer.time_f64(), observer.position(), w)
 }
 
-/// [`retarded_times`] in the continuous domain, for solving inside a system where local
-/// precision beats the 300 m grid.
+/// [`retarded_times`] in the continuous domain, where local precision beats the 300 m grid.
 pub fn retarded_times_at(t_o: f64, x_o: DVec3, w: &dyn Worldline) -> SmallVec<[f64; 2]> {
     let mut out = SmallVec::new();
 
@@ -84,10 +70,9 @@ pub fn retarded_times_at(t_o: f64, x_o: DVec3, w: &dyn Worldline) -> SmallVec<[f
         return out;
     }
 
-    // An unbounded worldline has no finite lower bracket to start from, so walk one back.
-    // f falls without bound at rate (1 - beta), so doubling terminates in O(log) steps; the
-    // first guess is the light travel time from the source's position at `hi`, which is the
-    // answer for a source that is not moving.
+    // An unbounded worldline gives no finite lower bracket, so walk one back. f falls at
+    // rate (1 - beta), so doubling terminates in O(log) steps. The first guess is the static
+    // answer: the light travel time from where the source is at `hi`.
     let mut lo = t0;
     if !lo.is_finite() {
         let mut step = (x_o - w.position_at(hi)).length().max(1.0);
@@ -113,9 +98,8 @@ pub fn retarded_times_at(t_o: f64, x_o: DVec3, w: &dyn Worldline) -> SmallVec<[f
         return out;
     }
 
-    // Safeguarded Newton: take the Newton step when it stays in the bracket, bisect when it
-    // does not. Newton alone can leave the bracket near a shallow derivative; bisection alone
-    // takes 50 iterations to reach f64 precision.
+    // Safeguarded Newton. Newton alone can leave the bracket where the derivative is
+    // shallow; bisection alone needs 50 iterations to reach f64 precision.
     let mut t = 0.5 * (lo + hi);
     for _ in 0..96 {
         let diff = x_o - w.position_at(t);
@@ -175,7 +159,7 @@ impl Worldline for Static {
     }
 }
 
-/// Constant velocity. `velocity` is `beta`: light-microseconds per microsecond.
+/// Constant velocity, `beta`.
 #[derive(Debug, Clone, Copy)]
 pub struct Inertial {
     pub origin: DVec3,
