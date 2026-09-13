@@ -1,11 +1,14 @@
 //! The Bevy layer: states, resources, and the systems that carry actions.
 
+use bevy::math::DVec3;
 use bevy::prelude::*;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 use lc_world::sky::{AuthoredStars, StarProvider};
 
-use crate::action::{Action, Effect, apply};
-use crate::input::{Requested, read_keys};
+use em_render::render_space::sim_to_render;
+
+use crate::action::{Action, Effect, apply, refresh_exposure};
+use crate::input::{Requested, look_around, read_keys};
 use crate::panels;
 use crate::session::Session;
 use crate::ui::{Screen, UiState};
@@ -50,16 +53,17 @@ impl Plugin for ClientPlugin {
                 Update,
                 (
                     boot.run_if(in_state(AppState::Boot)),
-                    read_keys.run_if(in_state(AppState::InGame)),
+                    (read_keys, look_around).run_if(in_state(AppState::InGame)),
                     dispatch,
                     // The clock is deliberately not gated on any panel or overlay. See
                     // lightcone/docs/13-client-shell.md: the game does not pause.
                     advance_clock.run_if(in_state(AppState::InGame)),
                     observe.run_if(in_state(AppState::InGame)),
+                    hold_exposure.run_if(in_state(AppState::InGame)),
                 )
                     .chain(),
             )
-            .add_systems(Update, draw_sky.run_if(in_state(AppState::InGame)))
+            .add_systems(Update, (aim_camera, draw_sky).chain().run_if(in_state(AppState::InGame)))
             .add_systems(
                 EguiPrimaryContextPass,
                 (
@@ -74,6 +78,39 @@ impl Plugin for ClientPlugin {
 fn spawn_camera(mut commands: Commands) {
     commands.spawn((Camera3d::default(), Transform::from_xyz(0.0, 0.0, 0.0)));
 }
+
+/// Point the camera where the interface says it is looking.
+///
+/// The camera never translates. Distance to a star is tens of trillions of kilometres and no
+/// float holds that next to a render unit, so the ship stays at the render origin and the sky
+/// moves around it; what changes when the ship flies is the direction to each star.
+fn aim_camera(ui: Res<Ui>, mut camera: Query<&mut Transform, With<Camera3d>>) {
+    let Ok(mut transform) = camera.single_mut() else { return };
+    let forward = sim_to_render(ui.look.forward()).as_vec3();
+    let up = sim_to_render(DVec3::Z).as_vec3();
+    transform.look_to(forward, up);
+}
+
+/// Keep the exposure window on the scene while the scene's brightness is moving.
+///
+/// Doppler beaming is the reason: at 0.996c the forward sky is some eighteen stops brighter
+/// than it was at rest, which is a white screen with a fixed window. Re-placed on progress
+/// rather than every frame, because placing it costs a pass over every star.
+fn hold_exposure(ui: Res<Ui>, mut game: ResMut<Game>, mut last: Local<f64>) {
+    let Some(cruise) = &game.cruise else {
+        *last = -1.0;
+        return;
+    };
+    let progress = cruise.progress(game.coordinate_time_s());
+    if (progress - *last).abs() < EXPOSURE_HOLD_STEP {
+        return;
+    }
+    *last = progress;
+    refresh_exposure(&ui.0, &mut game.0);
+}
+
+/// How far a crossing runs between re-exposures, as a fraction of it.
+const EXPOSURE_HOLD_STEP: f64 = 0.002;
 
 /// One frame of boot, so the window is up before anything slow happens.
 fn boot(mut next: ResMut<NextState<AppState>>, mut ui: ResMut<Ui>) {
@@ -160,7 +197,8 @@ fn draw_sky(mut gizmos: Gizmos, game: Res<Game>, camera: Query<&Transform, With<
         if colour.length_squared() <= 0.0 {
             continue;
         }
-        let dir = star.position_ly.normalize_or_zero().as_vec3();
+        // Aberrated, not true: this is where the ship sees it, which is not where it is.
+        let dir = sim_to_render(star.apparent_dir).as_vec3();
         if dir.length_squared() <= 0.0 {
             continue;
         }
@@ -229,6 +267,44 @@ mod tests {
         app.update();
         let exits = app.world().resource::<Messages<AppExit>>().len();
         assert_eq!(exits, 1);
+    }
+
+    /// A crossing driven entirely through the message path, with no window and no input
+    /// device: select, fly, and let the schedule run it.
+    #[test]
+    fn a_crossing_runs_through_the_schedule() {
+        let mut app = harness();
+        let id = app.world().resource::<Game>().stars[0].id;
+        let before = {
+            let game = app.world().resource::<Game>();
+            game.distance_to(game.star(id).unwrap())
+        };
+
+        app.world_mut().write_message(Requested(Action::SelectTarget(Some(id))));
+        app.world_mut().write_message(Requested(Action::FlyTo(None)));
+        app.update();
+        assert!(app.world().resource::<Game>().cruise.is_some(), "the crossing should have begun");
+
+        for _ in 0..64 {
+            app.update();
+        }
+        let game = app.world().resource::<Game>();
+        assert!(game.distance_to(game.star(id).unwrap()) < before, "the ship did not move");
+        assert!(game.beta.length() > 0.0, "and it is not under way");
+        assert!(game.ship_clock_s < game.coordinate_time_s(), "the ship clock should lag");
+    }
+
+    /// The camera turns; it does not travel. Everything drawn is at a fixed radius around it.
+    #[test]
+    fn the_camera_only_ever_rotates() {
+        let mut app = harness();
+        app.add_systems(Update, aim_camera);
+        let camera = app.world_mut().spawn((Camera3d::default(), Transform::default())).id();
+        app.world_mut().write_message(Requested(Action::Look { yaw: 1.0, pitch: 0.4 }));
+        app.update();
+        let transform = *app.world().entity(camera).get::<Transform>().unwrap();
+        assert_eq!(transform.translation, Vec3::ZERO, "the camera must stay at the origin");
+        assert!(transform.rotation.is_finite() && transform.rotation.length() > 0.5);
     }
 
     #[test]

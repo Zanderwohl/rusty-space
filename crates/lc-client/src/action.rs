@@ -9,7 +9,7 @@ use em_spectra::presets;
 use lc_world::sky::StarId;
 
 use crate::session::Session;
-use crate::ui::{MenuPage, Panel, UiState};
+use crate::ui::{Look, MenuPage, Panel, UiState};
 
 /// Everything the interface can be asked to do.
 #[derive(Clone, Debug, PartialEq)]
@@ -35,6 +35,18 @@ pub enum Action {
     SelectTarget(Option<StarId>),
     SetIntegration(f64),
 
+    // --- looking ----------------------------------------------------------------------
+    /// Turn by a relative amount, radians.
+    Look { yaw: f64, pitch: f64 },
+    LookAtSelected,
+
+    // --- flight -----------------------------------------------------------------------
+    /// Cross to a star. `None` means whatever is selected.
+    FlyTo(Option<StarId>),
+    AbortFlight,
+    /// Proper acceleration for the next crossing, in g.
+    SetDriveAccel(f64),
+
     // --- development ------------------------------------------------------------------
     ToggleGodView,
     SetTimeRate(f64),
@@ -52,6 +64,14 @@ pub enum Effect {
 
 /// Stops of exposure per keypress.
 pub const EXPOSURE_STEP: f32 = 0.5;
+
+/// Radians per keypress of look.
+pub const LOOK_STEP: f64 = 0.05;
+
+/// What the drive will accept. The low end is a burn a crew could live in for decades; the
+/// high end is where a crossing stops being something you watch happen.
+pub const MIN_ACCEL_G: f64 = 0.1;
+pub const MAX_ACCEL_G: f64 = 1000.0;
 
 /// Apply an action. The only path that mutates UI state.
 pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Effect> {
@@ -100,6 +120,24 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
         Action::SetIntegration(seconds) => ui.integration_s = seconds.max(0.0),
 
+        Action::Look { yaw, pitch } => ui.look.turn(yaw, pitch),
+        Action::LookAtSelected => match aim(ui, session) {
+            Some(look) => ui.look = look,
+            None => effects.push(Effect::Notify("nothing is selected to look at".into())),
+        },
+
+        Action::FlyTo(id) => fly(ui, session, id, &mut effects),
+        Action::AbortFlight => {
+            if session.cruise.is_some() {
+                session.abort_flight();
+                effects.push(Effect::Notify("drive cut".into()));
+            }
+        }
+        Action::SetDriveAccel(g) => {
+            session.drive.accel_g = g.clamp(MIN_ACCEL_G, MAX_ACCEL_G);
+            effects.push(Effect::Notify(format!("drive set to {:.0} g", session.drive.accel_g)));
+        }
+
         Action::ToggleGodView => {
             if cfg!(feature = "godview") {
                 ui.god_view = !ui.god_view;
@@ -112,6 +150,34 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::WriteSnapshot => effects.push(Effect::WriteSnapshot),
     }
     effects
+}
+
+fn aim(ui: &UiState, session: &Session) -> Option<Look> {
+    let star = session.star(ui.selected?)?;
+    Look::aimed_at(session.offset_to(star))
+}
+
+fn fly(ui: &mut UiState, session: &mut Session, id: Option<StarId>, effects: &mut Vec<Effect>) {
+    let Some(id) = id.or(ui.selected) else {
+        effects.push(Effect::Notify("no destination selected".into()));
+        return;
+    };
+    let Some(star) = session.star(id) else {
+        effects.push(Effect::Notify("that star is not loaded".into()));
+        return;
+    };
+    let name = star.name.clone().unwrap_or_else(|| "an unnamed star".into());
+    let Some(cruise) = session.fly_to(id) else { return };
+    let (years, aboard) = (
+        cruise.duration_s() / crate::flight::JULIAN_YEAR_S,
+        cruise.proper_duration_s() / crate::flight::JULIAN_YEAR_S,
+    );
+    // Looking somewhere else during a crossing is allowed; starting one pointed at the
+    // destination is what anybody wants by default.
+    if let Some(look) = Look::aimed_at(session.offset_to(session.star(id).unwrap())) {
+        ui.look = look;
+    }
+    effects.push(Effect::Notify(format!("{name}: {years:.2} years out, {aboard:.2} aboard")));
 }
 
 fn set_preset(ui: &mut UiState, session: &mut Session, index: usize, effects: &mut Vec<Effect>) {
@@ -130,6 +196,15 @@ fn set_preset(ui: &mut UiState, session: &mut Session, index: usize, effects: &m
 
 fn adjust_exposure(ui: &mut UiState, session: &mut Session, stops: f32) {
     ui.exposure_offset = (ui.exposure_offset + stops).clamp(-12.0, 12.0);
+    session.auto_expose();
+    apply_exposure_offset(ui, session);
+}
+
+/// Re-place the exposure window and re-apply the user's offset on top of it.
+///
+/// Public because the window has to be replaced whenever the scene's brightness moves on its
+/// own — flying toward a star changes it by tens of stops without anyone touching a control.
+pub fn refresh_exposure(ui: &UiState, session: &mut Session) {
     session.auto_expose();
     apply_exposure_offset(ui, session);
 }
@@ -277,5 +352,105 @@ mod tests {
         assert_eq!(ui.integration_s, 1e4);
         s.observe(ui.integration_s);
         assert!(!s.curve.is_empty(), "the telescope should have recorded something");
+    }
+
+    #[test]
+    fn looking_accumulates_and_the_pitch_stops_at_the_pole() {
+        let (mut ui, mut s) = fixture();
+        apply(Action::Look { yaw: 0.3, pitch: 0.2 }, &mut ui, &mut s);
+        apply(Action::Look { yaw: 0.3, pitch: 0.2 }, &mut ui, &mut s);
+        assert!((ui.look.yaw - 0.6).abs() < 1e-12);
+        assert!((ui.look.pitch - 0.4).abs() < 1e-12);
+        for _ in 0..200 {
+            apply(Action::Look { yaw: 0.0, pitch: 0.5 }, &mut ui, &mut s);
+        }
+        assert!(ui.look.pitch <= Look::PITCH_LIMIT, "{}", ui.look.pitch);
+        assert!(ui.look.forward().is_finite());
+    }
+
+    #[test]
+    fn yaw_wraps_rather_than_growing_without_bound() {
+        let (mut ui, mut s) = fixture();
+        for _ in 0..1000 {
+            apply(Action::Look { yaw: 1.0, pitch: 0.0 }, &mut ui, &mut s);
+        }
+        assert!(ui.look.yaw >= 0.0 && ui.look.yaw < std::f64::consts::TAU, "{}", ui.look.yaw);
+    }
+
+    #[test]
+    fn looking_at_the_selection_points_the_camera_at_it() {
+        let (mut ui, mut s) = fixture();
+        let id = s.stars[0].id;
+        assert_eq!(apply(Action::LookAtSelected, &mut ui, &mut s).len(), 1, "nothing selected");
+        apply(Action::SelectTarget(Some(id)), &mut ui, &mut s);
+        apply(Action::LookAtSelected, &mut ui, &mut s);
+        let want = s.offset_to(s.star(id).unwrap()).normalize();
+        assert!((ui.look.forward() - want).length() < 1e-12, "{:?} vs {want:?}", ui.look.forward());
+    }
+
+    #[test]
+    fn flying_with_nothing_selected_says_so_and_starts_nothing() {
+        let (mut ui, mut s) = fixture();
+        let effects = apply(Action::FlyTo(None), &mut ui, &mut s);
+        assert!(matches!(effects.as_slice(), [Effect::Notify(t)] if t.contains("no destination")));
+        assert!(s.cruise.is_none());
+    }
+
+    #[test]
+    fn flying_uses_the_selection_and_reports_both_clocks() {
+        let (mut ui, mut s) = fixture();
+        apply(Action::SelectTarget(Some(s.stars[0].id)), &mut ui, &mut s);
+        let effects = apply(Action::FlyTo(None), &mut ui, &mut s);
+        assert!(s.cruise.is_some());
+        let text = effects
+            .iter()
+            .find_map(|e| match e {
+                Effect::Notify(t) if t.contains("aboard") => Some(t.clone()),
+                _ => None,
+            })
+            .expect("a crossing report");
+        assert!(text.contains("years out"), "{text}");
+    }
+
+    /// Starting a crossing turns the camera to the destination; nothing else may.
+    #[test]
+    fn starting_a_crossing_aims_the_camera_at_it() {
+        let (mut ui, mut s) = fixture();
+        let id = s.stars[0].id;
+        apply(Action::Look { yaw: 2.0, pitch: -0.5 }, &mut ui, &mut s);
+        apply(Action::FlyTo(Some(id)), &mut ui, &mut s);
+        let want = s.offset_to(s.star(id).unwrap()).normalize();
+        assert!((ui.look.forward() - want).length() < 1e-12);
+    }
+
+    #[test]
+    fn cutting_a_drive_that_is_not_running_says_nothing() {
+        let (mut ui, mut s) = fixture();
+        assert!(apply(Action::AbortFlight, &mut ui, &mut s).is_empty());
+        apply(Action::FlyTo(Some(s.stars[0].id)), &mut ui, &mut s);
+        assert_eq!(apply(Action::AbortFlight, &mut ui, &mut s).len(), 1);
+        assert!(s.cruise.is_none());
+    }
+
+    #[test]
+    fn the_drive_setting_is_clamped_to_something_flyable() {
+        let (mut ui, mut s) = fixture();
+        apply(Action::SetDriveAccel(1e9), &mut ui, &mut s);
+        assert_eq!(s.drive.accel_g, MAX_ACCEL_G);
+        apply(Action::SetDriveAccel(-4.0), &mut ui, &mut s);
+        assert_eq!(s.drive.accel_g, MIN_ACCEL_G);
+    }
+
+    /// The setting has to reach the crossing, not just the readout.
+    #[test]
+    fn a_harder_drive_plans_a_shorter_crossing() {
+        let (mut ui, mut s) = fixture();
+        let id = s.stars[0].id;
+        apply(Action::SetDriveAccel(1.0), &mut ui, &mut s);
+        apply(Action::FlyTo(Some(id)), &mut ui, &mut s);
+        let slow = s.cruise.as_ref().unwrap().duration_s();
+        apply(Action::SetDriveAccel(50.0), &mut ui, &mut s);
+        apply(Action::FlyTo(Some(id)), &mut ui, &mut s);
+        assert!(s.cruise.as_ref().unwrap().duration_s() < slow);
     }
 }

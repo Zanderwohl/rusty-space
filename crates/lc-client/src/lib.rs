@@ -8,6 +8,7 @@
 pub mod action;
 pub mod app;
 pub mod curve;
+pub mod flight;
 pub mod hud;
 pub mod input;
 pub mod panels;

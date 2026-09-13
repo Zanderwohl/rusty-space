@@ -1,5 +1,6 @@
 //! What the interface is showing. Data only: [`crate::action::apply`] is what changes it.
 
+use glam::DVec3;
 use lc_world::sky::StarId;
 
 /// Where the application is. Not what is on top of it — nothing is modal, so panels are a
@@ -32,11 +33,18 @@ pub enum Panel {
     Debug,
     Telescope,
     System,
+    Flight,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 5] =
-        [Panel::Escape, Panel::Settings, Panel::Debug, Panel::Telescope, Panel::System];
+    pub const ALL: [Panel; 6] = [
+        Panel::Escape,
+        Panel::Settings,
+        Panel::Debug,
+        Panel::Telescope,
+        Panel::System,
+        Panel::Flight,
+    ];
 
     pub fn title(&self) -> &'static str {
         match self {
@@ -45,7 +53,42 @@ impl Panel {
             Panel::Debug => "Debug",
             Panel::Telescope => "Telescope",
             Panel::System => "System",
+            Panel::Flight => "Flight",
         }
+    }
+}
+
+/// Where the ship is looking: ecliptic angles, yaw about the pole from +X and pitch from the
+/// plane. Two angles rather than a quaternion so there is no roll to accumulate.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Look {
+    pub yaw: f64,
+    pub pitch: f64,
+}
+
+impl Look {
+    /// Pitch stops just short of the pole, where yaw stops being defined.
+    pub const PITCH_LIMIT: f64 = std::f64::consts::FRAC_PI_2 - 1e-3;
+
+    pub fn turn(&mut self, d_yaw: f64, d_pitch: f64) {
+        self.yaw = (self.yaw + d_yaw).rem_euclid(std::f64::consts::TAU);
+        self.pitch = (self.pitch + d_pitch).clamp(-Self::PITCH_LIMIT, Self::PITCH_LIMIT);
+    }
+
+    /// Unit vector the ship is looking along, in simulation axes.
+    pub fn forward(&self) -> DVec3 {
+        let (sp, cp) = self.pitch.sin_cos();
+        let (sy, cy) = self.yaw.sin_cos();
+        DVec3::new(cp * cy, cp * sy, sp)
+    }
+
+    /// Aim at a direction. A zero vector leaves the look where it was.
+    pub fn aimed_at(direction: DVec3) -> Option<Self> {
+        let d = direction.normalize_or_zero();
+        if d == DVec3::ZERO {
+            return None;
+        }
+        Some(Self { yaw: d.y.atan2(d.x), pitch: d.z.clamp(-1.0, 1.0).asin() })
     }
 }
 
@@ -59,6 +102,13 @@ pub struct Notification {
 /// How many notifications are kept. Older ones fall off rather than accumulating.
 pub const NOTIFICATION_LIMIT: usize = 6;
 
+/// Development default for the clock multiplier: a Julian year a minute rather than an hour.
+///
+/// A four light-year crossing then takes four minutes of real time instead of four hours,
+/// which is the difference between watching the sky move and taking it on faith. The server
+/// owns the rate in a real session and this multiplier does not exist there.
+pub const TEST_TIME_RATE: f64 = 60.0;
+
 #[derive(Clone, Debug)]
 pub struct UiState {
     pub screen: Screen,
@@ -66,6 +116,7 @@ pub struct UiState {
     /// Open panels, most recently opened last. Order is what "back" walks.
     open: Vec<Panel>,
     pub selected: Option<StarId>,
+    pub look: Look,
     /// Stops away from the automatic exposure.
     pub exposure_offset: f32,
     pub preset: usize,
@@ -83,11 +134,12 @@ impl Default for UiState {
             menu_page: MenuPage::Root,
             open: Vec::new(),
             selected: None,
+            look: Look::default(),
             exposure_offset: 0.0,
             preset: 0,
             integration_s: 1.0e4,
             god_view: false,
-            time_rate: 1.0,
+            time_rate: TEST_TIME_RATE,
             notifications: Vec::new(),
         }
     }

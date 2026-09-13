@@ -4,7 +4,8 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 use em_spectra::presets;
 
-use crate::action::Action;
+use crate::action::{Action, MAX_ACCEL_G, MIN_ACCEL_G};
+use crate::flight::JULIAN_YEAR_S;
 use crate::app::{Game, Ui};
 use crate::hud;
 use crate::input::Requested;
@@ -80,6 +81,13 @@ pub fn hud(mut contexts: EguiContexts, ui_state: Res<Ui>, game: Res<Game>) {
         if let Some(target) = &lines.target {
             ui.colored_label(egui::Color32::from_rgb(240, 190, 110), target);
         }
+        ui.horizontal(|ui| {
+            ui.weak(&lines.ship_clock);
+            if let Some(flight) = &lines.flight {
+                ui.separator();
+                ui.colored_label(egui::Color32::from_rgb(130, 200, 250), flight);
+            }
+        });
     });
 
     if !ui_state.notifications.is_empty() {
@@ -110,6 +118,7 @@ pub fn open_panels(
             Panel::Debug => debug(ui, &ui_state, &game, &mut out),
             Panel::Telescope => telescope(ui, &ui_state, &mut game, &mut out),
             Panel::System => system(ui, &ui_state, &game),
+            Panel::Flight => flight(ui, &ui_state, &game, &mut out),
         });
         if !open {
             ask(&mut out, Action::ClosePanel(panel));
@@ -178,13 +187,21 @@ fn telescope(ui: &mut egui::Ui, state: &Ui, game: &mut Game, out: &mut MessageWr
     egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
         for star in game.stars.iter().take(40) {
             let label = star.name.clone().unwrap_or_else(|| format!("{:x}", star.id.get()));
-            let distance = star.position_ly.length();
+            let distance = game.distance_to(star);
             if ui
-                .selectable_label(state.selected == Some(star.id), format!("{label} — {distance:.1} ly"))
+                .selectable_label(state.selected == Some(star.id), format!("{label} — {distance:.2} ly"))
                 .clicked()
             {
                 ask(out, Action::SelectTarget(Some(star.id)));
             }
+        }
+    });
+    ui.horizontal(|ui| {
+        if ui.button("Look at").clicked() {
+            ask(out, Action::LookAtSelected);
+        }
+        if ui.button("Fly there").clicked() {
+            ask(out, Action::FlyTo(None));
         }
     });
     ui.separator();
@@ -201,6 +218,56 @@ fn telescope(ui: &mut egui::Ui, state: &Ui, game: &mut Game, out: &mut MessageWr
     }
 }
 
+fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {
+    ui.label(format!("drive: {:.0} g, cap {:.3}c", game.drive.accel_g, game.drive.max_beta));
+    ui.horizontal(|ui| {
+        for g in [1.0, 5.0, 20.0, 100.0] {
+            if ui.button(format!("{g:.0} g")).clicked() {
+                ask(out, Action::SetDriveAccel(g));
+            }
+        }
+    });
+    ui.weak(format!("between {MIN_ACCEL_G} and {MAX_ACCEL_G} g"));
+    ui.separator();
+
+    match &game.cruise {
+        Some(cruise) => {
+            let now = game.coordinate_time_s();
+            let state = cruise.at(now);
+            ui.add(egui::ProgressBar::new(cruise.progress(now) as f32).show_percentage());
+            ui.label(format!("{:?}", state.phase));
+            ui.label(format!("speed: {:.6}c", state.beta.length()));
+            ui.label(format!("peak: {:.6}c", cruise.peak_beta()));
+            ui.label(format!(
+                "crossing: {:.2} years, {:.2} aboard",
+                cruise.duration_s() / JULIAN_YEAR_S,
+                cruise.proper_duration_s() / JULIAN_YEAR_S
+            ));
+            if ui.button("Cut the drive").clicked() {
+                ask(out, Action::AbortFlight);
+            }
+        }
+        None => {
+            ui.label("At rest.");
+            match state.selected.and_then(|id| game.star(id)) {
+                Some(star) => {
+                    let name = star.name.clone().unwrap_or_else(|| "unnamed".into());
+                    ui.label(format!("{name} — {:.2} ly", game.distance_to(star)));
+                    if ui.button("Fly there").clicked() {
+                        ask(out, Action::FlyTo(None));
+                    }
+                }
+                None => {
+                    ui.label("Select a target in the telescope panel first.");
+                }
+            }
+        }
+    }
+    ui.separator();
+    let p = game.position_ly;
+    ui.weak(format!("at {:.3}, {:.3}, {:.3} ly", p.x, p.y, p.z));
+}
+
 fn system(ui: &mut egui::Ui, state: &Ui, game: &Game) {
     let Some(id) = state.selected else {
         ui.label("Nothing selected.");
@@ -211,7 +278,7 @@ fn system(ui: &mut egui::Ui, state: &Ui, game: &Game) {
         return;
     };
     ui.label(star.name.clone().unwrap_or_else(|| "unnamed".into()));
-    ui.label(format!("{:.2} ly", star.position_ly.length()));
+    ui.label(format!("{:.2} ly", game.distance_to(star)));
     ui.label(format!("{:.0} K", star.star.teff_k));
     ui.label(format!("{:.3} solar luminosities", star.luminosity_solar));
     ui.label(format!("[Fe/H] {:+.2}", star.metallicity));

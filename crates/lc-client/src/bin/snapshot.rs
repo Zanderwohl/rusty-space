@@ -117,7 +117,7 @@ fn run(output: &str, catalogue: Option<&str>) -> Result<String, String> {
         let points: Vec<(f64, f64)> = members
             .iter()
             .map(|s| {
-                let p = s.position_ly.normalize_or_zero();
+                let p = s.apparent_dir;
                 (p.y.atan2(p.x).to_degrees(), p.z.clamp(-1.0, 1.0).asin().to_degrees())
             })
             .collect();

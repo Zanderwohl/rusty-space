@@ -8,13 +8,16 @@ use lc_spacetime::{Coord, Micros, frame::SystemFrame, units::Span};
 use lc_world::instrument::Instrument;
 use lc_world::observation::{Observation, Target, observe};
 use lc_world::sky::{CatalogueStar, StarId, StarProvider, generate};
-use lc_world::star::Star;
 
 use crate::curve::LightCurve;
+use crate::flight::{Cruise, Drive, Phase, STANDOFF_LY};
 use crate::tonemap::{Shaded, ToneMap};
 
 /// One in-game Julian year per real hour.
 pub const TIME_RATE: f64 = 31_557_600.0 / 3600.0;
+
+/// Light-microseconds per light-year, for putting the observer on the grid.
+const LUS_PER_LY: f64 = 1.0 / LY_PER_LUS;
 
 /// Light-years per light-microsecond, for reading catalogue positions onto the grid.
 const LY_PER_LUS: f64 = 299.792458 / 9.460_730_472_580_8e15;
@@ -29,11 +32,18 @@ pub const MODELLED_STARS: usize = 12;
 #[derive(Clone, Copy, Debug)]
 pub struct SkyStar {
     pub id: StarId,
-    /// Ecliptic position, light-years.
-    pub position_ly: DVec3,
+    /// Where it is relative to the observer, light-years, ecliptic axes.
+    pub offset_ly: DVec3,
+    /// Unit vector to draw along: [`offset_ly`] aberrated into the ship's frame. Equal to the
+    /// true direction at rest, and swung toward the bow at speed.
+    ///
+    /// [`offset_ly`]: SkyStar::offset_ly
+    pub apparent_dir: DVec3,
     pub shaded: Shaded,
     /// Light travel time from it, in seconds. Everything drawn is this stale.
     pub light_age_s: f64,
+    /// Observed over emitted frequency. Above 1 is a blueshift.
+    pub doppler: f64,
 }
 
 pub struct Session {
@@ -44,6 +54,17 @@ pub struct Session {
     pub tone: ToneMap,
     pub curve: LightCurve,
     pub pointing: Option<StarId>,
+    /// Where the ship is, light-years from the world origin. The continuous truth;
+    /// [`Session::observer`] is this rounded onto the grid.
+    pub position_ly: DVec3,
+    /// Ship velocity as a fraction of `c`.
+    pub beta: DVec3,
+    pub drive: Drive,
+    pub cruise: Option<Cruise>,
+    /// Seconds on the ship's own clock. Runs behind coordinate time whenever it is moving.
+    pub ship_clock_s: f64,
+    /// [`Session::ship_clock_s`] when the current crossing began.
+    cruise_clock_base_s: f64,
     targets: HashMap<StarId, Target>,
 }
 
@@ -67,19 +88,84 @@ impl Session {
             tone: ToneMap::default(),
             curve: LightCurve::new(Band::V, 4000),
             pointing: None,
+            position_ly: DVec3::ZERO,
+            beta: DVec3::ZERO,
+            drive: Drive::DEFAULT,
+            cruise: None,
+            ship_clock_s: 0.0,
+            cruise_clock_base_s: 0.0,
             targets,
         };
         session.auto_expose();
         session
     }
 
-    /// Advance coordinate time by a span of real seconds.
+    /// Advance coordinate time by a span of real seconds, flying the ship along with it.
     pub fn advance(&mut self, real_seconds: f64) {
-        let micros = (real_seconds * TIME_RATE * 1e6) as i64;
-        self.observer = Coord {
-            t: self.observer.t + Span::new(micros),
-            ..self.observer
-        };
+        let elapsed = real_seconds * TIME_RATE;
+        let micros = (elapsed * 1e6) as i64;
+        self.observer.t = self.observer.t + Span::new(micros);
+
+        let now = self.coordinate_time_s();
+        match &self.cruise {
+            Some(cruise) => {
+                let state = cruise.at(now);
+                self.position_ly = state.position_ly;
+                self.beta = state.beta;
+                // Read rather than integrated. Stepping `elapsed / gamma` uses one velocity
+                // for a whole interval the velocity changed across, which is wrong by first
+                // order everywhere and wrong by the entire last step at arrival, where the
+                // ship is already stopped. The crossing carries the closed form; use it.
+                self.ship_clock_s = self.cruise_clock_base_s + state.proper_s;
+                if state.phase == Phase::Arrived {
+                    self.cruise = None;
+                    self.beta = DVec3::ZERO;
+                }
+            }
+            None => self.ship_clock_s += elapsed,
+        }
+        self.sync_observer();
+    }
+
+    /// Put the continuous position back on the integer grid.
+    ///
+    /// Rounding is to the nearest light-microsecond, 300 metres. Retarded-time solving reads
+    /// the grid, so this is what the light delay is actually computed against.
+    fn sync_observer(&mut self) {
+        let grid = self.position_ly * LUS_PER_LY;
+        self.observer.x = grid.x as i64;
+        self.observer.y = grid.y as i64;
+        self.observer.z = grid.z as i64;
+    }
+
+    /// Begin a crossing to a star, stopping [`STANDOFF_LY`] short of it.
+    ///
+    /// The catalogue position is treated as fixed: nothing in this model has proper motion
+    /// yet, so aiming at where it is recorded and aiming at where it will be are the same.
+    pub fn fly_to(&mut self, id: StarId) -> Option<&Cruise> {
+        let star = self.star(id)?;
+        let target = star.position_ly;
+        let approach = (target - self.position_ly).normalize_or_zero();
+        let stop = target - approach * STANDOFF_LY;
+        self.cruise =
+            Some(Cruise::plan(self.position_ly, stop, self.coordinate_time_s(), self.drive));
+        self.cruise_clock_base_s = self.ship_clock_s;
+        self.cruise.as_ref()
+    }
+
+    /// Cut the drive where it is. Leaves the ship coasting at whatever it had reached.
+    pub fn abort_flight(&mut self) {
+        self.cruise = None;
+    }
+
+    /// Where a star is relative to the ship, light-years.
+    pub fn offset_to(&self, star: &CatalogueStar) -> DVec3 {
+        star.position_ly - self.position_ly
+    }
+
+    /// Distance to a star, light-years.
+    pub fn distance_to(&self, star: &CatalogueStar) -> f64 {
+        self.offset_to(star).length()
     }
 
     pub fn coordinate_time_s(&self) -> f64 {
@@ -110,30 +196,51 @@ impl Session {
         Some(obs)
     }
 
-    /// Band radiance arriving from one star, light delay included where it is modelled.
+    /// Observed over emitted frequency for one star, given the ship's velocity.
+    pub fn doppler_to(&self, star: &CatalogueStar) -> f64 {
+        let to_source = self.offset_to(star).normalize_or_zero();
+        if to_source == DVec3::ZERO || self.beta == DVec3::ZERO {
+            return 1.0;
+        }
+        lc_spacetime::doppler::doppler_factor(to_source, self.beta)
+    }
+
+    /// Band radiance arriving from one star, light delay and Doppler shift included.
     pub fn radiance_from(&self, star: &CatalogueStar) -> PerBand<f32> {
-        let distance_m = star.position_ly.length() * 9.460_730_472_580_8e15;
+        let distance_m = self.distance_to(star) * M_PER_LY;
+        // A blackbody seen with Doppler factor D is exactly a blackbody at D times the
+        // temperature: B_nu/nu^3 is invariant and Planck's law depends only on nu/T. So the
+        // shift needs no separate beaming term — integrating the observer's own bands against
+        // the shifted temperature already carries the D^4 in the flux.
+        let teff = (star.star.teff_k * self.doppler_to(star)).max(1.0);
         match self.targets.get(&star.id) {
             // A modelled system is evaluated properly, light delay and all.
             Some(target) => observe(target, self.observer, &full_spectrum(), 1.0, 0x5ee)
-                .map(|o| received(&o, &star.star, distance_m))
+                .map(|o| received(&o, teff, star.star.radius_m, distance_m))
                 .unwrap_or_default(),
             // A bare star is a function of its own parameters and nothing else.
-            None => bare(&star.star, distance_m),
+            None => bare(teff, star.star.radius_m, distance_m),
         }
     }
 
-    /// Every star, shaded for the current band mapping and exposure.
+    /// Every star, shaded for the current band mapping and exposure, in the ship's frame.
     pub fn sky(&self) -> Vec<SkyStar> {
         self.stars
             .iter()
             .map(|s| {
-                let distance_m = s.position_ly.length() * 9.460_730_472_580_8e15;
+                let offset_ly = self.offset_to(s);
+                let true_dir = offset_ly.normalize_or_zero();
                 SkyStar {
                     id: s.id,
-                    position_ly: s.position_ly,
+                    offset_ly,
+                    apparent_dir: if self.beta == DVec3::ZERO || true_dir == DVec3::ZERO {
+                        true_dir
+                    } else {
+                        lc_spacetime::doppler::apparent_source_direction(true_dir, self.beta)
+                    },
                     shaded: self.tone.shade(&self.radiance_from(s), &self.mapping),
-                    light_age_s: distance_m / 299_792_458.0,
+                    light_age_s: offset_ly.length() * M_PER_LY / 299_792_458.0,
+                    doppler: self.doppler_to(s),
                 }
             })
             .collect()
@@ -186,22 +293,29 @@ fn full_spectrum() -> Instrument {
         .cooled_to(20.0)
 }
 
-fn geometry(star: &Star, distance_m: f64) -> f64 {
-    std::f64::consts::PI * star.radius_m * star.radius_m / (distance_m * distance_m)
+/// Metres in a light-year.
+const M_PER_LY: f64 = 9.460_730_472_580_8e15;
+
+fn geometry(radius_m: f64, distance_m: f64) -> f64 {
+    std::f64::consts::PI * radius_m * radius_m / (distance_m * distance_m)
 }
 
-fn bare(star: &Star, distance_m: f64) -> PerBand<f32> {
-    let g = geometry(star, distance_m);
+fn bare(teff_k: f64, radius_m: f64, distance_m: f64) -> PerBand<f32> {
+    let g = geometry(radius_m, distance_m);
     PerBand::new(std::array::from_fn(|i| {
-        (blackbody::band_radiance(Band::ALL[i], star.teff_k) * g) as f32
+        (blackbody::band_radiance(Band::ALL[i], teff_k) * g) as f32
     }))
 }
 
-fn received(observation: &Observation, star: &Star, distance_m: f64) -> PerBand<f32> {
-    let g = geometry(star, distance_m);
+/// The deficit is applied in the band it was measured in, which is only right at rest: under
+/// a large shift the observer's V band samples what left the system somewhere else entirely.
+/// Correcting it needs the emission model evaluated at shifted band centres, which the world
+/// crate does not expose yet.
+fn received(observation: &Observation, teff_k: f64, radius_m: f64, distance_m: f64) -> PerBand<f32> {
+    let g = geometry(radius_m, distance_m);
     PerBand::new(std::array::from_fn(|i| {
         let band = Band::ALL[i];
-        let full = blackbody::band_radiance(band, star.teff_k) * g;
+        let full = blackbody::band_radiance(band, teff_k) * g;
         let deficit = observation.band(band).map(|m| m.true_deficit).unwrap_or(0.0);
         (full * (1.0 - deficit)) as f32
     }))
@@ -379,6 +493,177 @@ mod tests {
         assert_eq!(s.curve.len(), 200);
         let (first, last) = s.curve.span().unwrap();
         assert!(last > first, "the curve should advance through emission time");
+    }
+
+    /// Enough real seconds to finish any crossing in the sample sky.
+    const LONG_ENOUGH: f64 = 40_000.0;
+
+    /// The sample provider puts every star on +X, which makes any test about direction
+    /// vacuously true. This spreads the same stars over three axes.
+    fn spread() -> Session {
+        let template = AuthoredStars::sample().stars()[0].clone();
+        let mut stars = Vec::new();
+        for (k, axis) in [DVec3::X, DVec3::Y, DVec3::Z].into_iter().enumerate() {
+            let mut star = template.clone();
+            star.provenance.key = k as u64;
+            star.id = lc_world::sky::StarId::synthesise("spread", k as u64);
+            star.position_ly = axis * 4.2;
+            stars.push(star);
+        }
+        Session::new(&AuthoredStars::new("spread", stars), 3)
+    }
+
+    #[test]
+    fn flying_to_a_star_arrives_at_the_standoff_and_stops() {
+        let mut s = session();
+        let id = s.stars[0].id;
+        let before = s.distance_to(s.star(id).unwrap());
+        s.fly_to(id);
+        s.advance(LONG_ENOUGH);
+        let after = s.distance_to(s.star(id).unwrap());
+        assert!(after < before, "{before} -> {after} ly");
+        assert!((after - STANDOFF_LY).abs() < 1e-6, "stopped {after} ly out, wanted {STANDOFF_LY}");
+        assert!(s.cruise.is_none(), "the crossing should have ended");
+        assert_eq!(s.beta, DVec3::ZERO, "and the ship should be at rest");
+    }
+
+    /// The grid is what retarded time is solved against, so it has to follow the ship.
+    #[test]
+    fn the_observer_coordinate_tracks_the_ship() {
+        let mut s = session();
+        assert_eq!((s.observer.x, s.observer.y, s.observer.z), (0, 0, 0));
+        s.fly_to(s.stars[0].id);
+        s.advance(LONG_ENOUGH);
+        let grid = DVec3::new(s.observer.x as f64, s.observer.y as f64, s.observer.z as f64);
+        let want = s.position_ly * LUS_PER_LY;
+        // One light-microsecond of rounding, on a number of order 1e14.
+        assert!((grid - want).max_element() < 2.0, "{grid:?} vs {want:?}");
+    }
+
+    /// Light from the destination gets younger as the ship closes on it. The whole premise.
+    #[test]
+    fn the_light_from_the_destination_gets_fresher() {
+        let mut s = session();
+        let id = s.stars[0].id;
+        let age = |s: &Session| s.sky().into_iter().find(|x| x.id == id).unwrap().light_age_s;
+        let before = age(&s);
+        s.fly_to(id);
+        s.advance(LONG_ENOUGH);
+        assert!(age(&s) < before / 100.0, "{} should be far under {before}", age(&s));
+    }
+
+    #[test]
+    fn flying_toward_a_star_blueshifts_it_and_one_abeam_shifts_less() {
+        let mut s = spread();
+        let (ahead, abeam) = (s.stars[0].id, s.stars[1].id);
+        s.fly_to(ahead);
+        s.advance(8_000.0);
+        assert!(s.beta.length() > 0.5, "should be moving fast, got {}", s.beta.length());
+        let (front, side) = (s.doppler_to(s.star(ahead).unwrap()), s.doppler_to(s.star(abeam).unwrap()));
+        assert!(front > 1.0, "the destination must blueshift, got {front}");
+        assert!(side < front, "a star abeam must shift less than one dead ahead: {side} vs {front}");
+    }
+
+    /// Pins the rule the shift is implemented by: a blackbody seen with Doppler factor D is
+    /// exactly a blackbody at D times the temperature.
+    ///
+    /// Checked in the radio band, where a star of a few thousand kelvin is deep in the
+    /// Rayleigh-Jeans tail and the radiance is therefore linear in temperature. So the band
+    /// must brighten by exactly D — not by D^4, which is the *bolometric* factor and would
+    /// only show up in an integral over all frequencies, not in one narrow window.
+    #[test]
+    fn a_shifted_blackbody_is_a_blackbody_at_the_shifted_temperature() {
+        let mut s = spread();
+        let id = s.stars[0].id;
+        let radio = |s: &Session| s.radiance_from(s.star(id).unwrap())[Band::Radio] as f64;
+        let at_rest = radio(&s);
+        let distance_before = s.distance_to(s.star(id).unwrap());
+
+        s.fly_to(id);
+        s.advance(8_000.0);
+        let d = s.doppler_to(s.star(id).unwrap());
+        assert!(d > 1.5, "want a real shift, got {d}");
+
+        // Closing the distance brightens it as well; divide that out first.
+        let closing = (distance_before / s.distance_to(s.star(id).unwrap())).powi(2);
+        let ratio = radio(&s) / (at_rest * closing);
+        assert!((ratio / d - 1.0).abs() < 1e-3, "radio band rose {ratio}x, wanted D = {d}");
+    }
+
+    /// The sky compresses toward the bow. At speed a star abeam appears ahead of abeam.
+    #[test]
+    fn the_sky_aberrates_forward() {
+        let mut s = spread();
+        let (ahead, other) = (s.stars[0].id, s.stars[1].id);
+        s.fly_to(ahead);
+        s.advance(8_000.0);
+        let bow = s.beta.normalize();
+        let star = s.sky().into_iter().find(|x| x.id == other).unwrap();
+        let true_angle = star.offset_ly.normalize().dot(bow).acos();
+        let seen_angle = star.apparent_dir.dot(bow).acos();
+        assert!(seen_angle < true_angle, "{seen_angle} should be inside {true_angle}");
+    }
+
+    #[test]
+    fn cutting_the_drive_leaves_the_ship_where_it_was() {
+        let mut s = session();
+        s.fly_to(s.stars[0].id);
+        s.advance(8_000.0);
+        let at = s.position_ly;
+        s.abort_flight();
+        s.advance(8_000.0);
+        assert_eq!(s.position_ly, at, "an aborted crossing must not keep moving");
+        assert!(s.cruise.is_none());
+    }
+
+    /// The bug this exists for: the ship clock was stepped as `elapsed / gamma` using the
+    /// velocity at the end of each step, so its reading depended on the frame rate, and the
+    /// final step -- taken after the ship had already stopped -- ran at full rate.
+    #[test]
+    fn the_ship_clock_does_not_depend_on_how_finely_time_is_stepped() {
+        // Exactly to arrival and no further: time spent coasting afterwards runs at the
+        // coordinate rate and would swamp what is being measured.
+        let crossing = |steps: usize| {
+            let mut s = session();
+            s.fly_to(s.stars[0].id);
+            let cruise = s.cruise.as_ref().unwrap();
+            let (want, real) = (cruise.proper_duration_s(), cruise.duration_s() / TIME_RATE);
+            for _ in 0..steps {
+                s.advance(real / steps as f64);
+            }
+            (s.ship_clock_s, want)
+        };
+        let (coarse, want) = crossing(4);
+        let (fine, _) = crossing(4000);
+        assert!((coarse - fine).abs() < 1.0, "{coarse} against {fine} seconds");
+        // And both must agree with the closed form, not merely with each other.
+        assert!((coarse - want).abs() / want < 1e-6, "{coarse} against {want}");
+    }
+
+    #[test]
+    fn a_second_crossing_carries_on_from_the_first() {
+        let mut s = spread();
+        s.fly_to(s.stars[0].id);
+        s.advance(LONG_ENOUGH);
+        let after_one = s.ship_clock_s;
+        assert!(after_one > 0.0);
+        s.fly_to(s.stars[1].id);
+        s.advance(LONG_ENOUGH);
+        assert!(s.ship_clock_s > after_one, "the clock must not restart at zero");
+    }
+
+    #[test]
+    fn a_ship_that_never_flies_keeps_the_coordinate_clock() {
+        let mut s = session();
+        s.advance(3600.0);
+        assert!((s.ship_clock_s - s.coordinate_time_s()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn flying_somewhere_that_is_not_in_the_sky_does_nothing() {
+        let mut s = session();
+        assert!(s.fly_to(lc_world::sky::StarId::synthesise("absent", 1)).is_none());
+        assert!(s.cruise.is_none());
     }
 
     #[test]
