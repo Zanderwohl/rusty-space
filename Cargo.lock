@@ -4109,6 +4109,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lc-world"
+version = "0.1.0"
+dependencies = [
+ "em-foundations",
+ "em-spectra",
+ "glam",
+ "lc-spacetime",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lewton"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

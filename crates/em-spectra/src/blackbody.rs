@@ -59,11 +59,11 @@ pub fn band_radiance(band: Band, temperature_k: f64) -> f64 {
 
 /// Composite Simpson over an even number of intervals.
 fn simpson(lo: f64, hi: f64, intervals: usize, f: impl Fn(f64) -> f64) -> f64 {
-    debug_assert!(intervals % 2 == 0 && intervals > 0);
+    debug_assert!(intervals.is_multiple_of(2) && intervals > 0);
     let h = (hi - lo) / intervals as f64;
     let mut sum = f(lo) + f(hi);
     for i in 1..intervals {
-        sum += f(lo + i as f64 * h) * if i % 2 == 1 { 4.0 } else { 2.0 };
+        sum += f(lo + i as f64 * h) * if i.is_multiple_of(2) { 2.0 } else { 4.0 };
     }
     sum * h / 3.0
 }

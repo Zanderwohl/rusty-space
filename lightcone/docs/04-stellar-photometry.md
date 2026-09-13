@@ -303,6 +303,11 @@ Contents, per vertex:
 At level 5 (10 242 vertices, 2.0 degree edges) with seven bands that is nine `f32` per vertex,
 36 bytes, 360 KB per star, and only stars that actually have a population get one.
 
+The implementation stores one triangular lattice per icosahedron face without deduplicating
+shared edges, which costs 9.5% more at level 5 and buys O(1) lookup with no hierarchy to walk.
+Duplicated edge vertices are bit-identical, because a point on a shared edge is computed from
+the same two corners whichever face asks for it.
+
 | level | vertices | edge | size, 7 bands |
 |---|---|---|---|
 | 3 | 642 | 7.9 deg | 23 KB |
