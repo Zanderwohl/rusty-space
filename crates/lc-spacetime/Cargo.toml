@@ -1,0 +1,16 @@
+[package]
+name = "lc-spacetime"
+version = "0.1.0"
+edition = "2024"
+description = "Event coordinates, Minkowski intervals, worldlines and retarded time. No engine, no ECS, no rendering."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[dependencies]
+# em-foundations is engine-free, so depending on it keeps this crate engine-free too.
+# It is here for exactly one reason: the conversion in `frame` is the only place that knows
+# how coordinate time relates to the time em-sim propagates against.
+em-foundations = { path = "../em-foundations" }
+glam = { version = "0.30", features = ["serde"] }
+serde = { version = "1.0.215", features = ["derive"] }
+smallvec = { version = "1", features = ["serde", "union"] }
