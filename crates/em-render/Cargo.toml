@@ -1,0 +1,12 @@
+[package]
+name = "em-render"
+version = "0.1.0"
+edition = "2024"
+description = "Reusable Bevy rendering for orbital scenes. Knows no game or TTRPG rule."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[dependencies]
+em-foundations = { path = "../em-foundations" }
+em-sim = { path = "../em-sim", features = ["bevy"] }
+bevy = "0.17.2"

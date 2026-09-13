@@ -1,0 +1,9 @@
+[package]
+name = "em-plot"
+version = "0.1.0"
+edition = "2024"
+description = "Charts, curves and heat maps. Emits geometry and text placements; rasterises nothing."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[dependencies]

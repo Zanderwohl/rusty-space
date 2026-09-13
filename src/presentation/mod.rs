@@ -9,7 +9,9 @@ mod body_point;
 mod body_point_material;
 mod celestial_markers;
 mod lights;
-pub mod render_space;
+// Extracted to `em-render`; re-exported so `crate::presentation::render_space` still
+// resolves. It remains the only place the Z-up to Y-up conversion happens.
+pub use em_render::render_space;
 
 mod labels;
 mod local_starfield;
