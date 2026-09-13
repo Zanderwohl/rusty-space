@@ -18,16 +18,72 @@ Decisions not yet made, grouped by what they block. Each topic document carries 
 | Von Neumann termination | Replication orders carry a generation TTL. Drift can corrupt the counter, producing self-perpetuating drifters, which is a mechanic rather than a bug. |
 | Superluminal travel | Not built, not foreclosed. Three cheap signature decisions keep the option open; see [10-superluminal.md](10-superluminal.md). |
 
-## Blocking the first line of code
+## Blocking the prototype
 
-| question | options | blocks |
-|---|---|---|
-| Project name | `Lightcone` is a codename. Renaming later costs a `git mv` and a find-and-replace. | crate names, directory names |
-| Coordinate unit | integer light-microsecond grid as specified, or `f64` light-seconds, or `i64` nanoseconds plus separate spatial units | `lc-spacetime`, the Postgres schema, everything downstream |
-| Whether `em-foundations` gains a `deterministic` feature | feature-gate `libm`, or wrap the calls in `lc-world` | shared prediction; see [06-crate-layout.md](06-crate-layout.md) |
+The test applied here is narrow: **would a wrong answer force a rewrite rather than an edit?**
+That is true only of things named by everything else — types, identifiers, and stored formats.
+Everything else is discoverable by building, and planning it further is waste.
 
-The coordinate unit is the one that is expensive to change later, because it is in the
-database schema, the wire format and every stored coordinate. Decide it first.
+Four items pass that test.
+
+### 1. The coordinate unit
+
+Integer light-microsecond grid with `c = 1`, as specified in
+[01-spacetime.md](01-spacetime.md), versus `f64` light-seconds or some other pairing. It is in
+the schema, the wire format, every stored coordinate, and the type that everything else names.
+Nothing else on this list is as expensive to change.
+
+Treated as settled by use — the 36 500 ly world boundary is a consequence of it — but it has
+never been ratified explicitly, and it should be before `Coord` is written.
+
+### 2. One time representation, or three
+
+Currently the design implies three: `em_foundations::Instant` as `f64` seconds since J2000 for
+propagation, local system time as `f64` seconds from a per-system epoch, and `Coord::t` as
+`i64` microseconds from the world origin.
+
+Three origins for one quantity is exactly the shape of the failure that CLAUDE.md records —
+"mixing them once put the whole solar system 28 days out of position" — and a fictional galaxy
+makes it worse, because a fictional galaxy has no J2000 and `Instant`'s origin stops meaning
+anything.
+
+There is also a precision argument. `f64` absolute seconds holds up for decades and stops
+holding up for millennia: at 1e9 s the ulp is 36 m of light travel, comfortably under the
+300 m grid, but at 1.15e12 s — the 36 500-year world horizon — it is 73 km, well over it. A
+long-lived server reaches that; at 8766x, 36 500 in-game years is 4.2 real years.
+
+**Recommended: collapse to one.** `i64` microseconds is the only stored time. `f64` seconds
+exists only as a locally computed *difference*, which is what Kepler propagation actually
+consumes and where `f64` is precise. That removes the per-system epoch entirely and leaves one
+conversion, in `lc-spacetime`, in the pattern `em_foundations::time` already uses.
+
+This needs deciding before `Coord` and before anything calls into `em-sim`.
+
+### 3. Star data behind a provider interface, with synthetic IDs
+
+Created by the decision that the shipped game is a fictional galaxy. World generation must not
+parse a catalogue directly, and an HYG number must never become a `source_id`. See
+[03-world-model.md](03-world-model.md). Free now; a data migration and a schema change later.
+
+### 4. `BANDS` as a compile-time constant
+
+One line, but it belongs in exactly one crate (`em-spectra`) and it is baked into the shell
+file format, so the format needs a version field from its first write. Going from five bands
+to seven was free in a document and would not have been free in a serialised asset.
+
+## Explicitly not blocking
+
+Listed so they do not get planned. Each is a local edit whenever it is faced.
+
+| item | why it can wait |
+|---|---|
+| `deterministic` feature on `em-foundations` | a feature flag and a swap of `f64::sin` for `libm::sin`. It only matters once client prediction gates a rule, which is not the prototype. Previously classified as blocking; that was wrong. |
+| `cube` versus PostGIS | an index choice behind a query interface |
+| source BVH in Postgres or in memory | durable positions are needed either way |
+| transport and wire format | a prototype runs in one process |
+| every open item in [04-stellar-photometry.md](04-stellar-photometry.md) | refinements to a model whose shape is settled |
+| path extinction for interstellar dust | one multiplicative term on the observation path. Blocks the observation pipeline, not the start — but it is the one omission in the photometry model, since occlusion currently lives only on a source's own shell. |
+| globular cluster shell overlap | the clamp already exists; how well it behaves at cluster densities is measurable, not predictable |
 
 ## Blocking the world model
 

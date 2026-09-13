@@ -71,7 +71,35 @@ Consequences worth planning for:
 
 ## Systems and star data
 
-The starting catalogue is HYG v4.2, already in `assets/catalogs/hygdata_v42.csv` and read by
+### The catalogue is test data, not the world
+
+The shipped game is set in a **fictional galaxy** with authored features — globular clusters,
+stellar nurseries, structures chosen for play rather than inherited from the sky. Real star
+data is how the physics gets validated, not what the game ships.
+
+That has one architectural consequence, and it is cheap now and expensive later:
+
+- **Star data comes through a provider interface from the start.** `HygCatalogue` is one
+  implementation; `AuthoredGalaxy` and `ProceduralGalaxy` are others. Nothing in world
+  generation parses a CSV directly.
+- **Star identity is a synthetic stable ID, never a catalogue ID.** An HYG number must not
+  reach `source_id`, the event store, or the wire format. The importer assigns IDs; the
+  catalogue's own numbers survive only as a provenance field.
+
+Neither is work. Both are migrations if skipped.
+
+The features an authored galaxy adds are mostly additive, with two that touch existing
+assumptions and should be watched rather than solved now:
+
+| feature | what it stresses |
+|---|---|
+| globular cluster | shell overlap. 1e5 stars in 10 pc gives a mean separation near 1 ly, against a nominal shell radius of 1.58 ly, so the clamp runs constantly and each shell touches many neighbours |
+| stellar nursery | dust that belongs to no system. The occlusion model puts populations inside a shell; extended interstellar dust needs path extinction instead, which is a different calculation |
+| authored structures | generation is currently seeded and deterministic; authored content is neither, so both paths must coexist |
+
+### Source data
+
+The validation catalogue is HYG v4.2, already in `assets/catalogs/hygdata_v42.csv` and read by
 `src/catalog/`. It supplies position (RA/Dec/distance), spectral class, absolute magnitude,
 and proper motion for ~120 000 stars. Positions convert to the ecliptic frame the sim
 already uses; note the catalogue is equatorial and the existing conversion lives in the

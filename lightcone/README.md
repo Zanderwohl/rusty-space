@@ -15,7 +15,7 @@ This monorepo holds two products.
 |---|---|---|
 | what | trajectory tool for a TTRPG | multiplayer sandbox game |
 | root | `.` (workspace root package), `docs/` | `crates/lc-*`, `lightcone/` |
-| shared | `crates/em-foundations`, `crates/em-sim`, `crates/em-render` (to be extracted) | same |
+| shared | `crates/em-foundations`, `crates/em-sim`, `crates/em-render`, `crates/em-plot`, `crates/em-spectra` | same |
 
 The `em-*` crates are shared libraries. Neither product owns them; changes to them must
 keep both building. Everything under `lc-*` is game-specific and Exotic Matters must never

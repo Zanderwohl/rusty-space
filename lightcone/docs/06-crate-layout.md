@@ -8,6 +8,7 @@
 | `crates/em-sim` | simulation state and propagation | em-foundations; `bevy_ecs` behind the `bevy` feature |
 | `crates/em-render` | **new.** reusable Bevy rendering for orbital scenes | em-foundations, em-sim, bevy |
 | `crates/em-plot` | **new.** charts, curves, heat maps; see [11-plotting.md](11-plotting.md) | glam; bevy and egui behind features |
+| `crates/em-spectra` | **new.** bands, blackbody, extinction, colour, band-to-display mapping | glam, serde; no engine |
 | `crates/lc-spacetime` | event coordinates, intervals, retarded time, worldlines | glam, serde; no engine |
 | `crates/lc-world` | game rules, systems, structures, ships, resources, photometry | em-foundations, em-sim, lc-spacetime |
 | `crates/lc-proto` | wire messages, serialisation, versioning | serde, lc-spacetime, lc-world types |
@@ -70,6 +71,28 @@ Extraction order, one commit each, app building at every step:
 3. The starfield and catalogue.
 4. Cameras.
 5. Markers and paths.
+
+## `em-spectra`
+
+Everything about light that is physics rather than game rule. Shared, because Exotic Matters
+has stars to colour too and because a physics toolkit is worth more than a game feature.
+
+```
+bands.rs       the seven-band definition, centres, widths, BandMask
+blackbody.rs   Planck, Wien, Stefan-Boltzmann, band-integrated emission
+colour_index.rs  B-V to Teff (Ballesteros) and back; the reddening degeneracy
+extinction.rs  A_lambda/A_V curves, reddening vectors, colour-colour geometry
+cie.rs         CIE matching functions, XYZ, sRGB, the direct-assignment shortcut
+mapping.rs     BandMapping: the 3 x BANDS display matrix, presets, bloom assignment
+```
+
+No engine, no ECS, no rendering — `em-render` and `em-plot` consume it, and so does
+`lc-world`. `BANDS` is a compile-time constant here and nowhere else, so a change to the band
+set is one edit and a format version bump.
+
+The occultation integral of [04-stellar-photometry.md](04-stellar-photometry.md) is a
+migration candidate. It is pure physics and nothing about it is game-specific, but it is new
+and unproven, so it stays in `lc-world` until it has been used enough to know its shape.
 
 ## `lc-spacetime`
 
