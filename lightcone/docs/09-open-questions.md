@@ -26,17 +26,19 @@ Everything else is discoverable by building, and planning it further is waste.
 
 Four items pass that test.
 
-### 1. The coordinate unit
+**All four are now decided. This section is kept as the record of why they were the ones that
+mattered.**
+
+### 1. The coordinate unit — RATIFIED
 
 Integer light-microsecond grid with `c = 1`, as specified in
 [01-spacetime.md](01-spacetime.md), versus `f64` light-seconds or some other pairing. It is in
 the schema, the wire format, every stored coordinate, and the type that everything else names.
 Nothing else on this list is as expensive to change.
 
-Treated as settled by use — the 36 500 ly world boundary is a consequence of it — but it has
-never been ratified explicitly, and it should be before `Coord` is written.
+Ratified: the integer light-microsecond grid with `c = 1`.
 
-### 2. One time representation, or three
+### 2. One time representation — DECIDED: one
 
 Currently the design implies three: `em_foundations::Instant` as `f64` seconds since J2000 for
 propagation, local system time as `f64` seconds from a per-system epoch, and `Coord::t` as
@@ -57,15 +59,17 @@ exists only as a locally computed *difference*, which is what Kepler propagation
 consumes and where `f64` is precise. That removes the per-system epoch entirely and leaves one
 conversion, in `lc-spacetime`, in the pattern `em_foundations::time` already uses.
 
-This needs deciding before `Coord` and before anything calls into `em-sim`.
+Decided as recommended, on the grounds that this game runs far longer than Exotic Matters
+does. `em-foundations` is not modified; `lc-spacetime` converts at the boundary and passes
+`em-sim` an offset rather than an absolute epoch.
 
-### 3. Star data behind a provider interface, with synthetic IDs
+### 3. Star data behind a provider interface — DECIDED
 
 Created by the decision that the shipped game is a fictional galaxy. World generation must not
 parse a catalogue directly, and an HYG number must never become a `source_id`. See
 [03-world-model.md](03-world-model.md). Free now; a data migration and a schema change later.
 
-### 4. `BANDS` as a compile-time constant
+### 4. `BANDS` as a compile-time constant — DECIDED
 
 One line, but it belongs in exactly one crate (`em-spectra`) and it is baked into the shell
 file format, so the format needs a version field from its first write. Going from five bands
@@ -82,7 +86,7 @@ Listed so they do not get planned. Each is a local edit whenever it is faced.
 | source BVH in Postgres or in memory | durable positions are needed either way |
 | transport and wire format | a prototype runs in one process |
 | every open item in [04-stellar-photometry.md](04-stellar-photometry.md) | refinements to a model whose shape is settled |
-| path extinction for interstellar dust | one multiplicative term on the observation path. Blocks the observation pipeline, not the start — but it is the one omission in the photometry model, since occlusion currently lives only on a source's own shell. |
+| path extinction for interstellar dust | **Deferred deliberately.** Nurseries and dense clouds are special zones and want their own thought. Occlusion stays on a source's own shell until then; the omission is recorded rather than papered over. |
 | globular cluster shell overlap | the clamp already exists; how well it behaves at cluster densities is measurable, not predictable |
 
 ## Blocking the world model

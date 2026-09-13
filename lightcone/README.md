@@ -40,8 +40,10 @@ cross-reference except where a shared crate is the subject.
 | [09-open-questions.md](docs/09-open-questions.md) | decisions made and still outstanding |
 | [10-superluminal.md](docs/10-superluminal.md) | analysis only: what FTL trajectories would cost, and why the design is already paradox-free |
 | [11-plotting.md](docs/11-plotting.md) | `em-plot`: the shared charting crate, and why decimation is the hard part |
+| [12-buildout.md](docs/12-buildout.md) | **the plan.** Ten phases, each written to be started cold |
 
 ## Status
 
-Nothing is implemented. These are planning documents. Every number in them is a first
+Nothing is implemented. These are planning documents, and planning is finished — the blocking
+decisions are made and [12-buildout.md](docs/12-buildout.md) is the order of work. Every number in them is a first
 estimate; where a number drives a decision, the derivation is shown so it can be rechecked.

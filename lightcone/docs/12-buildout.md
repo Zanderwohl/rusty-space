@@ -1,0 +1,291 @@
+# Buildout plan
+
+Ten phases. The organising constraint is not effort but **context**: this project is larger
+than any one working session can hold, so each phase is written to be started cold.
+
+Every phase states what must already exist, what it delivers, how you know it is done, what it
+explicitly does not do, and which documents to read. A phase's reading list is the whole
+reading list — a session working on phase 3 should not need phases 7 through 10 in its head.
+
+Phases 1 to 6 are the prototype. **Phase 3 is the go/no-go**: it is the smallest program that
+either demonstrates the premise or shows that it does not work.
+
+## Dependency shape
+
+```
+  1a lc-spacetime ─┐
+                   ├─> 2 photometry ─> 3 PREMISE ─┐
+  1b em-spectra ───┘                              ├─> 6 client ─> 7 store ─> 8 server ─> 9 wasm ─> 10 game
+                   └─> 4 the sky ─────────────────┤
+  5 em-render + em-plot ──────────────────────────┘
+```
+
+1a and 1b are independent of each other. 5 is independent of everything and touches only the
+existing app, so it can run in parallel throughout.
+
+---
+
+## Phase 1a — `lc-spacetime`
+
+**Before:** nothing. First code written.
+
+**Deliver:** `crates/lc-spacetime`, engine-free.
+
+| module | contents |
+|---|---|
+| `coord.rs` | `Coord { t, x, y, z }` in `i64` microseconds and light-microseconds, the `2^60` construction invariant |
+| `interval.rs` | `interval2` in `i128`, `Separation`, `precedes` |
+| `worldline.rs` | the `Worldline` trait, `retarded_times` returning a `SmallVec`, `is_subluminal` |
+| `frame.rs` | system-local `f64` metres to and from the global grid; `propagation_time` to `em_foundations::Instant` |
+| `units.rs` | newtypes, and no arithmetic that can mix a duration with an instant |
+| `doppler.rs`, `proper_time.rs` | shift, aberration, gamma, hyperbolic motion |
+
+**Done when:**
+
+- `cargo test -p lc-spacetime` passes, including: the interval classification table; the
+  single-root property over randomised sub-luminal worldlines; the straight-line retarded-time
+  closed form checked against bisection; `i128` non-overflow at the `2^60` bound.
+- `cargo tree -p lc-spacetime | grep -i bevy` is empty.
+- `em-foundations` is untouched.
+
+**Do not:** build the light-cone cursor, touch a database, or add superluminal support beyond
+the signature already specified.
+
+**Read:** [01-spacetime.md](01-spacetime.md). Skim [10-superluminal.md](10-superluminal.md) for
+why `retarded_times` returns a collection.
+
+---
+
+## Phase 1b — `em-spectra`
+
+**Before:** nothing. Independent of 1a.
+
+**Deliver:** `crates/em-spectra`, engine-free, per [06-crate-layout.md](06-crate-layout.md).
+Bands, blackbody, extinction curves, colour index, CIE conversion, `BandMapping` and presets.
+`BANDS` is defined here and nowhere else.
+
+**Done when:**
+
+- Ballesteros returns 5778 K for `B-V = 0.65` and 3950 K for `+1.40`.
+- Extinction ratios reproduce the documented transmission table.
+- XYZ to sRGB round-trips; the direct-assignment shortcut is measurably more saturated than
+  the CIE path, and both are available.
+- A reddening vector and a stellar locus can be computed and their slopes compared.
+- No engine in the dependency tree.
+
+**Do not:** render anything, or implement the occultation integral.
+
+**Read:** the Bands section of [04-stellar-photometry.md](04-stellar-photometry.md).
+
+---
+
+## Phase 2 — Photometry
+
+**Before:** 1a, 1b.
+
+**Deliver:** the photometry half of `crates/lc-world`. `Population`, `EmissionModel`, the
+occultation integral, both flicker regimes, the analytic occluder path with quadratic limb
+darkening, and the baked shell with its versioned format.
+
+**Done when:**
+
+- The occultation integral agrees with direct Monte Carlo orbit sampling within Poisson error,
+  isotropic and inclination-banded. **The verification already run in the design work is the
+  test suite** — port it rather than reinventing it.
+- The moment inversion recovers its inputs: from mean deficit, rms flicker and knee
+  frequency, return element size and count. The documented case must return 1.0e12 m² and
+  1.50e6 elements.
+- Both flicker branches are exercised: Gaussian at `m = 8.1`, Poisson event train at
+  `m = 1.4e-3`, and the sparse branch reports the single-event depth rather than the mean.
+- A shell bakes, round-trips through its format, and interpolates.
+
+**Do not:** add observers, telescopes, or noise. This phase produces true radiance, not
+measurements.
+
+**Read:** [04-stellar-photometry.md](04-stellar-photometry.md) in full. It is the densest
+document and this is the phase it exists for.
+
+---
+
+## Phase 3 — The premise
+
+**Before:** 2.
+
+**Deliver:** the observation half of `lc-world`. Observers with worldlines, instruments with
+apertures and band masks, photon noise from a seeded generator, the received light curve.
+
+**Done when one headless integration test passes**, and it is the game:
+
+1. Build a system with a star, a planet and a swarm.
+2. Place an observer 30 light-years away.
+3. Advance the clock. The observer's measured curve matches the system's state at the
+   **retarded** time, not the current one.
+4. Change the swarm at time `T`. The observer's curve is unchanged until `T + 30 years` and
+   changes after.
+5. An observer with a V-only instrument cannot distinguish the swarm from a dust cloud of the
+   same optical depth. One with B/V/R/I usually can, and fails for a red star. One with K can.
+
+If step 4 or step 5 will not pass, the design is wrong and this is where it is cheapest to find
+out.
+
+**Do not:** render, network, or persist. Everything here is a function call.
+
+**Read:** [05-observation.md](05-observation.md), and [01-spacetime.md](01-spacetime.md) for
+the retarded-time solver.
+
+---
+
+## Phase 4 — The sky
+
+**Before:** 1a, 1b. Can overlap 2 and 3.
+
+**Deliver:** the star data provider interface, the HYG importer behind it, synthetic stable
+IDs, seeded procedural system generation producing `em_sim::system::BodyDef`, metallicity
+synthesised from galactic kinematics, and the Oort, Kuiper and belt populations that come with
+every system.
+
+**Done when:**
+
+- 120 000 catalogue stars load through the provider with synthetic IDs, and no HYG number
+  appears anywhere but a provenance field.
+- The same seed produces a byte-identical system, twice, in separate processes.
+- Binaries generate as a barycentre with two children and propagate.
+- A second provider implementation exists, even if it only returns three hand-written stars.
+  The interface is not proven by one implementation.
+
+**Do not:** author a fictional galaxy. That is later, and this phase exists to make it possible.
+
+**Read:** [03-world-model.md](03-world-model.md).
+
+---
+
+## Phase 5 — `em-render` and `em-plot`
+
+**Before:** nothing. Runs in parallel with everything; touches the existing app.
+
+**Deliver:** the five-step extraction in [06-crate-layout.md](06-crate-layout.md), and
+`em-plot` core with min/max decimation, scales, colour maps and an SVG test backend.
+
+**Done when:**
+
+- Exotic Matters builds and runs unchanged after every one of the five extraction commits.
+- `em-render` contains no game or TTRPG rule.
+- A two-million-sample curve renders into 800 pixels with the envelope preserved, verified
+  against a reference SVG, and a one-sample-wide transit survives every zoom level.
+- `cargo tree -p em-plot --no-default-features | grep -i bevy` is empty.
+
+**Do not:** build charts the game has not asked for.
+
+**Read:** [06-crate-layout.md](06-crate-layout.md) and [11-plotting.md](11-plotting.md).
+
+---
+
+## Phase 6 — The client
+
+**Before:** 3, 4, 5.
+
+**Deliver:** `crates/lc-client`, single process, no server, no network. Scale tiers,
+camera-relative rendering, retarded-time sampling per the distance rule, band-to-display
+presets, the population envelope shader, tone mapping with glow, and a light-curve panel.
+
+**Done when you can show it to someone:** fly to a star, point a telescope, watch a transit in
+the curve, switch to the thermal preset, and see a swarm that was invisible in natural colour.
+
+**Do not:** add WASM, networking, or god view. God view is compiled out of this build from the
+start rather than added and later removed.
+
+**Read:** [07-rendering.md](07-rendering.md).
+
+---
+
+## Phase 7 — The event store
+
+**Before:** 3. Can overlap 6.
+
+**Deliver:** `crates/lc-store`. Schema, partitioning, the causality functions, delivery
+scheduling, and the light-cone cursor.
+
+**Done when:**
+
+- Events survive a restart and a partition rollover.
+- Delivery lookup is a single B-tree range scan, demonstrated by an execution plan rather than
+  by assertion.
+- The cursor yields receptions in arrival order without sorting the full result, and early
+  termination does the work of the terminated case and not more.
+- `lc_precedes` agrees with `lc-spacetime`'s `precedes` on a randomised corpus. Two
+  implementations of causality is one too many, and this is the test that keeps them honest.
+
+**Do not:** shard.
+
+**Read:** [02-event-store.md](02-event-store.md).
+
+---
+
+## Phase 8 — Server and protocol
+
+**Before:** 7.
+
+**Deliver:** `lc-proto`, `lc-server`, the tick loop, intent validation, and the single send
+gate.
+
+**Done when:** two clients connect to one server, one acts, and the other learns about it at
+light delay and not before — with a test that asserts the negative case, that nothing arrives
+early. Every outbound message passes through one function and there is no second emit path.
+
+**Do not:** optimise. Correctness of the filter is the whole deliverable.
+
+**Read:** [08-networking.md](08-networking.md).
+
+---
+
+## Phase 9 — WASM
+
+**Before:** 6, 8.
+
+**Deliver:** the browser build. WebGPU only, single-threaded Bevy, transport over WebTransport
+or WebSocket, god view absent from the binary.
+
+**Done when:** it runs in a browser, refuses WebGL2 with a message that names the two supported
+routes, and the download is small enough to be worth measuring.
+
+**Read:** the WASM and portability sections of [07-rendering.md](07-rendering.md), and
+[08-networking.md](08-networking.md).
+
+---
+
+## Phase 10 — The game
+
+**Before:** 9.
+
+**Deliver:** resources and per-body deposits, energy, construction, ships with orders and
+proper time, telescope survey regimes, and von Neumann replication with generation TTL and
+drift.
+
+This phase is deliberately least specified. By the time it starts, six phases of contact with
+the design will have changed what it should contain, and planning it now would be planning the
+wrong thing.
+
+**Read:** [03-world-model.md](03-world-model.md), and whatever the previous nine phases have
+added to it.
+
+---
+
+## What is deferred past all of this
+
+| item | why |
+|---|---|
+| path extinction and nurseries | special zones, wanting their own design pass |
+| an authored fictional galaxy | phase 4 makes it possible; the content is its own project |
+| sharding | phase 8 does not preclude it; nothing should until measurements demand it |
+| interstellar VLBI | a late-game mechanic that needs the whole stack first |
+| superluminal travel | not built, not foreclosed; see [10-superluminal.md](10-superluminal.md) |
+
+## Where a design error is most likely to surface
+
+| phase | risk |
+|---|---|
+| 3 | the premise. If light-delayed observation is not fun, nothing later fixes it. |
+| 7 | the event store under real volume. The source-not-event decomposition is sound on paper and has never met a million rows. |
+| 6 | scale tiers and retarded-time granularity. The `f32` reduction is well understood; whether the three tiers compose visually is not. |
+
+Phase 3 is cheap and answers the largest question. That is why it is third and not tenth.

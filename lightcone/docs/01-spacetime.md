@@ -54,11 +54,36 @@ years). This bounds `dt^2 + dr^2` below 5.3e36, so `s2` computed in `i128` canno
 Without the bound, four squared `i64` extremes sum past the `i128` ceiling. The bound is
 checked on construction of a coordinate, not at every comparison.
 
+### Time is stored once, in microseconds
+
+**Decided: `i64` microseconds is the only stored time representation.** There is no per-system
+epoch and no second absolute origin. `f64` seconds exists only as a locally computed
+*difference*, which is what Kepler propagation actually consumes and the regime where `f64` is
+precise.
+
+The reason is the length of the game. Exotic Matters runs 2000 to 2400, so `f64` seconds from
+J2000 holds up for its whole span. This game does not: at the 36 500-year world horizon the
+`f64` ulp is 73 km of light travel against a 300 m grid, and a fictional galaxy has no J2000
+for the origin to mean anything against.
+
+**`em-foundations` is not modified.** `Instant` keeps its meaning and Exotic Matters keeps
+working. `lc-spacetime` converts at the boundary, and only there:
+
+```rust
+// The argument to any em-sim call is an offset, never an absolute epoch.
+fn propagation_time(t: i64, system_epoch: i64) -> Instant {
+    Instant::from_seconds((t - system_epoch) as f64 * 1e-6)
+}
+```
+
+The difference is small, so the `f64` is precise, and there is exactly one function that knows
+how the two systems relate — the same discipline `em_foundations::time` applies between
+`Instant` and `JulianDate`, for the same reason.
+
 ### Local tier: f64 metres from a system barycentre
 
-Inside a star system, positions are `f64` metres relative to that system's barycentre, and
-times are `f64` seconds relative to a per-system epoch. This is exactly what
-`em-foundations` and `em-sim` already use, so orbital code needs no changes.
+Inside a star system, positions are `f64` metres relative to that system's barycentre. This is
+exactly what `em-foundations` and `em-sim` already use, so orbital code needs no changes.
 
 Precision, since this is why the split exists:
 
