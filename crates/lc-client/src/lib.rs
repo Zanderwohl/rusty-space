@@ -5,7 +5,10 @@
 //! renderer made of ECS systems cannot be reused, so this one keeps the decisions separable
 //! from the drawing.
 
+pub mod action;
 pub mod curve;
+pub mod hud;
 pub mod session;
 pub mod tonemap;
+pub mod ui;
 pub mod view;

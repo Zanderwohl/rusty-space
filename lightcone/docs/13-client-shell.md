@@ -11,6 +11,15 @@ MenuPage     sub of MainMenu:  Root | NewWorld | Load | Settings | About
 Overlay      sub of InGame:    None | Escape | Settings | Debug
 ```
 
+**Nothing is modal.** Since the clock never stops, an overlay that blocks the world behind it
+is claiming something untrue. `Overlay` is therefore not a state at all — the escape menu, the
+settings screen and the debug window are panels in the same set as the telescope, each toggled
+independently. What remains of `AppState` is where the application is, not what is on top of it.
+
+This also fits the browser, where there is barely a main menu to speak of: you arrive already
+in the game. `MainMenu` is the desktop entry point and a thin one; the web build can open
+straight into `Loading`.
+
 `Settings` appears under both parents and is one screen either way. It is reachable from the
 main menu before a world exists and from the escape overlay while one is running, so it may
 not assume a world.
@@ -112,6 +121,27 @@ who cannot separate those two colours cannot play that part of the game.
 number as well as a hue; a star's temperature is a number as well as a tint. This is cheap now
 and structural later.
 
+## Every action is a message
+
+**No UI system acts directly.** A key press, a button, a menu item and a test all produce the
+same `Action` value, and one dispatcher applies it. Nothing else changes `UiState` or reaches
+into the session.
+
+```
+Action        an enum: ToggleP anel, SetBandPreset, ExposureUp, SelectTarget, Quit, ...
+apply()       Action + UiState + Session -> Vec<Effect>
+Effect        the few things needing the engine: Quit, WriteSnapshot, Notify
+input.rs      the only place that knows about KeyCode; maps input to Action
+```
+
+Rebinding is not built yet and this is what makes it a table rather than a rewrite. It also
+buys the things that usually arrive too late to be cheap: driving the UI from a test with no
+window, replaying a session from a list of actions, macros, and a remote control for
+debugging. The cost is one enum and one match.
+
+`Action` is engine-free. Only `input.rs` mentions `KeyCode`, so the core stays testable and a
+second front end — a touch build, a script — needs no new plumbing.
+
 ## Structure
 
 UI state is data and the systems are thin, for the reason
@@ -120,8 +150,9 @@ reused, and neither can a UI made of them be tested.
 
 ```
 UiState        open panels, selected target, exposure offset, preset index
+action::apply  the only thing that mutates UiState
 hud::lines()   what the readout says, as plain strings
-panels::*      egui systems that draw UiState and nothing else
+panels::*      egui systems that draw UiState and emit Actions
 ```
 
 Anything that decides *what* to show is a function over `Session` and `UiState`, testable with
@@ -138,8 +169,6 @@ rather than added and later removed.
 
 ## Open
 
-- Whether the escape overlay should be modal at all, given that nothing behind it stops. A
-  non-modal panel may be the honest form, with `Esc` toggling it like any other window.
-- Rebindable keys from the start, or a fixed set until the control scheme settles.
-- Whether the sky map is a window or the world itself seen from a ship. Probably the latter
-  eventually; the map is the cheaper first version and the two want different camera code.
+- Whether the sky map is a window or the world seen from a ship. Likely both, in the manner of
+  Space Engine: a view through a camera, and a three-dimensional stellar map centred on the
+  observer. The flat map is the cheaper first version and the two want different camera code.
