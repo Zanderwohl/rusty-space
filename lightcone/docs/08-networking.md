@@ -160,6 +160,10 @@ computed.
 
 ## Open
 
+**These are deferred by decision, to be settled when the features they belong to are designed
+rather than in advance.** Each is local to one component and none of them constrains anything
+else.
+
 - WebTransport support and stability across browsers; if it is not ready, WebSocket-only for
   the browser and QUIC for native, with one protocol over two transports.
 - Serialisation format. `postcard` is compact and `no_std`; `bincode` is simpler; both need

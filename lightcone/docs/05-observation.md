@@ -53,6 +53,36 @@ detection at 100 pc needs 100x the aperture-time product, and at 1 kpc, 10 000x.
 That is the intended shape of the mechanic. A small telescope surveys nearby stars. Reaching
 further means building a bigger one, or many, and committing them for in-game years.
 
+### Survey regimes
+
+A telescope, or a group of them acting together, commits to a regime for a period of time.
+
+| regime | targets | depth per target |
+|---|---|---|
+| stare | one star | the whole integration |
+| field | a region of sky | `T / N_field` |
+| all-sky survey | everything above the horizon of the instrument | `T / N_total` |
+
+Depth goes as `sqrt(T)`, so the tradeoff is exact: covering `N` times as many targets costs a
+factor of `sqrt(N)` in the smallest depth detectable. A survey that finds where to look and a
+stare that finds what is there are different instruments used at different times, not
+different hardware.
+
+**Calling a commitment off early does not cancel it. It leaves the result uncertain.** A
+half-finished integration produces a measurement with error bars, not nothing — a 2-sigma bump
+that might be a planet, might be a swarm, might be noise. That is the correct output and it
+should be shown as such.
+
+This is the single most important UI decision in the observation system: **the client reports
+a measurement and its uncertainty, and the player decides what to believe.** It does not report
+"planet detected". A player acting on a 2-sigma bump is making a real decision under real
+uncertainty, and being wrong sometimes is the mechanic working.
+
+Server-side confirmation still applies where a rule depends on a discovery, and it is
+consistent with this: noise is seeded on `(telescope, star, time bucket)`, so the server can
+recompute exactly what the instrument saw and check the claim against it. The player's
+uncertainty is real; the server's is not.
+
 ### Period finding
 
 Two tools, for two kinds of signal. Use the right one.
@@ -162,6 +192,41 @@ is not covert, it is only efficient. An optical link at the same range lands a s
 0.25 AU, so it is intercepted by anything inside the target's inner system and by nothing
 else. Covertness is bought with wavelength and aperture, and the numbers say how much.
 
+### Choosing a frequency
+
+The sky is not equally noisy everywhere. Galactic synchrotron falls as roughly `nu^-2.7`,
+the CMB contributes a flat 2.725 K, and quantum noise rises as `h nu / k`. The sum has a
+minimum:
+
+| frequency | synchrotron | quantum | total sky |
+|---|---|---|---|
+| 400 MHz | 297 K | 0.02 K | 299 K |
+| 1.42 GHz | 9.7 K | 0.07 K | 12.5 K |
+| 5 GHz | 0.32 K | 0.24 K | 3.3 K |
+| 10 GHz | 0.05 K | 0.48 K | 3.3 K |
+| 30 GHz | 0.00 K | 1.44 K | 4.2 K |
+| 100 GHz | 0.00 K | 4.80 K | 7.5 K |
+
+The free-space microwave window is about 3 to 30 GHz, with a floor near 3.2 K.
+
+**1420 MHz is not in it.** The hydrogen line sits at 12.5 K, four times the floor, which costs
+a factor of 15 in transmitter power or in integration time for the same detection. It is the
+worst good choice and the best obvious one — everyone knows where it is, so it is where a
+civilisation broadcasts if it wants to be found and where it listens if it expects company. A
+transmitter that wants to be heard pays the 15x. A transmitter that wants privacy moves to
+8 GHz and accepts that nobody is listening there unless told to.
+
+That tension is the whole frequency mechanic, and it is derived rather than assigned:
+
+| choice | cost | consequence |
+|---|---|---|
+| 1420 MHz, or the band up to the OH lines at 1720 MHz | 15x power | found by anyone surveying; the default meeting place |
+| 3-30 GHz window | none | heard only by a receiver already pointed and tuned |
+| deliberately obscure | none | requires pre-arrangement, which requires a prior message |
+
+Pre-arranging a private frequency requires sending a message to arrange it, and that message
+has to go somewhere. First contact is loud by necessity.
+
 ### Aiming
 
 A beam must be aimed where the target **will be** when the light arrives, not where it is
@@ -177,6 +242,69 @@ that are themselves old. A target that manoeuvres after the light left, but befo
 arrives, is missed. For a ship 4 ly away this means the aim is based on where the target was
 4 years ago, extrapolated 4 years forward — 8 years of prediction error. Stationary
 installations are easy to hit; ships under thrust are not.
+
+## Interferometry
+
+Two instruments separated by a baseline `B` resolve `lambda / B`. At the scales available here
+that number stops being the limit almost immediately.
+
+| baseline | band | resolution | linear size resolved at 10 ly |
+|---|---|---|---|
+| 1 AU | 550 nm | 3.7e-18 rad | 0.35 m |
+| 10 AU | 550 nm | 3.7e-19 rad | 3.5 cm |
+| 1 AU | 21 cm | 1.4e-12 rad | 133 km |
+| 4 ly | 21 cm | 5.6e-18 rad | 0.53 m |
+
+Resolving 35 cm features on a planet ten light-years away is not a game mechanic, so
+**diffraction is not what limits interferometry. Photons are.** An `N x N` image needs `N^2`
+times the photons of a single measurement at the same SNR, so collecting area scales as the
+square of the linear resolution wanted. Angular resolution is free; surface brightness is not.
+That is the correct limiter, it is physical, and it makes imaging an endgame investment
+measured in square kilometres of aperture rather than in baseline length.
+
+### Within a system
+
+Practical. Baselines of an AU or more, elements in known orbits, path lengths derivable from
+the same orbital mechanics everything else uses. A battery of telescopes in a common orbit is
+a natural structure and a natural thing to build incrementally: each element added improves
+the `u-v` coverage and the collecting area at once.
+
+### Between systems
+
+Optical is impossible and radio is merely very hard, and the difference is worth stating
+because it is what makes the 21 cm band matter.
+
+Coherent combination needs the path difference known to about `lambda / 10`:
+
+| band | baseline | absolute precision needed | relative |
+|---|---|---|---|
+| optical | 1 AU | 5.5e-8 m | 3.7e-19 |
+| optical | 4 ly | 5.5e-8 m | 1.5e-24 |
+| 21 cm | 4 ly | 2.1e-2 m | 5.6e-19 |
+
+Knowing an interstellar baseline to 55 nanometres is not a matter of effort. Knowing it to
+2 centimetres is the same class of problem terrestrial VLBI already solves, and the game has
+an advantage real VLBI does not: every station's position comes from the simulation, and
+every station's proper time is already related to server time by the engine.
+
+The other half of radio VLBI is that the waveform can be recorded. At optical frequencies it
+cannot — 5e14 Hz is not sampleable — but 21 cm is, and the recording is then a data volume
+problem:
+
+| bandwidth | sample rate | at 2 bytes/sample |
+|---|---|---|
+| 1 MHz | 2 Msamp/s | 4 MB/s, 0.3 TB per in-game day |
+| 100 MHz | 200 Msamp/s | 400 MB/s, 35 TB per in-game day |
+
+**So interstellar interferometry is: observe, record, ship the recordings to a correlator, and
+get the image years later.** The data streams have to reach a common node, which takes light
+travel time, and they have to be associated across the times at which each was taken, which
+the event store already does — a recording is an event with a coordinate, and correlating two
+of them is a query about two worldlines.
+
+That is a very good late-game mechanic. It is also the only thing in the design where a player
+deliberately builds infrastructure whose payoff arrives a decade after the observation, and it
+fits the premise better than anything else on the list.
 
 ## Instrument placement and the double delay
 
@@ -207,8 +335,9 @@ position — is confirmed server-side from the same deterministic functions.
   scintillation if any instrument is ever atmospheric. Photon noise alone makes large
   apertures too strong.
 - Whether spectroscopy gets its own instrument type or is a telescope mode.
-- Interferometry. Two telescopes separated by a baseline `B` resolve `lambda / B`, which
-  with interstellar baselines is enough to image a planet. It is a natural late-game goal
-  and needs its own rules for correlating two delayed data streams.
+- Interferometry within a system is settled in outline above. What is not: the `u-v` coverage
+  model, how partial coverage degrades an image, and the correlator's cost. Interstellar VLBI
+  needs a concrete data-shipping mechanic — whether recordings travel as cargo, as transmitted
+  signal, or both.
 - Neutrino and gravitational-wave channels. Both travel at c and both would bypass
   occlusion, which may be more mechanic than the game needs.

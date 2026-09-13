@@ -7,6 +7,7 @@
 | `crates/em-foundations` | orbital mechanics, reference frames, epochs | glam, serde, num-traits, scilib |
 | `crates/em-sim` | simulation state and propagation | em-foundations; `bevy_ecs` behind the `bevy` feature |
 | `crates/em-render` | **new.** reusable Bevy rendering for orbital scenes | em-foundations, em-sim, bevy |
+| `crates/em-plot` | **new.** charts, curves, heat maps; see [11-plotting.md](11-plotting.md) | glam; bevy and egui behind features |
 | `crates/lc-spacetime` | event coordinates, intervals, retarded time, worldlines | glam, serde; no engine |
 | `crates/lc-world` | game rules, systems, structures, ships, resources, photometry | em-foundations, em-sim, lc-spacetime |
 | `crates/lc-proto` | wire messages, serialisation, versioning | serde, lc-spacetime, lc-world types |
@@ -31,6 +32,7 @@ existing invariants are checked:
 cargo tree -p exotic-matters | grep -i '^\s*lc-'            # must be empty
 cargo tree -p em-foundations | grep -i bevy                 # must be empty
 cargo tree -p em-sim --no-default-features | grep -i bevy   # must be empty
+cargo tree -p em-plot --no-default-features | grep -i bevy  # must be empty
 cargo tree -p lc-spacetime | grep -i bevy                   # must be empty
 ```
 
@@ -130,7 +132,7 @@ assuming it matters; Kepler solves are not the bottleneck at these object counts
 | target | crates |
 |---|---|
 | `lc-server` native | lc-store, lc-world, lc-spacetime, lc-proto, tokio, sqlx |
-| `lc-client` native | lc-client, em-render, lc-world, lc-spacetime, lc-proto, bevy |
+| `lc-client` native | lc-client, em-render, em-plot, lc-world, lc-spacetime, lc-proto, bevy |
 | `lc-client` wasm32-unknown-unknown | same, minus anything that touches the filesystem or threads |
 | `exotic-matters` | unchanged, plus em-render |
 

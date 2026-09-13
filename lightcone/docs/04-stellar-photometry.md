@@ -345,11 +345,61 @@ disagree about what a star did and a light curve stops being reproducible.
 
 ## Bands
 
-Four to start: a broad visible band, two others chosen to make colour meaningful, and a
-thermal infrared band. The IR band is not decoration. Total output is conserved, so light a
-swarm intercepts reappears as waste heat; a player watching only the visible band sees a
-star that is slightly dim, and a player watching the IR sees a star with an excess that has
-no natural explanation. That is the difference between noticing a rival and identifying one.
+Five, and the fifth changes the model.
+
+| band | roughly | why it is there |
+|---|---|---|
+| B | 440 nm | colour, and the most extinction-sensitive band |
+| V | 550 nm | the workhorse; magnitudes and depths are quoted here |
+| K | 2.2 um | sees through dust that V cannot |
+| thermal IR | 10 um | waste heat |
+| radio | 21 cm | sees through everything, and carries signals |
+
+The thermal IR band is not decoration. Total output is conserved, so light a swarm intercepts
+reappears as waste heat; a player watching only V sees a star that is slightly dim, and a
+player watching 10 um sees an excess with no natural explanation. That is the difference
+between noticing a rival and identifying one.
+
+### Occlusion is not achromatic
+
+Adding a radio band forces a correction to the occlusion model. Geometric blocking is grey —
+a solid body removes the same fraction at every wavelength — but **dust is not**. Interstellar
+extinction follows roughly `A_lambda ~ 1/lambda` through the optical and falls away to nothing
+in the radio:
+
+| band | `A_lambda / A_V` | flux through `A_V = 1` | through `A_V = 5` |
+|---|---|---|---|
+| U | 1.53 | 0.244 | 0.0009 |
+| B | 1.32 | 0.297 | 0.0023 |
+| V | 1.00 | 0.398 | 0.0100 |
+| I | 0.48 | 0.643 | 0.110 |
+| K | 0.11 | 0.904 | 0.603 |
+| 10 um | 0.06 | 0.946 | 0.759 |
+| 21 cm | ~1e-10 | 1.000 | 1.000 |
+
+So a cloud that removes 99% of a star's visible light removes 40% of its K band and none of
+its 21 cm emission. In the galactic plane the ISM itself averages about 1.8 mag/kpc, which is
+one magnitude of V extinction per 1800 ly of sightline, before any local cloud.
+
+This is why `Population::band_response` exists. It is flat for anything solid and follows an
+extinction curve for anything made of dust, and **the difference between those two shapes is
+itself the observable**:
+
+| dip shape | occluder |
+|---|---|
+| grey — same depth in every band | solid: planet, collector, swarm element, megastructure |
+| reddening — much deeper in B than K, absent in radio | dust, debris, a natural cloud |
+| grey in the optical with an IR excess | solid, and absorbing rather than merely blocking — engineering |
+
+A civilisation that wants its swarm mistaken for a dust cloud has to make it reddening, which
+means making it out of small particles, which means giving up the structural integrity that
+made it a collector. The disguise has a physical price, and the game does not have to invent
+one.
+
+The radio band also stops the game from being a pure line-of-sight problem. A system behind a
+dense cloud is invisible optically and perfectly ordinary at 21 cm, so dust is cover against
+one kind of observation and no cover at all against another. See
+[05-observation.md](05-observation.md) for what the radio band costs to use.
 
 Adding bands costs linearly in shell size and nothing on the analytic path.
 
@@ -428,6 +478,9 @@ authoritative and letting instrument quality decide how much structure the clien
 rather than by switching representations per observer.
 
 ## Open
+
+These are all accepted as open, to be settled during implementation rather than before it.
+None of them blocks a first version.
 
 - Limb-darkening coefficients per spectral type. Claret tables are standard; decide whether
   to bundle a table or fit a two-parameter function of `Teff`.

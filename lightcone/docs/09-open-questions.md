@@ -62,13 +62,14 @@ database schema, the wire format and every stored coordinate. Decide it first.
 
 | question | notes |
 |---|---|
-| WebGL2 support | Recommended: no. Storage buffers and compute are wanted, and the fallback is a second code path. |
 | Threading in WASM | Cross-origin isolation breaks embeds. Single-threaded Bevy until profiling says otherwise. |
-| Retarded-time sampling granularity | Per object is correct; per spatial cell is cheaper and the error is sub-pixel at distance. |
-| God view exposure | Development-only, spectator-only, or never for players. |
-| Tone mapping | Stellar flux spans many orders of magnitude; a linear mapping shows the Sun or the sky, not both. |
+| Interferometry displays | `u-v` coverage and correlation views are charts, so they belong to `em-plot`, but they need a place in the UI. |
+| Dust versus swarm appearance | Dust is chromatic and a swarm is grey. The shader probably needs two looks, which is the visual form of the photometric diagnostic. |
 
 ## Blocking the server
+
+Deferred by decision: these are settled when the features they belong to are designed, not in
+advance. Each is local to one component.
 
 | question | notes |
 |---|---|
@@ -76,6 +77,14 @@ database schema, the wire format and every stored coordinate. Decide it first.
 | Wire format | `postcard` or `bincode`, plus a versioning scheme, since clients will lag deploys. |
 | Where the light-cone cursor lives | `lc-store` needs a database; the client wants the traversal logic. Likely splits into `lc-spacetime`. |
 | Rate limiting | A scripted client can emit intents at any rate. |
+
+## Observation, still open
+
+| question | notes |
+|---|---|
+| Interstellar VLBI data shipping | Recordings travel as cargo, as transmitted signal, or both. Radio is recordable and optical is not, so 21 cm is the only band this works in. |
+| `u-v` coverage model | How partial coverage degrades an image, and what a correlator costs to build and run. |
+| Frequency as a game surface | 1420 MHz costs 15x in power and is where everyone listens; the 3-30 GHz window is free and private. How much of this to expose as a player choice rather than a constant. |
 
 ## Design questions with no technical blocker
 

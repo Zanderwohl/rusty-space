@@ -39,6 +39,7 @@ cross-reference except where a shared crate is the subject.
 | [08-networking.md](docs/08-networking.md) | transport, authority, tick model, interest management |
 | [09-open-questions.md](docs/09-open-questions.md) | decisions made and still outstanding |
 | [10-superluminal.md](docs/10-superluminal.md) | analysis only: what FTL trajectories would cost, and why the design is already paradox-free |
+| [11-plotting.md](docs/11-plotting.md) | `em-plot`: the shared charting crate, and why decimation is the hard part |
 
 ## Status
 
