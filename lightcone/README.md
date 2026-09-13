@@ -41,6 +41,7 @@ cross-reference except where a shared crate is the subject.
 | [10-superluminal.md](docs/10-superluminal.md) | analysis only: what FTL trajectories would cost, and why the design is already paradox-free |
 | [11-plotting.md](docs/11-plotting.md) | `em-plot`: the shared charting crate, and why decimation is the hard part |
 | [12-buildout.md](docs/12-buildout.md) | **the plan.** Ten phases, each written to be started cold |
+| [13-client-shell.md](docs/13-client-shell.md) | states, menus, windows, and why the game never pauses |
 
 ## Status
 
