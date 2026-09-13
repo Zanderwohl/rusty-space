@@ -97,6 +97,10 @@ assumptions and should be watched rather than solved now:
 | stellar nursery | dust that belongs to no system. The occlusion model puts populations inside a shell; extended interstellar dust needs path extinction instead, which is a different calculation |
 | authored structures | generation is currently seeded and deterministic; authored content is neither, so both paths must coexist |
 
+Plotting the filtered catalogue as an HR diagram is the cheapest check that the import is
+right — see [11-plotting.md](11-plotting.md). If the distance sentinel were not cut, the
+main sequence would not appear.
+
 ### Source data
 
 The validation catalogue is HYG v4.2, already in `assets/catalogs/hygdata_v42.csv` and read by

@@ -102,6 +102,28 @@ being bolted on. Two projections:
 Both read the same icosphere buffer used by [04-stellar-photometry.md](04-stellar-photometry.md),
 so a debug view of a star's shell is the shell, not a copy of it.
 
+## What it looks like
+
+![HR diagram of 107 859 HYG stars](../images/hr-diagram.png)
+
+Density mode over the bundled catalogue: 107 859 stars binned to cells and coloured by count.
+The main sequence, the red giant clump, the subgiant branch joining them, the M dwarf tail and
+a faint white dwarf sequence are all where they should be, and the vertical striping near
+`B-V` 1.4 is real quantisation in HYG's source catalogues rather than a rendering artifact.
+
+```bash
+awk -F',' 'NR==1{print "ci,absmag"; next} $10>0 && $10<100000 && $17!="" {print $17","$15}' \
+  assets/catalogs/hygdata_v42.csv > hr.csv
+
+cargo run -p em-plot --features cli -- hr.csv hr.png \
+  --x ci --y absmag --density --cmap magma --gamma 0.35 \
+  --invert-y --dark --width 1200 --height 900
+```
+
+It is kept here because it checks more than the plotter: the CSV path, axis inversion, and
+phase 4's catalogue filtering all have to be right for this shape to appear. The `dist`
+sentinel cut is what stops it being a smear.
+
 ## Crate placement
 
 | crate | depends on |
