@@ -12,6 +12,7 @@ pub mod body_material;
 pub mod body_point_material;
 pub mod encounter_marker_material;
 pub mod local_starfield_material;
+pub mod relativistic_starfield_material;
 pub mod render_space;
 
 pub use render_space::{ToRender, render_to_sim, sim_to_render};

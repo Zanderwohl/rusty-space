@@ -15,6 +15,7 @@ lc-spacetime = { path = "../lc-spacetime" }
 lc-world = { path = "../lc-world", default-features = false }
 bevy = "0.17.2"
 bevy_egui = "0.38.0"
+bevy_mesh = "0.17"
 glam = { version = "0.30", features = ["serde"] }
 
 [[bin]]

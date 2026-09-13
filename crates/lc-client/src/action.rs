@@ -43,6 +43,8 @@ pub enum Action {
     // --- flight -----------------------------------------------------------------------
     /// Cross to a star. `None` means whatever is selected.
     FlyTo(Option<StarId>),
+    /// Cross to the nearest star that is actually interstellar.
+    FlyToNearest,
     AbortFlight,
     /// Proper acceleration for the next crossing, in g.
     SetDriveAccel(f64),
@@ -64,6 +66,9 @@ pub enum Effect {
 
 /// Stops of exposure per keypress.
 pub const EXPOSURE_STEP: f32 = 0.5;
+
+/// Below this a "star" is the one the ship is already at, not a destination.
+pub const INTERSTELLAR_LY: f64 = 0.01;
 
 /// Radians per keypress of look.
 pub const LOOK_STEP: f64 = 0.05;
@@ -127,6 +132,22 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         },
 
         Action::FlyTo(id) => fly(ui, session, id, &mut effects),
+        Action::FlyToNearest => {
+            // Not simply the first: the catalogue carries the Sun at about an astronomical
+            // unit, and "nearest star" has to mean one worth crossing to.
+            let nearest = session
+                .stars
+                .iter()
+                .find(|s| session.distance_to(s) > INTERSTELLAR_LY)
+                .map(|s| s.id);
+            match nearest {
+                Some(id) => {
+                    apply_to(ui, session, Action::SelectTarget(Some(id)), &mut effects);
+                    fly(ui, session, Some(id), &mut effects);
+                }
+                None => effects.push(Effect::Notify("nothing interstellar in range".into())),
+            }
+        }
         Action::AbortFlight => {
             if session.cruise.is_some() {
                 session.abort_flight();
@@ -150,6 +171,11 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::WriteSnapshot => effects.push(Effect::WriteSnapshot),
     }
     effects
+}
+
+/// Run a nested action, keeping its effects. Only for actions composed of other actions.
+fn apply_to(ui: &mut UiState, session: &mut Session, action: Action, effects: &mut Vec<Effect>) {
+    effects.extend(apply(action, ui, session));
 }
 
 fn aim(ui: &UiState, session: &Session) -> Option<Look> {

@@ -100,9 +100,40 @@ plane, which at these scale ratios means z-fighting on everything past a planet.
 
 ## Star rendering
 
+![The sky at rest](../images/starfield.png)
+
 Stars are points with a physically-derived colour and brightness, not billboards with a
 fixed sprite. The existing path is `src/presentation/local_starfield*.rs` with
 `src/catalog/spectral_color.rs`, driven by the HYG catalogue.
+
+`em-render::relativistic_starfield_material` is the descendant that the game uses, with
+`crates/lc-client/assets/shaders/starfield.wgsl`. It keeps the technique — one mesh, four
+vertices per star, the quad expanded in the vertex stage, `w = 0` on the direction transform so
+the sky is translation-invariant, `clip.z = clip.w` for background depth — and changes what is
+baked.
+
+| | app starfield | game starfield |
+|---|---|---|
+| baked per star | linear RGB, brightness, size | temperature, radius, position |
+| derived per frame | nothing | direction, aberration, Doppler, bands, exposure, size |
+| brightness from | catalogue apparent magnitude | `L / d^2` through the band mapping |
+| positions | unit directions, fixed | light-years from a bake origin that follows the ship |
+
+The reason for the split is that the observer moves. Baking a colour is right when the only
+input is a catalogue magnitude and wrong when aberration, Doppler shift, the band matrix and the
+exposure all change while the ship flies: re-uploading four `vec4`s per star per frame does not
+scale to the target count, and computing them from a temperature costs nothing.
+
+The blackbody is a table — `log2` of band radiance against `log2` of temperature, 2048 samples
+by 7 bands, generated at startup by `em_spectra::blackbody`. That is what "the starfield and the
+science instrument must not be two implementations" reduces to in practice: one Planck integral,
+tabulated for the shader. The table spans 16 K to 4 million K because the lookup happens at the
+*shifted* temperature, and at the drive's 0.999c cap the shift factor is 44.7 in both
+directions.
+
+Positions are baked relative to an origin that follows the ship, with the ship's offset from
+that origin as a uniform, so the shader differences two small numbers instead of two
+interstellar ones. The mesh is rebuilt once per light-year of travel.
 
 For the game, the brightness fed to that shader is not the catalogue's apparent magnitude.
 It is `L(n, t_r) / d^2` from [04-stellar-photometry.md](04-stellar-photometry.md), evaluated
@@ -227,14 +258,28 @@ beaming:     bolometric intensity scales as D^4
 ```
 
 At `beta = 0.5`, a star 90 degrees off the bow appears at 60 degrees — the whole sky compresses
-forward. Head-on light is blueshifted by a factor of 1.73, so a 600 nm star arrives at 347 nm
-and leaves the visible band entirely; astern, 600 nm arrives at 1040 nm and leaves it the other
-way. Forward sources brighten by `D^4 = 9` bolometrically while disappearing from view.
+forward.
 
-So at high `beta` the sky is a dark forward cone, a dark aft cone, and a bright compressed ring
-between them. It is unusable for navigation, which is correct, and it is the most striking image
-the renderer can produce. Capturing a still from a ship in transit is worth making an explicit
-affordance.
+![The sky at 0.99c](../images/relativistic-sky.png)
+
+**The forward sky brightens without limit and never goes dark.** An earlier version of this
+document said otherwise — that head-on light blueshifts out of the visible band and forward
+sources vanish while brightening — and the renderer disproved it. That argument holds for a
+monochromatic source and a star is a continuum. The band an observer looks through is fed by
+whatever the star emitted at `lambda / D`, and a hot star has plenty there.
+
+Put exactly: a blackbody seen with Doppler factor `D` is a blackbody at `D T`, and
+`B_lambda(lambda, T)` is strictly increasing in `T` at fixed `lambda`. So every band brightens
+going forward, monotonically, forever. For a sun-like star the B band rises 11 times at
+`D = 1.73` and 193 times at `D = 6.4`.
+
+Astern the same identity runs the other way and the sky really does go out: at `D = 1/6.4` the
+B band is down by thirteen orders of magnitude.
+
+So at high `beta` the sky is **a brilliant blue disc ahead and darkness everywhere else** — not
+a ring. It is unusable for navigation, which is correct, and it is the most striking image the
+renderer can produce. Capturing a still from a ship in transit is worth making an explicit
+affordance; `--shot` does it.
 
 ## Checking a renderer without a window
 

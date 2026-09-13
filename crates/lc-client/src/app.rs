@@ -1,16 +1,21 @@
 //! The Bevy layer: states, resources, and the systems that carry actions.
 
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::math::DVec3;
+use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
+use bevy::render::view::Hdr;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 use lc_world::sky::{AuthoredStars, StarProvider};
 
+use em_render::relativistic_starfield_material::RelativisticStarfieldMaterialPlugin;
 use em_render::render_space::sim_to_render;
 
 use crate::action::{Action, Effect, apply, refresh_exposure};
 use crate::input::{Requested, look_around, read_keys};
 use crate::panels;
 use crate::session::Session;
+use crate::starfield::{spawn_sky, update_sky};
 use crate::ui::{Screen, UiState};
 
 /// Where the application is. Not what is on top of it: panels are a separate set, because
@@ -34,6 +39,22 @@ pub struct Game(pub Session);
 #[derive(Resource, Default)]
 pub struct Catalogue(pub Option<String>);
 
+/// Development entry: skip the menu, and optionally photograph the sky and quit.
+///
+/// The renderer's output is the one thing that cannot be asserted from a test, and a window
+/// nobody is looking at proves nothing. This makes the running client produce the same kind of
+/// artifact the headless snapshot does -- a PNG -- except through the actual pipeline.
+#[derive(Resource, Default)]
+pub struct DevEntry {
+    pub observe_immediately: bool,
+    pub screenshot: Option<String>,
+    /// Frames to let the sky settle before the shutter. Pipelines compile lazily.
+    pub after_frames: u32,
+    /// Run once on reaching the sky. Actions rather than flags, so a development entry can
+    /// reach anything the interface can and needs no plumbing of its own.
+    pub actions: Vec<Action>,
+}
+
 /// How many stars the session keeps.
 pub const SKY_LIMIT: usize = 6000;
 
@@ -41,18 +62,22 @@ pub struct ClientPlugin;
 
 impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(EguiPlugin::default())
+        app.add_plugins((EguiPlugin::default(), RelativisticStarfieldMaterialPlugin))
             .init_state::<AppState>()
             .add_message::<Requested>()
             .insert_resource(Ui(UiState::default()))
             .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
             .init_resource::<Catalogue>()
+            .init_resource::<DevEntry>()
             .add_systems(Startup, spawn_camera)
             .add_systems(OnEnter(AppState::Loading), load_world)
+            .add_systems(OnEnter(AppState::InGame), (spawn_sky, run_dev_actions))
+            .insert_resource(ClearColor(Color::BLACK))
             .add_systems(
                 Update,
                 (
                     boot.run_if(in_state(AppState::Boot)),
+                    photograph.run_if(in_state(AppState::InGame)),
                     (read_keys, look_around).run_if(in_state(AppState::InGame)),
                     dispatch,
                     // The clock is deliberately not gated on any panel or overlay. See
@@ -63,7 +88,7 @@ impl Plugin for ClientPlugin {
                 )
                     .chain(),
             )
-            .add_systems(Update, (aim_camera, draw_sky).chain().run_if(in_state(AppState::InGame)))
+            .add_systems(Update, (aim_camera, update_sky).chain().run_if(in_state(AppState::InGame)))
             .add_systems(
                 EguiPrimaryContextPass,
                 (
@@ -75,8 +100,19 @@ impl Plugin for ClientPlugin {
     }
 }
 
+/// The camera the sky is drawn for.
+///
+/// HDR with bloom is not decoration here: the tone map deliberately pushes anything above the
+/// displayed window past the knee, so overflow has to become a halo somewhere. `min_radius`
+/// keeps a faint star to a couple of pixels rather than letting bloom eat the field.
 fn spawn_camera(mut commands: Commands) {
-    commands.spawn((Camera3d::default(), Transform::from_xyz(0.0, 0.0, 0.0)));
+    commands.spawn((
+        Camera3d::default(),
+        Hdr,
+        Bloom::NATURAL,
+        Tonemapping::TonyMcMapface,
+        Transform::from_xyz(0.0, 0.0, 0.0),
+    ));
 }
 
 /// Point the camera where the interface says it is looking.
@@ -113,9 +149,40 @@ fn hold_exposure(ui: Res<Ui>, mut game: ResMut<Game>, mut last: Local<f64>) {
 const EXPOSURE_HOLD_STEP: f64 = 0.002;
 
 /// One frame of boot, so the window is up before anything slow happens.
-fn boot(mut next: ResMut<NextState<AppState>>, mut ui: ResMut<Ui>) {
+fn boot(mut next: ResMut<NextState<AppState>>, mut ui: ResMut<Ui>, dev: Res<DevEntry>) {
+    if dev.observe_immediately {
+        ui.screen = Screen::Loading;
+        next.set(AppState::Loading);
+        return;
+    }
     ui.screen = Screen::MainMenu;
     next.set(AppState::MainMenu);
+}
+
+fn run_dev_actions(dev: Res<DevEntry>, mut out: MessageWriter<Requested>) {
+    for action in &dev.actions {
+        out.write(Requested(action.clone()));
+    }
+}
+
+/// Photograph the sky through the real pipeline, then quit.
+fn photograph(
+    mut commands: Commands,
+    dev: Res<DevEntry>,
+    mut frames: Local<u32>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let Some(path) = &dev.screenshot else { return };
+    *frames += 1;
+    if *frames == dev.after_frames {
+        commands
+            .spawn(bevy::render::view::screenshot::Screenshot::primary_window())
+            .observe(bevy::render::view::screenshot::save_to_disk(path.clone()));
+    }
+    // The capture is asynchronous; quitting on the same frame loses the file.
+    if *frames > dev.after_frames + 30 {
+        exit.write(AppExit::Success);
+    }
 }
 
 fn load_world(
@@ -182,33 +249,6 @@ fn observe(ui: Res<Ui>, mut game: ResMut<Game>) {
     if ui.selected.is_some() {
         let integration = ui.integration_s;
         game.observe(integration);
-    }
-}
-
-/// Stars as gizmo points on a unit sphere around the camera.
-///
-/// Immediate mode for a first pass: no entities to manage, and the interesting part is
-/// whether the shading and the retarded-time evaluation reach the screen at all.
-fn draw_sky(mut gizmos: Gizmos, game: Res<Game>, camera: Query<&Transform, With<Camera3d>>) {
-    let Ok(view) = camera.single() else { return };
-    const RADIUS: f32 = 100.0;
-    for star in game.sky() {
-        let colour = crate::session::point_colour(&star.shaded);
-        if colour.length_squared() <= 0.0 {
-            continue;
-        }
-        // Aberrated, not true: this is where the ship sees it, which is not where it is.
-        let dir = sim_to_render(star.apparent_dir).as_vec3();
-        if dir.length_squared() <= 0.0 {
-            continue;
-        }
-        let at = view.translation + dir * RADIUS;
-        let size = crate::session::point_size(&star.shaded, 0.35);
-        gizmos.circle(
-            Isometry3d::new(at, Quat::from_rotation_arc(Vec3::Z, -dir)),
-            size,
-            Color::srgb(colour.x, colour.y, colour.z),
-        );
     }
 }
 

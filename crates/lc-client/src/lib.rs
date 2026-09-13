@@ -13,6 +13,7 @@ pub mod hud;
 pub mod input;
 pub mod panels;
 pub mod session;
+pub mod starfield;
 pub mod tonemap;
 pub mod ui;
 pub mod view;
