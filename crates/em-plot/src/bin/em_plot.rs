@@ -215,8 +215,9 @@ fn read_csv(path: &str, x: &str, ys: &[String], color_by: Option<&str>) -> Resul
             continue;
         }
         for (k, yi) in yis.iter().enumerate() {
-            if let Some(yv) = r.get(*yi).and_then(|v| v.trim().parse::<f64>().ok()) {
-                if xv.is_finite() && yv.is_finite() {
+            let yv = r.get(*yi).and_then(|v| v.trim().parse::<f64>().ok());
+            if let Some(yv) = yv.filter(|yv| xv.is_finite() && yv.is_finite()) {
+                {
                     series[k].push((xv, yv));
                     if let Some(c) = shade {
                         shades[k].push(c);
@@ -237,7 +238,10 @@ fn noise(i: u64) -> f64 {
     ((x >> 11) as f64 / (1u64 << 53) as f64) - 0.5
 }
 
-fn demo(name: &str) -> Result<(Vec<Vec<(f64, f64)>>, Vec<String>), String> {
+/// One or more series, with a name each.
+type Demo = (Vec<Vec<(f64, f64)>>, Vec<String>);
+
+fn demo(name: &str) -> Result<Demo, String> {
     match name {
         // Two million samples with a transit a few hundred wide: the case decimation exists
         // for, and the reason a chart of this is not a polyline through the samples.

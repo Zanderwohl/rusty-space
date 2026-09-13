@@ -92,7 +92,7 @@ impl Scale {
     pub fn ticks(&self, range: (f64, f64), target: usize) -> Vec<f64> {
         let (a, b) = self.valid_range(range);
         let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-        if !(hi > lo) || target == 0 {
+        if !crate::decimate::spans(lo, hi) || target == 0 {
             return Vec::new();
         }
         match self {
@@ -189,7 +189,7 @@ mod tests {
         let t = Scale::Linear.ticks((0.0, 10.0), 5);
         assert_eq!(t, vec![0.0, 2.0, 4.0, 6.0, 8.0, 10.0]);
         for v in Scale::Linear.ticks((3.7, 18.2), 4) {
-            assert!(v >= 3.7 && v <= 18.2 + 1e-9);
+            assert!((3.7..=18.2 + 1e-9).contains(&v));
         }
     }
 

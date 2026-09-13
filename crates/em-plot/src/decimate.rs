@@ -1,5 +1,14 @@
 //! Reducing more samples than there are pixels.
 
+/// True when a range spans a usable interval: ordered, and free of NaN.
+///
+/// Written as a comparison rather than `hi <= lo` because NaN must be rejected, and
+/// `NaN <= lo` is false — the negation is the point.
+#[inline]
+pub fn spans(lo: f64, hi: f64) -> bool {
+    hi > lo
+}
+
 /// A pixel column's vertical extent, in data units.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Column {
@@ -47,7 +56,7 @@ impl Envelope {
 /// comparison pair each.
 pub fn min_max(points: &[(f64, f64)], x_range: (f64, f64), width_px: u32) -> Envelope {
     let (x0, x1) = x_range;
-    if width_px == 0 || !(x1 > x0) {
+    if width_px == 0 || !spans(x0, x1) {
         return Envelope::default();
     }
     let width = width_px as usize;
@@ -74,7 +83,7 @@ pub fn min_max(points: &[(f64, f64)], x_range: (f64, f64), width_px: u32) -> Env
 /// Mean per column, for drawing a track through a dense envelope.
 pub fn means(points: &[(f64, f64)], x_range: (f64, f64), width_px: u32) -> Vec<(u32, f64)> {
     let (x0, x1) = x_range;
-    if width_px == 0 || !(x1 > x0) {
+    if width_px == 0 || !spans(x0, x1) {
         return Vec::new();
     }
     let width = width_px as usize;

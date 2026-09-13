@@ -13,6 +13,8 @@ pub enum ColorMap {
     Diverging,
 }
 
+// Sampled colour values, not approximations of anything; clippy reads 0.318 as 1/pi.
+#[allow(clippy::approx_constant)]
 const VIRIDIS: [[f32; 3]; 11] = [
     [0.267, 0.005, 0.329], [0.283, 0.141, 0.458], [0.254, 0.265, 0.530],
     [0.207, 0.372, 0.553], [0.164, 0.471, 0.558], [0.128, 0.567, 0.551],
@@ -20,6 +22,7 @@ const VIRIDIS: [[f32; 3]; 11] = [
     [0.741, 0.873, 0.150], [0.993, 0.906, 0.144],
 ];
 
+#[allow(clippy::approx_constant)]
 const MAGMA: [[f32; 3]; 11] = [
     [0.001, 0.000, 0.014], [0.071, 0.048, 0.184], [0.185, 0.068, 0.353],
     [0.316, 0.072, 0.485], [0.451, 0.122, 0.506], [0.584, 0.177, 0.491],
@@ -27,6 +30,7 @@ const MAGMA: [[f32; 3]; 11] = [
     [0.988, 0.653, 0.354], [0.987, 0.991, 0.750],
 ];
 
+#[allow(clippy::approx_constant)]
 const DIVERGING: [[f32; 3]; 5] = [
     [0.020, 0.188, 0.380], [0.404, 0.663, 0.812], [0.969, 0.969, 0.969],
     [0.839, 0.376, 0.302], [0.404, 0.000, 0.121],
@@ -58,7 +62,7 @@ impl ColorMap {
     /// Sample a value within a range.
     pub fn sample_in(&self, value: f64, range: (f64, f64)) -> Rgba {
         let (lo, hi) = range;
-        if !(hi > lo) {
+        if !crate::decimate::spans(lo, hi) {
             return self.sample(0.0);
         }
         self.sample((value - lo) / (hi - lo))
