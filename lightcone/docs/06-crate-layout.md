@@ -61,8 +61,37 @@ whether a module belongs: **does it know any game or TTRPG rule?** If not, it mo
 | `src/catalog/` | **no, revised** | see below |
 | `src/gui/` | no | egui panels encode Exotic Matters' workflows; the game needs different ones |
 
-Everything that moves keeps its public API and gains a `Plugin` per subsystem, so the app
-composes what it wants rather than getting an all-or-nothing plugin group.
+### What actually extracts: definitions, not systems
+
+Phase 5 measured the coupling and the split is not the one this table assumed. Counting
+`use crate::` per module in the app:
+
+| module | app imports | extracts |
+|---|---|---|
+| `render_space` | 0 | yes |
+| `body_material`, `body_point_material` | 0 | yes |
+| `local_starfield_material`, `encounter_marker_material` | 0 | yes |
+| `celestial_markers` | 3 | no |
+| `chain_path`, `body_mesh`, `encounter_marker` | 4 | no |
+| `local_starfield`, `labels`, `lights` | 5 | no |
+| `camera/planetarium` | 10 | no |
+
+**Materials and geometry have no app coupling at all. The Bevy systems that drive them are
+made of it.** Every system reaches for `crate::sim::world::{BodyRef, SimSystem}`,
+`crate::camera::PlanetariumCamera`, `crate::gui::settings::Settings`,
+`crate::body::universe::save::ViewSettings` or `crate::body::appearance::Appearance` — that
+is, for how *this* application happens to lay out its ECS.
+
+Moving them needs a contract for how a host exposes simulation state to the renderer, and
+that contract has exactly one caller. Designing it now would be guessing at what the second
+one needs, which is the mistake `StarProvider` avoided by shipping with two implementations.
+
+So `em-render` ships **definitions** — materials, meshes, and the render-space math — and
+each host writes its own systems against them. When `lc-client` exists there will be two sets
+of systems to compare, and the contract can be extracted from what they share rather than
+invented before either exists.
+
+Everything that moves keeps its public API, so no call site changes.
 
 ### `src/catalog/` does not move
 

@@ -178,9 +178,16 @@ every system.
 **Deliver:** the five-step extraction in [06-crate-layout.md](06-crate-layout.md), and
 `em-plot` core with min/max decimation, scales, colour maps and an SVG test backend.
 
+**Revised during the phase.** The five-step list assumed materials, meshes, cameras, markers
+and paths all extract. Measuring the coupling showed they do not: material and geometry
+definitions have zero app imports, and every Bevy *system* has three to ten, because each one
+knows how this application lays out its ECS. `em-render` therefore ships definitions and each
+host writes its own systems; the contract between them waits for `lc-client` to exist so it
+has two callers to be shaped by. See [06-crate-layout.md](06-crate-layout.md).
+
 **Done when:**
 
-- Exotic Matters builds and runs unchanged after every one of the five extraction commits.
+- Exotic Matters builds and runs unchanged after every extraction commit.
 - `em-render` contains no game or TTRPG rule.
 - A two-million-sample curve renders into 800 pixels with the envelope preserved, verified
   against a reference SVG, and a one-sample-wide transit survives every zoom level.

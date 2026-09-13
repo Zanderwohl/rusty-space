@@ -2688,6 +2688,7 @@ name = "em-render"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_mesh",
  "em-foundations",
  "em-sim",
 ]

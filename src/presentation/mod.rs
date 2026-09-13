@@ -3,23 +3,22 @@
 //! This module handles the visual representation of simulation entities,
 //! separate from the GUI (egui panels) and the simulation logic itself.
 
-mod body_material;
 mod body_mesh;
 mod body_point;
-mod body_point_material;
 mod celestial_markers;
 mod lights;
-// Extracted to `em-render`; re-exported so `crate::presentation::render_space` still
-// resolves. It remains the only place the Z-up to Y-up conversion happens.
-pub use em_render::render_space;
+// Extracted to `em-render`; re-exported so existing paths still resolve. `render_space`
+// remains the only place the Z-up to Y-up conversion happens.
+pub use em_render::{
+    body_material, body_point_material, encounter_marker_material, local_starfield_material,
+    render_space,
+};
 
 mod labels;
 mod local_starfield;
-mod local_starfield_material;
 mod rotation;
 mod chain_path;
 mod encounter_marker;
-mod encounter_marker_material;
 mod soi;
 mod soi_material;
 mod star_cache;
