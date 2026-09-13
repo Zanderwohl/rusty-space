@@ -67,6 +67,13 @@ impl SystemFrame {
         Instant::from_seconds_since_j2000((t - self.origin.t).as_seconds())
     }
 
+    /// Coordinate time as seconds from this system's epoch, for a time that need not land on
+    /// the microsecond grid — a retarded-time solve does not.
+    #[inline]
+    pub fn local_seconds(&self, t_micros: f64) -> f64 {
+        (t_micros - self.origin.t.get() as f64) * 1e-6
+    }
+
     /// Inverse of [`SystemFrame::propagation_time`].
     #[inline]
     pub fn coordinate_time(&self, instant: Instant) -> Micros {
@@ -126,6 +133,15 @@ mod tests {
             let t = f.origin.t + Span::from_seconds(offset_s);
             assert_eq!(f.coordinate_time(f.propagation_time(t)), t);
         }
+    }
+
+    #[test]
+    fn local_seconds_agrees_with_the_instant_conversion() {
+        let f = frame();
+        let t = f.origin.t + Span::from_seconds(7);
+        let via_f64 = f.local_seconds(t.get() as f64);
+        assert!((via_f64 - f.propagation_time(t).to_j2000_seconds()).abs() < 1e-12);
+        assert!((f.local_seconds(f.origin.t.get() as f64 + 0.5) - 5e-7).abs() < 1e-18);
     }
 
     #[test]

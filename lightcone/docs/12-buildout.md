@@ -123,10 +123,22 @@ apertures and band masks, photon noise from a seeded generator, the received lig
 4. Change the swarm at time `T`. The observer's curve is unchanged until `T + 30 years` and
    changes after.
 5. An observer with a V-only instrument cannot distinguish the swarm from a dust cloud of the
-   same optical depth. One with B/V/R/I usually can, and fails for a red star. One with K can.
+   same optical depth. One with two bands can.
 
 If step 4 or step 5 will not pass, the design is wrong and this is where it is cheapest to find
 out.
+
+Step 5 was originally written as "B/V/R/I usually can, and fails for a red star; one with K
+can", and both halves were wrong. Phase 1b measured that K does not rescue the blind zone, and
+phase 3 found that the step conflates two different measurements:
+
+| measurement | what breaks the ambiguity |
+|---|---|
+| the occultation **varies**, so there is an unobscured baseline | the deficit *ratio* between any two bands: 1.0 for a solid occulter, 1.32 in `B/V` for dust. One band cannot form a ratio at any exposure; two can, and no locus is involved |
+| the obscuration is **steady**, so there is no baseline | the stellar-locus degeneracy, which has a blind zone at late K to early M that more bands do not fix |
+
+Both are real and they are different problems. The first is the phase 3 test; the second lives
+in `em_spectra::extinction` and was settled in phase 1b.
 
 **Do not:** render, network, or persist. Everything here is a function call.
 

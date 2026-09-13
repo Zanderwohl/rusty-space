@@ -9,6 +9,8 @@
 pub mod distribution;
 pub mod emission;
 pub mod flicker;
+pub mod instrument;
+pub mod observation;
 pub mod occluder;
 pub mod population;
 pub mod rng;
@@ -18,6 +20,8 @@ pub mod star;
 pub use distribution::{Distribution, Inclination};
 pub use emission::{Body, EmissionModel, invert_moments};
 pub use flicker::{Flicker, Regime};
+pub use instrument::{Instrument, SurveyRegime};
+pub use observation::{Observation, Target, observe};
 pub use occluder::{Occluder, transit_depth};
 pub use population::Population;
 pub use shell::{Shell, ShellSample};
