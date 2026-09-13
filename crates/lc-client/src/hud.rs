@@ -60,7 +60,7 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
         }),
         // The time rate is a development control and the server owns it; say so on screen
         // rather than letting a fast clock look normal.
-        warning: (ui.time_rate != 1.0).then(|| format!("clock at {:.0}x", ui.time_rate)),
+        warning: (ui.time_rate != 1.0).then(|| crate::ui::rate_label(ui.time_rate)),
     }
 }
 
@@ -122,9 +122,9 @@ mod tests {
     #[test]
     fn a_non_canonical_clock_rate_is_announced() {
         let (mut ui, mut s) = fixture();
-        assert!(lines(&s, &ui).warning.unwrap().contains("60"), "the test rate must be flagged");
+        assert_eq!(lines(&s, &ui).warning.unwrap(), "1 year / minute", "the test rate must be flagged");
         apply(Action::SetTimeRate(64.0), &mut ui, &mut s);
-        assert!(lines(&s, &ui).warning.unwrap().contains("64"));
+        assert!(lines(&s, &ui).warning.unwrap().contains("64"), "and so must one off the ladder");
         apply(Action::SetTimeRate(1.0), &mut ui, &mut s);
         assert!(lines(&s, &ui).warning.is_none(), "the canonical rate needs no warning");
     }

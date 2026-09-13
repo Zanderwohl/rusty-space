@@ -152,11 +152,13 @@ fn debug(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Req
     ui.separator();
 
     ui.label("clock rate (development only; the server owns this)");
-    for rate in [0.0, 1.0, 60.0, 3600.0] {
-        if ui.button(format!("{rate}x")).clicked() {
+    ui.label(crate::ui::rate_label(state.time_rate));
+    for (rate, name) in crate::ui::RATE_LADDER {
+        if ui.selectable_label(state.time_rate == rate, name).clicked() {
             ask(out, Action::SetTimeRate(rate));
         }
     }
+    ui.weak("or , and . while flying");
     ui.separator();
 
     if cfg!(feature = "godview") {

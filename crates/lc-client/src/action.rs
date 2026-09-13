@@ -52,6 +52,9 @@ pub enum Action {
     // --- development ------------------------------------------------------------------
     ToggleGodView,
     SetTimeRate(f64),
+    /// Step one rung along [`crate::ui::RATE_LADDER`].
+    TimeRateUp,
+    TimeRateDown,
     WriteSnapshot,
 }
 
@@ -168,6 +171,10 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             }
         }
         Action::SetTimeRate(rate) => ui.time_rate = rate.max(0.0),
+        Action::TimeRateUp | Action::TimeRateDown => {
+            ui.time_rate = crate::ui::rate_step(ui.time_rate, action == Action::TimeRateUp);
+            effects.push(Effect::Notify(format!("clock: {}", crate::ui::rate_label(ui.time_rate))));
+        }
         Action::WriteSnapshot => effects.push(Effect::WriteSnapshot),
     }
     effects
@@ -244,6 +251,7 @@ mod tests {
     use lc_world::sky::AuthoredStars;
 
     use super::*;
+    use crate::ui::{RATE_LADDER, rate_label};
 
     fn fixture() -> (UiState, Session) {
         (UiState::default(), Session::new(&AuthoredStars::sample(), 3))
@@ -478,5 +486,46 @@ mod tests {
         apply(Action::SetDriveAccel(50.0), &mut ui, &mut s);
         apply(Action::FlyTo(Some(id)), &mut ui, &mut s);
         assert!(s.cruise.as_ref().unwrap().duration_s() < slow);
+    }
+
+    #[test]
+    fn the_clock_steps_along_the_ladder_and_stops_at_the_ends() {
+        let (mut ui, mut s) = fixture();
+        apply(Action::SetTimeRate(RATE_LADDER[0].0), &mut ui, &mut s);
+        apply(Action::TimeRateDown, &mut ui, &mut s);
+        assert_eq!(ui.time_rate, RATE_LADDER[0].0, "the bottom rung is the bottom");
+        for _ in 0..20 {
+            apply(Action::TimeRateUp, &mut ui, &mut s);
+        }
+        assert_eq!(ui.time_rate, RATE_LADDER[RATE_LADDER.len() - 1].0, "and the top is the top");
+    }
+
+    #[test]
+    fn stepping_from_a_rate_off_the_ladder_still_moves_the_right_way() {
+        let (mut ui, mut s) = fixture();
+        apply(Action::SetTimeRate(200.0), &mut ui, &mut s);
+        apply(Action::TimeRateUp, &mut ui, &mut s);
+        assert!(ui.time_rate > 200.0, "went to {}", ui.time_rate);
+        apply(Action::SetTimeRate(200.0), &mut ui, &mut s);
+        apply(Action::TimeRateDown, &mut ui, &mut s);
+        assert!(ui.time_rate < 200.0, "went to {}", ui.time_rate);
+    }
+
+    /// Every rung has to be reachable by stepping, or a key cannot get to it.
+    #[test]
+    fn every_rung_is_reachable_by_stepping_up_from_the_bottom() {
+        let (mut ui, mut s) = fixture();
+        apply(Action::SetTimeRate(RATE_LADDER[0].0), &mut ui, &mut s);
+        for (rate, _) in RATE_LADDER.iter().skip(1) {
+            apply(Action::TimeRateUp, &mut ui, &mut s);
+            assert_eq!(ui.time_rate, *rate, "the ladder skipped a rung");
+        }
+    }
+
+    #[test]
+    fn a_rate_is_named_by_what_it_feels_like() {
+        assert_eq!(rate_label(60.0), "1 year / minute");
+        assert_eq!(rate_label(360.0), "1 year / 10 s");
+        assert!(rate_label(123.0).contains("123"), "an unnamed rate still reads");
     }
 }

@@ -162,6 +162,47 @@ from a test.
 `lc-client` does not share the Exotic Matters `src/gui/style.rs`. Phase 5 established that the
 GUI does not extract, and the two products want different looks.
 
+## Running it
+
+```bash
+cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv
+```
+
+Omit the path for the three authored sample stars.
+
+| key | does |
+|---|---|
+| `Esc` | close the top panel, then the menu |
+| `T` `Y` `F` `F3` | telescope, system, flight, debug |
+| arrows, right-drag | look |
+| `L` | look at the selection |
+| `G` `X` | cross to the selection, cut the drive |
+| `1`–`6` | band presets |
+| `[` `]` `\` | exposure down, up, auto |
+| `,` `.` | clock rate down, up along the ladder |
+
+The clock rate is a development control and the server owns it in a real session. It is
+labelled by period rather than by factor — `1 year / 10 s`, not `360x` — because a factor is
+not something anyone can feel, and the head-up display flags any rate off the design one so a
+fast clock never looks normal.
+
+### Development flags
+
+| flag | does |
+|---|---|
+| `--observe` | skip the menu and start in the sky |
+| `--shot <path>` | photograph the sky through the real pipeline, then quit |
+| `--fly` | cross to the nearest interstellar star |
+| `--band <n>` | band preset |
+| `--rate <n>` | clock multiplier against one year per hour: `360` is a year per ten seconds |
+| `--frames <n>` | frames before the shutter |
+
+These emit [`Action`]s rather than opening a second path into the client, so they can only do
+what the interface can do. `--shot` exists because WGSL cannot be asserted from a test and a
+window nobody is watching proves nothing; both images in
+[07-rendering.md](07-rendering.md) were taken with it. `--rate` without `--shot` is the screen
+recording setup.
+
 ## Not in this phase
 
 WASM, networking, and God view in any shipped build. The last is compiled out from the start

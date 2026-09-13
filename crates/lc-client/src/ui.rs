@@ -102,6 +102,40 @@ pub struct Notification {
 /// How many notifications are kept. Older ones fall off rather than accumulating.
 pub const NOTIFICATION_LIMIT: usize = 6;
 
+/// Clock multipliers a development build offers, and what each one means to watch.
+///
+/// The multiplier is against the design rate of one Julian year per real hour, so 60 is a year
+/// a minute. Labelled by period rather than by factor because a factor is not something anyone
+/// can feel, and these exist to be chosen by eye — a crossing to Proxima takes four and a half
+/// hours at 1x, four and a half minutes at 60x, and forty-five seconds at 360x.
+pub const RATE_LADDER: [(f64, &str); 6] = [
+    (0.0, "stopped"),
+    (1.0, "1 year / hour"),
+    (6.0, "1 year / 10 min"),
+    (60.0, "1 year / minute"),
+    (360.0, "1 year / 10 s"),
+    (3600.0, "1 year / second"),
+];
+
+/// The ladder's name for a rate, or the bare factor for one set from outside it.
+pub fn rate_label(rate: f64) -> String {
+    match RATE_LADDER.iter().find(|(r, _)| (r - rate).abs() < 1e-9) {
+        Some((_, name)) => (*name).to_string(),
+        None => format!("{rate:.0}x the design rate"),
+    }
+}
+
+/// The next rung up or down from `rate`, saturating at the ends.
+pub fn rate_step(rate: f64, up: bool) -> f64 {
+    let at = RATE_LADDER
+        .iter()
+        .position(|(r, _)| (r - rate).abs() < 1e-9)
+        // A rate from outside the ladder steps to the nearest rung that moves the right way.
+        .unwrap_or_else(|| RATE_LADDER.iter().filter(|(r, _)| *r < rate).count().saturating_sub(1));
+    let next = if up { at + 1 } else { at.saturating_sub(1) };
+    RATE_LADDER[next.min(RATE_LADDER.len() - 1)].0
+}
+
 /// Development default for the clock multiplier: a Julian year a minute rather than an hour.
 ///
 /// A four light-year crossing then takes four minutes of real time instead of four hours,

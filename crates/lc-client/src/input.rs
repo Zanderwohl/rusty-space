@@ -33,6 +33,8 @@ pub fn bindings() -> Vec<(KeyCode, Action)> {
         (KeyCode::KeyG, Action::FlyTo(None)),
         (KeyCode::KeyX, Action::AbortFlight),
         (KeyCode::KeyL, Action::LookAtSelected),
+        (KeyCode::Period, Action::TimeRateUp),
+        (KeyCode::Comma, Action::TimeRateDown),
     ]
 }
 
