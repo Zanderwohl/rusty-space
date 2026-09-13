@@ -3,7 +3,28 @@
 use tiny_skia::{Color, LineCap, Paint, PathBuilder, Pixmap, PremultipliedColorU8, Stroke, Transform};
 
 use crate::font::{GLYPH_H, GLYPH_W, glyph};
-use crate::primitives::{Anchor, Primitives, Rgba};
+use crate::primitives::{Anchor, Primitives, Rgba, TextMetrics};
+
+/// Text measurement that matches what [`render`] actually draws.
+///
+/// The generic `Monospace` estimate does not: this font steps by whole pixels, so at size 13
+/// it advances 12 px per character where a 0.6 ratio predicts 7.8. Laying out against the
+/// estimate and drawing with the font puts the leading digits of an axis label off the edge
+/// of the image. A backend that draws text should supply the metrics for it.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BitmapMetrics;
+
+/// Integer scale factor this font uses at a requested size.
+pub fn glyph_scale(size: f32) -> i32 {
+    ((size / GLYPH_H as f32).round() as i32).max(1)
+}
+
+impl TextMetrics for BitmapMetrics {
+    fn measure(&self, text: &str, size: f32) -> (f32, f32) {
+        let scale = glyph_scale(size) as f32;
+        (text.chars().count() as f32 * (GLYPH_W as f32 + 1.0) * scale, GLYPH_H as f32 * scale)
+    }
+}
 
 /// Blend an axis-aligned rectangle straight into the pixels, with edge coverage.
 ///
@@ -177,6 +198,40 @@ mod tests {
         fill_quad(&mut pm, 2.0, 2.0, 6.0, 6.0, faint);
         let twice = pm.pixels()[3 * 8 + 3].red();
         assert!(once < before && twice < once, "{before} -> {once} -> {twice}");
+    }
+
+    #[test]
+    fn the_metrics_match_what_the_font_draws() {
+        let m = BitmapMetrics;
+        for size in [8.0f32, 13.0, 20.0, 32.0] {
+            let scale = glyph_scale(size);
+            let (w, h) = m.measure("12345", size);
+            assert_eq!(w, 5.0 * (GLYPH_W as f32 + 1.0) * scale as f32);
+            assert_eq!(h, GLYPH_H as f32 * scale as f32);
+        }
+        // The generic estimate is the one that was wrong.
+        let generic = crate::primitives::Monospace::default().measure("0.9999982", 13.0).0;
+        let actual = m.measure("0.9999982", 13.0).0;
+        assert!(actual > generic, "{actual} vs the estimate {generic}");
+    }
+
+    #[test]
+    fn a_measured_label_fits_the_space_it_asked_for() {
+        let m = BitmapMetrics;
+        let text = "0.9999982";
+        let (w, _) = m.measure(text, 13.0);
+        let mut pm = Pixmap::new((w.ceil() as u32) + 2, 24).unwrap();
+        pm.fill(Color::WHITE);
+        // Anchored at the right edge of exactly the measured width: nothing should be cut.
+        super::text(&mut pm, (w + 1.0, 20.0), text, 13.0, Anchor::End, Rgba::BLACK);
+        let leftmost = pm
+            .pixels()
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.red() < 128)
+            .map(|(i, _)| i as u32 % pm.width())
+            .min();
+        assert!(leftmost.is_some_and(|x| x >= 1), "the label overflowed its measured width");
     }
 
     #[test]

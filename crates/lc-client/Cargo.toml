@@ -1,0 +1,28 @@
+[package]
+name = "lc-client"
+version = "0.1.0"
+edition = "2024"
+description = "The Lightcone client: single process, no server, no network."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[dependencies]
+em-plot = { path = "../em-plot", features = ["raster"] }
+em-render = { path = "../em-render" }
+em-spectra = { path = "../em-spectra" }
+em-sim = { path = "../em-sim", features = ["bevy"] }
+lc-spacetime = { path = "../lc-spacetime" }
+lc-world = { path = "../lc-world" }
+bevy = "0.17.2"
+glam = { version = "0.30", features = ["serde"] }
+
+[[bin]]
+name = "snapshot"
+path = "src/bin/snapshot.rs"
+
+[features]
+default = []
+# Development only, and absent from any shipped build. Compiling it out is about binary size
+# and about not handing anyone the client half of the mechanism; the server gate is what
+# actually enforces it.
+godview = []

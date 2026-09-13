@@ -236,6 +236,24 @@ between them. It is unusable for navigation, which is correct, and it is the mos
 the renderer can produce. Capturing a still from a ship in transit is worth making an explicit
 affordance.
 
+## Checking a renderer without a window
+
+![Observer snapshot](../images/observer-snapshot.png)
+
+The client's session state drawn straight to a PNG by `em-plot`: four thousand catalogue
+stars shaded through the current band mapping, and the light curve the telescope has
+accumulated. The galactic plane is visible as the band across the sky map, star colours come
+from their own temperatures, and the curve is labelled with what it actually is — light from
+Proxima that left 4.2 years ago, plotted against **emission** time rather than arrival.
+
+```bash
+cargo run -p lc-client --bin snapshot -- snap.png assets/catalogs/hygdata_v42.csv
+```
+
+A window is the obvious way to check a renderer and it is not the only one. Anything that
+decides *what* to draw can be exercised headlessly, and separating that from the drawing is
+what phase 5 found a renderer needs anyway.
+
 ## Bands and the display mapping
 
 The renderer computes radiance in the seven bands of
@@ -344,6 +362,20 @@ end of the lighting calculation, never in the middle.**
 ## Tone mapping
 
 **Decided: 2-3 stops of displayed luminance, with everything above that driving glow.**
+
+Two things that only became clear once it was implemented:
+
+- **The window has no absolute reference; it has to be placed by the scene.** A star's band
+  radiance at interstellar range is of order 1e-10 in SI units, so any fixed reference is
+  thirty stops out and the picture is uniformly black or white. Exposure is set from a high
+  percentile of the sky rather than its maximum, because one star can be arbitrarily nearer
+  than the rest — the catalogue puts the Sun about an astronomical unit away, and it outshines
+  a star four light-years off by some thirty-six stops. Letting the brightest couple of percent
+  clip is what a star map does anyway, and it is why daylight hides the sky.
+- **Below the window, a point source is small rather than black.** The two-or-three-stop
+  window is for surface brightness. A star field spans far more than that, so a shaded value
+  carries its true signed offset from the reference, and the renderer maps that to size across
+  about fourteen stops while colour stays inside the window.
 
 Physical flux in this game spans something like sixty stops, from a star at 1 AU to the
 faintest thing worth drawing. No tone curve maps that to a display. The mapping is therefore
