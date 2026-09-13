@@ -86,8 +86,12 @@ impl Scale {
     }
 
     /// Tick positions across `range`, at most `target` of them.
+    ///
+    /// A reversed range is legitimate and common — a magnitude axis runs backwards, because
+    /// brighter is a smaller number — so ticks are chosen on the sorted span.
     pub fn ticks(&self, range: (f64, f64), target: usize) -> Vec<f64> {
-        let (lo, hi) = self.valid_range(range);
+        let (a, b) = self.valid_range(range);
+        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
         if !(hi > lo) || target == 0 {
             return Vec::new();
         }
@@ -231,9 +235,24 @@ mod tests {
     }
 
     #[test]
+    fn a_reversed_axis_inverts_the_mapping_and_keeps_its_ticks() {
+        // Absolute magnitude: brighter is smaller, so the axis runs the other way.
+        let range = (16.0, -6.0);
+        let s = Scale::Linear;
+        assert!((s.normalise(16.0, range)).abs() < 1e-12, "the faint end is at the bottom");
+        assert!((s.normalise(-6.0, range) - 1.0).abs() < 1e-12);
+        assert!(s.normalise(0.0, range) > s.normalise(10.0, range));
+        let ticks = s.ticks(range, 6);
+        assert!(!ticks.is_empty(), "a reversed range still has ticks");
+        assert!(ticks.iter().all(|v| *v >= -6.0 && *v <= 16.0));
+        assert!((s.denormalise(s.normalise(4.0, range), range) - 4.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn degenerate_ranges_give_no_ticks() {
-        assert!(Scale::Linear.ticks((1.0, 1.0), 5).is_empty());
-        assert!(Scale::Linear.ticks((5.0, 1.0), 5).is_empty());
-        assert!(Scale::Linear.ticks((0.0, 1.0), 0).is_empty());
+        assert!(Scale::Linear.ticks((1.0, 1.0), 5).is_empty(), "a range of zero width");
+        assert!(Scale::Linear.ticks((0.0, 1.0), 0).is_empty(), "no ticks requested");
+        // A reversed range is not degenerate; it is an inverted axis.
+        assert!(!Scale::Linear.ticks((5.0, 1.0), 5).is_empty());
     }
 }

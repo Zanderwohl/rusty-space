@@ -20,7 +20,7 @@ pub mod scale;
 pub mod raster;
 pub mod svg;
 
-pub use chart::{Axis, Chart, Rect};
+pub use chart::{Axis, Chart, Marker, Rect};
 pub use colormap::ColorMap;
 pub use decimate::{Envelope, min_max};
 pub use primitives::{Monospace, Primitives, TextMetrics};

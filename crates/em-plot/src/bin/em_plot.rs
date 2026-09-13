@@ -4,7 +4,8 @@
 
 use std::process::ExitCode;
 
-use em_plot::chart::{Axis, Chart, Rect, Style};
+use em_plot::chart::{Axis, Chart, Marker, Rect, Style};
+use em_plot::colormap::ColorMap;
 use em_plot::primitives::{Anchor, Label, Monospace, Point, Primitives, Rgba};
 use em_plot::scale::Scale;
 use em_plot::{raster, svg};
@@ -28,6 +29,15 @@ Options
   --ylabel <text>
   --dark           light on dark
   --svg            also write <output>.svg
+  --scatter        draw marks instead of a line
+  --density        bin to cells and colour by count; for very dense scatters
+  --size <px>      marker or cell size                        (default 2)
+  --alpha <a>      marker opacity                             (default 0.5)
+  --color-by <col> colour marks by a third column
+  --cmap <name>    viridis | magma | diverging                (default viridis)
+  --gamma <g>      density contrast, below 1 lifts sparse cells (default 0.45)
+  --invert-x       run the x axis backwards
+  --invert-y       run the y axis backwards (magnitudes do)
   --demo <name>    transit | flicker | periodogram | list
 ";
 
@@ -46,6 +56,15 @@ struct Options {
     ylabel: Option<String>,
     dark: bool,
     svg: bool,
+    scatter: bool,
+    density: bool,
+    size: f32,
+    alpha: f32,
+    color_by: Option<String>,
+    cmap: ColorMap,
+    gamma: f64,
+    invert_x: bool,
+    invert_y: bool,
 }
 
 fn main() -> ExitCode {
@@ -79,6 +98,15 @@ fn parse_args() -> Result<Options, String> {
         ylabel: None,
         dark: false,
         svg: false,
+        scatter: false,
+        density: false,
+        size: 2.0,
+        alpha: 0.5,
+        color_by: None,
+        cmap: ColorMap::Viridis,
+        gamma: 0.45,
+        invert_x: false,
+        invert_y: false,
     };
     while let Some(a) = args.next() {
         let mut want = |flag: &str| -> Result<String, String> {
@@ -102,6 +130,25 @@ fn parse_args() -> Result<Options, String> {
             "--dark" => o.dark = true,
             "--svg" => o.svg = true,
             "--demo" => o.demo = Some(want("--demo")?),
+            "--scatter" => o.scatter = true,
+            "--density" => {
+                o.density = true;
+                o.scatter = true;
+            }
+            "--size" => o.size = want("--size")?.parse().map_err(|_| "bad --size")?,
+            "--alpha" => o.alpha = want("--alpha")?.parse().map_err(|_| "bad --alpha")?,
+            "--color-by" => o.color_by = Some(want("--color-by")?),
+            "--gamma" => o.gamma = want("--gamma")?.parse().map_err(|_| "bad --gamma")?,
+            "--invert-x" => o.invert_x = true,
+            "--invert-y" => o.invert_y = true,
+            "--cmap" => {
+                o.cmap = match want("--cmap")?.as_str() {
+                    "viridis" => ColorMap::Viridis,
+                    "magma" => ColorMap::Magma,
+                    "diverging" => ColorMap::Diverging,
+                    other => return Err(format!("unknown colour map {other:?}")),
+                }
+            }
             other if other.starts_with("--") => return Err(format!("unknown option {other}")),
             other => positional.push(other.to_string()),
         }
@@ -121,14 +168,18 @@ fn parse_args() -> Result<Options, String> {
 
 fn run() -> Result<String, String> {
     let o = parse_args()?;
-    let (series, names) = match &o.demo {
-        Some(name) => demo(name)?,
-        None => read_csv(o.input.as_ref().unwrap(), &o.x, &o.ys)?,
+    let (series, names, shades) = match &o.demo {
+        Some(name) => {
+            let (s, n) = demo(name)?;
+            let empty = vec![Vec::new(); s.len()];
+            (s, n, empty)
+        }
+        None => read_csv(o.input.as_ref().unwrap(), &o.x, &o.ys, o.color_by.as_deref())?,
     };
     if series.iter().all(|s| s.is_empty()) {
         return Err("no finite points to plot".into());
     }
-    draw(&o, &series, &names)
+    draw(&o, &series, &names, &shades)
 }
 
 /// Column by header name, else by index.
@@ -139,7 +190,9 @@ fn column(headers: &csv::StringRecord, key: &str) -> Result<usize, String> {
     key.parse::<usize>().map_err(|_| format!("no column {key:?}"))
 }
 
-fn read_csv(path: &str, x: &str, ys: &[String]) -> Result<(Vec<Vec<(f64, f64)>>, Vec<String>), String> {
+type Series = (Vec<Vec<(f64, f64)>>, Vec<String>, Vec<Vec<f64>>);
+
+fn read_csv(path: &str, x: &str, ys: &[String], color_by: Option<&str>) -> Result<Series, String> {
     let mut reader = csv::Reader::from_path(path).map_err(|e| format!("{path}: {e}"))?;
     let headers = reader.headers().map_err(|e| e.to_string())?.clone();
     let xi = column(&headers, x)?;
@@ -149,19 +202,30 @@ fn read_csv(path: &str, x: &str, ys: &[String]) -> Result<(Vec<Vec<(f64, f64)>>,
         .map(|i| headers.get(*i).map(str::to_owned).unwrap_or_else(|| format!("col {i}")))
         .collect();
 
+    let ci = color_by.map(|c| column(&headers, c)).transpose()?;
+
     let mut series = vec![Vec::new(); yis.len()];
+    let mut shades = vec![Vec::new(); yis.len()];
     for record in reader.records() {
         let r = record.map_err(|e| e.to_string())?;
         let Some(xv) = r.get(xi).and_then(|v| v.trim().parse::<f64>().ok()) else { continue };
+        let shade = ci.and_then(|i| r.get(i)).and_then(|v| v.trim().parse::<f64>().ok());
+        // A row missing its colour value is dropped rather than shaded arbitrarily.
+        if ci.is_some() && shade.is_none() {
+            continue;
+        }
         for (k, yi) in yis.iter().enumerate() {
             if let Some(yv) = r.get(*yi).and_then(|v| v.trim().parse::<f64>().ok()) {
                 if xv.is_finite() && yv.is_finite() {
                     series[k].push((xv, yv));
+                    if let Some(c) = shade {
+                        shades[k].push(c);
+                    }
                 }
             }
         }
     }
-    Ok((series, names))
+    Ok((series, names, shades))
 }
 
 /// Deterministic pseudo-noise, so a demo looks the same every run.
@@ -251,8 +315,19 @@ const PALETTE: [Rgba; 4] = [
     Rgba::opaque(0.78, 0.36, 0.68),
 ];
 
-fn draw(o: &Options, series: &[Vec<(f64, f64)>], names: &[String]) -> Result<String, String> {
-    let (xr, yr) = bounds(series, o.x_scale, o.y_scale);
+fn draw(
+    o: &Options,
+    series: &[Vec<(f64, f64)>],
+    names: &[String],
+    shades: &[Vec<f64>],
+) -> Result<String, String> {
+    let (mut xr, mut yr) = bounds(series, o.x_scale, o.y_scale);
+    if o.invert_x {
+        xr = (xr.1, xr.0);
+    }
+    if o.invert_y {
+        yr = (yr.1, yr.0);
+    }
     let metrics = Monospace::default();
     let (fg, bg) = if o.dark {
         (Rgba::opaque(0.86, 0.88, 0.92), Rgba::opaque(0.09, 0.10, 0.13))
@@ -281,11 +356,34 @@ fn draw(o: &Options, series: &[Vec<(f64, f64)>], names: &[String]) -> Result<Str
     let mut legend = Primitives::default();
     for (k, s) in series.iter().enumerate() {
         let colour = PALETTE[k % PALETTE.len()];
-        // The envelope carries the extremes; at these densities it is a solid block, so it
-        // goes in faint and the mean track goes over it.
-        chart.style.series = Rgba(colour.0, colour.1, colour.2, 0.35);
-        layers.push(chart.series(s));
-        layers.push(chart.mean_track(s, colour));
+        if o.density {
+            layers.push(chart.density(s, o.size, o.cmap, o.gamma));
+        } else if o.scatter {
+            let shade = shades.get(k).filter(|v| v.len() == s.len());
+            match shade {
+                Some(values) => {
+                    let range = values.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |r, v| {
+                        (r.0.min(*v), r.1.max(*v))
+                    });
+                    let cmap = o.cmap;
+                    let alpha = o.alpha;
+                    layers.push(chart.scatter_with(s, o.size, |i, _| {
+                        let c = cmap.sample_in(values[i], range);
+                        Rgba(c.0, c.1, c.2, alpha)
+                    }));
+                }
+                None => layers.push(chart.scatter(
+                    s,
+                    Marker::new(o.size, Rgba(colour.0, colour.1, colour.2, o.alpha)),
+                )),
+            }
+        } else {
+            // The envelope carries the extremes; at these densities it is a solid block, so
+            // it goes in faint and the mean track goes over it.
+            chart.style.series = Rgba(colour.0, colour.1, colour.2, 0.35);
+            layers.push(chart.series(s));
+            layers.push(chart.mean_track(s, colour));
+        }
         if series.len() > 1 {
             legend.labels.push(Label {
                 at: Point::new(area.x + area.width - 8.0, area.y + 18.0 + k as f32 * 20.0),

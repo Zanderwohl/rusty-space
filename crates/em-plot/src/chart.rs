@@ -1,7 +1,8 @@
 //! Turning a series and two axes into primitives.
 
 use crate::decimate::{self, Envelope};
-use crate::primitives::{Anchor, Label, Point, Polyline, Primitives, Rgba, TextMetrics};
+use crate::colormap::ColorMap;
+use crate::primitives::{Anchor, Label, Point, Polyline, Primitives, Quad, Rgba, TextMetrics};
 use crate::scale::Scale;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -326,5 +327,198 @@ mod tests {
         assert_eq!(line.points.len(), 800);
         let want = c.px(0.0, 0.5).y;
         assert!(line.points.iter().all(|p| (p.y - want).abs() < 0.5), "the track should sit at 0.5");
+    }
+}
+
+/// How a scatter point is drawn.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Marker {
+    pub size: f32,
+    pub colour: Rgba,
+}
+
+impl Marker {
+    pub fn new(size: f32, colour: Rgba) -> Self {
+        Self { size, colour }
+    }
+}
+
+impl Chart<'_> {
+    /// Scatter, one quad per point.
+    ///
+    /// Suitable up to a few hundred thousand points. Past that the marks overlap so heavily
+    /// that the picture is decided by draw order rather than by the data, and
+    /// [`Chart::density`] is the honest answer.
+    pub fn scatter(&self, points: &[(f64, f64)], marker: Marker) -> Primitives {
+        self.scatter_with(points, marker.size, |_, _| marker.colour)
+    }
+
+    /// Scatter with a colour per point, for showing a third variable.
+    pub fn scatter_with(
+        &self,
+        points: &[(f64, f64)],
+        size: f32,
+        colour_of: impl Fn(usize, (f64, f64)) -> Rgba,
+    ) -> Primitives {
+        let half = size.max(0.5) / 2.0;
+        let (x0, y0) = (self.area.x, self.area.y);
+        let (x1, y1) = (x0 + self.area.width, y0 + self.area.height);
+        let mut quads = Vec::with_capacity(points.len().min(1 << 20));
+        for (i, &(vx, vy)) in points.iter().enumerate() {
+            if !vx.is_finite() || !vy.is_finite() {
+                continue;
+            }
+            let p = self.px(vx, vy);
+            if p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1 {
+                continue;
+            }
+            quads.push(Quad {
+                min: Point::new(p.x - half, p.y - half),
+                max: Point::new(p.x + half, p.y + half),
+                colour: colour_of(i, (vx, vy)),
+            });
+        }
+        Primitives { quads, ..Primitives::default() }
+    }
+
+    /// Bin points into cells and colour each by how many landed in it.
+    ///
+    /// The scatter equivalent of min/max decimation: output is one quad per occupied cell
+    /// rather than one per point, so a million points cost the same as ten thousand, and
+    /// overlapping marks stop hiding the thing that matters — where the points actually
+    /// concentrate.
+    ///
+    /// `gamma` below 1 lifts sparse cells; 0.4 or so is usually where structure appears.
+    pub fn density(&self, points: &[(f64, f64)], cell_px: f32, map: ColorMap, gamma: f64) -> Primitives {
+        let cell = cell_px.max(1.0);
+        let cols = (self.area.width / cell).ceil().max(1.0) as usize;
+        let rows = (self.area.height / cell).ceil().max(1.0) as usize;
+        let mut counts = vec![0u32; cols * rows];
+        let mut peak = 0u32;
+
+        for &(vx, vy) in points {
+            if !vx.is_finite() || !vy.is_finite() {
+                continue;
+            }
+            let p = self.px(vx, vy);
+            let (cx, cy) = ((p.x - self.area.x) / cell, (p.y - self.area.y) / cell);
+            if cx < 0.0 || cy < 0.0 {
+                continue;
+            }
+            let (cx, cy) = (cx as usize, cy as usize);
+            if cx >= cols || cy >= rows {
+                continue;
+            }
+            let n = &mut counts[cy * cols + cx];
+            *n += 1;
+            peak = peak.max(*n);
+        }
+        if peak == 0 {
+            return Primitives::default();
+        }
+
+        let mut quads = Vec::new();
+        for (i, n) in counts.iter().enumerate() {
+            if *n == 0 {
+                continue;
+            }
+            let t = (*n as f64 / peak as f64).powf(gamma.max(1e-3));
+            let (cx, cy) = ((i % cols) as f32, (i / cols) as f32);
+            let min = Point::new(self.area.x + cx * cell, self.area.y + cy * cell);
+            quads.push(Quad {
+                min,
+                max: Point::new(min.x + cell, min.y + cell),
+                colour: map.sample(t),
+            });
+        }
+        Primitives { quads, ..Primitives::default() }
+    }
+}
+
+#[cfg(test)]
+mod scatter_tests {
+    use super::*;
+    use crate::primitives::Monospace;
+
+    fn chart(m: &Monospace) -> Chart<'_> {
+        Chart::new(
+            Rect { x: 20.0, y: 20.0, width: 400.0, height: 300.0 },
+            Axis::linear((0.0, 1.0)),
+            Axis::linear((0.0, 1.0)),
+            m,
+        )
+    }
+
+    #[test]
+    fn a_scatter_draws_one_mark_per_point_inside_the_area() {
+        let m = Monospace::default();
+        let c = chart(&m);
+        let points: Vec<(f64, f64)> =
+            (0..500).map(|i| (i as f64 / 500.0, (i % 17) as f64 / 17.0)).collect();
+        let s = c.scatter(&points, Marker::new(3.0, Rgba::BLACK));
+        assert_eq!(s.quads.len(), 500);
+        for q in &s.quads {
+            // Pixel coordinates are f32, so the edges round.
+            assert!((q.max.x - q.min.x - 3.0).abs() < 1e-3);
+            assert!(q.min.x >= c.area.x - 2.0 && q.max.x <= c.area.x + c.area.width + 2.0);
+        }
+    }
+
+    #[test]
+    fn points_outside_the_axes_are_dropped_rather_than_clamped_to_the_edge() {
+        let m = Monospace::default();
+        let c = chart(&m);
+        let points = vec![(0.5, 0.5), (5.0, 0.5), (0.5, -3.0), (f64::NAN, 0.1)];
+        assert_eq!(c.scatter(&points, Marker::new(2.0, Rgba::BLACK)).quads.len(), 1);
+    }
+
+    #[test]
+    fn scatter_can_colour_each_point_separately() {
+        let m = Monospace::default();
+        let c = chart(&m);
+        let points: Vec<(f64, f64)> = (0..10).map(|i| (i as f64 / 10.0, 0.5)).collect();
+        let s = c.scatter_with(&points, 2.0, |i, _| {
+            ColorMap::Viridis.sample(i as f64 / 9.0)
+        });
+        assert_eq!(s.quads.len(), 10);
+        assert_ne!(s.quads[0].colour, s.quads[9].colour);
+    }
+
+    #[test]
+    fn density_output_is_bounded_by_cells_not_by_points() {
+        let m = Monospace::default();
+        let c = chart(&m);
+        // A million points into a 400x300 area at 4px cells: at most 100 x 75 quads.
+        let points: Vec<(f64, f64)> = (0..1_000_000u64)
+            .map(|i| {
+                let a = ((i.wrapping_mul(2654435761)) % 10007) as f64 / 10007.0;
+                let b = ((i.wrapping_mul(40503)) % 9973) as f64 / 9973.0;
+                (a, b)
+            })
+            .collect();
+        let d = c.density(&points, 4.0, ColorMap::Magma, 0.4);
+        assert!(!d.quads.is_empty());
+        assert!(d.quads.len() <= 100 * 75, "{} quads for a million points", d.quads.len());
+    }
+
+    #[test]
+    fn density_colours_a_concentration_differently_from_a_sparse_cell() {
+        let m = Monospace::default();
+        let c = chart(&m);
+        let mut points = vec![(0.25, 0.25); 5000];
+        points.push((0.75, 0.75));
+        let d = c.density(&points, 4.0, ColorMap::Viridis, 1.0);
+        assert_eq!(d.quads.len(), 2);
+        let peak = ColorMap::Viridis.sample(1.0);
+        assert!(d.quads.iter().any(|q| q.colour == peak), "the busy cell should hit the top");
+        assert!(d.quads.iter().any(|q| q.colour != peak));
+    }
+
+    #[test]
+    fn an_empty_density_is_empty_rather_than_a_division_by_zero() {
+        let m = Monospace::default();
+        let c = chart(&m);
+        assert!(c.density(&[], 4.0, ColorMap::Magma, 0.4).is_empty());
+        assert!(c.density(&[(9.0, 9.0)], 4.0, ColorMap::Magma, 0.4).is_empty());
     }
 }
