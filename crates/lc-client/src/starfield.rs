@@ -40,19 +40,106 @@ pub const LOG_T_MAX: f32 = 22.0;
 /// orders inside that, and at the rates a crossing runs it means a rebuild every few seconds.
 pub const REBAKE_LY: f64 = 1.0;
 
+/// How one class of star is drawn.
+///
+/// There are two, and they obey different laws, which is the arrangement Exotic Matters
+/// arrived at and this follows. The background is a dome: a catalogue star is at infinity, its
+/// drawn size says how bright it is and nothing else, and it does not change as the ship moves.
+/// A local star is an object: it has a distance, its size is the angle it actually subtends,
+/// and approaching it changes both.
+///
+/// Collapsing the two into one law is what makes a sky of small dust or a sky of balloons. The
+/// size that makes arrival at a star look like arrival is the size that makes the background
+/// unreadable.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PointStyle {
+    /// Drawn radius in pixels, faintest to brightest. Pixels rather than an angle because the
+    /// eye reads a star chart in pixels: a minimum under one leaves the field looking like dust.
+    pub min_px: f32,
+    pub max_px: f32,
+    /// Extra radius per stop above the window, in units of `min_px`.
+    pub glow_radius_gain: f32,
+    /// HDR value per stop above the window. What bloom turns into glare.
+    pub overflow_gain: f32,
+    /// Output gain for a source inside the window.
+    pub brightness: f32,
+    /// How much of the output the glare carries, against the source itself.
+    pub halo_gain: f32,
+}
+
+/// The background. Small, tight, and it must stay readable as a field of thousands.
+pub const DISTANT: PointStyle = PointStyle {
+    min_px: 1.0,
+    max_px: 3.0,
+    glow_radius_gain: 0.12,
+    overflow_gain: 0.25,
+    brightness: 1.2,
+    halo_gain: 0.25,
+};
+
+/// A star whose system the ship is inside. Allowed to dominate the screen, because it does.
+/// The ranges do not overlap: crossing the shell boundary is a visible step, and a step is
+/// better than a star that shrinks as the ship approaches it.
+pub const LOCAL: PointStyle = PointStyle {
+    min_px: 4.0,
+    max_px: 26.0,
+    glow_radius_gain: 1.4,
+    overflow_gain: 2.0,
+    brightness: 1.6,
+    halo_gain: 0.22,
+};
+
+/// Inside this of a star, the ship is in its system and the star is drawn as an object rather
+/// than as a point of the background.
+///
+/// An Oort cloud reaches about a hundred thousand astronomical units, which is 1.6 light-years,
+/// and 03-world-model.md already makes that shell the partition boundary. Being inside it is
+/// the same statement as being in the system.
+pub const LOCAL_SHELL_LY: f64 = 1.6;
+
+/// Radians per pixel, vertically, for a perspective camera.
+pub fn radians_per_pixel(fov_y: f32, viewport_height: f32) -> f32 {
+    if viewport_height <= 0.0 {
+        return 0.0;
+    }
+    2.0 * (fov_y * 0.5).tan() / viewport_height
+}
+
 /// Quad corners, counter-clockwise.
 const QUAD: [[f32; 2]; 4] = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]];
 
-/// Where the current mesh was baked, and what is drawing it.
+/// One of the two passes: its mesh, its material, and which stars are in it.
+pub struct Pass {
+    pub mesh: Handle<Mesh>,
+    pub material: Handle<RelativisticStarfieldMaterial>,
+    pub style: PointStyle,
+    pub count: usize,
+}
+
+/// Where the current meshes were baked, and what is drawing them.
 #[derive(Resource)]
 pub struct Starfield {
     pub origin_ly: DVec3,
-    pub mesh: Handle<Mesh>,
-    pub material: Handle<RelativisticStarfieldMaterial>,
+    pub distant: Pass,
+    pub local: Pass,
 }
 
 #[derive(Component)]
 pub struct SkyMesh;
+
+/// Split the sky into the background and the system the ship is in.
+pub fn partition(session: &Session) -> (Vec<CatalogueStar>, Vec<CatalogueStar>) {
+    let mut distant = Vec::with_capacity(session.stars.len());
+    let mut local = Vec::new();
+    for star in &session.stars {
+        if session.distance_to(star) < LOCAL_SHELL_LY {
+            local.push(star.clone());
+        } else {
+            distant.push(star.clone());
+        }
+    }
+    (distant, local)
+}
 
 /// `log2` of band radiance against temperature: one column per sample, one row per band.
 ///
@@ -140,7 +227,15 @@ pub fn warm_params(star: &CatalogueStar) -> [f32; 4] {
 }
 
 /// The uniforms that change: where the ship is, how fast, and how it is looking.
-pub fn uniforms(session: &Session, origin_ly: DVec3, lut_scale: f32) -> RelativisticStarfieldUniform {
+pub fn uniforms(
+    session: &Session,
+    origin_ly: DVec3,
+    lut_scale: f32,
+    rad_per_px: f32,
+    style: PointStyle,
+) -> RelativisticStarfieldUniform {
+    let defaults = RelativisticStarfieldUniform::default();
+    let radius = |px: f32, fallback: f32| if rad_per_px > 0.0 { px * rad_per_px } else { fallback };
     let mapping = &session.mapping;
     RelativisticStarfieldUniform {
         band_to_display: band_columns(mapping),
@@ -148,6 +243,12 @@ pub fn uniforms(session: &Session, origin_ly: DVec3, lut_scale: f32) -> Relativi
         ship_offset_ly: sim_to_render(session.position_ly - origin_ly).as_vec3().extend(0.0),
         reference: session.tone.reference,
         point_stops: POINT_STOPS,
+        min_radius_rad: radius(style.min_px, defaults.min_radius_rad),
+        max_radius_rad: radius(style.max_px, defaults.max_radius_rad),
+        glow_radius_gain: style.glow_radius_gain,
+        overflow_gain: style.overflow_gain,
+        brightness: style.brightness,
+        halo_gain: style.halo_gain,
         log_t_min: LOG_T_MIN,
         log_t_scale: lut_scale,
         lut_samples: LUT_SAMPLES as f32,
@@ -174,49 +275,85 @@ pub fn lut_scale() -> f32 {
     (LUT_SAMPLES - 1) as f32 / (LOG_T_MAX - LOG_T_MIN)
 }
 
+/// Radians per pixel for the camera the sky is drawn for.
+fn camera_scale(camera: &Query<(&Projection, &Camera), With<Camera3d>>) -> f32 {
+    let Ok((projection, camera)) = camera.single() else { return 0.0 };
+    let Projection::Perspective(perspective) = projection else { return 0.0 };
+    let height = camera.logical_viewport_size().map(|s| s.y).unwrap_or(0.0);
+    radians_per_pixel(perspective.fov, height)
+}
+
 pub fn spawn_sky(
     mut commands: Commands,
     session: Res<crate::app::Game>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<RelativisticStarfieldMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    camera: Query<(&Projection, &Camera), With<Camera3d>>,
     existing: Query<Entity, With<SkyMesh>>,
 ) {
     for entity in &existing {
         commands.entity(entity).despawn();
     }
     let origin_ly = session.position_ly;
-    let mesh = meshes.add(build_mesh(&session.stars, origin_ly));
-    let material = materials.add(RelativisticStarfieldMaterial {
-        uniforms: uniforms(&session.0, origin_ly, lut_scale()),
-        band_lut: images.add(band_lut()),
-    });
-    commands.spawn((
-        Mesh3d(mesh.clone()),
-        MeshMaterial3d(material.clone()),
-        // Positions are light-year offsets that the shader never uses for placement, so the
-        // mesh's bounds say nothing about where it lands on screen.
-        NoFrustumCulling,
-        SkyMesh,
-    ));
-    commands.insert_resource(Starfield { origin_ly, mesh, material });
+    let rad_per_px = camera_scale(&camera);
+    // One table, shared: it is a function of temperature and nothing else.
+    let lut = images.add(band_lut());
+    let (distant_stars, local_stars) = partition(&session.0);
+
+    let mut pass = |stars: &[CatalogueStar], style: PointStyle| {
+        let mesh = meshes.add(build_mesh(stars, origin_ly));
+        let material = materials.add(RelativisticStarfieldMaterial {
+            uniforms: uniforms(&session.0, origin_ly, lut_scale(), rad_per_px, style),
+            band_lut: lut.clone(),
+        });
+        commands.spawn((
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            // Positions are light-year offsets the shader never uses for placement, so the
+            // mesh's bounds say nothing about where it lands on screen.
+            NoFrustumCulling,
+            SkyMesh,
+        ));
+        Pass { mesh, material, style, count: stars.len() }
+    };
+
+    let distant = pass(&distant_stars, DISTANT);
+    let local = pass(&local_stars, LOCAL);
+    commands.insert_resource(Starfield { origin_ly, distant, local });
 }
 
-/// Push this frame's uniforms, and re-bake if the ship has outrun the origin.
+/// Push this frame's uniforms, and re-bake if the ship has outrun the origin or left a system.
 pub fn update_sky(
     session: Res<crate::app::Game>,
     mut sky: ResMut<Starfield>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<RelativisticStarfieldMaterial>>,
+    camera: Query<(&Projection, &Camera), With<Camera3d>>,
 ) {
-    if session.position_ly.distance(sky.origin_ly) > REBAKE_LY {
+    let (distant_stars, local_stars) = partition(&session.0);
+    // Membership as well as distance: crossing into a system moves a star from one pass to the
+    // other, and nothing about the ship's position alone says that happened.
+    let moved = session.position_ly.distance(sky.origin_ly) > REBAKE_LY;
+    if moved || local_stars.len() != sky.local.count {
         sky.origin_ly = session.position_ly;
-        if let Some(mesh) = meshes.get_mut(&sky.mesh) {
-            *mesh = build_mesh(&session.stars, sky.origin_ly);
+        sky.distant.count = distant_stars.len();
+        sky.local.count = local_stars.len();
+        for (handle, stars) in
+            [(sky.distant.mesh.clone(), &distant_stars), (sky.local.mesh.clone(), &local_stars)]
+        {
+            if let Some(mesh) = meshes.get_mut(&handle) {
+                *mesh = build_mesh(stars, sky.origin_ly);
+            }
         }
     }
-    if let Some(material) = materials.get_mut(&sky.material) {
-        material.uniforms = uniforms(&session.0, sky.origin_ly, lut_scale());
+
+    let rad_per_px = camera_scale(&camera);
+    for pass in [&sky.distant, &sky.local] {
+        if let Some(material) = materials.get_mut(&pass.material) {
+            material.uniforms =
+                uniforms(&session.0, sky.origin_ly, lut_scale(), rad_per_px, pass.style);
+        }
     }
 }
 
@@ -362,10 +499,10 @@ mod tests {
     fn the_uniforms_follow_the_ship() {
         let mut s = sky();
         let origin = s.position_ly;
-        assert_eq!(uniforms(&s, origin, lut_scale()).ship_offset_ly, Vec4::ZERO);
+        assert_eq!(uniforms(&s, origin, lut_scale(), 0.0, DISTANT).ship_offset_ly, Vec4::ZERO);
         s.fly_to(s.stars[0].id);
         s.advance(8_000.0);
-        let u = uniforms(&s, origin, lut_scale());
+        let u = uniforms(&s, origin, lut_scale(), 0.0, DISTANT);
         assert!(u.ship_offset_ly.truncate().length() > 0.0, "the ship moved and the uniform did not");
         assert!(u.beta.truncate().length() > 0.5, "and it is moving fast");
         assert!(u.beta.truncate().length() < 1.0, "but not at or above c");
@@ -424,5 +561,93 @@ mod tests {
                 assert_eq!(warm_params(star), [0.0; 4]);
             }
         }
+    }
+
+    /// The bug this exists for: a minimum radius written as an angle came out at 0.36 pixels
+    /// on a 1280-wide window at 90 degrees, and the whole field rendered as dust.
+    #[test]
+    fn a_point_source_is_sized_in_pixels_not_in_arcminutes() {
+        let fov = std::f32::consts::FRAC_PI_2;
+        for height in [480.0, 720.0, 1440.0, 2160.0] {
+            let rad_per_px = radians_per_pixel(fov, height);
+            // The same star covers the same pixels whatever the window is.
+            let drawn = DISTANT.min_px * rad_per_px * height / (2.0 * (fov * 0.5).tan());
+            assert!((drawn - DISTANT.min_px).abs() < 1e-3, "{height}px window drew {drawn}");
+        }
+        assert!(DISTANT.min_px >= 1.0, "anything under a pixel is invisible");
+    }
+
+    /// The two passes exist because one law cannot serve both. The size that makes arriving at
+    /// a star look like arriving is the size that makes a field of thousands unreadable.
+    #[test]
+    fn the_background_stays_small_and_a_local_star_is_allowed_to_dominate() {
+        assert!(DISTANT.max_px < 4.0, "a background star must not become a ball");
+        assert!(LOCAL.min_px > DISTANT.max_px, "the two ranges should not even overlap");
+        assert!(LOCAL.overflow_gain > DISTANT.overflow_gain * 4.0, "glare is the local star's");
+    }
+
+    #[test]
+    fn a_star_becomes_local_only_inside_its_shell() {
+        let mut s = sky();
+        let id = s.stars[0].id;
+        let (_, local) = partition(&s);
+        assert!(local.is_empty(), "four light-years out, nothing is local");
+
+        s.fly_to(id);
+        s.advance(40_000.0);
+        let (distant, local) = partition(&s);
+        assert_eq!(local.len(), 1, "arriving should put exactly the destination in the system");
+        assert_eq!(local[0].id, id);
+        assert_eq!(distant.len() + local.len(), s.stars.len(), "no star may be in both or neither");
+    }
+
+    #[test]
+    fn the_two_passes_are_drawn_with_different_uniforms() {
+        let s = sky();
+        let rad = radians_per_pixel(std::f32::consts::FRAC_PI_2, 720.0);
+        let far = uniforms(&s, DVec3::ZERO, lut_scale(), rad, DISTANT);
+        let near = uniforms(&s, DVec3::ZERO, lut_scale(), rad, LOCAL);
+        assert!(near.max_radius_rad > far.max_radius_rad * 5.0);
+        assert!(near.overflow_gain > far.overflow_gain);
+        // But they read the same sky: same exposure, same velocity, same table.
+        assert_eq!(near.reference, far.reference);
+        assert_eq!(near.beta, far.beta);
+        assert_eq!(near.log_t_scale, far.log_t_scale);
+    }
+
+    #[test]
+    fn a_narrower_field_of_view_makes_a_pixel_a_smaller_angle() {
+        let wide = radians_per_pixel(std::f32::consts::FRAC_PI_2, 1080.0);
+        let narrow = radians_per_pixel(std::f32::consts::FRAC_PI_8, 1080.0);
+        assert!(narrow < wide, "zooming in must not grow every star: {narrow} against {wide}");
+    }
+
+    #[test]
+    fn a_camera_that_is_not_there_falls_back_to_the_defaults() {
+        let s = sky();
+        let u = uniforms(&s, DVec3::ZERO, lut_scale(), 0.0, DISTANT);
+        let d = RelativisticStarfieldUniform::default();
+        assert_eq!(u.min_radius_rad, d.min_radius_rad);
+        assert_eq!(u.max_radius_rad, d.max_radius_rad);
+        assert!(d.min_radius_rad > 0.0, "and the default is not zero");
+    }
+
+    /// Sixty astronomical units from a star is twenty-four stops above four light-years, and
+    /// the difference has to survive to the screen or arriving somewhere looks like arriving
+    /// nowhere.
+    #[test]
+    fn arriving_at_a_star_is_a_change_of_many_stops() {
+        let mut s = sky();
+        let id = s.stars[0].id;
+        let flux = |s: &Session| {
+            let star = s.star(id).unwrap();
+            s.luminance_from(star)
+        };
+        let far = flux(&s);
+        s.fly_to(id);
+        s.advance(40_000.0);
+        let near = flux(&s);
+        let stops = (near / far).log2();
+        assert!(stops > 20.0, "arrival should be tens of stops brighter, got {stops}");
     }
 }

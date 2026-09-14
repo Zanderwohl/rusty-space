@@ -35,6 +35,8 @@ struct StarfieldUniform {
     max_radius_rad: f32,
     glow_radius_gain: f32,
     brightness: f32,
+    overflow_gain: f32,
+    halo_gain: f32,
     // Lookup domain: index = (log2(T) - log_t_min) * log_t_scale.
     log_t_min: f32,
     log_t_scale: f32,
@@ -55,6 +57,8 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) corner: vec2<f32>,
     @location(1) colour: vec3<f32>,
+    /// Where the source itself ends and the glare begins, as a fraction of the quad.
+    @location(2) core: f32,
 };
 
 fn lorentz(beta: vec3<f32>) -> f32 {
@@ -110,10 +114,11 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // beaming needs no separate D^4 term. It is already in the band integral.
     let teff = max(vertex.params.x * doppler(to_source, beta), 1.0);
 
-    // Ratio before squaring: distance in metres squared overflows f32 past a couple of
-    // thousand light-years, and the ratio never does.
-    let shrink = vertex.params.y / (distance_ly * 9.4607305e15);
-    let geometry = PI * shrink * shrink;
+    // The star's true angular radius, and its solid angle. Ratio before squaring: distance in
+    // metres squared overflows f32 past a couple of thousand light-years, and the ratio never
+    // does.
+    let disc_rad = vertex.params.y / (distance_ly * 9.4607305e15);
+    let geometry = PI * disc_rad * disc_rad;
 
     // A population absorbs starlight and re-emits it as a blackbody at the temperature its
     // orbit sets. Occultation is grey and removes; re-emission is cold and adds, which in the
@@ -142,13 +147,26 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     }
     let chroma = select(vec3<f32>(1.0), linear / peak, peak > 0.0);
     let level = clamp(1.0 + above / max(material.point_stops, 1e-6), 0.0, 1.0);
-    let glow = clamp(above, 0.0, 12.0);
+    let glow = clamp(above, 0.0, 24.0);
 
-    out.colour = chroma * level * material.brightness;
+    // Overflow leaves as an HDR value rather than clipping to white. A star seen from sixty
+    // astronomical units is twenty-four stops over the window; without this it renders exactly
+    // like one that is barely over, and arriving somewhere looks like arriving nowhere.
+    out.colour = chroma * material.brightness * (level + glow * material.overflow_gain);
 
-    // Brightness past the top of the window widens the halo rather than whitening the core.
-    let radius_rad = mix(material.min_radius_rad, material.max_radius_rad, level)
+    // The source itself: its disc if that is resolvable, otherwise the smallest thing worth
+    // drawing. At sixty astronomical units a sun is a fiftieth of a pixel across, and it is
+    // bright rather than big.
+    let core_rad = max(disc_rad, material.min_radius_rad);
+    // The glare around it, which is what grows with brightness.
+    let glare_rad = mix(material.min_radius_rad, material.max_radius_rad, level)
         + material.glow_radius_gain * glow * material.min_radius_rad;
+
+    // The quad covers the glare; the core is a fraction of it. One quad drawing a single
+    // filled disc made a star a hundred and sixty pixels across into a flat white ball, with
+    // the disc it actually has swamped inside it.
+    let radius_rad = max(core_rad, glare_rad);
+    out.core = clamp(core_rad / radius_rad, 0.0, 1.0);
 
     // w = 0 drops the camera's translation, so the sky depends only on where it is pointed.
     // The quad centre sits one unit down the view ray, which makes the corner offset equal to
@@ -172,5 +190,16 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if (r > 1.0) {
         discard;
     }
-    return vec4<f32>(in.colour * (1.0 - r), 1.0);
+    // A bright edge to the source, and a soft fall outside it. For a distant star the core
+    // fills the quad and this reduces to the linear falloff it had before.
+    let core = 1.0 - smoothstep(in.core * 0.8, in.core, r);
+    let halo = pow(1.0 - r, 3.0);
+
+    // Alpha zero, and it has to be. AlphaMode::Add is premultiplied blending, `src + dst *
+    // (1 - alpha)`, so an alpha of one is not addition -- it is a straight overwrite. With it,
+    // every faint star's quad punched a dark square through the glare of a bright one, and
+    // because two transparent meshes at the same depth are sorted with an arbitrary tie-break,
+    // the squares flickered on and off from frame to frame. It read as z-fighting and it was
+    // blend order. At alpha zero the blend is `src + dst` and the order stops mattering.
+    return vec4<f32>(in.colour * (core + halo * material.halo_gain), 0.0);
 }

@@ -119,6 +119,30 @@ baked.
 | brightness from | catalogue apparent magnitude | `L / d^2` through the band mapping |
 | positions | unit directions, fixed | light-years from a bake origin that follows the ship |
 
+### Two passes, two laws
+
+The sky is drawn twice, and the two obey different rules. This is the arrangement Exotic Matters
+arrived at with `starfield` and `local_starfield`, and it is right for the same reason here.
+
+| | background | local |
+|---|---|---|
+| what it is | a dome at infinity | an object at a distance |
+| size | from brightness, 1 to 3 pixels | the angle it subtends, floored at 4 pixels |
+| glare | slight | allowed to fill the screen |
+| changes as the ship moves | only which stars are in it | continuously |
+
+A star joins the local pass when the ship is inside its Oort shell, 1.6 light-years, which
+[03-world-model.md](03-world-model.md) already makes the partition boundary: being inside it is
+the same statement as being in the system.
+
+One law cannot serve both. The drawn size that makes arriving at a star look like arriving is
+the size that makes a field of six thousand unreadable, and the first attempt here collapsed
+them into one pass and got a sky of dust, then a sky of balloons.
+
+Within a pass the source and its glare are also separate: the quad covers the glare, and the
+core is a fraction of it. A single filled disc made a star a hundred and sixty pixels across
+into a flat white ball with its actual disc swamped inside.
+
 The reason for the split is that the observer moves. Baking a colour is right when the only
 input is a catalogue magnitude and wrong when aberration, Doppler shift, the band matrix and the
 exposure all change while the ship flies: re-uploading four `vec4`s per star per frame does not

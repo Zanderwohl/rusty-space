@@ -49,12 +49,25 @@ pub struct RelativisticStarfieldUniform {
     pub reference: f32,
     /// Stops of brightness a star field is spread over, wider than the tone map's window.
     pub point_stops: f32,
+    /// Drawn radius of a point source, radians. The host converts these from pixels using the
+    /// camera's field of view, so a star is the same size on screen whatever the window is.
     pub min_radius_rad: f32,
     pub max_radius_rad: f32,
     /// Extra radius per stop above the window, in units of `min_radius_rad`.
     pub glow_radius_gain: f32,
-    /// Output gain. Above 1 so bright stars land past the HDR knee and reach bloom.
+    /// Output gain for a source inside the window. Kept near 1 so that what blooms is the
+    /// overflow and not simply everything: at 4, an ordinary star was already past the knee and
+    /// a star twenty-four stops over was indistinguishable from one barely clipping.
     pub brightness: f32,
+    /// HDR value added per stop above the window.
+    ///
+    /// Without it every source above the window clips to the same white and a star twenty-four
+    /// stops over -- which is what one looks like from sixty astronomical units -- renders
+    /// identically to one barely clipping. The overflow has to leave the shader as a number
+    /// bloom can act on.
+    pub overflow_gain: f32,
+    /// How much of the output the glare around the source carries, against the source itself.
+    pub halo_gain: f32,
     /// Lookup domain: `index = (log2(T) - log_t_min) * log_t_scale`.
     pub log_t_min: f32,
     pub log_t_scale: f32,
@@ -69,13 +82,14 @@ impl Default for RelativisticStarfieldUniform {
             ship_offset_ly: Vec4::ZERO,
             reference: 1.0,
             point_stops: 14.0,
-            // About 1.5 and 9 arcminutes. Wider than the true angular size of any star by
-            // many orders of magnitude, which is correct: what is being drawn is the
-            // instrument's response to a point source, not a resolved disc.
-            min_radius_rad: 4.4e-4,
-            max_radius_rad: 2.6e-3,
+            // Replaced by the host from pixels and the camera's field of view; these are the
+            // 90-degree, 1280-wide values so a headless default is not sub-pixel.
+            min_radius_rad: 1.4e-3,
+            max_radius_rad: 8.0e-3,
             glow_radius_gain: 0.35,
-            brightness: 4.0,
+            brightness: 1.2,
+            overflow_gain: 1.0,
+            halo_gain: 0.3,
             log_t_min: 0.0,
             log_t_scale: 1.0,
             lut_samples: 1.0,
@@ -106,6 +120,13 @@ impl Material for RelativisticStarfieldMaterial {
     }
 
     /// Point sources sum where they overlap, so the blend is additive rather than ordered.
+    ///
+    /// **The fragment shader must return alpha zero.** `AlphaMode::Add` is premultiplied
+    /// blending, `src + dst * (1 - alpha)`, so an alpha of one is not addition at all -- it is
+    /// an overwrite. Returning one made every faint star punch a dark square through the glare
+    /// of a bright one, and because two transparent meshes at the same depth are sorted with an
+    /// arbitrary tie-break, those squares flickered frame to frame. It looked exactly like
+    /// z-fighting and it was blend order.
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Add
     }
