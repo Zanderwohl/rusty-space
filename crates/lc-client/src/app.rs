@@ -399,7 +399,7 @@ fn finish_load(
     {
         // A sky that will not load is worth saying out loud rather than silently becoming
         // three hand-written stars.
-        ui.notify("sky failed to load; using the sample".into(), 0.0);
+        ui.notify("sky failed to load; using the sample", 0.0);
         enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample());
         commands.remove_resource::<LoadingSky>();
     }

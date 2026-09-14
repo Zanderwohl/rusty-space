@@ -311,21 +311,50 @@ minutes of link time for a speedup nobody feels. It does not apply here: this is
 artifact, download size *is* the product, and the build runs in CI. Say so in the CI job's name
 so a future session does not helpfully delete it.
 
-## What is not wasm-ready today
+## What was not wasm-ready — measured, not predicted
 
-Four concrete blockers, all in the client, none deep:
+This section originally listed four blockers. Building it found that **one of them did not
+exist, one was missing, and the compile story was far easier than expected**: with the
+`getrandom` backend named, `lc-client` compiled for `wasm32-unknown-unknown` unmodified.
 
-| where | problem | fix |
+| where | problem | what it took |
 |---|---|---|
-| `lc_world::sky::hyg` — `csv::Reader::from_path` | `std::fs`, and a 32 MB CSV | a binary sky chunk fetched over HTTP; keep the CSV importer behind the existing `hyg` feature for native tooling |
-| `bin/lightcone.rs` — `current_exe`, `env::args` | neither exists in a browser | a sibling `bin/lightcone_web.rs`; the flags it parses come from the query string |
-| `AssetPlugin { file_path }` | points at a local directory | on wasm, set it to the CDN prefix for the build — Bevy's default reader treats it as an HTTP base |
-| shader roots are split | `lc-client/assets/shaders/` has three; `em-render` names `body_point.wgsl` and `encounter_marker.wgsl`, which live in the *app's* `assets/` | a staging step that merges the roots into one tree per build. This one fails as a 404 at runtime in the browser, not at build time, which is the worst way to find out |
+| `getrandom` 0.3 | refuses `wasm32-unknown-unknown` unless a backend is named — **and needs both** the crate feature and a `--cfg` rustflag; either alone fails | `.cargo/config.toml` plus a wasm-only dependency. This was not predicted and was the only thing stopping the build |
+| `lc_world::sky::hyg` — `csv::Reader::from_path` | `std::fs`, and a 34 MB CSV | the sky chunk, below. `csv` is now absent from the browser build's dependency tree entirely, which is a stronger claim than a grep for `std::fs` |
+| `bin/lightcone.rs` — `current_exe`, `env::args` | compile fine on wasm and do the wrong thing quietly | `bin/lightcone_web.rs`, with the flag parsing factored into `lc_client::entry` so both binaries share one vocabulary |
+| `AssetPlugin { file_path }` | points at a local directory | on wasm it is an HTTP prefix, so a CDN URL is the whole integration. Also `meta_check: AssetMetaCheck::Never` — Bevy probes for a `.meta` beside every asset, which over a CDN is a round trip and a cached 404 per file |
+| ~~shader roots are split~~ | **wrong.** The client instantiates exactly three `em-render` materials — relativistic starfield, population, body surface — and its own asset root already holds all three shaders. The `body_point` and `encounter_marker` shaders belong to the app, which the client does not use | no merge step. `tools/check-shaders.sh` derives the needed set from the `em_render::` modules the client imports and asserts each exists, so this stays true rather than happening to be true |
 
-The sky chunk is the interesting one. 120 000 rows of CSV is 32 MB; the fields the client
-actually reads, packed as fixed-width binary, are a few megabytes and parse without a CSV
-reader. It is a new `lc-world` module and a small offline tool, and it deletes both the
-largest download and the only `std::fs` call in the client's tree.
+`starfield.wgsl` does exist in both roots and they differ — 3 kB against 16 kB. That is not a
+collision: `em-render` ships material definitions and each host supplies its own shader at the
+path the material names, which is the arrangement [06-crate-layout.md](06-crate-layout.md)
+chose. Two hosts, two shaders, one path, and neither build ever sees the other's.
+
+## The sky chunk
+
+120 000 rows of CSV is 34 MB. The same catalogue packed is **39 bytes a star**, and the client
+only ever uses the nearest 6 000 of them, so the shipped chunk holds 8 000 — a little above
+`SKY_LIMIT`, so raising that does not silently shorten the sky.
+
+**What is stored is what cannot be recomputed.** Radius, temperature, mu, mass and metallicity
+all follow from colour index, luminosity and velocity, so they are absent and derived on load.
+`StarRecord::assemble` is that derivation and both importers go through it; the chunk cannot
+disagree with the code that made it, because there is only one.
+
+The equivalence test runs the real 107 000-star catalogue down both routes and compares star
+for star. **It found four bugs**, none of which would have shown up as anything but a slightly
+different sky:
+
+| bug | why it was invisible |
+|---|---|
+| singleton groups were pruned before derivation, so a star whose partner was later rejected kept a group it was alone in | grouping is not yet consumed by anything |
+| eleven stars sit at exactly `B-V = -0.4`, the low end of `BV_VALID`, and the nearest `f32` is *below* it — so they assembled from the CSV and failed from their own chunk | eleven stars out of a hundred thousand |
+| zero as the "no group" sentinel collided with HYG's Sun, whose `comp_primary` really is 0 | the Sun acquired a phantom companion |
+| a rename shadowed the star's own key with the group's inside a struct literal | every identity in a decoded chunk was wrong, and every star still looked like a star |
+
+Colour index is stored as thousandths rather than `f32`: exact for every value HYG publishes,
+two bytes instead of four, and it is what fixes the boundary. Grouping carries a presence bit
+in the component byte, because no key value is free to mean "absent".
 
 ## Decided: single-threaded, therefore no cross-origin isolation
 
@@ -390,16 +419,29 @@ every Bevy asset fetch are cross-origin by construction.
 
 ## What a play actually costs
 
-First estimates. W3 replaces them with measurements.
+**Measured**, on the build at W3.
 
 | object | raw | brotli |
 |---|---|---|
-| `lightcone_web_bg.wasm` | 20–30 MB | 6–9 MB |
-| js glue | ~100 KB | ~30 KB |
-| shaders | ~30 KB | ~8 KB |
-| sky chunk | 2–4 MB | ~1.5 MB |
-| **first visit** | | **8–11 MB** |
+| `lightcone_web_bg.wasm` | 26.7 MB | **6.12 MB** |
+| js glue | 0.17 MB | 0.02 MB |
+| shaders (3 × wgsl) | 0.03 MB | 0.01 MB |
+| sky chunk (8 000 stars) | 0.31 MB | 0.25 MB |
+| **first visit** | 27.2 MB | **6.4 MB** |
 | **repeat visit, same build** | | **0** |
+
+The estimate was 8–11 MB brotli and the measurement is 6.4, so the sizing above holds with
+room. Two of the numbers moved a long way from the guess and both are worth keeping:
+
+- The **sky** was estimated at 1.5 MB compressed and is 0.25. Two thirds of that came from
+  packing only the stars the client uses; the rest from storing inputs rather than results.
+- The **wasm** is still 94% of the download, so it is the only figure worth optimising. `bevy`
+  is on default features here; trimming those is the obvious next lever and was deliberately
+  not pulled in W3, where the goal was a build that runs.
+
+`wasm-opt -Oz` takes 26.7 MB off 32.1 and costs 15 seconds. `--profile wasm-release` is the
+exception to `CLAUDE.md`'s "do not build release": there the rule protects a dev loop, and
+here the artifact *is* the product.
 
 The client has no textures, no skybox and no fonts — the starfield is generated from the
 catalogue and body appearance is derived, per [07-rendering.md](07-rendering.md). So the
@@ -618,7 +660,7 @@ commit means an edited stylesheet is invisible until the next commit — the ver
 working exactly as designed, and useless to edit against. Outside production the header is
 `no-store`.
 
-## W3 — The browser build
+## W3 — The browser build — **done**
 
 **Before:** phase 6.
 
@@ -633,6 +675,25 @@ estimates in this document.
 
 **Do not:** involve the CDN or the site yet. This phase is over when a directory of files
 plays in a browser.
+
+**What it measured.** `tools/build-wasm.sh` stages `target/web/<build-id>/` — wasm, glue,
+assets, manifest, and a loader page — in about four minutes cold. It runs in a browser on
+WebGPU with 7 973 stars, and flying to Proxima shows coordinate time and proper time diverging
+(4.60 years out, 1.23 aboard) with the starfield blue-shifted, which is the whole premise
+working through a fetch instead of a file.
+
+The loader checks `navigator.gpu` **and** asks for an adapter before touching the wasm, and
+both refusals were provoked deliberately: the message appears and no 26 MB download starts. It
+gets a byte-accurate progress bar *and* streaming compilation by teeing the response body
+through a counting `TransformStream` and rebuilding a `Response` around it, carrying the
+original headers — drop those and the content type goes with them.
+
+Bevy's winit loop reports its exit by throwing, so the loader has to not treat that as a
+failure. Anything else from `init` is shown to the reader.
+
+**`AssetMetaCheck::Never` matters more than it looks.** The default probes for a `.meta`
+sidecar beside every asset; on a filesystem that is a wasted stat, and over a CDN it is an
+extra round trip and a negatively-cached 404 per file. Three of them, on every first visit.
 
 ## W4 — Delivery
 
@@ -680,6 +741,9 @@ provoked deliberately and shows its message.
    path; fifty is a guess, not a measurement.
 4. **htmx 4's inheritance and swap defaults** — read the release notes before the first
    fragment, per the note above.
-5. **Does the sky chunk belong to `lc-world` or a new `lc-pack`?** It is a format plus a
-   packer, and phase 4's provider interface is the natural home for the reader. Decide when
-   writing it, not now.
+5. ~~**Does the sky chunk belong to `lc-world` or a new `lc-pack`?**~~ Settled in W3:
+   `lc_world::sky::chunk` for the format and `lc-world`'s `skypack` binary for the packer. A
+   separate crate would have split `StarRecord` from the importer that produces it, and that
+   shared derivation is the point.
+6. **How much can `bevy`'s default features be trimmed?** The wasm is 94% of the download and
+   nothing has been trimmed yet. Worth a measurement before it is worth an opinion.
