@@ -30,6 +30,7 @@ debug = false
 em-foundations = { path = "crates/em-foundations" }
 em-sim = { path = "crates/em-sim", features = ["bevy"] }
 em-render = { path = "crates/em-render" }
+em-ui = { path = "crates/em-ui" }
 
 num-traits = "0.2.18"
 scilib = "1.0.0"

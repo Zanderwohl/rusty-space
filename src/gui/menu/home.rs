@@ -4,7 +4,7 @@
 use bevy::prelude::*;
 
 use crate::gui::app::AppState;
-use crate::gui::menu::widgets::{spawn_button, spawn_panel, spawn_title};
+use em_ui::{MenuTheme, MenuUi};
 
 use super::{MenuState, UiState};
 
@@ -47,26 +47,13 @@ impl Plugin for HomeMenuPlugin {
 }
 
 fn setup_home_menu(mut commands: Commands) {
-    let root = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Absolute,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            HomeMenuScreen,
-            GlobalZIndex(100),
-        ))
-        .id();
-
-    let panel = spawn_panel(&mut commands, root);
-    spawn_title(&mut commands, panel, "Exotic Matters");
-    spawn_button(&mut commands, panel, "Planetarium", HomeAction::Planetarium);
-    spawn_button(&mut commands, panel, "Settings", HomeAction::Settings);
-    spawn_button(&mut commands, panel, "Quit", HomeAction::Quit);
+    let mut ui = MenuUi::new(&mut commands, MenuTheme::VFD);
+    let root = ui.screen((HomeMenuScreen, GlobalZIndex(100)));
+    let panel = ui.panel(root);
+    ui.title(panel, "Exotic Matters");
+    ui.button(panel, "Planetarium", HomeAction::Planetarium);
+    ui.button(panel, "Settings", HomeAction::Settings);
+    ui.button(panel, "Quit", HomeAction::Quit);
 }
 
 fn cleanup_home_menu(mut commands: Commands, query: Query<Entity, With<HomeMenuScreen>>) {

@@ -79,6 +79,7 @@ impl Plugin for ClientPlugin {
             RelativisticStarfieldMaterialPlugin,
             PopulationMaterialPlugin,
             BodySurfaceMaterialPlugin,
+            crate::menu::MainMenuPlugin,
         ))
             .init_state::<AppState>()
             .add_message::<Requested>()
@@ -98,7 +99,9 @@ impl Plugin for ClientPlugin {
                 Update,
                 (
                     boot.run_if(in_state(AppState::Boot)),
-                    photograph.run_if(in_state(AppState::InGame)),
+                    // Not gated on a state: `--menu --shot` photographs the menu, and the
+                    // system does nothing unless a path was asked for.
+                    photograph,
                     place_at_body.run_if(in_state(AppState::InGame)),
                     place_on_station.run_if(in_state(AppState::InGame)),
                     (read_keys, grab_cursor, look_around).chain().run_if(in_state(AppState::InGame)),
@@ -126,10 +129,15 @@ impl Plugin for ClientPlugin {
                     .chain()
                     .run_if(in_state(AppState::InGame)),
             )
+            // The menu's backdrop is the same starfield pass, so it needs the same two
+            // systems. Nothing else: there are no bodies and nothing to resolve.
+            .add_systems(
+                Update,
+                (aim_camera, update_sky).chain().run_if(in_state(AppState::MainMenu)),
+            )
             .add_systems(
                 EguiPrimaryContextPass,
                 (
-                    panels::main_menu.run_if(in_state(AppState::MainMenu)),
                     panels::loading.run_if(in_state(AppState::Loading)),
                     (panels::hud, panels::open_panels).run_if(in_state(AppState::InGame)),
                 ),

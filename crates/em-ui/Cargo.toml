@@ -1,0 +1,10 @@
+[package]
+name = "em-ui"
+version = "0.1.0"
+edition = "2024"
+description = "Reusable Bevy-native menu widgets. Knows no game or TTRPG rule."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[dependencies]
+bevy = "0.17.2"
