@@ -77,6 +77,22 @@ Each of these cost real time. None of them are visible from the code that hits t
 - `System::mu(i)` is the `mu` of the orbit body `i` is *on*, i.e. `G(M_parent + M_i)`. To orbit
   *around* `i`, use `gravitational_constant() * mass(i)`.
 - `Instant::to_j2000_seconds()`, not `seconds_since_j2000()`.
+- The arena holds **one instant**. `System::position(i)`, `LocalSystem::body_position_ly` and
+  friends read it; `propagate::state_at` and `LocalSystem::body_state_at` answer for any time
+  without touching it. Mixing the two — a craft read at `t`, the body it orbits read out of the
+  arena — turns a circular orbit into a wild ellipse. Nothing in `lc-world` or `lc-client`
+  propagates any more; if you need a position, say which instant you mean.
+- **A planet's frame is not inertial.** Earth turns eight degrees in nine days, so a "straight
+  line past Earth" posed at J2000 is a curve by the time it arrives, and a flyby slower than
+  30 km/s is Earth running into the craft rather than the reverse. Any test that predicts a
+  chord, a miss distance or an impact angle has to be fast enough that the frame holds still —
+  see `FLYBY_SPEED` in `em_sim::collision`.
+- Sphere-of-influence radii scale with the **live** separation, so they breathe over an
+  eccentric year: Earth's L2 is 1.476 million km at J2000 (near perihelion) and 1.501 at the
+  mean distance. A published figure is the mean one.
+- At a patched-conic join the craft is *exactly* on a boundary, so `influence::containing` is a
+  coin toss and it comes up "the sphere you are leaving". Take the new primary from the
+  crossing, as `em_sim::patch` does.
 
 **egui**
 
