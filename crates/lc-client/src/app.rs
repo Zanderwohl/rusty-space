@@ -8,6 +8,7 @@ use bevy::render::view::Hdr;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 use lc_world::sky::{AuthoredStars, StarProvider};
 
+use em_render::body_surface_material::BodySurfaceMaterialPlugin;
 use em_render::population_material::PopulationMaterialPlugin;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterialPlugin;
 use em_render::render_space::sim_to_render;
@@ -72,6 +73,7 @@ impl Plugin for ClientPlugin {
             EguiPlugin::default(),
             RelativisticStarfieldMaterialPlugin,
             PopulationMaterialPlugin,
+            BodySurfaceMaterialPlugin,
         ))
             .init_state::<AppState>()
             .add_message::<Requested>()
@@ -82,6 +84,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<Looking>()
             .init_resource::<Bodies>()
             .init_resource::<crate::envelope::Envelopes>()
+            .init_resource::<crate::resolved::Resolved>()
             .add_systems(Startup, spawn_camera)
             .add_systems(OnEnter(AppState::Loading), load_world)
             .add_systems(OnEnter(AppState::InGame), (spawn_sky, run_dev_actions))
@@ -104,7 +107,13 @@ impl Plugin for ClientPlugin {
             )
             .add_systems(
                 Update,
-                (aim_camera, update_sky, update_bodies, crate::envelope::update_envelopes)
+                (
+                    aim_camera,
+                    update_sky,
+                    update_bodies,
+                    crate::resolved::update_resolved,
+                    crate::envelope::update_envelopes,
+                )
                     .chain()
                     .run_if(in_state(AppState::InGame)),
             )
@@ -221,8 +230,12 @@ fn place_at_body(
     let stand_off = body.radius_m * 12.0 / crate::system::M_PER_LY;
     let from_star = (body.position_ly - bodies.system.as_ref().map(|s| s.origin_ly).unwrap_or_default())
         .normalize_or_zero();
-    game.place_at(body.position_ly + from_star * stand_off);
-    if let Some(look) = crate::ui::Look::aimed_at(-from_star) {
+    // Off to the side and a little sunward, so the body shows a terminator. Straight out from
+    // the star is the night side, which is a correct view of nothing.
+    let across = from_star.cross(DVec3::Z).normalize_or_zero();
+    let offset = (across * 0.9 - from_star * 0.45).normalize_or_zero();
+    game.place_at(body.position_ly + offset * stand_off);
+    if let Some(look) = crate::ui::Look::aimed_at(-offset) {
         ui.look = look;
     }
     ui.notify(format!("standing off {want}"), game.coordinate_time_s());

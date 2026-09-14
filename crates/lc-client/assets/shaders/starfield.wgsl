@@ -279,7 +279,13 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let dir_view = normalize((view.view_from_world * vec4<f32>(seen, 0.0)).xyz);
     let pos_view = dir_view + vec3<f32>(vertex.corner, 0.0) * radius_rad;
     var clip = view.clip_from_view * vec4<f32>(pos_view, 1.0);
-    clip.z = clip.w;
+    // Just in front of the far plane, so the sky is behind everything real.
+    //
+    // Depth is reversed here: `clip.z = clip.w` is the *near* plane, not the far one, and with
+    // nothing else in the scene that never showed. The moment a planet wrote depth, the stars
+    // came out in front of it. Not zero either -- the buffer is cleared to zero and the test
+    // is a strict greater-than, so a star at exactly zero fails everywhere.
+    clip.z = clip.w * 1.0e-6;
     // A star behind the camera must not wrap to the front.
     if (dir_view.z > 0.0) {
         clip = vec4<f32>(0.0, 0.0, 0.0, 0.0);

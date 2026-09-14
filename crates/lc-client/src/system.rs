@@ -18,11 +18,8 @@ pub const M_PER_LY: f64 = 9.460_730_472_580_8e15;
 /// number of order ten rather than of order 1e11.
 pub const UNIT_M: f64 = 1.495_978_707e11;
 
-/// Geometric albedo used for every body.
-///
-/// A placeholder, and the one number here that wants a real table: the solar system spans
-/// 0.04 for a comet nucleus to 1.4 for Enceladus, and what the preset carries is a
-/// visualisation colour rather than a measured albedo. Roughly the solar system's median.
+/// Geometric albedo where nothing better is known. Every classified body has its own; this is
+/// only the fallback.
 pub const DEFAULT_ALBEDO: f64 = 0.3;
 
 /// The catalogue name of the system whose data is real rather than generated.
@@ -41,6 +38,10 @@ pub struct Rings {
 pub struct Drawable {
     pub name: String,
     pub rings: Option<Rings>,
+    /// What it looks like, from what it is.
+    pub surface: lc_world::surface::Surface,
+    /// Spin axis, simulation axes. Ecliptic north where the data says nothing.
+    pub pole: DVec3,
     /// Where it is, light-years from the world origin, simulation axes.
     pub position_ly: DVec3,
     pub radius_m: f64,
@@ -139,14 +140,23 @@ impl LocalSystem {
                 // The rings are found by the body's `em-sim` id, and their plane is that body's
                 // own pole out of the preset's IAU rotation. A second copy of a pole here would
                 // be a second chance to have it wrong.
-                let rings = lc_world::rings::for_body(self.sim.name(i)).and_then(|system| {
-                    pole_of(self.sim.rotation(i)?).map(|pole| Rings { system, pole })
-                });
+                let pole = self.sim.rotation(i).and_then(pole_of).unwrap_or(DVec3::Z);
+                let rings = lc_world::rings::for_body(self.sim.name(i))
+                    .map(|system| Rings { system, pole });
+
+                let equilibrium_k = equilibrium_temperature(self.star_luminosity_w, distance_m);
+                let surface = lc_world::surface::Surface::classify(
+                    radius_m,
+                    self.sim.info(i).mass,
+                    equilibrium_k,
+                );
 
                 // What actually reflects: the lit disc, plus whatever of the rings is turned
                 // toward both the star and the observer.
                 let mut area = std::f64::consts::PI * radius_m * radius_m * phase;
-                let mut albedo = DEFAULT_ALBEDO;
+                // Its own albedo, not one number for everything. Ice reflects six times what
+                // bare rock does and the classification already knows which this is.
+                let mut albedo = surface.albedo();
                 if let Some(rings) = rings {
                     let lit = rings.pole.dot(to_star.normalize_or_zero()).abs();
                     let seen = rings.pole.dot(to_observer.normalize_or_zero()).abs();
@@ -163,6 +173,8 @@ impl LocalSystem {
                 Some(Drawable {
                     name: self.sim.info(i).name.clone().unwrap_or_else(|| self.sim.name(i).into()),
                     rings,
+                    surface,
+                    pole,
                     position_ly: self.origin_ly + at / M_PER_LY,
                     radius_m,
                     effective_radius_m: effective_radius_from_area(
@@ -171,7 +183,7 @@ impl LocalSystem {
                         albedo,
                         distance_m,
                     ),
-                    equilibrium_k: equilibrium_temperature(self.star_luminosity_w, distance_m),
+                    equilibrium_k,
                 })
             })
             .collect()
@@ -179,6 +191,15 @@ impl LocalSystem {
 
     pub fn star_teff_k(&self) -> f64 {
         self.star_teff_k
+    }
+
+    pub fn star_radius_m(&self) -> f64 {
+        self.star_radius_m
+    }
+
+    /// Where the star is, light-years from the world origin.
+    pub fn star_position_ly(&self) -> DVec3 {
+        self.origin_ly + self.sim.position(self.primary) / M_PER_LY
     }
 }
 
@@ -216,6 +237,16 @@ pub fn effective_radius_from_area(
         return 0.0;
     }
     star_radius_m * (albedo * area_m2 / std::f64::consts::PI).sqrt() / distance_m
+}
+
+/// A stable number from a body's name, for anything that needs a seed and has only a name.
+pub fn name_seed(name: &str) -> u64 {
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    for b in name.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x1000_0000_01b3);
+    }
+    lc_world::rng::mix(h)
 }
 
 /// A body's pole, from whichever way its rotation is described.

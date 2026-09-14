@@ -324,6 +324,43 @@ band near the plane and it reads as a ring; an isotropic swarm's is flat and it 
 sphere. Nothing special-cases either, and the mesh is built from the inclination distribution
 alone, so it is static — what changes as the ship moves is the transform.
 
+### Resolved bodies
+
+![Saturn](../images/planet.png)
+
+Past a couple of pixels of angular radius a body stops being a point and becomes a sphere. Below
+that it is drawn at its *effective* radius, which is a photometric fiction — the radius a
+blackbody would need to deliver the same flux — and that is right for anything unresolved and
+wrong the moment a body has a shape. It is why Saturn's rings had nothing in the middle.
+
+A resolved body is the only thing in this renderer that writes depth, which is what puts the far
+half of a ring behind its planet and the near half in front.
+
+**No textures and no authored appearance.** What a body looks like follows from its radius, mass
+and equilibrium temperature, which every body in every system already carries, and everything
+past that is a seed. `lc_world::surface` sorts the solar system the way a person would, and two
+of its thresholds are set between specific pairs rather than chosen:
+
+| | | |
+|---|---|---|
+| Europa 3013 kg/m³ against Io 3528 | bulk density | ice shell against no water at all |
+| Saturn 5.7e26 kg against Neptune 1.0e26 | mass | an ice giant is one because it never got the hydrogen |
+
+Sorting the giants by *temperature* was the first attempt and put Saturn, at 90 K, in with
+Uranus. True about its temperature and wrong about everything a person would recognise.
+
+Two families of surface cover it: latitude bands for anything gaseous, mottling for everything
+solid. The band warp has to stay well under the band spacing — at a quarter of a period it stops
+perturbing the bands and starts destroying them, and the planet reads as blobs.
+
+The classification also supplies a per-body albedo, which replaces the flat 0.3 the photometry
+had been using. Ice reflects six times what bare rock does.
+
+**Known gap: the exposure does not see bodies.** It is placed by the star field, and a lit
+surface a few astronomical units from its star is tens of stops above that, so most resolved
+bodies clip to the top of the window and their palette carries the difference. Making the
+auto-exposure account for what is actually on screen is its own piece of work.
+
 ### Rings
 
 ![Saturn](../images/rings.png)

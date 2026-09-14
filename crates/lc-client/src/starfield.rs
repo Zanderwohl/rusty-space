@@ -440,7 +440,7 @@ pub fn lut_scale() -> f32 {
 }
 
 /// Radians per pixel for the camera the sky is drawn for.
-fn camera_scale(camera: &Query<(&Projection, &Camera), With<Camera3d>>) -> f32 {
+pub fn camera_scale(camera: &Query<(&Projection, &Camera), With<Camera3d>>) -> f32 {
     let Ok((projection, camera)) = camera.single() else { return 0.0 };
     let Projection::Perspective(perspective) = projection else { return 0.0 };
     let height = camera.logical_viewport_size().map(|s| s.y).unwrap_or(0.0);
