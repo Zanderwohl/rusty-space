@@ -29,13 +29,7 @@ const LY_PER_LUS: f64 = 299.792458 / 9.460_730_472_580_8e15;
 /// metre silicon camera at room temperature: it cannot reach the thermal infrared at all, and
 /// its own 290 K housing glows straight into the band a swarm lives in. A ship that is a mind
 /// with no eyes builds the sensor it needs.
-pub const SHIP_SENSOR: Instrument = Instrument {
-    aperture_m2: 4.0,
-    throughput: 0.6,
-    bands: em_spectra::BandMask::ALL,
-    temperature_k: 45.0,
-    emissivity: 0.05,
-};
+pub const SHIP_SENSOR: Instrument = Instrument::SHIP;
 
 /// How many nearby stars get a generated system and a full emission model.
 ///

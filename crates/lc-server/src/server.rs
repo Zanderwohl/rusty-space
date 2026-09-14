@@ -12,8 +12,8 @@ use lc_store::id::Minter;
 use crate::journal::{Journal, JournalError, PREPARE_AHEAD_US};
 use crate::rate::Budget;
 use crate::transport::Transport;
-use crate::world::{Event, Scheduled, Ship, schedule};
-use lc_world::motion::ShipState;
+use crate::world::{Event, Scheduled, schedule};
+use lc_world::craft::{Craft, CraftId, Fleet};
 
 /// Real milliseconds a tick covers.
 pub const TICK_MS: i64 = 50;
@@ -43,7 +43,11 @@ pub struct Connected {
 
 pub struct Server<J: Journal> {
     now_t: i64,
-    ships: Vec<Ship>,
+    /// Every craft in the world. The physics is `lc-world`'s and this is the whole of it.
+    fleet: Fleet,
+    /// Who owns what. The server's fact, not the world's: a probe has a worldline and no
+    /// client, and a client is a connection rather than a thing in space.
+    owners: HashMap<CraftId, ClientId>,
     clients: HashMap<ClientId, Connected>,
     journal: J,
     minter: Minter,
@@ -59,7 +63,8 @@ impl<J: Journal> Server<J> {
     pub fn new(journal: J, start_t: i64, shard: u64) -> Self {
         Self {
             now_t: start_t,
-            ships: Vec::new(),
+            fleet: Fleet::new(),
+            owners: HashMap::new(),
             clients: HashMap::new(),
             journal,
             minter: Minter::new(shard).expect("a shard inside the identifier's field"),
@@ -76,8 +81,8 @@ impl<J: Journal> Server<J> {
         &self.journal
     }
 
-    pub fn ship(&self, id: ShipId) -> Option<&Ship> {
-        self.ships.iter().find(|s| s.id == id)
+    pub fn ship(&self, id: ShipId) -> Option<&Craft> {
+        self.fleet.get(CraftId(id.0))
     }
 
     /// What a client has actually sent. The measurement that will one day replace the guess in
@@ -91,8 +96,11 @@ impl<J: Journal> Server<J> {
     /// The identifier comes from the caller rather than from here, because who is connected is
     /// the transport's fact: a connection exists before the world has anything to say about it,
     /// and authentication will one day decide what it is called.
-    pub fn admit(&mut self, owner: ClientId, ship_id: ShipId, motion: ShipState, noise_floor: f32) {
-        self.ships.push(Ship { id: ship_id, owner, motion, system: None, noise_floor });
+    pub fn admit(&mut self, owner: ClientId, mut craft: Craft, noise_floor: f32) {
+        let ship_id = ShipId(craft.id.0);
+        craft.noise_floor = noise_floor;
+        self.owners.insert(craft.id, owner);
+        self.fleet.insert(craft);
         self.clients.insert(owner, Connected {
             ship: ship_id,
             // Nothing received yet, so nothing is provable: an intent may be stamped anywhere
@@ -186,11 +194,10 @@ impl<J: Journal> Server<J> {
         if state.ship != intent.ship_id {
             return Err(Refusal::NotYours);
         }
-        let index = self
-            .ships
-            .iter()
-            .position(|s| s.id == intent.ship_id && s.owner == from)
-            .ok_or(Refusal::NotYours)?;
+        let id = CraftId(intent.ship_id.0);
+        if self.owners.get(&id) != Some(&from) || self.fleet.get(id).is_none() {
+            return Err(Refusal::NotYours);
+        }
 
         // The clamp. Not later than now, and not earlier than the moment this client's stream
         // has already been resolved to.
@@ -217,19 +224,28 @@ impl<J: Journal> Server<J> {
                 if !beta.is_finite() || beta.length() >= 1.0 {
                     return Err(Refusal::Impossible);
                 }
-                let here = self.ships[index].position_at(at as f64);
-                self.ships[index].motion = crate::world::coasting(here, beta, at);
+                let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
+                let here = craft.position_at(at as f64);
+                let noise_floor = craft.noise_floor;
+                *craft = crate::world::coasting(intent.ship_id, here, beta, at);
+                craft.noise_floor = noise_floor;
                 // A burn is not silent -- it is the most visible thing a ship does -- but what
                 // it radiates is the drive's business. Nominal, until there is a drive model.
                 (KIND_BURN, BURN_POWER_W, format!("{{\"beta\":{beta:?}}}"))
             }
         };
 
-        let source = self.ships[index].id;
-        let at_position = self.ships[index].position_at(at as f64);
-        let id = self.minter.mint(at).ok_or(Refusal::Impossible)?.get();
-        let event = Event { id, source, t: at, at: at_position, kind, power_w, payload };
-        for observer in &self.ships {
+        let at_position = self.fleet.get(id).ok_or(Refusal::NotYours)?.position_at(at as f64);
+        let event = Event {
+            id: self.minter.mint(at).ok_or(Refusal::Impossible)?.get(),
+            source: intent.ship_id,
+            t: at,
+            at: at_position,
+            kind,
+            power_w,
+            payload,
+        };
+        for observer in self.fleet.iter() {
             if let Some(scheduled) = schedule(&event, observer) {
                 deliveries.push(scheduled);
             }
@@ -250,11 +266,11 @@ impl<J: Journal> Server<J> {
             self.clients.iter().map(|(id, state)| (*id, state.clone())).collect();
 
         for (id, state) in connections {
-            let Some(ship) = self.ships.iter().find(|s| s.id == state.ship).cloned() else {
+            let Some(ship) = self.fleet.get(CraftId(state.ship.0)).cloned() else {
                 continue;
             };
             // The proven read: one range scan over `(observer_id, arrive_t)`, already ordered.
-            let due = self.journal.due(ship.id, state.cursor_t, now).await?;
+            let due = self.journal.due(state.ship, state.cursor_t, now).await?;
 
             let mut cleared = Vec::new();
             let mut latest = state.last_reception_t;
@@ -331,10 +347,10 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let actor = ClientId(1);
-        server.admit(actor, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
+        server.admit(actor, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
         let watcher = ClientId(2);
         server
-            .admit(watcher, ShipId(2), crate::world::still(DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0)), 0.0);
+            .admit(watcher, crate::world::still(ShipId(2), DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0)), 0.0);
 
         wire.client_says(actor, Inbound::Act(Intent {
             ship_id: ShipId(1),
@@ -398,7 +414,7 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = ClientId(1);
-        server.admit(client, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
+        server.admit(client, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
 
         let order = |t| Inbound::Act(Intent {
             ship_id: ShipId(1),
@@ -459,8 +475,8 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let first = ClientId(1);
-        server.admit(first, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
-        server.admit(ClientId(2), ShipId(2), crate::world::still(DVec3::ZERO), 0.0);
+        server.admit(first, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+        server.admit(ClientId(2), crate::world::still(ShipId(2), DVec3::ZERO), 0.0);
 
         wire.client_says(first, Inbound::Act(Intent {
             ship_id: ShipId(2),
@@ -483,7 +499,7 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = ClientId(1);
-        server.admit(client, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
+        server.admit(client, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
 
         // The future: clamped down to now.
         wire.client_says(client, Inbound::Act(Intent {
@@ -526,7 +542,7 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = ClientId(1);
-        server.admit(client, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
+        server.admit(client, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
 
         // Let the cursor run well past where the intent claims to have been issued.
         for _ in 0..5 {
@@ -561,7 +577,7 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = ClientId(1);
-        server.admit(client, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
+        server.admit(client, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
 
         for order in [
             Order::Burn { beta: [1.0, 0.0, 0.0] },
@@ -606,14 +622,9 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let actor = ClientId(1);
-        server.admit(actor, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
+        server.admit(actor, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
         let deaf = ClientId(2);
-        server.admit(
-            deaf,
-            ShipId(2),
-            crate::world::still(DVec3::new(1_000_000.0, 0.0, 0.0)),
-            1.0e6,
-        );
+        server.admit(deaf, crate::world::still(ShipId(2), DVec3::new(1_000_000.0, 0.0, 0.0)), 1.0e6);
 
         wire.client_says(actor, Inbound::Act(Intent {
             ship_id: ShipId(1),
@@ -642,7 +653,7 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let actor = ClientId(1);
-        server.admit(actor, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
+        server.admit(actor, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
 
         wire.client_says(actor, Inbound::Act(Intent {
             ship_id: ShipId(1),
@@ -674,7 +685,7 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = ClientId(1);
-        server.admit(client, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
+        server.admit(client, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
 
         wire.client_says(client, Inbound::Hello { protocol: PROTOCOL_VERSION + 1 });
         server.tick(&mut wire).await.unwrap();
@@ -691,13 +702,7 @@ use crate::transport::Loopback;
     fn the_tick_size_does_not_change_where_anything_is() {
         let at = DVec3::new(500_000.0, 0.0, 0.0);
         let beta = DVec3::new(0.3, -0.1, 0.0);
-        let ship = Ship {
-            id: ShipId(1),
-            owner: ClientId(1),
-            motion: crate::world::coasting(at, beta, 0),
-            system: None,
-            noise_floor: 0.0,
-        };
+        let ship = crate::world::coasting(ShipId(1), at, beta, 0);
         let after = 40 * TICK_US;
         // One step or forty, the closed form is the same place to the last bit -- and it stays
         // exact across the conversion into light-years the world model works in and back.

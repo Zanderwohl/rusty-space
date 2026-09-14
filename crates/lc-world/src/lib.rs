@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 pub mod coast;
+pub mod craft;
 pub mod distribution;
 pub mod emission;
 pub mod flicker;

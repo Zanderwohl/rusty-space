@@ -1,73 +1,33 @@
 //! What the server knows: things with worldlines, and the events they have made.
 //!
-//! A ship's motion is [`lc_world::motion::ShipState`] — the same model the client runs, folded
-//! by the same [`apply`](lc_world::motion::apply). The server used to keep its own impoverished
-//! one, a point that was either still or coasting, and could therefore neither validate nor
-//! reproduce anything the client actually did.
-
-use std::sync::Arc;
+//! A craft is [`lc_world::craft::Craft`] — the same model the client runs, folded by the same
+//! [`apply`](lc_world::motion::apply). The server used to keep its own impoverished one, a
+//! point that was either still or coasting, and could therefore neither validate nor reproduce
+//! anything the client actually did.
+//!
+//! What stays here is what is the *server's* fact rather than the world's: who owns a craft,
+//! what has happened, and who is due to be told.
 
 use glam::DVec3;
-use lc_proto::{ClientId, ShipId};
+use lc_proto::ShipId;
 use lc_spacetime::Worldline;
-use lc_world::motion::{Flight, LIGHT_US_PER_LY, ShipState};
-use lc_world::system::LocalSystem;
+use lc_world::craft::{Craft, CraftId, Kind};
+use lc_world::motion::LIGHT_US_PER_LY;
 
 /// Microseconds of coordinate time in one second.
 pub const MICROS_PER_SECOND: i64 = 1_000_000;
 
-/// A ship at rest at a point, light-microseconds from the world origin.
-pub fn still(at: DVec3) -> ShipState {
-    ShipState::at(at / LIGHT_US_PER_LY)
+/// A craft at rest at a point, light-microseconds from the world origin.
+pub fn still(id: ShipId, at: DVec3) -> Craft {
+    Craft::at(CraftId(id.0), Kind::Ship, at / LIGHT_US_PER_LY)
 }
 
 /// Moving through `at` at `beta`, from coordinate microsecond `epoch_us` onward.
-pub fn coasting(at: DVec3, beta: DVec3, epoch_us: i64) -> ShipState {
-    let mut state = still(at);
-    state.beta = beta;
-    state.set_adrift(epoch_us as f64 * 1.0e-6);
-    state
-}
-
-/// A ship: a worldline the server owns, and the instrument a client sees through.
-#[derive(Clone)]
-pub struct Ship {
-    pub id: ShipId,
-    pub owner: ClientId,
-    pub motion: ShipState,
-    /// The system its motive is defined against, if it is in one.
-    ///
-    /// Shared and never mutated: every motive is now evaluated at the time asked for rather
-    /// than read out of a propagated arena, so the server never has to advance a system and
-    /// every ship in one can point at the same copy.
-    pub system: Option<Arc<LocalSystem>>,
-    /// Below this, an arrival is not a detection. Arrival is the hard gate; this is the one
-    /// that prunes far more.
-    pub noise_floor: f32,
-}
-
-impl Ship {
-    /// The ship as something the light-delay solve can evaluate.
-    pub fn worldline(&self) -> Flight<'_> {
-        Flight::new(&self.motion, self.system.as_deref())
-    }
-
-    /// Where it is at a coordinate microsecond, light-microseconds.
-    pub fn position_at(&self, t_us: f64) -> DVec3 {
-        self.worldline().position_at(t_us)
-    }
-}
-
-impl std::fmt::Debug for Ship {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Ship")
-            .field("id", &self.id)
-            .field("owner", &self.owner)
-            .field("motion", &self.motion)
-            .field("in_a_system", &self.system.is_some())
-            .field("noise_floor", &self.noise_floor)
-            .finish()
-    }
+pub fn coasting(id: ShipId, at: DVec3, beta: DVec3, epoch_us: i64) -> Craft {
+    let mut craft = still(id, at);
+    craft.motion.beta = beta;
+    craft.motion.set_adrift(epoch_us as f64 * 1.0e-6);
+    craft
 }
 
 /// Something that happened, at a coordinate.
@@ -109,7 +69,7 @@ pub fn strength(power_w: f64, distance: f64) -> f32 {
 ///
 /// `None` when it never does — the ship's worldline ends first, or the light already went past
 /// before it began.
-pub fn schedule(event: &Event, observer: &Ship) -> Option<Scheduled> {
+pub fn schedule(event: &Event, observer: &Craft) -> Option<Scheduled> {
     let line = observer.worldline();
     let arrive = lc_spacetime::arrival_time_at(event.t as f64, event.at, &line)?;
     // Rounded up. Rounding down would put an arrival a microsecond before its true time, and
@@ -118,7 +78,7 @@ pub fn schedule(event: &Event, observer: &Ship) -> Option<Scheduled> {
     let arrive_t = arrive.ceil() as i64;
     let travelled = (line.position_at(arrive) - event.at).length();
     Some(Scheduled {
-        observer: observer.id,
+        observer: ShipId(observer.id.0),
         event: event.id,
         arrive_t,
         strength: strength(event.power_w, travelled),
@@ -129,14 +89,8 @@ pub fn schedule(event: &Event, observer: &Ship) -> Option<Scheduled> {
 mod tests {
     use super::*;
 
-    fn ship(id: i64, at: DVec3) -> Ship {
-        Ship {
-            id: ShipId(id),
-            owner: ClientId(1),
-            motion: still(at),
-            system: None,
-            noise_floor: 0.0,
-        }
+    fn ship(id: i64, at: DVec3) -> Craft {
+        still(ShipId(id), at)
     }
 
     fn pulse(t: i64, at: DVec3, power_w: f64) -> Event {
@@ -178,9 +132,8 @@ mod tests {
     fn a_moving_observer_meets_the_light_at_a_different_time() {
         let at = DVec3::new(1_000_000.0, 0.0, 0.0);
         let still = ship(2, at);
-        let mut closing = ship(3, at);
         // Falling toward the source at a tenth of `c`, from the same place at the same time.
-        closing.motion = coasting(at, DVec3::new(-0.1, 0.0, 0.0), 0);
+        let closing = coasting(ShipId(3), at, DVec3::new(-0.1, 0.0, 0.0), 0);
 
         let sent = pulse(0, DVec3::ZERO, 1.0);
         let a = schedule(&sent, &still).unwrap().arrive_t;
@@ -203,7 +156,7 @@ mod tests {
 
         let sky = AuthoredStars::sample();
         let star = sky.stars().first().expect("a star").clone();
-        let Some(system) = LocalSystem::for_star(&star) else { return };
+        let Some(system) = lc_world::system::LocalSystem::for_star(&star) else { return };
         let Some(body) = system.inventory().iter().find_map(|e| match &e.target {
             lc_world::navigation::Target::Body(name) => Some(name.clone()),
             _ => None,
@@ -213,25 +166,14 @@ mod tests {
 
         let course = Course::Orbit { body, altitude_radii: 2.0, plane: Plane::Equatorial };
         let Some(waypoint) = course.resolve(&system, system.star_position_ly()) else { return };
-        let mut motion = ShipState::at(system.star_position_ly());
+        let mut motion = lc_world::motion::ShipState::at(system.star_position_ly());
         motion.begin_holding(waypoint);
 
-        let system = Arc::new(system);
-        let orbiting = Ship {
-            id: ShipId(2),
-            owner: ClientId(1),
-            motion: motion.clone(),
-            system: Some(system.clone()),
-            noise_floor: 0.0,
-        };
+        let mut orbiting = Craft::at(CraftId(2), Kind::Ship, DVec3::ZERO);
+        orbiting.motion = motion.clone();
+        orbiting.enter(Some(std::sync::Arc::new(system)), 0.0);
         // The same ship, frozen where it was at t = 0: what the old model could represent.
-        let parked = Ship {
-            id: ShipId(3),
-            owner: ClientId(1),
-            motion: still(orbiting.position_at(0.0)),
-            system: None,
-            noise_floor: 0.0,
-        };
+        let parked = still(ShipId(3), orbiting.position_at(0.0));
 
         // From far enough away that the delay is many orbits.
         let far = orbiting.position_at(0.0) + DVec3::new(5.0e9, 0.0, 0.0);
