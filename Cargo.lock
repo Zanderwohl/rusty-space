@@ -4255,6 +4255,7 @@ dependencies = [
 name = "lc-store"
 version = "0.1.0"
 dependencies = [
+ "glam",
  "lc-spacetime",
  "tokio",
  "tokio-postgres",

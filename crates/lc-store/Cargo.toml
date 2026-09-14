@@ -8,6 +8,7 @@ authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 
 [dependencies]
 lc-spacetime = { path = "../lc-spacetime" }
+glam = "0.30"
 tokio-postgres = "0.7"
 tokio = { version = "1", features = ["rt"] }
 

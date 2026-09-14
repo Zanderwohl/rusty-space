@@ -194,6 +194,31 @@ Properties that matter:
   that only draws the nearest 500 sources pays for 500.
 - Pruning by strength as well as time, since the bounding box also bounds `1/r^2`.
 
+### What the bounds can and cannot do
+
+A node is dropped on three tests: its first light has not arrived by the end of the window, its
+last light went past before the start of it, or the nearest it could be is still too far to clear
+the strength floor. Each needs a bound that errs the safe way — the near distance must never come
+out *larger* than the truth and the far distance never *smaller*, because a wrong bound drops a
+reception rather than merely costing a visit. The observer contributes a bounding ball over the
+window; the default is the one `c` alone gives, and a worldline that knows its own shape gives a
+tighter one.
+
+Two things about the heap key are worth knowing before trusting it.
+
+**It orders by `earliest emission + nearest distance`, and that is only informative while the
+window opens before the earliest possible arrival.** Streaming from the beginning and stopping
+early — the case the property is claimed for — prunes hard: twenty receptions out of two
+thousand open a fraction of the tree. A window that opens *after* the earliest possible arrival
+flattens the bound onto its own start for nearly every node, because every node genuinely could
+deliver at that instant. That is a limit of what a summary of a subtree can know.
+
+**A source that emits continuously is a candidate for any window its own span reaches.** So a
+tick does not read fewer *sources*; it reads a narrower range out of each, which is exactly the
+`(source_id, t)` B-tree the decomposition ends on. Measured on a tick one per cent of the world's
+span: the same sources, an eighth of the events. Time pruning at the source level pays for bursty
+sources — a ship that burned once — and distance and strength pruning pay for the rest.
+
 ## Retention
 
 The event table grows without bound and most of it is never read again. An event is

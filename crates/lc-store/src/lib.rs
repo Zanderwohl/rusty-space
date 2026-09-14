@@ -8,6 +8,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod bvh;
+pub mod cursor;
 pub mod id;
 pub mod migrate;
 pub mod store;

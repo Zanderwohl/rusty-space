@@ -39,7 +39,7 @@ pub mod worldline;
 pub use coord::{COORD_BOUND, Coord, LIGHT_MICROSECOND_M};
 pub use interval::{Separation, classify, interval2, precedes};
 pub use units::{Micros, Span};
-pub use worldline::{Worldline, retarded_times, retarded_times_at};
+pub use worldline::{Worldline, arrival_time, arrival_time_at, retarded_times, retarded_times_at};
 
 #[cfg(test)]
 mod standalone {
