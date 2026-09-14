@@ -541,7 +541,7 @@ something needs measuring.
 Same shape as [12-buildout.md](12-buildout.md): what must exist, what it delivers, how you
 know. W1 and W2 depend on nothing and can start today. W3 needs phase 6, which is done.
 
-## W1 — Skeleton and deploy
+## W1 — Skeleton and deploy — **done**
 
 **Deliver:** `web/lc-web`, axum, maud, the static routes, the SCSS pipeline with its token and
 base sheets, `/v/<build>/` asset serving, health checks, the Dockerfile, and one deploy to a
@@ -554,6 +554,22 @@ grep is in CI.
 
 **Do not:** add a database, htmx, or a build pipeline. Write `_base.scss` and `_tokens.scss`
 and stop — components arrive when a second page wants one.
+
+**What it measured.** Image 30.5 MB. Cold amd64 release build on `rocinante`, 46 s. Compiled
+stylesheet 4.4 kB, 1.4 kB brotli. Seven classes site-wide — `stack`, `lede`, `cta`, `page`,
+`columns`, `wordmark`, `fine-print` — and both pages' prose is styled entirely by element
+selectors, so the markdown pipeline in W2 walks into it unchanged. The container runs
+`--read-only --cap-drop ALL`, which the in-memory stylesheet is what makes possible.
+
+One bug worth keeping, because it looks like a grid problem and is not. As a bare rule,
+`.stack + .stack` also fires between grid siblings, so the second column of a `.columns` sat a
+whole section gap below the first. Section spacing belongs to the prose column, not to the
+primitive: `.page > .stack + .stack`. Layout primitives should say how children are arranged
+and nothing about where the primitive itself sits.
+
+`--check-styles` exists for the same reason the boot fails on a bad sheet: compiling at boot
+turns a CSS syntax error into a failed deploy, and CI compiling it first turns it back into a
+failed build.
 
 ## W2 — The blog
 
