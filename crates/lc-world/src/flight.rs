@@ -78,7 +78,7 @@ pub struct FlightState {
 ///
 /// The plan is computed once and then only sampled, so the trajectory does not drift with
 /// the frame rate and a paused or fast-forwarded clock lands in the same place.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Cruise {
     pub from_ly: DVec3,
     pub to_ly: DVec3,

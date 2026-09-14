@@ -14,6 +14,7 @@ pub mod emission;
 pub mod flicker;
 pub mod flight;
 pub mod instrument;
+pub mod motion;
 pub mod navigation;
 pub mod observation;
 pub mod occluder;
