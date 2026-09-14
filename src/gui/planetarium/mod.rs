@@ -141,6 +141,9 @@ impl Plugin for PlanetariumUI {
                 presentation::cleanup_orphaned_body_points,
                 presentation::label_bodies
                     .after(world::sync_transforms),
+                presentation::draw_reticle
+                    .after(world::sync_transforms)
+                    .after(presentation::label_bodies),
                 presentation::draw_trajectory_marker_labels
                     .after(world::sync_transforms)
                     .after(presentation::update_focused_trajectory_markers)

@@ -3,6 +3,7 @@
 //! This module handles 3D camera control, separate from the GUI (egui panels).
 
 mod freecam;
+pub mod picking;
 mod planetarium;
 
 pub use freecam::{Freecam, FreeCamPlugin, MovementSettings, KeyBindings};
