@@ -152,6 +152,100 @@ sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keyc
 Prefer the tunnel. A root certificate installed on a laptop outlives the reason it was
 installed.
 
+### Real certificates on the LAN: Let's Encrypt over DNS-01
+
+**This is the setup to use.** It gives rocinante a publicly-trusted certificate without
+exposing it to the internet, which removes the tunnel and makes `/play` work from any device
+at home.
+
+The trick is the challenge type. HTTP-01 and TLS-ALPN-01 both require Let's Encrypt to reach
+the machine; **DNS-01 requires only the ability to write a TXT record**. Caddy writes
+`_acme-challenge`, Let's Encrypt reads it, Caddy deletes it, and the same happens at renewal
+without anyone being involved. Nothing inbound, ever.
+
+The A records can then point at **10.37.1.100**. Let's Encrypt does not look at where a name
+resolves when the challenge is DNS-01, so a public name may resolve to a private address.
+
+`tools/proxy/` holds the image: Caddy rebuilt with `xcaddy` to include one DNS provider
+module, because the stock image has none.
+
+#### 1. Namecheap API access — check this first
+
+Namecheap gates API access behind account activity. The account must have **20+ domains, or
+$50+ balance, or $50+ spent in the last two years**, and the domain must be on Namecheap's own
+BasicDNS rather than external nameservers.
+
+If that gate does not open, do not fight it. Delegate the subdomain instead: create `NS`
+records for `lc.<domain>` pointing at a free DNS host with a usable API (Cloudflare and deSEC
+both qualify), and rebuild the proxy image `--with github.com/caddy-dns/cloudflare`. The
+registration stays at Namecheap and only that subdomain's DNS moves. Nothing else in this
+setup changes.
+
+Then, in the Namecheap dashboard:
+
+- **Profile → Tools → Namecheap API Access** — switch it on, and copy the API key.
+- **Whitelisted IPs** — add the address Namecheap will see the requests coming *from*. That is
+  the machine's **public egress address**, not its LAN address. Today both rocinante and the
+  laptop leave through `108.242.43.159`.
+
+Getting that IP wrong is the single most common failure, and it presents as an authentication
+error rather than as anything about addresses.
+
+#### 2. DNS records
+
+| host | type | value |
+|---|---|---|
+| `lc` | A | `10.37.1.100` |
+| `cdn.lc` | A | `10.37.1.100` |
+
+A wildcard `*.lc` A record works too if Namecheap accepts a nested wildcard, and saves adding
+a row per service. Explicit records always work, so start there.
+
+#### 3. Run it
+
+```bash
+docker --context rocinante build -t lightcone-proxy:latest tools/proxy
+docker --context rocinante volume create lightcone-proxy-data
+
+docker --context rocinante run -d --name lightcone-proxy --restart unless-stopped \
+    --network lightcone -p 80:80 -p 443:443 \
+    -v lightcone-proxy-data:/data \
+    -e LC_DOMAIN=lc.<domain> \
+    -e ACME_EMAIL=<you@example.com> \
+    -e NAMECHEAP_USER=<namecheap username> \
+    -e NAMECHEAP_API_KEY=<api key> \
+    -e NAMECHEAP_CLIENT_IP=108.242.43.159 \
+    lightcone-proxy:latest
+```
+
+**The `/data` volume is not optional.** Caddy keeps issued certificates there, and without it
+every container restart asks Let's Encrypt for a new one. The rate limit is 50 certificates
+per registered domain per week and it is reachable in an afternoon of restarts. If you do hit
+it, the limit is per week and waiting is the only remedy — so add `acme_ca` pointing at
+Let's Encrypt's **staging** endpoint while getting the configuration right, and remove it once
+a staging certificate is issued successfully.
+
+Then redeploy the site with the HTTPS origins, because feeds, the sitemap and the loader all
+build absolute URLs from them:
+
+```bash
+-e BASE_URL=https://lc.<domain>
+-e CDN_BASE=https://cdn.lc.<domain>
+```
+
+#### 4. What changes the moment it works
+
+- **`/play` runs without a tunnel**, from any device on the network, because a secure context
+  is what WebGPU requires.
+- **Brotli starts being used.** Chrome only advertises `br` over a secure connection, so
+  everything so far has been gzip — about 9 MB rather than 6.4. This is the first time the
+  `.br` files are read at all, which makes it the first time a mistake in them could show.
+- **The CDN's `Access-Control-Allow-Origin` should stop being `*`** and become
+  `https://lc.<domain>`. The wildcard is a development convenience for serving several local
+  origins and should not outlive them.
+- The hostname appears in public Certificate Transparency logs. Not a vulnerability, and the
+  wildcard means only `lc.<domain>` is published rather than every service under it.
+
 ### Production: a real domain, and Caddy in front of both
 
 One Caddy terminates TLS for the site and the CDN, gets certificates from Let's Encrypt on its

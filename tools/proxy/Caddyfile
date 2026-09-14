@@ -1,0 +1,52 @@
+# TLS for the Lightcone development stack.
+#
+# Certificates come from Let's Encrypt over the **DNS-01** challenge, which proves control of
+# the name by writing a TXT record rather than by being reachable. Nothing here is exposed to
+# the internet: the A records point at a private address, and Let's Encrypt never looks at
+# where a name resolves when the challenge is DNS-01.
+#
+# That is what makes a real, publicly-trusted certificate possible for a machine on a home
+# LAN — which matters because WebGPU is only available in a secure context, so `/play` cannot
+# run over plain HTTP at all.
+{
+	email {$ACME_EMAIL}
+
+	acme_dns namecheap {
+		user {$NAMECHEAP_USER}
+		api_key {$NAMECHEAP_API_KEY}
+		# The address Namecheap sees this request coming from, which must be allowlisted in
+		# the Namecheap API settings. It is the machine's public egress address, not its LAN
+		# one, and it is the single most common reason this fails.
+		client_ip {$NAMECHEAP_CLIENT_IP}
+	}
+}
+
+# One certificate for the subdomain and everything under it. A wildcard is not cosmetic here:
+# it means a new service needs a DNS record and nothing else, and it keeps every name but the
+# parent out of the public Certificate Transparency logs.
+*.{$LC_DOMAIN}, {$LC_DOMAIN} {
+	tls {
+		dns namecheap {
+			user {$NAMECHEAP_USER}
+			api_key {$NAMECHEAP_API_KEY}
+			client_ip {$NAMECHEAP_CLIENT_IP}
+		}
+	}
+
+	@cdn host cdn.{$LC_DOMAIN}
+	handle @cdn {
+		# The CDN keeps its own header policy -- content types, immutability, pre-compressed
+		# encodings. Proxying preserves all of it, so there is still one place that decides
+		# what a CDN response looks like.
+		reverse_proxy lightcone-cdn:3101
+	}
+
+	handle {
+		reverse_proxy lightcone-web:3100
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
