@@ -121,6 +121,13 @@ table {
   }
 }
 
+// `hidden` means the element is not rendered, and no layout rule should be able to override
+// it by accident. The UA sheet's `[hidden] { display: none }` has one class of specificity and
+// loses to any id or class rule that sets `display`.
+[hidden] {
+  display: none !important;
+}
+
 hr {
   border: 0;
   border-block-start: 1px solid var(--rule);

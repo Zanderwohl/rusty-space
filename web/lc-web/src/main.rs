@@ -39,6 +39,11 @@ pub struct AppState {
     pub assets: Assets,
     content: Arc<RwLock<Arc<Content>>>,
     pub base_url: Arc<str>,
+    /// Where game builds live. The site knows this and a build id, and nothing else about
+    /// the game.
+    pub cdn_base: Arc<str>,
+    /// Which build `/play` launches, if any.
+    pub build_id: Option<Arc<str>>,
 }
 
 impl AppState {
@@ -80,7 +85,12 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    tracing::info!(build = assets::BUILD, env = ?config.env, "starting");
+    tracing::info!(
+        build = assets::BUILD,
+        env = ?config.env,
+        game = config.fallback_build_id.as_deref().unwrap_or("none"),
+        "starting"
+    );
     let assets = Assets::load(&config.static_dir, config.env.is_production())?;
     // Drafts are loaded outside production and not loaded at all inside it. Excluding them at
     // load time rather than at render time means no handler can leak one by forgetting.
@@ -89,6 +99,8 @@ async fn main() -> anyhow::Result<()> {
         assets: assets.clone(),
         content: Arc::new(RwLock::new(Arc::new(content))),
         base_url: config.base_url.clone().into(),
+        cdn_base: config.cdn_base.clone().into(),
+        build_id: config.fallback_build_id.clone().map(Into::into),
     };
 
     // Spawned before the router takes ownership of the state. Both hold the same Arc, so a
@@ -101,6 +113,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/", get(views::home::page))
         .route("/about", get(views::page::about))
+        .route("/play", get(views::play::page))
         .route("/blog", get(views::blog::index))
         .route("/blog/{slug}", get(views::blog::post))
         .route("/blog/tag/{tag}", get(views::blog::tag))

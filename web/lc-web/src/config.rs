@@ -26,6 +26,14 @@ pub struct Config {
     /// Absolute origin, for feeds and the sitemap. Those are the only places a URL has to be
     /// absolute; every link in a page is relative and needs no configuration.
     pub base_url: String,
+    /// Where game builds are served from, without a trailing slash.
+    pub cdn_base: String,
+    /// Which build `/play` launches.
+    ///
+    /// Named for what it will be once there is a `channels` table: the answer when the
+    /// database cannot be reached. Today there is no database, so it is the only answer, and
+    /// that is the same code path rather than a temporary one.
+    pub fallback_build_id: Option<String>,
 }
 
 impl Config {
@@ -47,6 +55,11 @@ impl Config {
                 .unwrap_or_else(|| "https://lightcone.example".into())
                 .trim_end_matches('/')
                 .to_owned(),
+            cdn_base: var("CDN_BASE")
+                .unwrap_or_else(|| "https://cdn.lightcone.example".into())
+                .trim_end_matches('/')
+                .to_owned(),
+            fallback_build_id: var("FALLBACK_BUILD_ID"),
         })
     }
 }

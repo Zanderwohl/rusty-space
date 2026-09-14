@@ -3,6 +3,7 @@
 pub mod blog;
 pub mod home;
 pub mod page;
+pub mod play;
 
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
@@ -30,7 +31,21 @@ impl<'a> Head<'a> {
     }
 }
 
+/// The prose chrome: masthead, a reading column, footer. Every page but `/play`.
 pub fn shell(head: Head<'_>, body: Markup) -> Markup {
+    document(
+        head,
+        html! {
+            header { (masthead()) }
+            main class="page" { (body) }
+            footer { (colophon()) }
+        },
+    )
+}
+
+/// The document itself. `/play` uses this directly, because a full-bleed canvas is not a
+/// reading column and pretending otherwise would mean fighting the stylesheet.
+pub fn document(head: Head<'_>, body: Markup) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -51,28 +66,30 @@ pub fn shell(head: Head<'_>, body: Markup) -> Markup {
                 link rel="alternate" type="application/rss+xml" title="Lightcone devlog" href="/feed.xml";
                 link rel="alternate" type="application/feed+json" title="Lightcone devlog" href="/feed.json";
             }
-            body {
-                header {
-                    a class="wordmark" href="/" { "Lightcone" }
-                    nav {
-                        a href="/blog" { "Devlog" }
-                        a href="/about" { "About" }
-                        a href=(REPO) { "Source" }
-                    }
-                }
-                main class="page" { (body) }
-                footer {
-                    p {
-                        "A relativistic sandbox in a volume of real stars. "
-                        "Nothing here is playable yet."
-                    }
-                    p class="fine-print" {
-                        "Build " code { (assets::BUILD) } " · "
-                        a href="/feed.xml" { "RSS" } " · "
-                        a href="/feed.json" { "JSON feed" }
-                    }
-                }
-            }
+            body { (body) }
+        }
+    }
+}
+
+fn masthead() -> Markup {
+    html! {
+        a class="wordmark" href="/" { "Lightcone" }
+        nav {
+            a href="/play" { "Play" }
+            a href="/blog" { "Devlog" }
+            a href="/about" { "About" }
+            a href=(REPO) { "Source" }
+        }
+    }
+}
+
+fn colophon() -> Markup {
+    html! {
+        p { "A relativistic sandbox in a volume of real stars." }
+        p class="fine-print" {
+            "Build " code { (assets::BUILD) } " · "
+            a href="/feed.xml" { "RSS" } " · "
+            a href="/feed.json" { "JSON feed" }
         }
     }
 }

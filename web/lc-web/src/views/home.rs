@@ -75,14 +75,23 @@ pub async fn page() -> Markup {
             }
 
             section class="stack" {
-                h2 { "Not yet playable" }
+                h2 { "What there is so far" }
                 p {
-                    "The physics, the photometry and the client exist and run. The server, the "
-                    "browser build and the game on top of them do not. This site will carry the "
-                    "devlog as that changes, and the browser build when there is one to run. "
-                    "Until then the design documents are public and are the whole of it."
+                    "The physics, the photometry and the client run in a browser today: a sky "
+                    "of real stars, a telescope, and a ship whose clock disagrees with yours. "
+                    "What does not exist yet is the server, and so the other players — for now "
+                    "the universe is yours alone and nobody is coming."
                 }
-                p { a class="cta" href="/blog" { "Read the devlog" } }
+                p {
+                    "The "
+                    a href=(super::REPO) { "design documents" }
+                    " are public, and they are ahead of the code."
+                }
+                p {
+                    a class="cta" href="/play" { "Play in your browser" }
+                    " "
+                    a class="cta" href="/blog" { "Read the devlog" }
+                }
             }
         },
     )

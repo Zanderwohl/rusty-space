@@ -1,0 +1,56 @@
+// The one page that is not a document.
+//
+// A full-bleed canvas has nothing to do with a reading column, so `/play` does not use one.
+// It still uses the same tokens, which is why the loading state looks like the rest of the
+// site rather than like a different product.
+
+body:has(#lightcone) {
+  height: 100dvh;
+  overflow: hidden;
+}
+
+#lightcone {
+  display: block;
+  height: 100dvh;
+  outline: none;
+  width: 100vw;
+}
+
+// The loading state, over the canvas until the client takes the screen. Centred rather than
+// in the reading column, because there is no column here.
+#boot {
+  align-content: center;
+  display: grid;
+  gap: var(--space-3);
+  inset: 0;
+  justify-items: center;
+  padding: var(--space-4);
+  position: fixed;
+  text-align: center;
+
+  p {
+    color: var(--ink-dim);
+    max-width: 34rem;
+  }
+
+  progress {
+    accent-color: var(--accent);
+    height: 0.4rem;
+    width: min(22rem, 70vw);
+  }
+}
+
+#stage {
+  color: var(--accent);
+  font-family: var(--font-ui);
+  font-size: var(--step-0);
+  font-weight: 640;
+  letter-spacing: 0.06em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+// A failure is not a stage of loading, and should not read as one.
+.boot-failed #stage {
+  color: var(--ink);
+}
