@@ -134,15 +134,13 @@ pub const LOCAL: PointStyle = PointStyle {
     overflow_gain: 0.1,
     brightness: 0.2,
     halo_gain: 0.15,
-    // Well under 1: the glare falls off slowly and stays broad rather than collapsing onto the
-    // core. Tuned by eye against a live star, which is the only way to choose it.
-    halo_falloff: 0.16,
+    halo_falloff: 1.4,
     corona_strength: 0.95,
     // Streamers per radian of sky. Halving this halves their number and doubles their width,
     // which is the single lever that matters for how a corona reads.
     corona_frequency: 12.0,
     corona_reach_min: 0.20,
-    corona_reach_span: 0.50,
+    corona_reach_span: 0.37,
     corona_fade: 0.28,
     corona_floor: 0.22,
     corona_gain: 1.45,
