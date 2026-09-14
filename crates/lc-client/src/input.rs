@@ -5,6 +5,8 @@
 
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
+use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
+use bevy_egui::input::EguiWantsInput;
 
 use crate::action::{Action, LOOK_STEP};
 use crate::ui::Panel;
@@ -51,13 +53,73 @@ pub fn held_bindings() -> Vec<(KeyCode, (f64, f64))> {
 /// Radians of look per pixel of mouse movement.
 pub const MOUSE_SENSITIVITY: f64 = 0.003;
 
-/// Held arrow keys and a dragged right mouse button, as one relative turn per frame.
+/// The button that turns the view.
+pub const LOOK_BUTTON: MouseButton = MouseButton::Right;
+
+/// Whether the view is being turned with the mouse, and the cursor is therefore pinned.
+#[derive(Resource, Default)]
+pub struct Looking(pub bool);
+
+/// Pin the cursor while the look button is held, and give it back when it is released.
 ///
-/// The right button rather than the left, and drag rather than pointer capture, so egui keeps
-/// a usable cursor: every control in this client is reachable by mouse and nothing grabs it.
+/// Locked rather than confined: a confined cursor still travels and hits the edge of the window
+/// part-way through a turn, and macOS supports locking where it does not support confining.
+///
+/// Whether egui wants the pointer is consulted once, on the press. Asking every frame would let
+/// a turn that happens to leave the cursor over a panel release itself mid-drag; asking on the
+/// press is what stops a right-drag on a panel from taking the view away instead.
+///
+/// The component is written only on a transition. Writing it every frame is a window call every
+/// frame, for a value that did not change.
+pub fn grab_cursor(
+    buttons: Res<ButtonInput<MouseButton>>,
+    egui: Res<EguiWantsInput>,
+    mut looking: ResMut<Looking>,
+    mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
+) {
+    let Ok(mut cursor) = cursor.single_mut() else { return };
+    let want = grab_transition(
+        looking.0,
+        buttons.just_pressed(LOOK_BUTTON),
+        buttons.pressed(LOOK_BUTTON),
+        egui.wants_any_pointer_input(),
+    );
+    let Some(grab) = want else { return };
+    looking.0 = grab;
+    cursor.grab_mode = if grab { CursorGrabMode::Locked } else { CursorGrabMode::None };
+    cursor.visible = !grab;
+}
+
+/// Whether to take the cursor, give it back, or leave it alone.
+///
+/// Separate from the system because this is the part worth testing and `EguiWantsInput` cannot
+/// be put into a chosen state from outside `bevy_egui`.
+pub fn grab_transition(
+    looking: bool,
+    just_pressed: bool,
+    held: bool,
+    egui_wants_pointer: bool,
+) -> Option<bool> {
+    if !looking && just_pressed && !egui_wants_pointer {
+        Some(true)
+    } else if looking && !held {
+        // Released, or the window lost focus with the button still down. Either way the cursor
+        // goes back: an application holding a hidden cursor it no longer needs is one the
+        // player has to force-quit.
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Held arrow keys and the look button, as one relative turn per frame.
+///
+/// The right button rather than the left, so the left stays free for egui and for picking when
+/// picking exists. The keyboard path is not merely a convenience: it is the one that works
+/// without a pointing device at all.
 pub fn look_around(
     keys: Res<ButtonInput<KeyCode>>,
-    buttons: Res<ButtonInput<MouseButton>>,
+    looking: Res<Looking>,
     motion: Res<AccumulatedMouseMotion>,
     time: Res<Time>,
     mut out: MessageWriter<Requested>,
@@ -72,7 +134,7 @@ pub fn look_around(
             pitch += p * step;
         }
     }
-    if buttons.pressed(MouseButton::Right) {
+    if looking.0 {
         let d = motion.delta;
         yaw -= d.x as f64 * MOUSE_SENSITIVITY;
         pitch -= d.y as f64 * MOUSE_SENSITIVITY;
@@ -138,5 +200,112 @@ mod tests {
         for i in 0..em_spectra::presets::all().len() {
             assert!(bound.contains(&i), "preset {i} has no key");
         }
+    }
+
+    /// A headless app with the two look systems and a window carrying cursor options.
+    fn harness() -> (App, Entity) {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<Requested>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<AccumulatedMouseMotion>()
+            .init_resource::<EguiWantsInput>()
+            .init_resource::<Looking>()
+            .add_systems(Update, (grab_cursor, look_around).chain());
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), CursorOptions::default(), PrimaryWindow))
+            .id();
+        (app, window)
+    }
+
+    fn press(app: &mut App) {
+        app.world_mut().resource_mut::<ButtonInput<MouseButton>>().press(LOOK_BUTTON);
+    }
+
+    fn release(app: &mut App) {
+        app.world_mut().resource_mut::<ButtonInput<MouseButton>>().release(LOOK_BUTTON);
+    }
+
+    fn cursor(app: &App, window: Entity) -> CursorOptions {
+        app.world().entity(window).get::<CursorOptions>().unwrap().clone()
+    }
+
+    #[test]
+    fn holding_the_look_button_pins_the_cursor_and_releasing_gives_it_back() {
+        let (mut app, window) = harness();
+        assert_eq!(cursor(&app, window).grab_mode, CursorGrabMode::None);
+
+        press(&mut app);
+        app.update();
+        assert_eq!(cursor(&app, window).grab_mode, CursorGrabMode::Locked);
+        assert!(!cursor(&app, window).visible);
+
+        release(&mut app);
+        app.update();
+        assert_eq!(cursor(&app, window).grab_mode, CursorGrabMode::None);
+        assert!(cursor(&app, window).visible, "a hidden cursor nobody can free is a force-quit");
+    }
+
+    /// The failure this guards: losing focus mid-drag leaves the button never released, and a
+    /// client that keeps the cursor in that state cannot be clicked out of.
+    #[test]
+    fn the_cursor_comes_back_even_if_the_release_is_never_seen() {
+        let (mut app, window) = harness();
+        press(&mut app);
+        app.update();
+        // Not a release -- the input resource simply stops reporting the button as held.
+        app.world_mut().resource_mut::<ButtonInput<MouseButton>>().reset_all();
+        app.update();
+        assert_eq!(cursor(&app, window).grab_mode, CursorGrabMode::None);
+        assert!(cursor(&app, window).visible);
+    }
+
+    #[test]
+    fn a_right_drag_on_a_panel_does_not_take_the_view() {
+        assert_eq!(grab_transition(false, true, true, true), None, "egui had the pointer");
+        assert_eq!(grab_transition(false, true, true, false), Some(true));
+    }
+
+    /// Asked once on the press, not every frame: a turn that happens to leave the cursor over a
+    /// panel must not release itself part-way through.
+    #[test]
+    fn a_turn_already_under_way_is_not_interrupted_by_a_panel() {
+        assert_eq!(grab_transition(true, false, true, true), None, "must stay grabbed");
+        assert_eq!(grab_transition(true, false, false, true), Some(false), "and release on let go");
+    }
+
+    #[test]
+    fn a_steady_state_writes_nothing() {
+        assert_eq!(grab_transition(false, false, false, false), None);
+        assert_eq!(grab_transition(true, false, true, false), None);
+    }
+
+    #[test]
+    fn the_mouse_only_turns_the_view_while_it_is_held() {
+        let (mut app, _) = harness();
+        let nudge = |app: &mut App| {
+            app.world_mut().resource_mut::<AccumulatedMouseMotion>().delta = Vec2::new(10.0, 0.0);
+            app.update();
+            app.world_mut().resource_mut::<Messages<Requested>>().drain().count()
+        };
+        assert_eq!(nudge(&mut app), 0, "a loose mouse must not turn the view");
+        press(&mut app);
+        assert_eq!(nudge(&mut app), 1, "a held one must");
+    }
+
+    /// The keyboard path does not depend on a pointing device being present at all.
+    ///
+    /// Two updates, not one: the keyboard turn is scaled by the frame time and the first frame
+    /// of any app has a delta of zero.
+    #[test]
+    fn the_arrow_keys_turn_the_view_without_the_mouse() {
+        let (mut app, _) = harness();
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ArrowLeft);
+        app.update();
+        app.world_mut().resource_mut::<Messages<Requested>>().clear();
+        app.update();
+        assert_eq!(app.world_mut().resource_mut::<Messages<Requested>>().drain().count(), 1);
     }
 }

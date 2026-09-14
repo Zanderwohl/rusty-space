@@ -12,7 +12,7 @@ use em_render::relativistic_starfield_material::RelativisticStarfieldMaterialPlu
 use em_render::render_space::sim_to_render;
 
 use crate::action::{Action, Effect, apply, refresh_exposure};
-use crate::input::{Requested, look_around, read_keys};
+use crate::input::{Looking, Requested, grab_cursor, look_around, read_keys};
 use crate::panels;
 use crate::session::Session;
 use crate::starfield::{spawn_sky, update_sky};
@@ -69,6 +69,7 @@ impl Plugin for ClientPlugin {
             .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
             .init_resource::<Catalogue>()
             .init_resource::<DevEntry>()
+            .init_resource::<Looking>()
             .add_systems(Startup, spawn_camera)
             .add_systems(OnEnter(AppState::Loading), load_world)
             .add_systems(OnEnter(AppState::InGame), (spawn_sky, run_dev_actions))
@@ -78,7 +79,7 @@ impl Plugin for ClientPlugin {
                 (
                     boot.run_if(in_state(AppState::Boot)),
                     photograph.run_if(in_state(AppState::InGame)),
-                    (read_keys, look_around).run_if(in_state(AppState::InGame)),
+                    (read_keys, grab_cursor, look_around).chain().run_if(in_state(AppState::InGame)),
                     dispatch,
                     // The clock is deliberately not gated on any panel or overlay. See
                     // lightcone/docs/13-client-shell.md: the game does not pause.

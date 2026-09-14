@@ -175,6 +175,7 @@ Omit the path for the three authored sample stars.
 | `Esc` | close the top panel, then the menu |
 | `T` `Y` `F` `F3` | telescope, system, flight, debug |
 | arrows, right-drag | look |
+| | the cursor is pinned while the right button is held, and released on let go |
 | `L` | look at the selection |
 | `G` `X` | cross to the selection, cut the drive |
 | `1`–`6` | band presets |
