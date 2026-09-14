@@ -740,7 +740,7 @@ failure. Anything else from `init` is shown to the reader.
 sidecar beside every asset; on a filesystem that is a wasted stat, and over a CDN it is an
 extra round trip and a negatively-cached 404 per file. Three of them, on every first visit.
 
-## W4 — Delivery
+## W4 — Delivery — **half done**
 
 **Deliver:** the bucket, the CDN, the publish script, `releases` and `channels`, the
 `/internal/release` endpoint, and `/play` with its loader.
@@ -753,6 +753,43 @@ correctly with Postgres stopped**; the wasm arrives brotli-compressed as
 
 **Do not:** add accounts, saves, or matchmaking. `/play` launches a client; what it connects
 to is phase 8's problem.
+
+**Done so far.** The CDN, the publish script, and `/play` — which reads `CDN_BASE` and
+`FALLBACK_BUILD_ID` and hands over to the client. That is deliberately the *degraded* path
+built first: it is what the site falls back to when the database is unreachable, so the
+database adds a lookup in front of it rather than replacing it.
+
+**Still to do:** `releases` and `channels`, `/internal/release`, and promotion as a row.
+
+With no build configured `/play` says so, rather than rendering a loader with nothing to load.
+
+**`/play` needs a secure context**, so over plain HTTP it cannot run at all — see the
+development CDN above. Today it is reached through an SSH tunnel, which makes both the site
+and the CDN `localhost` and keeps them different origins, so CORS is still exercised:
+
+```bash
+ssh -N -L 3100:localhost:3100 -L 3101:localhost:3101 zandy@rocinante.local
+```
+
+The loader checks `isSecureContext` **separately from** `navigator.gpu`. They fail together,
+because WebGPU is not exposed outside a secure context, and reporting the second sends someone
+to download a browser they already have.
+
+**Two bugs, both about something not changing when it should have.**
+
+`build.rs` declared only `rerun-if-env-changed`, so it ran once and the baked site build id
+never moved again — frozen at W1's commit through three phases of stylesheet changes. Assets
+are served `immutable`, so in production a CSS edit would never have reached anyone who had
+already loaded the old one; the versioned URL exists to prevent exactly that and had quietly
+stopped doing it. It hid because a development server sends `no-store`, and surfaced only as
+`/play` laying itself out with CSS from twelve commits ago. It now watches `.git/HEAD` and the
+ref that HEAD names, following the worktree's `gitdir:` pointer.
+
+`#boot { display: grid }` outranks the user-agent sheet's `[hidden] { display: none }` by a
+whole class of specificity, so setting `hidden` on the loading overlay did nothing and it sat
+on top of a running game. The overlay is now **removed** rather than hidden — no specificity
+argument to lose, and it leaves the accessibility tree at the same time. `[hidden]` is also
+now `!important` in the base sheet, because that trap is general.
 
 ## W5 — Hardening
 
