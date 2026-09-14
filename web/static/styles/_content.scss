@@ -1,0 +1,98 @@
+// Rendered markdown, and the lists of posts around it.
+//
+// The post body itself is styled entirely by `_base.scss`: the renderer emits bare tags with
+// no attributes, so everything here is either furniture around the prose or a construct that
+// element selectors alone cannot reach.
+
+.post-list {
+  list-style: none;
+  padding: 0;
+  // No `margin: 0` here. `_base.scss` already zeroes list margins, and repeating it at this
+  // specificity beats `.page > * + *` on source order alone, which silently removes the gap
+  // between the page's sections.
+
+
+  > li + li {
+    border-block-start: 1px solid var(--rule);
+    margin-block-start: var(--space-4);
+    padding-block-start: var(--space-4);
+  }
+}
+
+// Date, reading time and tags, under a title or in a list. One line in both places so a post
+// looks like itself wherever it appears.
+.post-meta {
+  color: var(--ink-dim);
+  font-family: var(--font-ui);
+  font-size: var(--step--1);
+
+  // Deliberately not a flex container. The separators between the parts are text, and a flex
+  // container turns each run of text into its own item, which breaks them onto their own
+  // lines and spaces them by the gap instead of by the words around them.
+  line-height: 1.9;
+}
+
+.tag-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  vertical-align: baseline;
+
+  li + li {
+    margin-block-start: 0;
+  }
+}
+
+// A tag list standing on its own, rather than inside a line of post metadata.
+.stack > .tag-list {
+  display: flex;
+  font-family: var(--font-ui);
+  font-size: var(--step-0);
+  gap: var(--space-3);
+}
+
+.draft-marker {
+  border: 1px solid var(--accent-dim);
+  border-radius: 2px;
+  font-size: 0.85em;
+  letter-spacing: 0.06em;
+  padding: 0 var(--space-1);
+  text-transform: uppercase;
+}
+
+// Markdown emits a bare <img>. Centring it and captioning it is the one thing the prose
+// column cannot say for itself.
+.page img {
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  display: block;
+  height: auto;
+  max-width: 100%;
+  padding: var(--space-4);
+}
+
+.page figcaption,
+.page table caption {
+  color: var(--ink-dim);
+  font-family: var(--font-ui);
+  font-size: var(--step--1);
+}
+
+// pulldown-cmark's footnotes are a definition list of paragraphs at the end of the document.
+.footnote-definition {
+  color: var(--ink-dim);
+  display: flex;
+  font-size: var(--step--1);
+  gap: var(--space-2);
+
+  p {
+    margin: 0;
+  }
+}
+
+.footnote-definition-label {
+  font-family: var(--font-ui);
+}

@@ -11,8 +11,10 @@ use serde::{Deserialize, Serialize};
 use crate::rng;
 use crate::star::Star;
 
+pub mod chunk;
 pub mod generate;
 pub mod metallicity;
+pub mod record;
 
 #[cfg(feature = "hyg")]
 pub mod hyg;

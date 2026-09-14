@@ -1,0 +1,99 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lightcone</title>
+<style>
+  :root { color-scheme: dark }
+  html, body { margin: 0; height: 100%; background: #0b0d12; color: #dfe3ec;
+               font: 15px/1.6 ui-sans-serif, system-ui, sans-serif }
+  #lightcone { display: block; width: 100%; height: 100%; outline: none }
+  #boot { position: fixed; inset: 0; display: grid; place-content: center;
+          gap: .9rem; padding: 2rem; text-align: center }
+  #boot[hidden] { display: none }
+  h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: .04em;
+       text-transform: uppercase; color: #7fd4d8; margin: 0 }
+  p { margin: 0; max-width: 34rem; color: #97a0b5 }
+  progress { width: min(22rem, 70vw); height: .4rem; accent-color: #7fd4d8 }
+  code { font-family: ui-monospace, Menlo, monospace; color: #dfe3ec }
+</style>
+
+<canvas id="lightcone" tabindex="0"></canvas>
+
+<div id="boot">
+  <h1 id="stage">Starting</h1>
+  <p id="detail">Checking what this browser can do.</p>
+  <progress id="bar" max="100" value="0" hidden></progress>
+</div>
+
+<script type="module">
+  const boot = document.getElementById('boot');
+  const stage = document.getElementById('stage');
+  const detail = document.getElementById('detail');
+  const bar = document.getElementById('bar');
+
+  const say = (s, d) => { stage.textContent = s; detail.innerHTML = d; };
+  const fail = (s, d) => { say(s, d); bar.hidden = true; throw new Error(s); };
+
+  // Before the download, not after. The check is free; the wasm is not.
+  if (!navigator.gpu) {
+    fail('WebGPU required', 'This build renders through WebGPU and has no WebGL fallback, ' +
+      'because the sky needs storage buffers and a silently degraded one would be worse than ' +
+      'this message. Try a current Chrome, Edge, or Safari 26+.');
+  }
+  if (!(await navigator.gpu.requestAdapter().catch(() => null))) {
+    fail('No GPU adapter', 'The browser reports WebGPU but would not give this page an ' +
+      'adapter. That is usually a disabled or blocklisted GPU driver.');
+  }
+
+  // `?base=` points at a build on a CDN. Without it everything is relative, so the staged
+  // directory also works served straight from disk. The site's own /play page is this same
+  // arrangement: a shell on one origin, a build on another.
+  const params = new URLSearchParams(location.search);
+  const base = (params.get('base') || '.').replace(/\/$/, '');
+  const at = path => `${base}/${path}`;
+
+  say('Loading', 'Fetching the manifest.');
+  const manifest = await fetch(at('manifest.json')).then(r => r.json()).catch(() => null);
+  if (!manifest) fail('No manifest', `No <code>manifest.json</code> at <code>${base}</code>.`);
+
+  // The client resolves its own assets against this, so a cross-origin build needs it made
+  // absolute here -- the wasm has no idea which page loaded it.
+  if (!params.has('assets')) {
+    params.set('assets', new URL(at(manifest.asset_base || 'assets'), location.href).href);
+    history.replaceState(null, '', `${location.pathname}?${params}`);
+  }
+
+  // Streaming compilation *and* a progress bar: tee the body through a counting transform and
+  // hand the rebuilt Response to instantiateStreaming. Picking one or the other is the usual
+  // mistake, and the headers have to be carried over or the content type is lost.
+  say('Loading', `Downloading the client (${(manifest.bytes.wasm / 1e6).toFixed(1)} MB).`);
+  bar.hidden = false;
+  const response = await fetch(at(manifest.wasm));
+  if (!response.ok) fail('Download failed', `The wasm returned ${response.status}.`);
+
+  const total = Number(response.headers.get('content-length')) || manifest.bytes.wasm;
+  let seen = 0;
+  const counted = new Response(
+    response.body.pipeThrough(new TransformStream({
+      transform(chunk, controller) {
+        seen += chunk.byteLength;
+        bar.value = Math.min(100, (seen / total) * 100);
+        controller.enqueue(chunk);
+      },
+    })),
+    { headers: response.headers },
+  );
+
+  const init = (await import(new URL(at(manifest.entry), location.href).href)).default;
+  say('Starting', 'Compiling and handing over.');
+  try {
+    await init({ module_or_path: counted });
+  } catch (e) {
+    // Bevy's winit loop reports its exit by throwing; that is not a failure.
+    if (!String(e).includes('Using exceptions for control flow')) {
+      fail('Failed to start', `<code>${String(e).slice(0, 300)}</code>`);
+    }
+  }
+  boot.hidden = true;
+  document.getElementById('lightcone').focus();
+</script>

@@ -26,6 +26,18 @@ codegen-units = 1
 incremental = false
 debug = false
 
+# The browser build, and the one place in this repo where a long link is worth paying for.
+# `CLAUDE.md` says not to build release; that rule is about the desktop development loop,
+# where LTO costs minutes for a speedup nobody feels. Here the artifact is the product and
+# download size is a feature, so it optimises for bytes rather than speed.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
 [dependencies]
 em-foundations = { path = "crates/em-foundations" }
 em-sim = { path = "crates/em-sim", features = ["bevy"] }

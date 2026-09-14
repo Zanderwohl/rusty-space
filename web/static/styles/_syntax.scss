@@ -1,0 +1,91 @@
+// Syntax highlighting.
+//
+// syntect emits classes rather than inline styles, which is the whole reason the code in a
+// post changes colour with the rest of the page: an inline `style="color:…"` would be the
+// same in light mode and dark, and no stylesheet rule could override it.
+//
+// Scope names come from the syntax definitions, so they name what a token *is* — a keyword,
+// a string, a comment — which is the same rule the rest of this stylesheet follows.
+
+:root {
+  --syn-comment: #6b7486;
+  --syn-keyword: #c2a0e8;
+  --syn-string: #9ad0a4;
+  --syn-number: #e6b473;
+  --syn-function: #7fd4d8;
+  --syn-type: #e3c98a;
+  --syn-punctuation: var(--ink-dim);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --syn-comment: #767f8c;
+    --syn-keyword: #7a3fa8;
+    --syn-string: #1f7a3d;
+    --syn-number: #9a5610;
+    --syn-function: #10666a;
+    --syn-type: #8a6210;
+  }
+}
+
+pre[data-language] {
+  position: relative;
+  // Room for the label, so a long first line scrolls under the padding rather than under
+  // the word sitting in it.
+  padding-block-start: var(--space-4);
+
+  // The language, set once from the fence. An attribute rather than a class, because the
+  // value is data and there is no list of languages to enumerate in a stylesheet.
+  &::before {
+    color: var(--ink-dim);
+    content: attr(data-language);
+    font-family: var(--font-ui);
+    font-size: var(--step--1);
+    inset-block-start: var(--space-1);
+    inset-inline-end: var(--space-2);
+    letter-spacing: 0.06em;
+    position: absolute;
+    text-transform: uppercase;
+  }
+}
+
+.syn-comment,
+.syn-punctuation.syn-definition.syn-comment {
+  color: var(--syn-comment);
+  font-style: italic;
+}
+
+.syn-keyword,
+.syn-storage {
+  color: var(--syn-keyword);
+}
+
+.syn-string,
+.syn-punctuation.syn-definition.syn-string {
+  color: var(--syn-string);
+}
+
+.syn-constant {
+  color: var(--syn-number);
+}
+
+.syn-entity.syn-name.syn-function,
+.syn-support.syn-function {
+  color: var(--syn-function);
+}
+
+.syn-entity.syn-name.syn-type,
+.syn-entity.syn-name.syn-struct,
+.syn-support.syn-type,
+.syn-storage.syn-type {
+  color: var(--syn-type);
+}
+
+.syn-punctuation {
+  color: var(--syn-punctuation);
+}
+
+.syn-meta.syn-annotation,
+.syn-meta.syn-attribute {
+  color: var(--syn-comment);
+}

@@ -1,0 +1,4 @@
+# The game workspace has no rustfmt.toml and its code sits around 100 columns wide with
+# single-line bodies left alone. This pins that so `cargo fmt --check` in CI means something.
+max_width = 100
+use_small_heuristics = "Max"

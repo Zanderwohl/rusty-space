@@ -1,0 +1,48 @@
+// Custom properties, not SCSS variables. A media query can redefine these at :root and the
+// rest of the stylesheet is untouched; an SCSS variable compiles away and cannot.
+//
+// Dark is the default because the subject is the night sky. Light is an override, not an
+// afterthought, and both are the same stylesheet.
+
+:root {
+  --ground: #0b0d12;
+  --ground-raised: #12151d;
+  --ink: #dfe3ec;
+  --ink-dim: #97a0b5;
+  --rule: #232935;
+  --accent: #7fd4d8;
+  --accent-dim: #3f7a7d;
+
+  --font-body: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  // A modular scale at 1.25. Named by distance from body text so a heading level can change
+  // without renaming anything.
+  --step--1: 0.84rem;
+  --step-0: 1.0625rem;
+  --step-1: 1.33rem;
+  --step-2: 1.66rem;
+  --step-3: 2.07rem;
+
+  --space-1: 0.35rem;
+  --space-2: 0.7rem;
+  --space-3: 1.15rem;
+  --space-4: 1.9rem;
+  --space-5: 3.1rem;
+
+  // The comfortable reading width of the prose column, in characters of body text.
+  --measure: 64ch;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --ground: #fbfaf7;
+    --ground-raised: #ffffff;
+    --ink: #1b1f27;
+    --ink-dim: #5c6473;
+    --rule: #ddd9d0;
+    --accent: #1f6f73;
+    --accent-dim: #8cb9bb;
+  }
+}

@@ -49,3 +49,103 @@ jobs:
             cargo tree -p exotic-matters | grep -E '^[[:space:]]*lc-' >&2
             exit 1
           fi
+
+  # The browser build.
+  #
+  # A PR gets the cheap half: does it compile for wasm, and is every shader its materials
+  # name actually in the asset tree. The expensive half -- a fat-LTO release build, wasm-opt,
+  # and the staged artifact -- runs on master, because it is minutes and a PR does not need
+  # the bytes.
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev binaryen brotli
+
+      # Every shader lc-client's materials name must exist. This is a runtime 404 in a
+      # browser otherwise, discovered long after the build reported success.
+      - name: Shaders are all present
+        run: tools/check-shaders.sh
+
+      - name: The client compiles for the browser
+        run: |
+          cargo check -p lc-client --bin lightcone_web \
+            --target wasm32-unknown-unknown --no-default-features
+
+      # The browser build must not contain a CSV reader: there is no filesystem to read from,
+      # and the catalogue ships as a packed chunk instead.
+      - name: No CSV reader in the browser build
+        run: |
+          if cargo tree -p lc-client --no-default-features \
+               --target wasm32-unknown-unknown | grep -qE '^[[:space:]]*csv '; then
+            echo "the browser build links a CSV reader" >&2
+            exit 1
+          fi
+
+      # The CLI has to match the crate the client links, so take the version from the lock
+      # file rather than pinning it twice and letting the two drift.
+      - name: Install wasm-bindgen-cli
+        if: github.ref == 'refs/heads/master'
+        run: |
+          version=$(cargo metadata --format-version 1 --locked \
+            | python3 -c "import json,sys;print(next(p['version'] for p in json.load(sys.stdin)['packages'] if p['name']=='wasm-bindgen'))")
+          echo "wasm-bindgen $version"
+          cargo install wasm-bindgen-cli --version "$version" --locked
+
+      - name: Build the artifact
+        if: github.ref == 'refs/heads/master'
+        run: tools/build-wasm.sh
+
+      - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/master'
+        with:
+          name: lightcone-web
+          path: target/web/
+          retention-days: 14
+
+  # The website is its own workspace with its own lockfile, which is what makes its
+  # version independent of the game's. It shares no code with either product, so a
+  # path dependency reaching back into crates/ is the thing to catch.
+  #
+  # Images are built on the `rocinante` docker context, not here. See
+  # lightcone/docs/14-hosting.md.
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: web
+
+      - name: The site is a separate workspace
+        run: |
+          if grep -rn 'path = "\.\./\.\./crates' */Cargo.toml; then
+            echo "the site has a path dependency on a game crate" >&2
+            exit 1
+          fi
+
+      - name: Test
+        run: cargo test
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Formatting
+        run: cargo fmt --check
+
+      # The stylesheet is compiled at boot, so a syntax error in it is a failed
+      # deploy rather than a failed build. Compiling it here moves that left.
+      - name: The stylesheet compiles
+        run: cargo run --quiet --bin lc-web -- --check-styles

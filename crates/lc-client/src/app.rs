@@ -37,9 +37,18 @@ pub struct Ui(pub UiState);
 #[derive(Resource, Deref, DerefMut)]
 pub struct Game(pub Session);
 
-/// Where the catalogue is, if one is to be loaded.
+/// Which sky to load, if any.
+///
+/// An **asset path**, not a filesystem path: the asset server reads a file on the desktop and
+/// fetches over HTTP in a browser, and this code cannot tell which. A `.csv` is still accepted
+/// on native builds with the `hyg` feature, which is how the catalogue gets packed in the
+/// first place.
 #[derive(Resource, Default)]
 pub struct Catalogue(pub Option<String>);
+
+/// The sky asset in flight, while [`AppState::Loading`] waits for it.
+#[derive(Resource)]
+struct LoadingSky(Handle<crate::sky_asset::Sky>);
 
 /// Development entry: skip the menu, and optionally photograph the sky and quit.
 ///
@@ -79,6 +88,7 @@ impl Plugin for ClientPlugin {
             RelativisticStarfieldMaterialPlugin,
             PopulationMaterialPlugin,
             BodySurfaceMaterialPlugin,
+            crate::sky_asset::SkyAssetPlugin,
             crate::menu::MainMenuPlugin,
         ))
             .init_state::<AppState>()
@@ -92,13 +102,14 @@ impl Plugin for ClientPlugin {
             .init_resource::<crate::envelope::Envelopes>()
             .init_resource::<crate::resolved::Resolved>()
             .add_systems(Startup, spawn_camera)
-            .add_systems(OnEnter(AppState::Loading), load_world)
+            .add_systems(OnEnter(AppState::Loading), begin_load)
             .add_systems(OnEnter(AppState::InGame), (spawn_sky, run_dev_actions))
             .insert_resource(ClearColor(Color::BLACK))
             .add_systems(
                 Update,
                 (
                     boot.run_if(in_state(AppState::Boot)),
+                    finish_load.run_if(in_state(AppState::Loading)),
                     // Not gated on a state: `--menu --shot` photographs the menu, and the
                     // system does nothing unless a path was asked for.
                     photograph,
@@ -342,25 +353,74 @@ fn photograph(
     }
 }
 
-fn load_world(
+/// Starts the sky loading, or finishes immediately when there is nothing to load.
+fn begin_load(
     catalogue: Res<Catalogue>,
+    assets: Res<AssetServer>,
+    mut commands: Commands,
     mut game: ResMut<Game>,
     mut ui: ResMut<Ui>,
     mut next: ResMut<NextState<AppState>>,
 ) {
-    let provider: Box<dyn StarProvider> = match &catalogue.0 {
+    match catalogue.0.as_deref() {
+        // Packing is native tooling and reads a file directly; see `skypack`. Absent from a
+        // browser build, where the feature is off and `csv` is not in the tree at all.
         #[cfg(feature = "hyg")]
-        Some(path) => match lc_world::sky::hyg::HygProvider::load(path) {
-            Ok(p) => Box::new(p),
-            Err(e) => {
-                ui.notify(format!("catalogue: {e}"), 0.0);
-                Box::new(AuthoredStars::sample())
+        Some(path) if path.ends_with(".csv") => {
+            match lc_world::sky::hyg::HygProvider::load(path) {
+                Ok(p) => enter_game(&mut game, &mut ui, &mut next, &p),
+                Err(e) => {
+                    ui.notify(format!("catalogue: {e}"), 0.0);
+                    enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample());
+                }
             }
-        },
-        _ => Box::new(AuthoredStars::sample()),
-    };
+        }
+        Some(path) => {
+            commands.insert_resource(LoadingSky(assets.load(path.to_owned())));
+        }
+        None => enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample()),
+    }
+}
+
+/// Waits for the sky, then builds the session.
+///
+/// A frozen window is not a loading screen, so this is a polled system rather than a blocking
+/// read: the loading panel keeps drawing while the fetch is in flight.
+fn finish_load(
+    loading: Option<Res<LoadingSky>>,
+    skies: Res<Assets<crate::sky_asset::Sky>>,
+    assets: Res<AssetServer>,
+    mut commands: Commands,
+    mut game: ResMut<Game>,
+    mut ui: ResMut<Ui>,
+    mut next: ResMut<NextState<AppState>>,
+) {
+    let Some(loading) = loading else { return };
+    if let Some(sky) = skies.get(&loading.0) {
+        if sky.skipped > 0 {
+            ui.notify(format!("{} sky records were unusable", sky.skipped), 0.0);
+        }
+        enter_game(&mut game, &mut ui, &mut next, sky);
+        commands.remove_resource::<LoadingSky>();
+    } else if let Some(state) = assets.get_load_state(&loading.0)
+        && state.is_failed()
+    {
+        // A sky that will not load is worth saying out loud rather than silently becoming
+        // three hand-written stars.
+        ui.notify("sky failed to load; using the sample", 0.0);
+        enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample());
+        commands.remove_resource::<LoadingSky>();
+    }
+}
+
+fn enter_game(
+    game: &mut Game,
+    ui: &mut Ui,
+    next: &mut NextState<AppState>,
+    provider: &dyn StarProvider,
+) {
     let count = provider.len();
-    game.0 = Session::new(provider.as_ref(), SKY_LIMIT);
+    game.0 = Session::new(provider, SKY_LIMIT);
     ui.notify(format!("{count} stars loaded"), 0.0);
     ui.screen = Screen::InGame;
     next.set(AppState::InGame);

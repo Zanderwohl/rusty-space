@@ -4239,15 +4239,19 @@ dependencies = [
  "bevy",
  "bevy_egui",
  "bevy_mesh",
+ "console_error_panic_hook",
  "em-foundations",
  "em-plot",
  "em-render",
  "em-sim",
  "em-spectra",
  "em-ui",
+ "getrandom 0.3.3",
  "glam",
  "lc-spacetime",
  "lc-world",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -7334,6 +7338,7 @@ dependencies = [
  "smallvec",
  "static_assertions",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
  "wgpu-core 26.0.1",
  "wgpu-hal 26.0.6",

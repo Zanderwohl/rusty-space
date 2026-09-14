@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 140" role="img"
+     aria-label="Three labelled circles connected by arrows">
+  <style>
+    /* An SVG loaded as an image is its own document: currentColor resolves against this
+       root and not the page, so the theme is restated here. The media query still works,
+       because the browser matches it against the user's own preference.
+       Note this is XML: a raw angle bracket anywhere in here is a parse error, and a broken
+       SVG shows as alt text with no console message. */
+    svg { color: #1b1f27 }
+    @media (prefers-color-scheme: dark) { svg { color: #dfe3ec } }
+    circle { fill: none; stroke: currentColor; stroke-width: 1.5; opacity: 0.85 }
+    line   { stroke: currentColor; stroke-width: 1.5; opacity: 0.5 }
+    text   { fill: currentColor; font: 13px ui-sans-serif, system-ui, sans-serif;
+             text-anchor: middle; opacity: 0.9 }
+  </style>
+  <line x1="98" y1="62" x2="182" y2="62" />
+  <line x1="298" y1="62" x2="382" y2="62" />
+  <circle cx="70" cy="62" r="28" />
+  <circle cx="240" cy="62" r="28" />
+  <circle cx="410" cy="62" r="28" />
+  <text x="70" y="67">lorem</text>
+  <text x="240" y="67">ipsum</text>
+  <text x="410" y="67">dolor</text>
+  <text x="240" y="126" opacity="0.6">sit amet, consectetur adipiscing elit</text>
+</svg>

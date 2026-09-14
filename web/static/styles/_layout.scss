@@ -1,0 +1,65 @@
+// Layout primitives. Each says how children are arranged and nothing about what they are.
+
+// The prose column. One per page, on <main>.
+.page {
+  margin-inline: auto;
+  max-width: var(--measure);
+  padding: var(--space-5) var(--space-4);
+}
+
+// Vertical rhythm between siblings, with no margin on the first or last child so the
+// container's own padding stays predictable.
+.stack > * + * {
+  margin-block-start: var(--space-3);
+}
+
+// Sections of the prose column are separated more than paragraphs within one. Scoped to the
+// column deliberately: as a bare `.stack + .stack` it also fires between grid siblings, which
+// pushes the second column of a `.columns` down by a section gap.
+//
+// Every child, not only `.stack` ones — a list of posts is a section of the page too, and
+// naming the primitive here would mean remembering to add each new one.
+.page > * + * {
+  margin-block-start: var(--space-5);
+}
+
+// Side by side where there is room, stacked where there is not. No breakpoint: the column
+// count follows from the minimum width a column is readable at.
+.columns {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+
+body > header {
+  align-items: baseline;
+  border-block-end: 1px solid var(--rule);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: space-between;
+  margin-inline: auto;
+  max-width: var(--measure);
+  padding: var(--space-3) var(--space-4);
+
+  nav {
+    display: flex;
+    gap: var(--space-3);
+    font-family: var(--font-ui);
+    font-size: var(--step--1);
+  }
+}
+
+body > footer {
+  border-block-start: 1px solid var(--rule);
+  color: var(--ink-dim);
+  font-family: var(--font-ui);
+  font-size: var(--step--1);
+  margin-inline: auto;
+  max-width: var(--measure);
+  padding: var(--space-4);
+
+  > * + * {
+    margin-block-start: var(--space-2);
+  }
+}

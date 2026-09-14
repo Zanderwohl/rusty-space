@@ -1,11 +1,13 @@
-//! The Lightcone client.
+//! The Lightcone client, on a desktop.
+//!
+//! The browser build is `lightcone_web`; the two share everything but where their arguments
+//! and their assets come from.
 
 use std::path::PathBuf;
 
 use bevy::asset::AssetPlugin;
 use bevy::prelude::*;
-use lc_client::action::Action;
-use lc_client::app::{Catalogue, ClientPlugin, DevEntry};
+use lc_client::app::{Catalogue, ClientPlugin};
 
 /// Where the client's own assets are.
 ///
@@ -26,57 +28,8 @@ fn asset_path() -> String {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let flag = |name: &str| args.iter().position(|a| a == name);
-    fn value<T: std::str::FromStr>(args: &[String], name: &str) -> Option<T> {
-        let i = args.iter().position(|a| a == name)?;
-        args.get(i + 1)?.parse().ok()
-    }
-    let mut actions = Vec::new();
-    if let Some(preset) = value::<usize>(&args, "--band") {
-        actions.push(Action::SetBandPreset(preset));
-    }
-    if let Some(rate) = value::<f64>(&args, "--rate") {
-        actions.push(Action::SetTimeRate(rate));
-    }
-    if flag("--tune").is_some() {
-        actions.push(Action::OpenPanel(lc_client::ui::Panel::Tuning));
-    }
-    if let Some(i) = flag("--panel") {
-        if let Some(panel) = args.get(i + 1).and_then(|n| lc_client::ui::Panel::named(n)) {
-            actions.push(Action::OpenPanel(panel));
-        }
-    }
-    if flag("--watch").is_some() || flag("--swarm").is_some() {
-        actions.push(Action::SelectNearest);
-        actions.push(Action::OpenPanel(lc_client::ui::Panel::Telescope));
-    }
-    if let Some(b) = value::<usize>(&args, "--curve") {
-        if let Some(band) = em_spectra::Band::ALL.get(b) {
-            actions.push(Action::SetCurveBand(*band));
-        }
-    }
-    if flag("--fly").is_some() {
-        // Index 0 of the sorted sky is the Sun in the full catalogue; 1 is interstellar.
-        actions.push(Action::FlyToNearest);
-    }
-    // `--menu` holds the entry at the main menu, so `--shot` can photograph it. Without it a
-    // screenshot run goes straight to the sky, which is what every other capture wants.
-    let stay_in_menu = flag("--menu").is_some();
-    let dev = DevEntry {
-        observe_immediately: !stay_in_menu
-            && (flag("--observe").is_some()
-                || flag("--shot").is_some()
-                || flag("--at").is_some()
-                || flag("--station").is_some()),
-        target_swarm: flag("--swarm").is_some(),
-        at_body: flag("--at").and_then(|i| args.get(i + 1).cloned()),
-        station: flag("--station").and_then(|i| args.get(i + 1).cloned()),
-        screenshot: flag("--shot").and_then(|i| args.get(i + 1).cloned()),
-        after_frames: value::<u32>(&args, "--frames").unwrap_or(120),
-        burst: value::<u32>(&args, "--burst").unwrap_or(1),
-        actions,
-    };
-    let catalogue = args.first().filter(|a| !a.starts_with("--")).cloned();
+    let (dev, catalogue) = lc_client::entry::parse(&args);
+
     App::new()
         .add_plugins(
             DefaultPlugins
