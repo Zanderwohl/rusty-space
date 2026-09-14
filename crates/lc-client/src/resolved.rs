@@ -15,7 +15,7 @@ use em_render::render_space::sim_to_render;
 use em_spectra::{Band, PerBand, blackbody};
 use glam::DVec3;
 
-use crate::session::Session;
+use crate::session::{Disc, Scene, Session};
 use crate::system::{Drawable, M_PER_LY, UNIT_M};
 
 /// Angular radius, in pixels, past which a body is drawn as a disc.
@@ -72,12 +72,122 @@ pub fn surface_level(session: &Session, body: &Drawable, star_radius_m: f64, sta
     // displayed window or it clips, where a point source is spread over a much wider range
     // because its size can carry what its value cannot.
     //
-    // It does clip, often. The exposure is placed by the star field and a lit surface a few
-    // astronomical units from its star is tens of stops above that, so most resolved bodies
-    // come out at the top of the window and their palette carries the difference. Making the
-    // exposure account for what is actually on screen is the fix, and it is its own piece of
-    // work: today the auto-exposure looks only at stars.
-    session.tone.shade(&radiance, &session.mapping).value
+    // `shade_surface`, not `shade`: a surface is metered against a radiance and a point
+    // against a flux. [`sample_scene`] is what keeps the two references on the same scene.
+    session.tone.shade_surface(&radiance, &session.mapping).value
+}
+
+/// How much sky a body covers from `observer_ly`, steradians.
+pub fn solid_angle_sr(body: &Drawable, observer_ly: DVec3) -> f32 {
+    let distance_m = observer_ly.distance(body.position_ly) * M_PER_LY;
+    if distance_m <= 0.0 {
+        return 0.0;
+    }
+    (std::f64::consts::PI * (body.radius_m / distance_m).powi(2)) as f32
+}
+
+/// Everything an unresolved body sends the ship: reflected starlight off its effective disc,
+/// plus what it re-radiates off its real one. The same two terms the point shader adds.
+fn point_flux(body: &Drawable, star_teff_k: f64, observer_ly: DVec3) -> PerBand<f32> {
+    let distance_m = observer_ly.distance(body.position_ly) * M_PER_LY;
+    if distance_m <= 0.0 {
+        return PerBand::splat(0.0);
+    }
+    let reflected = crate::session::bare(star_teff_k, body.effective_radius_m, distance_m);
+    let thermal = crate::session::bare(body.equilibrium_k, body.radius_m, distance_m);
+    PerBand::new(std::array::from_fn(|i| reflected[Band::ALL[i]] + thermal[Band::ALL[i]]))
+}
+
+/// Bolometric flux from an unresolved body, up to a factor every body shares.
+///
+/// Both terms of [`point_flux`] with the Planck integral replaced by the Stefan-Boltzmann law
+/// it integrates to, which is what makes it cheap: no band integrals at all. Used only to rank.
+///
+/// Bolometric, where the metering is through a band mapping, so a preset narrow enough to sit
+/// on one side of two bodies' spectra could rank them the other way round. It decides only
+/// which of two hundred bodies are worth shading, and both would have to be inside the couple
+/// of per cent that clips for the difference to reach the screen.
+fn point_power(body: &Drawable, star_teff_k: f64, observer_ly: DVec3) -> f64 {
+    let distance_m = observer_ly.distance(body.position_ly) * M_PER_LY;
+    if distance_m <= 0.0 {
+        return 0.0;
+    }
+    let reflected = star_teff_k.powi(4) * (body.effective_radius_m / distance_m).powi(2);
+    let thermal = body.equilibrium_k.powi(4) * (body.radius_m / distance_m).powi(2);
+    reflected + thermal
+}
+
+/// How many unresolved bodies are metered by their spectrum rather than dropped.
+///
+/// A point can only move the exposure by crowding into the couple of per cent of the frame
+/// that is allowed to clip, which against a six thousand star field is a hundred-odd slots. Two
+/// hundred and thirty solar system bodies cost two and a half milliseconds a frame to shade and
+/// all but the brightest handful are thirty stops under the cut. Ranking by
+/// [`point_power`] first costs nothing and throws away nothing that could have counted.
+const METERED_POINTS: usize = 32;
+
+/// How far the bodies' share of the frame may move before the exposure is re-placed, in stops.
+///
+/// Not every frame: re-placing costs a pass over every star in the catalogue. A quarter of a
+/// stop is below what anyone can see step, and a body's surface radiance does not depend on how
+/// far away the ship is at all — only its size on screen does — so an approach crosses this
+/// perhaps a few dozen times rather than continuously.
+const REMETER_STOPS: f32 = 0.25;
+
+/// Tell the session what the renderer is about to draw, and re-expose when that has moved.
+pub fn sample_scene(
+    ui: Res<crate::app::Ui>,
+    mut game: ResMut<crate::app::Game>,
+    bodies: Res<crate::starfield::Bodies>,
+    camera: Query<(&Projection, &Camera), With<Camera3d>>,
+    mut last: Local<Option<(usize, f32)>>,
+) {
+    let rad_per_px = crate::starfield::camera_scale(&camera);
+    let observer = game.position_ly;
+    let mut scene = Scene { point_sr: rad_per_px * rad_per_px, ..default() };
+    if let Some(system) = bodies.system.as_ref() {
+        let star_ly = system.star_position_ly();
+        let (star_radius, star_teff) = (system.star_radius_m(), system.star_teff_k());
+        let mut unresolved: Vec<(f64, &Drawable)> = Vec::new();
+        for body in &bodies.drawn {
+            if is_resolved(body, observer, rad_per_px) {
+                let star_distance = star_ly.distance(body.position_ly) * M_PER_LY;
+                scene.discs.push(Disc {
+                    radiance: surface_radiance(body, star_radius, star_teff, star_distance),
+                    solid_angle_sr: solid_angle_sr(body, observer),
+                });
+            } else {
+                unresolved.push((point_power(body, star_teff, observer), body));
+            }
+        }
+        if unresolved.len() > METERED_POINTS {
+            unresolved.select_nth_unstable_by(METERED_POINTS, |a, b| b.0.total_cmp(&a.0));
+            unresolved.truncate(METERED_POINTS);
+        }
+        scene.points =
+            unresolved.iter().map(|(_, b)| point_flux(b, star_teff, observer)).collect();
+    }
+
+    // The summary is the power the bodies contribute, which moves with both their brightness
+    // and their size. The disc count is in it separately so that a body crossing the resolution
+    // threshold always re-meters: it changes which term it is counted under.
+    let power: f32 = scene.discs.iter().map(|d| luma(&d.radiance) * d.solid_angle_sr).sum::<f32>()
+        + scene.points.iter().map(luma).sum::<f32>();
+    let now = (scene.discs.len(), if power > 0.0 { power.log2() } else { f32::NEG_INFINITY });
+    let moved = match *last {
+        Some((discs, before)) => discs != now.0 || (now.1 - before).abs() > REMETER_STOPS,
+        None => true,
+    };
+    game.0.scene = scene;
+    if moved {
+        *last = Some(now);
+        crate::action::refresh_exposure(&ui.0, &mut game.0);
+    }
+}
+
+/// Unweighted band sum, only ever compared against itself to decide whether to re-meter.
+fn luma(radiance: &PerBand<f32>) -> f32 {
+    Band::ALL.iter().map(|b| radiance[*b]).sum()
 }
 
 /// What a lit surface actually emits, per band: `p (R_star / d)^2 B(T_star)`.
@@ -100,7 +210,7 @@ pub fn surface_radiance(
     }))
 }
 
-fn uniforms(session: &Session, body: &Drawable, star_ly: DVec3, level: f32) -> BodySurfaceUniform {
+fn uniforms(body: &Drawable, star_ly: DVec3, level: f32) -> BodySurfaceUniform {
     let (dark, light, contrast) = body.surface.palette();
     let to_star = sim_to_render((star_ly - body.position_ly).normalize_or_zero()).as_vec3();
     // Stable per body and independent of everything else, so a world looks the same every time
@@ -158,7 +268,7 @@ pub fn update_resolved(
             commands.spawn((
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(materials.add(BodySurfaceMaterial {
-                    uniforms: uniforms(&session.0, body, star_ly, level),
+                    uniforms: uniforms(body, star_ly, level),
                 })),
                 Transform::default(),
                 NoFrustumCulling,
@@ -180,7 +290,7 @@ pub fn update_resolved(
         if let Some(asset) = materials.get_mut(&material.0) {
             let star_distance = star_ly.distance(body.position_ly) * M_PER_LY;
             let level = surface_level(&session.0, body, star_radius, star_teff, star_distance);
-            let next = uniforms(&session.0, body, star_ly, level);
+            let next = uniforms(body, star_ly, level);
             if asset.uniforms != next {
                 asset.uniforms = next;
             }
@@ -190,8 +300,10 @@ pub fn update_resolved(
 
 #[cfg(test)]
 mod tests {
-    use lc_world::sky::{AuthoredStars, StarProvider};
+    use lc_world::sky::AuthoredStars;
     use lc_world::surface::Surface;
+
+    use crate::session::NOMINAL_POINT_SR;
 
     use super::*;
 
@@ -254,13 +366,44 @@ mod tests {
         assert!(at(&icy) > at(&rocky) * 4.0, "{} against {}", at(&icy), at(&rocky));
     }
 
+    /// The cheap ranking must agree with the spectrum it stands in for, or truncating to the
+    /// brightest thirty-two would throw away one that counted. Checked across the split it is
+    /// most likely to get wrong: a cold body large enough that its own heat outweighs what it
+    /// reflects, against a small bright one.
+    #[test]
+    fn the_ranking_proxy_orders_bodies_the_way_their_spectra_do() {
+        let mut candidates = Vec::new();
+        for (radius, effective, temperature) in [
+            (6.0e7, 3.0e4, 90.0),
+            (6.0e5, 1.0e3, 40.0),
+            (2.0e6, 2.0e2, 700.0),
+            (1.0e7, 9.0e3, 160.0),
+        ] {
+            let mut b = body(radius, DVec3::X * 1.0e-5);
+            b.effective_radius_m = effective;
+            b.equilibrium_k = temperature;
+            candidates.push(b);
+        }
+        let luminance = |b: &Drawable| {
+            let f = point_flux(b, 5772.0, DVec3::ZERO);
+            Band::ALL.iter().map(|x| f[*x] as f64).sum::<f64>()
+        };
+        let mut by_proxy: Vec<usize> = (0..candidates.len()).collect();
+        let mut by_spectrum = by_proxy.clone();
+        by_proxy.sort_by(|a, b| {
+            point_power(&candidates[*b], 5772.0, DVec3::ZERO)
+                .total_cmp(&point_power(&candidates[*a], 5772.0, DVec3::ZERO))
+        });
+        by_spectrum.sort_by(|a, b| luminance(&candidates[*b]).total_cmp(&luminance(&candidates[*a])));
+        assert_eq!(by_proxy, by_spectrum);
+    }
+
     /// The displayed window is two and a half stops wide and a lit surface's range is tens, so
-    /// the level clips. That is what an exposure placed by the star field does to a planet, and
-    /// the palette is what carries the difference until the exposure learns to see bodies.
+    /// the level clips. Which end it clips at is the exposure's business, not this function's.
     #[test]
     fn the_level_is_a_window_and_a_close_surface_fills_it() {
         let mut session = Session::new(&AuthoredStars::sample(), 3);
-        session.tone.reference = 2.0;
+        session.tone.surface_reference = 2.0;
         let b = body(6.0e7, DVec3::ZERO);
         let near = surface_level(&session, &b, 6.957e8, 5772.0, AU);
         let far = surface_level(&session, &b, 6.957e8, 5772.0, 30.0 * AU);
@@ -268,4 +411,29 @@ mod tests {
         assert_eq!(far, 0.0, "and one ten stops down is under it");
         assert_eq!(surface_level(&session, &b, 6.957e8, 5772.0, 0.0), 0.0);
     }
+
+    /// The point of metering the bodies: a planet large enough to be the picture is exposed
+    /// for, and the same planet at a different distance from its star is not the same colour.
+    ///
+    /// A body's surface radiance does not change as the ship approaches it — only its size on
+    /// screen does — so this is a statement about the reference following the subject.
+    #[test]
+    fn a_metered_planet_lands_inside_the_window_and_a_dimmer_one_below_it() {
+        let mut session = Session::new(&AuthoredStars::sample(), 3);
+        let inner = body(6.0e7, DVec3::ZERO);
+        let outer = body(6.0e7, DVec3::ZERO);
+        let radiance = |d: f64| surface_radiance(&inner, 6.957e8, 5772.0, d);
+        // One planet at one astronomical unit, filling a good part of the frame.
+        session.scene = Scene {
+            point_sr: NOMINAL_POINT_SR,
+            points: Vec::new(),
+            discs: vec![Disc { radiance: radiance(AU), solid_angle_sr: 0.2 }],
+        };
+        session.auto_expose();
+        let near = surface_level(&session, &inner, 6.957e8, 5772.0, AU);
+        let far = surface_level(&session, &outer, 6.957e8, 5772.0, 4.0 * AU);
+        assert!(near > 0.9, "the metered subject is at the top of the window, not past it: {near}");
+        assert!(far < near, "four times as far is four stops down: {far} against {near}");
+    }
+
 }

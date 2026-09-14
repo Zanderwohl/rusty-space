@@ -111,6 +111,9 @@ impl Plugin for ClientPlugin {
                     aim_camera,
                     update_sky,
                     update_bodies,
+                    // After the bodies, because it meters them; before the surfaces, because
+                    // they are shaded against what it places.
+                    crate::resolved::sample_scene,
                     crate::resolved::update_resolved,
                     crate::envelope::update_envelopes,
                 )

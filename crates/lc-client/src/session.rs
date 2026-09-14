@@ -60,6 +60,36 @@ pub struct SkyStar {
     pub doppler: f64,
 }
 
+/// Solid angle of one pixel at ninety degrees across a 1080-line viewport, steradians.
+///
+/// Only a fallback for [`Scene::point_sr`] before a camera exists. It cancels out of a
+/// star-only metering — see [`Session::expose_to_percentile`] — so its value is arbitrary
+/// there; it matters only if bodies are metered without a camera, which the renderer never
+/// does.
+pub const NOMINAL_POINT_SR: f32 = 3.429_355e-6;
+
+/// One body drawn as a disc.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Disc {
+    /// Radiance of its lit surface, per band.
+    pub radiance: PerBand<f32>,
+    /// How much sky it covers, steradians. Its weight in the metering.
+    pub solid_angle_sr: f32,
+}
+
+/// What the exposure has to fit besides the star field.
+///
+/// Filled by the renderer, because which bodies are discs and how large they are drawn is a
+/// fact about the camera. Empty between systems, which is most of the time.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Scene {
+    /// Solid angle a point source is drawn at, steradians. Zero until a camera exists.
+    pub point_sr: f32,
+    /// Flux from each body still small enough to be drawn as a point, per band.
+    pub points: Vec<PerBand<f32>>,
+    pub discs: Vec<Disc>,
+}
+
 pub struct Session {
     pub stars: Vec<CatalogueStar>,
     pub observer: Coord,
@@ -79,6 +109,8 @@ pub struct Session {
     pub ship_clock_s: f64,
     /// [`Session::ship_clock_s`] when the current crossing began.
     cruise_clock_base_s: f64,
+    /// What the renderer is about to draw besides the stars. Metered, never drawn from.
+    pub scene: Scene,
     targets: HashMap<StarId, Target>,
 }
 
@@ -108,6 +140,7 @@ impl Session {
             cruise: None,
             ship_clock_s: 0.0,
             cruise_clock_base_s: 0.0,
+            scene: Scene::default(),
             targets,
         };
         session.retune();
@@ -303,32 +336,75 @@ impl Session {
         self.expose_to_percentile(0.98);
     }
 
-    /// Place the window so that `fraction` of the sky falls below the top of it.
+    /// Place the window so that `fraction` of the drawn sky falls below the top of it.
     ///
     /// A percentile rather than the maximum, because one star can be arbitrarily closer than
     /// the rest — the Sun is in the catalogue at about an astronomical unit — and exposing
     /// for it puts everything else thirty stops under and renders a black sky. Letting the
     /// brightest couple of percent clip is what a star map does anyway.
+    ///
+    /// The percentile is over *area*, not over count, which is what lets one pass meter a star
+    /// field and a planet together. Every source is reduced to the brightness it has per unit
+    /// of the sky it covers: a surface's own radiance, and for a point the flux it delivers
+    /// divided by the solid angle the renderer spreads it over. Weighting each by that same
+    /// solid angle makes the sum the power actually collected, so the rule reads as a light
+    /// meter does — expose so that `1 - fraction` of the frame clips.
+    ///
+    /// Points all carry the same weight, so a sky with no bodies in it meters exactly as a
+    /// count percentile over stars did, `point_sr` cancelling. A resolved planet does not: at
+    /// a couple of hundred pixels across it outweighs six thousand stars together and takes
+    /// the exposure with it, which is what a photograph of a planet looks like.
     pub fn expose_to_percentile(&mut self, fraction: f32) {
-        let mut luminances: Vec<f32> = self
-            .stars
-            .iter()
-            .map(|s| self.luminance_from(s))
-            .filter(|l| *l > 0.0 && l.is_finite())
-            .collect();
-        if luminances.is_empty() {
+        let point_sr =
+            if self.scene.point_sr > 0.0 { self.scene.point_sr } else { NOMINAL_POINT_SR };
+        let mut samples: Vec<(f32, f32)> =
+            Vec::with_capacity(self.stars.len() + self.scene.points.len() + self.scene.discs.len());
+        let mut push = |brightness: f32, weight: f32| {
+            if brightness > 0.0 && brightness.is_finite() && weight > 0.0 {
+                samples.push((brightness, weight));
+            }
+        };
+        for star in &self.stars {
+            push(self.luminance_from(star) / point_sr, point_sr);
+        }
+        for flux in &self.scene.points {
+            push(luminance_of(flux, &self.mapping) / point_sr, point_sr);
+        }
+        for disc in &self.scene.discs {
+            // Floored at a point's weight: a body at the crossover is drawn at a pixel or two
+            // whatever its true angle, and metering it at less than that would let a
+            // just-resolved body count for nothing while being fully visible.
+            push(luminance_of(&disc.radiance, &self.mapping), disc.solid_angle_sr.max(point_sr));
+        }
+        if samples.is_empty() {
             return;
         }
-        luminances.sort_by(f32::total_cmp);
-        let at = ((luminances.len() - 1) as f32 * fraction.clamp(0.0, 1.0)).round() as usize;
-        self.tone.reference = luminances[at];
+        samples.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let total: f32 = samples.iter().map(|(_, w)| w).sum();
+        let want = total * fraction.clamp(0.0, 1.0);
+        let mut below = 0.0;
+        let mut at = samples.len() - 1;
+        for (i, (_, weight)) in samples.iter().enumerate() {
+            below += weight;
+            if below >= want {
+                at = i;
+                break;
+            }
+        }
+        self.tone.surface_reference = samples[at].0;
+        self.tone.reference = samples[at].0 * point_sr;
     }
 
     /// Displayed luminance a star would contribute under the current mapping.
     pub fn luminance_from(&self, star: &CatalogueStar) -> f32 {
-        let rgb = self.mapping.apply(&self.radiance_from(star));
-        rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722
+        luminance_of(&self.radiance_from(star), &self.mapping)
     }
+}
+
+/// Rec. 709 luminance of a per-band radiance under a mapping.
+fn luminance_of(radiance: &PerBand<f32>, mapping: &BandMapping) -> f32 {
+    let rgb = mapping.apply(radiance);
+    rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722
 }
 
 /// An idealised instrument, for evaluating what leaves a system rather than what an
@@ -346,7 +422,11 @@ fn geometry(radius_m: f64, distance_m: f64) -> f64 {
     std::f64::consts::PI * radius_m * radius_m / (distance_m * distance_m)
 }
 
-fn bare(teff_k: f64, radius_m: f64, distance_m: f64) -> PerBand<f32> {
+/// Band flux from a blackbody disc of `radius_m` seen from `distance_m`, W/m^2.
+///
+/// The whole of an unmodelled star's brightness, and — at the star's own temperature and a
+/// body's effective radius — the whole of a body's reflected brightness.
+pub fn bare(teff_k: f64, radius_m: f64, distance_m: f64) -> PerBand<f32> {
     let g = geometry(radius_m, distance_m);
     PerBand::new(std::array::from_fn(|i| {
         (blackbody::band_radiance(Band::ALL[i], teff_k) * g) as f32
@@ -483,6 +563,69 @@ mod tests {
         naive.expose_to_percentile(1.0);
         let left = naive.sky().iter().filter(|x| point_colour(&x.shaded).length() > 0.0).count();
         assert!(left < 5, "{left} stars should have survived exposing for the Sun");
+    }
+
+    /// A sky with nothing in it but stars must meter exactly as a count percentile did: every
+    /// point carries the same weight, so the solid angle divides out of both the samples and
+    /// the total. This is what lets the star field keep its tuning.
+    #[test]
+    fn a_sky_of_points_meters_by_count_whatever_a_pixel_subtends() {
+        let mut s = session();
+        s.scene.point_sr = NOMINAL_POINT_SR;
+        s.auto_expose();
+        let coarse = s.tone.reference;
+        s.scene.point_sr = NOMINAL_POINT_SR * 1000.0;
+        s.auto_expose();
+        assert_eq!(s.tone.reference, coarse, "a point reference cannot depend on the zoom");
+        assert!(
+            (s.tone.surface_reference * s.scene.point_sr / s.tone.reference - 1.0).abs() < 1e-5,
+            "and the two references are one metering, a solid angle apart",
+        );
+    }
+
+    /// The rule the area percentile buys: how much of the frame a body covers is what decides
+    /// whether it is the subject. Two per cent of the metered sky is the line, because that is
+    /// what `auto_expose` lets clip.
+    #[test]
+    fn a_body_takes_the_exposure_once_it_is_more_than_a_crowd_of_stars() {
+        let mut s = session();
+        let crowd = 200;
+        let faint = PerBand::splat(1.0e-12f32);
+        let bright = PerBand::splat(1.0e3f32);
+        let meter = |s: &mut Session, sr: f32| {
+            s.scene = Scene {
+                point_sr: NOMINAL_POINT_SR,
+                points: vec![faint; crowd],
+                discs: vec![Disc { radiance: bright, solid_angle_sr: sr }],
+            };
+            s.auto_expose();
+            s.tone.surface_reference
+        };
+        // The crossover: with `n` equal points, a disc outweighs the top two per cent of the
+        // frame at `n * (1 / 0.98 - 1)` of their area.
+        let edge = (crowd + s.stars.len()) as f32 * (1.0 / 0.98 - 1.0) * NOMINAL_POINT_SR;
+        let small = meter(&mut s, edge * 0.5);
+        let large = meter(&mut s, edge * 2.0);
+        assert!(small < bright[Band::V], "a body under the line leaves the field exposed");
+        assert!(large > small * 1.0e6, "and over it the body is what is exposed for");
+    }
+
+    /// Faint points are still points: a body that has not resolved yet is metered by the flux
+    /// it delivers, so it cannot take the exposure by being large.
+    #[test]
+    fn an_unresolved_body_is_metered_as_a_point() {
+        let mut s = session();
+        s.scene = Scene {
+            point_sr: NOMINAL_POINT_SR,
+            points: vec![PerBand::splat(1.0e3f32)],
+            discs: Vec::new(),
+        };
+        s.auto_expose();
+        let one_bright_point = s.tone.reference;
+        s.scene.points = vec![PerBand::splat(1.0e3f32); 3];
+        s.auto_expose();
+        assert!(s.tone.reference >= one_bright_point, "more bright points, not a brighter one");
+        assert!(s.tone.reference.is_finite() && s.tone.reference > 0.0);
     }
 
     #[test]

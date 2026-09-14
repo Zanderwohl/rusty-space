@@ -356,10 +356,9 @@ perturbing the bands and starts destroying them, and the planet reads as blobs.
 The classification also supplies a per-body albedo, which replaces the flat 0.3 the photometry
 had been using. Ice reflects six times what bare rock does.
 
-**Known gap: the exposure does not see bodies.** It is placed by the star field, and a lit
-surface a few astronomical units from its star is tens of stops above that, so most resolved
-bodies clip to the top of the window and their palette carries the difference. Making the
-auto-exposure account for what is actually on screen is its own piece of work.
+The exposure meters bodies along with the stars — see [Metering](#metering) — so a planet
+large enough to be the picture is what the window is placed on, and the star field behind it
+drops away as it does in any photograph of a planet.
 
 ### Rings
 
@@ -652,6 +651,47 @@ only mapping that shows a star and a rock at the same time.
 Glow carries the dynamic range the pixels cannot: a very bright source is not a brighter white,
 it is a wider halo. That reads correctly, matches how bright points look through any real
 optic, and leaves the 2-3 stop window free for the things that have detail in them.
+
+### Metering
+
+**Decided: the percentile is over area, not over count.**
+
+![Saturn, metered](../images/exposure.png)
+
+*The same view metered by the star field alone put Saturn flat against the top of the window and
+left the sky at full brightness.*
+
+Two kinds of thing are drawn and they are not measured in the same unit. A point delivers a
+*flux*, in W/m^2, into however many pixels the renderer decides to spread it over. A surface has
+a *radiance*, in W/m^2/sr, which does not change as the ship approaches it — only its size on
+screen does. Exposing both from one number means reducing each to the brightness it has per
+unit of sky it covers: a surface's own radiance, and for a point the flux divided by the solid
+angle it is drawn at. Weighting each sample by that same solid angle makes the sum the power
+actually collected, so the rule reads as a light meter does — expose so that `1 - fraction` of
+the frame clips.
+
+Everything the old count percentile did survives, because points all carry the same weight and
+the solid angle divides out of both the samples and the total. A sky with no bodies in it meters
+exactly as it did, which is what lets the star field keep its tuning. A resolved planet does
+not carry a point's weight: against six thousand stars a body takes the exposure once it is
+about twelve pixels across, which is roughly where it stops being a dot.
+
+The tone map therefore holds two references a solid angle apart — one flux, one radiance —
+placed by the same pass and moved together by the exposure control.
+
+Two practical constraints:
+
+- **The metering is over the whole sky, not the frame.** A light meter sees what the lens sees;
+  this one sees every star in the session, so a body's share of the picture is understated by
+  the ratio of the sphere to the field of view. Restricting it to the frame would also make the
+  exposure change as the camera turns, which needs the star half of the pass cached before it
+  can run at frame rate.
+- **Re-placing the window costs a pass over the catalogue**, so it happens when the bodies'
+  contribution has moved a quarter of a stop rather than every frame. A body's surface radiance
+  does not depend on the ship's distance at all, so an approach crosses that a few dozen times
+  rather than continuously. Unresolved bodies are ranked by a Stefan-Boltzmann proxy and only
+  the brightest thirty-two are shaded: shading all two hundred and thirty solar system bodies
+  cost 2.5 ms a frame, and all but a handful sit thirty stops under the cut.
 
 ## Open
 
