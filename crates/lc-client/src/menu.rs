@@ -64,11 +64,11 @@ fn sync_screen(
 }
 
 fn build(commands: &mut Commands, page: MenuPage) {
-    let mut ui = MenuUi::new(commands, MenuTheme::VFD).panel_width(460.0);
+    let mut ui = MenuUi::new(commands, MenuTheme::VFD).panel_width(520.0);
     let root = ui.screen(MenuScreen(page));
     let panel = ui.panel(root);
     ui.title(panel, "LIGHTCONE");
-    ui.message(panel, "everything you see already happened");
+    ui.message(panel, "Everything you see has already happened.");
 
     match page {
         MenuPage::Root => {

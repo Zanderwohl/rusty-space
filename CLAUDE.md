@@ -100,13 +100,13 @@ its pitfalls are in `docs/horizons-golden-vectors.md`, with scripts in `docs/scr
 
 ## The other project
 
-`lightcone/` holds design documents for a separate product — a relativistic sandbox MMO
-built on the same shared crates. It has no code yet. Exotic Matters must never depend on
-anything from it:
+`lightcone/` holds the design documents for a separate product — a relativistic sandbox MMO
+built on the same shared crates. Its code is `crates/lc-*`: `lc-spacetime`, `lc-world`,
+`lc-store` and the `lc-client` app. Exotic Matters must never depend on anything from it:
 
 ```bash
 cargo tree -p exotic-matters | grep -E '^\s*lc-'     # must be empty
 ```
 
-Game-specific crates will be `crates/lc-*`. Shared libraries stay `em-*` and must keep both
-products building. Start at [lightcone/README.md](lightcone/README.md).
+Game-specific crates stay `lc-*`. Shared libraries stay `em-*` and must keep both products
+building. Start at [lightcone/README.md](lightcone/README.md).
