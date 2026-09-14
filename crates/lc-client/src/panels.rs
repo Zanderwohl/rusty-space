@@ -301,7 +301,7 @@ fn tuning(ui: &mut egui::Ui, state: &Ui, out: &mut MessageWriter<Requested>) {
 }
 
 fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {
-    ui.label(format!("drive: {:.0} g, cap {:.3}c", game.drive.accel_g, game.drive.max_beta));
+    ui.label(format!("drive: {:.0} g, cap {:.3}c", game.ship.drive.accel_g, game.ship.drive.max_beta));
     ui.horizontal(|ui| {
         for g in [1.0, 5.0, 20.0, 100.0] {
             if ui.button(format!("{g:.0} g")).clicked() {
@@ -312,7 +312,7 @@ fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Re
     ui.weak(format!("between {MIN_ACCEL_G} and {MAX_ACCEL_G} g"));
     ui.separator();
 
-    match &game.cruise {
+    match &game.cruise() {
         Some(cruise) => {
             let now = game.coordinate_time_s();
             let state = cruise.at(now);
@@ -346,7 +346,7 @@ fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Re
         }
     }
     ui.separator();
-    let p = game.position_ly;
+    let p = game.ship.position_ly;
     ui.weak(format!("at {:.3}, {:.3}, {:.3} ly", p.x, p.y, p.z));
 }
 
@@ -426,15 +426,15 @@ fn system(
                 ask(out, Action::SetCourse(course));
             }
         }
-        ui.weak(format!("brachistochrone at {:.0} g", game.drive.accel_g));
+        ui.weak(format!("brachistochrone at {:.0} g", game.ship.drive.accel_g));
     });
 }
 
 /// Where the ship is holding, if it is holding anywhere.
 fn station(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {
     let Some(system) = game.system.as_ref() else { return };
-    let Some(waypoint) = game.station.as_ref() else {
-        match &game.coast {
+    let Some(waypoint) = game.station() else {
+        match game.coast() {
             // Not "adrift": the ship is on something, and which conic it is on is the first
             // thing a player needs after cutting the engine.
             Some(coast) => {
@@ -477,7 +477,7 @@ fn range_to(game: &Game, system: &crate::system::LocalSystem, target: &Target) -
         Target::Body(name) => system.body_position_ly(name),
         Target::Band(_) => Some(system.star_position_ly()),
     };
-    at.map(|at| at.distance(game.position_ly)).unwrap_or(0.0)
+    at.map(|at| at.distance(game.ship.position_ly)).unwrap_or(0.0)
 }
 
 

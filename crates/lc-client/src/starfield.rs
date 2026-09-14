@@ -390,8 +390,8 @@ pub fn uniforms(
     let mapping = &session.mapping;
     RelativisticStarfieldUniform {
         band_to_display: band_columns(mapping),
-        beta: sim_to_render(session.beta).as_vec3().extend(0.0),
-        ship_offset_ly: sim_to_render(session.position_ly - origin_ly).as_vec3().extend(0.0),
+        beta: sim_to_render(session.ship.beta).as_vec3().extend(0.0),
+        ship_offset_ly: sim_to_render(session.ship.position_ly - origin_ly).as_vec3().extend(0.0),
         reference: session.tone.reference,
         point_stops: POINT_STOPS,
         min_radius_rad: radius(style.min_px, defaults.min_radius_rad),
@@ -455,7 +455,7 @@ pub fn spawn_sky(
     for entity in &existing {
         commands.entity(entity).despawn();
     }
-    let origin_ly = session.position_ly;
+    let origin_ly = session.ship.position_ly;
     let rad_per_px = camera_scale(&camera);
     // One table, shared: it is a function of temperature and nothing else.
     let lut = images.add(band_lut());
@@ -512,7 +512,7 @@ pub fn update_bodies(
     session.0.sync_system();
 
     let origin = sky.origin_ly;
-    let at = session.position_ly;
+    let at = session.ship.position_ly;
     let (drawn, teff) = match session.0.system.as_ref() {
         Some(system) => (system.drawables(at), system.star_teff_k()),
         None => (Vec::new(), 0.0),
@@ -541,9 +541,9 @@ pub fn update_sky(
     let (distant_stars, local_stars) = partition(&session.0);
     // Membership as well as distance: crossing into a system moves a star from one pass to the
     // other, and nothing about the ship's position alone says that happened.
-    let moved = session.position_ly.distance(sky.origin_ly) > REBAKE_LY;
+    let moved = session.ship.position_ly.distance(sky.origin_ly) > REBAKE_LY;
     if moved || local_stars.len() != sky.local.count {
-        sky.origin_ly = session.position_ly;
+        sky.origin_ly = session.ship.position_ly;
         sky.distant.count = distant_stars.len();
         sky.local.count = local_stars.len();
         for (handle, stars) in
@@ -711,7 +711,7 @@ mod tests {
     #[test]
     fn the_uniforms_follow_the_ship() {
         let mut s = sky();
-        let origin = s.position_ly;
+        let origin = s.ship.position_ly;
         assert_eq!(uniforms(&s, origin, lut_scale(), 0.0, DISTANT).ship_offset_ly, Vec4::ZERO);
         s.fly_to(s.stars[0].id);
         s.advance(8_000.0);

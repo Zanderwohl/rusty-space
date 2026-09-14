@@ -207,7 +207,7 @@ fn aim_camera(ui: Res<Ui>, mut camera: Query<&mut Transform, With<Camera3d>>) {
 /// than it was at rest, which is a white screen with a fixed window. Re-placed on progress
 /// rather than every frame, because placing it costs a pass over every star.
 fn hold_exposure(ui: Res<Ui>, mut game: ResMut<Game>, mut last: Local<f64>) {
-    let Some(cruise) = &game.cruise else {
+    let Some(cruise) = &game.cruise() else {
         *last = -1.0;
         return;
     };
@@ -242,7 +242,7 @@ fn place_on_station(
         return;
     };
     let Some(system) = game.system.as_ref() else { return };
-    let here = game.position_ly;
+    let here = game.ship.position_ly;
     let Some(waypoint) = course.resolve(system, here) else { return };
     // Aimed at where the ship already is, so `--station` lands on the near side of an orbit
     // rather than wherever the clock had it.
@@ -254,7 +254,7 @@ fn place_on_station(
         ui.look = look;
     }
     game.0.place_at(at);
-    game.0.station = Some(waypoint);
+    game.0.ship.begin_holding(waypoint);
     ui.notify(format!("on station: {label}"), game.coordinate_time_s());
     *done = true;
 }
@@ -540,15 +540,15 @@ mod tests {
         app.world_mut().write_message(Requested(Action::SelectTarget(Some(id))));
         app.world_mut().write_message(Requested(Action::FlyTo(None)));
         app.update();
-        assert!(app.world().resource::<Game>().cruise.is_some(), "the crossing should have begun");
+        assert!(app.world().resource::<Game>().cruise().is_some(), "the crossing should have begun");
 
         for _ in 0..64 {
             app.update();
         }
         let game = app.world().resource::<Game>();
         assert!(game.distance_to(game.star(id).unwrap()) < before, "the ship did not move");
-        assert!(game.beta.length() > 0.0, "and it is not under way");
-        assert!(game.ship_clock_s < game.coordinate_time_s(), "the ship clock should lag");
+        assert!(game.ship.beta.length() > 0.0, "and it is not under way");
+        assert!(game.ship.clock_s < game.coordinate_time_s(), "the ship clock should lag");
     }
 
     /// The camera turns; it does not travel. Everything drawn is at a fixed radius around it.

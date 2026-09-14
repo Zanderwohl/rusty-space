@@ -143,7 +143,7 @@ pub fn sample_scene(
     mut last: Local<Option<(usize, f32)>>,
 ) {
     let rad_per_px = crate::starfield::camera_scale(&camera);
-    let observer = game.position_ly;
+    let observer = game.ship.position_ly;
     let mut scene = Scene { point_sr: rad_per_px * rad_per_px, ..default() };
     // The three numbers rather than the system: the borrow has to end before the scene is
     // written back, and copying two hundred and thirty bodies a frame to avoid that would cost
@@ -256,7 +256,7 @@ pub fn update_resolved(
     let want: Vec<&Drawable> = bodies
         .drawn
         .iter()
-        .filter(|d| is_resolved(d, session.position_ly, rad_per_px))
+        .filter(|d| is_resolved(d, session.ship.position_ly, rad_per_px))
         .collect();
     let names: Vec<String> = want.iter().map(|d| d.name.clone()).collect();
 
@@ -288,7 +288,7 @@ pub fn update_resolved(
     for (mut transform, material, marker) in placed.iter_mut() {
         let Some(body) = bodies.drawn.iter().find(|d| d.name == marker.name) else { continue };
         transform.translation =
-            sim_to_render((body.position_ly - session.position_ly) * M_PER_LY / UNIT_M).as_vec3();
+            sim_to_render((body.position_ly - session.ship.position_ly) * M_PER_LY / UNIT_M).as_vec3();
         transform.rotation =
             Quat::from_rotation_arc(Vec3::Y, sim_to_render(body.pole).as_vec3().normalize());
         transform.scale = Vec3::splat((body.radius_m / UNIT_M) as f32);

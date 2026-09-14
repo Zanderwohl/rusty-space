@@ -72,6 +72,52 @@ impl ShipState {
     pub fn is_under_way(&self) -> bool {
         matches!(self.motive, Motive::Crossing(_))
     }
+
+    /// Where the crossing under way is for, if it is for anywhere.
+    pub fn bound_for(&self) -> Option<&Waypoint> {
+        self.arrive_at.as_ref()
+    }
+
+    /// Put a ship on a crossing directly, for a caller that has already planned one.
+    ///
+    /// [`apply`] is the way in for anything a client and a server both have to agree about.
+    /// This is for the crossing between stars, which has no course to resolve and no system to
+    /// resolve it against.
+    pub fn begin_crossing(&mut self, cruise: Cruise, arrive_at: Option<Waypoint>) {
+        self.crossing_clock_base_s = self.clock_s;
+        self.motive = Motive::Crossing(cruise);
+        self.arrive_at = arrive_at;
+    }
+
+    /// Hold a place directly, for a caller that put the ship there rather than flying it.
+    pub fn begin_holding(&mut self, waypoint: Waypoint) {
+        self.motive = Motive::Holding(waypoint);
+        self.arrive_at = None;
+        self.beta = DVec3::ZERO;
+    }
+
+    /// Stop holding and stop falling: whatever it has, in a straight line from here.
+    pub fn set_adrift(&mut self, now_s: f64) {
+        self.motive = Motive::Drifting { from_ly: self.position_ly, since_t: now_s };
+        self.arrive_at = None;
+    }
+
+    /// The ship has left the system its motive was defined against.
+    ///
+    /// A station and a conic are positions relative to bodies that are no longer there, so they
+    /// go. A **crossing does not**: it is a straight line between two points of the world, and
+    /// leaving a system is exactly what one is for. Dropping it here cancelled every
+    /// interstellar flight at the moment it cleared the shell, and the ship then coasted the
+    /// rest of the way with its clock running at the coordinate rate.
+    pub fn leave_system(&mut self, now_s: f64) {
+        match self.motive {
+            Motive::Crossing(_) => {
+                // The place it was flying to is gone even though the flight is not.
+                self.arrive_at = None;
+            }
+            _ => self.set_adrift(now_s),
+        }
+    }
 }
 
 /// What can happen to a ship.
@@ -194,7 +240,16 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
             if flight.phase == Phase::Arrived {
                 state.beta = DVec3::ZERO;
                 state.motive = match state.arrive_at.take() {
-                    Some(waypoint) => Motive::Holding(waypoint),
+                    Some(waypoint) => {
+                        // Placed on it at once, not next step. The crossing ends where the
+                        // station *was* when the plan was made, and a step that overshoots the
+                        // arrival by a little leaves the body a little further round its year:
+                        // holding from the following step would show as a jump.
+                        if let Some(at) = system.and_then(|s| waypoint.place(s)) {
+                            state.position_ly = at;
+                        }
+                        Motive::Holding(waypoint)
+                    }
                     None => Motive::Drifting { from_ly: state.position_ly, since_t: now_s },
                 };
             }
@@ -308,7 +363,7 @@ mod tests {
         const END_T: f64 = 300_000.0;
         let run = |state: &mut ShipState, system: &mut LocalSystem, step: f64| {
             let mut now = 0.0;
-            let mut step_to = |state: &mut ShipState, system: &mut LocalSystem, target: f64, now: &mut f64| {
+            let step_to = |state: &mut ShipState, system: &mut LocalSystem, target: f64, now: &mut f64| {
                 while *now < target {
                     let next = (*now + step).min(target);
                     let elapsed = next - *now;

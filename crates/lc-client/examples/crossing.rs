@@ -52,7 +52,7 @@ fn main() {
     let distance = session.distance_to(session.star(target).unwrap());
 
     session.fly_to(target);
-    let cruise = session.cruise.clone().expect("a crossing");
+    let cruise = session.cruise().clone().expect("a crossing");
     println!(
         "{name}: {distance:.2} ly, {:.2} coordinate years, {:.2} aboard, peak {:.4}c",
         cruise.duration_s() / 31_557_600.0,
@@ -76,7 +76,7 @@ fn main() {
     let mut title = Primitives::default();
     title.labels.push(Label {
         at: Point::new(24.0, 24.0),
-        text: format!("crossing to {name} — {distance:.2} ly at {:.0} g", session.drive.accel_g),
+        text: format!("crossing to {name} — {distance:.2} ly at {:.0} g", session.ship.drive.accel_g),
         size: 17.0,
         anchor: Anchor::Start,
         colour: FG,
@@ -149,9 +149,9 @@ fn panel(
         out.push(chart.scatter_with(&points, 0.8 + bucket as f32 * 1.2, |i, _| colours[i]));
     }
 
-    let beta = session.beta.length();
+    let beta = session.ship.beta.length();
     let years = session.coordinate_time_s() / 31_557_600.0;
-    let aboard = session.ship_clock_s / 31_557_600.0;
+    let aboard = session.ship.clock_s / 31_557_600.0;
     let left = session.star(target).map(|s| session.distance_to(s)).unwrap_or(0.0);
 
     // Two lines, not one: at this panel width the single-line form runs into the next panel.
