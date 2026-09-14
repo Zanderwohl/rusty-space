@@ -50,6 +50,9 @@ pub fn parse(args: &[String]) -> (DevEntry, Option<String>) {
     if let Some(degrees) = value::<f64>(args, "--turn") {
         actions.push(Action::Look { yaw: degrees.to_radians(), pitch: 0.0 });
     }
+    if let Some(degrees) = value::<f64>(args, "--pitch") {
+        actions.push(Action::Look { yaw: 0.0, pitch: degrees.to_radians() });
+    }
     if flag("--fly") {
         // Index 0 of the sorted sky is the Sun in the full catalogue; 1 is interstellar.
         actions.push(Action::FlyToNearest);

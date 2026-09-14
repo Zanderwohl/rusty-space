@@ -17,7 +17,7 @@ use bevy_egui::input::EguiWantsInput;
 use bevy_egui::{EguiContexts, egui};
 use em_render::render_space::sim_to_render;
 use em_ui::picking::{self, Candidate, rank};
-use em_ui::reticle::{self, Marker};
+use em_ui::reticle::{self, Frame, Marker};
 use glam::DVec3;
 use lc_world::navigation::Target;
 use lc_world::sky::StarId;
@@ -89,7 +89,12 @@ impl Plugin for PickPlugin {
             .add_systems(Update, survey.run_if(in_state(crate::app::AppState::InGame)))
             .add_systems(
                 bevy_egui::EguiPrimaryContextPass,
-                draw.run_if(in_state(crate::app::AppState::InGame)),
+                // After the interface, not before it. `available_rect` is built up as panels
+                // are added during the pass, so an overlay that runs first sees the whole
+                // window and puts its arrows under the head-up display.
+                draw.after(crate::panels::hud)
+                    .after(crate::panels::open_panels)
+                    .run_if(in_state(crate::app::AppState::InGame)),
             );
     }
 }
@@ -130,7 +135,7 @@ fn survey(
 
     // Against the whole window, because that is where the cursor can be. A thing under a panel
     // is not pickable anyway: egui takes the pointer first, which is checked below.
-    let whole = reticle::safe_rect(viewport, 0.0);
+    let whole = Frame::bare(reticle::safe_rect(viewport, 0.0));
     // Only what is actually on screen can be under the cursor. An off-screen thing is placed on
     // the border, and taking that as a position would make the edges pick whatever is out there.
     let mut candidates = Vec::with_capacity(sighted.len());
@@ -260,6 +265,10 @@ fn draw(mut contexts: EguiContexts, picked: Res<Picked>, windows: Query<&Window,
         Vec2::new(available.min.x + inset, available.min.y + inset),
         Vec2::new(available.max.x - inset, available.max.y - inset),
     );
+    // What the interface has taken. `available_rect` accounts for docked panels and nothing
+    // else, so every floating window and notice has to be named here or a mark lands on one.
+    let occupied = occupied_rects(context);
+    let frame = Frame::with(safe, &occupied, ARROW_PX);
 
     // Foreground, not background. Panels paint in `Order::Background` and floating notices in
     // `Order::Middle`, so a mark on either of those layers is covered by whatever the interface
@@ -277,7 +286,7 @@ fn draw(mut contexts: EguiContexts, picked: Res<Picked>, windows: Query<&Window,
     .into_iter()
     .filter_map(|(mark, colour, bracketed)| Some((mark?, colour, bracketed)))
     {
-        paint(&painter, mark, viewport, safe, colour, bracketed);
+        paint(&painter, mark, viewport, frame, colour, bracketed);
     }
 }
 
@@ -285,17 +294,41 @@ const HOVER: egui::Color32 = egui::Color32::from_rgb(150, 170, 190);
 const SELECTED: egui::Color32 = egui::Color32::from_rgb(235, 200, 120);
 const LABEL_SIZE: f32 = 12.0;
 
+/// Every visible floating area, as rectangles to keep marks out of.
+///
+/// Docked panels are not areas and do not appear here; they are already out of
+/// [`egui::Context::available_rect`]. This is the rest of the interface: windows, notices,
+/// tooltips — everything that floats over the view and that `available_rect` says nothing
+/// about. The overlay's own layer is skipped, or it would exclude itself.
+fn occupied_rects(context: &egui::Context) -> Vec<bevy::math::Rect> {
+    context.memory(|memory| {
+        memory
+            .areas()
+            .visible_layer_ids()
+            .iter()
+            .filter(|layer| layer.order < egui::Order::Foreground)
+            .filter_map(|layer| memory.area_rect(layer.id))
+            .map(|rect| {
+                bevy::math::Rect::from_corners(
+                    Vec2::new(rect.min.x, rect.min.y),
+                    Vec2::new(rect.max.x, rect.max.y),
+                )
+            })
+            .collect()
+    })
+}
+
 fn paint(
     painter: &egui::Painter,
     mark: &Mark,
     viewport: Vec2,
-    safe: bevy::math::Rect,
+    frame: Frame<'_>,
     colour: egui::Color32,
     bracketed: bool,
 ) {
     let stroke = egui::Stroke::new(1.0_f32, colour);
-    let (anchor, radius_px, preferred) = match reticle::place(mark.clip, mark.radius_px, viewport, safe)
-    {
+    let (anchor, radius_px, preferred) =
+        match reticle::place(mark.clip, mark.radius_px, viewport, frame) {
         Marker::On { at, radius_px } => {
             let radius = radius_px.max(HOVER_RING_PX);
             let segments = if bracketed {
@@ -319,7 +352,8 @@ fn paint(
     let font = egui::FontId::proportional(LABEL_SIZE);
     let galley = painter.layout_no_wrap(mark.label.clone(), font, colour);
     let size = Vec2::new(galley.size().x, galley.size().y);
-    let centre = reticle::place_label(anchor, radius_px, size, safe, reticle::LABEL_GAP_PX, preferred);
+    let centre =
+        reticle::place_label(anchor, radius_px, size, frame, reticle::LABEL_GAP_PX, preferred);
     painter.galley(
         egui::pos2(centre.x - size.x * 0.5, centre.y - size.y * 0.5),
         galley,
@@ -355,7 +389,7 @@ mod tests {
         assert!(clip.w > 0.0, "ahead is in front of the camera: w = {}", clip.w);
         assert!(clip.x.abs() < 1.0e-5 && clip.y.abs() < 1.0e-5, "{clip:?}");
 
-        let marker = reticle::place(clip, 0.0, Vec2::new(1280.0, 720.0), reticle::safe_rect(Vec2::new(1280.0, 720.0), 10.0));
+        let marker = reticle::place(clip, 0.0, Vec2::new(1280.0, 720.0), Frame::bare(reticle::safe_rect(Vec2::new(1280.0, 720.0), 10.0)));
         let Marker::On { at, .. } = marker else { panic!("{marker:?}") };
         assert!((at - Vec2::new(640.0, 360.0)).length() < 0.05, "{at}");
     }
@@ -380,7 +414,7 @@ mod tests {
         assert!(clip.y > 0.0, "clip y is up: {clip:?}");
 
         let viewport = Vec2::new(1280.0, 720.0);
-        let marker = reticle::place(clip, 0.0, viewport, reticle::safe_rect(viewport, 10.0));
+        let marker = reticle::place(clip, 0.0, viewport, Frame::bare(reticle::safe_rect(viewport, 10.0)));
         let Marker::On { at, .. } = marker else { panic!("{marker:?}") };
         assert!(at.y < 360.0, "up in the world should be up the screen: {at}");
     }
@@ -396,7 +430,7 @@ mod tests {
             project_direction(rotation, clip_from_view, port),
             0.0,
             viewport,
-            reticle::safe_rect(viewport, 10.0),
+            Frame::bare(reticle::safe_rect(viewport, 10.0)),
         );
         let Marker::On { at, .. } = marker else { panic!("{marker:?}") };
         assert!(at.x < 640.0, "{at}");
