@@ -356,31 +356,11 @@ fn swarm_name(population: &lc_world::population::Population) -> String {
     )
 }
 
-/// How far a population reaches: inner radius, outer radius, and half-thickness angle.
-///
-/// The eccentricity matters as much as the semi-major axis does. An element with semi-major
-/// axis `a` and eccentricity `e` is somewhere between `a(1-e)` and `a(1+e)` over its year, so
-/// the tube is wider than the spread of `a` alone — and for the belt it is wider by more than
-/// the spread of `a` is.
-fn swarm_extent(population: &lc_world::population::Population) -> Option<(f64, f64, f64)> {
-    let axes = population.semi_major.nodes();
-    let eccentricities = population.eccentricity.nodes();
-    let a_lo = axes.iter().map(|(v, _)| *v).fold(f64::INFINITY, f64::min);
-    let a_hi = axes.iter().map(|(v, _)| *v).fold(0.0, f64::max);
-    let e_hi = eccentricities.iter().map(|(v, _)| *v).fold(0.0, f64::max).clamp(0.0, 0.95);
-    let inner = a_lo * (1.0 - e_hi);
-    let outer = a_hi * (1.0 + e_hi);
-    (inner > 0.0 && outer > inner)
-        .then(|| (inner, outer, population.inclination.max_inclination()))
-}
-
 /// The population as a torus, in curves: its inner and outer edges, and cross-sections round
 /// it.
 ///
-/// A belt is a donut, and the model says so — a spread of semi-major axes, a spread of
-/// eccentricities, a spread of inclinations, and *no* node or periapsis angle anywhere, which
-/// is what leaves it symmetric about its pole. One circle was the core of that torus and not
-/// the torus.
+/// The same torus [`crate::envelope::build_envelope`] draws, from the same
+/// [`Extent`](lc_world::population::Extent). One circle was the core of it and not the torus.
 ///
 /// It degenerates correctly: an isotropic cloud has a half-thickness of a right angle, its
 /// cross-sections close into meridians and the whole thing reads as the shell it is.
@@ -389,7 +369,7 @@ fn swarm_outlines(
     ship_ly: DVec3,
     population: &lc_world::population::Population,
 ) -> Vec<Vec<DVec3>> {
-    let Some((inner, outer, half_angle)) = swarm_extent(population) else { return Vec::new() };
+    let Some(extent) = population.extent() else { return Vec::new() };
     let (u, v) = lc_world::navigation::basis(population.pole);
     let pole = population.pole.normalize_or_zero();
     let centre = (star_ly - ship_ly) * M_PER_LY;
@@ -403,13 +383,13 @@ fn swarm_outlines(
             .collect()
     };
 
-    let mut out = vec![ring(inner, 0.0), ring(outer, 0.0)];
+    let mut out = vec![ring(extent.inner_m, 0.0), ring(extent.outer_m, 0.0)];
 
-    // The tube, as seen in a plane containing the pole: half as wide as the gap between the
-    // edges, and as tall as the inclination tips the far edge.
-    let core = (inner + outer) * 0.5;
-    let half_width = (outer - inner) * 0.5;
-    let half_height = core * half_angle.sin();
+    // The tube, as seen in a plane containing the pole. The same numbers the envelope mesh is
+    // built from, so the skeleton and the thing it is drawn over cannot drift apart.
+    let core = extent.core_m();
+    let half_width = extent.half_width_m();
+    let half_height = extent.half_height_m();
     for k in 0..SWARM_CROSS_SECTIONS {
         let phi = std::f64::consts::TAU * k as f64 / SWARM_CROSS_SECTIONS as f64;
         let outward = u * phi.cos() + v * phi.sin();
@@ -669,7 +649,8 @@ mod tests {
     #[test]
     fn a_belts_extent_comes_from_the_eccentricity_as_much_as_the_axis() {
         let belt = belt();
-        let (inner, outer, half_angle) = swarm_extent(&belt).expect("a belt has extent");
+        let e = belt.extent().expect("a belt has extent");
+        let (inner, outer, half_angle) = (e.inner_m, e.outer_m, e.half_angle_rad);
 
         let au = lc_world::navigation::AU;
         let axes = belt.semi_major.nodes();
@@ -696,7 +677,8 @@ mod tests {
     #[test]
     fn the_outline_is_a_torus_about_the_star() {
         let belt = belt();
-        let (inner, outer, half_angle) = swarm_extent(&belt).unwrap();
+        let e = belt.extent().unwrap();
+        let (inner, outer, half_angle) = (e.inner_m, e.outer_m, e.half_angle_rad);
         // Inside the system, which is the only place anyone sees one. Putting the star light-
         // years off instead costs metres of cancellation against an AU-scale radius, and the
         // first version of this test read that as a geometry error.
@@ -739,7 +721,8 @@ mod tests {
             inclination: lc_world::distribution::Inclination::isotropic(),
             ..belt()
         };
-        let (inner, outer, half_angle) = swarm_extent(&cloud).unwrap();
+        let e = cloud.extent().unwrap();
+        let (inner, outer, half_angle) = (e.inner_m, e.outer_m, e.half_angle_rad);
         assert!((half_angle - std::f64::consts::FRAC_PI_2).abs() < 1.0e-9, "{half_angle}");
 
         let curves = swarm_outlines(DVec3::ZERO, DVec3::ZERO, &cloud);
@@ -759,7 +742,7 @@ mod tests {
             semi_major: lc_world::distribution::Distribution::delta(0.0),
             ..belt()
         };
-        assert!(swarm_extent(&nothing).is_none());
+        assert!(nothing.extent().is_none());
         assert!(swarm_outlines(DVec3::ZERO, DVec3::ZERO, &nothing).is_empty());
     }
 
