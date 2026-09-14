@@ -59,11 +59,15 @@ fn main() {
         // Index 0 of the sorted sky is the Sun in the full catalogue; 1 is interstellar.
         actions.push(Action::FlyToNearest);
     }
+    // `--menu` holds the entry at the main menu, so `--shot` can photograph it. Without it a
+    // screenshot run goes straight to the sky, which is what every other capture wants.
+    let stay_in_menu = flag("--menu").is_some();
     let dev = DevEntry {
-        observe_immediately: flag("--observe").is_some()
-            || flag("--shot").is_some()
-            || flag("--at").is_some()
-            || flag("--station").is_some(),
+        observe_immediately: !stay_in_menu
+            && (flag("--observe").is_some()
+                || flag("--shot").is_some()
+                || flag("--at").is_some()
+                || flag("--station").is_some()),
         target_swarm: flag("--swarm").is_some(),
         at_body: flag("--at").and_then(|i| args.get(i + 1).cloned()),
         station: flag("--station").and_then(|i| args.get(i + 1).cloned()),

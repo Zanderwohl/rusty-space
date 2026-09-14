@@ -11,6 +11,7 @@ someone a day. This file is the conventions.
 |---|---|---|
 | `crates/em-foundations` | orbital mechanics, reference frames, epochs | glam, serde, num-traits, scilib |
 | `crates/em-sim` | simulation state and propagation | em-foundations; `bevy_ecs` only behind the `bevy` feature |
+| `crates/em-ui` | Bevy-native menu widgets, in a palette the caller picks | bevy |
 | `.` (`exotic-matters`) | the app: rendering, egui, persistence | anything |
 
 The app is the workspace **root** package, so `assets/` resolves against `CARGO_MANIFEST_DIR`

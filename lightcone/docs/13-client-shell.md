@@ -1,7 +1,8 @@
 # The client shell
 
 The application around the simulation: states, menus, windows and the rules they answer to.
-`bevy_egui` for everything with text in it.
+`bevy_egui` for everything dense with text. The exception is the main menu, which composites
+over a rendered background and is Bevy UI — see [The main menu](#the-main-menu).
 
 ## States
 
@@ -42,6 +43,36 @@ Two consequences to design for now:
 - **Settings apply live.** There is no "apply on resume", because there is no resume.
 - **The overlay says so.** It dims the world and leaves the clock ticking in the corner, which
   teaches the rule better than a tooltip.
+
+## The main menu
+
+Bevy UI, not egui: it sits in front of a starfield and has to composite with it, and there is
+no point drawing an opaque egui panel over a sky in order to hide the sky. The widgets come
+from `em-ui`, shared with Exotic Matters, so both products' menus are one implementation in
+two palettes.
+
+It emits actions like every other surface: a button writes `Requested(Action)` and the
+dispatcher does the rest. Nothing in the menu mutates state directly, and the page it draws is
+read from `UiState::menu_page` rather than mirrored into a Bevy state, so there is one record
+of where the player is.
+
+### The backdrop is generated, not loaded
+
+The sky behind the menu is drawn by the real starfield pass, at rest, but its stars are not the
+catalogue's. Loading the catalogue is what `Loading` exists for — a hundred and twenty thousand
+rows, and generation per star — and a menu that waits for it is the frozen window that state
+was added to avoid.
+
+So the menu generates four thousand main-sequence stars from a fixed seed: isotropic, uniform
+in volume out to four hundred light-years, masses from an inverted Salpeter IMF and effective
+temperature from the same mass so the colours agree with the sizes. Fixed rather than random
+per launch, because a backdrop that differs each time reads as a bug in the sky.
+
+The field turns at one radian a minute, in yaw only. `Look` carries no roll by construction, and
+a horizon that rotates is a worse backdrop than one that pans. The heading the drift reaches is
+where the ship starts looking; there is no better default.
+
+`--menu --shot <path>` photographs it, because a window nobody is watching proves nothing.
 
 ## The staleness readout is the premise
 
