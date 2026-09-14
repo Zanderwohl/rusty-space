@@ -2,6 +2,9 @@
 
 A Bevy app plus two engine-free libraries.
 
+See [AGENTS.md](AGENTS.md) for how to check your work and for the traps that have already cost
+someone a day. This file is the conventions.
+
 ## Layout
 
 | crate | what it is | may depend on |
