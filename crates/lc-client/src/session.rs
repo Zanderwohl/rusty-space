@@ -706,6 +706,104 @@ mod tests {
         assert!(left < 5, "{left} stars should have survived exposing for the Sun");
     }
 
+    // The world model moved to `lc-world`; these two stayed, because what they check is the
+    // session driving it rather than the model itself.
+
+    /// The whole of it, through the session rather than the pieces: ask for an orbit, fly, and
+    /// still be in that orbit afterwards. The hold is what the screenshots cannot show — a ship
+    /// parked at a point rather than following one drifts out of frame within the hour.
+    #[test]
+    fn a_course_is_flown_and_then_held() {
+        let mut session = Session::new(
+            &lc_world::sky::hyg::HygProvider::load(
+                "../../assets/catalogs/hygdata_v42_dist_sort.csv",
+            )
+            .expect("the catalogue"),
+            64,
+        );
+        session.sync_system();
+        assert!(session.system.is_some(), "the ship starts inside the solar system");
+
+        let course =
+            lc_world::navigation::Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: lc_world::navigation::Plane::Equatorial };
+        let label = session.set_course(&course).expect("a course to Earth");
+        assert_eq!(label, "orbit of Earth");
+        assert!(session.cruise.is_some(), "and a crossing to fly it");
+
+        // Fly. A tenth of a real second a step, which at the design rate is fifteen minutes.
+        let mut steps = 0;
+        while session.cruise.is_some() {
+            session.advance(0.1);
+            session.sync_system();
+            steps += 1;
+            assert!(steps < 10_000, "the crossing never ended");
+        }
+
+        // What `hold_station` does, without an engine to do it in.
+        let hold = |session: &mut Session| {
+            let system = session.system.as_ref().expect("still in the system");
+            let at = session.station.as_ref().expect("a station").place(system).expect("a place");
+            session.place_at(at);
+        };
+        hold(&mut session);
+        let altitude = |session: &Session| {
+            let earth = session.system.as_ref().unwrap().body_position_ly("Earth").unwrap();
+            session.position_ly.distance(earth) * lc_world::system::M_PER_LY / 6.371e6
+        };
+        assert!((altitude(&session) - 3.0).abs() < 0.05, "arrived at {}", altitude(&session));
+
+        // And an hour later, with Earth thirty thousand kilometres further round its year.
+        for _ in 0..40 {
+            session.advance(0.1);
+            session.sync_system();
+            hold(&mut session);
+        }
+        assert!((altitude(&session) - 3.0).abs() < 0.05, "drifted to {}", altitude(&session));
+    }
+
+/// The whole of it through the session: fly a course, cut the engine partway, and end up
+    /// on a real orbit that is then held without thrust.
+    #[test]
+    fn cancelling_a_crossing_leaves_the_ship_on_a_conic() {
+        let provider =
+            lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv");
+        let Ok(provider) = provider else { return };
+        let mut session = Session::new(&provider, 64);
+        session.sync_system();
+        let course = lc_world::navigation::Course::Orbit {
+            body: "Earth".into(),
+            altitude_radii: 2.0,
+            plane: lc_world::navigation::Plane::Equatorial,
+        };
+        session.set_course(&course).expect("a course");
+
+        // Partway: far enough to be moving, not so far as to have arrived.
+        for _ in 0..20 {
+            session.advance(0.05);
+        }
+        assert!(session.cruise.is_some(), "still under way");
+        let moving = session.velocity_m_s();
+        assert!(moving.length() > 1.0e3, "only {} m/s", moving.length());
+
+        let coast = session.cancel().expect("an arc");
+        assert!(session.cruise.is_none() && session.station.is_none());
+        eprintln!(
+            "cut at {:.0} km/s -> {} (e {:.3})",
+            moving.length() / 1.0e3,
+            crate::hud::arc(&coast),
+            coast.elements.eccentricity,
+        );
+
+        // And it keeps going, ballistically, without any of the three modes fighting.
+        let before = session.position_ly;
+        for _ in 0..20 {
+            session.advance(0.05);
+        }
+        assert!(session.position_ly != before, "a coasting ship is not parked");
+        assert!(session.coast.is_some(), "and it is still on an arc");
+    }
+
+
     /// A sky with nothing in it but stars must meter exactly as a count percentile did: every
     /// point carries the same weight, so the solid angle divides out of both the samples and
     /// the total. This is what lets the star field keep its tuning.

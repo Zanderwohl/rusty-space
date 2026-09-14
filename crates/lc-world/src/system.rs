@@ -9,7 +9,7 @@ use em_sim::system::System;
 use em_sim::universe::UniverseFileContents;
 use em_foundations::time::Instant;
 use glam::DVec3;
-use lc_world::sky::{CatalogueStar, StarId, generate};
+use crate::sky::{CatalogueStar, StarId, generate};
 
 /// Metres in a light-year.
 pub const M_PER_LY: f64 = 9.460_730_472_580_8e15;
@@ -28,13 +28,21 @@ pub const DEFAULT_ALBEDO: f64 = 0.3;
 /// this one, so the list does not reshuffle while it is being read.
 pub const INVENTORY_EPOCH_S: f64 = 0.0;
 
+/// Inside this of a star, the ship is in its system and the star is drawn as an object rather
+/// than as a point of the background.
+///
+/// An Oort cloud reaches about a hundred thousand astronomical units, which is 1.6 light-years,
+/// and 03-world-model.md already makes that shell the partition boundary. Being inside it is
+/// the same statement as being in the system.
+pub const LOCAL_SHELL_LY: f64 = 1.6;
+
 /// The catalogue name of the system whose data is real rather than generated.
 pub const SOL: &str = "Sol";
 
 /// A body's rings, as the renderer wants them.
 #[derive(Clone, Copy, Debug)]
 pub struct Rings {
-    pub system: &'static lc_world::rings::RingSystem,
+    pub system: &'static crate::rings::RingSystem,
     /// Unit normal of the ring plane, simulation axes.
     pub pole: DVec3,
 }
@@ -45,7 +53,7 @@ pub struct Drawable {
     pub name: String,
     pub rings: Option<Rings>,
     /// What it looks like, from what it is.
-    pub surface: lc_world::surface::Surface,
+    pub surface: crate::surface::Surface,
     /// Spin axis, simulation axes. Ecliptic north where the data says nothing.
     pub pole: DVec3,
     /// Where it is, light-years from the world origin, simulation axes.
@@ -65,7 +73,7 @@ pub struct LocalSystem {
     /// Swarms, belts and clouds. Generated even for the real solar system: `em-sim`'s preset
     /// carries bodies and no distributions, and a system with a Kuiper belt and no Kuiper belt
     /// in it would be the stranger of the two errors.
-    pub populations: Vec<lc_world::population::Population>,
+    pub populations: Vec<crate::population::Population>,
     /// Where the system's barycentre sits, light-years from the world origin.
     pub origin_ly: DVec3,
     sim: System,
@@ -160,11 +168,11 @@ impl LocalSystem {
                 // own pole out of the preset's IAU rotation. A second copy of a pole here would
                 // be a second chance to have it wrong.
                 let pole = self.sim.rotation(i).and_then(pole_of).unwrap_or(DVec3::Z);
-                let rings = lc_world::rings::for_body(self.sim.name(i))
+                let rings = crate::rings::for_body(self.sim.name(i))
                     .map(|system| Rings { system, pole });
 
                 let equilibrium_k = equilibrium_temperature(self.star_luminosity_w, distance_m);
-                let surface = lc_world::surface::Surface::classify(
+                let surface = crate::surface::Surface::classify(
                     radius_m,
                     self.sim.info(i).mass,
                     equilibrium_k,
@@ -280,7 +288,7 @@ impl LocalSystem {
             .iter()
             .map(|p| p.semi_major.nodes().iter().map(|(a, _)| *a).fold(0.0f64, f64::max))
             .fold(0.0f64, f64::max);
-        (bodies.max(populations) / M_PER_LY).max(crate::starfield::LOCAL_SHELL_LY)
+        (bodies.max(populations) / M_PER_LY).max(LOCAL_SHELL_LY)
     }
 
     pub fn star_teff_k(&self) -> f64 {
@@ -340,7 +348,7 @@ pub fn name_seed(name: &str) -> u64 {
         h ^= *b as u64;
         h = h.wrapping_mul(0x1000_0000_01b3);
     }
-    lc_world::rng::mix(h)
+    crate::rng::mix(h)
 }
 
 /// A body's pole, from whichever way its rotation is described.
@@ -368,7 +376,7 @@ pub fn phase_factor(to_star: DVec3, to_observer: DVec3) -> f64 {
 
 /// What a body at `distance_m` from a star of `luminosity_w` settles at, kelvin.
 ///
-/// The sphere case of the balance in `lc_world::population`: absorbing on a cross-section and
+/// The sphere case of the balance in `crate::population`: absorbing on a cross-section and
 /// radiating from the whole surface.
 pub fn equilibrium_temperature(luminosity_w: f64, distance_m: f64) -> f64 {
     if distance_m <= 0.0 {
@@ -390,7 +398,7 @@ fn build_inventory(
     sim: &System,
     primary: BodyIndex,
     star_name: &str,
-    populations: &[lc_world::population::Population],
+    populations: &[crate::population::Population],
 ) -> Vec<crate::navigation::Entry> {
     use crate::navigation::{Entry, Kind, Target, designate};
 
@@ -473,14 +481,14 @@ fn build_inventory(
 
 #[cfg(test)]
 mod tests {
-    use lc_world::sky::{AuthoredStars, StarProvider};
+    use crate::sky::{AuthoredStars, StarProvider};
 
     use super::*;
 
     const AU: f64 = 1.495_978_707e11;
 
-    fn catalogue() -> Option<lc_world::sky::hyg::HygProvider> {
-        lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv").ok()
+    fn catalogue() -> Option<crate::sky::hyg::HygProvider> {
+        crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv").ok()
     }
 
     #[test]
@@ -494,7 +502,7 @@ mod tests {
 
         let other = provider.stars().iter().find(|s| s.name.as_deref() != Some(SOL)).unwrap();
         let made = LocalSystem::for_star(other).expect("a generated system loads");
-        assert!(made.len() >= 1 && made.len() < real.len());
+        assert!(!made.is_empty() && made.len() < real.len());
     }
 
     #[test]
@@ -654,7 +662,7 @@ mod tests {
 
     #[test]
     fn a_ring_seen_edge_on_reflects_nothing() {
-        let s = lc_world::rings::for_body("Saturn").unwrap();
+        let s = crate::rings::for_body("Saturn").unwrap();
         // The formula's two cosines: face-on is the whole cross-section, edge-on is none.
         let face = s.cross_section_m2() * 1.0 * 1.0;
         let edge = s.cross_section_m2() * 0.0 * 1.0;

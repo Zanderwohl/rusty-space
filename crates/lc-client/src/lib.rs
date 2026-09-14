@@ -5,24 +5,25 @@
 //! renderer made of ECS systems cannot be reused, so this one keeps the decisions separable
 //! from the drawing.
 
+// Moved into `lc-world`, because the server is authoritative over ship motion and has to run
+// the same code the client predicts with. Re-exported so the client's own paths still read the
+// way they did.
+pub use lc_world::{coast, flight, navigation, system};
+
 pub mod action;
 pub mod app;
-pub mod coast;
 pub mod curve;
 pub mod entry;
 pub mod envelope;
-pub mod flight;
 pub mod hud;
 pub mod input;
 pub mod menu;
-pub mod navigation;
 pub mod panels;
 pub mod plot;
 pub mod resolved;
 pub mod session;
 pub mod sky_asset;
 pub mod starfield;
-pub mod system;
 pub mod tonemap;
 pub mod ui;
 pub mod view;

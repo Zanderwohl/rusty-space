@@ -12,7 +12,7 @@
 //! integrated, so nothing here drifts and nothing here needs a fuel budget.
 
 use glam::DVec3;
-use lc_world::population::Population;
+use crate::population::Population;
 
 use crate::flight::{Cruise, Drive};
 use crate::system::{LocalSystem, M_PER_LY};
@@ -318,7 +318,7 @@ impl Course {
             }
             Course::Rings(body) => {
                 let index = system.body_named(body)?;
-                let rings = lc_world::rings::for_body(system.sim().name(index))?;
+                let rings = crate::rings::for_body(system.sim().name(index))?;
                 Some(Waypoint::Orbit(Orbit {
                     about: Anchor::Body(body.clone()),
                     radius_m: rings.outer_m() * RING_STANDOFF,
@@ -537,7 +537,7 @@ pub fn options_for(system: &LocalSystem, target: &Target) -> Vec<(String, Course
             out.push((what.to_string(), Course::Lagrange { body: name.clone(), point }));
         }
     }
-    if lc_world::rings::for_body(system.sim().name(index)).is_some() {
+    if crate::rings::for_body(system.sim().name(index)).is_some() {
         out.push(("above the rings".to_string(), Course::Rings(name.clone())));
     }
     if index == system.primary() {
@@ -591,13 +591,13 @@ pub fn is_flat(population: &Population) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use lc_world::sky::{AuthoredStars, StarProvider};
+    use crate::sky::{AuthoredStars, StarProvider};
 
     use super::*;
 
     fn sol() -> LocalSystem {
         let provider =
-            lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
+            crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
                 .expect("the catalogue");
         let sun = provider
             .stars()
@@ -735,7 +735,7 @@ mod tests {
             let offset = leave(from);
             let radius = (from - star).normalize();
             assert!(offset.normalize().dot(radius) > 0.999, "{body} did not leave radially");
-            assert!(offset.length() > crate::starfield::LOCAL_SHELL_LY, "still inside the shell");
+            assert!(offset.length() > crate::system::LOCAL_SHELL_LY, "still inside the shell");
         }
         // Two bodies on opposite sides of the star leave in opposite directions, which is the
         // whole difference from a fixed axis.
@@ -813,7 +813,7 @@ mod tests {
         else {
             panic!("rings are an orbit")
         };
-        let rings = lc_world::rings::for_body("Saturn").expect("Saturn has rings");
+        let rings = crate::rings::for_body("Saturn").expect("Saturn has rings");
         assert!(orbit.radius_m > rings.outer_m(), "inside the annulus is the degenerate case");
 
         // The orbit's own normal is tilted from the ring pole, so the station rises out of the
@@ -876,58 +876,6 @@ mod tests {
         assert_eq!(altitude_radii, 20.0);
         assert_eq!(Course::parse("orbit:Earth:enormous"), None, "and only as the table names it");
         assert!(Course::parse("belt:9").unwrap().resolve(&system, DVec3::ZERO).is_none(), "and out of range");
-    }
-
-    /// The whole of it, through the session rather than the pieces: ask for an orbit, fly, and
-    /// still be in that orbit afterwards. The hold is what the screenshots cannot show — a ship
-    /// parked at a point rather than following one drifts out of frame within the hour.
-    #[test]
-    fn a_course_is_flown_and_then_held() {
-        let mut session = crate::session::Session::new(
-            &lc_world::sky::hyg::HygProvider::load(
-                "../../assets/catalogs/hygdata_v42_dist_sort.csv",
-            )
-            .expect("the catalogue"),
-            64,
-        );
-        session.sync_system();
-        assert!(session.system.is_some(), "the ship starts inside the solar system");
-
-        let course =
-            Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
-        let label = session.set_course(&course).expect("a course to Earth");
-        assert_eq!(label, "orbit of Earth");
-        assert!(session.cruise.is_some(), "and a crossing to fly it");
-
-        // Fly. A tenth of a real second a step, which at the design rate is fifteen minutes.
-        let mut steps = 0;
-        while session.cruise.is_some() {
-            session.advance(0.1);
-            session.sync_system();
-            steps += 1;
-            assert!(steps < 10_000, "the crossing never ended");
-        }
-
-        // What `hold_station` does, without an engine to do it in.
-        let hold = |session: &mut crate::session::Session| {
-            let system = session.system.as_ref().expect("still in the system");
-            let at = session.station.as_ref().expect("a station").place(system).expect("a place");
-            session.place_at(at);
-        };
-        hold(&mut session);
-        let altitude = |session: &crate::session::Session| {
-            let earth = session.system.as_ref().unwrap().body_position_ly("Earth").unwrap();
-            session.position_ly.distance(earth) * M_PER_LY / 6.371e6
-        };
-        assert!((altitude(&session) - 3.0).abs() < 0.05, "arrived at {}", altitude(&session));
-
-        // And an hour later, with Earth thirty thousand kilometres further round its year.
-        for _ in 0..40 {
-            session.advance(0.1);
-            session.sync_system();
-            hold(&mut session);
-        }
-        assert!((altitude(&session) - 3.0).abs() < 0.05, "drifted to {}", altitude(&session));
     }
 
     /// The list a player reads: outward from the star, with each planet's moons behind it.
@@ -1041,6 +989,7 @@ mod tests {
             }
         }
     }
+
 
     /// The basis has to be orthonormal whatever it is handed, including a degenerate pole.    /// The basis has to be orthonormal whatever it is handed, including a degenerate pole.
     #[test]

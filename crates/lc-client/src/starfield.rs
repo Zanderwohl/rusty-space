@@ -169,13 +169,8 @@ pub const LOCAL: PointStyle = PointStyle {
     corona_gain: 1.45,
 };
 
-/// Inside this of a star, the ship is in its system and the star is drawn as an object rather
-/// than as a point of the background.
-///
-/// An Oort cloud reaches about a hundred thousand astronomical units, which is 1.6 light-years,
-/// and 03-world-model.md already makes that shell the partition boundary. Being inside it is
-/// the same statement as being in the system.
-pub const LOCAL_SHELL_LY: f64 = 1.6;
+/// Where the local shell is, re-exported so the drawing code reads the same as the world code.
+pub use lc_world::system::LOCAL_SHELL_LY;
 
 /// Radians per pixel, vertically, for a perspective camera.
 pub fn radians_per_pixel(fov_y: f32, viewport_height: f32) -> f32 {

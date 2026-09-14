@@ -198,9 +198,9 @@ mod tests {
 
     fn sol() -> LocalSystem {
         let provider =
-            lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
+            crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
                 .expect("the catalogue");
-        let sun = lc_world::sky::StarProvider::stars(&provider)
+        let sun = crate::sky::StarProvider::stars(&provider)
             .iter()
             .find(|s| s.name.as_deref() == Some("Sol"))
             .expect("the Sun")
@@ -379,48 +379,6 @@ mod tests {
     fn beta_is_a_fraction_of_light() {
         assert!((beta_of(DVec3::X * C_M_S).x - 1.0).abs() < 1e-12);
         assert!(beta_of(DVec3::X * 3.0e4).length() < 1.0e-3, "orbital speeds are nothing");
-    }
-
-/// The whole of it through the session: fly a course, cut the engine partway, and end up
-    /// on a real orbit that is then held without thrust.
-    #[test]
-    fn cancelling_a_crossing_leaves_the_ship_on_a_conic() {
-        let provider =
-            lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv");
-        let Ok(provider) = provider else { return };
-        let mut session = crate::session::Session::new(&provider, 64);
-        session.sync_system();
-        let course = Course::Orbit {
-            body: "Earth".into(),
-            altitude_radii: 2.0,
-            plane: Plane::Equatorial,
-        };
-        session.set_course(&course).expect("a course");
-
-        // Partway: far enough to be moving, not so far as to have arrived.
-        for _ in 0..20 {
-            session.advance(0.05);
-        }
-        assert!(session.cruise.is_some(), "still under way");
-        let moving = session.velocity_m_s();
-        assert!(moving.length() > 1.0e3, "only {} m/s", moving.length());
-
-        let coast = session.cancel().expect("an arc");
-        assert!(session.cruise.is_none() && session.station.is_none());
-        eprintln!(
-            "cut at {:.0} km/s -> {} (e {:.3})",
-            moving.length() / 1.0e3,
-            crate::hud::arc(&coast),
-            coast.elements.eccentricity,
-        );
-
-        // And it keeps going, ballistically, without any of the three modes fighting.
-        let before = session.position_ly;
-        for _ in 0..20 {
-            session.advance(0.05);
-        }
-        assert!(session.position_ly != before, "a coasting ship is not parked");
-        assert!(session.coast.is_some(), "and it is still on an arc");
     }
 
     /// An astronomical unit is what it is; this is only here so the constant is used.
