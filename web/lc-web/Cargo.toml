@@ -26,6 +26,16 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 rss = "2"
+# Runtime-checked queries, not the `query!` macros.
+#
+# The plan said compile-time checking with a committed `.sqlx/`. That needs `cargo sqlx
+# prepare` against a live database whenever a query changes, and a stale `.sqlx` fails the
+# Docker build confusingly. For six queries over two tables that is a poor trade: the checking
+# buys little and the hermetic build is worth a lot. Revisit if the schema grows.
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "chrono",
+] }
+chrono = { version = "0.4", features = ["serde"] }
 notify = { version = "8", optional = true }
 
 [features]

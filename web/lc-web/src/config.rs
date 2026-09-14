@@ -34,6 +34,10 @@ pub struct Config {
     /// database cannot be reached. Today there is no database, so it is the only answer, and
     /// that is the same code path rather than a temporary one.
     pub fallback_build_id: Option<String>,
+    /// Absent means degraded mode, which is a supported state and not an error.
+    pub database_url: Option<String>,
+    /// Shared secret for the internal endpoints. Absent means they are all closed.
+    pub release_token: Option<String>,
 }
 
 impl Config {
@@ -60,6 +64,8 @@ impl Config {
                 .trim_end_matches('/')
                 .to_owned(),
             fallback_build_id: var("FALLBACK_BUILD_ID"),
+            database_url: var("DATABASE_URL"),
+            release_token: var("RELEASE_TOKEN"),
         })
     }
 }

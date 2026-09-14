@@ -8,6 +8,8 @@ mod assets;
 mod config;
 mod content;
 mod feed;
+mod internal;
+mod releases;
 mod views;
 
 use std::time::Duration;
@@ -17,8 +19,8 @@ use std::sync::{Arc, RwLock};
 use axum::Router;
 use axum::extract::FromRef;
 use axum::http::{HeaderName, HeaderValue, StatusCode};
-use axum::response::IntoResponse;
-use axum::routing::get;
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
 use tower_http::compression::CompressionLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::timeout::TimeoutLayer;
@@ -42,8 +44,16 @@ pub struct AppState {
     /// Where game builds live. The site knows this and a build id, and nothing else about
     /// the game.
     pub cdn_base: Arc<str>,
-    /// Which build `/play` launches, if any.
+    /// Which build `/play` launches when the database cannot answer.
     pub build_id: Option<Arc<str>>,
+    /// Absent when no `DATABASE_URL` was given, or the pool could not be built. Every use is
+    /// optional by construction: the site serves without it.
+    pub pool: Option<sqlx::PgPool>,
+    /// Whether a database was asked for. A site deliberately running without one is healthy;
+    /// a site that was given a `DATABASE_URL` and could not use it is not, and `/readyz` has
+    /// to tell those apart or it reports the second as fine.
+    pub db_expected: bool,
+    pub release_token: Option<Arc<str>>,
 }
 
 impl AppState {
@@ -95,12 +105,46 @@ async fn main() -> anyhow::Result<()> {
     // Drafts are loaded outside production and not loaded at all inside it. Excluding them at
     // load time rather than at render time means no handler can leak one by forgetting.
     let content = Content::load(&config.content_dir, !config.env.is_production())?;
+    // A database that will not connect is a degraded site, not a dead one. The blog is on
+    // disk and `/play` has a fallback, so this is logged and carried on from.
+    let pool = match config.database_url.as_deref() {
+        Some(url) => match sqlx::postgres::PgPoolOptions::new()
+            .max_connections(8)
+            .acquire_timeout(std::time::Duration::from_secs(5))
+            .connect(url)
+            .await
+        {
+            Ok(pool) => {
+                // sqlx takes a PostgreSQL advisory lock, so this stays correct with more than
+                // one replica starting at once.
+                if let Err(e) = sqlx::migrate!("./migrations").run(&pool).await {
+                    tracing::error!(error = %e, "migrations failed; continuing without a database");
+                    None
+                } else {
+                    tracing::info!("database ready");
+                    Some(pool)
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "no database; release management is unavailable");
+                None
+            }
+        },
+        None => {
+            tracing::info!("no DATABASE_URL; serving from FALLBACK_BUILD_ID alone");
+            None
+        }
+    };
+
     let state = AppState {
         assets: assets.clone(),
         content: Arc::new(RwLock::new(Arc::new(content))),
         base_url: config.base_url.clone().into(),
         cdn_base: config.cdn_base.clone().into(),
         build_id: config.fallback_build_id.clone().map(Into::into),
+        pool: pool.clone(),
+        db_expected: config.database_url.is_some(),
+        release_token: config.release_token.clone().map(Into::into),
     };
 
     // Spawned before the router takes ownership of the state. Both hold the same Arc, so a
@@ -123,6 +167,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/robots.txt", get(feed::robots))
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .route("/internal/releases", get(internal::list))
+        .route("/internal/release", post(internal::register))
+        .route("/internal/channel/{channel}", post(internal::promote))
+        .route("/internal/release/{build_id}/yank", post(internal::yank))
         .route("/v/{build}/{*path}", get(assets::serve))
         .fallback(not_found)
         .with_state(state)
@@ -150,10 +198,26 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
-/// Readiness. Nothing to check yet — the database arrives in W4, and the site is designed to
-/// serve without it even then.
-async fn readyz() -> &'static str {
-    "ready"
+/// Readiness.
+///
+/// Reports ready when the database is absent by configuration, and not ready only when one was
+/// configured and has gone away — so a site deliberately running without one is not flagged as
+/// broken, and a site that has lost its own is.
+async fn readyz(axum::extract::State(state): axum::extract::State<AppState>) -> Response {
+    let Some(pool) = &state.pool else {
+        return if state.db_expected {
+            (StatusCode::SERVICE_UNAVAILABLE, "database configured but unavailable").into_response()
+        } else {
+            "ready (no database configured)".into_response()
+        };
+    };
+    match sqlx::query("select 1").execute(pool).await {
+        Ok(_) => "ready".into_response(),
+        Err(e) => {
+            tracing::warn!(error = %e, "readiness probe failed");
+            (StatusCode::SERVICE_UNAVAILABLE, "database unreachable").into_response()
+        }
+    }
 }
 
 pub async fn not_found() -> impl IntoResponse {
