@@ -175,6 +175,11 @@ comes out at -2.72 against an observed -2.70.
 The phase term is not optional. Venus at a tenth of an astronomical unit is a razor crescent, and
 a full-phase calculation puts it three magnitudes too bright.
 
+A lit body is drawn at very nearly the background's size, and that is the point. A planet looks
+like a star — it is why they were called wandering ones — and what distinguishes it is that it
+moves, not that it is bigger. Drawn larger, the quad stops reading as a point source and starts
+reading as a disc with a square behind it.
+
 The body's own thermal emission goes in the same slot a swarm's does, because it is the same
 physics: it absorbs starlight and re-radiates at the temperature its orbit sets. So a planet is
 warm in the thermal preset without any separate machinery.
@@ -203,7 +208,7 @@ arrived at with `starfield` and `local_starfield`, and it is right for the same 
 | | background | local star | lit bodies |
 |---|---|---|---|
 | what it is | a dome at infinity | an object at a distance | objects in orbit |
-| size | from brightness, 1 to 3 pixels | the angle it subtends, floored at 4 pixels | from reflected flux, 1.6 to 9 pixels |
+| size | from brightness, 1 to 3 pixels | the angle it subtends, floored at 4 pixels | from reflected flux, 1 to 3.6 pixels |
 | glare | slight | allowed to fill the screen | slight |
 | corona | none | yes | none |
 | rebuilt | when the ship crosses a shell | likewise | every frame, because they move |

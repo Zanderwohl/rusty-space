@@ -124,15 +124,20 @@ pub const DISTANT: PointStyle = PointStyle {
     corona_gain: 1.45,
 };
 
-/// Lit bodies: planets, moons, anything reflecting. No corona, and small.
+/// Lit bodies: planets, moons, anything reflecting.
+///
+/// Very nearly the background's style, and that is the point. A planet looks like a star —
+/// that is why they were called wandering ones — and what distinguishes it is that it moves,
+/// not that it is bigger. Drawn any larger the quad stops being a point source and starts
+/// being a visible disc with a square behind it.
 pub const BODIES: PointStyle = PointStyle {
-    min_px: 1.6,
-    max_px: 9.0,
-    glow_radius_gain: 0.2,
-    overflow_gain: 0.2,
+    min_px: 1.0,
+    max_px: 3.6,
+    glow_radius_gain: 0.12,
+    overflow_gain: 0.25,
     brightness: 1.2,
-    halo_gain: 0.3,
-    halo_falloff: 1.6,
+    halo_gain: 0.25,
+    halo_falloff: 1.9,
     corona_strength: 0.0,
     corona_frequency: 11.0,
     corona_reach_min: 0.2,
@@ -908,5 +913,14 @@ mod tests {
     fn only_a_local_star_gets_a_corona() {
         assert_eq!(DISTANT.corona_strength, 0.0);
         assert!(LOCAL.corona_strength > 0.5);
+    }
+
+    /// A planet is a point source like any other. Drawn larger than the background's brightest
+    /// star it stops reading as a point and starts reading as a disc on a quad.
+    #[test]
+    fn a_lit_body_is_drawn_no_larger_than_a_bright_star() {
+        assert!(BODIES.max_px <= DISTANT.max_px * 1.5, "{} against {}", BODIES.max_px, DISTANT.max_px);
+        assert!(BODIES.min_px >= 1.0, "still at least a pixel");
+        assert_eq!(BODIES.corona_strength, 0.0);
     }
 }
