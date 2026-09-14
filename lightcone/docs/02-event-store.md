@@ -225,3 +225,23 @@ Still open:
 - Whether the source BVH lives in Postgres at all, or is rebuilt in server memory at start
   with Postgres holding only the durable positions. Under discussion; not blocking, because
   the durable positions are needed either way.
+
+## Building it
+
+`lc-store` applies its own schema. The SQL is compiled into the binary rather than read from
+disk, so a server carries the schema it expects and a test needs no working directory. Each step
+runs once, inside a transaction, and is recorded in `lc_schema_steps`.
+
+Migration takes a **session advisory lock** first. Without it two processes starting together
+both find the step table missing, both create it, and one fails on a duplicate key in `pg_type`.
+That is what two servers coming up at once looks like — and what three tests running in parallel
+found before any server existed.
+
+`lc_interval2` multiplies rather than raising to a power. `numeric ^ 2` is exact, but it goes
+through `numeric_power`, which picks a display scale: a separation of one microsecond comes back
+as `-1.0000000000000000`. Two scale-zero numerics multiplied are scale zero, so the result reads
+as the integer it is, and it is the cheaper of the two besides.
+
+A developer needs `createdb lc_store` and nothing else; `LC_STORE_URL` points elsewhere. Every
+test that needs the database **skips** when it cannot reach one, because the suite has to pass on
+a machine without Postgres and a test that cannot run is not a test that failed.
