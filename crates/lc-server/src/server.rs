@@ -10,6 +10,7 @@ use lc_proto::{
 use lc_spacetime::Worldline;
 use lc_store::id::Minter;
 
+use crate::journal::{Journal, JournalError, PREPARE_AHEAD_US};
 use crate::transport::Transport;
 use crate::world::{Event, Path, Scheduled, Ship, schedule};
 
@@ -36,27 +37,28 @@ pub struct Connected {
     pub cursor_t: i64,
 }
 
-pub struct Server {
+pub struct Server<J: Journal> {
     now_t: i64,
     ships: Vec<Ship>,
     clients: HashMap<ClientId, Connected>,
-    events: Vec<Event>,
-    deliveries: Vec<Scheduled>,
+    journal: J,
     minter: Minter,
     next_client: u64,
+    /// Written by this tick, and handed to the journal at the end of it.
+    pending: Vec<Event>,
 }
 
-impl Server {
+impl<J: Journal> Server<J> {
     /// A world at coordinate time `start_t`, with a shard identifier for its event ids.
-    pub fn new(start_t: i64, shard: u64) -> Self {
+    pub fn new(journal: J, start_t: i64, shard: u64) -> Self {
         Self {
             now_t: start_t,
             ships: Vec::new(),
             clients: HashMap::new(),
-            events: Vec::new(),
-            deliveries: Vec::new(),
+            journal,
             minter: Minter::new(shard).expect("a shard inside the identifier's field"),
             next_client: 1,
+            pending: Vec::new(),
         }
     }
 
@@ -64,12 +66,8 @@ impl Server {
         self.now_t
     }
 
-    pub fn events(&self) -> &[Event] {
-        &self.events
-    }
-
-    pub fn deliveries(&self) -> &[Scheduled] {
-        &self.deliveries
+    pub fn journal(&self) -> &J {
+        &self.journal
     }
 
     pub fn ship(&self, id: ShipId) -> Option<&Ship> {
@@ -96,18 +94,32 @@ impl Server {
     }
 
     /// One tick. The order is the whole of it.
-    pub fn tick(&mut self, wire: &mut impl Transport) {
+    pub async fn tick(&mut self, wire: &mut impl Transport) -> Result<(), JournalError> {
         // 1. Advance.
         self.now_t += TICK_US;
+        // Room to write into, kept ahead rather than made on demand. Cheap: the journal holds
+        // the range it has already made and this is a comparison until the window moves.
+        self.journal.prepare(self.now_t, self.now_t + PREPARE_AHEAD_US).await?;
         // 2. Drain intents, validate, write events, schedule deliveries.
+        let mut events = Vec::new();
+        let mut deliveries = Vec::new();
         for (from, message) in wire.poll() {
-            self.handle(from, message, wire);
+            self.handle(from, message, wire, &mut events, &mut deliveries);
         }
+        self.journal.write(&events, &deliveries).await?;
+        self.pending = events;
         // 3 and 4. Everything that has arrived since the last tick, through the gate.
-        self.flush(wire);
+        self.flush(wire).await
     }
 
-    fn handle(&mut self, from: ClientId, message: Inbound, wire: &mut impl Transport) {
+    fn handle(
+        &mut self,
+        from: ClientId,
+        message: Inbound,
+        wire: &mut impl Transport,
+        events: &mut Vec<Event>,
+        deliveries: &mut Vec<Scheduled>,
+    ) {
         match message {
             Inbound::Hello { protocol } => {
                 if protocol != PROTOCOL_VERSION {
@@ -124,7 +136,7 @@ impl Server {
                 }
             }
             Inbound::Act(intent) => {
-                if let Err(reason) = self.act(from, intent) {
+                if let Err(reason) = self.act(from, intent, events, deliveries) {
                     wire.send(from, Outbound::Refused { ship_id: intent.ship_id, reason });
                 }
             }
@@ -139,7 +151,13 @@ impl Server {
     }
 
     /// Validate an intent, and if it stands, make it an event.
-    fn act(&mut self, from: ClientId, intent: Intent) -> Result<(), Refusal> {
+    fn act(
+        &mut self,
+        from: ClientId,
+        intent: Intent,
+        events: &mut Vec<Event>,
+        deliveries: &mut Vec<Scheduled>,
+    ) -> Result<(), Refusal> {
         let state = self.clients.get(&from).ok_or(Refusal::NotYours)?;
         if state.ship != intent.ship_id {
             return Err(Refusal::NotYours);
@@ -181,10 +199,10 @@ impl Server {
         let event = Event { id, source, t: at, at: at_position, kind, power_w, payload };
         for observer in &self.ships {
             if let Some(scheduled) = schedule(&event, observer) {
-                self.deliveries.push(scheduled);
+                deliveries.push(scheduled);
             }
         }
-        self.events.push(event);
+        events.push(event);
         Ok(())
     }
 
@@ -193,24 +211,22 @@ impl Server {
     /// Every sighting here goes through [`Cleared::clear`], which is the only constructor of
     /// the only type [`Outbound::Sightings`] can hold. Adding a second path out would mean
     /// adding a second way to build a `Cleared`, and there is not one.
-    fn flush(&mut self, wire: &mut impl Transport) {
+    async fn flush(&mut self, wire: &mut impl Transport) -> Result<(), JournalError> {
         let now = self.now_t;
-        for (id, state) in self.clients.iter_mut() {
-            let Some(ship) = self.ships.iter().find(|s| s.id == state.ship) else { continue };
+        // Cloned out first: the journal read borrows `self`, and the state update writes it.
+        let connections: Vec<(ClientId, Connected)> =
+            self.clients.iter().map(|(id, state)| (*id, state.clone())).collect();
+
+        for (id, state) in connections {
+            let Some(ship) = self.ships.iter().find(|s| s.id == state.ship).cloned() else {
+                continue;
+            };
+            // The proven read: one range scan over `(observer_id, arrive_t)`, already ordered.
+            let due = self.journal.due(ship.id, state.cursor_t, now).await?;
+
             let mut cleared = Vec::new();
             let mut latest = state.last_reception_t;
-            for scheduled in &self.deliveries {
-                if scheduled.observer != ship.id {
-                    continue;
-                }
-                // The window is half-open: a tick asks for what arrived since the last one, and
-                // an inclusive lower bound would deliver the boundary twice.
-                if scheduled.arrive_t <= state.cursor_t || scheduled.arrive_t > now {
-                    continue;
-                }
-                let Some(event) = self.events.iter().find(|e| e.id == scheduled.event) else {
-                    continue;
-                };
+            for (scheduled, event) in due {
                 let direction = (event.at - ship.path.position_at(scheduled.arrive_t as f64))
                     .normalize_or_zero();
                 let sighting = Sighting {
@@ -234,13 +250,15 @@ impl Server {
                     Err(Withheld::StillInFlight | Withheld::BelowNoiseFloor) => {}
                 }
             }
-            state.cursor_t = now;
-            state.last_reception_t = latest;
+            if let Some(mine) = self.clients.get_mut(&id) {
+                mine.cursor_t = now;
+                mine.last_reception_t = latest;
+            }
             if !cleared.is_empty() {
-                cleared.sort_by_key(|c| c.get().arrive_t);
-                wire.send(*id, Outbound::Sightings(cleared));
+                wire.send(id, Outbound::Sightings(cleared));
             }
         }
+        Ok(())
     }
 }
 
@@ -254,7 +272,8 @@ pub const BURN_POWER_W: f64 = 1.0e12;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transport::Loopback;
+    use crate::journal::Memory;
+use crate::transport::Loopback;
 
     /// Two light-hours, in light-microseconds. Far enough that the delay is many ticks.
     const TWO_LIGHT_HOURS: f64 = 7_200.0 * 1_000_000.0;
@@ -275,9 +294,9 @@ mod tests {
     /// The negative half is the one that matters: it is asserted on every tick from the act
     /// until the light arrives, not merely at the end. A gate that released everything one tick
     /// early would pass a test that only looked at the end.
-    #[test]
-    fn one_client_acts_and_the_other_learns_at_light_delay_and_not_before() {
-        let mut server = Server::new(0, 1);
+    #[tokio::test]
+    async fn one_client_acts_and_the_other_learns_at_light_delay_and_not_before() {
+        let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let actor = server.admit(ShipId(1), Path::still(DVec3::ZERO), 0.0);
         let watcher = server
@@ -288,9 +307,9 @@ mod tests {
             order: Order::Transmit { power_w: 1.0e20 },
             issued_at_client_t: 0,
         }));
-        server.tick(&mut wire);
+        server.tick(&mut wire).await.unwrap();
 
-        let emitted = server.events()[0].t;
+        let emitted = server.journal().events[0].t;
         let arrives = emitted + TWO_LIGHT_HOURS as i64;
         assert!(arrives > server.now_t() + TICK_US * 8, "the delay is not worth testing");
 
@@ -300,7 +319,7 @@ mod tests {
         let mut told_at = None;
         for _ in 0..2_000 {
             let before = server.now_t();
-            server.tick(&mut wire);
+            server.tick(&mut wire).await.unwrap();
             let seen = wire.take(watcher);
             let list = sightings(&seen);
             if list.is_empty() {
@@ -329,15 +348,15 @@ mod tests {
 
         // And it is said once, not on every tick after.
         for _ in 0..5 {
-            server.tick(&mut wire);
+            server.tick(&mut wire).await.unwrap();
             assert!(sightings(&wire.take(watcher)).is_empty(), "the same sighting came twice");
         }
     }
 
     /// A ship may not act for a ship that is not its own, and may not be told that it tried.
-    #[test]
-    fn a_client_cannot_act_for_a_ship_it_does_not_own() {
-        let mut server = Server::new(0, 1);
+    #[tokio::test]
+    async fn a_client_cannot_act_for_a_ship_it_does_not_own() {
+        let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let first = server.admit(ShipId(1), Path::still(DVec3::ZERO), 0.0);
         let _second = server.admit(ShipId(2), Path::still(DVec3::ZERO), 0.0);
@@ -347,8 +366,8 @@ mod tests {
             order: Order::Transmit { power_w: 1.0 },
             issued_at_client_t: 0,
         }));
-        server.tick(&mut wire);
-        assert!(server.events().is_empty(), "an event was written for someone else's ship");
+        server.tick(&mut wire).await.unwrap();
+        assert!(server.journal().events.is_empty(), "an event was written for someone else's ship");
         assert!(matches!(
             wire.take(first).as_slice(),
             [Outbound::Refused { reason: Refusal::NotYours, .. }]
@@ -358,9 +377,9 @@ mod tests {
     /// The clamp. An intent stamped earlier than the last thing the client can prove it
     /// received is a claim to have acted on information it did not have; one stamped later than
     /// now is a claim about the future.
-    #[test]
-    fn an_intents_timestamp_is_clamped_at_both_ends() {
-        let mut server = Server::new(0, 1);
+    #[tokio::test]
+    async fn an_intents_timestamp_is_clamped_at_both_ends() {
+        let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = server.admit(ShipId(1), Path::still(DVec3::ZERO), 0.0);
 
@@ -370,13 +389,13 @@ mod tests {
             order: Order::Transmit { power_w: 1.0 },
             issued_at_client_t: i64::MAX / 4,
         }));
-        server.tick(&mut wire);
-        assert_eq!(server.events()[0].t, server.now_t(), "an intent was stamped in the future");
+        server.tick(&mut wire).await.unwrap();
+        assert_eq!(server.journal().events[0].t, server.now_t(), "an intent was stamped in the future");
         let _ = wire.take(client);
 
         // Its own transmission is received at once, so the floor is now that arrival.
-        server.tick(&mut wire);
-        let floor = server.events()[0].t;
+        server.tick(&mut wire).await.unwrap();
+        let floor = server.journal().events[0].t;
 
         // The past: clamped up to what it can prove it knew.
         wire.client_says(client, Inbound::Act(Intent {
@@ -384,8 +403,8 @@ mod tests {
             order: Order::Transmit { power_w: 1.0 },
             issued_at_client_t: 0,
         }));
-        server.tick(&mut wire);
-        let second = server.events().last().unwrap();
+        server.tick(&mut wire).await.unwrap();
+        let second = server.journal().events.last().unwrap();
         assert!(
             second.t >= floor,
             "stamped at {} but the client had already received something at {floor}",
@@ -395,9 +414,9 @@ mod tests {
 
     /// An order the world cannot carry out is refused rather than clamped into something it
     /// can. There is no nearest legal burn to a superluminal one.
-    #[test]
-    fn an_impossible_order_is_refused() {
-        let mut server = Server::new(0, 1);
+    #[tokio::test]
+    async fn an_impossible_order_is_refused() {
+        let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = server.admit(ShipId(1), Path::still(DVec3::ZERO), 0.0);
 
@@ -413,8 +432,8 @@ mod tests {
                 order,
                 issued_at_client_t: 0,
             }));
-            server.tick(&mut wire);
-            assert!(server.events().is_empty(), "{order:?} became an event");
+            server.tick(&mut wire).await.unwrap();
+            assert!(server.journal().events.is_empty(), "{order:?} became an event");
             assert!(
                 matches!(
                     wire.take(client).as_slice(),
@@ -429,16 +448,16 @@ mod tests {
             order: Order::Burn { beta: [0.99, 0.0, 0.0] },
             issued_at_client_t: 0,
         }));
-        server.tick(&mut wire);
-        assert_eq!(server.events().len(), 1);
+        server.tick(&mut wire).await.unwrap();
+        assert_eq!(server.journal().events.len(), 1);
         assert!(matches!(server.ship(ShipId(1)).unwrap().path, Path::Coasting(_)));
     }
 
     /// Arrival is not detection. A signal that reaches a receiver below its noise floor is not
     /// sent, and the client cannot tell that from nothing having happened.
-    #[test]
-    fn a_signal_under_the_noise_floor_arrives_and_is_not_sent() {
-        let mut server = Server::new(0, 1);
+    #[tokio::test]
+    async fn a_signal_under_the_noise_floor_arrives_and_is_not_sent() {
+        let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let actor = server.admit(ShipId(1), Path::still(DVec3::ZERO), 0.0);
         let deaf = server.admit(
@@ -452,16 +471,16 @@ mod tests {
             order: Order::Transmit { power_w: 1.0 },
             issued_at_client_t: 0,
         }));
-        server.tick(&mut wire);
+        server.tick(&mut wire).await.unwrap();
         let _ = wire.take(actor);
 
         // Well past the arrival, and still nothing.
         for _ in 0..4 {
-            server.tick(&mut wire);
+            server.tick(&mut wire).await.unwrap();
         }
         assert!(server.now_t() > 1_000_000, "the test never reached the arrival");
         assert!(
-            server.deliveries().iter().any(|d| d.observer == ShipId(2)),
+            server.journal().deliveries.iter().any(|d| d.observer == ShipId(2)),
             "it was never even scheduled, so the floor is not what stopped it",
         );
         assert!(sightings(&wire.take(deaf)).is_empty(), "a signal under the floor was sent");
@@ -469,9 +488,9 @@ mod tests {
 
     /// Catch-up. A client that was away winds its cursor back and is told everything again,
     /// still subject to the same gate.
-    #[test]
-    fn resuming_replays_what_was_missed_and_nothing_more() {
-        let mut server = Server::new(0, 1);
+    #[tokio::test]
+    async fn resuming_replays_what_was_missed_and_nothing_more() {
+        let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let actor = server.admit(ShipId(1), Path::still(DVec3::ZERO), 0.0);
 
@@ -482,36 +501,36 @@ mod tests {
             // mean it. A reception at zero is one the client already has.
             issued_at_client_t: i64::MAX / 4,
         }));
-        server.tick(&mut wire);
+        server.tick(&mut wire).await.unwrap();
         let first = sightings(&wire.take(actor)).len();
         assert_eq!(first, 1);
 
         // Nothing new while it is away.
-        server.tick(&mut wire);
+        server.tick(&mut wire).await.unwrap();
         assert!(sightings(&wire.take(actor)).is_empty());
 
         wire.client_says(actor, Inbound::ResumeFrom { arrive_t: 0 });
-        server.tick(&mut wire);
+        server.tick(&mut wire).await.unwrap();
         assert_eq!(sightings(&wire.take(actor)).len(), 1, "the replay did not come back");
 
         // A resume past `now` cannot be used to ask for the future.
         wire.client_says(actor, Inbound::ResumeFrom { arrive_t: i64::MAX });
-        server.tick(&mut wire);
+        server.tick(&mut wire).await.unwrap();
         assert!(sightings(&wire.take(actor)).is_empty());
     }
 
-    #[test]
-    fn a_client_on_the_wrong_protocol_is_told_so_and_not_welcomed() {
-        let mut server = Server::new(0, 1);
+    #[tokio::test]
+    async fn a_client_on_the_wrong_protocol_is_told_so_and_not_welcomed() {
+        let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = server.admit(ShipId(1), Path::still(DVec3::ZERO), 0.0);
 
         wire.client_says(client, Inbound::Hello { protocol: PROTOCOL_VERSION + 1 });
-        server.tick(&mut wire);
+        server.tick(&mut wire).await.unwrap();
         assert!(matches!(wire.take(client).as_slice(), [Outbound::WrongProtocol { .. }]));
 
         wire.client_says(client, Inbound::Hello { protocol: PROTOCOL_VERSION });
-        server.tick(&mut wire);
+        server.tick(&mut wire).await.unwrap();
         assert!(matches!(wire.take(client).as_slice(), [Outbound::Welcome { .. }]));
     }
 

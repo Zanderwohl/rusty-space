@@ -11,3 +11,7 @@ lc-proto = { path = "../lc-proto" }
 lc-spacetime = { path = "../lc-spacetime" }
 lc-store = { path = "../lc-store" }
 glam = "0.30"
+tokio-postgres = "0.7"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

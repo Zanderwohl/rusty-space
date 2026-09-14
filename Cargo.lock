@@ -4269,6 +4269,8 @@ dependencies = [
  "lc-proto",
  "lc-spacetime",
  "lc-store",
+ "tokio",
+ "tokio-postgres",
 ]
 
 [[package]]

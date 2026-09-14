@@ -44,7 +44,13 @@ send(client, event) requires:
 
 Implemented as the `deliveries` table from [02-event-store.md](02-event-store.md): arrival
 times are computed when the event is written, so the tick-time check is a B-tree range scan
-on `(observer_id, arrive_t)`.
+on `(observer_id, arrive_t)`. The server reads it through exactly that scan, and a second
+server started against the same database delivers what the first one scheduled — the tick loop
+holds no events of its own.
+
+Storage sits behind a `Journal` trait with two implementations. The filter's own tests run
+against the in-memory one, because they are about causality and must not need a database to
+say anything; the Postgres one has its own, which skip when there is none.
 
 Make this one function, in one place, with tests that assert the negative case. Every other
 send path calls it. Do not allow a second code path to emit to a socket.
@@ -120,6 +126,11 @@ world state, only coarser event timestamps.
 Ships under thrust are the exception: their arcs are analytic within a burn, but a burn's
 *start* and *end* are events, and those must be placed at their exact coordinate time rather
 than snapped to a tick. Schedule them; do not round them.
+
+The tick also keeps the store's partitions made two spans ahead of itself. Doc 02 is explicit
+that a store creating them on demand would hide a stalled maintenance job until the disk filled
+— so the server does it on purpose, at a point where failing to is visible. The server *is* the
+job that pre-creates the window.
 
 ## Interest management
 

@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod journal;
 pub mod server;
 pub mod transport;
 pub mod world;
