@@ -6,11 +6,16 @@
 
 mod assets;
 mod config;
+mod content;
+mod feed;
 mod views;
 
 use std::time::Duration;
 
+use std::sync::{Arc, RwLock};
+
 use axum::Router;
+use axum::extract::FromRef;
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
@@ -21,6 +26,37 @@ use tower_http::trace::TraceLayer;
 
 use crate::assets::Assets;
 use crate::config::Config;
+use crate::content::Content;
+
+/// Everything a handler can reach. All of it is built at startup, which is what makes a
+/// request an index lookup and a template render.
+///
+/// The content is behind a lock only so the development watcher can replace it. A reader
+/// clones the `Arc` and drops the lock immediately, so a rebuild never blocks a render
+/// half-finished, and in production nothing ever takes the write side.
+#[derive(Clone)]
+pub struct AppState {
+    pub assets: Assets,
+    content: Arc<RwLock<Arc<Content>>>,
+    pub base_url: Arc<str>,
+}
+
+impl AppState {
+    pub fn content(&self) -> Arc<Content> {
+        Arc::clone(&self.content.read().expect("content lock poisoned"))
+    }
+
+    #[cfg(feature = "watch")]
+    fn replace_content(&self, next: Content) {
+        *self.content.write().expect("content lock poisoned") = Arc::new(next);
+    }
+}
+
+impl FromRef<AppState> for Assets {
+    fn from_ref(state: &AppState) -> Assets {
+        state.assets.clone()
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -36,27 +72,47 @@ async fn main() -> anyhow::Result<()> {
     // The stylesheet is compiled at boot, so a syntax error in it is a failed deploy rather
     // than a failed build. This flag lets CI move that leftward.
     if std::env::args().any(|a| a == "--check-styles") {
-        Assets::load(&config.static_dir)?;
-        println!("stylesheet ok");
+        Assets::load(&config.static_dir, true)?;
+        // Content is checked here too: a malformed post fails the boot, and the same argument
+        // applies -- that is a failed deploy where it could have been a failed build.
+        Content::load(&config.content_dir, true)?;
+        println!("stylesheet and content ok");
         return Ok(());
     }
 
     tracing::info!(build = assets::BUILD, env = ?config.env, "starting");
-    let assets = Assets::load(&config.static_dir)?;
+    let assets = Assets::load(&config.static_dir, config.env.is_production())?;
+    // Drafts are loaded outside production and not loaded at all inside it. Excluding them at
+    // load time rather than at render time means no handler can leak one by forgetting.
+    let content = Content::load(&config.content_dir, !config.env.is_production())?;
+    let state = AppState {
+        assets: assets.clone(),
+        content: Arc::new(RwLock::new(Arc::new(content))),
+        base_url: config.base_url.clone().into(),
+    };
 
+    // Spawned before the router takes ownership of the state. Both hold the same Arc, so a
+    // reload the watcher performs is visible to every handler.
     #[cfg(feature = "watch")]
     if !config.env.is_production() {
-        watch::spawn(config.static_dir.clone(), assets.clone());
+        watch::spawn(&config, assets.clone(), state.clone());
     }
 
     let app = Router::new()
         .route("/", get(views::home::page))
-        .route("/about", get(views::about::page))
+        .route("/about", get(views::page::about))
+        .route("/blog", get(views::blog::index))
+        .route("/blog/{slug}", get(views::blog::post))
+        .route("/blog/tag/{tag}", get(views::blog::tag))
+        .route("/feed.xml", get(feed::rss))
+        .route("/feed.json", get(feed::json))
+        .route("/sitemap.xml", get(feed::sitemap))
+        .route("/robots.txt", get(feed::robots))
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/v/{build}/{*path}", get(assets::serve))
         .fallback(not_found)
-        .with_state(assets)
+        .with_state(state)
         .layer(TraceLayer::new_for_http())
         .layer(CompressionLayer::new())
         .layer(TimeoutLayer::with_status_code(StatusCode::GATEWAY_TIMEOUT, Duration::from_secs(15)))
@@ -87,12 +143,11 @@ async fn readyz() -> &'static str {
     "ready"
 }
 
-async fn not_found() -> impl IntoResponse {
+pub async fn not_found() -> impl IntoResponse {
     (
         StatusCode::NOT_FOUND,
         views::shell(
-            "Not found",
-            "No page at that address.",
+            views::Head::new("Not found", "No page at that address."),
             maud::html! {
                 section class="stack" {
                     h1 { "No page here" }
@@ -116,40 +171,69 @@ async fn shutdown() {
 
 #[cfg(feature = "watch")]
 mod watch {
-    use std::path::PathBuf;
     use std::sync::mpsc;
     use std::time::Duration;
 
     use notify::{RecursiveMode, Watcher};
 
+    use crate::AppState;
     use crate::assets::Assets;
+    use crate::config::Config;
+    use crate::content::Content;
 
-    /// Recompiles the stylesheet when a `.scss` under `static/styles` changes.
+    /// Recompiles the stylesheet and reloads the content when either tree changes.
     ///
-    /// A failed recompile keeps the previous sheet: losing styling mid-session for a typo in
-    /// progress is worse than serving something one save out of date.
-    pub fn spawn(root: PathBuf, assets: Assets) {
+    /// A failure keeps what is already loaded: losing the whole site to a half-saved file is
+    /// worse than serving something one keystroke out of date.
+    pub fn spawn(config: &Config, assets: Assets, state: AppState) {
+        let styles = config.static_dir.join("styles");
+        let content_dir = config.content_dir.clone();
+        let drafts = !config.env.is_production();
         std::thread::spawn(move || {
             let (tx, rx) = mpsc::channel();
             let mut watcher = match notify::recommended_watcher(tx) {
                 Ok(w) => w,
-                Err(e) => return tracing::error!(error = %e, "no stylesheet watcher"),
+                Err(e) => return tracing::error!(error = %e, "no asset watcher"),
             };
-            let styles = root.join("styles");
-            if let Err(e) = watcher.watch(&styles, RecursiveMode::Recursive) {
-                return tracing::error!(error = %e, path = %styles.display(), "cannot watch");
+            for dir in [styles.as_path(), content_dir.as_path()] {
+                if let Err(e) = watcher.watch(dir, RecursiveMode::Recursive) {
+                    tracing::error!(error = %e, path = %dir.display(), "cannot watch");
+                }
             }
-            tracing::info!(path = %styles.display(), "watching stylesheets");
+            tracing::info!(
+                styles = %styles.display(),
+                content = %content_dir.display(),
+                "watching for changes"
+            );
+
             while let Ok(event) = rx.recv() {
                 let Ok(event) = event else { continue };
-                if !event.paths.iter().any(|p| p.extension().is_some_and(|e| e == "scss")) {
+                let touched =
+                    |ext: &str| event.paths.iter().any(|p| p.extension().is_some_and(|e| e == ext));
+                let (scss, md) = (touched("scss"), touched("md"));
+                if !scss && !md {
                     continue;
                 }
                 // Editors write a file in several steps; let the burst settle.
                 std::thread::sleep(Duration::from_millis(50));
                 while rx.recv_timeout(Duration::from_millis(50)).is_ok() {}
-                if let Err(e) = assets.recompile() {
-                    tracing::error!(error = %e, "stylesheet recompile failed; keeping previous");
+
+                if scss {
+                    match assets.recompile() {
+                        Ok(()) => tracing::info!("stylesheet reloaded"),
+                        Err(e) => {
+                            tracing::error!(error = %e, "stylesheet failed; keeping previous")
+                        }
+                    }
+                }
+                if md {
+                    match Content::load(&content_dir, drafts) {
+                        Ok(next) => {
+                            state.replace_content(next);
+                            tracing::info!("content reloaded");
+                        }
+                        Err(e) => tracing::error!(error = %e, "content failed; keeping previous"),
+                    }
                 }
             }
         });

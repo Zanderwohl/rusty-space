@@ -1,14 +1,13 @@
 use maud::{Markup, html};
 
-use super::shell;
+use super::{Head, shell};
 
 const DESCRIPTION: &str = "A real-time strategy sandbox across a volume of real stars, where \
                            information propagates at the speed of light and never faster.";
 
 pub async fn page() -> Markup {
     shell(
-        "Information travels at c",
-        DESCRIPTION,
+        Head::new("Information travels at c", DESCRIPTION),
         html! {
             section class="stack" {
                 h1 { "Everything you know is out of date." }
@@ -83,7 +82,7 @@ pub async fn page() -> Markup {
                     "devlog as that changes, and the browser build when there is one to run. "
                     "Until then the design documents are public and are the whole of it."
                 }
-                p { a class="cta" href=(super::REPO) { "Read the design documents" } }
+                p { a class="cta" href="/blog" { "Read the devlog" } }
             }
         },
     )

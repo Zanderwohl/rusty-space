@@ -1,34 +1,61 @@
 //! Every page is a document. The shell wraps a body in the chrome and nothing else does.
 
-pub mod about;
+pub mod blog;
 pub mod home;
+pub mod page;
 
-use maud::{DOCTYPE, Markup, html};
+use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 use crate::assets;
 
-/// The design documents are the only thing to read until there is a devlog.
+/// The design documents are the only thing to read until the devlog has more in it.
 pub const REPO: &str = "https://github.com/Zanderwohl/rusty-space/tree/master/lightcone";
 
-/// `title` is the page's own; the site name is appended here so no caller repeats it.
-pub fn shell(title: &str, description: &str, body: Markup) -> Markup {
+/// What goes in `<head>`, gathered in one place so no page half-fills it.
+pub struct Head<'a> {
+    pub title: &'a str,
+    pub description: &'a str,
+    /// Set for posts. Turns the card into an article and carries the date.
+    pub published: Option<String>,
+}
+
+impl<'a> Head<'a> {
+    pub fn new(title: &'a str, description: &'a str) -> Self {
+        Head { title, description, published: None }
+    }
+
+    pub fn article(mut self, published: String) -> Self {
+        self.published = Some(published);
+        self
+    }
+}
+
+pub fn shell(head: Head<'_>, body: Markup) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (title) " — Lightcone" }
-                meta name="description" content=(description);
-                meta property="og:title" content=(title);
-                meta property="og:description" content=(description);
-                meta property="og:type" content="website";
+                title { (head.title) " — Lightcone" }
+                meta name="description" content=(head.description);
+                meta property="og:site_name" content="Lightcone";
+                meta property="og:title" content=(head.title);
+                meta property="og:description" content=(head.description);
+                meta property="og:type" content=(if head.published.is_some() { "article" } else { "website" });
+                @if let Some(published) = &head.published {
+                    meta property="article:published_time" content=(published);
+                }
+                meta name="twitter:card" content="summary";
                 link rel="stylesheet" href=(assets::url(assets::STYLESHEET));
+                link rel="alternate" type="application/rss+xml" title="Lightcone devlog" href="/feed.xml";
+                link rel="alternate" type="application/feed+json" title="Lightcone devlog" href="/feed.json";
             }
             body {
                 header {
                     a class="wordmark" href="/" { "Lightcone" }
                     nav {
+                        a href="/blog" { "Devlog" }
                         a href="/about" { "About" }
                         a href=(REPO) { "Source" }
                     }
@@ -39,9 +66,19 @@ pub fn shell(title: &str, description: &str, body: Markup) -> Markup {
                         "A relativistic sandbox in a volume of real stars. "
                         "Nothing here is playable yet."
                     }
-                    p class="fine-print" { "Build " code { (assets::BUILD) } }
+                    p class="fine-print" {
+                        "Build " code { (assets::BUILD) } " · "
+                        a href="/feed.xml" { "RSS" } " · "
+                        a href="/feed.json" { "JSON feed" }
+                    }
                 }
             }
         }
     }
+}
+
+/// Rendered markdown. The only place raw HTML enters a page, and it comes from files in the
+/// image rather than from anything a request carries.
+pub fn prose(html: &str) -> Markup {
+    PreEscaped(html.to_owned())
 }

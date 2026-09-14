@@ -16,7 +16,10 @@
 // Sections of the prose column are separated more than paragraphs within one. Scoped to the
 // column deliberately: as a bare `.stack + .stack` it also fires between grid siblings, which
 // pushes the second column of a `.columns` down by a section gap.
-.page > .stack + .stack {
+//
+// Every child, not only `.stack` ones — a list of posts is a section of the page too, and
+// naming the primitive here would mean remembering to add each new one.
+.page > * + * {
   margin-block-start: var(--space-5);
 }
 

@@ -212,12 +212,15 @@ Frontmatter is a TOML block fenced by `+++`, parsed with `toml`:
 ```toml
 +++
 title   = "What thirty light-years does to a patch note"
-date    = 2026-03-14
-tags    = ["design", "relativity"]
 summary = "One paragraph for the feed and the OG card."
+tags    = ["design", "relativity"]
 draft   = false
 +++
 ```
+
+**The date is not in there.** It is in the filename, which is the only copy — two sources that
+can disagree is one too many, and the filename is the one that also sorts a directory listing.
+`updated` is front matter, because there is nowhere else for it to live.
 
 **Parsed once at startup, not per request.** Startup walks `content/`, renders each post to
 HTML, highlights code with syntect, and builds a `Vec<Post>` sorted by date descending plus a
@@ -231,6 +234,9 @@ Details that are cheap now and annoying later:
 - `draft = true` is excluded when `SITE_ENV=production` and listed at `/drafts` otherwise.
 - The slug comes from the filename with the date prefix stripped, so renaming a file breaks a
   URL. Startup asserts slugs are unique and fails loudly rather than serving whichever won.
+- **Posts write `/static/…` for an image and the renderer rewrites it** to the versioned URL.
+  A markdown file cannot know the build id, and it should not have to: the authored path is
+  stable and the immutable one is derived.
 - A dev-only file watcher re-runs the parse on change. Behind `cfg(debug_assertions)`; the
   production binary does not watch anything.
 - Post images go on the CDN, not in the image. A 3 MB screenshot in the container is 3 MB in
@@ -579,10 +585,38 @@ the dev file watcher.
 **Done when:** adding a file to `content/posts/` and redeploying publishes it; the feed
 validates; a post with three code blocks renders highlighted; duplicate slugs fail at startup
 rather than at request time; drafts are invisible in production and listed in staging; **the
-post body is styled entirely by element selectors** and the single-use-class scan over the
-whole site prints nothing.
+post body is styled entirely by element selectors**, and every entry the single-use-class scan
+prints has been looked at and is either shell furniture or a name with an obvious second
+caller.
 
-**Do not:** build an admin UI. The editor is a text editor and the CMS is git.
+That last clause was originally "the scan prints nothing", which was written before there was
+any markup and was wrong. A class that appears once in a template but on every page — the
+wordmark, the prose column — is exactly the case the scan is meant to raise and a human is
+meant to dismiss. A check that cannot be satisfied gets disabled.
+
+**Do not:** build an admin UI. The editor is a text editor and the CMS is git. No pagination
+and no htmx until a page is long enough to need them.
+
+**What it measured.** Eleven classes site-wide, four of them single-use and all four reviewed.
+The renderer emits none of them: a post body is `_base.scss` and nothing else, which is what
+the section above predicted and the reason to have predicted it.
+
+Syntax highlighting is **classes, not inline styles** — `ClassedHTMLGenerator` with a `syn-`
+prefix — so code changes colour with the rest of the page. An inline `style="color:…"` would
+have been the same in both themes and no rule could have overridden it.
+
+Three bugs worth keeping, because none of them look like what they are:
+
+| symptom | cause |
+|---|---|
+| tags always broke onto their own line, whatever the CSS said | a `ul` inside a `p`. Invalid HTML, so the parser closes the paragraph before the list. The fix is a `div`; no stylesheet could have fixed it |
+| the gap between a page's sections vanished on the blog index | `.post-list { margin: 0 }` ties `.page > * + *` on specificity and wins on source order. `_base.scss` already zeroes list margins, so the reset was redundant as well as harmful |
+| the figure was invisible in dark mode, then vanished entirely | an SVG loaded through `img` is its own document: `currentColor` resolves against *its* root, not the page, so it needs its own `prefers-color-scheme` block. Adding one with an angle bracket in the comment then broke it outright — SVG is XML, and a broken SVG shows as alt text with nothing in the console |
+
+**Caching had to become conditional.** Immutable assets plus a build id that only changes on
+commit means an edited stylesheet is invisible until the next commit — the versioning scheme
+working exactly as designed, and useless to edit against. Outside production the header is
+`no-store`.
 
 ## W3 — The browser build
 

@@ -11,8 +11,7 @@ pub enum Env {
 }
 
 impl Env {
-    #[cfg_attr(not(feature = "watch"), allow(dead_code))]
-    /// Drafts are listed and assets are watched only outside production.
+    /// Drafts are listed, assets are watched and caching is disabled only outside production.
     pub fn is_production(self) -> bool {
         self == Env::Production
     }
@@ -23,6 +22,10 @@ pub struct Config {
     pub bind: SocketAddr,
     pub env: Env,
     pub static_dir: PathBuf,
+    pub content_dir: PathBuf,
+    /// Absolute origin, for feeds and the sitemap. Those are the only places a URL has to be
+    /// absolute; every link in a page is relative and needs no configuration.
+    pub base_url: String,
 }
 
 impl Config {
@@ -39,6 +42,11 @@ impl Config {
             bind,
             env,
             static_dir: var("STATIC_DIR").unwrap_or_else(|| "static".into()).into(),
+            content_dir: var("CONTENT_DIR").unwrap_or_else(|| "content".into()).into(),
+            base_url: var("BASE_URL")
+                .unwrap_or_else(|| "https://lightcone.example".into())
+                .trim_end_matches('/')
+                .to_owned(),
         })
     }
 }

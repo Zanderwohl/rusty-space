@@ -26,6 +26,10 @@ pub const STYLESHEET: &str = "styles/application.css";
 const SCSS_ENTRY: &str = "styles/application.scss";
 
 const IMMUTABLE: &str = "public, max-age=31536000, immutable";
+/// Outside production the build id does not change when a file does, so an immutable header
+/// would cache an edit out of existence until the next commit. The watcher recompiles and
+/// this is what lets a reload see it.
+const NO_STORE: &str = "no-store";
 
 #[derive(Clone)]
 pub struct Assets {
@@ -36,17 +40,19 @@ pub struct Assets {
     files: ServeDir,
     #[cfg_attr(not(feature = "watch"), allow(dead_code))]
     root: PathBuf,
+    cache: &'static str,
 }
 
 impl Assets {
     /// Compiles the stylesheet. A failure here fails the boot: a site that came up without a
     /// stylesheet is an outage that returns 200, which is worse than an outage.
-    pub fn load(root: &Path) -> anyhow::Result<Self> {
+    pub fn load(root: &Path, immutable: bool) -> anyhow::Result<Self> {
         let css = compile(root)?;
         Ok(Assets {
             css: Arc::new(RwLock::new(css)),
             files: ServeDir::new(root).precompressed_br().precompressed_gzip(),
             root: root.to_path_buf(),
+            cache: if immutable { IMMUTABLE } else { NO_STORE },
         })
     }
 
@@ -87,7 +93,7 @@ pub async fn serve(State(assets): State<Assets>, request: Request) -> Response {
         return (
             [
                 (header::CONTENT_TYPE, HeaderValue::from_static("text/css; charset=utf-8")),
-                (header::CACHE_CONTROL, HeaderValue::from_static(IMMUTABLE)),
+                (header::CACHE_CONTROL, HeaderValue::from_static(assets.cache)),
             ],
             Body::from(css.to_string()),
         )
@@ -110,7 +116,9 @@ pub async fn serve(State(assets): State<Assets>, request: Request) -> Response {
         }
     };
     if response.status().is_success() {
-        response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static(IMMUTABLE));
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static(assets.cache));
     }
     response
 }
