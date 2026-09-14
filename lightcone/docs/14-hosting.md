@@ -460,6 +460,51 @@ megabytes per build, fifty builds retained, under 20 GB.
 Egress is the entire cost story of hosting a 10 MB game, so pick on egress. R2's S3-compatible
 API means the publish script is `aws s3 cp` either way and switching later is a config change.
 
+## The development CDN
+
+There is no cloud bucket yet and there will not be for a while, so delivery is rehearsed
+locally: a **Caddy container** on `rocinante:3101` serving a volume that builds are published
+into. `tools/dev-cdn/Caddyfile` is the real deliverable — it is the header policy, and it is
+what should be handed to R2 or Bunny when there is one.
+
+**Not a small web application.** The obvious move is a FastAPI app with a couple of routes
+matching the CDN's URL shape, and it is the wrong one: `/game/<build-id>/…` is a directory
+layout, so there is no request to route, and everything that actually breaks is a header —
+`application/wasm`, pre-compressed content served with the *original* content type, CORS,
+immutability. A hand-written server gets those wrong in the direction that hides the bug until
+production. A static server with an explicit header policy cannot.
+
+Fault injection — latency, partial responses, a 500 on the wasm — is the one thing a small app
+would do better, and it is worth adding when the loader's failure paths need exercising rather
+than now.
+
+`tools/publish-build.sh` is the seam. Today it is `docker cp` into a volume; the day there is a
+bucket it becomes `aws s3 cp --recursive` with the headers the Caddyfile already names, and
+nothing else moves. It refuses to publish over an existing build id, and refuses a `-dirty`
+one outright — a build that exists on one laptop is not something anyone can roll back to.
+
+### Two things that only show up over HTTP
+
+Both were found by running a real browser against it, and both change how the dev setup has to
+be used.
+
+**Chrome only advertises `Accept-Encoding: br` on a secure origin.** Against the plain-HTTP dev
+CDN a browser asks for `gzip, deflate` and nothing else — so with only `.br` files present it
+took the whole 26.6 MB uncompressed, in six requests that were all `200 OK`. Nothing looked
+wrong. Builds now carry `.gz` as well as `.br`, which brings the dev download to 9.4 MB and,
+more importantly, means the compression path is exercised somewhere other than production.
+
+**WebGPU needs a secure context, and so the page cannot be served over plain HTTP.** Loading
+the loader from `http://rocinante.local:3101/` shows the WebGPU refusal, correctly: `navigator.gpu`
+does not exist there. It works from `http://127.0.0.1:3200/` because localhost counts as
+secure. So the arrangement that works today is **shell on localhost, build on the CDN**, which
+is also the cross-origin case worth testing.
+
+This lands on W4: the site on `rocinante:3100` over plain HTTP **cannot run the game**, whatever
+`/play` does. An SSH tunnel to localhost is the cheap fix for development; a real domain with
+real TLS is the answer past that. Mixed content rules out the other pairing — an HTTPS page may
+not fetch an HTTP build — so the day the site gets TLS, the CDN needs it the same day.
+
 ---
 
 # The seam
@@ -554,7 +599,7 @@ Environment only; no config file, no secrets in the image.
 |---|---|---|
 | `BIND_ADDR` | `0.0.0.0:8080` | |
 | `DATABASE_URL` | | optional — absent means degraded mode, and that is a supported state |
-| `CDN_BASE` | `https://cdn.<domain>` | default when a release row does not carry its own |
+| `CDN_BASE` | `https://cdn.<domain>` | default when a release row does not carry its own. **Not yet implemented** — `/play` is what reads it, and that is W4; a field nothing reads is worse than a missing one |
 | `FALLBACK_BUILD_ID` | | what `/play` serves when the DB is unreachable |
 | `SITE_ENV` | `production` \| `staging` \| `dev` | gates drafts and the file watcher |
 | `RELEASE_TOKEN` | | shared secret for `/internal/release` |
@@ -747,3 +792,11 @@ provoked deliberately and shows its message.
    shared derivation is the point.
 6. **How much can `bevy`'s default features be trimmed?** The wasm is 94% of the download and
    nothing has been trimmed yet. Worth a measurement before it is worth an opinion.
+7. **How does development get a secure context?** An SSH tunnel works today and needs nothing.
+   Caddy's internal CA would work everywhere on the network at the cost of installing a root
+   certificate on each machine. A real domain settles it properly. Decide when someone other
+   than the author needs to open it.
+8. **Bevy retries a failed asset load without bound.** A wrong asset base produced over forty
+   thousand requests for one shader before anyone looked. In production that is a client
+   hammering whichever origin it was aimed at, so the base must come from a manifest and never
+   from anything a person types. Whether it also wants a cap is a question for `lc-client`.
