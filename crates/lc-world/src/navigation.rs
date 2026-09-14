@@ -38,6 +38,17 @@ pub enum LagrangePoint {
     L2,
 }
 
+impl LagrangePoint {
+    /// Which way along the parent-to-body direction the point lies: inward for L1, outward
+    /// for L2.
+    pub fn outward_sign(self) -> f64 {
+        match self {
+            LagrangePoint::L1 => -1.0,
+            LagrangePoint::L2 => 1.0,
+        }
+    }
+}
+
 /// Which way round a body an orbit runs.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Plane {
@@ -72,6 +83,9 @@ pub enum Waypoint {
     Fixed(DVec3),
     Orbit(Orbit),
     Lagrange { body: String, point: LagrangePoint },
+    /// A libration orbit *about* a collinear point, which is what a craft there actually
+    /// flies. See [`crate::libration`].
+    Libration(crate::libration::Libration),
 }
 
 /// What the interface asks for, before a system has been consulted about whether it exists.
@@ -86,6 +100,9 @@ pub enum Course {
     /// Circular orbit at an altitude given in radii above the surface.
     Orbit { body: String, altitude_radii: f64, plane: Plane },
     Lagrange { body: String, point: LagrangePoint },
+    /// A libration orbit about L1 or L2, rather than the point itself. What a real mission
+    /// flies, and somewhere you can see out from.
+    Hangout { body: String, point: LagrangePoint },
     /// Into the middle of a body's rings, in their own plane.
     Rings(String),
     /// Into a population's band, at the radius that carries its light.
@@ -153,6 +170,7 @@ impl Waypoint {
                 let (u, v) = basis(orbit.pole);
                 Some(centre + (u * theta.cos() + v * theta.sin()) * orbit.radius_m / M_PER_LY)
             }
+            Waypoint::Libration(libration) => libration.at(system, seconds),
             Waypoint::Lagrange { body, point } => {
                 let index = system.body_named(body)?;
                 let parent = system.sim().parent(index)?;
@@ -186,6 +204,7 @@ impl Waypoint {
                 Anchor::Body(name) => format!("orbit of {name}"),
             },
             Waypoint::Lagrange { body, point } => format!("{body} {point:?}"),
+            Waypoint::Libration(l) => format!("{} {:?} libration", l.body, l.point),
         }
     }
 
@@ -241,6 +260,7 @@ impl Waypoint {
             Waypoint::Fixed(_) => Some(system.star_position_ly()),
             Waypoint::Orbit(orbit) => Some(orbit.centre_of(system)?.0),
             Waypoint::Lagrange { body, .. } => system.body_position_ly(body),
+            Waypoint::Libration(l) => system.body_position_ly(&l.body),
         }
     }
 
@@ -249,6 +269,9 @@ impl Waypoint {
     /// On screen because the clock runs at eight thousand times real time by default, which
     /// turns a low orbit into a blur: the period is what tells a player which rung to pick.
     pub fn period_s(&self, system: &LocalSystem) -> Option<f64> {
+        if let Waypoint::Libration(libration) = self {
+            return Some(libration.period_s());
+        }
         let Waypoint::Orbit(orbit) = self else { return None };
         let (_, mu) = orbit.centre_of(system)?;
         (mu > 0.0 && orbit.radius_m > 0.0)
@@ -335,6 +358,9 @@ impl Course {
                 system.sim().parent(index)?;
                 Some(Waypoint::Lagrange { body: body.clone(), point: *point })
             }
+            Course::Hangout { body, point } => Some(Waypoint::Libration(
+                crate::libration::Libration::about(system, body, *point, system.time_s())?,
+            )),
             Course::Rings(body) => {
                 let index = system.body_named(body)?;
                 let rings = crate::rings::for_body(system.sim().name(index))?;
@@ -371,15 +397,16 @@ impl Course {
     pub fn target(&self) -> Option<Target> {
         match self {
             Course::To(_) | Course::LeaveSystem => None,
-            Course::Orbit { body, .. } | Course::Lagrange { body, .. } | Course::Rings(body) => {
-                Some(Target::Body(body.clone()))
-            }
+            Course::Orbit { body, .. }
+            | Course::Lagrange { body, .. }
+            | Course::Hangout { body, .. }
+            | Course::Rings(body) => Some(Target::Body(body.clone())),
             Course::Belt(index) => Some(Target::Band(*index)),
         }
     }
 
     /// Read a course from a development flag: `orbit:Earth`, `polar:Titan:high`,
-    /// `rings:Saturn`, `l2:Earth`, `belt:0`, `leave`.
+    /// `rings:Saturn`, `l2:Earth`, `hang2:Earth`, `belt:0`, `leave`.
     ///
     /// An orbit takes an optional altitude, named as [`ALTITUDES`] names it. Only `--station`
     /// uses this; it exists so a screenshot of a place can be asked for on a command line
@@ -392,6 +419,8 @@ impl Course {
             "leave" => Some(Course::LeaveSystem),
             "belt" => rest.parse().ok().map(Course::Belt),
             "rings" => Some(Course::Rings(rest.to_string())),
+            "hang1" => Some(Course::Hangout { body: rest.into(), point: LagrangePoint::L1 }),
+            "hang2" => Some(Course::Hangout { body: rest.into(), point: LagrangePoint::L2 }),
             "l1" => Some(Course::Lagrange { body: rest.into(), point: LagrangePoint::L1 }),
             "l2" => Some(Course::Lagrange { body: rest.into(), point: LagrangePoint::L2 }),
             "orbit" | "polar" => {
@@ -554,6 +583,11 @@ pub fn options_for(system: &LocalSystem, target: &Target) -> Vec<(String, Course
             [(LagrangePoint::L1, "L1 companion"), (LagrangePoint::L2, "L2 companion")]
         {
             out.push((what.to_string(), Course::Lagrange { body: name.clone(), point }));
+        }
+        for (point, what) in
+            [(LagrangePoint::L1, "L1 hangout"), (LagrangePoint::L2, "L2 hangout")]
+        {
+            out.push((what.to_string(), Course::Hangout { body: name.clone(), point }));
         }
     }
     if crate::rings::for_body(system.sim().name(index)).is_some() {

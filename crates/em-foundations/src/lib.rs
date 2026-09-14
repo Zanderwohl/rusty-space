@@ -33,6 +33,7 @@ pub mod time;
 
 pub mod common;
 pub mod mappings;
+pub mod lagrange;
 pub mod patched_conics;
 
 #[cfg(test)]
