@@ -5,12 +5,10 @@
 use std::path::Path;
 
 use em_foundations::reference_frame::equatorial;
-use em_spectra::{colour_index, stellar};
 use glam::DVec3;
 
-use super::{CatalogueStar, Component, Provenance, StarId, StarProvider};
-use crate::sky::metallicity;
-use crate::star::Star;
+use super::record::{StarRecord, assemble_all};
+use super::{CatalogueStar, StarProvider};
 
 const PARSEC_LY: f64 = 3.261_563_777;
 /// One parsec per year, in m/s. HYG's velocity unit.
@@ -46,6 +44,16 @@ pub struct HygProvider {
 
 impl HygProvider {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, HygError> {
+        let records = Self::read_records(path)?;
+        let (stars, skipped) = assemble_all(SOURCE, &records);
+        Ok(Self { stars, skipped })
+    }
+
+    /// The catalogue as records, before anything is derived from them.
+    ///
+    /// This is what the packer writes into a sky chunk, so the chunk and this importer are
+    /// the same data taking two routes to the same `assemble`.
+    pub fn read_records(path: impl AsRef<Path>) -> Result<Vec<StarRecord>, HygError> {
         let mut reader = csv::Reader::from_path(path).map_err(HygError::Csv)?;
         let headers = reader.headers().map_err(HygError::Csv)?.clone();
         let col = |name: &'static str| {
@@ -57,8 +65,7 @@ impl HygProvider {
         let (c_comp, c_primary) = (col("comp")?, col("comp_primary")?);
         let c_proper = col("proper")?;
 
-        let mut stars = Vec::with_capacity(120_000);
-        let mut skipped = 0usize;
+        let mut records = Vec::with_capacity(120_000);
         for record in reader.records() {
             let r = record.map_err(HygError::Csv)?;
             let num = |i: usize| r.get(i).and_then(|s| s.trim().parse::<f64>().ok());
@@ -66,77 +73,37 @@ impl HygProvider {
             let (Some(key), Some(dist), Some(ci), Some(lum)) =
                 (num(c_id), num(c_dist), num(c_ci), num(c_lum))
             else {
-                skipped += 1;
                 continue;
             };
             // Rows with no usable parallax carry a sentinel distance and a luminosity derived
-            // from it, which is meaningless. Zero is legitimate: it is the Sun.
-            if dist < 0.0 || dist >= UNKNOWN_DISTANCE_PC || lum <= 0.0 {
-                skipped += 1;
+            // from it, which is meaningless. Zero is legitimate: it is the Sun. This check is
+            // HYG's own and stays here; everything that applies to any catalogue is in
+            // `StarRecord::assemble`.
+            if dist < 0.0 || dist >= UNKNOWN_DISTANCE_PC {
                 continue;
             }
-            if !colour_index::bv_is_valid(ci) {
-                skipped += 1;
-                continue;
-            }
-            let teff = colour_index::teff_from_bv(ci);
-            let luminosity_w = lum * stellar::SOLAR_LUMINOSITY;
-            let radius = stellar::radius_from_luminosity(luminosity_w, teff);
-            if !(radius.is_finite() && radius > 0.0) {
-                skipped += 1;
-                continue;
-            }
-            let mass_solar = stellar::main_sequence_mass_solar(lum);
 
-            let equatorial_pc = DVec3::new(
-                num(c_x).unwrap_or(0.0),
-                num(c_y).unwrap_or(0.0),
-                num(c_z).unwrap_or(0.0),
-            );
+            let equatorial_pc =
+                DVec3::new(num(c_x).unwrap_or(0.0), num(c_y).unwrap_or(0.0), num(c_z).unwrap_or(0.0));
             let velocity_eq = DVec3::new(
                 num(c_vx).unwrap_or(0.0),
                 num(c_vy).unwrap_or(0.0),
                 num(c_vz).unwrap_or(0.0),
             ) * PC_PER_YEAR_MS;
 
-            let position_ly = equatorial::to_ecliptic(equatorial_pc) * PARSEC_LY;
-            let velocity = equatorial::to_ecliptic(velocity_eq);
-
-            let key = key as u64;
-            let id = StarId::synthesise(SOURCE, key);
-            // Every row names the primary of its system, itself included, so grouping is
-            // provisional here and singletons are cleared in a second pass below.
-            let component = Component {
-                index: num(c_comp).unwrap_or(1.0) as u8,
-                group: num(c_primary).map(|p| p as u64),
-            };
-
-            stars.push(CatalogueStar {
-                id,
-                provenance: Provenance { source: SOURCE.into(), key },
+            records.push(StarRecord {
+                key: key as u64,
                 name: r.get(c_proper).filter(|s| !s.is_empty()).map(str::to_owned),
-                position_ly,
-                velocity,
-                star: Star { radius_m: radius, teff_k: teff, mu: stellar::mu_from_mass_solar(mass_solar), limb_darkening: (0.4, 0.26) },
+                position_ly: equatorial::to_ecliptic(equatorial_pc) * PARSEC_LY,
+                velocity: equatorial::to_ecliptic(velocity_eq),
+                colour_index: ci,
                 luminosity_solar: lum,
-                mass_solar,
-                metallicity: metallicity::from_speed(velocity.length(), id.get()),
-                component,
+                component_index: num(c_comp).unwrap_or(1.0) as u8,
+                group: num(c_primary).map(|p| p as u64),
             });
         }
-        // A group of one is not a multiple.
-        let mut seen: std::collections::HashMap<u64, u32> = std::collections::HashMap::new();
-        for s in &stars {
-            if let Some(g) = s.component.group {
-                *seen.entry(g).or_default() += 1;
-            }
-        }
-        for s in &mut stars {
-            if s.component.group.is_some_and(|g| seen[&g] < 2) {
-                s.component.group = None;
-            }
-        }
-        Ok(Self { stars, skipped })
+        // Grouping is resolved in `assemble_all`, over the stars that survive derivation.
+        Ok(records)
     }
 }
 
@@ -151,7 +118,10 @@ impl StarProvider for HygProvider {
 
 #[cfg(test)]
 mod tests {
+    use em_spectra::stellar;
+
     use super::*;
+    use crate::sky::{CatalogueStar, StarId};
 
     fn catalogue() -> Option<HygProvider> {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/catalogs/hygdata_v42.csv");

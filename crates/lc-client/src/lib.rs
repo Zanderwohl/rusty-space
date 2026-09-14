@@ -18,6 +18,7 @@ pub mod panels;
 pub mod plot;
 pub mod resolved;
 pub mod session;
+pub mod sky_asset;
 pub mod starfield;
 pub mod system;
 pub mod tonemap;

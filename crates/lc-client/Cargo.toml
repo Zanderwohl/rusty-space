@@ -19,6 +19,14 @@ bevy_egui = "0.38.0"
 bevy_mesh = "0.17"
 glam = { version = "0.30", features = ["serde"] }
 
+# The browser build. `getrandom` needs its wasm backend named here as well as in
+# `.cargo/config.toml`; one without the other is not enough.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["Window", "Location", "UrlSearchParams", "Document", "Element", "HtmlCanvasElement"] }
+console_error_panic_hook = "0.1"
+
 [[bin]]
 name = "lightcone"
 path = "src/bin/lightcone.rs"

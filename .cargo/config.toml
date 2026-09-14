@@ -1,0 +1,7 @@
+# getrandom 0.3 refuses wasm32-unknown-unknown unless a backend is named, and naming it needs
+# both this cfg and the crate's `wasm_js` feature (see lc-client's wasm dependencies). The
+# browser has `crypto.getRandomValues`; the bare target cannot know that, so it asks.
+#
+# Native builds are unaffected: this section applies to the wasm target alone.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

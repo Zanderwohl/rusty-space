@@ -4231,14 +4231,18 @@ dependencies = [
  "bevy",
  "bevy_egui",
  "bevy_mesh",
+ "console_error_panic_hook",
  "em-foundations",
  "em-plot",
  "em-render",
  "em-sim",
  "em-spectra",
+ "getrandom 0.3.3",
  "glam",
  "lc-spacetime",
  "lc-world",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

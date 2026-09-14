@@ -17,6 +17,12 @@ glam = { version = "0.30", features = ["serde"] }
 serde = { version = "1.0.215", features = ["derive"] }
 csv = { version = "1", optional = true }
 
+# Offline tooling. Native only, and the only program in the tree that reads a CSV.
+[[bin]]
+name = "skypack"
+path = "src/bin/skypack.rs"
+required-features = ["hyg"]
+
 [features]
 default = ["hyg"]
 # The HYG importer, and the CSV reader it needs. Off for a world built from an authored
