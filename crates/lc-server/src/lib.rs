@@ -10,6 +10,7 @@
 #![forbid(unsafe_code)]
 
 pub mod journal;
+pub mod rate;
 pub mod server;
 pub mod transport;
 pub mod websocket;

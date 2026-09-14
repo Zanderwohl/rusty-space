@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -157,6 +157,11 @@ pub enum Outbound {
     Refused { ship_id: ShipId, reason: Refusal },
     /// The protocol version did not match. The last thing sent on that connection.
     WrongProtocol { server: u32 },
+    /// This client is sending faster than the server will take, and the message was dropped
+    /// unread. Not a disconnection: a client that hits this has a bug, and is told so it can be
+    /// fixed. Nothing about the world leaks through it — it is a fact about the client's own
+    /// sending and reveals nothing that was withheld.
+    Throttled { retry_after_ticks: u32 },
 }
 
 /// Why an intent was not acted on.
@@ -196,8 +201,8 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 /// test on these fails. A deployed client would otherwise read the new shape as the old one and
 /// be confidently wrong rather than refused.
 pub mod golden {
-    /// `Outbound::Welcome { client_id: 7, protocol: 1, ship_id: 42, now_t: 1_000_000 }`
-    pub const WELCOME: &[u8] = &[0, 7, 1, 84, 128, 137, 122];
+    /// `Outbound::Welcome { client_id: 7, protocol: PROTOCOL_VERSION, ship_id: 42, now_t: 1e6 }`
+    pub const WELCOME: &[u8] = &[0, 7, 2, 84, 128, 137, 122];
 
     /// `Inbound::Act(Intent { ship_id: 42, order: Transmit { power_w: 1500.0 }, .. })`
     pub const ACT: &[u8] =

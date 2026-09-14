@@ -232,5 +232,33 @@ else.
 - Whether the client ever runs `lc-store`. It should not — the client has no database — but
   the light-cone cursor's traversal logic is wanted on both sides, so it may need to split
   out of `lc-store` into `lc-spacetime`.
-- Rate limiting and the cost of an intent, given that a player with a scripted client could
-  emit thousands per second.
+- ~~Rate limiting~~. **Decided: a token bucket per connection, as a safety valve, with the
+  number treated as provisional and measured.**
+
+  Two separate things were being conflated. The *cost of an action* is a game rule — reaction
+  mass for a burn, energy for a transmission, a cooldown on an instrument — and doc 02 already
+  says where it lives: *a transmitter that raises its power raises its fan-out cost, which is a
+  fair place for a game-balance knob to live.* That is phase 10's business and is not this.
+
+  What this is, is a ceiling that stops a scripted client consuming the server, set far above
+  any plausible legitimate rate. Two per second sustained, thirty at once. The sustained figure
+  is not taste: doc 02 sizes the event table on *ten thousand players producing one event per
+  real second*, so one per second is the rate the storage was designed for and this is double
+  it.
+
+  It is deliberately **not frame-coupled**. A burn is one intent that then runs for days of
+  coordinate time; an order is one intent; the motion in between is analytic and predicted on
+  the client. This is a strategy game's input rate, not a shooter's, and a per-frame allowance
+  would be both far too generous and the wrong shape.
+
+  Nobody has measured what a real player sends, because there is not yet a game to measure. So
+  the server counts: `Server::usage` reports accepted, refused, and the peak any client reached
+  in a tick and in a second. If real sessions never approach the ceiling, it can stop being
+  provisional; if a legitimate client trips it, that is a bug report with the measurement
+  already attached.
+
+  A refusal is `Outbound::Throttled`, carrying how many ticks to wait. Not a disconnection: a
+  client that hits it has a bug and should be told. It reveals nothing, being a fact about the
+  client's own sending rather than about the world. The charge is taken *before* the message is
+  read, so rubbish costs its sender as much as a valid intent, and connections that have never
+  been given a ship are limited too.

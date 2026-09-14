@@ -11,6 +11,7 @@ use lc_spacetime::Worldline;
 use lc_store::id::Minter;
 
 use crate::journal::{Journal, JournalError, PREPARE_AHEAD_US};
+use crate::rate::Budget;
 use crate::transport::Transport;
 use crate::world::{Event, Path, Scheduled, Ship, schedule};
 
@@ -23,6 +24,9 @@ pub const TICK_MS: i64 = 50;
 /// propagated analytically. A server that drops to 10 Hz produces identical world state with
 /// coarser event timestamps -- the step never enters an integrator, so it cannot accumulate.
 pub const TICK_US: i64 = TICK_MS * 8766 * 1_000;
+
+/// Ticks in a real second, for the window the rate counters measure over.
+pub const TICKS_PER_SECOND: u32 = (1_000 / TICK_MS) as u32;
 
 /// What the server remembers about one connection.
 #[derive(Clone, Debug)]
@@ -45,6 +49,9 @@ pub struct Server<J: Journal> {
     minter: Minter,
     /// Written by this tick, and handed to the journal at the end of it.
     pending: Vec<Event>,
+    /// What each connection is allowed to send. Kept per `ClientId` rather than per admitted
+    /// client, so a connection that has not been given a ship still cannot flood.
+    budgets: HashMap<ClientId, Budget>,
 }
 
 impl<J: Journal> Server<J> {
@@ -57,6 +64,7 @@ impl<J: Journal> Server<J> {
             journal,
             minter: Minter::new(shard).expect("a shard inside the identifier's field"),
             pending: Vec::new(),
+            budgets: HashMap::new(),
         }
     }
 
@@ -70,6 +78,12 @@ impl<J: Journal> Server<J> {
 
     pub fn ship(&self, id: ShipId) -> Option<&Ship> {
         self.ships.iter().find(|s| s.id == id)
+    }
+
+    /// What a client has actually sent. The measurement that will one day replace the guess in
+    /// [`crate::rate`] with evidence.
+    pub fn usage(&self, client: ClientId) -> Option<crate::rate::Usage> {
+        self.budgets.get(&client).map(|b| b.usage)
     }
 
     /// Put a ship in the world and give it to a client.
@@ -103,7 +117,18 @@ impl<J: Journal> Server<J> {
         let mut events = Vec::new();
         let mut deliveries = Vec::new();
         for (from, message) in wire.poll() {
+            // Charged before the message is read, so a malformed one costs its sender as much
+            // as a valid one and there is nothing to gain by sending rubbish quickly.
+            let budget = self.budgets.entry(from).or_insert_with(|| Budget::new(TICK_MS));
+            if !budget.charge() {
+                let retry_after_ticks = budget.retry_after_ticks();
+                wire.send(from, Outbound::Throttled { retry_after_ticks });
+                continue;
+            }
             self.handle(from, message, wire, &mut events, &mut deliveries);
+        }
+        for budget in self.budgets.values_mut() {
+            budget.advance(TICKS_PER_SECOND);
         }
         self.journal.write(&events, &deliveries).await?;
         self.pending = events;
@@ -360,6 +385,72 @@ use crate::transport::Loopback;
             server.tick(&mut wire).await.unwrap();
             assert!(sightings(&wire.take(watcher)).is_empty(), "the same sighting came twice");
         }
+    }
+
+    /// A flood is stopped, told when to come back, and costs the sender whether or not the
+    /// message was any good.
+    ///
+    /// The ceiling is a safety valve rather than a game rule — see [`crate::rate`] — so what
+    /// this checks is that it exists and is not in the way, not that it is set to the right
+    /// number. Nobody knows the right number yet, which is why `usage` counts.
+    #[tokio::test]
+    async fn a_flood_is_throttled_and_a_legitimate_burst_is_not() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let client = ClientId(1);
+        server.admit(client, ShipId(1), Path::still(DVec3::ZERO), 0.0);
+
+        let order = |t| Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Transmit { power_w: 1.0 },
+            issued_at_client_t: t,
+        });
+
+        // A burst a player could plausibly produce goes through untouched.
+        for step in 0..crate::rate::BURST as i64 {
+            wire.client_says(client, order(step));
+        }
+        server.tick(&mut wire).await.unwrap();
+        let answered = wire.take(client);
+        assert!(
+            !answered.iter().any(|m| matches!(m, Outbound::Throttled { .. })),
+            "a burst inside the allowance was throttled",
+        );
+        assert_eq!(server.usage(client).unwrap().refused, 0);
+
+        // A scripted client sending ten times that in one tick is not.
+        for step in 0..(crate::rate::BURST as i64 * 10) {
+            wire.client_says(client, order(step));
+        }
+        server.tick(&mut wire).await.unwrap();
+        let answered = wire.take(client);
+        let throttled: Vec<u32> = answered
+            .iter()
+            .filter_map(|m| match m {
+                Outbound::Throttled { retry_after_ticks } => Some(*retry_after_ticks),
+                _ => None,
+            })
+            .collect();
+        assert!(!throttled.is_empty(), "a flood was not stopped");
+        assert!(throttled.iter().all(|t| *t > 0), "told to retry at once after being refused");
+
+        let usage = server.usage(client).unwrap();
+        assert!(usage.refused > 0);
+        assert!(usage.peak_per_tick >= crate::rate::BURST as u32 * 10, "the attempt went unmeasured");
+    }
+
+    /// An unknown connection is limited too. A socket that has never been given a ship can
+    /// still send, and flooding costs the server the same whether the sender owns anything.
+    #[tokio::test]
+    async fn a_connection_with_no_ship_is_still_limited() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let stranger = ClientId(99);
+        for _ in 0..(crate::rate::BURST as i64 * 3) {
+            wire.client_says(stranger, Inbound::Hello { protocol: PROTOCOL_VERSION });
+        }
+        server.tick(&mut wire).await.unwrap();
+        assert!(server.usage(stranger).unwrap().refused > 0, "an unadmitted flood was free");
     }
 
     /// A ship may not act for a ship that is not its own, and may not be told that it tried.
