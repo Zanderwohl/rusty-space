@@ -205,6 +205,7 @@ fast clock never looks normal.
 | `--frames <n>` | frames before the shutter |
 | `--at <body>` | stand off a named body of the local system |
 | `--station <course>` | put the ship straight on a station: `orbit:Earth`, `polar:Mars:high`, `rings:Saturn`, `l2:Earth`, `belt:0`, `leave` |
+| `--burst <n>` | photograph `n` consecutive frames, numbered. For flicker: two runs stopped at frame `n` and frame `n+1` have accumulated different wall time and are not consecutive at all |
 
 These emit [`Action`]s rather than opening a second path into the client, so they can only do
 what the interface can do. `--shot` exists because WGSL cannot be asserted from a test and a
@@ -251,6 +252,27 @@ The design rate is already 8766 times real time, which puts a whole low orbit in
 The rate ladder therefore reaches below the design rate as well as above it — real time, a
 minute a second, an hour a second — and the navigation panel prints the orbital period next to
 the station and says so when the clock is outrunning it.
+
+### A ring has no thickness, so there is nowhere inside it to stand
+
+![On station at Saturn's rings](../images/ring-station.png)
+
+The ring station started out mid-annulus, in the ring plane — which is what "enter a ring"
+sounds like, and it was unusable. A ring is drawn as a surface with no thickness. With the ship
+inside the annulus that surface passes through the camera: the nearest geometry is at no
+distance at all, and the camera's own offset from the plane is smaller than f32 render
+positions can hold — about six metres at Saturn. The rings swung between a hairline and a
+bright wedge from one frame to the next, and nine and a half per cent of the screen changed
+every frame at real time.
+
+A ring station now stands a quarter outside the outer edge, in a plane tipped a quarter turn
+out of theirs, so the rings read as rings and the orbit still closes them to a line twice a
+turn. Outside the annulus the same six metres of jitter is six metres in a hundred and forty
+thousand kilometres, and the flicker falls by a factor of four thousand — from 87,704 changed
+pixels a frame to twenty, which is what a star field crossing pixel boundaries costs anyway.
+
+Edge-on from *outside* still shimmers on the one-pixel line the rings collapse to. That is
+ordinary geometric aliasing of a thin bright edge, it is bounded, and it is 141 pixels.
 
 ### The near plane is fifteen metres
 

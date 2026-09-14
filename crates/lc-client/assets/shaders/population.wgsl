@@ -109,7 +109,17 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let limb = 1.0 + material.limb_gain * (1.0 / max(facing, 0.08) - 1.0);
 
     let speckle = mix(1.0, grain(in.local_direction, material.seed), material.grain_strength);
-    let alpha = in.density * material.opacity * limb * speckle * material.inside_fade;
+
+    // What one straight-through pass covers, and then that pass repeated `limb` times over.
+    //
+    // `1 - (1 - t)^limb`, not `t * limb`. A sightline along a sheet has unbounded path length,
+    // and under a linear law it paints unbounded light: edge-on, Saturn's rings came out at
+    // twice full white. This is the same exponential `Population::absorbed_fraction` applies
+    // to the star's light -- past a covering fraction of a few tenths the elements shadow one
+    // another -- and it leaves the face-on case exactly as it was, because at `limb` of one it
+    // is `t`. Only the grazing case changes, and only by being bounded.
+    let single = clamp(in.density * material.opacity * speckle * material.inside_fade, 0.0, 1.0);
+    let alpha = 1.0 - pow(max(1.0 - single, 0.0), limb);
     // Premultiplied: the blend is additive, so alpha leaves as zero and the colour carries it.
     return vec4<f32>(material.tint.rgb * alpha, 0.0);
 }

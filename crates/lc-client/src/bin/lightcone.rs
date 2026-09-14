@@ -64,6 +64,7 @@ fn main() {
         station: flag("--station").and_then(|i| args.get(i + 1).cloned()),
         screenshot: flag("--shot").and_then(|i| args.get(i + 1).cloned()),
         after_frames: value::<u32>(&args, "--frames").unwrap_or(120),
+        burst: value::<u32>(&args, "--burst").unwrap_or(1),
         actions,
     };
     let catalogue = args.first().filter(|a| !a.starts_with("--")).cloned();

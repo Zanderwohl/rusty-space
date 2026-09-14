@@ -60,6 +60,8 @@ pub struct DevEntry {
     pub screenshot: Option<String>,
     /// Frames to let the sky settle before the shutter. Pipelines compile lazily.
     pub after_frames: u32,
+    /// How many consecutive frames to photograph. More than one for diagnosing a flicker.
+    pub burst: u32,
     /// Run once on reaching the sky. Actions rather than flags, so a development entry can
     /// reach anything the interface can and needs no plumbing of its own.
     pub actions: Vec<Action>,
@@ -298,6 +300,14 @@ fn place_at_body(
 }
 
 /// Photograph the sky through the real pipeline, then quit.
+/// `shot.png` and 2 becomes `shot.2.png`.
+fn numbered(path: &str, index: u32) -> String {
+    match path.rsplit_once('.') {
+        Some((stem, extension)) => format!("{stem}.{index}.{extension}"),
+        None => format!("{path}.{index}"),
+    }
+}
+
 fn photograph(
     mut commands: Commands,
     dev: Res<DevEntry>,
@@ -306,13 +316,19 @@ fn photograph(
 ) {
     let Some(path) = &dev.screenshot else { return };
     *frames += 1;
-    if *frames == dev.after_frames {
+    let burst = dev.burst.max(1);
+    if (dev.after_frames..dev.after_frames + burst).contains(&*frames) {
+        // Consecutive frames of one run, which is the only way to see a flicker: two runs
+        // stopped at frame n and frame n+1 have accumulated different wall time and are not
+        // consecutive at all.
+        let index = *frames - dev.after_frames;
+        let at = if burst > 1 { numbered(path, index) } else { path.clone() };
         commands
             .spawn(bevy::render::view::screenshot::Screenshot::primary_window())
-            .observe(bevy::render::view::screenshot::save_to_disk(path.clone()));
+            .observe(bevy::render::view::screenshot::save_to_disk(at));
     }
     // The capture is asynchronous; quitting on the same frame loses the file.
-    if *frames > dev.after_frames + 30 {
+    if *frames > dev.after_frames + burst + 30 {
         exit.write(AppExit::Success);
     }
 }

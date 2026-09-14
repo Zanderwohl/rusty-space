@@ -93,6 +93,22 @@ pub enum Course {
 /// Deimos and at Jupiter, which differ by four orders in size.
 pub const ALTITUDES: [(f64, &str); 3] = [(0.2, "low"), (2.0, "high"), (20.0, "distant")];
 
+/// Where a ring station sits: this many times the outer edge, and this far tipped out of the
+/// ring plane.
+///
+/// Outside the rings, not in them. A ring is drawn as a surface with no thickness, so inside
+/// the annulus the sheet passes through the camera: the nearest geometry is at no distance at
+/// all, and the camera's own offset from the plane is below what f32 render positions can hold
+/// — six metres or so at Saturn. The rings then swing between a hairline and a bright wedge
+/// from one frame to the next. Outside the annulus, edge-on is a clean line and the jitter is
+/// six metres in a hundred and forty thousand kilometres.
+///
+/// Tipped, because a ring seen from within its own plane is a line whichever side of it you
+/// stand. A quarter turn of tilt opens them, and the orbit still crosses the plane twice a
+/// turn to close them again.
+pub const RING_STANDOFF: f64 = 1.25;
+pub const RING_TILT_RAD: f64 = 0.45;
+
 /// How far past the outer edge of the cloud a departure stops.
 ///
 /// Just outside, not far outside: the point is to be able to look back at the whole system, and
@@ -200,6 +216,12 @@ impl Orbit {
 /// Metres in an astronomical unit.
 pub const AU: f64 = 1.495_978_707e11;
 
+/// `pole` tipped by `angle`, about an axis in the plane it is normal to.
+pub fn tilt(pole: DVec3, angle: f64) -> DVec3 {
+    let (u, _) = basis(pole);
+    (pole.normalize_or(DVec3::Z) * angle.cos() + u * angle.sin()).normalize_or(DVec3::Z)
+}
+
 /// Two unit vectors spanning the plane normal to `pole`.
 ///
 /// Deterministic, so a ship sent to the same orbit twice arrives at the same place rather than
@@ -241,9 +263,8 @@ impl Course {
                 let rings = lc_world::rings::for_body(system.sim().name(index))?;
                 Some(Waypoint::Orbit(Orbit {
                     about: Anchor::Body(body.clone()),
-                    // Mid-ring rather than an edge: inside the system, between the two faces.
-                    radius_m: (rings.inner_m() + rings.outer_m()) * 0.5,
-                    pole: system.body_pole(index),
+                    radius_m: rings.outer_m() * RING_STANDOFF,
+                    pole: tilt(system.body_pole(index), RING_TILT_RAD),
                 }))
             }
             Course::Belt(index) => {
@@ -502,18 +523,29 @@ mod tests {
         assert!(offset.length() > crate::starfield::LOCAL_SHELL_LY, "still inside the shell");
     }
 
-    /// The ring course has to land between the two edges, or it draws a ring from inside the
-    /// planet or from outside the whole system.
+    /// The ring course has to stay clear of the annulus, and out of its plane.
+    ///
+    /// Inside it, the sheet passes through the camera and the rings flickered between a
+    /// hairline and a wedge every frame; in its plane they are a line however far off you are.
     #[test]
-    fn a_ring_course_lands_in_the_rings() {
+    fn a_ring_course_stands_outside_the_rings_and_out_of_their_plane() {
         let system = sol();
         let Waypoint::Orbit(orbit) = Course::Rings("Saturn".into()).resolve(&system).unwrap()
         else {
             panic!("rings are an orbit")
         };
         let rings = lc_world::rings::for_body("Saturn").expect("Saturn has rings");
-        assert!(orbit.radius_m > rings.inner_m() && orbit.radius_m < rings.outer_m());
-        assert!(orbit.radius_m > 6.0e7, "and outside the planet");
+        assert!(orbit.radius_m > rings.outer_m(), "inside the annulus is the degenerate case");
+
+        // The orbit's own normal is tilted from the ring pole, so the station rises out of the
+        // plane rather than running along it.
+        let pole = system.body_pole(system.body_named("Saturn").unwrap());
+        let tipped = orbit.pole.dot(pole).clamp(-1.0, 1.0).acos();
+        assert!((tipped - RING_TILT_RAD).abs() < 1e-9, "tilted by {tipped}");
+
+        // And the highest it gets is a real fraction of the way out of the plane.
+        let highest = orbit.radius_m * RING_TILT_RAD.sin();
+        assert!(highest > rings.outer_m() * 0.4, "only {highest:e} above the rings");
     }
 
     #[test]

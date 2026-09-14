@@ -364,6 +364,14 @@ drops away as it does in any photograph of a planet.
 
 ![Saturn](../images/rings.png)
 
+**Opacity composites, it does not add.** A sightline crossing the shell at a grazing angle
+passes through more of it, and the shader carries that as a limb term — but as `1 - (1 - t)^n`,
+not `t * n`. A sightline running *along* a sheet has unbounded path length, and under a linear
+law it paints unbounded light: seen edge-on from close up, Saturn's rings came out at twice
+full white. It is the same exponential the photometry already applies to the star's light,
+where past a covering fraction of a few tenths the elements begin shadowing one another, and it
+leaves the face-on case untouched because at `n` of one it is `t`.
+
 A ring is not a shell. It has radial structure and no latitude, so it gets a flat annulus with
 each vertex's opacity from the optical depth *at that radius*. Saturn's rings span a factor of
 1.8 in radius with a division in the middle that is the most recognisable thing about them;
