@@ -145,9 +145,15 @@ pub fn sample_scene(
     let rad_per_px = crate::starfield::camera_scale(&camera);
     let observer = game.position_ly;
     let mut scene = Scene { point_sr: rad_per_px * rad_per_px, ..default() };
-    if let Some(system) = bodies.system.as_ref() {
-        let star_ly = system.star_position_ly();
-        let (star_radius, star_teff) = (system.star_radius_m(), system.star_teff_k());
+    // The three numbers rather than the system: the borrow has to end before the scene is
+    // written back, and copying two hundred and thirty bodies a frame to avoid that would cost
+    // more than the metering it feeds.
+    let star = game
+        .0
+        .system
+        .as_ref()
+        .map(|s| (s.star_position_ly(), s.star_radius_m(), s.star_teff_k()));
+    if let Some((star_ly, star_radius, star_teff)) = star {
         let mut unresolved: Vec<(f64, &Drawable)> = Vec::new();
         for body in &bodies.drawn {
             if is_resolved(body, observer, rad_per_px) {
@@ -237,7 +243,7 @@ pub fn update_resolved(
     mut placed: Query<(&mut Transform, &MeshMaterial3d<BodySurfaceMaterial>, &ResolvedBody)>,
 ) {
     let rad_per_px = crate::starfield::camera_scale(&camera);
-    let Some(system) = bodies.system.as_ref() else {
+    let Some(system) = session.0.system.as_ref() else {
         for (entity, _) in &existing {
             commands.entity(entity).despawn();
         }

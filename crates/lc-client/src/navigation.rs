@@ -1,0 +1,632 @@
+//! Getting about inside a system.
+//!
+//! Five things a ship can be asked to do — cross to a point, take up an orbit, sit at a
+//! libration point, drop into a belt or a ring, leave the system along its axis — reduce to
+//! two: a [`Waypoint`] that says where to be at any coordinate time, and the same
+//! [`crate::flight::Cruise`] that crosses between stars, aimed at where that waypoint will be
+//! when the ship gets there.
+//!
+//! The ship is a torch under constant thrust and none of this is orbital mechanics. It does not
+//! transfer, it goes: a burn, a flip and a burn, and then it holds station against whatever it
+//! was sent to. Orbital speeds are four orders below `c` and a hold is exact rather than
+//! integrated, so nothing here drifts and nothing here needs a fuel budget.
+
+use glam::DVec3;
+use lc_world::population::Population;
+
+use crate::flight::{Cruise, Drive};
+use crate::system::{LocalSystem, M_PER_LY};
+
+/// What a circular orbit is measured against.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Anchor {
+    /// The system's primary. A belt orbits this.
+    Star,
+    /// One body, by the name `em-sim` knows it under.
+    Body(String),
+}
+
+/// The two collinear libration points a ship would want.
+///
+/// L3, L4 and L5 are left out: L3 is behind the star and L4/L5 are sixty degrees round the
+/// orbit, which is a long way to go to see the same thing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LagrangePoint {
+    /// Between the body and its primary.
+    L1,
+    /// Directly outside the body, in the shadow.
+    L2,
+}
+
+/// Which way round a body an orbit runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Plane {
+    /// In the body's own equator, which is where its rings and most of its moons are.
+    #[default]
+    Equatorial,
+    /// Over the poles, which is the only way to see all of a body.
+    Polar,
+}
+
+/// A circular orbit, as the three numbers that fix one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Orbit {
+    pub about: Anchor,
+    pub radius_m: f64,
+    /// Unit normal of the orbital plane, simulation axes.
+    pub pole: DVec3,
+}
+
+/// A place the ship can be, evaluated at any coordinate time.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Waypoint {
+    /// Fixed, light-years from the world origin. Where a crossing that is simply going
+    /// somewhere ends up, and where a ship that has left the system waits.
+    Fixed(DVec3),
+    Orbit(Orbit),
+    Lagrange { body: String, point: LagrangePoint },
+}
+
+/// What the interface asks for, before a system has been consulted about whether it exists.
+///
+/// Separate from [`Waypoint`] because these are the player's words — "low polar orbit of
+/// Titan" — and a waypoint is a position. Resolving one into the other is where a body is
+/// looked up, a radius is worked out from an altitude, and a plane becomes a pole.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Course {
+    /// Burn, flip and burn to a point, light-years from the world origin.
+    To(DVec3),
+    /// Circular orbit at an altitude given in radii above the surface.
+    Orbit { body: String, altitude_radii: f64, plane: Plane },
+    Lagrange { body: String, point: LagrangePoint },
+    /// Into the middle of a body's rings, in their own plane.
+    Rings(String),
+    /// Into a population's band, at the radius that carries its light.
+    Belt(usize),
+    /// Out along the system's axis until everything is behind.
+    LeaveSystem,
+}
+
+/// Altitudes the interface offers, in radii above the surface.
+///
+/// Radii rather than kilometres because the same three numbers then mean the same thing at
+/// Deimos and at Jupiter, which differ by four orders in size.
+pub const ALTITUDES: [(f64, &str); 3] = [(0.2, "low"), (2.0, "high"), (20.0, "distant")];
+
+/// How far past the outer edge of the cloud a departure stops.
+///
+/// Just outside, not far outside: the point is to be able to look back at the whole system, and
+/// the shell is what separates a star drawn as an object from a star drawn as a point.
+pub const DEPARTURE_MARGIN: f64 = 1.05;
+
+/// Rounds of aiming at where the target will be rather than where it is.
+///
+/// Flip-and-burn time goes as the square root of distance, so re-aiming contracts fast: three
+/// rounds hold a planet to metres. One round is not enough — Earth moves a fiftieth of an
+/// astronomical unit during a crossing from Mars.
+pub const ARRIVAL_ROUNDS: usize = 3;
+
+impl Waypoint {
+    /// Where this is, light-years from the world origin, in the system as currently propagated.
+    ///
+    /// `None` when the body it names has gone, which happens when the ship leaves the system.
+    pub fn place(&self, system: &LocalSystem) -> Option<DVec3> {
+        match self {
+            Waypoint::Fixed(at) => Some(*at),
+            Waypoint::Orbit(orbit) => {
+                let (centre, mu) = orbit.centre_of(system)?;
+                if orbit.radius_m <= 0.0 || mu <= 0.0 {
+                    return None;
+                }
+                let rate = (mu / orbit.radius_m.powi(3)).sqrt();
+                let theta = rate * system.time_s();
+                let (u, v) = basis(orbit.pole);
+                Some(centre + (u * theta.cos() + v * theta.sin()) * orbit.radius_m / M_PER_LY)
+            }
+            Waypoint::Lagrange { body, point } => {
+                let index = system.body_named(body)?;
+                let parent = system.sim().parent(index)?;
+                let offset = system.sim().position(index) - system.sim().position(parent);
+                let distance = offset.length();
+                let mass = system.sim().mass(parent);
+                if distance <= 0.0 || mass <= 0.0 {
+                    return None;
+                }
+                // The Hill radius. Exact enough: the collinear points sit within a few per cent
+                // of it, and the ship is holding station rather than balancing there.
+                let hill = distance * (system.sim().mass(index) / (3.0 * mass)).cbrt();
+                let sign = match point {
+                    LagrangePoint::L1 => -1.0,
+                    LagrangePoint::L2 => 1.0,
+                };
+                let at = system.sim().position(index) + offset / distance * hill * sign;
+                Some(system.origin_ly + at / M_PER_LY)
+            }
+        }
+    }
+
+    /// What to call this on screen.
+    pub fn label(&self) -> String {
+        match self {
+            Waypoint::Fixed(_) => "a fixed point".to_string(),
+            Waypoint::Orbit(orbit) => match &orbit.about {
+                Anchor::Star => format!("a band at {:.1} AU", orbit.radius_m / AU),
+                Anchor::Body(name) => format!("orbit of {name}"),
+            },
+            Waypoint::Lagrange { body, point } => format!("{body} {point:?}"),
+        }
+    }
+
+    /// What the station is *about*: the body or star it was chosen for.
+    ///
+    /// A ship on station is looking at something, and it is never the station itself. From an
+    /// orbit that is the body underneath; from a libration point it is the planet the point
+    /// belongs to; from anywhere else it is the star.
+    pub fn focus(&self, system: &LocalSystem) -> Option<DVec3> {
+        match self {
+            Waypoint::Fixed(_) => Some(system.star_position_ly()),
+            Waypoint::Orbit(orbit) => Some(orbit.centre_of(system)?.0),
+            Waypoint::Lagrange { body, .. } => system.body_position_ly(body),
+        }
+    }
+
+    /// Seconds the ship takes to go once round, or `None` for anything that does not.
+    ///
+    /// On screen because the clock runs at eight thousand times real time by default, which
+    /// turns a low orbit into a blur: the period is what tells a player which rung to pick.
+    pub fn period_s(&self, system: &LocalSystem) -> Option<f64> {
+        let Waypoint::Orbit(orbit) = self else { return None };
+        let (_, mu) = orbit.centre_of(system)?;
+        (mu > 0.0 && orbit.radius_m > 0.0)
+            .then(|| std::f64::consts::TAU * (orbit.radius_m.powi(3) / mu).sqrt())
+    }
+}
+
+impl Orbit {
+    /// Where the orbit is centred, light-years, and the `mu` that sets its rate.
+    ///
+    /// `G m` of the centre, not `System::mu`, which is the `mu` of the orbit the centre itself
+    /// is on — `G(M_sun + M_earth)` for Earth. Using it put a low Earth orbit at eleven seconds.
+    fn centre_of(&self, system: &LocalSystem) -> Option<(DVec3, f64)> {
+        let index = match &self.about {
+            Anchor::Star => system.primary(),
+            Anchor::Body(name) => system.body_named(name)?,
+        };
+        let at = system.origin_ly + system.sim().position(index) / M_PER_LY;
+        Some((at, system.sim().gravitational_constant() * system.sim().mass(index)))
+    }
+}
+
+/// Metres in an astronomical unit.
+pub const AU: f64 = 1.495_978_707e11;
+
+/// Two unit vectors spanning the plane normal to `pole`.
+///
+/// Deterministic, so a ship sent to the same orbit twice arrives at the same place rather than
+/// somewhere that depends on how it was asked.
+pub fn basis(pole: DVec3) -> (DVec3, DVec3) {
+    let n = pole.normalize_or(DVec3::Z);
+    // Any fixed vector not parallel to the pole. Z first because most poles are near it and
+    // the cross product is then largest.
+    let seed = if n.z.abs() < 0.9 { DVec3::Z } else { DVec3::X };
+    let u = seed.cross(n).normalize_or(DVec3::X);
+    (u, n.cross(u))
+}
+
+impl Course {
+    /// Turn a request into a place, against the system the ship is in.
+    pub fn resolve(&self, system: &LocalSystem) -> Option<Waypoint> {
+        match self {
+            Course::To(at) => Some(Waypoint::Fixed(*at)),
+            Course::Orbit { body, altitude_radii, plane } => {
+                let index = system.body_named(body)?;
+                let radius = system.sim().radius(index);
+                if radius <= 0.0 {
+                    return None;
+                }
+                Some(Waypoint::Orbit(Orbit {
+                    about: Anchor::Body(body.clone()),
+                    radius_m: radius * (1.0 + altitude_radii.max(0.0)),
+                    pole: plane.pole_of(system.body_pole(index)),
+                }))
+            }
+            Course::Lagrange { body, point } => {
+                let index = system.body_named(body)?;
+                // A body with no parent has no libration points: there is no second mass.
+                system.sim().parent(index)?;
+                Some(Waypoint::Lagrange { body: body.clone(), point: *point })
+            }
+            Course::Rings(body) => {
+                let index = system.body_named(body)?;
+                let rings = lc_world::rings::for_body(system.sim().name(index))?;
+                Some(Waypoint::Orbit(Orbit {
+                    about: Anchor::Body(body.clone()),
+                    // Mid-ring rather than an edge: inside the system, between the two faces.
+                    radius_m: (rings.inner_m() + rings.outer_m()) * 0.5,
+                    pole: system.body_pole(index),
+                }))
+            }
+            Course::Belt(index) => {
+                let population = system.populations.get(*index)?;
+                let radius = population.thermal_radius();
+                (radius > 0.0).then_some(Waypoint::Orbit(Orbit {
+                    about: Anchor::Star,
+                    radius_m: radius,
+                    pole: population.pole,
+                }))
+            }
+            Course::LeaveSystem => {
+                let axis = system.axis();
+                let out = system.star_position_ly() + axis * system.reach_ly() * DEPARTURE_MARGIN;
+                Some(Waypoint::Fixed(out))
+            }
+        }
+    }
+
+    /// Read a course from a development flag: `orbit:Earth`, `polar:Titan:high`,
+    /// `rings:Saturn`, `l2:Earth`, `belt:0`, `leave`.
+    ///
+    /// An orbit takes an optional altitude, named as [`ALTITUDES`] names it. Only `--station`
+    /// uses this; it exists so a screenshot of a place can be asked for on a command line
+    /// rather than by flying there, and so the spellings are tested.
+    pub fn parse(spec: &str) -> Option<Self> {
+        let mut fields = spec.split(':');
+        let kind = fields.next()?;
+        let rest = fields.next().unwrap_or("");
+        match kind {
+            "leave" => Some(Course::LeaveSystem),
+            "belt" => rest.parse().ok().map(Course::Belt),
+            "rings" => Some(Course::Rings(rest.to_string())),
+            "l1" => Some(Course::Lagrange { body: rest.into(), point: LagrangePoint::L1 }),
+            "l2" => Some(Course::Lagrange { body: rest.into(), point: LagrangePoint::L2 }),
+            "orbit" | "polar" => {
+                let named = fields.next();
+                let altitude = match named {
+                    Some(name) => ALTITUDES.iter().find(|(_, n)| *n == name)?.0,
+                    None => ALTITUDES[0].0,
+                };
+                Some(Course::Orbit {
+                    body: rest.into(),
+                    altitude_radii: altitude,
+                    plane: if kind == "polar" { Plane::Polar } else { Plane::Equatorial },
+                })
+            }
+            _ => None,
+        }
+    }
+}
+
+impl Plane {
+    /// The orbit normal for this plane about a body whose own pole is `pole`.
+    pub fn pole_of(&self, pole: DVec3) -> DVec3 {
+        match self {
+            Plane::Equatorial => pole,
+            // Any normal perpendicular to the pole puts the pole in the orbital plane, which
+            // is what makes the orbit polar.
+            Plane::Polar => basis(pole).0,
+        }
+    }
+}
+
+/// Plan a crossing to where a waypoint will be when the ship arrives.
+///
+/// A fixed point needs one pass; anything that moves needs the arrival time, which depends on
+/// the distance, which depends on the arrival time. Iterated rather than solved: the map is a
+/// strong contraction and [`ARRIVAL_ROUNDS`] of it is exact to well under a body's radius.
+pub fn plan(
+    system: &LocalSystem,
+    waypoint: &Waypoint,
+    from_ly: DVec3,
+    start_s: f64,
+    drive: Drive,
+) -> Option<Cruise> {
+    let mut target = waypoint.place(system)?;
+    let mut cruise = Cruise::plan(from_ly, target, start_s, drive);
+    if matches!(waypoint, Waypoint::Fixed(_)) {
+        return Some(cruise);
+    }
+    for _ in 0..ARRIVAL_ROUNDS {
+        let arrival = system.propagated_to(start_s + cruise.duration_s());
+        let Some(next) = waypoint.place(&arrival) else { break };
+        if next == target {
+            break;
+        }
+        target = next;
+        cruise = Cruise::plan(from_ly, target, start_s, drive);
+    }
+    Some(cruise)
+}
+
+/// What a population is, from its shape alone.
+///
+/// A belt is flat and a cloud is not, and nothing else about a population distinguishes them.
+/// Used for naming one on screen; the Oort analogue is the only isotropic one a system has.
+pub fn is_flat(population: &Population) -> bool {
+    population.inclination.max_inclination() < 1.0
+}
+
+/// Hold the ship on its station.
+///
+/// Runs after the system has been propagated, because a station is a position in it. The ship's
+/// place is read from the waypoint rather than integrated, so a paused clock, a fast one and a
+/// dropped frame all leave it in the same place.
+///
+/// Velocity is left at zero. A body's orbital speed is of order `1e-4 c`, which is four
+/// magnitudes under anything the sky shows; carrying it would mean differentiating the waypoint
+/// every frame to display nothing.
+pub fn hold_station(mut game: bevy::prelude::ResMut<crate::app::Game>) {
+    if game.cruise.is_some() {
+        return;
+    }
+    let Some(station) = game.station.clone() else { return };
+    let Some(at) = game.system.as_ref().and_then(|s| station.place(s)) else { return };
+    game.0.place_at(at);
+}
+
+#[cfg(test)]
+mod tests {
+    use lc_world::sky::{AuthoredStars, StarProvider};
+
+    use super::*;
+
+    fn sol() -> LocalSystem {
+        let provider =
+            lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
+                .expect("the catalogue");
+        let sun = provider
+            .stars()
+            .iter()
+            .find(|s| s.name.as_deref() == Some("Sol"))
+            .expect("the Sun")
+            .clone();
+        let mut system = LocalSystem::for_star(&sun).expect("the solar system");
+        system.advance_to(0.0);
+        system
+    }
+
+    fn generated() -> LocalSystem {
+        let stars = AuthoredStars::sample();
+        LocalSystem::for_star(&stars.stars()[0]).expect("a generated system")
+    }
+
+    /// An altitude in radii is an altitude above the *surface*, which is the only reading of it
+    /// that means the same thing at Deimos and at Jupiter.
+    #[test]
+    fn an_orbit_sits_where_its_altitude_says() {
+        let system = sol();
+        let course =
+            Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
+        let waypoint = course.resolve(&system).expect("Earth has an orbit");
+        let at = waypoint.place(&system).expect("a position");
+        let earth = system.body_position_ly("Earth").expect("Earth");
+        let radius = at.distance(earth) * M_PER_LY;
+        let expected = 6.371e6 * 3.0;
+        assert!((radius / expected - 1.0).abs() < 0.02, "{radius:e} against {expected:e}");
+    }
+
+    /// A polar orbit puts the pole in the orbital plane; an equatorial one puts it normal to it.
+    /// Getting this backwards is invisible in a still and obvious in motion.
+    #[test]
+    fn a_polar_orbit_crosses_the_pole_and_an_equatorial_one_does_not() {
+        let system = sol();
+        let pole = system.body_pole(system.body_named("Earth").unwrap());
+        let of = |plane| {
+            let course = Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane };
+            let Waypoint::Orbit(orbit) = course.resolve(&system).unwrap() else { panic!() };
+            orbit.pole.dot(pole).abs()
+        };
+        assert!(of(Plane::Equatorial) > 0.999, "an equatorial normal is the pole");
+        assert!(of(Plane::Polar) < 1.0e-9, "a polar normal is perpendicular to it");
+    }
+
+    /// An orbit is circular, so every sample of it is the same distance out and they are not
+    /// all the same place. The second half is what catches a rate of zero.
+    #[test]
+    fn an_orbit_goes_round() {
+        let mut system = sol();
+        let course =
+            Course::Orbit { body: "Earth".into(), altitude_radii: 0.2, plane: Plane::Equatorial };
+        let waypoint = course.resolve(&system).unwrap();
+        let period = waypoint.period_s(&system).expect("a period");
+        // Low Earth orbit is about ninety minutes; at 1.2 radii it is a little longer.
+        assert!((5000.0..9000.0).contains(&period), "{period} seconds");
+
+        let mut seen = Vec::new();
+        for step in 0..4 {
+            system.advance_to(period * step as f64 / 4.0);
+            let at = waypoint.place(&system).unwrap();
+            let centre = system.body_position_ly("Earth").unwrap();
+            seen.push((at, at.distance(centre) * M_PER_LY));
+        }
+        let radius = seen[0].1;
+        for (_, r) in &seen {
+            assert!((r / radius - 1.0).abs() < 1e-9, "{r} against {radius}");
+        }
+        let quarter = seen[0].0.distance(seen[1].0) * M_PER_LY;
+        assert!(quarter > radius, "a quarter turn moves further than the radius is long");
+    }
+
+    /// L1 is sunward of the body and L2 is behind it, both at about the Hill radius. Earth's is
+    /// 1.5 million kilometres, which is a number people know.
+    #[test]
+    fn the_libration_points_straddle_the_body() {
+        let system = sol();
+        let earth = system.body_position_ly("Earth").unwrap();
+        let star = system.star_position_ly();
+        let at = |point| {
+            Waypoint::Lagrange { body: "Earth".into(), point }.place(&system).expect("a point")
+        };
+        let (l1, l2) = (at(LagrangePoint::L1), at(LagrangePoint::L2));
+        let out = (earth - star).normalize();
+        assert!((l1 - earth).dot(out) < 0.0, "L1 is on the sunward side");
+        assert!((l2 - earth).dot(out) > 0.0, "L2 is on the far side");
+        for point in [l1, l2] {
+            let hill = point.distance(earth) * M_PER_LY;
+            assert!((hill / 1.5e9 - 1.0).abs() < 0.1, "{hill:e} is not the Hill radius");
+        }
+    }
+
+    /// Aiming at where a body is rather than where it will be is the whole of the error here,
+    /// and it is not small: Earth runs a fiftieth of an astronomical unit during a crossing.
+    #[test]
+    fn a_crossing_leads_a_moving_target() {
+        let system = sol();
+        let course =
+            Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
+        let waypoint = course.resolve(&system).unwrap();
+        let from = system.body_position_ly("Mars").expect("Mars");
+        let cruise = plan(&system, &waypoint, from, 0.0, Drive::DEFAULT).expect("a crossing");
+
+        let arrival = system.propagated_to(cruise.duration_s());
+        let wanted = waypoint.place(&arrival).unwrap();
+        let landed = cruise.at(cruise.duration_s()).position_ly;
+        let miss = landed.distance(wanted) * M_PER_LY;
+        assert!(miss < 6.371e6, "missed by {miss:e} metres, more than a planetary radius");
+
+        // And the naive aim is far worse, which is why the rounds are there.
+        let naive = Cruise::plan(from, waypoint.place(&system).unwrap(), 0.0, Drive::DEFAULT);
+        let naive_miss = naive.at(naive.duration_s()).position_ly.distance(wanted) * M_PER_LY;
+        assert!(naive_miss > miss * 100.0, "{naive_miss:e} against {miss:e}");
+    }
+
+    /// Leaving goes along the system's axis, not along whatever direction the ship happened to
+    /// be facing, and it ends up outside the shell that makes a star a local object.
+    #[test]
+    fn leaving_the_system_goes_out_over_the_pole() {
+        let system = sol();
+        let Waypoint::Fixed(out) = Course::LeaveSystem.resolve(&system).unwrap() else {
+            panic!("leaving ends at a fixed point")
+        };
+        let offset = out - system.star_position_ly();
+        assert!(offset.normalize().dot(system.axis()) > 0.999, "not along the axis");
+        assert!(offset.length() > crate::starfield::LOCAL_SHELL_LY, "still inside the shell");
+    }
+
+    /// The ring course has to land between the two edges, or it draws a ring from inside the
+    /// planet or from outside the whole system.
+    #[test]
+    fn a_ring_course_lands_in_the_rings() {
+        let system = sol();
+        let Waypoint::Orbit(orbit) = Course::Rings("Saturn".into()).resolve(&system).unwrap()
+        else {
+            panic!("rings are an orbit")
+        };
+        let rings = lc_world::rings::for_body("Saturn").expect("Saturn has rings");
+        assert!(orbit.radius_m > rings.inner_m() && orbit.radius_m < rings.outer_m());
+        assert!(orbit.radius_m > 6.0e7, "and outside the planet");
+    }
+
+    #[test]
+    fn a_body_without_rings_or_a_parent_refuses_rather_than_guessing() {
+        let system = sol();
+        assert!(Course::Rings("Earth".into()).resolve(&system).is_none());
+        assert!(Course::Rings("Nowhere".into()).resolve(&system).is_none());
+        assert!(Course::Orbit { body: "Nowhere".into(), altitude_radii: 1.0, plane: Plane::Polar }
+            .resolve(&system)
+            .is_none());
+        // The primary is the one body with nothing to librate against.
+        let star = system.sim().name(system.primary()).to_string();
+        assert!(Course::Lagrange { body: star, point: LagrangePoint::L1 }.resolve(&system).is_none());
+    }
+
+    /// A generated system has no measured data in it at all, and every course still has to
+    /// resolve or refuse cleanly.
+    #[test]
+    fn a_generated_system_navigates_too() {
+        let system = generated();
+        assert!(Course::LeaveSystem.resolve(&system).is_some());
+        let belts = (0..system.populations.len())
+            .filter_map(|i| Course::Belt(i).resolve(&system))
+            .count();
+        assert_eq!(belts, system.populations.len(), "every population is somewhere to go");
+        let flat = system.populations.iter().filter(|p| is_flat(p)).count();
+        assert_eq!(flat, system.populations.len() - 1, "all but the cloud are flat");
+    }
+
+    #[test]
+    fn a_course_spelling_means_what_it_says() {
+        let system = sol();
+        assert_eq!(Course::parse("leave"), Some(Course::LeaveSystem));
+        assert_eq!(Course::parse("belt:1"), Some(Course::Belt(1)));
+        assert_eq!(Course::parse("rings:Saturn"), Some(Course::Rings("Saturn".into())));
+        assert!(matches!(
+            Course::parse("l2:Earth"),
+            Some(Course::Lagrange { point: LagrangePoint::L2, .. })
+        ));
+        let Some(Course::Orbit { plane, .. }) = Course::parse("polar:Earth") else {
+            panic!("polar is an orbit")
+        };
+        assert_eq!(plane, Plane::Polar);
+        assert_eq!(Course::parse("nonsense:Earth"), None);
+        let Some(Course::Orbit { altitude_radii, .. }) = Course::parse("orbit:Earth:distant")
+        else {
+            panic!("an altitude may be named")
+        };
+        assert_eq!(altitude_radii, 20.0);
+        assert_eq!(Course::parse("orbit:Earth:enormous"), None, "and only as the table names it");
+        assert!(Course::parse("belt:9").unwrap().resolve(&system).is_none(), "and out of range");
+    }
+
+    /// The whole of it, through the session rather than the pieces: ask for an orbit, fly, and
+    /// still be in that orbit afterwards. The hold is what the screenshots cannot show — a ship
+    /// parked at a point rather than following one drifts out of frame within the hour.
+    #[test]
+    fn a_course_is_flown_and_then_held() {
+        let mut session = crate::session::Session::new(
+            &lc_world::sky::hyg::HygProvider::load(
+                "../../assets/catalogs/hygdata_v42_dist_sort.csv",
+            )
+            .expect("the catalogue"),
+            64,
+        );
+        session.sync_system();
+        assert!(session.system.is_some(), "the ship starts inside the solar system");
+
+        let course =
+            Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
+        let label = session.set_course(&course).expect("a course to Earth");
+        assert_eq!(label, "orbit of Earth");
+        assert!(session.cruise.is_some(), "and a crossing to fly it");
+
+        // Fly. A tenth of a real second a step, which at the design rate is fifteen minutes.
+        let mut steps = 0;
+        while session.cruise.is_some() {
+            session.advance(0.1);
+            session.sync_system();
+            steps += 1;
+            assert!(steps < 10_000, "the crossing never ended");
+        }
+
+        // What `hold_station` does, without an engine to do it in.
+        let hold = |session: &mut crate::session::Session| {
+            let system = session.system.as_ref().expect("still in the system");
+            let at = session.station.as_ref().expect("a station").place(system).expect("a place");
+            session.place_at(at);
+        };
+        hold(&mut session);
+        let altitude = |session: &crate::session::Session| {
+            let earth = session.system.as_ref().unwrap().body_position_ly("Earth").unwrap();
+            session.position_ly.distance(earth) * M_PER_LY / 6.371e6
+        };
+        assert!((altitude(&session) - 3.0).abs() < 0.05, "arrived at {}", altitude(&session));
+
+        // And an hour later, with Earth thirty thousand kilometres further round its year.
+        for _ in 0..40 {
+            session.advance(0.1);
+            session.sync_system();
+            hold(&mut session);
+        }
+        assert!((altitude(&session) - 3.0).abs() < 0.05, "drifted to {}", altitude(&session));
+    }
+
+    /// The basis has to be orthonormal whatever it is handed, including a degenerate pole.    /// The basis has to be orthonormal whatever it is handed, including a degenerate pole.
+    #[test]
+    fn the_orbital_basis_is_orthonormal_everywhere() {
+        for pole in [DVec3::Z, DVec3::X, -DVec3::Z, DVec3::ZERO, DVec3::new(1.0, 1.0, 1.0)] {
+            let (u, v) = basis(pole);
+            assert!((u.length() - 1.0).abs() < 1e-12, "{pole} gave {u}");
+            assert!((v.length() - 1.0).abs() < 1e-12, "{pole} gave {v}");
+            assert!(u.dot(v).abs() < 1e-12, "{pole} gave a skew basis");
+        }
+    }
+}

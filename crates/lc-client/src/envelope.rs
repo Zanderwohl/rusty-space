@@ -341,13 +341,13 @@ pub fn update_envelopes(
     mut placed: Query<&mut Transform, (With<EnvelopeMesh>, Without<RingMesh>)>,
     mut ringed: Query<(&mut Transform, &RingMesh), Without<EnvelopeMesh>>,
 ) {
-    let here = bodies.system.as_ref().map(|s| s.star);
+    let here = session.system.as_ref().map(|s| s.star);
     if envelopes.star != here {
         for entity in &existing {
             commands.entity(entity).despawn();
         }
         envelopes.star = here;
-        envelopes.shells = match bodies.system.as_ref() {
+        envelopes.shells = match session.system.as_ref() {
             Some(system) => {
                 spawn_rings(&mut commands, &mut meshes, &mut materials, &bodies.drawn, ui.envelope_gain);
                 spawn(
@@ -364,7 +364,7 @@ pub fn update_envelopes(
         return;
     }
 
-    let Some(system) = bodies.system.as_ref() else { return };
+    let Some(system) = session.system.as_ref() else { return };
     for (mut transform, shell) in placed.iter_mut().zip(&envelopes.shells) {
         transform.translation =
             sim_to_render((system.origin_ly - session.position_ly) * M_PER_LY / UNIT_M).as_vec3();

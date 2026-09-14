@@ -54,6 +54,9 @@ pub struct DevEntry {
     /// Put the ship beside a body of the local system, by name. There is no action for this and
     /// there never will be; it exists so a thing too small to fly to can be looked at.
     pub at_body: Option<String>,
+    /// Put the ship straight onto a station, by [`crate::navigation::Course::parse`] spelling.
+    /// The same courses the interface offers, without the crossing in between.
+    pub station: Option<String>,
     pub screenshot: Option<String>,
     /// Frames to let the sky settle before the shutter. Pipelines compile lazily.
     pub after_frames: u32,
@@ -95,6 +98,7 @@ impl Plugin for ClientPlugin {
                     boot.run_if(in_state(AppState::Boot)),
                     photograph.run_if(in_state(AppState::InGame)),
                     place_at_body.run_if(in_state(AppState::InGame)),
+                    place_on_station.run_if(in_state(AppState::InGame)),
                     (read_keys, grab_cursor, look_around).chain().run_if(in_state(AppState::InGame)),
                     dispatch,
                     // The clock is deliberately not gated on any panel or overlay. See
@@ -111,6 +115,10 @@ impl Plugin for ClientPlugin {
                     aim_camera,
                     update_sky,
                     update_bodies,
+                    // After the system has been propagated, because a station is a position in
+                    // it. The sky was drawn from the previous frame's position, which at an
+                    // orbital speed of a few km/s is a hundred metres and far under a pixel.
+                    crate::navigation::hold_station,
                     // After the bodies, because it meters them; before the surfaces, because
                     // they are shaded against what it places.
                     crate::resolved::sample_scene,
@@ -136,13 +144,24 @@ impl Plugin for ClientPlugin {
 /// HDR with bloom is not decoration here: the tone map deliberately pushes anything above the
 /// displayed window past the knee, so overflow has to become a halo somewhere. `min_radius`
 /// keeps a faint star to a couple of pixels rather than letting bloom eat the field.
+/// Camera near plane, in render units of one astronomical unit. Fifteen metres.
+///
+/// Anything nearer than this is clipped, so it is the closest a ship can come to a surface.
+pub const NEAR_PLANE: f32 = 1.0e-10;
+
 fn spawn_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
         // A system spans a hundred thousand astronomical units and the render unit is one, so
         // the default thousand-unit far plane would clip everything past Saturn.
+        //
+        // The near plane is fifteen metres. It has to be, because a low orbit is a fraction of
+        // a planetary radius above the surface: at 1e-5 units the near plane stood a million
+        // and a half metres off, which is further than a low orbit of Earth, and the sphere
+        // was clipped away to nothing while its billboard still drew. Reversed float depth
+        // costs nothing for the range — precision is relative, not absolute.
         Projection::Perspective(PerspectiveProjection {
-            near: 1.0e-5,
+            near: NEAR_PLANE,
             far: 1.0e9,
             ..default()
         }),
@@ -185,6 +204,38 @@ fn hold_exposure(ui: Res<Ui>, mut game: ResMut<Game>, mut last: Local<f64>) {
 
 /// How far a crossing runs between re-exposures, as a fraction of it.
 const EXPOSURE_HOLD_STEP: f64 = 0.002;
+
+/// Put the ship on a station named by `--station`, without flying it there.
+///
+/// The crossing is what `--station` skips: a course to Neptune is two months of coordinate
+/// time, and a screenshot of a place should not have to wait for it.
+fn place_on_station(
+    dev: Res<DevEntry>,
+    mut game: ResMut<Game>,
+    mut ui: ResMut<Ui>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    let Some(spec) = &dev.station else { return };
+    let Some(course) = crate::navigation::Course::parse(spec) else {
+        ui.notify(format!("no such course: {spec}"), 0.0);
+        *done = true;
+        return;
+    };
+    let Some(system) = game.system.as_ref() else { return };
+    let Some(waypoint) = course.resolve(system) else { return };
+    let Some(at) = waypoint.place(system) else { return };
+    let label = waypoint.label();
+    if let Some(look) = waypoint.focus(system).and_then(|f| crate::ui::Look::aimed_at(f - at)) {
+        ui.look = look;
+    }
+    game.0.place_at(at);
+    game.0.station = Some(waypoint);
+    ui.notify(format!("on station: {label}"), game.coordinate_time_s());
+    *done = true;
+}
 
 /// One frame of boot, so the window is up before anything slow happens.
 fn boot(mut next: ResMut<NextState<AppState>>, mut ui: ResMut<Ui>, dev: Res<DevEntry>) {
@@ -231,7 +282,8 @@ fn place_at_body(
     // Far enough out that the body is a disc rather than a wall. Rings reach a couple of
     // planetary radii, so this has to clear them.
     let stand_off = body.radius_m * 12.0 / crate::system::M_PER_LY;
-    let from_star = (body.position_ly - bodies.system.as_ref().map(|s| s.origin_ly).unwrap_or_default())
+    let origin = game.system.as_ref().map(|s| s.origin_ly).unwrap_or_default();
+    let from_star = (body.position_ly - origin)
         .normalize_or_zero();
     // Off to the side and a little sunward, so the body shows a terminator. Straight out from
     // the star is the night side, which is a correct view of nothing.

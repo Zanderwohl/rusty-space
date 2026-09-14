@@ -34,17 +34,19 @@ pub enum Panel {
     Telescope,
     System,
     Flight,
+    Navigation,
     Tuning,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 7] = [
+    pub const ALL: [Panel; 8] = [
         Panel::Escape,
         Panel::Settings,
         Panel::Debug,
         Panel::Telescope,
         Panel::System,
         Panel::Flight,
+        Panel::Navigation,
         Panel::Tuning,
     ];
 
@@ -56,6 +58,7 @@ impl Panel {
             Panel::Telescope => "Telescope",
             Panel::System => "System",
             Panel::Flight => "Flight",
+            Panel::Navigation => "Navigation",
             Panel::Tuning => "Starfield tuning",
         }
     }
@@ -111,14 +114,25 @@ pub const NOTIFICATION_LIMIT: usize = 6;
 /// a minute. Labelled by period rather than by factor because a factor is not something anyone
 /// can feel, and these exist to be chosen by eye — a crossing to Proxima takes four and a half
 /// hours at 1x, four and a half minutes at 60x, and forty-five seconds at 360x.
-pub const RATE_LADDER: [(f64, &str); 6] = [
+/// The ladder, as multiples of [`crate::session::TIME_RATE`].
+///
+/// The bottom three rungs are what orbits need. The design rate is already 8766 times real
+/// time, which puts a low orbit's whole period inside a second: at that speed a ship in orbit
+/// is a strobe, and nothing about the view can be read. Each rung is about sixty times the one
+/// below, so the whole range from a spacewalk to a crossing is eight steps.
+pub const RATE_LADDER: [(f64, &str); 9] = [
     (0.0, "stopped"),
+    (REAL_TIME, "real time"),
+    (0.006_844, "1 minute / second"),
+    (0.410_678, "1 hour / second"),
     (1.0, "1 year / hour"),
     (6.0, "1 year / 10 min"),
     (60.0, "1 year / minute"),
     (360.0, "1 year / 10 s"),
     (3600.0, "1 year / second"),
 ];
+
+pub const REAL_TIME: f64 = 3600.0 / 31_557_600.0;
 
 /// The ladder's name for a rate, or the bare factor for one set from outside it.
 pub fn rate_label(rate: f64) -> String {

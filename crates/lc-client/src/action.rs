@@ -8,6 +8,7 @@
 use em_spectra::{Band, presets};
 use lc_world::sky::StarId;
 
+use crate::navigation::Course;
 use crate::session::Session;
 use crate::starfield::{PointStyle, Which};
 use crate::ui::{Look, MenuPage, Panel, UiState};
@@ -44,6 +45,8 @@ pub enum Action {
     /// Turn by a relative amount, radians.
     Look { yaw: f64, pitch: f64 },
     LookAtSelected,
+    /// Face whatever the station is about: the body below, or the star.
+    LookAtStation,
 
     // --- flight -----------------------------------------------------------------------
     /// Cross to a star. `None` means whatever is selected.
@@ -51,6 +54,10 @@ pub enum Action {
     /// Cross to the nearest star that is actually interstellar.
     FlyToNearest,
     AbortFlight,
+    /// Go somewhere in the local system, and hold there once arrived.
+    SetCourse(Course),
+    /// Cut the drive and give up the station.
+    HoldHere,
     /// Proper acceleration for the next crossing, in g.
     SetDriveAccel(f64),
 
@@ -159,6 +166,18 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             None => effects.push(Effect::Notify("nothing is selected to look at".into())),
         },
 
+        Action::LookAtStation => {
+            let at = session
+                .station
+                .as_ref()
+                .zip(session.system.as_ref())
+                .and_then(|(station, system)| station.focus(system));
+            match at.and_then(|at| Look::aimed_at(at - session.position_ly)) {
+                Some(look) => ui.look = look,
+                None => effects.push(Effect::Notify("not on a station".into())),
+            }
+        }
+
         Action::FlyTo(id) => fly(ui, session, id, &mut effects),
         Action::FlyToNearest => {
             apply_to(ui, session, Action::SelectNearest, &mut effects);
@@ -171,6 +190,22 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             if session.cruise.is_some() {
                 session.abort_flight();
                 effects.push(Effect::Notify("drive cut".into()));
+            }
+        }
+        Action::SetCourse(course) => {
+            let note = match session.set_course(&course) {
+                Some(label) => format!("course: {label}"),
+                // Not an error dialogue: the interface offers what the system has, so this is
+                // reachable only by a stale panel or a test.
+                None => "nothing there to go to".to_string(),
+            };
+            effects.push(Effect::Notify(note));
+        }
+        Action::HoldHere => {
+            let held = session.station.is_some() || session.cruise.is_some();
+            session.hold_here();
+            if held {
+                effects.push(Effect::Notify("holding here".into()));
             }
         }
         Action::SetDriveAccel(g) => {
@@ -667,5 +702,33 @@ mod tests {
             seen.push(ptr);
         }
         assert!(seen.len() >= 10, "only {} knobs reached", seen.len());
+    }
+
+    /// A course is a crossing and a standing order at once, and giving up the station has to
+    /// drop both. A ship that stopped flying but kept holding would be teleported back.
+    #[test]
+    fn a_course_sets_a_station_and_holding_gives_it_up() {
+        let mut ui = UiState::default();
+        let mut s = Session::new(&AuthoredStars::sample(), 3);
+        // The sample sky has no system to navigate, so the course has nowhere to go.
+        let refused = apply(Action::SetCourse(Course::LeaveSystem), &mut ui, &mut s);
+        assert_eq!(refused.len(), 1, "it says so rather than doing nothing");
+        assert!(s.station.is_none());
+
+        // Holding when nothing is held is silent: it is already true.
+        assert!(apply(Action::HoldHere, &mut ui, &mut s).is_empty());
+        s.fly_to(s.stars[0].id);
+        assert_eq!(apply(Action::HoldHere, &mut ui, &mut s).len(), 1);
+        assert!(s.cruise.is_none() && s.station.is_none());
+    }
+
+    /// Crossing to another star abandons the station: it was defined against bodies that will
+    /// be four light-years away.
+    #[test]
+    fn leaving_for_another_star_gives_up_the_station() {
+        let mut s = Session::new(&AuthoredStars::sample(), 3);
+        s.station = Some(crate::navigation::Waypoint::Fixed(glam::DVec3::X));
+        s.fly_to(s.stars[0].id);
+        assert!(s.station.is_none());
     }
 }

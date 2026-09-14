@@ -491,12 +491,13 @@ pub fn spawn_sky(
     commands.insert_resource(Starfield { origin_ly, distant, local, bodies });
 }
 
-/// The system the ship is inside, if it is inside one.
+/// This frame's view of the local system.
+///
+/// The system itself lives on the [`Session`], which is what a course is set against; this is
+/// only what the renderer made of it, kept so the envelope and surface passes can place rings
+/// and spheres without propagating anything a second time.
 #[derive(Resource, Default)]
 pub struct Bodies {
-    pub system: Option<crate::system::LocalSystem>,
-    /// This frame's bodies. Kept so the envelope pass can place rings on them without
-    /// propagating the system a second time.
     pub drawn: Vec<crate::system::Drawable>,
 }
 
@@ -506,24 +507,19 @@ pub struct Bodies {
 /// move: a body's whole reason to be drawn is that it is somewhere different from last frame.
 /// A few hundred bodies is a thousand vertices, which is nothing.
 pub fn update_bodies(
-    session: Res<crate::app::Game>,
+    mut session: ResMut<crate::app::Game>,
     mut bodies: ResMut<Bodies>,
     mut sky: ResMut<Starfield>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    let here = local_star(&session.0).map(|s| s.id);
-    if bodies.system.as_ref().map(|s| s.star) != here {
-        bodies.system = local_star(&session.0).and_then(crate::system::LocalSystem::for_star);
-    }
+    // Coordinate time, not retarded. Inside a system the delay is minutes to hours and moves a
+    // planet by far less than a pixel; between systems there is nothing to draw.
+    session.0.sync_system();
 
     let origin = sky.origin_ly;
-    let (drawn, teff) = match bodies.system.as_mut() {
-        Some(system) => {
-            // Coordinate time, not retarded. Inside a system the delay is minutes to hours and
-            // moves a planet by far less than a pixel; between systems there is nothing to draw.
-            system.advance_to(session.coordinate_time_s());
-            (system.drawables(session.position_ly), system.star_teff_k())
-        }
+    let at = session.position_ly;
+    let (drawn, teff) = match session.0.system.as_ref() {
+        Some(system) => (system.drawables(at), system.star_teff_k()),
         None => (Vec::new(), 0.0),
     };
     let points: Vec<Point> = drawn.iter().map(|d| Point::body(d, teff)).collect();

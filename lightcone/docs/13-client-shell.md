@@ -173,11 +173,12 @@ Omit the path for the three authored sample stars.
 | key | does |
 |---|---|
 | `Esc` | close the top panel, then the menu |
-| `T` `Y` `F` `F3` `F4` | telescope, system, flight, debug, starfield tuning |
+| `T` `Y` `F` `V` `F3` `F4` | telescope, system, flight, navigation, debug, starfield tuning |
 | arrows, right-drag | look |
 | | the cursor is pinned while the right button is held, and released on let go |
 | `L` | look at the selection |
 | `G` `X` | cross to the selection, cut the drive |
+| `H` | give up the station and drift |
 | `N` | target the nearest system |
 | `1`–`6` | band presets |
 | `[` `]` `\` | exposure down, up, auto |
@@ -202,12 +203,63 @@ fast clock never looks normal.
 | `--curve <n>` | which band the light curve measures |
 | `--tune` | open the starfield tuning panel |
 | `--frames <n>` | frames before the shutter |
+| `--at <body>` | stand off a named body of the local system |
+| `--station <course>` | put the ship straight on a station: `orbit:Earth`, `polar:Mars:high`, `rings:Saturn`, `l2:Earth`, `belt:0`, `leave` |
 
 These emit [`Action`]s rather than opening a second path into the client, so they can only do
 what the interface can do. `--shot` exists because WGSL cannot be asserted from a test and a
 window nobody is watching proves nothing; both images in
 [07-rendering.md](07-rendering.md) were taken with it. `--rate` without `--shot` is the screen
 recording setup.
+
+## Getting about inside a system
+
+![High orbit of Earth](../images/orbit.png)
+
+![In the asteroid belt](../images/belt-station.png)
+
+Five things a ship can be told to do — cross to a point, take up an orbit, sit at a libration
+point, drop into a belt or a ring, leave the system along its axis — are two mechanisms, not
+five. A **waypoint** says where to be at any coordinate time; the same crossing that goes
+between stars takes the ship there. Arriving is not the end of it: the ship then *holds* that
+waypoint, which is what makes an orbit an orbit rather than a point it drifts away from.
+
+A hold is read, never integrated. The waypoint is a closed form in the coordinate time, so a
+paused clock, a clock at a year a second and a dropped frame all leave the ship in the same
+place, and nothing accumulates.
+
+None of this is orbital mechanics, and the ship never transfers. It is a torch under five
+gravities: it points at where the destination will be and burns. What the simulated mechanics
+are for is the *destinations* — a real Hill radius for the libration points, a real ring plane
+out of the body's own pole, a belt at the radius that actually carries its light.
+
+Three things the shapes buy:
+
+- **An altitude is in radii above the surface**, not kilometres, so `low` means the same thing
+  at Deimos and at Jupiter — bodies four orders apart in size.
+- **A polar orbit is one whose normal is perpendicular to the body's pole**, and an equatorial
+  one has the pole for its normal. One line either way, and the same `Orbit` draws a ring
+  system by taking the ring plane instead.
+- **A crossing leads its target.** Flip-and-burn time goes as the square root of distance, so
+  aiming at where the body will be converges in three rounds. It matters: Earth runs a
+  fiftieth of an astronomical unit during a crossing from Mars, which is four thousand
+  planetary radii of miss.
+
+### The clock has to slow down for an orbit
+
+The design rate is already 8766 times real time, which puts a whole low orbit inside a second.
+The rate ladder therefore reaches below the design rate as well as above it — real time, a
+minute a second, an hour a second — and the navigation panel prints the orbital period next to
+the station and says so when the clock is outrunning it.
+
+### The near plane is fifteen metres
+
+A low orbit is a fraction of a planetary radius above the surface, and the render unit is an
+astronomical unit. The camera's near plane stood at a million and a half metres, which is
+further from Earth than a low orbit is: the sphere was clipped away entirely while its own
+billboard still drew, so a planet filling the sky rendered as a dot. Reversed float depth costs
+nothing for the range — its precision is relative — but the constant the star field writes is
+tied to it, because that has to stay under the smallest depth a real body produces.
 
 ## The light curve
 

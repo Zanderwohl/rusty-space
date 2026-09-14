@@ -285,7 +285,12 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // nothing else in the scene that never showed. The moment a planet wrote depth, the stars
     // came out in front of it. Not zero either -- the buffer is cleared to zero and the test
     // is a strict greater-than, so a star at exactly zero fails everywhere.
-    clip.z = clip.w * 1.0e-6;
+    //
+    // The value has to stay under the smallest a real body produces. Reversed depth is
+    // near/z, and the near plane is 1e-10 render units against an Oort cloud at 1e5, so the
+    // faintest real depth is of order 1e-15. Anything above that and the sky punches through
+    // the outer system.
+    clip.z = clip.w * 1.0e-20;
     // A star behind the camera must not wrap to the front.
     if (dir_view.z > 0.0) {
         clip = vec4<f32>(0.0, 0.0, 0.0, 0.0);

@@ -52,6 +52,7 @@ pub struct Drawable {
     pub equilibrium_k: f64,
 }
 
+#[derive(Clone)]
 pub struct LocalSystem {
     pub star: StarId,
     pub star_name: String,
@@ -187,6 +188,75 @@ impl LocalSystem {
                 })
             })
             .collect()
+    }
+
+    /// The propagated bodies, for anything that needs more than [`LocalSystem::drawables`].
+    pub fn sim(&self) -> &System {
+        &self.sim
+    }
+
+    /// The most massive body: the star everything here orbits.
+    pub fn primary(&self) -> BodyIndex {
+        self.primary
+    }
+
+    pub fn body_named(&self, name: &str) -> Option<BodyIndex> {
+        // By display name as well as by id, because the interface offers what `drawables` shows
+        // and that is the display name.
+        self.sim
+            .indices()
+            .find(|i| self.sim.info(*i).name.as_deref() == Some(name) || self.sim.name(*i) == name)
+    }
+
+    /// Where a named body is, light-years from the world origin.
+    pub fn body_position_ly(&self, name: &str) -> Option<DVec3> {
+        let index = self.body_named(name)?;
+        Some(self.origin_ly + self.sim.position(index) / M_PER_LY)
+    }
+
+    /// A body's spin axis, simulation axes. Ecliptic north where the data says nothing.
+    pub fn body_pole(&self, index: BodyIndex) -> DVec3 {
+        self.sim.rotation(index).and_then(pole_of).unwrap_or(DVec3::Z)
+    }
+
+    /// Coordinate seconds the system is currently propagated to.
+    pub fn time_s(&self) -> f64 {
+        self.sim.time().to_j2000_seconds()
+    }
+
+    /// A copy of this system propagated to another time.
+    ///
+    /// A copy because propagating is a mutation and the caller is usually asking about the
+    /// future while the present is still being drawn. Two hundred and thirty bodies of analytic
+    /// elements; only planning does this, never a frame.
+    pub fn propagated_to(&self, seconds: f64) -> Self {
+        let mut copy = self.clone();
+        copy.advance_to(seconds);
+        copy
+    }
+
+    /// The axis the system as a whole turns about: the primary's own pole.
+    pub fn axis(&self) -> DVec3 {
+        self.body_pole(self.primary)
+    }
+
+    /// How far out the system reaches, light-years.
+    ///
+    /// The outermost thing in it, which is the cloud if it has one and its furthest body
+    /// otherwise. What "leaving" has to clear.
+    pub fn reach_ly(&self) -> f64 {
+        let star_at = self.sim.position(self.primary);
+        let bodies = self
+            .sim
+            .indices()
+            .map(|i| (self.sim.position(i) - star_at).length())
+            .fold(0.0f64, f64::max);
+        let populations = self
+            .populations
+            .iter()
+            .map(|p| p.semi_major.nodes().iter().map(|(a, _)| *a).fold(0.0f64, f64::max))
+            .fold(0.0f64, f64::max);
+        (bodies.max(populations) / M_PER_LY).max(crate::starfield::LOCAL_SHELL_LY)
     }
 
     pub fn star_teff_k(&self) -> f64 {

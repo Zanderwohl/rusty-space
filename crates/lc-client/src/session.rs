@@ -109,6 +109,14 @@ pub struct Session {
     pub ship_clock_s: f64,
     /// [`Session::ship_clock_s`] when the current crossing began.
     cruise_clock_base_s: f64,
+    /// The system the ship is inside, propagated, or `None` between stars.
+    ///
+    /// Here rather than beside the renderer because a course is set against it: an orbit, a
+    /// libration point and a belt are all defined by bodies, and the action that chooses one
+    /// has to be able to see them.
+    pub system: Option<crate::system::LocalSystem>,
+    /// Where the ship holds once it arrives. Cleared by anything that flies it somewhere else.
+    pub station: Option<crate::navigation::Waypoint>,
     /// What the renderer is about to draw besides the stars. Metered, never drawn from.
     pub scene: Scene,
     targets: HashMap<StarId, Target>,
@@ -141,11 +149,35 @@ impl Session {
             ship_clock_s: 0.0,
             cruise_clock_base_s: 0.0,
             scene: Scene::default(),
+            system: None,
+            station: None,
             targets,
         };
         session.retune();
         session.auto_expose();
         session
+    }
+
+    /// The star whose system the ship is inside, if it is inside one.
+    pub fn local_star(&self) -> Option<&CatalogueStar> {
+        self.stars.iter().find(|s| self.distance_to(s) < crate::starfield::LOCAL_SHELL_LY)
+    }
+
+    /// Load or drop the local system, and propagate it to now.
+    ///
+    /// Loading is the expensive part — two hundred and thirty bodies parsed out of a preset —
+    /// so it happens only when the ship crosses into a different star's shell.
+    pub fn sync_system(&mut self) {
+        let here = self.local_star().map(|s| s.id);
+        if self.system.as_ref().map(|s| s.star) != here {
+            self.system = self.local_star().and_then(crate::system::LocalSystem::for_star);
+            // A station is defined against bodies that no longer exist.
+            self.station = None;
+        }
+        let now = self.coordinate_time_s();
+        if let Some(system) = self.system.as_mut() {
+            system.advance_to(now);
+        }
     }
 
     /// Point the band mapping at what the instrument can actually sense.
@@ -204,10 +236,38 @@ impl Session {
         let target = star.position_ly;
         let approach = (target - self.position_ly).normalize_or_zero();
         let stop = target - approach * STANDOFF_LY;
+        self.station = None;
         self.cruise =
             Some(Cruise::plan(self.position_ly, stop, self.coordinate_time_s(), self.drive));
         self.cruise_clock_base_s = self.ship_clock_s;
         self.cruise.as_ref()
+    }
+
+    /// Set a course inside the local system, and hold there on arrival.
+    ///
+    /// Returns what to call the destination, or `None` if the system has nothing answering to
+    /// it — a moon that is not there, rings on a body without any, a libration point of the
+    /// star itself.
+    pub fn set_course(&mut self, course: &crate::navigation::Course) -> Option<String> {
+        let from = self.position_ly;
+        let start = self.coordinate_time_s();
+        let drive = self.drive;
+        let system = self.system.as_ref()?;
+        let waypoint = course.resolve(system)?;
+        let cruise = crate::navigation::plan(system, &waypoint, from, start, drive)?;
+        let label = waypoint.label();
+        self.cruise = Some(cruise);
+        self.cruise_clock_base_s = self.ship_clock_s;
+        self.station = Some(waypoint);
+        Some(label)
+    }
+
+    /// Cut the drive and give up the station. Whatever the ship was holding against, it stops
+    /// holding: drifting is a place to be, and the only one that is nobody's idea.
+    pub fn hold_here(&mut self) {
+        self.cruise = None;
+        self.station = None;
+        self.beta = DVec3::ZERO;
     }
 
     /// Put the ship somewhere, cutting any crossing. Development only: there is no action for
