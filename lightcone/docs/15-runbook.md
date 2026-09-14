@@ -30,11 +30,15 @@ version from the lock file is how the two stay together.
 ## Shipping a game build
 
 ```bash
-tools/build-wasm.sh                   # stages target/web/<build-id>/
-tools/publish-build.sh                # uploads the most recent staged build
-tools/release.sh register <build-id>  # tells the site the build exists
-tools/release.sh promote <build-id>   # points a channel at it
+export RELEASE_TOKEN=...               # and LC_SITE if the site is not on localhost:3100
+tools/build-wasm.sh                    # stages target/web/<build-id>/
+tools/publish-build.sh                 # uploads the most recent staged build
+tools/release.sh register <build-id>   # tells the site the build exists
+tools/release.sh promote <build-id>    # points a channel at it
 ```
+
+During development, `tools/release.sh ship` does all four. It exists because you are the only
+player; do not reach for it once anyone else is.
 
 Four steps because three of them are reversible and one is not. Publishing is the irreversible
 one — a build id on the CDN is never overwritten — and promotion is the one that changes what
@@ -53,7 +57,12 @@ No deploy, no CDN purge, no restart. Old builds stay on the CDN precisely so thi
 command. `tools/release.sh list` shows what is available.
 
 If a build is actively harmful, `tools/release.sh yank <build-id>` marks it unpromotable
-without deleting it, so nobody re-promotes it by muscle memory.
+without deleting it, so nobody re-promotes it by muscle memory. The bytes stay on the CDN:
+anything already running against them keeps working, and deleting the evidence of a bad build
+helps nobody. `unyank` reverses it.
+
+Yanking the build a channel points at does not silently fall through to an older one —
+`/play` says there is nothing to play. Promotion is a deliberate act and so is undoing one.
 
 ---
 
@@ -107,7 +116,14 @@ behaviour is still exercised rather than accidentally bypassed.
 ssh -N -L 3100:localhost:3100 -L 3101:localhost:3101 zandy@rocinante.local
 ```
 
-Then open `http://localhost:3100`. Set `CDN_BASE=http://localhost:3101` if you want the assets
+Then open `http://localhost:3100`. **The tunnel holds those local ports**, so a local
+development server cannot also use 3100 — it will fail to bind, and every request will go to
+the deployed container while looking as though it went to the local one. Run a local server on
+a different port, or close the tunnel first:
+
+```bash
+lsof -nP -iTCP:3100 -sTCP:LISTEN     # says `ssh` when the tunnel has it
+``` Set `CDN_BASE=http://localhost:3101` if you want the assets
 through the tunnel too; either works, because an HTTP page may fetch HTTP subresources.
 
 No certificates, nothing to trust, nothing to expire.
@@ -171,7 +187,9 @@ Set `BASE_URL` and `CDN_BASE` to the `https://` origins in the same deploy.
 ## The database
 
 ```bash
+docker --context rocinante network create lightcone
 docker --context rocinante run -d --name lightcone-db --restart unless-stopped \
+    --network lightcone \
     -e POSTGRES_USER=lc_site -e POSTGRES_PASSWORD=<password> -e POSTGRES_DB=lc_site \
     -v lightcone-db-data:/var/lib/postgresql/data \
     -p 3102:5432 postgres:17-bookworm
@@ -179,6 +197,17 @@ docker --context rocinante run -d --name lightcone-db --restart unless-stopped \
 
 Its own database and its own role. The site's credentials must not reach `lc_game`: two
 readers of one schema is how a game migration starts breaking a marketing page.
+
+**The site reaches it by container name on the `lightcone` network**, not over the LAN —
+`postgres://lc_site@lightcone-db:5432/lc_site`. The published port is a development
+convenience for `psql` and nothing else.
+
+Connecting to it from a laptop has a trap worth knowing about. `rocinante.local` is mDNS, and
+mDNS answers with a **link-local IPv6 address first** (`fe80::…`), which needs a scope id that
+a connection string has nowhere to put. `psql` tries it, fails, and falls back to IPv4; sqlx
+does not, and reports `pool timed out while waiting for an open connection` — which reads like
+the database being slow or down rather than unreachable at that address. Use the IPv4 address
+for a laptop connection, or an SSH tunnel.
 
 Migrations run at startup, under a PostgreSQL advisory lock that sqlx takes for itself, so
 this stays correct with more than one replica.
@@ -217,5 +246,7 @@ nothing should ever compare them.
 | `/play` says "Build not found" | the promoted build id is not on the CDN. `tools/release.sh list`, then `publish-build.sh` |
 | the client starts and the sky is three stars | the sky chunk 404'd; the client says so and falls back to a sample |
 | thousands of requests for one asset | a wrong asset base. Bevy retries a failed load without bound |
-| a stylesheet change does not appear | the site build id did not move. Check `x-lightcone-build` against `git rev-parse --short HEAD` |
+| a stylesheet change does not appear | the asset version did not move, or the tunnel is serving you the deployed container |
+| `pool timed out while waiting for an open connection` | mDNS handed out a link-local IPv6. Use the IPv4 address |
+| the local server "starts" but serves old code | it failed to bind and something else has the port. `lsof -nP -iTCP:<port> -sTCP:LISTEN` |
 | the whole 27 MB downloads | no `.br`/`.gz` beside the file, or the connection is not secure so `br` was never asked for |
