@@ -1,0 +1,1025 @@
+//! What the client knows and is doing. No engine: the Bevy layer reads this.
+
+use std::collections::HashMap;
+
+use em_spectra::{Band, BandMapping, PerBand, blackbody, presets};
+use glam::{DVec3, Vec3};
+use lc_spacetime::{Coord, Micros, frame::SystemFrame, units::Span};
+use lc_world::instrument::Instrument;
+use lc_world::observation::{Observation, Target, observe};
+use lc_world::sky::{CatalogueStar, StarId, StarProvider, generate};
+
+use crate::curve::LightCurve;
+use crate::flight::{Cruise, Drive, Phase, STANDOFF_LY};
+use crate::tonemap::{Shaded, ToneMap};
+
+/// One in-game Julian year per real hour.
+pub const TIME_RATE: f64 = 31_557_600.0 / 3600.0;
+
+/// Light-microseconds per light-year, for putting the observer on the grid.
+const LUS_PER_LY: f64 = 1.0 / LY_PER_LUS;
+
+/// Light-years per light-microsecond, for reading catalogue positions onto the grid.
+const LY_PER_LUS: f64 = 299.792458 / 9.460_730_472_580_8e15;
+
+/// What the ship looks through.
+///
+/// Four square metres, every band, and cooled. Not [`Instrument::BASELINE`], which is a one
+/// metre silicon camera at room temperature: it cannot reach the thermal infrared at all, and
+/// its own 290 K housing glows straight into the band a swarm lives in. A ship that is a mind
+/// with no eyes builds the sensor it needs.
+pub const SHIP_SENSOR: Instrument = Instrument {
+    aperture_m2: 4.0,
+    throughput: 0.6,
+    bands: em_spectra::BandMask::ALL,
+    temperature_k: 45.0,
+    emissivity: 0.05,
+};
+
+/// How many nearby stars get a generated system and a full emission model.
+///
+/// The rest are drawn as bare blackbodies. Starlight is a function rather than an event
+/// stream, so a star with nothing around it costs one evaluation and needs no model at all.
+pub const MODELLED_STARS: usize = 12;
+
+/// A star as the renderer wants it.
+#[derive(Clone, Copy, Debug)]
+pub struct SkyStar {
+    pub id: StarId,
+    /// Where it is relative to the observer, light-years, ecliptic axes.
+    pub offset_ly: DVec3,
+    /// Unit vector to draw along: [`offset_ly`] aberrated into the ship's frame. Equal to the
+    /// true direction at rest, and swung toward the bow at speed.
+    ///
+    /// [`offset_ly`]: SkyStar::offset_ly
+    pub apparent_dir: DVec3,
+    pub shaded: Shaded,
+    /// Light travel time from it, in seconds. Everything drawn is this stale.
+    pub light_age_s: f64,
+    /// Observed over emitted frequency. Above 1 is a blueshift.
+    pub doppler: f64,
+}
+
+/// Solid angle of one pixel at ninety degrees across a 1080-line viewport, steradians.
+///
+/// Only a fallback for [`Scene::point_sr`] before a camera exists. It cancels out of a
+/// star-only metering — see [`Session::expose_to_percentile`] — so its value is arbitrary
+/// there; it matters only if bodies are metered without a camera, which the renderer never
+/// does.
+pub const NOMINAL_POINT_SR: f32 = 3.429_355e-6;
+
+/// One body drawn as a disc.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Disc {
+    /// Radiance of its lit surface, per band.
+    pub radiance: PerBand<f32>,
+    /// How much sky it covers, steradians. Its weight in the metering.
+    pub solid_angle_sr: f32,
+}
+
+/// What the exposure has to fit besides the star field.
+///
+/// Filled by the renderer, because which bodies are discs and how large they are drawn is a
+/// fact about the camera. Empty between systems, which is most of the time.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Scene {
+    /// Solid angle a point source is drawn at, steradians. Zero until a camera exists.
+    pub point_sr: f32,
+    /// Flux from each body still small enough to be drawn as a point, per band.
+    pub points: Vec<PerBand<f32>>,
+    pub discs: Vec<Disc>,
+}
+
+pub struct Session {
+    pub stars: Vec<CatalogueStar>,
+    pub observer: Coord,
+    pub telescope: Instrument,
+    pub mapping: BandMapping,
+    pub tone: ToneMap,
+    pub curve: LightCurve,
+    pub pointing: Option<StarId>,
+    /// Where the ship is, light-years from the world origin. The continuous truth;
+    /// [`Session::observer`] is this rounded onto the grid.
+    pub position_ly: DVec3,
+    /// Ship velocity as a fraction of `c`.
+    pub beta: DVec3,
+    pub drive: Drive,
+    pub cruise: Option<Cruise>,
+    /// Seconds on the ship's own clock. Runs behind coordinate time whenever it is moving.
+    pub ship_clock_s: f64,
+    /// [`Session::ship_clock_s`] when the current crossing began.
+    cruise_clock_base_s: f64,
+    /// The system the ship is inside, propagated, or `None` between stars.
+    ///
+    /// Here rather than beside the renderer because a course is set against it: an orbit, a
+    /// libration point and a belt are all defined by bodies, and the action that chooses one
+    /// has to be able to see them.
+    pub system: Option<crate::system::LocalSystem>,
+    /// Where the ship holds once it arrives. Cleared by anything that flies it somewhere else.
+    pub station: Option<crate::navigation::Waypoint>,
+    /// The ballistic arc the ship is on, when nothing is holding or pushing it.
+    pub coast: Option<crate::coast::Coast>,
+    /// What the renderer is about to draw besides the stars. Metered, never drawn from.
+    pub scene: Scene,
+    targets: HashMap<StarId, Target>,
+}
+
+impl Session {
+    /// Take the nearest stars to the origin and model a few of them.
+    pub fn new(provider: &dyn StarProvider, count: usize) -> Self {
+        let mut stars: Vec<CatalogueStar> = provider.stars().to_vec();
+        stars.sort_by(|a, b| a.position_ly.length().total_cmp(&b.position_ly.length()));
+        stars.truncate(count.max(1));
+
+        let mut targets = HashMap::new();
+        for star in stars.iter().take(MODELLED_STARS) {
+            targets.insert(star.id, build_target(star));
+        }
+
+        let mut session = Self {
+            stars,
+            observer: Coord::ORIGIN,
+            telescope: SHIP_SENSOR,
+            mapping: presets::natural(),
+            tone: ToneMap::default(),
+            curve: LightCurve::new(Band::V, 4000),
+            pointing: None,
+            position_ly: DVec3::ZERO,
+            beta: DVec3::ZERO,
+            drive: Drive::DEFAULT,
+            cruise: None,
+            ship_clock_s: 0.0,
+            cruise_clock_base_s: 0.0,
+            scene: Scene::default(),
+            system: None,
+            station: None,
+            coast: None,
+            targets,
+        };
+        session.retune();
+        session.auto_expose();
+        session
+    }
+
+    /// The star whose system the ship is inside, if it is inside one.
+    pub fn local_star(&self) -> Option<&CatalogueStar> {
+        self.stars.iter().find(|s| self.distance_to(s) < crate::starfield::LOCAL_SHELL_LY)
+    }
+
+    /// Load or drop the local system, and propagate it to now.
+    ///
+    /// Loading is the expensive part — two hundred and thirty bodies parsed out of a preset —
+    /// so it happens only when the ship crosses into a different star's shell.
+    pub fn sync_system(&mut self) {
+        let here = self.local_star().map(|s| s.id);
+        if self.system.as_ref().map(|s| s.star) != here {
+            self.system = self.local_star().and_then(crate::system::LocalSystem::for_star);
+            // A station and a conic are both defined against bodies that no longer exist.
+            self.station = None;
+            self.coast = None;
+        }
+        let now = self.coordinate_time_s();
+        if let Some(system) = self.system.as_mut() {
+            // Guarded: this runs once from the clock and once from the renderer, and
+            // propagating two hundred and thirty bodies twice a frame is pure waste.
+            if system.time_s() != now {
+                system.advance_to(now);
+            }
+        }
+    }
+
+    /// Point the band mapping at what the instrument can actually sense.
+    ///
+    /// A band the sensor cannot reach contributes nothing rather than reading as dark, which is
+    /// the distinction `BandMask` exists for. Without this the sky is drawn through seven bands
+    /// while the telescope reports four, and the two disagree about the same star.
+    pub fn retune(&mut self) {
+        self.mapping.available = self.telescope.bands;
+    }
+
+    /// Advance coordinate time by a span of real seconds, flying the ship along with it.
+    /// Advance coordinate time by a span of real seconds, flying the ship along with it.
+    ///
+    /// Three ways to be moving and they are exclusive. Under thrust the crossing says where the
+    /// ship is; on station the waypoint does; otherwise it is ballistic — a conic inside a
+    /// system and a straight line between them. All three are *read* at the new time rather
+    /// than integrated from the old one, so nothing drifts with the frame rate.
+    pub fn advance(&mut self, real_seconds: f64) {
+        let elapsed = real_seconds * TIME_RATE;
+        let micros = (elapsed * 1e6) as i64;
+        self.observer.t = self.observer.t + Span::new(micros);
+        let now = self.coordinate_time_s();
+        // Before anything is placed against it: a station and a conic are both positions in a
+        // system, and one propagated to last frame would put the ship a frame behind.
+        self.sync_system();
+
+        match &self.cruise {
+            Some(cruise) => {
+                let state = cruise.at(now);
+                self.position_ly = state.position_ly;
+                self.beta = state.beta;
+                // Read rather than integrated. Stepping `elapsed / gamma` uses one velocity
+                // for a whole interval the velocity changed across, which is wrong by first
+                // order everywhere and wrong by the entire last step at arrival, where the
+                // ship is already stopped. The crossing carries the closed form; use it.
+                self.ship_clock_s = self.cruise_clock_base_s + state.proper_s;
+                if state.phase == Phase::Arrived {
+                    self.cruise = None;
+                    self.beta = DVec3::ZERO;
+                }
+            }
+            None => {
+                self.ship_clock_s += elapsed;
+                self.drift(now, elapsed);
+            }
+        }
+        self.sync_observer();
+    }
+
+    /// Where an unpowered ship is: on its station, on its conic, or simply going.
+    fn drift(&mut self, now: f64, elapsed: f64) {
+        if let Some(station) = self.station.clone() {
+            if let Some(at) = self.system.as_ref().and_then(|s| station.place(s)) {
+                self.position_ly = at;
+            }
+            return;
+        }
+        if let Some(coast) = self.coast.clone() {
+            let Some(system) = self.system.as_ref() else {
+                // The system is gone, which means the ship has left it. Whatever the conic
+                // said, out here it is a straight line.
+                self.coast = None;
+                return;
+            };
+            if let Some((at, velocity)) = coast.at(system, now) {
+                self.position_ly = at;
+                self.beta = crate::coast::beta_of(velocity);
+                // Patched conics: the arc is exact only inside one sphere of influence.
+                if let Some(next) = coast.repatched(system, at, velocity, now) {
+                    self.coast = Some(next);
+                }
+            }
+            return;
+        }
+        // Nothing holding it and nothing to fall towards. A light-year is a year of travel at
+        // `c` by definition, so a beta is already light-years per year.
+        if self.beta != DVec3::ZERO {
+            self.position_ly += self.beta * elapsed / crate::flight::JULIAN_YEAR_S;
+        }
+    }
+
+    /// How fast the ship is going, metres a second, world frame.
+    pub fn velocity_m_s(&self) -> DVec3 {
+        if let Some(cruise) = &self.cruise {
+            return cruise.at(self.coordinate_time_s()).beta * crate::flight::C_M_S;
+        }
+        if let Some(station) = &self.station {
+            return self
+                .system
+                .as_ref()
+                .and_then(|s| station.velocity_at(s))
+                .unwrap_or(DVec3::ZERO);
+        }
+        self.beta * crate::flight::C_M_S
+    }
+
+    /// Cut the engine and keep going.
+    ///
+    /// Not a stop. The ship keeps the velocity it had, which inside a system means it is now on
+    /// whatever conic that velocity puts it on about whichever body holds it — a circular orbit
+    /// if it was holding one, something eccentric if it was halfway through a burn, an escape
+    /// if it was fast. Returns what it ended up on.
+    pub fn cancel(&mut self) -> Option<crate::coast::Coast> {
+        let velocity = self.velocity_m_s();
+        let now = self.coordinate_time_s();
+        self.cruise = None;
+        self.station = None;
+        self.beta = crate::coast::beta_of(velocity);
+        self.coast = self
+            .system
+            .as_ref()
+            .and_then(|s| crate::coast::Coast::from_state(s, self.position_ly, velocity, now));
+        self.coast.clone()
+    }
+
+    /// Put the continuous position back on the integer grid.
+    ///
+    /// Rounding is to the nearest light-microsecond, 300 metres. Retarded-time solving reads
+    /// the grid, so this is what the light delay is actually computed against.
+    fn sync_observer(&mut self) {
+        let grid = self.position_ly * LUS_PER_LY;
+        self.observer.x = grid.x as i64;
+        self.observer.y = grid.y as i64;
+        self.observer.z = grid.z as i64;
+    }
+
+    /// Begin a crossing to a star, stopping [`STANDOFF_LY`] short of it.
+    ///
+    /// The catalogue position is treated as fixed: nothing in this model has proper motion
+    /// yet, so aiming at where it is recorded and aiming at where it will be are the same.
+    pub fn fly_to(&mut self, id: StarId) -> Option<&Cruise> {
+        let star = self.star(id)?;
+        let target = star.position_ly;
+        let approach = (target - self.position_ly).normalize_or_zero();
+        let stop = target - approach * STANDOFF_LY;
+        self.station = None;
+        self.coast = None;
+        self.cruise =
+            Some(Cruise::plan(self.position_ly, stop, self.coordinate_time_s(), self.drive));
+        self.cruise_clock_base_s = self.ship_clock_s;
+        self.cruise.as_ref()
+    }
+
+    /// Set a course inside the local system, and hold there on arrival.
+    ///
+    /// Returns what to call the destination, or `None` if the system has nothing answering to
+    /// it — a moon that is not there, rings on a body without any, a libration point of the
+    /// star itself.
+    pub fn set_course(&mut self, course: &crate::navigation::Course) -> Option<String> {
+        let from = self.position_ly;
+        let start = self.coordinate_time_s();
+        let drive = self.drive;
+        let system = self.system.as_ref()?;
+        let waypoint = course.resolve(system, from)?;
+        // The planned waypoint, not the resolved one: planning is what decides where on an
+        // orbit the ship meets it.
+        let (cruise, aimed) = crate::navigation::plan(system, &waypoint, from, start, drive)?;
+        let label = aimed.label();
+        self.cruise = Some(cruise);
+        self.cruise_clock_base_s = self.ship_clock_s;
+        self.station = Some(aimed);
+        self.coast = None;
+        Some(label)
+    }
+
+
+    /// Put the ship somewhere, cutting any crossing. Development only: there is no action for
+    /// it and the server would never accept one.
+    pub fn place_at(&mut self, position_ly: DVec3) {
+        self.cruise = None;
+        self.coast = None;
+        self.beta = DVec3::ZERO;
+        self.position_ly = position_ly;
+        self.sync_observer();
+    }
+
+    /// Cut the drive where it is. Leaves the ship coasting at whatever it had reached.
+
+    /// Where a star is relative to the ship, light-years.
+    pub fn offset_to(&self, star: &CatalogueStar) -> DVec3 {
+        star.position_ly - self.position_ly
+    }
+
+    /// Distance to a star, light-years.
+    pub fn distance_to(&self, star: &CatalogueStar) -> f64 {
+        self.offset_to(star).length()
+    }
+
+    pub fn coordinate_time_s(&self) -> f64 {
+        self.observer.t.get() as f64 * 1e-6
+    }
+
+    pub fn target(&self, id: StarId) -> Option<&Target> {
+        self.targets.get(&id)
+    }
+
+    pub fn star(&self, id: StarId) -> Option<&CatalogueStar> {
+        self.stars.iter().find(|s| s.id == id)
+    }
+
+    /// Point the telescope, clearing whatever it was watching.
+    ///
+    /// Builds the target's emission model if this is the first time anything has looked at it.
+    /// [`MODELLED_STARS`] bounds what the *sky* evaluates every frame, which is a cost that
+    /// scales with the field; the telescope looks at one star, and there is no reason a player
+    /// should be unable to point it at the thirteenth-nearest.
+    pub fn point_at(&mut self, id: Option<StarId>) {
+        if self.pointing != id {
+            self.curve.clear();
+        }
+        self.pointing = id;
+        if let Some(id) = id {
+            if !self.targets.contains_key(&id) {
+                if let Some(star) = self.stars.iter().find(|s| s.id == id) {
+                    let target = build_target(star);
+                    self.targets.insert(id, target);
+                }
+            }
+        }
+    }
+
+    /// Take one measurement of whatever the telescope is on.
+    pub fn observe(&mut self, exposure_s: f64) -> Option<Observation> {
+        let target = self.targets.get(&self.pointing?)?;
+        let obs = observe(target, self.observer, &self.telescope, exposure_s, 0x10c)?;
+        self.curve.record(&obs);
+        Some(obs)
+    }
+
+    /// Observed over emitted frequency for one star, given the ship's velocity.
+    pub fn doppler_to(&self, star: &CatalogueStar) -> f64 {
+        let to_source = self.offset_to(star).normalize_or_zero();
+        if to_source == DVec3::ZERO || self.beta == DVec3::ZERO {
+            return 1.0;
+        }
+        lc_spacetime::doppler::doppler_factor(to_source, self.beta)
+    }
+
+    /// Band radiance arriving from one star, light delay and Doppler shift included.
+    pub fn radiance_from(&self, star: &CatalogueStar) -> PerBand<f32> {
+        let distance_m = self.distance_to(star) * M_PER_LY;
+        // A blackbody seen with Doppler factor D is exactly a blackbody at D times the
+        // temperature: B_nu/nu^3 is invariant and Planck's law depends only on nu/T. So the
+        // shift needs no separate beaming term — integrating the observer's own bands against
+        // the shifted temperature already carries the D^4 in the flux.
+        let teff = (star.star.teff_k * self.doppler_to(star)).max(1.0);
+        match self.targets.get(&star.id) {
+            // A modelled system is evaluated properly, light delay and all.
+            Some(target) => observe(target, self.observer, &full_spectrum(), 1.0, 0x5ee)
+                .map(|o| received(&o, teff, star.star.radius_m, distance_m))
+                .unwrap_or_default(),
+            // A bare star is a function of its own parameters and nothing else.
+            None => bare(teff, star.star.radius_m, distance_m),
+        }
+    }
+
+    /// Every star, shaded for the current band mapping and exposure, in the ship's frame.
+    pub fn sky(&self) -> Vec<SkyStar> {
+        self.stars
+            .iter()
+            .map(|s| {
+                let offset_ly = self.offset_to(s);
+                let true_dir = offset_ly.normalize_or_zero();
+                SkyStar {
+                    id: s.id,
+                    offset_ly,
+                    apparent_dir: if self.beta == DVec3::ZERO || true_dir == DVec3::ZERO {
+                        true_dir
+                    } else {
+                        lc_spacetime::doppler::apparent_source_direction(true_dir, self.beta)
+                    },
+                    shaded: self.tone.shade(&self.radiance_from(s), &self.mapping),
+                    light_age_s: offset_ly.length() * M_PER_LY / 299_792_458.0,
+                    doppler: self.doppler_to(s),
+                }
+            })
+            .collect()
+    }
+
+    /// Put the brightest thing in the sky at the top of the displayed window.
+    ///
+    /// There is no absolute reference to use instead. A star's band radiance at
+    /// interstellar range is of order 1e-10 in SI units, so any fixed reference is either
+    /// thirty stops high or thirty stops low, and the picture is black or white accordingly.
+    /// The window has to be placed by the scene, and it moves when the band mapping does —
+    /// the thermal preset reads a different band and therefore a different brightness.
+    pub fn auto_expose(&mut self) {
+        self.expose_to_percentile(0.98);
+    }
+
+    /// Place the window so that `fraction` of the drawn sky falls below the top of it.
+    ///
+    /// A percentile rather than the maximum, because one star can be arbitrarily closer than
+    /// the rest — the Sun is in the catalogue at about an astronomical unit — and exposing
+    /// for it puts everything else thirty stops under and renders a black sky. Letting the
+    /// brightest couple of percent clip is what a star map does anyway.
+    ///
+    /// The percentile is over *area*, not over count, which is what lets one pass meter a star
+    /// field and a planet together. Every source is reduced to the brightness it has per unit
+    /// of the sky it covers: a surface's own radiance, and for a point the flux it delivers
+    /// divided by the solid angle the renderer spreads it over. Weighting each by that same
+    /// solid angle makes the sum the power actually collected, so the rule reads as a light
+    /// meter does — expose so that `1 - fraction` of the frame clips.
+    ///
+    /// Points all carry the same weight, so a sky with no bodies in it meters exactly as a
+    /// count percentile over stars did, `point_sr` cancelling. A resolved planet does not: at
+    /// a couple of hundred pixels across it outweighs six thousand stars together and takes
+    /// the exposure with it, which is what a photograph of a planet looks like.
+    pub fn expose_to_percentile(&mut self, fraction: f32) {
+        let point_sr =
+            if self.scene.point_sr > 0.0 { self.scene.point_sr } else { NOMINAL_POINT_SR };
+        let mut samples: Vec<(f32, f32)> =
+            Vec::with_capacity(self.stars.len() + self.scene.points.len() + self.scene.discs.len());
+        let mut push = |brightness: f32, weight: f32| {
+            if brightness > 0.0 && brightness.is_finite() && weight > 0.0 {
+                samples.push((brightness, weight));
+            }
+        };
+        for star in &self.stars {
+            push(self.luminance_from(star) / point_sr, point_sr);
+        }
+        for flux in &self.scene.points {
+            push(luminance_of(flux, &self.mapping) / point_sr, point_sr);
+        }
+        for disc in &self.scene.discs {
+            // Floored at a point's weight: a body at the crossover is drawn at a pixel or two
+            // whatever its true angle, and metering it at less than that would let a
+            // just-resolved body count for nothing while being fully visible.
+            push(luminance_of(&disc.radiance, &self.mapping), disc.solid_angle_sr.max(point_sr));
+        }
+        if samples.is_empty() {
+            return;
+        }
+        samples.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let total: f32 = samples.iter().map(|(_, w)| w).sum();
+        let want = total * fraction.clamp(0.0, 1.0);
+        let mut below = 0.0;
+        let mut at = samples.len() - 1;
+        for (i, (_, weight)) in samples.iter().enumerate() {
+            below += weight;
+            if below >= want {
+                at = i;
+                break;
+            }
+        }
+        self.tone.surface_reference = samples[at].0;
+        self.tone.reference = samples[at].0 * point_sr;
+    }
+
+    /// Displayed luminance a star would contribute under the current mapping.
+    pub fn luminance_from(&self, star: &CatalogueStar) -> f32 {
+        luminance_of(&self.radiance_from(star), &self.mapping)
+    }
+}
+
+/// Rec. 709 luminance of a per-band radiance under a mapping.
+fn luminance_of(radiance: &PerBand<f32>, mapping: &BandMapping) -> f32 {
+    let rgb = mapping.apply(radiance);
+    rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722
+}
+
+/// An idealised instrument, for evaluating what leaves a system rather than what an
+/// instrument would record of it.
+fn full_spectrum() -> Instrument {
+    Instrument::BASELINE
+        .with_bands(em_spectra::BandMask::ALL)
+        .cooled_to(20.0)
+}
+
+/// Metres in a light-year.
+const M_PER_LY: f64 = 9.460_730_472_580_8e15;
+
+fn geometry(radius_m: f64, distance_m: f64) -> f64 {
+    std::f64::consts::PI * radius_m * radius_m / (distance_m * distance_m)
+}
+
+/// Band flux from a blackbody disc of `radius_m` seen from `distance_m`, W/m^2.
+///
+/// The whole of an unmodelled star's brightness, and — at the star's own temperature and a
+/// body's effective radius — the whole of a body's reflected brightness.
+pub fn bare(teff_k: f64, radius_m: f64, distance_m: f64) -> PerBand<f32> {
+    let g = geometry(radius_m, distance_m);
+    PerBand::new(std::array::from_fn(|i| {
+        (blackbody::band_radiance(Band::ALL[i], teff_k) * g) as f32
+    }))
+}
+
+/// The deficit is applied in the band it was measured in, which is only right at rest: under
+/// a large shift the observer's V band samples what left the system somewhere else entirely.
+/// Correcting it needs the emission model evaluated at shifted band centres, which the world
+/// crate does not expose yet.
+fn received(observation: &Observation, teff_k: f64, radius_m: f64, distance_m: f64) -> PerBand<f32> {
+    let g = geometry(radius_m, distance_m);
+    PerBand::new(std::array::from_fn(|i| {
+        let band = Band::ALL[i];
+        let full = blackbody::band_radiance(band, teff_k) * g;
+        // Relative flux, not one minus the deficit: a warm population adds where a cold one
+        // only subtracts, and in the thermal infrared the sum can exceed the bare star.
+        let relative = observation.band(band).map(|m| m.relative_flux()).unwrap_or(1.0);
+        (full * relative) as f32
+    }))
+}
+
+fn build_target(star: &CatalogueStar) -> Target {
+    let system = generate::system_for(star);
+    let mut model = lc_world::emission::EmissionModel::new(star.star, star.seed());
+    model.populations = system.populations;
+    for planet in &system.planets {
+        model.bodies.push(lc_world::emission::Body {
+            occluder: lc_world::occluder::Occluder::new(planet.radius_m),
+            motion: Box::new(lc_world::emission::CircularOrbit {
+                radius_m: planet.semi_major_m,
+                pole: DVec3::Z,
+                phase0: planet.mean_anomaly_deg.to_radians(),
+                mu: star.star.mu,
+            }),
+        });
+    }
+    let grid = star.position_ly / LY_PER_LUS / 9.460_730_472_580_8e15 * 299.792458;
+    let origin = Coord::new(
+        Micros::ORIGIN,
+        (star.position_ly.x / LY_PER_LUS) as i64,
+        (star.position_ly.y / LY_PER_LUS) as i64,
+        (star.position_ly.z / LY_PER_LUS) as i64,
+    )
+    .unwrap_or(Coord::ORIGIN);
+    let _ = grid;
+    Target::new(SystemFrame::new(origin), model)
+}
+
+/// Stops of brightness a star field spreads over, beyond the tone map's own window.
+pub const POINT_STOPS: f32 = 14.0;
+
+/// How large a star should be drawn: its brightness across [`POINT_STOPS`], plus any glow.
+pub fn point_size(shaded: &Shaded, base: f32) -> f32 {
+    base * (0.35 + shaded.point_brightness(POINT_STOPS) + shaded.glow.clamp(0.0, 12.0) * 0.3)
+}
+
+/// Colour for a star drawn as a point.
+pub fn point_colour(shaded: &Shaded) -> Vec3 {
+    shaded.point_colour(POINT_STOPS)
+}
+
+#[cfg(test)]
+mod tests {
+    use lc_world::sky::AuthoredStars;
+
+    use super::*;
+
+    fn session() -> Session {
+        Session::new(&AuthoredStars::sample(), 3)
+    }
+
+    #[test]
+    fn a_session_sorts_its_stars_by_distance_and_models_the_near_ones() {
+        let s = session();
+        assert_eq!(s.stars.len(), 3);
+        let d: Vec<f64> = s.stars.iter().map(|x| x.position_ly.length()).collect();
+        assert!(d.windows(2).all(|w| w[0] <= w[1]), "{d:?}");
+        assert!(s.target(s.stars[0].id).is_some());
+    }
+
+    #[test]
+    fn the_clock_runs_a_year_an_hour() {
+        let mut s = session();
+        s.advance(3600.0);
+        let years = s.coordinate_time_s() / 31_557_600.0;
+        assert!((years - 1.0).abs() < 1e-6, "an hour should be {years} years");
+    }
+
+    #[test]
+    fn every_star_in_the_sky_is_shaded_and_stale() {
+        let s = session();
+        let sky = s.sky();
+        assert_eq!(sky.len(), 3);
+        for star in &sky {
+            assert!(star.shaded.colour().is_finite());
+            assert!(star.light_age_s > 0.0, "everything drawn is old");
+            // Four light-years is about four years of staleness.
+            let years = star.light_age_s / 31_557_600.0;
+            assert!(years > 4.0 && years < 30.0, "{years} years");
+        }
+    }
+
+    /// The bug this exists for: the Sun sits in the catalogue about an astronomical unit
+    /// away, and exposing for the brightest star renders everything else black.
+    ///
+    /// Not an artifact — the Sun at one AU outshines a star four light-years off by some
+    /// thirty-six stops, which is why daylight hides the sky. What a percentile buys is that
+    /// the outlier clips instead of setting the scale for everyone.
+    #[test]
+    fn one_very_close_star_does_not_black_out_the_field() {
+        let template = AuthoredStars::sample().stars()[1].clone();
+        let mut stars = Vec::new();
+        for k in 0..200u64 {
+            let mut s = template.clone();
+            s.provenance.key = k;
+            s.id = lc_world::sky::StarId::synthesise("many", k);
+            let d = 4.0 + (k % 40) as f64;
+            s.position_ly = glam::DVec3::new(d, (k % 7) as f64, (k % 11) as f64).normalize() * d;
+            stars.push(s);
+        }
+        let mut sun = template.clone();
+        sun.provenance.key = 9999;
+        sun.id = lc_world::sky::StarId::synthesise("many", 9999);
+        sun.position_ly = glam::DVec3::new(1.6e-5, 0.0, 0.0); // roughly an AU
+        stars.insert(0, sun);
+
+        let s = Session::new(&AuthoredStars::new("many", stars), 201);
+        let visible = s.sky().iter().filter(|x| point_colour(&x.shaded).length() > 0.0).count();
+        assert!(visible > 150, "only {visible} of 201 stars survived the exposure");
+
+        // Exposing for the maximum instead is the failure: the field goes out.
+        let mut naive = Session::new(&AuthoredStars::new("many", s.stars.clone()), 201);
+        naive.expose_to_percentile(1.0);
+        let left = naive.sky().iter().filter(|x| point_colour(&x.shaded).length() > 0.0).count();
+        assert!(left < 5, "{left} stars should have survived exposing for the Sun");
+    }
+
+    /// A sky with nothing in it but stars must meter exactly as a count percentile did: every
+    /// point carries the same weight, so the solid angle divides out of both the samples and
+    /// the total. This is what lets the star field keep its tuning.
+    #[test]
+    fn a_sky_of_points_meters_by_count_whatever_a_pixel_subtends() {
+        let mut s = session();
+        s.scene.point_sr = NOMINAL_POINT_SR;
+        s.auto_expose();
+        let coarse = s.tone.reference;
+        s.scene.point_sr = NOMINAL_POINT_SR * 1000.0;
+        s.auto_expose();
+        assert_eq!(s.tone.reference, coarse, "a point reference cannot depend on the zoom");
+        assert!(
+            (s.tone.surface_reference * s.scene.point_sr / s.tone.reference - 1.0).abs() < 1e-5,
+            "and the two references are one metering, a solid angle apart",
+        );
+    }
+
+    /// The rule the area percentile buys: how much of the frame a body covers is what decides
+    /// whether it is the subject. Two per cent of the metered sky is the line, because that is
+    /// what `auto_expose` lets clip.
+    #[test]
+    fn a_body_takes_the_exposure_once_it_is_more_than_a_crowd_of_stars() {
+        let mut s = session();
+        let crowd = 200;
+        let faint = PerBand::splat(1.0e-12f32);
+        let bright = PerBand::splat(1.0e3f32);
+        let meter = |s: &mut Session, sr: f32| {
+            s.scene = Scene {
+                point_sr: NOMINAL_POINT_SR,
+                points: vec![faint; crowd],
+                discs: vec![Disc { radiance: bright, solid_angle_sr: sr }],
+            };
+            s.auto_expose();
+            s.tone.surface_reference
+        };
+        // The crossover: with `n` equal points, a disc outweighs the top two per cent of the
+        // frame at `n * (1 / 0.98 - 1)` of their area.
+        let edge = (crowd + s.stars.len()) as f32 * (1.0 / 0.98 - 1.0) * NOMINAL_POINT_SR;
+        let small = meter(&mut s, edge * 0.5);
+        let large = meter(&mut s, edge * 2.0);
+        assert!(small < bright[Band::V], "a body under the line leaves the field exposed");
+        assert!(large > small * 1.0e6, "and over it the body is what is exposed for");
+    }
+
+    /// Faint points are still points: a body that has not resolved yet is metered by the flux
+    /// it delivers, so it cannot take the exposure by being large.
+    #[test]
+    fn an_unresolved_body_is_metered_as_a_point() {
+        let mut s = session();
+        s.scene = Scene {
+            point_sr: NOMINAL_POINT_SR,
+            points: vec![PerBand::splat(1.0e3f32)],
+            discs: Vec::new(),
+        };
+        s.auto_expose();
+        let one_bright_point = s.tone.reference;
+        s.scene.points = vec![PerBand::splat(1.0e3f32); 3];
+        s.auto_expose();
+        assert!(s.tone.reference >= one_bright_point, "more bright points, not a brighter one");
+        assert!(s.tone.reference.is_finite() && s.tone.reference > 0.0);
+    }
+
+    #[test]
+    fn auto_exposure_puts_the_brightest_star_at_the_top_of_the_window() {
+        let s = session();
+        let sky = s.sky();
+        assert!(sky.iter().any(|x| x.shaded.colour().length() > 0.0), "something must be visible");
+        let brightest = sky
+            .iter()
+            .map(|x| x.shaded.colour().max_element())
+            .fold(0.0f32, f32::max);
+        assert!(brightest > 0.99, "the brightest should fill the window, got {brightest}");
+    }
+
+    /// The bug this exists for: a fixed reference of 1.0 is thirty stops above a star's
+    /// actual band radiance, and the whole sky renders black.
+    #[test]
+    fn a_fixed_reference_would_render_nothing() {
+        let mut s = session();
+        s.tone = ToneMap::default();
+        assert!(
+            s.sky().iter().all(|x| x.shaded.colour() == Vec3::ZERO),
+            "an unexposed scene is black, which is why auto_expose exists"
+        );
+        s.auto_expose();
+        assert!(s.sky().iter().any(|x| x.shaded.colour().length() > 0.0));
+    }
+
+    #[test]
+    fn pointing_somewhere_new_discards_the_old_curve() {
+        let mut s = session();
+        let (a, b) = (s.stars[0].id, s.stars[1].id);
+        s.point_at(Some(a));
+        s.observe(1e4);
+        assert!(!s.curve.is_empty());
+        s.point_at(Some(b));
+        assert!(s.curve.is_empty(), "a curve belongs to one target");
+    }
+
+    #[test]
+    fn observing_nothing_returns_nothing() {
+        let mut s = session();
+        s.point_at(None);
+        assert!(s.observe(1.0).is_none());
+    }
+
+    #[test]
+    fn a_modelled_system_accumulates_a_curve_over_time() {
+        let mut s = session();
+        s.telescope = s.telescope.with_aperture(1e4).with_bands(em_spectra::BandMask::ALL);
+        s.point_at(Some(s.stars[0].id));
+        for _ in 0..200 {
+            s.advance(6.0);
+            s.observe(1e3);
+        }
+        assert_eq!(s.curve.len(), 200);
+        let (first, last) = s.curve.span().unwrap();
+        assert!(last > first, "the curve should advance through emission time");
+    }
+
+    /// Enough real seconds to finish any crossing in the sample sky.
+    const LONG_ENOUGH: f64 = 40_000.0;
+
+    /// The sample provider puts every star on +X, which makes any test about direction
+    /// vacuously true. This spreads the same stars over three axes.
+    fn spread() -> Session {
+        let template = AuthoredStars::sample().stars()[0].clone();
+        let mut stars = Vec::new();
+        for (k, axis) in [DVec3::X, DVec3::Y, DVec3::Z].into_iter().enumerate() {
+            let mut star = template.clone();
+            star.provenance.key = k as u64;
+            star.id = lc_world::sky::StarId::synthesise("spread", k as u64);
+            star.position_ly = axis * 4.2;
+            stars.push(star);
+        }
+        Session::new(&AuthoredStars::new("spread", stars), 3)
+    }
+
+    #[test]
+    fn flying_to_a_star_arrives_at_the_standoff_and_stops() {
+        let mut s = session();
+        let id = s.stars[0].id;
+        let before = s.distance_to(s.star(id).unwrap());
+        s.fly_to(id);
+        s.advance(LONG_ENOUGH);
+        let after = s.distance_to(s.star(id).unwrap());
+        assert!(after < before, "{before} -> {after} ly");
+        assert!((after - STANDOFF_LY).abs() < 1e-6, "stopped {after} ly out, wanted {STANDOFF_LY}");
+        assert!(s.cruise.is_none(), "the crossing should have ended");
+        assert_eq!(s.beta, DVec3::ZERO, "and the ship should be at rest");
+    }
+
+    /// The grid is what retarded time is solved against, so it has to follow the ship.
+    #[test]
+    fn the_observer_coordinate_tracks_the_ship() {
+        let mut s = session();
+        assert_eq!((s.observer.x, s.observer.y, s.observer.z), (0, 0, 0));
+        s.fly_to(s.stars[0].id);
+        s.advance(LONG_ENOUGH);
+        let grid = DVec3::new(s.observer.x as f64, s.observer.y as f64, s.observer.z as f64);
+        let want = s.position_ly * LUS_PER_LY;
+        // One light-microsecond of rounding, on a number of order 1e14.
+        assert!((grid - want).max_element() < 2.0, "{grid:?} vs {want:?}");
+    }
+
+    /// Light from the destination gets younger as the ship closes on it. The whole premise.
+    #[test]
+    fn the_light_from_the_destination_gets_fresher() {
+        let mut s = session();
+        let id = s.stars[0].id;
+        let age = |s: &Session| s.sky().into_iter().find(|x| x.id == id).unwrap().light_age_s;
+        let before = age(&s);
+        s.fly_to(id);
+        s.advance(LONG_ENOUGH);
+        assert!(age(&s) < before / 100.0, "{} should be far under {before}", age(&s));
+    }
+
+    #[test]
+    fn flying_toward_a_star_blueshifts_it_and_one_abeam_shifts_less() {
+        let mut s = spread();
+        let (ahead, abeam) = (s.stars[0].id, s.stars[1].id);
+        s.fly_to(ahead);
+        s.advance(8_000.0);
+        assert!(s.beta.length() > 0.5, "should be moving fast, got {}", s.beta.length());
+        let (front, side) = (s.doppler_to(s.star(ahead).unwrap()), s.doppler_to(s.star(abeam).unwrap()));
+        assert!(front > 1.0, "the destination must blueshift, got {front}");
+        assert!(side < front, "a star abeam must shift less than one dead ahead: {side} vs {front}");
+    }
+
+    /// Pins the rule the shift is implemented by: a blackbody seen with Doppler factor D is
+    /// exactly a blackbody at D times the temperature.
+    ///
+    /// Checked in the radio band, where a star of a few thousand kelvin is deep in the
+    /// Rayleigh-Jeans tail and the radiance is therefore linear in temperature. So the band
+    /// must brighten by exactly D — not by D^4, which is the *bolometric* factor and would
+    /// only show up in an integral over all frequencies, not in one narrow window.
+    #[test]
+    fn a_shifted_blackbody_is_a_blackbody_at_the_shifted_temperature() {
+        let mut s = spread();
+        let id = s.stars[0].id;
+        let radio = |s: &Session| s.radiance_from(s.star(id).unwrap())[Band::Radio] as f64;
+        let at_rest = radio(&s);
+        let distance_before = s.distance_to(s.star(id).unwrap());
+
+        s.fly_to(id);
+        s.advance(8_000.0);
+        let d = s.doppler_to(s.star(id).unwrap());
+        assert!(d > 1.5, "want a real shift, got {d}");
+
+        // Closing the distance brightens it as well; divide that out first.
+        let closing = (distance_before / s.distance_to(s.star(id).unwrap())).powi(2);
+        let ratio = radio(&s) / (at_rest * closing);
+        assert!((ratio / d - 1.0).abs() < 1e-3, "radio band rose {ratio}x, wanted D = {d}");
+    }
+
+    /// The sky compresses toward the bow. At speed a star abeam appears ahead of abeam.
+    #[test]
+    fn the_sky_aberrates_forward() {
+        let mut s = spread();
+        let (ahead, other) = (s.stars[0].id, s.stars[1].id);
+        s.fly_to(ahead);
+        s.advance(8_000.0);
+        let bow = s.beta.normalize();
+        let star = s.sky().into_iter().find(|x| x.id == other).unwrap();
+        let true_angle = star.offset_ly.normalize().dot(bow).acos();
+        let seen_angle = star.apparent_dir.dot(bow).acos();
+        assert!(seen_angle < true_angle, "{seen_angle} should be inside {true_angle}");
+    }
+
+    #[test]
+    fn cutting_the_drive_keeps_the_velocity_it_had() {
+        let mut s = session();
+        s.fly_to(s.stars[0].id);
+        s.advance(8_000.0);
+        let at = s.position_ly;
+        let beta = s.beta;
+        assert!(beta.length() > 0.01, "the crossing should be up to speed");
+
+        s.cancel();
+        assert!(s.cruise.is_none() && s.station.is_none());
+        // Not exactly: the velocity goes out through metres a second and comes back, and a
+        // multiply by `c` followed by a divide by `c` is not the identity in binary.
+        assert!((s.beta - beta).length() < beta.length() * 1e-12, "cutting the engine is a brake");
+
+        // Between stars there is no conic to fall onto, so it is a straight line at the speed
+        // it had. A light-year is a year at `c`, so the distance is the beta times the years.
+        s.advance(8_000.0);
+        let gone = s.position_ly - at;
+        let expected = beta * (8_000.0 * TIME_RATE) / crate::flight::JULIAN_YEAR_S;
+        assert!(
+            (gone - expected).length() < expected.length() * 1e-9,
+            "{gone:?} against {expected:?}",
+        );
+    }
+
+    /// The bug this exists for: the ship clock was stepped as `elapsed / gamma` using the
+    /// velocity at the end of each step, so its reading depended on the frame rate, and the
+    /// final step -- taken after the ship had already stopped -- ran at full rate.
+    #[test]
+    fn the_ship_clock_does_not_depend_on_how_finely_time_is_stepped() {
+        // Exactly to arrival and no further: time spent coasting afterwards runs at the
+        // coordinate rate and would swamp what is being measured.
+        let crossing = |steps: usize| {
+            let mut s = session();
+            s.fly_to(s.stars[0].id);
+            let cruise = s.cruise.as_ref().unwrap();
+            let (want, real) = (cruise.proper_duration_s(), cruise.duration_s() / TIME_RATE);
+            for _ in 0..steps {
+                s.advance(real / steps as f64);
+            }
+            (s.ship_clock_s, want)
+        };
+        let (coarse, want) = crossing(4);
+        let (fine, _) = crossing(4000);
+        assert!((coarse - fine).abs() < 1.0, "{coarse} against {fine} seconds");
+        // And both must agree with the closed form, not merely with each other.
+        assert!((coarse - want).abs() / want < 1e-6, "{coarse} against {want}");
+    }
+
+    #[test]
+    fn a_second_crossing_carries_on_from_the_first() {
+        let mut s = spread();
+        s.fly_to(s.stars[0].id);
+        s.advance(LONG_ENOUGH);
+        let after_one = s.ship_clock_s;
+        assert!(after_one > 0.0);
+        s.fly_to(s.stars[1].id);
+        s.advance(LONG_ENOUGH);
+        assert!(s.ship_clock_s > after_one, "the clock must not restart at zero");
+    }
+
+    #[test]
+    fn a_ship_that_never_flies_keeps_the_coordinate_clock() {
+        let mut s = session();
+        s.advance(3600.0);
+        assert!((s.ship_clock_s - s.coordinate_time_s()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn flying_somewhere_that_is_not_in_the_sky_does_nothing() {
+        let mut s = session();
+        assert!(s.fly_to(lc_world::sky::StarId::synthesise("absent", 1)).is_none());
+        assert!(s.cruise.is_none());
+    }
+
+    #[test]
+    fn switching_the_band_mapping_changes_what_is_drawn() {
+        let mut s = session();
+        let natural: Vec<Vec3> = s.sky().iter().map(|x| x.shaded.colour()).collect();
+        s.mapping = presets::thermal();
+        // The window follows the mapping: a different band is a different brightness.
+        s.auto_expose();
+        let thermal: Vec<Vec3> = s.sky().iter().map(|x| x.shaded.colour()).collect();
+        assert_ne!(natural, thermal, "the preset must reach the picture");
+    }
+}

@@ -39,3 +39,13 @@ jobs:
         run: |
           cargo build -p em-foundations --no-default-features
           cargo build -p em-sim --no-default-features
+
+      # The other direction of the split: Lightcone is a separate product on the
+      # same shared crates, and Exotic Matters must never reach into it.
+      - name: Exotic Matters does not depend on Lightcone
+        run: |
+          if cargo tree -p exotic-matters | grep -qE '^[[:space:]]*lc-'; then
+            echo "exotic-matters depends on an lc- crate" >&2
+            cargo tree -p exotic-matters | grep -E '^[[:space:]]*lc-' >&2
+            exit 1
+          fi

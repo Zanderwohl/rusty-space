@@ -1,0 +1,23 @@
+[package]
+name = "em-plot"
+version = "0.1.0"
+edition = "2024"
+description = "Charts, curves and heat maps. Emits geometry and text placements; rasterises nothing."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[features]
+default = []
+# PNG output. Off by default so the library itself stays dependency-free.
+raster = ["dep:tiny-skia"]
+# The command-line plotter.
+cli = ["raster", "dep:csv"]
+
+[[bin]]
+name = "em-plot"
+path = "src/bin/em_plot.rs"
+required-features = ["cli"]
+
+[dependencies]
+tiny-skia = { version = "0.11", optional = true }
+csv = { version = "1", optional = true }

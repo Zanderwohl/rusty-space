@@ -1,0 +1,10 @@
+[package]
+name = "em-spectra"
+version = "0.1.0"
+edition = "2024"
+description = "Bands, blackbody radiation, extinction, colour and band-to-display mapping. No engine, no ECS, no rendering."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[dependencies]
+serde = { version = "1.0.215", features = ["derive"] }

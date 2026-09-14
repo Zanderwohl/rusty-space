@@ -49,6 +49,10 @@ pub struct BodyDef {
 }
 
 /// The simulation arena.
+///
+/// `Clone` because propagating is a mutation: a caller asking where a body *will be* while the
+/// present is still being read needs a copy to advance. Plain columns, so a copy is a memcpy.
+#[derive(Clone)]
 pub struct System {
     // --- identity ---
     ids: Vec<BodyId>,

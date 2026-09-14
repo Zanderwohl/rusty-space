@@ -1,0 +1,27 @@
+[package]
+name = "lc-world"
+version = "0.1.0"
+edition = "2024"
+description = "Game world model: populations, stellar photometry and occultation. Engine-agnostic."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[dependencies]
+em-foundations = { path = "../em-foundations" }
+em-spectra = { path = "../em-spectra" }
+lc-spacetime = { path = "../lc-spacetime" }
+# No default features: em-sim pulls in bevy_ecs behind its `bevy` feature and the server
+# must not link an engine.
+em-sim = { path = "../em-sim", default-features = false }
+glam = { version = "0.30", features = ["serde"] }
+serde = { version = "1.0.215", features = ["derive"] }
+csv = { version = "1", optional = true }
+
+[features]
+default = ["hyg"]
+# The HYG importer, and the CSV reader it needs. Off for a world built from an authored
+# galaxy, which is what the shipped game uses.
+hyg = ["dep:csv"]
+
+[dev-dependencies]
+serde_json = "1"

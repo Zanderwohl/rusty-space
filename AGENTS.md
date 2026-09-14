@@ -1,0 +1,107 @@
+# Working in this repository
+
+Read [CLAUDE.md](CLAUDE.md) first — layout, conventions, the comment policy and the file-size
+cap live there and are not repeated here. This file is the rest: how to check your work, and
+the things that have already cost someone a day.
+
+Design documents are the readable form of the argument and are kept current:
+`lightcone/docs/` for the game, `docs/` for Exotic Matters. Read the one for the area you are
+touching before changing it, and update it when the answer changes.
+
+## Housekeeping
+
+- **`cargo clean` when you finish.** `target/` reaches **70 GB** in this workspace. Nothing
+  warns you.
+- **Never `--release`.** Dependencies are already `opt-level = 3` in the dev profile; a release
+  build costs many minutes of link time for a speedup you will not notice.
+- **Commit promptly.** Worktrees get recycled and uncommitted work is gone for good.
+
+## Two invariants, both enforced by CI
+
+```bash
+cargo tree -p em-foundations | grep -i bevy     # must be empty
+cargo tree -p exotic-matters | grep -E '^\s*lc-' # must be empty
+```
+
+`em-foundations` is engine-free. Exotic Matters and Lightcone are two products on the same
+shared crates (`em-*`); Lightcone's own crates (`lc-*`) may never be reached from the app.
+
+## Checking your work
+
+`python3 tools/api_surface.py crates/<name>` prints a crate's public surface and its line
+counts. Run it at the end of a piece of work; the printout is the review artifact.
+
+**WGSL cannot be asserted from a test, and a window nobody is watching proves nothing.** The
+client photographs itself through the real pipeline:
+
+```bash
+cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
+    --station rings:Saturn --panel system --rate 0 --shot /tmp/shot.png --frames 90
+```
+
+| flag | for |
+|---|---|
+| `--shot <path> --frames <n>` | photograph and quit |
+| `--burst <n>` | photograph `n` **consecutive** frames — the only way to see a flicker |
+| `--at <body>` / `--station <course>` | stand off a body, or start on a station |
+| `--panel <name>` / `--tune` | open a panel |
+| `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable |
+
+Most of what has gone wrong in the renderer was found this way and could not have been found
+any other way.
+
+The store's tests need PostgreSQL (`createdb lc_store`; `LC_STORE_URL` overrides). They
+**skip** when they cannot reach one — keep it that way, so the suite passes without it.
+
+## Traps
+
+Each of these cost real time. None of them are visible from the code that hits them.
+
+**Rendering**
+
+- Depth is **reversed**. `clip.z = clip.w` is the *near* plane. Background geometry wants a
+  tiny positive value, not zero — the buffer clears to zero and the test is strictly greater.
+- `AlphaMode::Add` is *premultiplied*: `src + dst*(1-alpha)`. For pure additive the fragment
+  must return **alpha 0**, or it overwrites and two coplanar meshes flicker on sort order.
+- Render positions are f32 relative to the camera: about **six metres** at a hundred thousand
+  kilometres. Never place the camera on a surface — an infinitely thin sheet containing the
+  camera swings wildly from frame to frame.
+- Two runs stopped at frame `n` and frame `n+1` are **not** consecutive frames. They have
+  accumulated different wall time. Use `--burst`.
+
+**`em-sim` and `em-foundations`**
+
+- Derived columns — `parent`, `position`, `mu` — are empty until the first propagation.
+  Reading them straight after `System::from_contents` gives zeros and no hierarchy.
+- `System::mu(i)` is the `mu` of the orbit body `i` is *on*, i.e. `G(M_parent + M_i)`. To orbit
+  *around* `i`, use `gravitational_constant() * mass(i)`.
+- `Instant::to_j2000_seconds()`, not `seconds_since_j2000()`.
+
+**egui**
+
+- The default font has no U+2715 `✕` — it renders as a tofu box. U+00D7 `×` is fine.
+- `add_enabled` wrapping a `SelectableLabel` reports clicks nobody made. A plain
+  `selectable_label` does not.
+
+**PostgreSQL**
+
+- `numeric ^ 2` is exact but goes through `numeric_power`, which picks a display scale: `-1`
+  comes back as `-1.0000000000000000`. Multiply instead — scale zero, and cheaper.
+- Migrations need a **session advisory lock**. Without one, two processes both find the step
+  table missing, both create it, and one dies on a duplicate key in `pg_type`.
+- An index-only scan still checks the heap for every row until a **vacuum** marks pages
+  all-visible, and the planner correctly prices it as no better than a bitmap scan until then.
+  A plan that should be index-only and is not usually means no vacuum has run.
+- `tokio-postgres` has no `jsonb` conversion for a Rust string. Send `text[]` and cast in the
+  statement.
+
+## When a test disagrees with the code
+
+Assume the test premise is wrong about as often as the code is — most of the disagreements in
+this repository so far have been the assertion, not the implementation. Numbers written from
+memory (an orbital period, a threshold, a formula) are the usual culprit.
+
+The exception is worth knowing: if you write a brute-force reference to check a fast path,
+**derive it independently**. A reference written from the same mistaken idea as the thing it
+checks will agree with it and prove nothing. One here did not agree only because the two
+filtered their results differently, which is luck.

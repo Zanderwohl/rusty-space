@@ -1,0 +1,16 @@
+[package]
+name = "lc-store"
+version = "0.1.0"
+edition = "2024"
+description = "The Lightcone event store: schema, causality and the light-cone cursor."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[dependencies]
+lc-spacetime = { path = "../lc-spacetime" }
+glam = "0.30"
+tokio-postgres = "0.7"
+tokio = { version = "1", features = ["rt"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
