@@ -11,6 +11,12 @@
 {
 	email {$ACME_EMAIL}
 
+	# Let's Encrypt's rate limit is 50 certificates per registered domain per week, and a
+	# misconfiguration that retries will spend them. Point this at the staging endpoint while
+	# getting the DNS credentials right; staging issues an untrusted certificate, which is
+	# exactly enough to prove the challenge worked, and costs nothing.
+	acme_ca {$ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
+
 	acme_dns namecheap {
 		user {$NAMECHEAP_USER}
 		api_key {$NAMECHEAP_API_KEY}

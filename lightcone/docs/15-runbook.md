@@ -6,11 +6,44 @@ is shaped this way; this is the sequence of commands.
 Everything runs on **`rocinante`**, a docker context over SSH to a home-lab machine that is
 natively `linux/amd64`. Ports 3000–3999 are this project's; 3000 belongs to another project.
 
-| | port | what |
+| container | port | what |
 |---|---|---|
+| `lightcone-proxy` | 80, 443 | TLS, and the only thing that should be reached from a browser |
 | `lightcone-web` | 3100 | the site |
 | `lightcone-cdn` | 3101 | game builds |
 | `lightcone-db` | 3102 | the site's PostgreSQL |
+
+They share a docker network called `lightcone` and address each other by container name. The
+published ports are for debugging; the addresses that matter are:
+
+| | |
+|---|---|
+| https://lc.zanderlowry.com | the site, the blog, `/play` |
+| https://cdn.lc.zanderlowry.com | game builds |
+
+Both resolve to `10.37.1.100` in public DNS and are reachable only from the LAN. The
+certificate is real; see [TLS](#tls).
+
+## Secrets
+
+Three, none of which belong in this repository or in a shell history.
+
+| | where it lives | used by |
+|---|---|---|
+| Namecheap API key | `~/.config/lightcone/proxy.env` on rocinante, mode 600 | the proxy, at certificate renewal |
+| `RELEASE_TOKEN` | the same file, and your shell when running `tools/release.sh` | promoting builds |
+| PostgreSQL password | the same file | the site |
+
+To set one without it reaching your history or the screen:
+
+```bash
+read -rs -p 'value: ' v && sed -i "s|^NAME=.*|NAME=$v|" ~/.config/lightcone/proxy.env && unset v
+```
+
+Containers read it with `--env-file`. **That flag is resolved by whichever docker CLI you
+invoke**, so a `docker --context rocinante run --env-file ~/...` from a laptop looks for the
+file on the laptop and fails. Run those commands over `ssh` instead, which also keeps the
+secret on the host that needs it.
 
 ## Prerequisites
 
@@ -56,6 +89,19 @@ tools/release.sh promote <older-build-id>
 No deploy, no CDN purge, no restart. Old builds stay on the CDN precisely so this is one
 command. `tools/release.sh list` shows what is available.
 
+### Moving builds to a different CDN
+
+Each release row carries its own `cdn_base`, so a build can move without a code change or a
+deploy. Re-register it against the new one:
+
+```bash
+LC_CDN=https://cdn.lc.zanderlowry.com tools/release.sh register <build-id>
+```
+
+`CDN_BASE` on the site is only the default for builds served from the fallback path. Changing
+that environment variable does **not** move builds already registered, which is the intended
+behaviour and reliably surprising the first time.
+
 If a build is actively harmful, `tools/release.sh yank <build-id>` marks it unpromotable
 without deleting it, so nobody re-promotes it by muscle memory. The bytes stay on the CDN:
 anything already running against them keeps working, and deleting the evidence of a bad build
@@ -98,6 +144,10 @@ To roll back, run the same command with an older tag. The image holds its own co
 
 ## TLS
 
+Running today: real Let's Encrypt certificates for `lc.zanderlowry.com` and
+`*.lc.zanderlowry.com`, issued over DNS-01, renewing automatically, on a machine with no
+inbound connectivity. The sections below are how it got there and how to rebuild it.
+
 **The site and the CDN need certificates on the same day.** Mixed-content rules forbid an
 HTTPS page fetching an HTTP subresource, so moving one without the other breaks `/play`
 entirely. They are one change.
@@ -108,7 +158,9 @@ HTTP `navigator.gpu` does not exist, so `/play` cannot run at all, however good 
 
 ### Development: an SSH tunnel
 
-The cheapest correct answer, and what to use until there is a domain. Both services become
+**Superseded** by the Let's Encrypt setup below, which is what is running. Kept because it
+needs no DNS, no credentials and no certificates, so it is the fallback whenever the proxy is
+being changed or the certificate has expired. Both services become
 `localhost`, which is a secure context, and they stay on different ports, so cross-origin
 behaviour is still exercised rather than accidentally bypassed.
 
@@ -203,20 +255,42 @@ a row per service. Explicit records always work, so start there.
 
 #### 3. Run it
 
+Credentials live in `~/.config/lightcone/proxy.env` **on rocinante**:
+
+```
+LC_DOMAIN=lc.zanderlowry.com
+NAMECHEAP_CLIENT_IP=108.242.43.159
+ACME_CA=https://acme-v02.api.letsencrypt.org/directory
+ACME_EMAIL=...
+NAMECHEAP_USER=...
+NAMECHEAP_API_KEY=...
+```
+
 ```bash
 docker --context rocinante build -t lightcone-proxy:latest tools/proxy
-docker --context rocinante volume create lightcone-proxy-data
 
-docker --context rocinante run -d --name lightcone-proxy --restart unless-stopped \
+# Over ssh, because --env-file is read by the CLI you invoke and that file is on rocinante.
+ssh zandy@rocinante.local '
+docker volume create lightcone-proxy-data
+docker rm -f lightcone-proxy
+docker run -d --name lightcone-proxy --restart unless-stopped \
     --network lightcone -p 80:80 -p 443:443 \
     -v lightcone-proxy-data:/data \
-    -e LC_DOMAIN=lc.<domain> \
-    -e ACME_EMAIL=<you@example.com> \
-    -e NAMECHEAP_USER=<namecheap username> \
-    -e NAMECHEAP_API_KEY=<api key> \
-    -e NAMECHEAP_CLIENT_IP=108.242.43.159 \
-    lightcone-proxy:latest
+    --env-file ~/.config/lightcone/proxy.env \
+    lightcone-proxy:latest'
 ```
+
+Watch the challenge:
+
+```bash
+docker --context rocinante logs -f lightcone-proxy 2>&1 | grep -i 'challenge\|obtained\|error'
+```
+
+**Get a staging certificate first.** `ACME_CA` is pre-set to Let's Encrypt's staging endpoint
+in the template above for that reason: it proves the DNS credentials work without spending a
+real issuance, and a wrong `NAMECHEAP_CLIENT_IP` will otherwise burn several in a retry loop.
+Once staging says `certificate obtained successfully` for both names, point `ACME_CA` at
+production and restart. The production certificate issues in seconds.
 
 **The `/data` volume is not optional.** Caddy keeps issued certificates there, and without it
 every container restart asks Let's Encrypt for a new one. The rate limit is 50 certificates
@@ -233,7 +307,30 @@ build absolute URLs from them:
 -e CDN_BASE=https://cdn.lc.<domain>
 ```
 
-#### 4. What changes the moment it works
+#### 4. Point the site and the CDN at the new names
+
+Three things, and the first two are one deploy:
+
+```bash
+-e BASE_URL=https://lc.zanderlowry.com        # feeds and the sitemap build absolute URLs
+-e CDN_BASE=https://cdn.lc.zanderlowry.com    # the default for the fallback path
+```
+
+```bash
+-e CDN_ALLOW_ORIGIN=https://lc.zanderlowry.com   # on lightcone-cdn; `*` was a dev convenience
+```
+
+And re-register every build, because a release row carries its own `cdn_base` and an
+environment variable does not reach it:
+
+```bash
+LC_CDN=https://cdn.lc.zanderlowry.com tools/release.sh register <build-id>
+```
+
+Miss the last one and `/play` reports "Build not found" while pointing at an `http://` URL —
+which is the mixed-content rule doing its job, and reads like the CDN being down.
+
+#### 5. What changes the moment it works
 
 - **`/play` runs without a tunnel**, from any device on the network, because a secure context
   is what WebGPU requires.
@@ -343,4 +440,7 @@ nothing should ever compare them.
 | a stylesheet change does not appear | the asset version did not move, or the tunnel is serving you the deployed container |
 | `pool timed out while waiting for an open connection` | mDNS handed out a link-local IPv6. Use the IPv4 address |
 | the local server "starts" but serves old code | it failed to bind and something else has the port. `lsof -nP -iTCP:<port> -sTCP:LISTEN` |
+| `pull access denied for lightcone-web` | the image tag for that commit was never built. Build and run in one sequence, not two |
+| `/play` says "Build not found" over HTTPS | the release row still carries an `http://` `cdn_base`. Re-register it |
+| certificate renewal fails silently | the Namecheap allowlist no longer has this network's public IP. It changes when the ISP reassigns |
 | the whole 27 MB downloads | no `.br`/`.gz` beside the file, or the connection is not secure so `br` was never asked for |
