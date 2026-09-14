@@ -179,6 +179,22 @@ impl Waypoint {
         }
     }
 
+    /// How fast the station is moving, metres a second, world frame.
+    ///
+    /// Differenced rather than differentiated: a waypoint is a closed form but three different
+    /// ones, and the same central difference serves all of them. Only cancelling asks for this,
+    /// so the two extra propagations cost nothing anyone can see.
+    pub fn velocity_at(&self, system: &LocalSystem) -> Option<DVec3> {
+        if matches!(self, Waypoint::Fixed(_)) {
+            return Some(DVec3::ZERO);
+        }
+        let now = system.time_s();
+        let step = self.period_s(system).map(|p| p / 4096.0).unwrap_or(1.0).clamp(1.0e-3, 60.0);
+        let before = self.place(&system.propagated_to(now - step))?;
+        let after = self.place(&system.propagated_to(now + step))?;
+        Some((after - before) * M_PER_LY / (2.0 * step))
+    }
+
     /// The same place, entered at the point of it nearest `from_ly`.
     ///
     /// An orbit is a circle and a ship arriving at it has a nearest point; arriving anywhere
@@ -571,24 +587,6 @@ pub fn plan(
 /// Used for naming one on screen; the Oort analogue is the only isotropic one a system has.
 pub fn is_flat(population: &Population) -> bool {
     population.inclination.max_inclination() < 1.0
-}
-
-/// Hold the ship on its station.
-///
-/// Runs after the system has been propagated, because a station is a position in it. The ship's
-/// place is read from the waypoint rather than integrated, so a paused clock, a fast one and a
-/// dropped frame all leave it in the same place.
-///
-/// Velocity is left at zero. A body's orbital speed is of order `1e-4 c`, which is four
-/// magnitudes under anything the sky shows; carrying it would mean differentiating the waypoint
-/// every frame to display nothing.
-pub fn hold_station(mut game: bevy::prelude::ResMut<crate::app::Game>) {
-    if game.cruise.is_some() {
-        return;
-    }
-    let Some(station) = game.station.clone() else { return };
-    let Some(at) = game.system.as_ref().and_then(|s| station.place(s)) else { return };
-    game.0.place_at(at);
 }
 
 #[cfg(test)]

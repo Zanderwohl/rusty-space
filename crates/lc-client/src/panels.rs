@@ -64,7 +64,12 @@ pub fn loading(mut contexts: EguiContexts) {
 }
 
 /// The always-visible readout. Never in a closable panel: it is the premise.
-pub fn hud(mut contexts: EguiContexts, ui_state: Res<Ui>, game: Res<Game>) {
+pub fn hud(
+    mut contexts: EguiContexts,
+    ui_state: Res<Ui>,
+    game: Res<Game>,
+    mut out: MessageWriter<Requested>,
+) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
     let lines = hud::lines(&game.0, &ui_state.0);
 
@@ -88,6 +93,18 @@ pub fn hud(mut contexts: EguiContexts, ui_state: Res<Ui>, game: Res<Game>) {
             if let Some(flight) = &lines.flight {
                 ui.separator();
                 ui.colored_label(egui::Color32::from_rgb(130, 200, 250), flight);
+                // No confirmation. Cutting the engine is not destructive -- the ship keeps its
+                // velocity -- and a dialogue between a player and their own throttle is worse
+                // than the mistake it prevents.
+                // U+00D7, not U+2715: egui's default font has no glyph for the latter and it
+                // came out as a tofu box.
+                if ui.small_button("×").on_hover_text("cut the drive").clicked() {
+                    ask(&mut out, Action::AbortFlight);
+                }
+            }
+            if let Some(coasting) = &lines.coasting {
+                ui.separator();
+                ui.colored_label(egui::Color32::from_rgb(170, 190, 170), coasting);
             }
         });
     });
@@ -452,7 +469,19 @@ fn system(
 fn station(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {
     let Some(system) = game.system.as_ref() else { return };
     let Some(waypoint) = game.station.as_ref() else {
-        ui.weak("adrift");
+        match &game.coast {
+            // Not "adrift": the ship is on something, and which conic it is on is the first
+            // thing a player needs after cutting the engine.
+            Some(coast) => {
+                ui.label(format!("coasting: {}", crate::hud::arc(coast)));
+                if let Some(period) = coast.period_s() {
+                    ui.weak(format!("one turn in {}", duration(period)));
+                }
+            }
+            None => {
+                ui.weak("adrift");
+            }
+        }
         return;
     };
     ui.label(format!("holding: {}", waypoint.label()));
@@ -471,8 +500,8 @@ fn station(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<R
         if ui.button("Look at it").clicked() {
             ask(out, Action::LookAtStation);
         }
-        if ui.button("Give up the station").clicked() {
-            ask(out, Action::HoldHere);
+        if ui.button("Cut the drive").clicked() {
+            ask(out, Action::AbortFlight);
         }
     });
 }

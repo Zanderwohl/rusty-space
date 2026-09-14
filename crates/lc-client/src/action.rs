@@ -53,6 +53,8 @@ pub enum Action {
     FlyTo(Option<StarId>),
     /// Cross to the nearest star that is actually interstellar.
     FlyToNearest,
+    /// Cut the engine. Not a stop: the ship keeps its velocity and coasts on whatever conic
+    /// that puts it on.
     AbortFlight,
     /// Pick something out of the local system's inventory. Clears whatever course was armed
     /// for the last one.
@@ -61,8 +63,6 @@ pub enum Action {
     ChooseCourse(Option<Course>),
     /// Go somewhere in the local system, and hold there once arrived. What Go sends.
     SetCourse(Course),
-    /// Cut the drive and give up the station.
-    HoldHere,
     /// Proper acceleration for the next crossing, in g.
     SetDriveAccel(f64),
 
@@ -192,9 +192,14 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             }
         }
         Action::AbortFlight => {
-            if session.cruise.is_some() {
-                session.abort_flight();
-                effects.push(Effect::Notify("drive cut".into()));
+            if session.cruise.is_some() || session.station.is_some() {
+                let note = match session.cancel() {
+                    // What it says is where the ship ended up, because cancelling does not
+                    // stop it: it keeps its velocity and that velocity is now an orbit.
+                    Some(coast) => format!("drive cut — {}", crate::hud::arc(&coast)),
+                    None => "drive cut".to_string(),
+                };
+                effects.push(Effect::Notify(note));
             }
         }
         Action::FocusTarget(target) => {
@@ -211,13 +216,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             };
             effects.push(Effect::Notify(note));
         }
-        Action::HoldHere => {
-            let held = session.station.is_some() || session.cruise.is_some();
-            session.hold_here();
-            if held {
-                effects.push(Effect::Notify("holding here".into()));
-            }
-        }
+
         Action::SetDriveAccel(g) => {
             session.drive.accel_g = g.clamp(MIN_ACCEL_G, MAX_ACCEL_G);
             effects.push(Effect::Notify(format!("drive set to {:.0} g", session.drive.accel_g)));
@@ -714,10 +713,11 @@ mod tests {
         assert!(seen.len() >= 10, "only {} knobs reached", seen.len());
     }
 
-    /// A course is a crossing and a standing order at once, and giving up the station has to
-    /// drop both. A ship that stopped flying but kept holding would be teleported back.
+    /// A course is a crossing and a standing order at once, and cutting the drive has to drop
+    /// both. A ship that stopped flying but kept its station would be snapped to the
+    /// destination the moment the crossing ended, which is a teleport with extra steps.
     #[test]
-    fn a_course_sets_a_station_and_holding_gives_it_up() {
+    fn a_course_sets_a_station_and_cutting_the_drive_gives_it_up() {
         let mut ui = UiState::default();
         let mut s = Session::new(&AuthoredStars::sample(), 3);
         // The sample sky has no system to navigate, so the course has nowhere to go.
@@ -726,9 +726,9 @@ mod tests {
         assert!(s.station.is_none());
 
         // Holding when nothing is held is silent: it is already true.
-        assert!(apply(Action::HoldHere, &mut ui, &mut s).is_empty());
+        assert!(apply(Action::AbortFlight, &mut ui, &mut s).is_empty());
         s.fly_to(s.stars[0].id);
-        assert_eq!(apply(Action::HoldHere, &mut ui, &mut s).len(), 1);
+        assert_eq!(apply(Action::AbortFlight, &mut ui, &mut s).len(), 1);
         assert!(s.cruise.is_none() && s.station.is_none());
     }
 

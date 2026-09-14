@@ -7,6 +7,7 @@
 
 pub mod action;
 pub mod app;
+pub mod coast;
 pub mod curve;
 pub mod envelope;
 pub mod flight;

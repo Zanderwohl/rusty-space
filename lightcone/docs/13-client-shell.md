@@ -177,8 +177,7 @@ Omit the path for the three authored sample stars.
 | arrows, right-drag | look |
 | | the cursor is pinned while the right button is held, and released on let go |
 | `L` | look at the selection |
-| `G` `X` | cross to the selection, cut the drive |
-| `H` | give up the station and drift |
+| `G` `X` | cross to the selection, cut the engine |
 | `N` | target the nearest system |
 | `1`–`6` | band presets |
 | `[` `]` `\` | exposure down, up, auto |
@@ -294,6 +293,46 @@ station on it.
 it carries, and only then a made-up one — the primary's name and a Roman numeral, which is how
 an unnamed body has been designated since Galileo. When players can name worlds, that name goes
 in the first slot and nothing else changes.
+
+### Cutting the engine does not stop the ship
+
+**Decided: cancelling keeps the velocity, and inside a system that velocity is an orbit.**
+
+The `×` beside the flight readout cuts the drive, with no confirmation — the action is not
+destructive and a dialogue between a player and their own throttle is worse than the mistake it
+prevents. What it does is stop the *engine*. The ship keeps what it had, and what it had is now
+a conic about whichever body's sphere of influence it is in.
+
+None of that arithmetic is written here. `em-foundations` turns a state vector into elements
+and back and solves both anomalies; `em-sim` finds the sphere of influence. The client is the
+join, plus the patched-conic rule: one conic is exact only inside one sphere of influence, so
+when the ship crosses into another body's the arc is re-solved about it. Done when the crossing
+is reached rather than predicted ahead, which is the cheap half of patched conics and the half
+that cannot be wrong.
+
+A torch ship makes this less forgiving than it sounds. Five gravities passes solar escape
+velocity in minutes, so cutting out of a brachistochrone halfway to Earth leaves an eccentricity
+of a hundred and sixty — a near-straight line out of the system. Cancelling off a station gives
+back the orbit the station was holding, which is the case the readout is really for.
+
+Two things it cannot do:
+
+- **A radial state has no elements.** A ship at rest relative to what holds it is falling
+  straight down the line to it: the angular momentum is zero and the orbital plane is
+  undefined, so no conic can be written. It refuses, and a refusal leaves the ship drifting at
+  the velocity it has, which is none. Standing still is the wrong physics and the right
+  behaviour; falling into the star over the following two months is neither.
+- **Parabolic is nudged off.** Both anomaly solvers divide by the distance from `e = 1`, and a
+  state landing exactly there is an accident of arithmetic rather than a trajectory anyone
+  chose.
+
+There are now three ways for the ship to be moving and they are exclusive: under thrust the
+crossing says where it is, on station the waypoint does, otherwise it is ballistic — a conic
+inside a system and a straight line between them. All three are **read** at the new time rather
+than integrated from the old one, so a paused clock, a clock at a year a second and a dropped
+frame all leave the ship in the same place. Holding a station used to be a rendering system
+running a frame behind the model; now that the session owns the local system it is one branch
+of three in the same place.
 
 ### The clock has to slow down for an orbit
 

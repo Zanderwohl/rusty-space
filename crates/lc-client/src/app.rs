@@ -117,10 +117,6 @@ impl Plugin for ClientPlugin {
                     aim_camera,
                     update_sky,
                     update_bodies,
-                    // After the system has been propagated, because a station is a position in
-                    // it. The sky was drawn from the previous frame's position, which at an
-                    // orbital speed of a few km/s is a hundred metres and far under a pixel.
-                    crate::navigation::hold_station,
                     // After the bodies, because it meters them; before the surfaces, because
                     // they are shaded against what it places.
                     crate::resolved::sample_scene,

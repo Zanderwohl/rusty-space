@@ -25,8 +25,32 @@ pub struct Hud {
     pub exposure: String,
     /// Set while a crossing is under way.
     pub flight: Option<String>,
+    /// Set while the ship is falling rather than flying.
+    pub coasting: Option<String>,
     /// Set when the clock is running at something other than the canonical rate.
     pub warning: Option<String>,
+}
+
+/// What an arc reads as: the two apsides, or the periapsis alone on an escape.
+///
+/// Apsides rather than elements. Nobody looks at an eccentricity and knows whether they are
+/// about to hit the planet.
+pub fn arc(coast: &crate::coast::Coast) -> String {
+    let near = span(coast.periapsis_m());
+    match coast.apoapsis_m() {
+        Some(far) => format!("{near} by {} about {}", span(far), coast.primary),
+        None => format!("escaping {} past {near}", coast.primary),
+    }
+}
+
+/// A distance in whatever unit makes it readable.
+fn span(metres: f64) -> String {
+    match metres {
+        m if m < 1.0e6 => format!("{:.0} km", m / 1.0e3),
+        m if m < 1.0e9 => format!("{:.0} thousand km", m / 1.0e6),
+        m if m < 1.0e11 => format!("{:.2} million km", m / 1.0e9),
+        m => format!("{:.2} AU", m / 1.495_978_707e11),
+    }
 }
 
 pub fn lines(session: &Session, ui: &UiState) -> Hud {
@@ -58,6 +82,7 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
                 left / YEAR_S,
             )
         }),
+        coasting: session.coast.as_ref().map(arc),
         // The time rate is a development control and the server owns it; say so on screen
         // rather than letting a fast clock look normal.
         warning: (ui.time_rate != 1.0).then(|| crate::ui::rate_label(ui.time_rate)),

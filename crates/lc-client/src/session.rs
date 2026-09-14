@@ -117,6 +117,8 @@ pub struct Session {
     pub system: Option<crate::system::LocalSystem>,
     /// Where the ship holds once it arrives. Cleared by anything that flies it somewhere else.
     pub station: Option<crate::navigation::Waypoint>,
+    /// The ballistic arc the ship is on, when nothing is holding or pushing it.
+    pub coast: Option<crate::coast::Coast>,
     /// What the renderer is about to draw besides the stars. Metered, never drawn from.
     pub scene: Scene,
     targets: HashMap<StarId, Target>,
@@ -151,6 +153,7 @@ impl Session {
             scene: Scene::default(),
             system: None,
             station: None,
+            coast: None,
             targets,
         };
         session.retune();
@@ -171,12 +174,17 @@ impl Session {
         let here = self.local_star().map(|s| s.id);
         if self.system.as_ref().map(|s| s.star) != here {
             self.system = self.local_star().and_then(crate::system::LocalSystem::for_star);
-            // A station is defined against bodies that no longer exist.
+            // A station and a conic are both defined against bodies that no longer exist.
             self.station = None;
+            self.coast = None;
         }
         let now = self.coordinate_time_s();
         if let Some(system) = self.system.as_mut() {
-            system.advance_to(now);
+            // Guarded: this runs once from the clock and once from the renderer, and
+            // propagating two hundred and thirty bodies twice a frame is pure waste.
+            if system.time_s() != now {
+                system.advance_to(now);
+            }
         }
     }
 
@@ -190,12 +198,21 @@ impl Session {
     }
 
     /// Advance coordinate time by a span of real seconds, flying the ship along with it.
+    /// Advance coordinate time by a span of real seconds, flying the ship along with it.
+    ///
+    /// Three ways to be moving and they are exclusive. Under thrust the crossing says where the
+    /// ship is; on station the waypoint does; otherwise it is ballistic — a conic inside a
+    /// system and a straight line between them. All three are *read* at the new time rather
+    /// than integrated from the old one, so nothing drifts with the frame rate.
     pub fn advance(&mut self, real_seconds: f64) {
         let elapsed = real_seconds * TIME_RATE;
         let micros = (elapsed * 1e6) as i64;
         self.observer.t = self.observer.t + Span::new(micros);
-
         let now = self.coordinate_time_s();
+        // Before anything is placed against it: a station and a conic are both positions in a
+        // system, and one propagated to last frame would put the ship a frame behind.
+        self.sync_system();
+
         match &self.cruise {
             Some(cruise) => {
                 let state = cruise.at(now);
@@ -211,9 +228,78 @@ impl Session {
                     self.beta = DVec3::ZERO;
                 }
             }
-            None => self.ship_clock_s += elapsed,
+            None => {
+                self.ship_clock_s += elapsed;
+                self.drift(now, elapsed);
+            }
         }
         self.sync_observer();
+    }
+
+    /// Where an unpowered ship is: on its station, on its conic, or simply going.
+    fn drift(&mut self, now: f64, elapsed: f64) {
+        if let Some(station) = self.station.clone() {
+            if let Some(at) = self.system.as_ref().and_then(|s| station.place(s)) {
+                self.position_ly = at;
+            }
+            return;
+        }
+        if let Some(coast) = self.coast.clone() {
+            let Some(system) = self.system.as_ref() else {
+                // The system is gone, which means the ship has left it. Whatever the conic
+                // said, out here it is a straight line.
+                self.coast = None;
+                return;
+            };
+            if let Some((at, velocity)) = coast.at(system, now) {
+                self.position_ly = at;
+                self.beta = crate::coast::beta_of(velocity);
+                // Patched conics: the arc is exact only inside one sphere of influence.
+                if let Some(next) = coast.repatched(system, at, velocity, now) {
+                    self.coast = Some(next);
+                }
+            }
+            return;
+        }
+        // Nothing holding it and nothing to fall towards. A light-year is a year of travel at
+        // `c` by definition, so a beta is already light-years per year.
+        if self.beta != DVec3::ZERO {
+            self.position_ly += self.beta * elapsed / crate::flight::JULIAN_YEAR_S;
+        }
+    }
+
+    /// How fast the ship is going, metres a second, world frame.
+    pub fn velocity_m_s(&self) -> DVec3 {
+        if let Some(cruise) = &self.cruise {
+            return cruise.at(self.coordinate_time_s()).beta * crate::flight::C_M_S;
+        }
+        if let Some(station) = &self.station {
+            return self
+                .system
+                .as_ref()
+                .and_then(|s| station.velocity_at(s))
+                .unwrap_or(DVec3::ZERO);
+        }
+        self.beta * crate::flight::C_M_S
+    }
+
+    /// Cut the engine and keep going.
+    ///
+    /// Not a stop. The ship keeps the velocity it had, which inside a system means it is now on
+    /// whatever conic that velocity puts it on about whichever body holds it — a circular orbit
+    /// if it was holding one, something eccentric if it was halfway through a burn, an escape
+    /// if it was fast. Returns what it ended up on.
+    pub fn cancel(&mut self) -> Option<crate::coast::Coast> {
+        let velocity = self.velocity_m_s();
+        let now = self.coordinate_time_s();
+        self.cruise = None;
+        self.station = None;
+        self.beta = crate::coast::beta_of(velocity);
+        self.coast = self
+            .system
+            .as_ref()
+            .and_then(|s| crate::coast::Coast::from_state(s, self.position_ly, velocity, now));
+        self.coast.clone()
     }
 
     /// Put the continuous position back on the integer grid.
@@ -237,6 +323,7 @@ impl Session {
         let approach = (target - self.position_ly).normalize_or_zero();
         let stop = target - approach * STANDOFF_LY;
         self.station = None;
+        self.coast = None;
         self.cruise =
             Some(Cruise::plan(self.position_ly, stop, self.coordinate_time_s(), self.drive));
         self.cruise_clock_base_s = self.ship_clock_s;
@@ -261,30 +348,22 @@ impl Session {
         self.cruise = Some(cruise);
         self.cruise_clock_base_s = self.ship_clock_s;
         self.station = Some(aimed);
+        self.coast = None;
         Some(label)
     }
 
-    /// Cut the drive and give up the station. Whatever the ship was holding against, it stops
-    /// holding: drifting is a place to be, and the only one that is nobody's idea.
-    pub fn hold_here(&mut self) {
-        self.cruise = None;
-        self.station = None;
-        self.beta = DVec3::ZERO;
-    }
 
     /// Put the ship somewhere, cutting any crossing. Development only: there is no action for
     /// it and the server would never accept one.
     pub fn place_at(&mut self, position_ly: DVec3) {
         self.cruise = None;
+        self.coast = None;
         self.beta = DVec3::ZERO;
         self.position_ly = position_ly;
         self.sync_observer();
     }
 
     /// Cut the drive where it is. Leaves the ship coasting at whatever it had reached.
-    pub fn abort_flight(&mut self) {
-        self.cruise = None;
-    }
 
     /// Where a star is relative to the ship, light-years.
     pub fn offset_to(&self, star: &CatalogueStar) -> DVec3 {
@@ -858,15 +937,29 @@ mod tests {
     }
 
     #[test]
-    fn cutting_the_drive_leaves_the_ship_where_it_was() {
+    fn cutting_the_drive_keeps_the_velocity_it_had() {
         let mut s = session();
         s.fly_to(s.stars[0].id);
         s.advance(8_000.0);
         let at = s.position_ly;
-        s.abort_flight();
+        let beta = s.beta;
+        assert!(beta.length() > 0.01, "the crossing should be up to speed");
+
+        s.cancel();
+        assert!(s.cruise.is_none() && s.station.is_none());
+        // Not exactly: the velocity goes out through metres a second and comes back, and a
+        // multiply by `c` followed by a divide by `c` is not the identity in binary.
+        assert!((s.beta - beta).length() < beta.length() * 1e-12, "cutting the engine is a brake");
+
+        // Between stars there is no conic to fall onto, so it is a straight line at the speed
+        // it had. A light-year is a year at `c`, so the distance is the beta times the years.
         s.advance(8_000.0);
-        assert_eq!(s.position_ly, at, "an aborted crossing must not keep moving");
-        assert!(s.cruise.is_none());
+        let gone = s.position_ly - at;
+        let expected = beta * (8_000.0 * TIME_RATE) / crate::flight::JULIAN_YEAR_S;
+        assert!(
+            (gone - expected).length() < expected.length() * 1e-9,
+            "{gone:?} against {expected:?}",
+        );
     }
 
     /// The bug this exists for: the ship clock was stepped as `elapsed / gamma` using the
