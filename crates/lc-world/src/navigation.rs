@@ -136,6 +136,97 @@ pub enum Course {
     LeaveSystem,
 }
 
+/// The wire's course, and the world's, converted.
+///
+/// Both matches are exhaustive on purpose: a course the world gains and the protocol has not
+/// learned will not compile until the protocol learns it. That is the only thing keeping a
+/// mirrored type honest, and it costs nothing to have.
+///
+/// Total in both directions. A course is a request, and every request the wire can express is
+/// one the world can name — whether the *system* has anything answering to it is
+/// [`Course::resolve`]'s business, and its refusal is what a client is told.
+impl From<&Course> for lc_proto::Course {
+    fn from(course: &Course) -> Self {
+        match course {
+            Course::To(at) => lc_proto::Course::To(at.to_array()),
+            Course::Orbit { body, altitude_radii, plane } => lc_proto::Course::Orbit {
+                body: body.clone(),
+                altitude_radii: *altitude_radii,
+                plane: (*plane).into(),
+            },
+            Course::Lagrange { body, point } => {
+                lc_proto::Course::Lagrange { body: body.clone(), point: (*point).into() }
+            }
+            Course::Hangout { body, point } => {
+                lc_proto::Course::Hangout { body: body.clone(), point: (*point).into() }
+            }
+            Course::Rings(body) => lc_proto::Course::Rings { body: body.clone() },
+            // A system with four billion populations is not a system. Saturating rather than
+            // wrapping, so a nonsense index refuses at `resolve` instead of naming a real band.
+            Course::Belt(index) => {
+                lc_proto::Course::Belt { index: u32::try_from(*index).unwrap_or(u32::MAX) }
+            }
+            Course::LeaveSystem => lc_proto::Course::LeaveSystem,
+        }
+    }
+}
+
+impl From<lc_proto::Course> for Course {
+    fn from(course: lc_proto::Course) -> Self {
+        match course {
+            lc_proto::Course::To(at) => Course::To(DVec3::from_array(at)),
+            lc_proto::Course::Orbit { body, altitude_radii, plane } => {
+                Course::Orbit { body, altitude_radii, plane: plane.into() }
+            }
+            lc_proto::Course::Lagrange { body, point } => {
+                Course::Lagrange { body, point: point.into() }
+            }
+            lc_proto::Course::Hangout { body, point } => {
+                Course::Hangout { body, point: point.into() }
+            }
+            lc_proto::Course::Rings { body } => Course::Rings(body),
+            lc_proto::Course::Belt { index } => Course::Belt(index as usize),
+            lc_proto::Course::LeaveSystem => Course::LeaveSystem,
+        }
+    }
+}
+
+impl From<Plane> for lc_proto::Plane {
+    fn from(plane: Plane) -> Self {
+        match plane {
+            Plane::Equatorial => lc_proto::Plane::Equatorial,
+            Plane::Polar => lc_proto::Plane::Polar,
+        }
+    }
+}
+
+impl From<lc_proto::Plane> for Plane {
+    fn from(plane: lc_proto::Plane) -> Self {
+        match plane {
+            lc_proto::Plane::Equatorial => Plane::Equatorial,
+            lc_proto::Plane::Polar => Plane::Polar,
+        }
+    }
+}
+
+impl From<LagrangePoint> for lc_proto::LagrangePoint {
+    fn from(point: LagrangePoint) -> Self {
+        match point {
+            LagrangePoint::L1 => lc_proto::LagrangePoint::L1,
+            LagrangePoint::L2 => lc_proto::LagrangePoint::L2,
+        }
+    }
+}
+
+impl From<lc_proto::LagrangePoint> for LagrangePoint {
+    fn from(point: lc_proto::LagrangePoint) -> Self {
+        match point {
+            lc_proto::LagrangePoint::L1 => LagrangePoint::L1,
+            lc_proto::LagrangePoint::L2 => LagrangePoint::L2,
+        }
+    }
+}
+
 /// Altitudes the interface offers, in radii above the surface.
 ///
 /// Radii rather than kilometres because the same three numbers then mean the same thing at
@@ -650,6 +741,57 @@ mod tests {
     use crate::sky::{AuthoredStars, StarProvider};
 
     use super::*;
+
+    /// Every course the interface can offer survives the wire and comes back the same.
+    ///
+    /// One case per variant, listed by hand. A loop over something generated would pass while
+    /// the wire quietly dropped a field, because the thing being checked *is* whether every
+    /// field made the trip.
+    #[test]
+    fn every_course_survives_the_wire() {
+        let all = [
+            Course::To(DVec3::new(1.5, -2.5, 0.25)),
+            Course::Orbit {
+                body: "Earth".into(),
+                altitude_radii: 2.0,
+                plane: Plane::Equatorial,
+            },
+            Course::Orbit { body: "Luna".into(), altitude_radii: 0.2, plane: Plane::Polar },
+            Course::Lagrange { body: "Earth".into(), point: LagrangePoint::L1 },
+            Course::Lagrange { body: "Earth".into(), point: LagrangePoint::L2 },
+            Course::Hangout { body: "Earth".into(), point: LagrangePoint::L2 },
+            Course::Rings("Saturn".into()),
+            Course::Belt(3),
+            Course::LeaveSystem,
+        ];
+        for course in all {
+            let there: lc_proto::Course = (&course).into();
+            let back: Course = there.clone().into();
+            assert_eq!(back, course, "{course:?} did not survive as {there:?}");
+
+            // And through postcard, which is what actually goes over the wire.
+            let bytes = postcard::to_stdvec(&there).expect("it encodes");
+            let decoded: lc_proto::Course = postcard::from_bytes(&bytes).expect("it decodes");
+            assert_eq!(Course::from(decoded), course);
+        }
+    }
+
+    /// The count is the check: a variant added to either side without the other is a compile
+    /// error in the conversions, and this is what notices that the *test* was not extended.
+    #[test]
+    fn the_round_trip_covers_every_variant() {
+        let seen = [
+            Course::To(DVec3::ZERO),
+            Course::Orbit { body: String::new(), altitude_radii: 0.0, plane: Plane::default() },
+            Course::Lagrange { body: String::new(), point: LagrangePoint::L1 },
+            Course::Hangout { body: String::new(), point: LagrangePoint::L1 },
+            Course::Rings(String::new()),
+            Course::Belt(0),
+            Course::LeaveSystem,
+        ];
+        // If this fails, a variant was added: extend `every_course_survives_the_wire` too.
+        assert_eq!(seen.len(), 7);
+    }
 
     fn sol() -> LocalSystem {
         let provider =

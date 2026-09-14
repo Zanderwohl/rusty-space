@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -32,20 +32,74 @@ pub struct ClientId(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ShipId(pub i64);
 
+/// Where a client is asking to go.
+///
+/// A mirror of the world's `Course` rather than the type itself. This crate is `serde` and
+/// `postcard` and nothing else, and it stays that way: a wire type that was an alias for a
+/// world type would make every change to the world model a change to the protocol, which is
+/// the thing [`PROTOCOL_VERSION`] exists to make expensive.
+///
+/// The mirror is kept honest by the conversions in `lc_world::navigation`, which match
+/// exhaustively in both directions — a course the world gains and the wire has not learned is
+/// a compile error rather than a variant that silently cannot be asked for.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Course {
+    /// Burn, flip and burn to a point, light-years from the world origin.
+    To([f64; 3]),
+    /// Circular orbit at an altitude given in radii above the surface.
+    Orbit { body: String, altitude_radii: f64, plane: Plane },
+    /// The libration point itself.
+    Lagrange { body: String, point: LagrangePoint },
+    /// A libration orbit about the point, which is what a real mission flies.
+    Hangout { body: String, point: LagrangePoint },
+    /// Into a body's ring system, in its plane.
+    Rings { body: String },
+    /// Into a population's band, by its index in the system's list.
+    Belt { index: u32 },
+    /// Out along the system's axis until everything is behind.
+    LeaveSystem,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Plane {
+    #[default]
+    Equatorial,
+    Polar,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LagrangePoint {
+    L1,
+    L2,
+}
+
 /// What a client asks its ship to do.
 ///
 /// Deliberately few. Every order has to become an event with a coordinate, and an order that
 /// cannot be placed at one instant is not an order, it is a plan.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+///
+/// A course is an order by that test and a crossing is not: "go to this orbit, at this
+/// acceleration, now" happens at an instant, and the flight it implies is worked out from it by
+/// the same code at both ends. Sending the solved crossing instead would put a second copy of
+/// the answer on the wire, free to disagree with the one the receiver would have computed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Order {
     /// Put out a pulse. The clearest thing another client can be told about late.
     Transmit { power_w: f64 },
     /// Change velocity, as a fraction of `c` on each axis. The burn's start is the event.
     Burn { beta: [f64; 3] },
+    /// Fly somewhere and hold there.
+    ///
+    /// The acceleration is asked for, not stated: it is clamped to what the craft's own drive
+    /// can do, so a client cannot ask for a better ship than it has.
+    SetCourse { course: Course, accel_g: f64 },
+    /// Cut the engine. Not a stop — whatever velocity it had, it keeps, on whatever conic that
+    /// puts it on.
+    CutDrive,
 }
 
 /// A client's request. Never authoritative about anything.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Intent {
     pub ship_id: ShipId,
     pub order: Order,
@@ -202,11 +256,22 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 /// be confidently wrong rather than refused.
 pub mod golden {
     /// `Outbound::Welcome { client_id: 7, protocol: PROTOCOL_VERSION, ship_id: 42, now_t: 1e6 }`
-    pub const WELCOME: &[u8] = &[0, 7, 2, 84, 128, 137, 122];
+    pub const WELCOME: &[u8] = &[0, 7, 3, 84, 128, 137, 122];
 
     /// `Inbound::Act(Intent { ship_id: 42, order: Transmit { power_w: 1500.0 }, .. })`
     pub const ACT: &[u8] =
         &[1, 84, 0, 0, 0, 0, 0, 0, 112, 151, 64, 128, 137, 122];
+
+    /// `Inbound::Act(Intent { ship_id: 42, order: SetCourse { Orbit of Earth, polar, 2 radii,
+    /// 5 g }, .. })`
+    ///
+    /// Pinned as well as the other two because a course is the first thing on this wire with a
+    /// *shape* — nested enums, a string, two floats — rather than a number. It is the message
+    /// most able to move a field without anyone noticing.
+    pub const SET_COURSE: &[u8] = &[
+        1, 84, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0, 0, 0, 0, 0, 0, 20,
+        64, 128, 137, 122,
+    ];
 }
 
 #[cfg(test)]
@@ -249,6 +314,21 @@ mod tests {
     /// notices. If this fails, either the change was unintended or `PROTOCOL_VERSION` needs
     /// bumping and these bytes need replacing — and a deployed client needs to be refused
     /// rather than left reading the new shape as the old one.
+    fn set_course() -> Inbound {
+        Inbound::Act(Intent {
+            ship_id: ShipId(42),
+            order: Order::SetCourse {
+                course: Course::Orbit {
+                    body: "Earth".into(),
+                    altitude_radii: 2.0,
+                    plane: Plane::Polar,
+                },
+                accel_g: 5.0,
+            },
+            issued_at_client_t: 1_000_000,
+        })
+    }
+
     #[test]
     fn the_wire_format_for_this_version_has_not_moved() {
         assert_eq!(
@@ -260,6 +340,11 @@ mod tests {
             encode(&act()),
             golden::ACT,
             "Inbound::Act changed shape at protocol version {PROTOCOL_VERSION}",
+        );
+        assert_eq!(
+            encode(&set_course()),
+            golden::SET_COURSE,
+            "Order::SetCourse changed shape at protocol version {PROTOCOL_VERSION}",
         );
     }
 

@@ -14,6 +14,8 @@ use crate::rate::Budget;
 use crate::transport::Transport;
 use crate::world::{Event, Scheduled, schedule};
 use lc_world::craft::{Craft, CraftId, Fleet};
+use lc_world::motion::{Change, Event as Change_, Rejected};
+use lc_world::navigation::Course;
 
 /// Real milliseconds a tick covers.
 pub const TICK_MS: i64 = 50;
@@ -79,6 +81,14 @@ impl<J: Journal> Server<J> {
 
     pub fn journal(&self) -> &J {
         &self.journal
+    }
+
+    /// The fleet, for a caller putting a craft into a system.
+    ///
+    /// Placing craft is not the tick loop's business — a world is loaded around it — so this is
+    /// how whatever owns the world reaches in. Reading it is [`Server::ship`].
+    pub fn fleet_mut(&mut self) -> &mut Fleet {
+        &mut self.fleet
     }
 
     pub fn ship(&self, id: ShipId) -> Option<&Craft> {
@@ -168,8 +178,9 @@ impl<J: Journal> Server<J> {
                 }
             }
             Inbound::Act(intent) => {
+                let ship_id = intent.ship_id;
                 if let Err(reason) = self.act(from, intent, events, deliveries) {
-                    wire.send(from, Outbound::Refused { ship_id: intent.ship_id, reason });
+                    wire.send(from, Outbound::Refused { ship_id, reason });
                 }
             }
             Inbound::ResumeFrom { arrive_t } => {
@@ -211,8 +222,9 @@ impl<J: Journal> Server<J> {
         let floor = state.cursor_t.saturating_add(1);
         let at = intent.issued_at_client_t.clamp(floor.min(self.now_t), self.now_t);
 
-        let (kind, power_w, payload) = match intent.order {
+        let (kind, power_w, payload) = match &intent.order {
             Order::Transmit { power_w } => {
+                let power_w = *power_w;
                 // `<= 0.0` is false for NaN, so the finite check is not redundant with it.
                 if power_w <= 0.0 || !power_w.is_finite() {
                     return Err(Refusal::Impossible);
@@ -220,7 +232,7 @@ impl<J: Journal> Server<J> {
                 (KIND_TRANSMIT, power_w, format!("{{\"power_w\":{power_w}}}"))
             }
             Order::Burn { beta } => {
-                let beta = DVec3::from_array(beta);
+                let beta = DVec3::from_array(*beta);
                 if !beta.is_finite() || beta.length() >= 1.0 {
                     return Err(Refusal::Impossible);
                 }
@@ -232,6 +244,37 @@ impl<J: Journal> Server<J> {
                 // A burn is not silent -- it is the most visible thing a ship does -- but what
                 // it radiates is the drive's business. Nominal, until there is a drive model.
                 (KIND_BURN, BURN_POWER_W, format!("{{\"beta\":{beta:?}}}"))
+            }
+            Order::SetCourse { course, accel_g } => {
+                if !accel_g.is_finite() || *accel_g <= 0.0 {
+                    return Err(Refusal::Impossible);
+                }
+                let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
+                // Asked for, not stated. The ceiling is the craft's own, so a client cannot
+                // fly a better ship than it has by sending a larger number.
+                let mut drive = craft.kind.drive();
+                drive.accel_g = accel_g.min(drive.accel_g);
+                let course: Course = course.clone().into();
+                let change = Change::SetCourse { course, drive };
+                // **The fold, not a second implementation.** The server works the crossing out
+                // from the order exactly as the client will, because it is the same function.
+                craft
+                    .apply(&Change_ { ship: motion_id(id), at_t: at as f64 * 1.0e-6, change })
+                    .map_err(refusal_for)?;
+                (KIND_BURN, BURN_POWER_W, format!("{{\"accel_g\":{}}}", drive.accel_g))
+            }
+            Order::CutDrive => {
+                let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
+                craft
+                    .apply(&Change_ {
+                        ship: motion_id(id),
+                        at_t: at as f64 * 1.0e-6,
+                        change: Change::CutDrive,
+                    })
+                    .map_err(refusal_for)?;
+                // Silent. Cutting the engine is the one manoeuvre that puts nothing out, which
+                // is exactly why a player might choose it.
+                (KIND_CUT, 0.0, "{}".to_string())
             }
         };
 
@@ -310,9 +353,28 @@ impl<J: Journal> Server<J> {
     }
 }
 
+/// Why the world refused an order, as the client is told it.
+///
+/// A refusal and not a failure: the server has the authoritative view of the system, and a
+/// client folding the same order against a staler one can legitimately reach a different
+/// answer. It is told which, and corrects.
+/// A craft's identifier as [`lc_world::motion`] names it. The two are the same number: a craft
+/// is the thing a worldline belongs to, and `motion` predates the fleet that owns them.
+fn motion_id(id: CraftId) -> lc_world::motion::ShipId {
+    lc_world::motion::ShipId(id.0)
+}
+
+fn refusal_for(rejected: Rejected) -> Refusal {
+    match rejected {
+        Rejected::NotInASystem | Rejected::NoSuchPlace => Refusal::Impossible,
+    }
+}
+
 /// Event kinds. Small integers on the wire; named here.
 pub const KIND_TRANSMIT: i16 = 1;
 pub const KIND_BURN: i16 = 2;
+/// Cutting the engine. Distinct from a burn because it radiates nothing.
+pub const KIND_CUT: i16 = 3;
 
 /// What a burn radiates, until there is a drive model to ask.
 pub const BURN_POWER_W: f64 = 1.0e12;
@@ -588,7 +650,7 @@ use crate::transport::Loopback;
         ] {
             wire.client_says(client, Inbound::Act(Intent {
                 ship_id: ShipId(1),
-                order,
+                order: order.clone(),
                 issued_at_client_t: 0,
             }));
             server.tick(&mut wire).await.unwrap();
@@ -707,5 +769,166 @@ use crate::transport::Loopback;
         // One step or forty, the closed form is the same place to the last bit -- and it stays
         // exact across the conversion into light-years the world model works in and back.
         assert_eq!(ship.position_at(after as f64), at + beta * after as f64);
+    }
+}
+
+#[cfg(test)]
+mod course_tests {
+    use super::*;
+    use crate::journal::Memory;
+    use crate::transport::Loopback;
+    use lc_world::craft::Kind;
+    use lc_world::motion::Motive;
+    use lc_world::sky::{AuthoredStars, StarProvider};
+    use lc_world::system::LocalSystem;
+    use std::sync::Arc;
+
+    fn a_system() -> Option<Arc<LocalSystem>> {
+        let sky = AuthoredStars::sample();
+        let star = sky.stars().first()?.clone();
+        LocalSystem::for_star(&star).map(Arc::new)
+    }
+
+    fn orbitable(system: &LocalSystem) -> Option<String> {
+        system.inventory().iter().find_map(|entry| match &entry.target {
+            lc_world::navigation::Target::Body(name) => Some(name.clone()),
+            _ => None,
+        })
+    }
+
+    /// The point of putting a course on the wire: the server works the crossing out *itself*,
+    /// from the order, with the same `lc_world::motion::apply` the client runs. Nothing about
+    /// the trajectory is sent.
+    #[tokio::test]
+    async fn a_course_on_the_wire_becomes_a_crossing_the_server_solved() {
+        let Some(system) = a_system() else { return };
+        let Some(body) = orbitable(&system) else { return };
+
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let client = ClientId(1);
+        server.admit(client, Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO), 0.0);
+        server.fleet_mut().get_mut(CraftId(1)).expect("the craft").enter(Some(system), 0.0);
+
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::SetCourse {
+                course: lc_proto::Course::Orbit {
+                    body: body.clone(),
+                    altitude_radii: 2.0,
+                    plane: lc_proto::Plane::Equatorial,
+                },
+                accel_g: 5.0,
+            },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+
+        assert!(
+            !wire.take(client).iter().any(|out| matches!(out, Outbound::Refused { .. })),
+            "the course was refused",
+        );
+        let craft = server.ship(ShipId(1)).expect("the craft");
+        let Motive::Crossing(cruise) = &craft.motion.motive else {
+            panic!("a course is a crossing, not {:?}", craft.motion.motive)
+        };
+        assert!(cruise.duration_s() > 0.0, "a crossing that takes no time went nowhere");
+        assert_eq!(server.journal().events.len(), 1, "and it is one event");
+    }
+
+    /// Cutting the engine leaves the velocity it had. With no system to be on a conic about,
+    /// that is a straight line — and it is *not* a stop.
+    #[tokio::test]
+    async fn cutting_the_drive_keeps_the_velocity() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let client = ClientId(1);
+        server.admit(client, Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO), 0.0);
+
+        let beta = [0.4, 0.0, 0.0];
+        for order in [Order::Burn { beta }, Order::CutDrive] {
+            wire.client_says(client, Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order,
+                issued_at_client_t: 0,
+            }));
+            server.tick(&mut wire).await.unwrap();
+        }
+
+        let craft = server.ship(ShipId(1)).expect("the craft");
+        assert!(matches!(craft.motion.motive, Motive::Drifting { .. }), "{:?}", craft.motion.motive);
+        assert!((craft.motion.beta.x - 0.4).abs() < 1.0e-12, "{}", craft.motion.beta.x);
+    }
+
+    /// A course with nowhere to resolve against is refused rather than silently dropped. The
+    /// world's refusal is the client's refusal.
+    #[tokio::test]
+    async fn a_course_with_no_system_is_refused() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let client = ClientId(1);
+        server.admit(client, Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO), 0.0);
+
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::SetCourse { course: lc_proto::Course::LeaveSystem, accel_g: 5.0 },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+
+        assert!(
+            wire.take(client).iter().any(|out| matches!(
+                out,
+                Outbound::Refused { reason: Refusal::Impossible, .. }
+            )),
+            "a course that cannot be resolved should be refused",
+        );
+        assert_eq!(server.journal().events.len(), 0, "and nothing was written");
+    }
+
+    /// The acceleration is asked for, not stated. A client sending a thousand g gets its own
+    /// ship's ceiling, and the event records what was actually flown.
+    #[tokio::test]
+    async fn a_client_cannot_ask_for_a_better_ship_than_it_has() {
+        let Some(system) = a_system() else { return };
+        let Some(body) = orbitable(&system) else { return };
+
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let client = ClientId(1);
+        server.admit(client, Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO), 0.0);
+        server.fleet_mut().get_mut(CraftId(1)).expect("the craft").enter(Some(system), 0.0);
+
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::SetCourse {
+                course: lc_proto::Course::Orbit {
+                    body,
+                    altitude_radii: 2.0,
+                    plane: lc_proto::Plane::Equatorial,
+                },
+                accel_g: 1000.0,
+            },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+
+        let ceiling = Kind::Ship.drive().accel_g;
+        let written = &server.journal().events[0].payload;
+        assert!(written.contains(&format!("{ceiling}")), "{written} does not record {ceiling} g");
+
+        // And a nonsense acceleration is refused rather than clamped into something flyable.
+        for accel_g in [0.0, -1.0, f64::NAN] {
+            wire.client_says(client, Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: Order::SetCourse { course: lc_proto::Course::LeaveSystem, accel_g },
+                issued_at_client_t: 0,
+            }));
+            server.tick(&mut wire).await.unwrap();
+            assert!(
+                wire.take(client).iter().any(|out| matches!(out, Outbound::Refused { .. })),
+                "{accel_g} g was not refused",
+            );
+        }
     }
 }

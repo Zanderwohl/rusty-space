@@ -4407,7 +4407,9 @@ dependencies = [
  "em-sim",
  "em-spectra",
  "glam",
+ "lc-proto",
  "lc-spacetime",
+ "postcard",
  "serde",
  "serde_json",
 ]

@@ -10,6 +10,9 @@ authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 em-foundations = { path = "../em-foundations" }
 em-spectra = { path = "../em-spectra" }
 lc-spacetime = { path = "../lc-spacetime" }
+# The wire types, for the conversions in `navigation`. Serde and postcard and nothing else,
+# so this costs the browser build nothing it was not already paying.
+lc-proto = { path = "../lc-proto" }
 # No default features: em-sim pulls in bevy_ecs behind its `bevy` feature and the server
 # must not link an engine.
 em-sim = { path = "../em-sim", default-features = false }
@@ -31,3 +34,4 @@ hyg = ["dep:csv"]
 
 [dev-dependencies]
 serde_json = "1"
+postcard = { version = "1", features = ["use-std"] }
