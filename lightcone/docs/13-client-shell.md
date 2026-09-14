@@ -178,6 +178,7 @@ Omit the path for the three authored sample stars.
 | | the cursor is pinned while the right button is held, and released on let go |
 | `L` | look at the selection |
 | `G` `X` | cross to the selection, cut the drive |
+| `N` | target the nearest system |
 | `1`–`6` | band presets |
 | `[` `]` `\` | exposure down, up, auto |
 | `,` `.` | clock rate down, up along the ladder |
@@ -196,6 +197,9 @@ fast clock never looks normal.
 | `--fly` | cross to the nearest interstellar star |
 | `--band <n>` | band preset |
 | `--rate <n>` | clock multiplier against one year per hour: `360` is a year per ten seconds |
+| `--watch` | target the nearest system and open the telescope |
+| `--swarm` | target the nearest star carrying a swarm |
+| `--curve <n>` | which band the light curve measures |
 | `--frames <n>` | frames before the shutter |
 
 These emit [`Action`]s rather than opening a second path into the client, so they can only do
@@ -203,6 +207,34 @@ what the interface can do. `--shot` exists because WGSL cannot be asserted from 
 window nobody is watching proves nothing; both images in
 [07-rendering.md](07-rendering.md) were taken with it. `--rate` without `--shot` is the screen
 recording setup.
+
+## The light curve
+
+![The light curve](../images/light-curve.png)
+
+Drawn by em-plot into a `tiny_skia` pixmap and handed to egui as a texture, rasterised only when
+what it shows changes. Not with egui's own painter: em-plot already has the min/max column
+decimation that a curve of thousands of samples in a panel of hundreds of pixels needs, and a
+second plotting implementation is the thing to avoid.
+
+Two rules the picture follows:
+
+- **It plots relative flux, not the deficit.** With re-emission a measurement lands *above* the
+  unobscured star, and a plot of how much is missing cannot show that at all.
+- **The baseline is always in frame.** A curve auto-scaled to its own noise looks like a
+  detection when the star is doing nothing.
+
+The caption is egui text rather than pixels. Baked into the bitmap it collided with the axis
+labels, and egui draws text better than a twelve-pixel bitmap font.
+
+The band the curve measures is chosen separately from the display mapping. They are different
+questions — one is what the instrument integrates, the other is how three numbers become a
+colour — and the screenshot above is the reason they have to be separate: the display is in the
+thermal preset and the curve is in the thermal *band*, and only the second one is what makes the
+excess a number.
+
+A band the sensor cannot reach is shown as unavailable rather than omitted, so the instrument's
+limits are visible instead of merely enforced.
 
 ## Not in this phase
 

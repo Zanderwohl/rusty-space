@@ -22,6 +22,20 @@ const LUS_PER_LY: f64 = 1.0 / LY_PER_LUS;
 /// Light-years per light-microsecond, for reading catalogue positions onto the grid.
 const LY_PER_LUS: f64 = 299.792458 / 9.460_730_472_580_8e15;
 
+/// What the ship looks through.
+///
+/// Four square metres, every band, and cooled. Not [`Instrument::BASELINE`], which is a one
+/// metre silicon camera at room temperature: it cannot reach the thermal infrared at all, and
+/// its own 290 K housing glows straight into the band a swarm lives in. A ship that is a mind
+/// with no eyes builds the sensor it needs.
+pub const SHIP_SENSOR: Instrument = Instrument {
+    aperture_m2: 4.0,
+    throughput: 0.6,
+    bands: em_spectra::BandMask::ALL,
+    temperature_k: 45.0,
+    emissivity: 0.05,
+};
+
 /// How many nearby stars get a generated system and a full emission model.
 ///
 /// The rest are drawn as bare blackbodies. Starlight is a function rather than an event
@@ -83,7 +97,7 @@ impl Session {
         let mut session = Self {
             stars,
             observer: Coord::ORIGIN,
-            telescope: Instrument::BASELINE,
+            telescope: SHIP_SENSOR,
             mapping: presets::natural(),
             tone: ToneMap::default(),
             curve: LightCurve::new(Band::V, 4000),
@@ -96,8 +110,18 @@ impl Session {
             cruise_clock_base_s: 0.0,
             targets,
         };
+        session.retune();
         session.auto_expose();
         session
+    }
+
+    /// Point the band mapping at what the instrument can actually sense.
+    ///
+    /// A band the sensor cannot reach contributes nothing rather than reading as dark, which is
+    /// the distinction `BandMask` exists for. Without this the sky is drawn through seven bands
+    /// while the telescope reports four, and the two disagree about the same star.
+    pub fn retune(&mut self) {
+        self.mapping.available = self.telescope.bands;
     }
 
     /// Advance coordinate time by a span of real seconds, flying the ship along with it.
@@ -181,11 +205,24 @@ impl Session {
     }
 
     /// Point the telescope, clearing whatever it was watching.
+    ///
+    /// Builds the target's emission model if this is the first time anything has looked at it.
+    /// [`MODELLED_STARS`] bounds what the *sky* evaluates every frame, which is a cost that
+    /// scales with the field; the telescope looks at one star, and there is no reason a player
+    /// should be unable to point it at the thirteenth-nearest.
     pub fn point_at(&mut self, id: Option<StarId>) {
         if self.pointing != id {
             self.curve.clear();
         }
         self.pointing = id;
+        if let Some(id) = id {
+            if !self.targets.contains_key(&id) {
+                if let Some(star) = self.stars.iter().find(|s| s.id == id) {
+                    let target = build_target(star);
+                    self.targets.insert(id, target);
+                }
+            }
+        }
     }
 
     /// Take one measurement of whatever the telescope is on.

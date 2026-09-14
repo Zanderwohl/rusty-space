@@ -47,6 +47,8 @@ pub struct Catalogue(pub Option<String>);
 #[derive(Resource, Default)]
 pub struct DevEntry {
     pub observe_immediately: bool,
+    /// Point at the nearest star carrying a swarm, for showing the thing off.
+    pub target_swarm: bool,
     pub screenshot: Option<String>,
     /// Frames to let the sky settle before the shutter. Pipelines compile lazily.
     pub after_frames: u32,
@@ -160,9 +162,21 @@ fn boot(mut next: ResMut<NextState<AppState>>, mut ui: ResMut<Ui>, dev: Res<DevE
     next.set(AppState::MainMenu);
 }
 
-fn run_dev_actions(dev: Res<DevEntry>, mut out: MessageWriter<Requested>) {
+fn run_dev_actions(dev: Res<DevEntry>, game: Res<Game>, mut out: MessageWriter<Requested>) {
     for action in &dev.actions {
         out.write(Requested(action.clone()));
+    }
+    // Finding one is the game, so this is not an Action and no key reaches it. The dev entry
+    // picks the star; selecting it goes through the same action as a click on the list.
+    if dev.target_swarm {
+        let found = game
+            .stars
+            .iter()
+            .find(|s| lc_world::sky::generate::swarm_for(s).is_some())
+            .map(|s| s.id);
+        if let Some(id) = found {
+            out.write(Requested(Action::SelectTarget(Some(id))));
+        }
     }
 }
 

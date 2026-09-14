@@ -5,7 +5,7 @@
 //! reaches into a [`Session`]. Rebinding is then a table rather than a rewrite, and a UI can
 //! be driven from a test with no window.
 
-use em_spectra::presets;
+use em_spectra::{Band, presets};
 use lc_world::sky::StarId;
 
 use crate::session::Session;
@@ -33,7 +33,11 @@ pub enum Action {
 
     // --- observing --------------------------------------------------------------------
     SelectTarget(Option<StarId>),
+    /// Point at the nearest star that is actually interstellar.
+    SelectNearest,
     SetIntegration(f64),
+    /// Which band the light curve measures. Independent of the display mapping.
+    SetCurveBand(Band),
 
     // --- looking ----------------------------------------------------------------------
     /// Turn by a relative amount, radians.
@@ -126,7 +130,19 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 None => {}
             }
         }
+        Action::SelectNearest => match nearest_interstellar(session) {
+            Some(id) => apply_to(ui, session, Action::SelectTarget(Some(id)), &mut effects),
+            None => effects.push(Effect::Notify("nothing interstellar in range".into())),
+        },
         Action::SetIntegration(seconds) => ui.integration_s = seconds.max(0.0),
+        Action::SetCurveBand(band) => {
+            if !session.telescope.sees(band) {
+                effects.push(Effect::Notify(format!("the sensor cannot reach {band:?}")));
+            } else if session.curve.band() != band {
+                session.curve.set_band(band);
+                effects.push(Effect::Notify(format!("curve: {band:?}")));
+            }
+        }
 
         Action::Look { yaw, pitch } => ui.look.turn(yaw, pitch),
         Action::LookAtSelected => match aim(ui, session) {
@@ -136,19 +152,10 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
 
         Action::FlyTo(id) => fly(ui, session, id, &mut effects),
         Action::FlyToNearest => {
-            // Not simply the first: the catalogue carries the Sun at about an astronomical
-            // unit, and "nearest star" has to mean one worth crossing to.
-            let nearest = session
-                .stars
-                .iter()
-                .find(|s| session.distance_to(s) > INTERSTELLAR_LY)
-                .map(|s| s.id);
-            match nearest {
-                Some(id) => {
-                    apply_to(ui, session, Action::SelectTarget(Some(id)), &mut effects);
-                    fly(ui, session, Some(id), &mut effects);
-                }
-                None => effects.push(Effect::Notify("nothing interstellar in range".into())),
+            apply_to(ui, session, Action::SelectNearest, &mut effects);
+            let id = ui.selected;
+            if id.is_some() {
+                fly(ui, session, id, &mut effects);
             }
         }
         Action::AbortFlight => {
@@ -183,6 +190,14 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
 /// Run a nested action, keeping its effects. Only for actions composed of other actions.
 fn apply_to(ui: &mut UiState, session: &mut Session, action: Action, effects: &mut Vec<Effect>) {
     effects.extend(apply(action, ui, session));
+}
+
+/// The nearest star worth pointing at.
+///
+/// Not simply the first: the catalogue carries the Sun at about an astronomical unit, and
+/// "nearest star" has to mean one that is somewhere else.
+fn nearest_interstellar(session: &Session) -> Option<StarId> {
+    session.stars.iter().find(|s| session.distance_to(s) > INTERSTELLAR_LY).map(|s| s.id)
 }
 
 fn aim(ui: &UiState, session: &Session) -> Option<Look> {
@@ -221,6 +236,7 @@ fn set_preset(ui: &mut UiState, session: &mut Session, index: usize, effects: &m
     };
     ui.preset = index;
     session.mapping = *mapping;
+    session.retune();
     // The window follows the mapping: a different band is a different brightness.
     session.auto_expose();
     apply_exposure_offset(ui, session);
@@ -527,5 +543,64 @@ mod tests {
         assert_eq!(rate_label(60.0), "1 year / minute");
         assert_eq!(rate_label(360.0), "1 year / 10 s");
         assert!(rate_label(123.0).contains("123"), "an unnamed rate still reads");
+    }
+
+    /// The exit criterion, driven entirely through actions with no window.
+    #[test]
+    fn a_swarm_reads_as_a_deficit_in_the_visible_and_an_excess_in_the_thermal() {
+        use lc_world::sky::{AuthoredStars, StarProvider};
+        let provider = AuthoredStars::sample();
+        let Some(star) = provider.stars().iter().find(|s| {
+            lc_world::sky::generate::swarm_for(s).is_some()
+        }) else {
+            // The sample sky is three stars and may carry no swarm. The catalogue test covers
+            // the populated case; this one has nothing to say.
+            return;
+        };
+        let mut s = Session::new(&provider, 3);
+        let mut ui = UiState::default();
+        apply(Action::SelectTarget(Some(star.id)), &mut ui, &mut s);
+
+        let watch = |s: &mut Session, ui: &mut UiState, band: Band| {
+            apply(Action::SetCurveBand(band), ui, s);
+            for _ in 0..40 {
+                s.advance(30.0);
+                s.observe(1.0e4);
+            }
+            let samples = s.curve.samples().to_vec();
+            samples.iter().map(|(_, d)| *d).sum::<f64>() / samples.len() as f64
+        };
+        assert!(watch(&mut s, &mut ui, Band::V) > 0.0, "the visible must be a shadow");
+        assert!(watch(&mut s, &mut ui, Band::ThermalIr) < 0.0, "and the thermal a source");
+    }
+
+    #[test]
+    fn changing_the_curve_band_discards_the_old_measurements() {
+        let (mut ui, mut s) = fixture();
+        apply(Action::SelectTarget(Some(s.stars[0].id)), &mut ui, &mut s);
+        s.observe(1.0e4);
+        assert!(!s.curve.is_empty());
+        apply(Action::SetCurveBand(Band::K), &mut ui, &mut s);
+        assert!(s.curve.is_empty(), "two bands are not one series");
+        assert_eq!(s.curve.band(), Band::K);
+    }
+
+    #[test]
+    fn a_band_the_sensor_cannot_reach_is_refused_rather_than_measured() {
+        let (mut ui, mut s) = fixture();
+        s.telescope = s.telescope.with_bands(em_spectra::BandMask::SILICON);
+        let effects = apply(Action::SetCurveBand(Band::Radio), &mut ui, &mut s);
+        assert!(matches!(effects.as_slice(), [Effect::Notify(t)] if t.contains("cannot reach")));
+        assert_ne!(s.curve.band(), Band::Radio);
+    }
+
+    /// The telescope must not be limited to the stars the sky happens to model.
+    #[test]
+    fn any_star_in_the_list_can_be_watched() {
+        let (mut ui, mut s) = fixture();
+        let last = s.stars.last().unwrap().id;
+        apply(Action::SelectTarget(Some(last)), &mut ui, &mut s);
+        assert!(s.target(last).is_some(), "pointing at a star should model it");
+        assert!(s.observe(1.0e4).is_some());
     }
 }

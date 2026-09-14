@@ -12,6 +12,7 @@ pub mod flight;
 pub mod hud;
 pub mod input;
 pub mod panels;
+pub mod plot;
 pub mod session;
 pub mod starfield;
 pub mod tonemap;

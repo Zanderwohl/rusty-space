@@ -9,6 +9,7 @@ use crate::flight::JULIAN_YEAR_S;
 use crate::app::{Game, Ui};
 use crate::hud;
 use crate::input::Requested;
+use crate::plot::CurvePlot;
 use crate::ui::{MenuPage, Panel};
 
 fn ask(out: &mut MessageWriter<Requested>, action: Action) {
@@ -108,6 +109,7 @@ pub fn open_panels(
     ui_state: Res<Ui>,
     mut game: ResMut<Game>,
     mut out: MessageWriter<Requested>,
+    mut curve: Local<CurvePlot>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
     for panel in ui_state.open_panels().to_vec() {
@@ -116,7 +118,7 @@ pub fn open_panels(
             Panel::Escape => escape(ui, &mut out),
             Panel::Settings => settings(ui, &ui_state),
             Panel::Debug => debug(ui, &ui_state, &game, &mut out),
-            Panel::Telescope => telescope(ui, &ui_state, &mut game, &mut out),
+            Panel::Telescope => telescope(ui, &ui_state, &mut game, &mut out, &mut curve),
             Panel::System => system(ui, &ui_state, &game),
             Panel::Flight => flight(ui, &ui_state, &game, &mut out),
         });
@@ -174,7 +176,13 @@ fn debug(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Req
     }
 }
 
-fn telescope(ui: &mut egui::Ui, state: &Ui, game: &mut Game, out: &mut MessageWriter<Requested>) {
+fn telescope(
+    ui: &mut egui::Ui,
+    state: &Ui,
+    game: &mut Game,
+    out: &mut MessageWriter<Requested>,
+    plot: &mut CurvePlot,
+) {
     ui.label("Band mapping");
     ui.horizontal(|ui| {
         for (i, (name, _)) in presets::all().iter().enumerate() {
@@ -208,15 +216,45 @@ fn telescope(ui: &mut egui::Ui, state: &Ui, game: &mut Game, out: &mut MessageWr
     });
     ui.separator();
 
-    ui.label(format!("integration: {:.0} s", state.integration_s));
-    ui.label(format!("samples: {}", game.curve.len()));
-    if game.curve.len() > 1 {
-        ui.label(format!("deepest dip: {:.3e}", game.curve.deepest()));
-        ui.label(format!("uncertainty: {:.3e}", game.curve.uncertainty()));
-        // Colour is an information channel here, so the number is given as well.
-        let samples = game.curve.samples();
-        let last = samples.last().copied().unwrap_or((0.0, 0.0));
-        ui.label(format!("last measurement: {:.4e}", last.1));
+    ui.horizontal(|ui| {
+        ui.label(format!("integration: {:.0} s", state.integration_s));
+        ui.separator();
+        ui.label(format!("{} samples", game.curve.len()));
+        if game.curve.len() > 1 {
+            ui.separator();
+            ui.label(format!("+/- {:.1e}", game.curve.uncertainty()));
+        }
+    });
+
+    let band = game.curve.band();
+    ui.horizontal(|ui| {
+        ui.label("curve");
+        for b in em_spectra::Band::ALL {
+            // A band the sensor cannot reach is shown as unavailable rather than omitted, so
+            // the instrument's limits are visible instead of merely being enforced.
+            if !game.telescope.sees(b) {
+                ui.weak(format!("{b:?}"));
+                continue;
+            }
+            if ui.selectable_label(band == b, format!("{b:?}")).clicked() {
+                ask(out, Action::SetCurveBand(b));
+            }
+        }
+    });
+    let width = ui.available_width().max(220.0);
+    let samples = game.curve.samples().to_vec();
+    plot.show(ui, &samples, egui::vec2(width, 190.0));
+    ui.weak(crate::plot::caption(band));
+
+    if let Some((_, last)) = samples.last() {
+        // The picture is the readout, but a number is the one form of it that survives being
+        // read aloud, screenshotted, or looked at by someone who cannot see the colour.
+        let (label, value) = if *last >= 0.0 {
+            ("deficit", *last)
+        } else {
+            ("excess", -*last)
+        };
+        ui.label(format!("last: {label} {value:.4e}   deepest dip {:.3e}", game.curve.deepest()));
     }
 }
 

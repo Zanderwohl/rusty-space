@@ -47,6 +47,24 @@ impl LightCurve {
     }
 
     /// One sigma on the most recent measurement.
+    /// Which band the curve is of.
+    pub fn band(&self) -> Band {
+        self.band
+    }
+
+    /// Watch a different band, discarding what was measured in the old one.
+    ///
+    /// A curve is of one band. Keeping the samples across a change would splice two different
+    /// measurements into one series, and in a system with a warm population the two do not even
+    /// have the same sign.
+    pub fn set_band(&mut self, band: Band) {
+        if self.band != band {
+            self.band = band;
+            self.samples.clear();
+            self.uncertainty = 0.0;
+        }
+    }
+
     pub fn uncertainty(&self) -> f64 {
         self.uncertainty
     }
