@@ -7,7 +7,10 @@ use tokio_postgres::Client;
 
 /// Every step, in order. The name is the record; never rename or reorder one that has shipped.
 pub const STEPS: &[(&str, &str)] =
-    &[("0001_causality", include_str!("../sql/0001_causality.sql"))];
+    &[
+        ("0001_causality", include_str!("../sql/0001_causality.sql")),
+        ("0002_schema", include_str!("../sql/0002_schema.sql")),
+    ];
 
 /// The advisory lock every migrator takes before touching the schema.
 ///
@@ -146,7 +149,7 @@ mod tests {
         }
 
         // And a spread over the whole legal range, including the extremes the bound allows.
-        let mut coordinate = |state: &mut u64| {
+        let coordinate = |state: &mut u64| {
             let pick = |state: &mut u64| {
                 let raw = splitmix(state) % (COORD_BOUND as u64 * 2);
                 raw as i64 - COORD_BOUND

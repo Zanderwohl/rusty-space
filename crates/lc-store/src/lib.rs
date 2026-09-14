@@ -8,7 +8,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod id;
 pub mod migrate;
+pub mod store;
 
 /// Where the store lives, from the environment or the development default.
 ///

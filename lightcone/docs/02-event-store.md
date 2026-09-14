@@ -242,6 +242,26 @@ through `numeric_power`, which picks a display scale: a separation of one micros
 as `-1.0000000000000000`. Two scale-zero numerics multiplied are scale zero, so the result reads
 as the integer it is, and it is the cheaper of the two besides.
 
+### What the plan actually says
+
+The delivery lookup is checked against the planner rather than asserted, because "a single
+B-tree range scan" is a claim about what Postgres *chooses* to do and it is free to choose
+otherwise. Two things had to be true before it did.
+
+**The index has to cover the query.** `strength` was not in the primary key, so the planner had
+to visit the heap for one float — and it does that with a bitmap scan, which reads the heap in
+physical order, loses the index's ordering, and sorts the whole result before yielding the first
+row. `PRIMARY KEY (observer_id, arrive_t, event_id) INCLUDE (strength)` removes the heap visit.
+
+**Autovacuum has to keep up.** An index-only scan still checks the heap for every row until a
+vacuum marks the pages all-visible, and until then the planner correctly prices it as no better
+than a bitmap scan. Cost on twenty thousand rows: 362 before, 39 after. *The hot path is
+index-only only while autovacuum keeps up* — a deployment requirement, not a schema one.
+
+With both, the plan is one `Index Only Scan` over one partition, no sort and no heap access.
+Partition pruning does the rest: a tick's window falls inside one thirty-day span, so the other
+partitions are never opened.
+
 A developer needs `createdb lc_store` and nothing else; `LC_STORE_URL` points elsewhere. Every
 test that needs the database **skips** when it cannot reach one, because the suite has to pass on
 a machine without Postgres and a test that cannot run is not a test that failed.
