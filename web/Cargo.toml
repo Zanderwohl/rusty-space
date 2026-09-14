@@ -1,0 +1,11 @@
+# A workspace of its own, deliberately. The site shares no code with the game, and a second
+# lockfile is what makes "the site and the game version independently" true rather than
+# intended. See lightcone/docs/14-hosting.md.
+[workspace]
+resolver = "3"
+members = ["lc-web"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true

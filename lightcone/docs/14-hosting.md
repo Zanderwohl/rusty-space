@@ -475,6 +475,29 @@ a style rollback and a code rollback the same operation. The site is one image p
 environment and does not depend on the CDN to render a single page — the CDN serves the game,
 not the website.
 
+## Building it: the `rocinante` context
+
+Images are built on **`rocinante`**, a docker context over SSH to an idle home-lab machine
+that is natively `linux/amd64`.
+
+```bash
+docker --context rocinante build -t lightcone-web:<tag> -f web/Dockerfile .
+docker --context rocinante run -d --name lightcone-web -p 3100:3100 ... lightcone-web:<tag>
+```
+
+Three reasons it beats CI for this, and they are the same reasons sandhill already builds
+there: it is free where GitHub Actions minutes are not, it is faster, and it runs when asked
+rather than when a queue gets to it. It is also the right architecture — building `amd64` on
+an Apple Silicon laptop means qemu emulation, which for a Rust release build is the difference
+between minutes and most of an afternoon.
+
+CI's job is therefore `cargo test` and the dependency-invariant greps. **CI does not build or
+push images.** If that ever changes, it is because a deploy needs to happen when the machine
+is off, and the answer then is a registry, not emulation.
+
+Ports 3000–3999 on that host are the range for this project; 3000 is sandhill's, and the site
+takes **3100**.
+
 ## Configuration
 
 Environment only; no config file, no secrets in the image.
