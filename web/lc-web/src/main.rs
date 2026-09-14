@@ -32,8 +32,16 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env()?;
-    tracing::info!(build = assets::BUILD, env = ?config.env, "starting");
 
+    // The stylesheet is compiled at boot, so a syntax error in it is a failed deploy rather
+    // than a failed build. This flag lets CI move that leftward.
+    if std::env::args().any(|a| a == "--check-styles") {
+        Assets::load(&config.static_dir)?;
+        println!("stylesheet ok");
+        return Ok(());
+    }
+
+    tracing::info!(build = assets::BUILD, env = ?config.env, "starting");
     let assets = Assets::load(&config.static_dir)?;
 
     #[cfg(feature = "watch")]
@@ -51,10 +59,7 @@ async fn main() -> anyhow::Result<()> {
         .with_state(assets)
         .layer(TraceLayer::new_for_http())
         .layer(CompressionLayer::new())
-        .layer(TimeoutLayer::with_status_code(
-            StatusCode::GATEWAY_TIMEOUT,
-            Duration::from_secs(15),
-        ))
+        .layer(TimeoutLayer::with_status_code(StatusCode::GATEWAY_TIMEOUT, Duration::from_secs(15)))
         .layer(SetResponseHeaderLayer::overriding(
             HeaderName::from_static("x-lightcone-build"),
             HeaderValue::from_static(assets::BUILD),

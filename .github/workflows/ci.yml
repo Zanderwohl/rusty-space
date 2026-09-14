@@ -49,3 +49,42 @@ jobs:
             cargo tree -p exotic-matters | grep -E '^[[:space:]]*lc-' >&2
             exit 1
           fi
+
+  # The website is its own workspace with its own lockfile, which is what makes its
+  # version independent of the game's. It shares no code with either product, so a
+  # path dependency reaching back into crates/ is the thing to catch.
+  #
+  # Images are built on the `rocinante` docker context, not here. See
+  # lightcone/docs/14-hosting.md.
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: web
+
+      - name: The site is a separate workspace
+        run: |
+          if grep -rn 'path = "\.\./\.\./crates' */Cargo.toml; then
+            echo "the site has a path dependency on a game crate" >&2
+            exit 1
+          fi
+
+      - name: Test
+        run: cargo test
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Formatting
+        run: cargo fmt --check
+
+      # The stylesheet is compiled at boot, so a syntax error in it is a failed
+      # deploy rather than a failed build. Compiling it here moves that left.
+      - name: The stylesheet compiles
+        run: cargo run --quiet --bin lc-web -- --check-styles

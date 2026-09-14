@@ -130,7 +130,10 @@ mod tests {
 
     #[test]
     fn strips_the_build_segment() {
-        assert_eq!(strip_version("/v/a1b2c3d/styles/application.css"), Some("styles/application.css"));
+        assert_eq!(
+            strip_version("/v/a1b2c3d/styles/application.css"),
+            Some("styles/application.css")
+        );
         assert_eq!(strip_version("/v/anything/images/a.png"), Some("images/a.png"));
     }
 

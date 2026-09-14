@@ -8,8 +8,8 @@ use std::process::Command;
 fn main() {
     println!("cargo:rerun-if-env-changed=SITE_BUILD");
 
-    let build = std::env::var("SITE_BUILD").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(
-        || {
+    let build =
+        std::env::var("SITE_BUILD").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| {
             Command::new("git")
                 .args(["rev-parse", "--short", "HEAD"])
                 .output()
@@ -19,7 +19,6 @@ fn main() {
                 .map(|s| s.trim().to_owned())
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| format!("v{}", env!("CARGO_PKG_VERSION")))
-        },
-    );
+        });
     println!("cargo:rustc-env=SITE_BUILD={build}");
 }
