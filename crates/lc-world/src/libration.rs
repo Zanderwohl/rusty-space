@@ -17,7 +17,7 @@
 //! the planar and vertical frequencies are never equal. The difference is
 //! visible over years and is not what a player is looking at.
 
-use em_foundations::lagrange::{self, Collinear};
+use em_foundations::lagrange;
 use glam::DVec3;
 
 use crate::navigation::LagrangePoint;
@@ -77,7 +77,7 @@ impl Libration {
 
         let mass = system.sim().mass(index);
         let ratio = mass / (mass + system.sim().mass(parent));
-        let (gamma, frequencies) = lagrange::about(ratio, collinear(point))?;
+        let (gamma, frequencies) = lagrange::about(ratio, point.collinear())?;
 
         let distance = separation.length();
         // Instantaneous angular rate of the pair, from `r x v`. The mean motion of a circular
@@ -153,13 +153,6 @@ impl Libration {
     /// Longest dimension of the orbit, metres: the along-track axis.
     pub fn extent_m(&self) -> f64 {
         2.0 * self.amplitude_ratio * self.radial_m
-    }
-}
-
-fn collinear(point: LagrangePoint) -> Collinear {
-    match point {
-        LagrangePoint::L1 => Collinear::L1,
-        LagrangePoint::L2 => Collinear::L2,
     }
 }
 
@@ -299,6 +292,78 @@ mod tests {
             let stale = system.propagated_to(present);
             assert_eq!(orbit.at(&stale, ahead), Some(now), "the clock at {present} changed it");
         }
+    }
+
+    /// Why a mission flies a libration orbit and does not park on the point.
+    ///
+    /// A craft *at* L2 is on the Sun-Earth line by definition, so Earth eclipses the Sun there
+    /// permanently — no sunlight, ever. The Lissajous swings a third of a right angle off the
+    /// line and is in the shadow only where it crosses. That is not a quirk of this model; it
+    /// is the reason halo orbits exist.
+    #[test]
+    fn the_point_is_permanently_eclipsed_and_the_orbit_about_it_is_not() {
+        let Some(system) = sol() else { return };
+        let sun = system.primary();
+        let earth = system.body_named("Earth").unwrap();
+        let r_earth = system.sim().radius(earth);
+        let r_sun = system.sim().radius(sun);
+
+        // How much of a year is spent with Earth over any part of the Sun, and how far off the
+        // line the craft ever gets.
+        let survey = |place: &dyn Fn(f64) -> Option<DVec3>| {
+            let (mut overlapped, mut widest) = (0, 0.0f64);
+            for step in 0..64 {
+                let t = 365.25 * 86_400.0 * step as f64 / 64.0;
+                let at = place(t).expect("a place");
+                let to_earth = (system.body_position_at("Earth", t).unwrap() - at).normalize();
+                let to_sun = (system.star_position_at(t).unwrap() - at).normalize();
+                let separation = to_earth.dot(to_sun).clamp(-1.0, 1.0).acos();
+                let earth_range =
+                    (system.body_position_at("Earth", t).unwrap() - at).length() * M_PER_LY;
+                let sun_range = (system.star_position_at(t).unwrap() - at).length() * M_PER_LY;
+                if separation < (r_earth / earth_range).asin() + (r_sun / sun_range).asin() {
+                    overlapped += 1;
+                }
+                widest = widest.max(separation.to_degrees());
+            }
+            (overlapped, widest)
+        };
+
+        let point =
+            crate::navigation::Waypoint::Lagrange { body: "Earth".into(), point: LagrangePoint::L2 };
+        let (at_point, widest_at_point) = survey(&|t| point.place_at(&system, t));
+        assert_eq!(at_point, 64, "the point is on the line at every instant, by construction");
+        // Not zero: the direction is normalised out of positions of order 1e11 metres, and a
+        // millionth of a degree at this range is four centimetres.
+        assert!(widest_at_point < 1.0e-4, "{widest_at_point} degrees off the line");
+
+        let orbit = Libration::about(&system, "Earth", LagrangePoint::L2, 0.0).expect("L2");
+        let (in_orbit, widest_in_orbit) = survey(&|t| orbit.at(&system, t));
+        assert!(in_orbit <= 4, "{in_orbit} of 64 samples in the shadow");
+        assert!(widest_in_orbit > 25.0, "only {widest_in_orbit} degrees off the line");
+    }
+
+    /// The companion and the hangout measure the same standoff, because they now solve the
+    /// same quintic. The Hill radius is not that number, and is the *same* number for L1 and
+    /// L2 — which put them symmetrically either side of Earth. They are not symmetric.
+    #[test]
+    fn the_point_and_the_orbit_about_it_agree_on_where_it_is() {
+        let Some(system) = sol() else { return };
+        for point in [LagrangePoint::L1, LagrangePoint::L2] {
+            let orbit = Libration::about(&system, "Earth", point, 0.0).expect("a point");
+            let standoff = point.standoff_m(&system, "Earth", 0.0).expect("a point");
+            assert!(
+                (standoff / orbit.standoff_m - 1.0).abs() < 1.0e-12,
+                "{standoff} against {}",
+                orbit.standoff_m,
+            );
+        }
+
+        let one = LagrangePoint::L1.standoff_m(&system, "Earth", 0.0).unwrap();
+        let two = LagrangePoint::L2.standoff_m(&system, "Earth", 0.0).unwrap();
+        assert!(two > one, "L2 is the further out: {two} against {one}");
+        // Some seven thousand kilometres apart, which the Hill radius collapsed to zero.
+        assert!((two - one) / KM > 5_000.0, "{} km apart", (two - one) / KM);
     }
 
     /// The Sun has no parent, so it has no libration points, and that is said rather than

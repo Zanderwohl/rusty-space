@@ -47,6 +47,31 @@ impl LagrangePoint {
             LagrangePoint::L2 => 1.0,
         }
     }
+
+    pub fn collinear(self) -> em_foundations::lagrange::Collinear {
+        match self {
+            LagrangePoint::L1 => em_foundations::lagrange::Collinear::L1,
+            LagrangePoint::L2 => em_foundations::lagrange::Collinear::L2,
+        }
+    }
+
+    /// How far from `body` its point of this kind sits, metres, at a coordinate time.
+    ///
+    /// The root of Lagrange's quintic, not the Hill radius. The two differ by a third of a per
+    /// cent at Sun-Earth — five thousand kilometres — and, worse, the Hill radius is the *same*
+    /// number for L1 and L2, which puts them symmetrically either side of the body. They are
+    /// not symmetric: L2 is the further out.
+    pub fn standoff_m(self, system: &LocalSystem, body: &str, seconds: f64) -> Option<f64> {
+        let index = system.body_named(body)?;
+        let parent = system.sim().parent(index)?;
+        let (at_body, _) = system.body_state_at(index, seconds)?;
+        let (at_parent, _) = system.body_state_at(parent, seconds)?;
+        let distance = (at_body - at_parent).length();
+        let mass = system.sim().mass(index);
+        let ratio = mass / (mass + system.sim().mass(parent));
+        let gamma = em_foundations::lagrange::gamma(ratio, self.collinear())?;
+        (distance > 0.0).then_some(gamma * distance)
+    }
 }
 
 /// Which way round a body an orbit runs.
@@ -173,20 +198,9 @@ impl Waypoint {
                 let parent = system.sim().parent(index)?;
                 let (at_body, _) = system.body_state_at(index, seconds)?;
                 let (at_parent, _) = system.body_state_at(parent, seconds)?;
-                let offset = at_body - at_parent;
-                let distance = offset.length();
-                let mass = system.sim().mass(parent);
-                if distance <= 0.0 || mass <= 0.0 {
-                    return None;
-                }
-                // The Hill radius. Exact enough: the collinear points sit within a few per cent
-                // of it, and the ship is holding station rather than balancing there.
-                let hill = distance * (system.sim().mass(index) / (3.0 * mass)).cbrt();
-                let sign = match point {
-                    LagrangePoint::L1 => -1.0,
-                    LagrangePoint::L2 => 1.0,
-                };
-                let at = at_body + offset / distance * hill * sign;
+                let out = (at_body - at_parent).normalize_or_zero();
+                let standoff = point.standoff_m(system, body, seconds)?;
+                let at = at_body + out * standoff * point.outward_sign();
                 Some(system.origin_ly + at / M_PER_LY)
             }
         }
