@@ -104,7 +104,9 @@ pub fn impact_with(
         return None;
     }
     let radius = system.radius(body);
-    if !(radius > 0.0) {
+    // `is_nan` spelled out: a NaN compares false against everything, so the bound alone would
+    // let one through into the march.
+    if radius.is_nan() || radius <= 0.0 {
         return None;
     }
     let mu = system.gravitational_constant() * system.mass(body);
@@ -186,9 +188,7 @@ fn safe_step(
     let fastest =
         (closing * closing + 2.0 * mu * (1.0 / radius - 1.0 / separation).max(0.0)).sqrt();
     let seconds = if fastest > 0.0 { above / fastest } else { f64::INFINITY };
-    Some(TimeDelta::from_seconds(
-        (seconds * STEP_SAFETY).max(MIN_STEP_SECONDS).min(f64::MAX),
-    ))
+    Some(TimeDelta::from_seconds((seconds * STEP_SAFETY).max(MIN_STEP_SECONDS)))
 }
 
 /// Bisect a bracketed contact down to [`CONTACT_TOLERANCE_SECONDS`].

@@ -165,7 +165,7 @@ mod tests {
         };
 
         let course = Course::Orbit { body, altitude_radii: 2.0, plane: Plane::Equatorial };
-        let Some(waypoint) = course.resolve(&system, system.star_position_ly()) else { return };
+        let Some(waypoint) = course.resolve(&system, system.star_position_ly(), 0.0) else { return };
         let mut motion = lc_world::motion::ShipState::at(system.star_position_ly());
         motion.begin_holding(waypoint);
 

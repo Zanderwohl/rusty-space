@@ -301,7 +301,7 @@ fn tuning(ui: &mut egui::Ui, state: &Ui, out: &mut MessageWriter<Requested>) {
 }
 
 fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {
-    ui.label(format!("drive: {:.0} g, cap {:.3}c", game.ship.drive.accel_g, game.ship.drive.max_beta));
+    ui.label(format!("drive: {:.0} g, cap {:.3}c", game.ship.motion.drive.accel_g, game.ship.motion.drive.max_beta));
     ui.horizontal(|ui| {
         for g in [1.0, 5.0, 20.0, 100.0] {
             if ui.button(format!("{g:.0} g")).clicked() {
@@ -346,7 +346,7 @@ fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Re
         }
     }
     ui.separator();
-    let p = game.ship.position_ly;
+    let p = game.ship.motion.position_ly;
     ui.weak(format!("at {:.3}, {:.3}, {:.3} ly", p.x, p.y, p.z));
 }
 
@@ -426,7 +426,7 @@ fn system(
                 ask(out, Action::SetCourse(course));
             }
         }
-        ui.weak(format!("brachistochrone at {:.0} g", game.ship.drive.accel_g));
+        ui.weak(format!("brachistochrone at {:.0} g", game.ship.motion.drive.accel_g));
     });
 }
 
@@ -450,7 +450,7 @@ fn station(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<R
         return;
     };
     ui.label(format!("holding: {}", waypoint.label()));
-    if let Some(period) = waypoint.period_s(system) {
+    if let Some(period) = waypoint.period_s(system, game.coordinate_time_s()) {
         ui.weak(format!("one turn in {}", duration(period)));
         // The clock outruns an orbit by default and the view is then a strobe. Say so where the
         // decision is made rather than leaving it to be discovered.
@@ -473,11 +473,15 @@ fn station(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<R
 
 /// How far the ship is from a target, light-years.
 fn range_to(game: &Game, system: &crate::system::LocalSystem, target: &Target) -> f64 {
+    // At the ship's own time. Read out of the arena, which no longer advances, a three-radii
+    // orbit of Earth read as five hundred thousand kilometres after five hours -- which is
+    // exactly how far Earth had gone in the meantime.
+    let now = game.coordinate_time_s();
     let at = match target {
-        Target::Body(name) => system.body_position_ly(name),
-        Target::Band(_) => Some(system.star_position_ly()),
+        Target::Body(name) => system.body_position_at(name, now),
+        Target::Band(_) => system.star_position_at(now),
     };
-    at.map(|at| at.distance(game.ship.position_ly)).unwrap_or(0.0)
+    at.map(|at| at.distance(game.ship.motion.position_ly)).unwrap_or(0.0)
 }
 
 

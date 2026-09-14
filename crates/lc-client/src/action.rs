@@ -172,11 +172,12 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         },
 
         Action::LookAtStation => {
+            let now = session.coordinate_time_s();
             let at = session
                 .station()
                 .zip(session.system.as_ref())
-                .and_then(|(station, system)| station.focus(system));
-            match at.and_then(|at| Look::aimed_at(at - session.ship.position_ly)) {
+                .and_then(|(station, system)| station.focus(system, now));
+            match at.and_then(|at| Look::aimed_at(at - session.ship.motion.position_ly)) {
                 Some(look) => ui.look = look,
                 None => effects.push(Effect::Notify("not on a station".into())),
             }
@@ -217,8 +218,8 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
 
         Action::SetDriveAccel(g) => {
-            session.ship.drive.accel_g = g.clamp(MIN_ACCEL_G, MAX_ACCEL_G);
-            effects.push(Effect::Notify(format!("drive set to {:.0} g", session.ship.drive.accel_g)));
+            session.ship.motion.drive.accel_g = g.clamp(MIN_ACCEL_G, MAX_ACCEL_G);
+            effects.push(Effect::Notify(format!("drive set to {:.0} g", session.ship.motion.drive.accel_g)));
         }
 
         Action::SetPointStyle { which, style } => match which {
@@ -553,9 +554,9 @@ mod tests {
     fn the_drive_setting_is_clamped_to_something_flyable() {
         let (mut ui, mut s) = fixture();
         apply(Action::SetDriveAccel(1e9), &mut ui, &mut s);
-        assert_eq!(s.ship.drive.accel_g, MAX_ACCEL_G);
+        assert_eq!(s.ship.motion.drive.accel_g, MAX_ACCEL_G);
         apply(Action::SetDriveAccel(-4.0), &mut ui, &mut s);
-        assert_eq!(s.ship.drive.accel_g, MIN_ACCEL_G);
+        assert_eq!(s.ship.motion.drive.accel_g, MIN_ACCEL_G);
     }
 
     /// The setting has to reach the crossing, not just the readout.
@@ -736,7 +737,7 @@ mod tests {
     #[test]
     fn leaving_for_another_star_gives_up_the_station() {
         let mut s = Session::new(&AuthoredStars::sample(), 3);
-        s.ship.begin_holding(crate::navigation::Waypoint::Fixed(glam::DVec3::X));
+        s.ship.motion.begin_holding(crate::navigation::Waypoint::Fixed(glam::DVec3::X));
         s.fly_to(s.stars[0].id);
         assert!(s.station().is_none());
     }
@@ -772,7 +773,7 @@ mod tests {
         // Crossing and holding are exclusive: the ship is flying *to* the station, and
         // arriving is what turns one into the other.
         assert!(s.cruise().is_some(), "Go did not begin a crossing");
-        assert!(s.ship.bound_for().is_some(), "and the crossing is not for anywhere");
+        assert!(s.ship.motion.bound_for().is_some(), "and the crossing is not for anywhere");
         assert!(s.station().is_none(), "it cannot be holding a place it has not reached");
 
         // Focusing something else drops the armed course: it belonged to the last one.

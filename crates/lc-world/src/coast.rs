@@ -418,9 +418,9 @@ mod tests {
         let system = sol();
         let course =
             Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
-        let waypoint = course.resolve(&system, DVec3::ZERO).unwrap();
-        let at = waypoint.place(&system).unwrap();
-        let velocity = waypoint.velocity_at(&system).expect("a station has a velocity");
+        let waypoint = course.resolve(&system, DVec3::ZERO, 0.0).unwrap();
+        let at = waypoint.place_at(&system, 0.0).unwrap();
+        let velocity = waypoint.velocity_at(&system, 0.0).expect("a station has a velocity");
         let coast = Coast::from_state(&system, at, velocity, system.time_s()).expect("an arc");
         assert_eq!(coast.primary, "Earth");
         assert!(coast.elements.eccentricity < 1e-3, "e = {}", coast.elements.eccentricity);

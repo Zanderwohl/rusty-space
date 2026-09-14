@@ -213,7 +213,9 @@ pub fn apply(
         }
         Change::SetCourse { course, drive } => {
             let system = system.ok_or(Rejected::NotInASystem)?;
-            let waypoint = course.resolve(system, state.position_ly).ok_or(Rejected::NoSuchPlace)?;
+            let waypoint = course
+                .resolve(system, state.position_ly, event.at_t)
+                .ok_or(Rejected::NoSuchPlace)?;
             let (cruise, aimed) =
                 crate::navigation::plan(system, &waypoint, state.position_ly, event.at_t, *drive)
                     .ok_or(Rejected::NoSuchPlace)?;
@@ -253,7 +255,7 @@ pub fn state_at(
         Motive::Holding(waypoint) => {
             let system = system?;
             let at = waypoint.place_at(system, now_s)?;
-            let velocity = waypoint.velocity_at_time(system, now_s).unwrap_or(DVec3::ZERO);
+            let velocity = waypoint.velocity_at(system, now_s).unwrap_or(DVec3::ZERO);
             Some((at, coast::beta_of(velocity)))
         }
         Motive::Falling(arc) => {
@@ -614,7 +616,7 @@ mod tests {
         let mut ship = ShipState::at(DVec3::ZERO);
         let course =
             Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
-        let waypoint = course.resolve(&system, DVec3::ZERO).expect("a place");
+        let waypoint = course.resolve(&system, DVec3::ZERO, 0.0).expect("a place");
         ship.begin_holding(waypoint);
 
         let ahead = 43_200.0;

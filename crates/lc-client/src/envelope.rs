@@ -367,7 +367,7 @@ pub fn update_envelopes(
     let Some(system) = session.system.as_ref() else { return };
     for (mut transform, shell) in placed.iter_mut().zip(&envelopes.shells) {
         transform.translation =
-            sim_to_render((system.origin_ly - session.ship.position_ly) * M_PER_LY / UNIT_M).as_vec3();
+            sim_to_render((system.origin_ly - session.ship.motion.position_ly) * M_PER_LY / UNIT_M).as_vec3();
         transform.rotation = shell.orientation;
         transform.scale = Vec3::splat(shell.radius);
     }
@@ -377,7 +377,7 @@ pub fn update_envelopes(
         let Some(body) = bodies.drawn.iter().find(|d| d.name == ring.body) else { continue };
         let Some(rings) = body.rings else { continue };
         transform.translation =
-            sim_to_render((body.position_ly - session.ship.position_ly) * M_PER_LY / UNIT_M).as_vec3();
+            sim_to_render((body.position_ly - session.ship.motion.position_ly) * M_PER_LY / UNIT_M).as_vec3();
         transform.rotation = orientation(rings.pole);
         transform.scale = Vec3::splat(ring.radius);
     }
@@ -387,7 +387,7 @@ pub fn update_envelopes(
         envelopes.shells.iter().zip(system.populations.iter().filter(|p| visible(p)))
     {
         if let Some(material) = materials.get_mut(&shell.material) {
-            let inside = session.ship.position_ly.distance(system.origin_ly) * M_PER_LY
+            let inside = session.ship.motion.position_ly.distance(system.origin_ly) * M_PER_LY
                 < population.thermal_radius();
             let next = uniforms(population, material.uniforms.seed, ui.envelope_gain, inside);
             if material.uniforms != next {

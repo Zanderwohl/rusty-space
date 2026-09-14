@@ -241,20 +241,23 @@ fn place_on_station(
         *done = true;
         return;
     };
-    let Some(system) = game.system.as_ref() else { return };
-    let here = game.ship.position_ly;
-    let Some(waypoint) = course.resolve(system, here) else { return };
+    let now = game.coordinate_time_s();
+    let Some(system) = game.system.clone() else { return };
+    let here = game.ship.motion.position_ly;
+    let Some(waypoint) = course.resolve(&system, here, now) else { return };
     // Aimed at where the ship already is, so `--station` lands on the near side of an orbit
     // rather than wherever the clock had it.
-    let waypoint = waypoint.nearest_to(here, system);
-    let Some(at) = waypoint.place(system) else { return };
+    let waypoint = waypoint.nearest_to(here, &system, now);
+    let Some(at) = waypoint.place_at(&system, now) else { return };
     let label = waypoint.label();
     ui.focus = course.target();
-    if let Some(look) = waypoint.focus(system).and_then(|f| crate::ui::Look::aimed_at(f - at)) {
+    if let Some(look) =
+        waypoint.focus(&system, now).and_then(|f| crate::ui::Look::aimed_at(f - at))
+    {
         ui.look = look;
     }
     game.0.place_at(at);
-    game.0.ship.begin_holding(waypoint);
+    game.0.ship.motion.begin_holding(waypoint);
     ui.notify(format!("on station: {label}"), game.coordinate_time_s());
     *done = true;
 }
@@ -547,8 +550,8 @@ mod tests {
         }
         let game = app.world().resource::<Game>();
         assert!(game.distance_to(game.star(id).unwrap()) < before, "the ship did not move");
-        assert!(game.ship.beta.length() > 0.0, "and it is not under way");
-        assert!(game.ship.clock_s < game.coordinate_time_s(), "the ship clock should lag");
+        assert!(game.ship.motion.beta.length() > 0.0, "and it is not under way");
+        assert!(game.ship.motion.clock_s < game.coordinate_time_s(), "the ship clock should lag");
     }
 
     /// The camera turns; it does not travel. Everything drawn is at a fixed radius around it.

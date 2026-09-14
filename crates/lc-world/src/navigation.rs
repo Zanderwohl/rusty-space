@@ -147,17 +147,14 @@ pub const DEPARTURE_MARGIN: f64 = 1.05;
 pub const ARRIVAL_ROUNDS: usize = 3;
 
 impl Waypoint {
-    /// Where this is, light-years from the world origin, in the system as currently propagated.
-    ///
-    /// `None` when the body it names has gone, which happens when the ship leaves the system.
-    pub fn place(&self, system: &LocalSystem) -> Option<DVec3> {
-        self.place_at(system, system.time_s())
-    }
-
-    /// The same, at a coordinate time of the caller's choosing.
+    /// Where this is at a coordinate time, light-years from the world origin.
     ///
     /// Bodies are placed analytically rather than read from the arena, so this does not care
-    /// where `system`'s clock is. A station is a worldline and this is how it is read.
+    /// where `system`'s clock is — and there is deliberately no form that defaults to it. A
+    /// station is a worldline, every caller means a particular instant, and the one that
+    /// defaulted was how "the system must be propagated first" became a caller's problem.
+    ///
+    /// `None` when the body it names has gone, which happens when the ship leaves the system.
     pub fn place_at(&self, system: &LocalSystem, seconds: f64) -> Option<DVec3> {
         match self {
             Waypoint::Fixed(at) => Some(*at),
@@ -213,16 +210,12 @@ impl Waypoint {
     /// Differenced rather than differentiated: a waypoint is a closed form but three different
     /// ones, and the same central difference serves all of them. Only cancelling asks for this,
     /// so the two extra propagations cost nothing anyone can see.
-    pub fn velocity_at(&self, system: &LocalSystem) -> Option<DVec3> {
-        self.velocity_at_time(system, system.time_s())
-    }
-
-    /// The same, at a coordinate time of the caller's choosing.
-    pub fn velocity_at_time(&self, system: &LocalSystem, seconds: f64) -> Option<DVec3> {
+    pub fn velocity_at(&self, system: &LocalSystem, seconds: f64) -> Option<DVec3> {
         if matches!(self, Waypoint::Fixed(_)) {
             return Some(DVec3::ZERO);
         }
-        let step = self.period_s(system).map(|p| p / 4096.0).unwrap_or(1.0).clamp(1.0e-3, 60.0);
+        let step =
+            self.period_s(system, seconds).map(|p| p / 4096.0).unwrap_or(1.0).clamp(1.0e-3, 60.0);
         let before = self.place_at(system, seconds - step)?;
         let after = self.place_at(system, seconds + step)?;
         Some((after - before) * M_PER_LY / (2.0 * step))
@@ -235,18 +228,18 @@ impl Waypoint {
     /// crossing straight through the body. Anything that is not a circle has one point and is
     /// returned unchanged.
     ///
-    /// `system` must be propagated to the arrival time: the phase is fixed against the clock,
-    /// so it is chosen for when the ship gets there rather than for now.
-    pub fn nearest_to(&self, from_ly: DVec3, system: &LocalSystem) -> Self {
+    /// `at_s` is the *arrival* time, not now: the phase is fixed against the clock, so the
+    /// nearest point is the one the orbit will be presenting when the ship gets there.
+    pub fn nearest_to(&self, from_ly: DVec3, system: &LocalSystem, at_s: f64) -> Self {
         let Waypoint::Orbit(orbit) = self else { return self.clone() };
-        let Some((centre, mu)) = orbit.centre_of(system) else { return self.clone() };
+        let Some((centre, mu)) = orbit.centre_of_at(system, at_s) else { return self.clone() };
         let (u, v) = basis(orbit.pole);
         let approach = from_ly - centre;
         // Dropping the component along the pole leaves the direction the circle can actually
         // reach. A ship directly over the pole has no nearest point and gets a fixed one.
         let want = approach.dot(v).atan2(approach.dot(u));
         let mut aimed = orbit.clone();
-        aimed.phase_rad = want - orbit.rate(mu) * system.time_s();
+        aimed.phase_rad = want - orbit.rate(mu) * at_s;
         Waypoint::Orbit(aimed)
     }
 
@@ -255,12 +248,12 @@ impl Waypoint {
     /// A ship on station is looking at something, and it is never the station itself. From an
     /// orbit that is the body underneath; from a libration point it is the planet the point
     /// belongs to; from anywhere else it is the star.
-    pub fn focus(&self, system: &LocalSystem) -> Option<DVec3> {
+    pub fn focus(&self, system: &LocalSystem, seconds: f64) -> Option<DVec3> {
         match self {
-            Waypoint::Fixed(_) => Some(system.star_position_ly()),
-            Waypoint::Orbit(orbit) => Some(orbit.centre_of(system)?.0),
-            Waypoint::Lagrange { body, .. } => system.body_position_ly(body),
-            Waypoint::Libration(l) => system.body_position_ly(&l.body),
+            Waypoint::Fixed(_) => system.star_position_at(seconds),
+            Waypoint::Orbit(orbit) => Some(orbit.centre_of_at(system, seconds)?.0),
+            Waypoint::Lagrange { body, .. } => system.body_position_at(body, seconds),
+            Waypoint::Libration(l) => system.body_position_at(&l.body, seconds),
         }
     }
 
@@ -268,12 +261,12 @@ impl Waypoint {
     ///
     /// On screen because the clock runs at eight thousand times real time by default, which
     /// turns a low orbit into a blur: the period is what tells a player which rung to pick.
-    pub fn period_s(&self, system: &LocalSystem) -> Option<f64> {
+    pub fn period_s(&self, system: &LocalSystem, seconds: f64) -> Option<f64> {
         if let Waypoint::Libration(libration) = self {
             return Some(libration.period_s());
         }
         let Waypoint::Orbit(orbit) = self else { return None };
-        let (_, mu) = orbit.centre_of(system)?;
+        let (_, mu) = orbit.centre_of_at(system, seconds)?;
         (mu > 0.0 && orbit.radius_m > 0.0)
             .then(|| std::f64::consts::TAU * (orbit.radius_m.powi(3) / mu).sqrt())
     }
@@ -294,10 +287,6 @@ impl Orbit {
     ///
     /// `G m` of the centre, not `System::mu`, which is the `mu` of the orbit the centre itself
     /// is on — `G(M_sun + M_earth)` for Earth. Using it put a low Earth orbit at eleven seconds.
-    fn centre_of(&self, system: &LocalSystem) -> Option<(DVec3, f64)> {
-        self.centre_of_at(system, system.time_s())
-    }
-
     fn centre_of_at(&self, system: &LocalSystem, seconds: f64) -> Option<(DVec3, f64)> {
         let index = match &self.about {
             Anchor::Star => system.primary(),
@@ -336,7 +325,7 @@ impl Course {
     ///
     /// `from_ly` matters for exactly one course — leaving goes straight out from the star,
     /// which is a different direction depending on where you start.
-    pub fn resolve(&self, system: &LocalSystem, from_ly: DVec3) -> Option<Waypoint> {
+    pub fn resolve(&self, system: &LocalSystem, from_ly: DVec3, now_s: f64) -> Option<Waypoint> {
         match self {
             Course::To(at) => Some(Waypoint::Fixed(*at)),
             Course::Orbit { body, altitude_radii, plane } => {
@@ -359,7 +348,7 @@ impl Course {
                 Some(Waypoint::Lagrange { body: body.clone(), point: *point })
             }
             Course::Hangout { body, point } => Some(Waypoint::Libration(
-                crate::libration::Libration::about(system, body, *point, system.time_s())?,
+                crate::libration::Libration::about(system, body, *point, now_s)?,
             )),
             Course::Rings(body) => {
                 let index = system.body_named(body)?;
@@ -382,7 +371,7 @@ impl Course {
                 }))
             }
             Course::LeaveSystem => {
-                let star = system.star_position_ly();
+                let star = system.star_position_at(now_s)?;
                 // Straight out from the star, along the radius the ship is already on. Not
                 // along the star's own axis: that is one fixed direction, and leaving should
                 // be the shortest way out of the system rather than a trip to the north pole.
@@ -616,15 +605,15 @@ pub fn plan(
     drive: Drive,
 ) -> Option<(Cruise, Waypoint)> {
     let mut aimed = waypoint.clone();
-    let mut target = aimed.place(system)?;
+    let mut target = aimed.place_at(system, start_s)?;
     let mut cruise = Cruise::plan(from_ly, target, start_s, drive);
     if matches!(waypoint, Waypoint::Fixed(_)) {
         return Some((cruise, aimed));
     }
     for _ in 0..ARRIVAL_ROUNDS {
-        let arrival = system.propagated_to(start_s + cruise.duration_s());
-        aimed = waypoint.nearest_to(from_ly, &arrival);
-        let Some(next) = aimed.place(&arrival) else { break };
+        let arrival_s = start_s + cruise.duration_s();
+        aimed = waypoint.nearest_to(from_ly, system, arrival_s);
+        let Some(next) = aimed.place_at(system, arrival_s) else { break };
         if next == target {
             break;
         }
@@ -675,8 +664,8 @@ mod tests {
         let system = sol();
         let course =
             Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
-        let waypoint = course.resolve(&system, DVec3::ZERO).expect("Earth has an orbit");
-        let at = waypoint.place(&system).expect("a position");
+        let waypoint = course.resolve(&system, DVec3::ZERO, 0.0).expect("Earth has an orbit");
+        let at = waypoint.place_at(&system, 0.0).expect("a position");
         let earth = system.body_position_ly("Earth").expect("Earth");
         let radius = at.distance(earth) * M_PER_LY;
         let expected = 6.371e6 * 3.0;
@@ -691,7 +680,7 @@ mod tests {
         let pole = system.body_pole(system.body_named("Earth").unwrap());
         let of = |plane| {
             let course = Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane };
-            let Waypoint::Orbit(orbit) = course.resolve(&system, DVec3::ZERO).unwrap() else { panic!() };
+            let Waypoint::Orbit(orbit) = course.resolve(&system, DVec3::ZERO, 0.0).unwrap() else { panic!() };
             orbit.pole.dot(pole).abs()
         };
         assert!(of(Plane::Equatorial) > 0.999, "an equatorial normal is the pole");
@@ -702,19 +691,23 @@ mod tests {
     /// all the same place. The second half is what catches a rate of zero.
     #[test]
     fn an_orbit_goes_round() {
-        let mut system = sol();
+        let system = sol();
         let course =
             Course::Orbit { body: "Earth".into(), altitude_radii: 0.2, plane: Plane::Equatorial };
-        let waypoint = course.resolve(&system, DVec3::ZERO).unwrap();
-        let period = waypoint.period_s(&system).expect("a period");
+        let waypoint = course.resolve(&system, DVec3::ZERO, 0.0).unwrap();
+        let period = waypoint.period_s(&system, 0.0).expect("a period");
         // Low Earth orbit is about ninety minutes; at 1.2 radii it is a little longer.
         assert!((5000.0..9000.0).contains(&period), "{period} seconds");
 
+        // Both the ship and Earth read at the same instant. Reading one at `t` and the other
+        // out of the arena is how a circular orbit comes out fifty thousand kilometres wide.
+        let earth = system.body_named("Earth").unwrap();
         let mut seen = Vec::new();
         for step in 0..4 {
-            system.advance_to(period * step as f64 / 4.0);
-            let at = waypoint.place(&system).unwrap();
-            let centre = system.body_position_ly("Earth").unwrap();
+            let t = period * step as f64 / 4.0;
+            let at = waypoint.place_at(&system, t).unwrap();
+            let centre =
+                system.origin_ly + system.body_state_at(earth, t).unwrap().0 / M_PER_LY;
             seen.push((at, at.distance(centre) * M_PER_LY));
         }
         let radius = seen[0].1;
@@ -733,7 +726,9 @@ mod tests {
         let earth = system.body_position_ly("Earth").unwrap();
         let star = system.star_position_ly();
         let at = |point| {
-            Waypoint::Lagrange { body: "Earth".into(), point }.place(&system).expect("a point")
+            Waypoint::Lagrange { body: "Earth".into(), point }
+                .place_at(&system, 0.0)
+                .expect("a point")
         };
         let (l1, l2) = (at(LagrangePoint::L1), at(LagrangePoint::L2));
         let out = (earth - star).normalize();
@@ -752,18 +747,17 @@ mod tests {
         let system = sol();
         let course =
             Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
-        let waypoint = course.resolve(&system, DVec3::ZERO).unwrap();
+        let waypoint = course.resolve(&system, DVec3::ZERO, 0.0).unwrap();
         let from = system.body_position_ly("Mars").expect("Mars");
         let (cruise, waypoint) = plan(&system, &waypoint, from, 0.0, Drive::DEFAULT).expect("a crossing");
 
-        let arrival = system.propagated_to(cruise.duration_s());
-        let wanted = waypoint.place(&arrival).unwrap();
+        let wanted = waypoint.place_at(&system, cruise.duration_s()).unwrap();
         let landed = cruise.at(cruise.duration_s()).position_ly;
         let miss = landed.distance(wanted) * M_PER_LY;
         assert!(miss < 6.371e6, "missed by {miss:e} metres, more than a planetary radius");
 
         // And the naive aim is far worse, which is why the rounds are there.
-        let naive = Cruise::plan(from, waypoint.place(&system).unwrap(), 0.0, Drive::DEFAULT);
+        let naive = Cruise::plan(from, waypoint.place_at(&system, 0.0).unwrap(), 0.0, Drive::DEFAULT);
         let naive_miss = naive.at(naive.duration_s()).position_ly.distance(wanted) * M_PER_LY;
         assert!(naive_miss > miss * 100.0, "{naive_miss:e} against {miss:e}");
     }
@@ -778,7 +772,7 @@ mod tests {
         let system = sol();
         let star = system.star_position_ly();
         let leave = |from: DVec3| {
-            let Waypoint::Fixed(out) = Course::LeaveSystem.resolve(&system, from).unwrap() else {
+            let Waypoint::Fixed(out) = Course::LeaveSystem.resolve(&system, from, 0.0).unwrap() else {
                 panic!("leaving ends at a fixed point")
             };
             out - star
@@ -807,12 +801,12 @@ mod tests {
         let system = sol();
         let course =
             Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
-        let waypoint = course.resolve(&system, DVec3::ZERO).unwrap();
+        let waypoint = course.resolve(&system, DVec3::ZERO, 0.0).unwrap();
         let from = system.body_position_ly("Mars").expect("Mars");
         let (cruise, aimed) = plan(&system, &waypoint, from, 0.0, Drive::DEFAULT).expect("a plan");
 
-        let arrival = system.propagated_to(cruise.duration_s());
-        let landed = aimed.place(&arrival).unwrap();
+        let arrival_s = cruise.duration_s();
+        let landed = aimed.place_at(&system, arrival_s).unwrap();
         let reach = from.distance(landed);
 
         // The nearest point, checked against the rest of the circle rather than against a
@@ -822,13 +816,15 @@ mod tests {
         for step in 1..36 {
             let mut elsewhere = orbit.clone();
             elsewhere.phase_rad += std::f64::consts::TAU * step as f64 / 36.0;
-            let other = Waypoint::Orbit(elsewhere).place(&arrival).unwrap();
+            let other = Waypoint::Orbit(elsewhere).place_at(&system, arrival_s).unwrap();
             let range = from.distance(other);
             assert!(range >= reach * (1.0 - 1e-9), "{range:e} beats the chosen {reach:e}");
             furthest = furthest.max(range);
         }
         // And the far side is a whole diameter further, which is what injecting blind costs.
-        let earth = arrival.body_position_ly("Earth").unwrap();
+        let earth = system.origin_ly
+            + system.body_state_at(system.body_named("Earth").unwrap(), arrival_s).unwrap().0
+                / M_PER_LY;
         let diameter = landed.distance(earth) * 2.0;
         assert!(furthest - reach > diameter * 0.9, "the circle is not being crossed at all");
     }
@@ -837,17 +833,16 @@ mod tests {
     /// is where the orbit *starts*, not a place the ship stops.
     #[test]
     fn an_aimed_orbit_still_turns() {
-        let mut system = sol();
+        let system = sol();
         let course =
             Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
         let waypoint = course
-            .resolve(&system, DVec3::ZERO)
+            .resolve(&system, DVec3::ZERO, 0.0)
             .unwrap()
-            .nearest_to(system.body_position_ly("Mars").unwrap(), &system);
-        let period = waypoint.period_s(&system).unwrap();
-        let at_start = waypoint.place(&system).unwrap();
-        system.advance_to(period * 0.5);
-        let half_way = waypoint.place(&system).unwrap();
+            .nearest_to(system.body_position_ly("Mars").unwrap(), &system, 0.0);
+        let period = waypoint.period_s(&system, 0.0).unwrap();
+        let at_start = waypoint.place_at(&system, 0.0).unwrap();
+        let half_way = waypoint.place_at(&system, period * 0.5).unwrap();
         let earth = system.body_position_ly("Earth").unwrap();
         assert!(
             half_way.distance(at_start) > at_start.distance(earth),
@@ -862,7 +857,7 @@ mod tests {
     #[test]
     fn a_ring_course_stands_outside_the_rings_and_out_of_their_plane() {
         let system = sol();
-        let Waypoint::Orbit(orbit) = Course::Rings("Saturn".into()).resolve(&system, DVec3::ZERO).unwrap()
+        let Waypoint::Orbit(orbit) = Course::Rings("Saturn".into()).resolve(&system, DVec3::ZERO, 0.0).unwrap()
         else {
             panic!("rings are an orbit")
         };
@@ -883,14 +878,14 @@ mod tests {
     #[test]
     fn a_body_without_rings_or_a_parent_refuses_rather_than_guessing() {
         let system = sol();
-        assert!(Course::Rings("Earth".into()).resolve(&system, DVec3::ZERO).is_none());
-        assert!(Course::Rings("Nowhere".into()).resolve(&system, DVec3::ZERO).is_none());
+        assert!(Course::Rings("Earth".into()).resolve(&system, DVec3::ZERO, 0.0).is_none());
+        assert!(Course::Rings("Nowhere".into()).resolve(&system, DVec3::ZERO, 0.0).is_none());
         assert!(Course::Orbit { body: "Nowhere".into(), altitude_radii: 1.0, plane: Plane::Polar }
-            .resolve(&system, DVec3::ZERO)
+            .resolve(&system, DVec3::ZERO, 0.0)
             .is_none());
         // The primary is the one body with nothing to librate against.
         let star = system.sim().name(system.primary()).to_string();
-        assert!(Course::Lagrange { body: star, point: LagrangePoint::L1 }.resolve(&system, DVec3::ZERO).is_none());
+        assert!(Course::Lagrange { body: star, point: LagrangePoint::L1 }.resolve(&system, DVec3::ZERO, 0.0).is_none());
     }
 
     /// A generated system has no measured data in it at all, and every course still has to
@@ -898,9 +893,9 @@ mod tests {
     #[test]
     fn a_generated_system_navigates_too() {
         let system = generated();
-        assert!(Course::LeaveSystem.resolve(&system, DVec3::ZERO).is_some());
+        assert!(Course::LeaveSystem.resolve(&system, DVec3::ZERO, 0.0).is_some());
         let belts = (0..system.populations.len())
-            .filter_map(|i| Course::Belt(i).resolve(&system, DVec3::ZERO))
+            .filter_map(|i| Course::Belt(i).resolve(&system, DVec3::ZERO, 0.0))
             .count();
         assert_eq!(belts, system.populations.len(), "every population is somewhere to go");
         let flat = system.populations.iter().filter(|p| is_flat(p)).count();
@@ -928,7 +923,7 @@ mod tests {
         };
         assert_eq!(altitude_radii, 20.0);
         assert_eq!(Course::parse("orbit:Earth:enormous"), None, "and only as the table names it");
-        assert!(Course::parse("belt:9").unwrap().resolve(&system, DVec3::ZERO).is_none(), "and out of range");
+        assert!(Course::parse("belt:9").unwrap().resolve(&system, DVec3::ZERO, 0.0).is_none(), "and out of range");
     }
 
     /// The list a player reads: outward from the star, with each planet's moons behind it.
@@ -1025,7 +1020,7 @@ mod tests {
         assert_eq!(labels("Nowhere"), Vec::<String>::new());
         let band = options_for(&system, &Target::Band(0));
         assert_eq!(band.len(), 1);
-        assert!(band[0].1.resolve(&system, DVec3::ZERO).is_some(), "and it is a course that resolves");
+        assert!(band[0].1.resolve(&system, DVec3::ZERO, 0.0).is_some(), "and it is a course that resolves");
     }
 
     /// Every option the interface offers has to resolve, or a Go button lies.
@@ -1035,7 +1030,7 @@ mod tests {
         for entry in system.inventory().iter().filter(|e| e.major) {
             for (label, course) in options_for(&system, &entry.target) {
                 assert!(
-                    course.resolve(&system, DVec3::ZERO).is_some(),
+                    course.resolve(&system, DVec3::ZERO, 0.0).is_some(),
                     "{} offers {label} and it does not resolve",
                     entry.designation
                 );
