@@ -227,7 +227,11 @@ fn place_on_station(
         return;
     };
     let Some(system) = game.system.as_ref() else { return };
-    let Some(waypoint) = course.resolve(system) else { return };
+    let here = game.position_ly;
+    let Some(waypoint) = course.resolve(system, here) else { return };
+    // Aimed at where the ship already is, so `--station` lands on the near side of an orbit
+    // rather than wherever the clock had it.
+    let waypoint = waypoint.nearest_to(here, system);
     let Some(at) = waypoint.place(system) else { return };
     let label = waypoint.label();
     ui.focus = course.target();

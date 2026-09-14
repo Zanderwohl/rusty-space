@@ -221,7 +221,7 @@ recording setup.
 ![In the asteroid belt](../images/belt-station.png)
 
 Five things a ship can be told to do — cross to a point, take up an orbit, sit at a libration
-point, drop into a belt or a ring, leave the system along its axis — are two mechanisms, not
+point, drop into a belt or a ring, leave the system — are two mechanisms, not
 five. A **waypoint** says where to be at any coordinate time; the same crossing that goes
 between stars takes the ship there. Arriving is not the end of it: the ship then *holds* that
 waypoint, which is what makes an orbit an orbit rather than a point it drifts away from.
@@ -242,6 +242,16 @@ Three things the shapes buy:
 - **A polar orbit is one whose normal is perpendicular to the body's pole**, and an equatorial
   one has the pole for its normal. One line either way, and the same `Orbit` draws a ring
   system by taking the ring plane instead.
+- **A crossing meets an orbit at its nearest point.** An orbit is a circle and a ship arriving
+  at one has a near side; entering at whatever point the clock happened to have it can mean a
+  crossing straight through the body. The phase is therefore chosen when the course is planned
+  rather than when it is resolved — which point is nearest is a question about where the ship
+  is coming *from*, and that is not known until then. It is part of the same fixed point as the
+  arrival time, since the nearest point moves while the ship is flying.
+- **Leaving goes straight out from the star**, along the radius the ship is already on. Not
+  along the star's own axis: that is one fixed direction whatever the ship is doing, so every
+  departure rose out of the ecliptic instead of taking the shortest way out. A ship at the star
+  itself has no radius to follow and falls back to the axis.
 - **A crossing leads its target.** Flip-and-burn time goes as the square root of distance, so
   aiming at where the body will be converges in three rounds. It matters: Earth runs a
   fiftieth of an astronomical unit during a crossing from Mars, which is four thousand

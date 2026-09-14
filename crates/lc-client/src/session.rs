@@ -253,12 +253,14 @@ impl Session {
         let start = self.coordinate_time_s();
         let drive = self.drive;
         let system = self.system.as_ref()?;
-        let waypoint = course.resolve(system)?;
-        let cruise = crate::navigation::plan(system, &waypoint, from, start, drive)?;
-        let label = waypoint.label();
+        let waypoint = course.resolve(system, from)?;
+        // The planned waypoint, not the resolved one: planning is what decides where on an
+        // orbit the ship meets it.
+        let (cruise, aimed) = crate::navigation::plan(system, &waypoint, from, start, drive)?;
+        let label = aimed.label();
         self.cruise = Some(cruise);
         self.cruise_clock_base_s = self.ship_clock_s;
-        self.station = Some(waypoint);
+        self.station = Some(aimed);
         Some(label)
     }
 
