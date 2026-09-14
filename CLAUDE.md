@@ -16,6 +16,12 @@ someone a day. This file is the conventions.
 The app is the workspace **root** package, so `assets/` resolves against `CARGO_MANIFEST_DIR`
 as Bevy's default `AssetPlugin` expects.
 
+`web/` is **a separate cargo workspace** with its own lockfile, and is not a member of this
+one — so `cargo test --workspace` does not reach it and `cargo update` here does not touch it.
+That is deliberate: the site shares no code with either product, and a second lockfile is what
+makes "the site and the game version independently" a mechanism rather than an intention. It
+has its own CI job.
+
 Two invariants worth checking after any structural change:
 
 ```bash
@@ -96,6 +102,25 @@ The bundled system is generated, not hand-maintained. Elements are least-squares
 against JPL Horizons series, and every body records its own fit residual. The pipeline and
 its pitfalls are in `docs/horizons-golden-vectors.md`, with scripts in `docs/scratch/`.
 `tests/ephemeris.rs` pins positions and velocities against JPL.
+
+## The website
+
+`web/` is the Lightcone site: axum, maud, SCSS compiled by `grass` at boot. Two conventions
+that are easy to violate by habit:
+
+- **Semantic classes only.** A class names what a thing *is* — `.post-meta`, `.tag-list` — never
+  what it looks like. A class used once is a review item; most pages should add none, because
+  rendered markdown is bare tags and `_base.scss` styles those.
+- **No JavaScript.** Every page is a document a browser renders on arrival. `/play` is the one
+  exception and all it does is hand over to the game client. Anything that wants real
+  interactivity belongs in the client, which already has a WebGPU context.
+
+The browser build of the game is staged by `tools/build-wasm.sh` and delivered from a CDN that
+never overwrites anything — a new build is a new directory, so rollback is a pointer change.
+Promotion is a row in the site's database, not a deploy.
+
+[lightcone/docs/14-hosting.md](lightcone/docs/14-hosting.md) is why any of it is shaped that
+way; [15-runbook.md](lightcone/docs/15-runbook.md) is the commands.
 
 ## The other project
 
