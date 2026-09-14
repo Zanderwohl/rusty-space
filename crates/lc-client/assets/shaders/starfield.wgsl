@@ -134,18 +134,34 @@ fn value_noise(p: vec3<f32>) -> f32 {
 fn filaments(direction: vec3<f32>, seed: f32) -> f32 {
     let p = direction * material.corona_frequency + vec3<f32>(seed, seed * 1.7, seed * 2.3);
     var sum = 0.0;
-    var amplitude = 0.58;
+    var amplitude = 0.66;
     var frequency = 1.0;
-    for (var i = 0u; i < 4u; i = i + 1u) {
+    // Three octaves, not more. The fine ones read as fur, and a corona is a few broad
+    // streamers. Squared rather than cubed for the same reason: each extra power narrows the
+    // crease, and these are meant to be thick.
+    for (var i = 0u; i < 3u; i = i + 1u) {
         let n = value_noise(p * frequency);
-        // Cubed rather than squared: it takes the field further from its mean, which is the
-        // difference between a few bold streamers and uniform fur.
         let ridge = 1.0 - abs(2.0 * n - 1.0);
-        sum = sum + amplitude * ridge * ridge * ridge;
-        frequency = frequency * 2.17;
-        amplitude = amplitude * 0.52;
+        sum = sum + amplitude * ridge * ridge;
+        frequency = frequency * 2.4;
+        amplitude = amplitude * 0.42;
     }
-    return clamp(sum, 0.0, 1.6);
+    return clamp(sum, 0.0, 1.5);
+}
+
+/// How far one streamer reaches, `[0, 1]`.
+///
+/// A second field on the *same* angular scale as the threads but a different seed, so length
+/// and brightness are not the same number.
+///
+/// The scale matters as much as the decorrelation. Driving both from one field made every long
+/// streamer also the brightest, which the eye picks up at once; sampling the length at half the
+/// frequency replaced the streamers with half a dozen broad lobes, because the thing being
+/// varied was no longer a streamer.
+fn reach_of(direction: vec3<f32>, seed: f32) -> f32 {
+    let p = direction * material.corona_frequency
+        + vec3<f32>(seed * 3.1 + 41.0, seed * 0.7 + 17.0, seed * 1.3 + 29.0);
+    return value_noise(p);
 }
 
 /// Band radiance of a blackbody at `teff`, from the table em-spectra generated.
@@ -286,13 +302,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let around = normalize(in.sky);
         let dir = normalize(around + in.axis * (r * 0.5));
         let threads = filaments(dir, in.seed);
-        // The threads set how far the corona reaches as well as how bright it is, so the outer
-        // boundary is ragged rather than a circle. The fade has to *finish* inside the quad:
-        // run it past r = 1 and the discard at the edge cuts it into a hard disc, which is the
-        // circle this was meant to avoid, only sharper.
-        let reach = 0.38 + threads * 0.22;
-        let edge = 1.0 - smoothstep(reach, min(reach + 0.36, 0.99), r);
-        halo = profile * edge * mix(1.0, 0.3 + threads * 1.15, material.corona_strength);
+        // How far this streamer goes, which is ragged rather than a circle. The fade has to
+        // *finish* inside the quad: run it past r = 1 and the discard at the edge cuts it into
+        // a hard disc, which is the circle this was meant to avoid, only sharper.
+        let reach = 0.20 + reach_of(dir, in.seed) * 0.50;
+        let edge = 1.0 - smoothstep(reach, min(reach + 0.28, 0.99), r);
+        halo = profile * edge * mix(1.0, 0.22 + threads * 1.45, material.corona_strength);
     }
 
     // Alpha zero, and it has to be. AlphaMode::Add is premultiplied blending, `src + dst *

@@ -138,6 +138,16 @@ It is a function of a per-star seed and a world-space direction and of nothing e
 not swim when the camera turns, it is identical for every client, and flying around a star shows
 its other side.
 
+Length and brightness come from two fields, not one, on the same angular scale and different
+seeds. Driving both from one field made every long streamer also the brightest, which the eye
+picks up at once. Sampling the length at half the frequency was worse again: it replaced the
+streamers with half a dozen broad lobes, because the thing being varied was no longer a
+streamer.
+
+`corona_frequency` is streamers per radian and is the lever that matters — halving it halves
+their number and doubles their width. Three octaves of squared ridges, not four of cubed: the
+fine octaves read as fur, and every extra power narrows the crease.
+
 Two things that looked like tuning and are not:
 
 - **The halo is a power law out from the source, not a fade in from the edge of the quad.**

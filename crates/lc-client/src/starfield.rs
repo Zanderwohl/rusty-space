@@ -96,7 +96,9 @@ pub const LOCAL: PointStyle = PointStyle {
     brightness: 1.6,
     halo_gain: 0.22,
     corona_strength: 0.95,
-    corona_frequency: 17.0,
+    // Streamers per radian of sky. Halving this halves their number and doubles their width,
+    // which is the single lever that matters for how a corona reads.
+    corona_frequency: 11.0,
 };
 
 /// Inside this of a star, the ship is in its system and the star is drawn as an object rather
