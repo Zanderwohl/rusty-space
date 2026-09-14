@@ -99,6 +99,21 @@ pub fn from_query(query: &str) -> Vec<String> {
     positional
 }
 
+/// One query parameter, decoded.
+///
+/// Decoding is not optional: an absolute URL in a parameter comes back percent-encoded, and
+/// handing `http%3A%2F%2F...` to the asset server makes it a relative path under the page's
+/// own origin. Which is a 404 per asset, and Bevy retries those.
+#[cfg(target_arch = "wasm32")]
+pub fn param(search: &str, name: &str) -> Option<String> {
+    search
+        .trim_start_matches('?')
+        .split('&')
+        .filter_map(|p| p.split_once('='))
+        .find(|(k, _)| *k == name)
+        .map(|(_, v)| decode(v))
+}
+
 /// Percent-decoding, plus `+` for space. Enough for a query string and no more.
 #[cfg(target_arch = "wasm32")]
 fn decode(s: &str) -> String {

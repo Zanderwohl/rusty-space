@@ -39,7 +39,9 @@ fn main() {
     let args = lc_client::entry::from_query(&search);
     let (dev, catalogue) = lc_client::entry::parse(&args);
 
-    let asset_base = param(&search, "assets").unwrap_or_else(|| DEFAULT_ASSET_BASE.to_owned());
+    let asset_base = lc_client::entry::param(&search, "assets")
+        .unwrap_or_else(|| DEFAULT_ASSET_BASE.to_owned());
+    info!("assets from {asset_base}");
 
     App::new()
         .add_plugins(
@@ -74,14 +76,4 @@ fn main() {
         .insert_resource(dev)
         .add_plugins(ClientPlugin)
         .run();
-}
-
-/// One query parameter, without pulling in a URL crate for it.
-fn param(search: &str, name: &str) -> Option<String> {
-    search
-        .trim_start_matches('?')
-        .split('&')
-        .filter_map(|p| p.split_once('='))
-        .find(|(k, _)| *k == name)
-        .map(|(_, v)| v.to_owned())
 }
