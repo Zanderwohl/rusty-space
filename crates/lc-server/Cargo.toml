@@ -12,6 +12,9 @@ lc-spacetime = { path = "../lc-spacetime" }
 lc-store = { path = "../lc-store" }
 glam = "0.30"
 tokio-postgres = "0.7"
+tokio = { version = "1", features = ["rt", "net", "sync", "macros", "time"] }
+tokio-tungstenite = "0.24"
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

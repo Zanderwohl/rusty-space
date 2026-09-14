@@ -5,8 +5,14 @@
 //! decides what a client may know is not a convention this crate documents — it is
 //! [`Cleared::clear`], the only constructor of the only type the event channel can carry.
 //!
-//! No transport and no serialisation format: both are still open, and the types derive `serde`
-//! so that neither choice reaches back into this. See `lightcone/docs/08-networking.md`.
+//! The wire format is `postcard`: compact, `serde`-based, and not self-describing. Not
+//! self-describing is the point rather than a cost — a stale client that half-understood a
+//! message would be a client misreading a sighting, and in a game whose correctness *is* the
+//! filter that is worse than a refused connection. So the version handshake is strict, and
+//! [`golden`] pins the bytes a version encodes to.
+//!
+//! Transport is elsewhere and is deliberately not visible here. See
+//! `lightcone/docs/08-networking.md`.
 
 #![forbid(unsafe_code)]
 
@@ -73,7 +79,7 @@ pub struct Sighting {
 /// notice being broken: there is no second path to a socket because there is no second way to
 /// make one of these.
 ///
-/// The field is private, so from outside this crate there is no route round [`Cleared::clear`]:
+/// The field is private, so nothing in this process can make one except the gate:
 ///
 /// ```compile_fail
 /// # use lc_proto::{Cleared, Sighting};
@@ -89,6 +95,11 @@ pub struct Sighting {
 ///     inner
 /// }
 /// ```
+///
+/// Deserialising one is not a hole in that, and it is worth being exact about why. A `Cleared`
+/// read off the wire is a claim by whoever sent it — it says *a server released this*, not
+/// *this passed our gate*. The invariant is about what a process emits, and a server only ever
+/// emits ones it built with [`Cleared::clear`]; the client is the end that decodes them.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Cleared<T> {
     inner: T,
@@ -166,6 +177,33 @@ pub enum Inbound {
     ResumeFrom { arrive_t: i64 },
 }
 
+/// Encode anything the protocol carries.
+pub fn encode<T: Serialize>(value: &T) -> Vec<u8> {
+    // Infallible for these types: they contain no map with non-string keys and no borrowed
+    // data, which are the only shapes postcard rejects.
+    postcard::to_stdvec(value).expect("the protocol's own types encode")
+}
+
+/// Decode. A failure means the peer is not speaking this version, whatever it claimed.
+pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Error> {
+    postcard::from_bytes(bytes)
+}
+
+/// The bytes this protocol version encodes to.
+///
+/// A format that is not self-describing cannot notice a field that moved, so this is what
+/// notices: change the shape of anything above without bumping [`PROTOCOL_VERSION`] and the
+/// test on these fails. A deployed client would otherwise read the new shape as the old one and
+/// be confidently wrong rather than refused.
+pub mod golden {
+    /// `Outbound::Welcome { client_id: 7, protocol: 1, ship_id: 42, now_t: 1_000_000 }`
+    pub const WELCOME: &[u8] = &[0, 7, 1, 84, 128, 137, 122];
+
+    /// `Inbound::Act(Intent { ship_id: 42, order: Transmit { power_w: 1500.0 }, .. })`
+    pub const ACT: &[u8] =
+        &[1, 84, 0, 0, 0, 0, 0, 0, 112, 151, 64, 128, 137, 122];
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,6 +219,81 @@ mod tests {
             kind: 0,
             payload: "{}".into(),
         }
+    }
+
+    fn welcome() -> Outbound {
+        Outbound::Welcome {
+            client_id: ClientId(7),
+            protocol: PROTOCOL_VERSION,
+            ship_id: ShipId(42),
+            now_t: 1_000_000,
+        }
+    }
+
+    fn act() -> Inbound {
+        Inbound::Act(Intent {
+            ship_id: ShipId(42),
+            order: Order::Transmit { power_w: 1500.0 },
+            issued_at_client_t: 1_000_000,
+        })
+    }
+
+    /// What a version encodes to, pinned.
+    ///
+    /// A format that is not self-describing cannot notice a field that moved, so this is what
+    /// notices. If this fails, either the change was unintended or `PROTOCOL_VERSION` needs
+    /// bumping and these bytes need replacing — and a deployed client needs to be refused
+    /// rather than left reading the new shape as the old one.
+    #[test]
+    fn the_wire_format_for_this_version_has_not_moved() {
+        assert_eq!(
+            encode(&welcome()),
+            golden::WELCOME,
+            "Outbound::Welcome changed shape at protocol version {PROTOCOL_VERSION}",
+        );
+        assert_eq!(
+            encode(&act()),
+            golden::ACT,
+            "Inbound::Act changed shape at protocol version {PROTOCOL_VERSION}",
+        );
+    }
+
+    #[test]
+    fn everything_the_protocol_carries_survives_a_round_trip() {
+        let out = [
+            welcome(),
+            Outbound::Sightings(vec![
+                Cleared::clear(sighting(500, 2.5), 1_000, 0.0).unwrap(),
+            ]),
+            Outbound::Refused { ship_id: ShipId(-3), reason: Refusal::NotYours },
+            Outbound::WrongProtocol { server: 9 },
+        ];
+        for message in out {
+            let bytes = encode(&message);
+            assert_eq!(decode::<Outbound>(&bytes).unwrap(), message);
+        }
+        let inbound = [
+            Inbound::Hello { protocol: PROTOCOL_VERSION },
+            act(),
+            Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: Order::Burn { beta: [0.1, -0.2, 0.3] },
+                issued_at_client_t: i64::MIN,
+            }),
+            Inbound::ResumeFrom { arrive_t: -1 },
+        ];
+        for message in inbound {
+            let bytes = encode(&message);
+            assert_eq!(decode::<Inbound>(&bytes).unwrap(), message);
+        }
+    }
+
+    /// Rubbish is a decode error, not a message. A format that is not self-describing will
+    /// happily read the wrong shape, so this is only a check that it fails when it can.
+    #[test]
+    fn nonsense_does_not_decode_into_a_message() {
+        assert!(decode::<Outbound>(&[255, 255, 255]).is_err());
+        assert!(decode::<Inbound>(&[]).is_err());
     }
 
     /// The negative case, which is the one that matters. Everything else in this crate is

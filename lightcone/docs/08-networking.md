@@ -27,6 +27,14 @@ The server validates, assigns the event its coordinate, and persists it. `issued
 is advisory and is clamped: an intent may not be stamped earlier than the last event the
 client has provably received, nor later than the server's current `t`.
 
+**In practice the floor is the client's delivery cursor, which is stronger.** A delivery is
+matched against a cursor that advances every tick, so an event stamped *behind* that cursor
+gets written, scheduled, and then never looked at again — the client's own transmission simply
+vanishes. The last reception is always at or behind the cursor, so flooring at the cursor
+implies the rule above and adds the part that keeps the delivery findable. It took several
+ticks of accumulated cursor to show at all, which is why acting on the first tick never
+revealed it.
+
 Clients predict locally by running the same `lc_world::apply` over the events they have, so
 a local order appears to take effect immediately and is reconciled when the server's version
 of the event arrives. Because the client's ship is co-located with the player, the
@@ -73,15 +81,30 @@ Two details the gate turns on:
 
 ## Transport
 
-| target | primary | fallback |
+**Decided: WebSocket, for now, with one protocol behind a `Transport` trait.**
+
+| target | built | later |
 |---|---|---|
-| native desktop | QUIC | TCP |
-| browser | WebTransport (HTTP/3) | WebSocket |
+| native desktop | WebSocket | QUIC |
+| browser | WebSocket | WebTransport (HTTP/3) |
 
 WebTransport gives the browser unreliable datagrams and multiple streams over QUIC, matching
-what the native client gets, so one protocol implementation covers both. WebSocket is the
-fallback where WebTransport is unavailable; it is reliable-ordered only, which is acceptable
-because almost all of this game's traffic wants reliable delivery anyway.
+what the native client gets, so one protocol implementation covers both — and it is where this
+should end up. It is not where it starts, for three reasons. It needs HTTP/3 and valid TLS in
+development, where a self-signed certificate means a hash pin the browser expires in a
+fortnight. Its browser support has to be checked rather than assumed. And the traffic that
+would use its datagrams is the player's own ship state, which the client predicts locally and
+does not need sent at all.
+
+WebSocket reaches every target today with no ceremony, and it is reliable-ordered only, which
+is acceptable because almost all of this game's traffic wants reliable delivery anyway. What it
+costs is head-of-line blocking across the channels: one stream, so a bulk transfer stalls
+events. Bulk is already out of band and belongs on its own connection when it exists.
+
+The `Transport` trait is what makes this reversible, and a second implementation later will
+prove the abstraction rather than fight it. The IO is async and the tick is not: reader and
+writer tasks own the sockets and the tick only ever touches channel ends, so it never awaits on
+a peer.
 
 Raw UDP is not available in the browser, so it is not an option for any tier. Do not design
 a protocol that needs it.
@@ -196,10 +219,16 @@ computed.
 rather than in advance.** Each is local to one component and none of them constrains anything
 else.
 
-- WebTransport support and stability across browsers; if it is not ready, WebSocket-only for
-  the browser and QUIC for native, with one protocol over two transports.
-- Serialisation format. `postcard` is compact and `no_std`; `bincode` is simpler; both need
-  an explicit versioning scheme since clients will lag server deploys.
+- ~~Transport~~. **Decided: WebSocket first**, behind a `Transport` trait, with WebTransport
+  and QUIC to follow when the datagram channel has a consumer and the TLS story is settled.
+- ~~Serialisation format~~. **Decided: `postcard`.** Both ends are Rust, including the WASM
+  client, so a self-describing format buys nothing — and it would cost something: it lets a
+  stale client half-understand a message, and a client misreading a sighting is not a degraded
+  experience but a wrong one. A strict version handshake refusing the connection is the honest
+  failure. The versioning scheme is that handshake plus golden bytes: `lc_proto::golden` pins
+  what a version encodes to, and changing any message's shape without bumping
+  `PROTOCOL_VERSION` fails a test. That is the only thing that can notice a moved field in a
+  format that is not self-describing.
 - Whether the client ever runs `lc-store`. It should not — the client has no database — but
   the light-cone cursor's traversal logic is wanted on both sides, so it may need to split
   out of `lc-store` into `lc-spacetime`.

@@ -43,7 +43,6 @@ pub struct Server<J: Journal> {
     clients: HashMap<ClientId, Connected>,
     journal: J,
     minter: Minter,
-    next_client: u64,
     /// Written by this tick, and handed to the journal at the end of it.
     pending: Vec<Event>,
 }
@@ -57,7 +56,6 @@ impl<J: Journal> Server<J> {
             clients: HashMap::new(),
             journal,
             minter: Minter::new(shard).expect("a shard inside the identifier's field"),
-            next_client: 1,
             pending: Vec::new(),
         }
     }
@@ -74,10 +72,12 @@ impl<J: Journal> Server<J> {
         self.ships.iter().find(|s| s.id == id)
     }
 
-    /// Put a ship in the world and give it to a client. Returns the client's own identifier.
-    pub fn admit(&mut self, ship_id: ShipId, path: Path, noise_floor: f32) -> ClientId {
-        let owner = ClientId(self.next_client);
-        self.next_client += 1;
+    /// Put a ship in the world and give it to a client.
+    ///
+    /// The identifier comes from the caller rather than from here, because who is connected is
+    /// the transport's fact: a connection exists before the world has anything to say about it,
+    /// and authentication will one day decide what it is called.
+    pub fn admit(&mut self, owner: ClientId, ship_id: ShipId, path: Path, noise_floor: f32) {
         self.ships.push(Ship { id: ship_id, owner, path, noise_floor });
         self.clients.insert(owner, Connected {
             ship: ship_id,
@@ -90,7 +90,6 @@ impl<J: Journal> Server<J> {
             // the catch-up path run from the beginning.
             cursor_t: i64::MIN,
         });
-        owner
     }
 
     /// One tick. The order is the whole of it.
@@ -168,8 +167,16 @@ impl<J: Journal> Server<J> {
             .position(|s| s.id == intent.ship_id && s.owner == from)
             .ok_or(Refusal::NotYours)?;
 
-        // The clamp. Not earlier than what the client can prove it knew, not later than now.
-        let floor = state.last_reception_t;
+        // The clamp. Not later than now, and not earlier than the moment this client's stream
+        // has already been resolved to.
+        //
+        // Stronger than doc 08's rule, which floors at the last event the client can prove it
+        // received, and stronger for a reason the rule alone does not cover: a delivery is
+        // matched against a cursor that advances every tick, so an event stamped behind that
+        // cursor would be written, scheduled, and then never looked at again. The client's own
+        // transmission would vanish. The last reception is always at or behind the cursor, so
+        // this floor implies the doc's and adds the part that keeps deliveries findable.
+        let floor = state.cursor_t.saturating_add(1);
         let at = intent.issued_at_client_t.clamp(floor.min(self.now_t), self.now_t);
 
         let (kind, power_w, payload) = match intent.order {
@@ -298,9 +305,11 @@ use crate::transport::Loopback;
     async fn one_client_acts_and_the_other_learns_at_light_delay_and_not_before() {
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
-        let actor = server.admit(ShipId(1), Path::still(DVec3::ZERO), 0.0);
-        let watcher = server
-            .admit(ShipId(2), Path::still(DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0)), 0.0);
+        let actor = ClientId(1);
+        server.admit(actor, ShipId(1), Path::still(DVec3::ZERO), 0.0);
+        let watcher = ClientId(2);
+        server
+            .admit(watcher, ShipId(2), Path::still(DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0)), 0.0);
 
         wire.client_says(actor, Inbound::Act(Intent {
             ship_id: ShipId(1),
@@ -358,8 +367,9 @@ use crate::transport::Loopback;
     async fn a_client_cannot_act_for_a_ship_it_does_not_own() {
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
-        let first = server.admit(ShipId(1), Path::still(DVec3::ZERO), 0.0);
-        let _second = server.admit(ShipId(2), Path::still(DVec3::ZERO), 0.0);
+        let first = ClientId(1);
+        server.admit(first, ShipId(1), Path::still(DVec3::ZERO), 0.0);
+        server.admit(ClientId(2), ShipId(2), Path::still(DVec3::ZERO), 0.0);
 
         wire.client_says(first, Inbound::Act(Intent {
             ship_id: ShipId(2),
@@ -381,7 +391,8 @@ use crate::transport::Loopback;
     async fn an_intents_timestamp_is_clamped_at_both_ends() {
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
-        let client = server.admit(ShipId(1), Path::still(DVec3::ZERO), 0.0);
+        let client = ClientId(1);
+        server.admit(client, ShipId(1), Path::still(DVec3::ZERO), 0.0);
 
         // The future: clamped down to now.
         wire.client_says(client, Inbound::Act(Intent {
@@ -412,13 +423,54 @@ use crate::transport::Loopback;
         );
     }
 
+    /// An intent that arrives several ticks in, stamped in the deep past, still gets delivered.
+    ///
+    /// The regression for a delivery that could be written and then never looked at. Flush
+    /// advances a cursor to `now` every tick; an event clamped to a time behind that cursor is
+    /// scheduled into a window already passed, and the client's own transmission disappears.
+    /// It needed a few ticks to appear at all, which is why it survived the first test that
+    /// acted on tick one.
+    #[tokio::test]
+    async fn an_intent_stamped_in_the_deep_past_is_still_delivered() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let client = ClientId(1);
+        server.admit(client, ShipId(1), Path::still(DVec3::ZERO), 0.0);
+
+        // Let the cursor run well past where the intent claims to have been issued.
+        for _ in 0..5 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let _ = wire.take(client);
+
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Transmit { power_w: 1.0e9 },
+            issued_at_client_t: i64::MIN,
+        }));
+        server.tick(&mut wire).await.unwrap();
+
+        let messages = wire.take(client);
+        let told = sightings(&messages);
+        assert_eq!(told.len(), 1, "the act was written and then never looked at again");
+        // Clamped into this tick's window rather than into the past it asked for.
+        assert!(
+            told[0].emitted_t > server.now_t() - TICK_US,
+            "stamped at {} but the tick began at {}",
+            told[0].emitted_t,
+            server.now_t() - TICK_US,
+        );
+        assert!(told[0].emitted_t <= server.now_t());
+    }
+
     /// An order the world cannot carry out is refused rather than clamped into something it
     /// can. There is no nearest legal burn to a superluminal one.
     #[tokio::test]
     async fn an_impossible_order_is_refused() {
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
-        let client = server.admit(ShipId(1), Path::still(DVec3::ZERO), 0.0);
+        let client = ClientId(1);
+        server.admit(client, ShipId(1), Path::still(DVec3::ZERO), 0.0);
 
         for order in [
             Order::Burn { beta: [1.0, 0.0, 0.0] },
@@ -459,8 +511,11 @@ use crate::transport::Loopback;
     async fn a_signal_under_the_noise_floor_arrives_and_is_not_sent() {
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
-        let actor = server.admit(ShipId(1), Path::still(DVec3::ZERO), 0.0);
-        let deaf = server.admit(
+        let actor = ClientId(1);
+        server.admit(actor, ShipId(1), Path::still(DVec3::ZERO), 0.0);
+        let deaf = ClientId(2);
+        server.admit(
+            deaf,
             ShipId(2),
             Path::still(DVec3::new(1_000_000.0, 0.0, 0.0)),
             1.0e6,
@@ -492,7 +547,8 @@ use crate::transport::Loopback;
     async fn resuming_replays_what_was_missed_and_nothing_more() {
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
-        let actor = server.admit(ShipId(1), Path::still(DVec3::ZERO), 0.0);
+        let actor = ClientId(1);
+        server.admit(actor, ShipId(1), Path::still(DVec3::ZERO), 0.0);
 
         wire.client_says(actor, Inbound::Act(Intent {
             ship_id: ShipId(1),
@@ -523,7 +579,8 @@ use crate::transport::Loopback;
     async fn a_client_on_the_wrong_protocol_is_told_so_and_not_welcomed() {
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
-        let client = server.admit(ShipId(1), Path::still(DVec3::ZERO), 0.0);
+        let client = ClientId(1);
+        server.admit(client, ShipId(1), Path::still(DVec3::ZERO), 0.0);
 
         wire.client_says(client, Inbound::Hello { protocol: PROTOCOL_VERSION + 1 });
         server.tick(&mut wire).await.unwrap();

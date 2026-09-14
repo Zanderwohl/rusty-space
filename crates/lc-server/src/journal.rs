@@ -327,8 +327,9 @@ mod tests {
 
         let mut wire = Loopback::new();
         let mut server = Server::new(journal, 0, SHARD);
-        let actor = server.admit(ShipId(ACTOR), Path::still(DVec3::ZERO), 0.0);
-        let _watcher = server.admit(ShipId(WATCHER), Path::still(far), 0.0);
+        let actor = lc_proto::ClientId(1);
+        server.admit(actor, ShipId(ACTOR), Path::still(DVec3::ZERO), 0.0);
+        server.admit(lc_proto::ClientId(2), ShipId(WATCHER), Path::still(far), 0.0);
 
         wire.client_says(actor, Inbound::Act(Intent {
             ship_id: ShipId(ACTOR),
@@ -343,7 +344,8 @@ mod tests {
         // A new server, a new connection, and nothing carried over but the database.
         let Ok(journal) = Postgres::open().await else { return };
         let mut restarted = Server::new(journal, arrives - TICK_US, SHARD + 1);
-        let watcher = restarted.admit(ShipId(WATCHER), Path::still(far), 0.0);
+        let watcher = lc_proto::ClientId(1);
+        restarted.admit(watcher, ShipId(WATCHER), Path::still(far), 0.0);
         let mut wire = Loopback::new();
         // It has read nothing, so it asks from before the arrival.
         wire.client_says(watcher, Inbound::ResumeFrom { arrive_t: 0 });
@@ -369,7 +371,8 @@ mod tests {
         // reached the arrival is told the same thing by the same query, and releases nothing.
         let Ok(journal) = Postgres::open().await else { return };
         let mut early = Server::new(journal, arrives - TICK_US * 3, SHARD + 2);
-        let watcher = early.admit(ShipId(WATCHER), Path::still(far), 0.0);
+        let watcher = lc_proto::ClientId(1);
+        early.admit(watcher, ShipId(WATCHER), Path::still(far), 0.0);
         let mut wire = Loopback::new();
         wire.client_says(watcher, Inbound::ResumeFrom { arrive_t: 0 });
         early.tick(&mut wire).await.unwrap();

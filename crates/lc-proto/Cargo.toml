@@ -8,3 +8,4 @@ authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", features = ["use-std"] }
