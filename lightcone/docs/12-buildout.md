@@ -268,7 +268,9 @@ or WebSocket, god view absent from the binary.
 routes, and the download is small enough to be worth measuring.
 
 **Read:** the WASM and portability sections of [07-rendering.md](07-rendering.md), and
-[08-networking.md](08-networking.md).
+[08-networking.md](08-networking.md). The build pipeline, the CDN layout and the four
+things in the client that are not wasm-ready are in [14-hosting.md](14-hosting.md), whose W3
+and W4 are this phase's delivery half and can be worked separately.
 
 ---
 
