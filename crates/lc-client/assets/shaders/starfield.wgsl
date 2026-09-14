@@ -11,7 +11,7 @@
 // Per-vertex, baked:
 //   POSITION : star position relative to the bake origin, light-years, render axes
 //   CORNER   : quad corner in [-1, 1]^2, also the radial falloff coordinate
-//   PARAMS   : (effective temperature K, radius m, unused, unused)
+//   PARAMS   : (effective temperature K, radius m, corona seed, unused)
 //   WARM     : (population temperature K, its radiance over the star's disc, grey deficit, -)
 //
 // Everything else is a uniform. See lightcone/docs/07-rendering.md.
@@ -37,6 +37,10 @@ struct StarfieldUniform {
     brightness: f32,
     overflow_gain: f32,
     halo_gain: f32,
+    /// How much angular structure the glare carries. Zero leaves it a smooth halo.
+    corona_strength: f32,
+    /// Filaments per radian of sky. Higher is finer structure.
+    corona_frequency: f32,
     // Lookup domain: index = (log2(T) - log_t_min) * log_t_scale.
     log_t_min: f32,
     log_t_scale: f32,
@@ -59,6 +63,12 @@ struct VertexOutput {
     @location(1) colour: vec3<f32>,
     /// Where the source itself ends and the glare begins, as a fraction of the quad.
     @location(2) core: f32,
+    /// Offset from the star in the plane of the sky, world axes. Its *direction* is the angle
+    /// around the star; its length is the distance out.
+    @location(3) sky: vec3<f32>,
+    /// World direction to the star, the axis the corona is arranged about.
+    @location(4) axis: vec3<f32>,
+    @location(5) seed: f32,
 };
 
 fn lorentz(beta: vec3<f32>) -> f32 {
@@ -79,6 +89,63 @@ fn aberrate(to_source: vec3<f32>, beta: vec3<f32>) -> vec3<f32> {
 /// Observed over emitted frequency. Above 1 is a blueshift.
 fn doppler(to_source: vec3<f32>, beta: vec3<f32>) -> f32 {
     return lorentz(beta) * (1.0 + dot(beta, to_source));
+}
+
+// --- corona ----------------------------------------------------------------------------
+//
+// Not physical, and deliberately so. A real corona is a millionth of the photosphere and
+// invisible without occulting it. This ship occults it: it has no eyes, only a pipeline, and
+// 07-rendering.md already hands the player the band matrix on the same grounds.
+//
+// The structure is ridged fractal noise sampled on the *normalised* direction from the star.
+// Normalising discards the radial coordinate, so the pattern is constant along every ray out
+// of the star and the filaments come out radial without being asked for. It is a function of
+// world direction and a per-star seed and of nothing else, so it does not swim when the camera
+// turns, it is the same for every client, and flying around a star shows its other side.
+
+fn hash31(p: vec3<f32>) -> f32 {
+    var q = fract(p * 0.1031);
+    q = q + dot(q, q.zyx + 31.32);
+    return fract((q.x + q.y) * q.z);
+}
+
+fn value_noise(p: vec3<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    // Smoothstep weights, so the lattice does not show as a grid.
+    let w = f * f * (3.0 - 2.0 * f);
+    let c000 = hash31(i + vec3<f32>(0.0, 0.0, 0.0));
+    let c100 = hash31(i + vec3<f32>(1.0, 0.0, 0.0));
+    let c010 = hash31(i + vec3<f32>(0.0, 1.0, 0.0));
+    let c110 = hash31(i + vec3<f32>(1.0, 1.0, 0.0));
+    let c001 = hash31(i + vec3<f32>(0.0, 0.0, 1.0));
+    let c101 = hash31(i + vec3<f32>(1.0, 0.0, 1.0));
+    let c011 = hash31(i + vec3<f32>(0.0, 1.0, 1.0));
+    let c111 = hash31(i + vec3<f32>(1.0, 1.0, 1.0));
+    let x00 = mix(c000, c100, w.x);
+    let x10 = mix(c010, c110, w.x);
+    let x01 = mix(c001, c101, w.x);
+    let x11 = mix(c011, c111, w.x);
+    return mix(mix(x00, x10, w.y), mix(x01, x11, w.y), w.z);
+}
+
+/// Ridged fractal noise: `1 - |2n - 1|` turns the smooth field's zero crossings into creases,
+/// which is what makes threads rather than blobs.
+fn filaments(direction: vec3<f32>, seed: f32) -> f32 {
+    let p = direction * material.corona_frequency + vec3<f32>(seed, seed * 1.7, seed * 2.3);
+    var sum = 0.0;
+    var amplitude = 0.58;
+    var frequency = 1.0;
+    for (var i = 0u; i < 4u; i = i + 1u) {
+        let n = value_noise(p * frequency);
+        // Cubed rather than squared: it takes the field further from its mean, which is the
+        // difference between a few bold streamers and uniform fur.
+        let ridge = 1.0 - abs(2.0 * n - 1.0);
+        sum = sum + amplitude * ridge * ridge * ridge;
+        frequency = frequency * 2.17;
+        amplitude = amplitude * 0.52;
+    }
+    return clamp(sum, 0.0, 1.6);
 }
 
 /// Band radiance of a blackbody at `teff`, from the table em-spectra generated.
@@ -109,6 +176,8 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let to_source = rel / distance_ly;
 
     let beta = material.beta.xyz;
+    // Where the ship sees it, which is not where it is.
+    let seen = aberrate(to_source, beta);
     // A blackbody seen with Doppler factor D is exactly a blackbody at D times the
     // temperature -- B_nu/nu^3 is invariant and Planck's law depends only on nu/T -- so the
     // beaming needs no separate D^4 term. It is already in the band integral.
@@ -168,10 +237,19 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let radius_rad = max(core_rad, glare_rad);
     out.core = clamp(core_rad / radius_rad, 0.0, 1.0);
 
+    // Offset from the star in the plane of the sky, in world axes so the pattern is anchored
+    // to the star rather than to the camera. Normalising this in the fragment discards the
+    // distance out and leaves only the angle around the star, which is what makes every
+    // feature a radial thread instead of a blob.
+    let right_world = (view.world_from_view * vec4<f32>(1.0, 0.0, 0.0, 0.0)).xyz;
+    let up_world = (view.world_from_view * vec4<f32>(0.0, 1.0, 0.0, 0.0)).xyz;
+    out.sky = right_world * vertex.corner.x + up_world * vertex.corner.y;
+    out.axis = seen;
+    out.seed = vertex.params.z;
+
     // w = 0 drops the camera's translation, so the sky depends only on where it is pointed.
     // The quad centre sits one unit down the view ray, which makes the corner offset equal to
     // the angle subtended, so radius_rad is an angular radius with no projection arithmetic.
-    let seen = aberrate(to_source, beta);
     let dir_view = normalize((view.view_from_world * vec4<f32>(seen, 0.0)).xyz);
     let pos_view = dir_view + vec3<f32>(vertex.corner, 0.0) * radius_rad;
     var clip = view.clip_from_view * vec4<f32>(pos_view, 1.0);
@@ -193,7 +271,29 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // A bright edge to the source, and a soft fall outside it. For a distant star the core
     // fills the quad and this reduces to the linear falloff it had before.
     let core = 1.0 - smoothstep(in.core * 0.8, in.core, r);
-    let halo = pow(1.0 - r, 3.0);
+
+    // A power law out from the source, not a fade in from the edge of the quad. A corona falls
+    // off with distance from the star; `pow(1 - r, n)` is a property of where the quad happens
+    // to end, which is a different shape and reads as a ball.
+    let rr = max(r, in.core);
+    let profile = pow(in.core / rr, 1.25);
+
+    var halo = profile * (1.0 - smoothstep(0.55, 1.0, r));
+    if (material.corona_strength > 0.0 && length(in.sky) > 1e-6) {
+        // Structure in the glare, not in the disc: the photosphere is smooth and the corona is
+        // not. The sample direction leans along the line of sight as it goes out, so threads
+        // evolve with distance instead of being perfectly straight spokes.
+        let around = normalize(in.sky);
+        let dir = normalize(around + in.axis * (r * 0.5));
+        let threads = filaments(dir, in.seed);
+        // The threads set how far the corona reaches as well as how bright it is, so the outer
+        // boundary is ragged rather than a circle. The fade has to *finish* inside the quad:
+        // run it past r = 1 and the discard at the edge cuts it into a hard disc, which is the
+        // circle this was meant to avoid, only sharper.
+        let reach = 0.38 + threads * 0.22;
+        let edge = 1.0 - smoothstep(reach, min(reach + 0.36, 0.99), r);
+        halo = profile * edge * mix(1.0, 0.3 + threads * 1.15, material.corona_strength);
+    }
 
     // Alpha zero, and it has to be. AlphaMode::Add is premultiplied blending, `src + dst *
     // (1 - alpha)`, so an alpha of one is not addition -- it is a straight overwrite. With it,

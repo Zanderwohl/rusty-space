@@ -68,6 +68,10 @@ pub struct RelativisticStarfieldUniform {
     pub overflow_gain: f32,
     /// How much of the output the glare around the source carries, against the source itself.
     pub halo_gain: f32,
+    /// How much angular structure the glare carries. Zero leaves it a smooth halo.
+    pub corona_strength: f32,
+    /// Filaments per radian of sky. Higher is finer structure.
+    pub corona_frequency: f32,
     /// Lookup domain: `index = (log2(T) - log_t_min) * log_t_scale`.
     pub log_t_min: f32,
     pub log_t_scale: f32,
@@ -90,6 +94,8 @@ impl Default for RelativisticStarfieldUniform {
             brightness: 1.2,
             overflow_gain: 1.0,
             halo_gain: 0.3,
+            corona_strength: 0.0,
+            corona_frequency: 42.0,
             log_t_min: 0.0,
             log_t_scale: 1.0,
             lut_samples: 1.0,

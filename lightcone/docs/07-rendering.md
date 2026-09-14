@@ -119,6 +119,33 @@ baked.
 | brightness from | catalogue apparent magnitude | `L / d^2` through the band mapping |
 | positions | unit directions, fixed | light-years from a bake origin that follows the ship |
 
+### The corona
+
+![A local star](../images/corona.png)
+
+A local star's glare carries radial filaments. This is not physical and is deliberate: a real
+corona is a millionth of the photosphere and invisible without occulting it. This ship occults
+it. It has no eyes, only a pipeline, and the band matrix is already handed to the player on
+exactly those grounds — a corona it chooses to render is the same kind of decision.
+
+The structure is ridged fractal noise, and the one idea that makes it work is **sampling on the
+normalised offset in the plane of the sky**. Normalising discards the distance out and leaves
+only the angle around the star, so the field is constant along every ray and every feature
+comes out radial without being asked for. The sample direction leans along the line of sight as
+it goes out, so threads evolve rather than being straight spokes.
+
+It is a function of a per-star seed and a world-space direction and of nothing else. So it does
+not swim when the camera turns, it is identical for every client, and flying around a star shows
+its other side.
+
+Two things that looked like tuning and are not:
+
+- **The halo is a power law out from the source, not a fade in from the edge of the quad.**
+  `pow(1 - r, n)` is a property of where the quad happens to end, and it renders as a ball.
+- **The outer fade must finish inside the quad.** Letting the threads push the boundary past
+  `r = 1` means the `discard` at the edge cuts it, and the ragged silhouette becomes a hard
+  circle — the exact artifact it was added to remove, only sharper.
+
 ### Two passes, two laws
 
 The sky is drawn twice, and the two obey different rules. This is the arrangement Exotic Matters

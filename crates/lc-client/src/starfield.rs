@@ -16,6 +16,7 @@ use em_render::relativistic_starfield_material::{
 use em_render::render_space::sim_to_render;
 use em_spectra::{Band, BandMapping, blackbody};
 use glam::DVec3;
+use lc_world::rng;
 use lc_world::sky::{CatalogueStar, generate};
 
 use crate::session::{POINT_STOPS, Session};
@@ -65,6 +66,10 @@ pub struct PointStyle {
     pub brightness: f32,
     /// How much of the output the glare carries, against the source itself.
     pub halo_gain: f32,
+    /// How much angular structure the glare carries. Zero leaves it a smooth halo.
+    pub corona_strength: f32,
+    /// Filaments per radian of sky.
+    pub corona_frequency: f32,
 }
 
 /// The background. Small, tight, and it must stay readable as a field of thousands.
@@ -75,6 +80,9 @@ pub const DISTANT: PointStyle = PointStyle {
     overflow_gain: 0.25,
     brightness: 1.2,
     halo_gain: 0.25,
+    // Nothing three pixels across has visible structure, and noise at that size is a shimmer.
+    corona_strength: 0.0,
+    corona_frequency: 0.0,
 };
 
 /// A star whose system the ship is inside. Allowed to dominate the screen, because it does.
@@ -87,6 +95,8 @@ pub const LOCAL: PointStyle = PointStyle {
     overflow_gain: 2.0,
     brightness: 1.6,
     halo_gain: 0.22,
+    corona_strength: 0.95,
+    corona_frequency: 17.0,
 };
 
 /// Inside this of a star, the ship is in its system and the star is drawn as an object rather
@@ -185,7 +195,10 @@ pub fn build_mesh(stars: &[CatalogueStar], origin_ly: DVec3) -> Mesh {
     for star in stars {
         // Differenced in f64 and narrowed after, which is the whole point of the bake origin.
         let at = sim_to_render(star.position_ly - origin_ly).as_vec3().to_array();
-        let physics = [star.star.teff_k as f32, star.star.radius_m as f32, 0.0, 0.0];
+        // The corona seed. Hashed rather than taken raw so two adjacent catalogue ids do not
+        // give two stars the same threads.
+        let seed = (rng::mix(star.seed()) >> 40) as f32 * 1.0e-3;
+        let physics = [star.star.teff_k as f32, star.star.radius_m as f32, seed, 0.0];
         let heat = warm_params(star);
         let base = positions.len() as u32;
         for corner in QUAD {
@@ -249,6 +262,8 @@ pub fn uniforms(
         overflow_gain: style.overflow_gain,
         brightness: style.brightness,
         halo_gain: style.halo_gain,
+        corona_strength: style.corona_strength,
+        corona_frequency: style.corona_frequency,
         log_t_min: LOG_T_MIN,
         log_t_scale: lut_scale,
         lut_samples: LUT_SAMPLES as f32,
@@ -649,5 +664,40 @@ mod tests {
         let near = flux(&s);
         let stops = (near / far).log2();
         assert!(stops > 20.0, "arrival should be tens of stops brighter, got {stops}");
+    }
+
+    fn seeds(mesh: &Mesh) -> Vec<f32> {
+        match mesh.attribute(ATTRIBUTE_STAR_PARAMS).unwrap() {
+            bevy_mesh::VertexAttributeValues::Float32x4(v) => v.iter().map(|p| p[2]).collect(),
+            _ => panic!("params must be Float32x4"),
+        }
+    }
+
+    /// The corona is noise, and noise that is not deterministic is a star that shimmers
+    /// differently for every player. It has to be a function of the star and nothing else --
+    /// not of time, not of the camera, not of which pass it landed in.
+    #[test]
+    fn a_star_gets_the_same_corona_every_time_it_is_baked() {
+        let s = sky();
+        let a = seeds(&build_mesh(&s.stars, DVec3::ZERO));
+        let b = seeds(&build_mesh(&s.stars, DVec3::new(3.0, -1.0, 2.0)));
+        assert_eq!(a, b, "a different bake origin must not change the threads");
+        assert!(a.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn two_stars_do_not_share_a_corona() {
+        let s = sky();
+        let mut per_star: Vec<f32> = seeds(&build_mesh(&s.stars, DVec3::ZERO));
+        // Four vertices per star carry the same seed; one per star is what must differ.
+        per_star.dedup();
+        assert_eq!(per_star.len(), s.stars.len(), "adjacent catalogue ids collided: {per_star:?}");
+    }
+
+    /// A three-pixel dot has no room for structure, and noise at that size is a shimmer.
+    #[test]
+    fn only_a_local_star_gets_a_corona() {
+        assert_eq!(DISTANT.corona_strength, 0.0);
+        assert!(LOCAL.corona_strength > 0.5);
     }
 }
