@@ -78,18 +78,17 @@ impl Coast {
     /// Where the ship is and how fast, at a coordinate time. Light-years and metres a second,
     /// world frame.
     ///
-    /// `system` must be propagated to `now_s`: the arc is about a body that is itself moving,
-    /// and the conic only gives the part relative to it.
+    /// The primary is placed at `now_s` analytically rather than read from the arena, so the
+    /// answer does not depend on where `system`'s own clock happens to be. It is what makes an
+    /// arc a worldline — something a light-delay solve can evaluate at whatever time its root
+    /// lands on — rather than a thing that is only correct at the present.
     pub fn at(&self, system: &LocalSystem, now_s: f64) -> Option<(DVec3, DVec3)> {
         let index = system.body_named(&self.primary)?;
+        let (centre, carried) = system.body_state_at(index, now_s)?;
         let mut elements = self.elements;
         elements.true_anomaly = self.true_anomaly_at(now_s)?;
         let (local, relative) = state::to_state(self.mu, &elements)?;
-        let at_m = system.sim().position(index) + local;
-        Some((
-            system.origin_ly + at_m / M_PER_LY,
-            system.sim().velocity(index) + relative,
-        ))
+        Some((system.origin_ly + (centre + local) / M_PER_LY, carried + relative))
     }
 
     /// Where round the conic the ship is, radians, at a coordinate time.

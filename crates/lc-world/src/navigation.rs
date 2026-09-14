@@ -134,21 +134,31 @@ impl Waypoint {
     ///
     /// `None` when the body it names has gone, which happens when the ship leaves the system.
     pub fn place(&self, system: &LocalSystem) -> Option<DVec3> {
+        self.place_at(system, system.time_s())
+    }
+
+    /// The same, at a coordinate time of the caller's choosing.
+    ///
+    /// Bodies are placed analytically rather than read from the arena, so this does not care
+    /// where `system`'s clock is. A station is a worldline and this is how it is read.
+    pub fn place_at(&self, system: &LocalSystem, seconds: f64) -> Option<DVec3> {
         match self {
             Waypoint::Fixed(at) => Some(*at),
             Waypoint::Orbit(orbit) => {
-                let (centre, mu) = orbit.centre_of(system)?;
+                let (centre, mu) = orbit.centre_of_at(system, seconds)?;
                 if orbit.radius_m <= 0.0 || mu <= 0.0 {
                     return None;
                 }
-                let theta = orbit.angle_at(system.time_s(), mu);
+                let theta = orbit.angle_at(seconds, mu);
                 let (u, v) = basis(orbit.pole);
                 Some(centre + (u * theta.cos() + v * theta.sin()) * orbit.radius_m / M_PER_LY)
             }
             Waypoint::Lagrange { body, point } => {
                 let index = system.body_named(body)?;
                 let parent = system.sim().parent(index)?;
-                let offset = system.sim().position(index) - system.sim().position(parent);
+                let (at_body, _) = system.body_state_at(index, seconds)?;
+                let (at_parent, _) = system.body_state_at(parent, seconds)?;
+                let offset = at_body - at_parent;
                 let distance = offset.length();
                 let mass = system.sim().mass(parent);
                 if distance <= 0.0 || mass <= 0.0 {
@@ -161,7 +171,7 @@ impl Waypoint {
                     LagrangePoint::L1 => -1.0,
                     LagrangePoint::L2 => 1.0,
                 };
-                let at = system.sim().position(index) + offset / distance * hill * sign;
+                let at = at_body + offset / distance * hill * sign;
                 Some(system.origin_ly + at / M_PER_LY)
             }
         }
@@ -185,13 +195,17 @@ impl Waypoint {
     /// ones, and the same central difference serves all of them. Only cancelling asks for this,
     /// so the two extra propagations cost nothing anyone can see.
     pub fn velocity_at(&self, system: &LocalSystem) -> Option<DVec3> {
+        self.velocity_at_time(system, system.time_s())
+    }
+
+    /// The same, at a coordinate time of the caller's choosing.
+    pub fn velocity_at_time(&self, system: &LocalSystem, seconds: f64) -> Option<DVec3> {
         if matches!(self, Waypoint::Fixed(_)) {
             return Some(DVec3::ZERO);
         }
-        let now = system.time_s();
         let step = self.period_s(system).map(|p| p / 4096.0).unwrap_or(1.0).clamp(1.0e-3, 60.0);
-        let before = self.place(&system.propagated_to(now - step))?;
-        let after = self.place(&system.propagated_to(now + step))?;
+        let before = self.place_at(system, seconds - step)?;
+        let after = self.place_at(system, seconds + step)?;
         Some((after - before) * M_PER_LY / (2.0 * step))
     }
 
@@ -258,11 +272,16 @@ impl Orbit {
     /// `G m` of the centre, not `System::mu`, which is the `mu` of the orbit the centre itself
     /// is on — `G(M_sun + M_earth)` for Earth. Using it put a low Earth orbit at eleven seconds.
     fn centre_of(&self, system: &LocalSystem) -> Option<(DVec3, f64)> {
+        self.centre_of_at(system, system.time_s())
+    }
+
+    fn centre_of_at(&self, system: &LocalSystem, seconds: f64) -> Option<(DVec3, f64)> {
         let index = match &self.about {
             Anchor::Star => system.primary(),
             Anchor::Body(name) => system.body_named(name)?,
         };
-        let at = system.origin_ly + system.sim().position(index) / M_PER_LY;
+        let (at_m, _) = system.body_state_at(index, seconds)?;
+        let at = system.origin_ly + at_m / M_PER_LY;
         Some((at, system.sim().gravitational_constant() * system.sim().mass(index)))
     }
 }

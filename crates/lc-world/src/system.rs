@@ -246,6 +246,18 @@ impl LocalSystem {
         Some(self.origin_ly + self.sim.position(index) / M_PER_LY)
     }
 
+    /// A body's position and velocity at a coordinate time, simulation frame, metres and
+    /// metres a second — without propagating this system to get there.
+    ///
+    /// [`LocalSystem::sim`]'s accessors read the arena, which holds one instant: asking them
+    /// where a body *will* be means propagating a copy first. This walks the body's parent
+    /// chain analytically instead, so anything defined against a body is evaluable at an
+    /// arbitrary time without the caller having to arrange the clock. `None` for a body whose
+    /// chain is integrated rather than evaluated, which has no closed form to ask.
+    pub fn body_state_at(&self, index: BodyIndex, seconds: f64) -> Option<(DVec3, DVec3)> {
+        em_sim::propagate::state_at(&self.sim, index, Instant::from_seconds_since_j2000(seconds))
+    }
+
     /// A body's spin axis, simulation axes. Ecliptic north where the data says nothing.
     pub fn body_pole(&self, index: BodyIndex) -> DVec3 {
         self.sim.rotation(index).and_then(pole_of).unwrap_or(DVec3::Z)

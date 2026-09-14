@@ -221,17 +221,65 @@ pub fn apply(
     }
 }
 
-/// Move a ship to a coordinate time.
+/// Where a ship is and how fast, at any coordinate time, without changing anything.
 ///
-/// Read at the new time rather than integrated from the old one, in every branch. A paused
-/// clock, a clock at a year a second and a dropped frame all leave the ship in the same place,
-/// which is what lets a client at one frame rate and a server at another agree.
-pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, elapsed_s: f64) {
+/// **A motive is a worldline.** All four arms are closed forms in `t`: a crossing carries its
+/// own, a station and a conic are defined against bodies that `LocalSystem` places
+/// analytically, and a drift is a line read from where it began. So a ship can be asked where
+/// it will be at a time that has not happened yet, which is what a light-delay solve needs —
+/// the root it is looking for *is* a future time, and a model that could only answer for the
+/// present would have to be extrapolated to get there.
+///
+/// `None` when the motive cannot be evaluated: the body it is defined against has gone, or the
+/// conic's chain is integrated rather than analytic. A caller that already has a position
+/// should keep it rather than invent one.
+pub fn state_at(
+    state: &ShipState,
+    system: Option<&LocalSystem>,
+    now_s: f64,
+) -> Option<(DVec3, DVec3)> {
     match &state.motive {
         Motive::Crossing(cruise) => {
             let flight = cruise.at(now_s);
-            state.position_ly = flight.position_ly;
-            state.beta = flight.beta;
+            Some((flight.position_ly, flight.beta))
+        }
+        Motive::Holding(waypoint) => {
+            let system = system?;
+            let at = waypoint.place_at(system, now_s)?;
+            let velocity = waypoint.velocity_at_time(system, now_s).unwrap_or(DVec3::ZERO);
+            Some((at, coast::beta_of(velocity)))
+        }
+        Motive::Falling(arc) => {
+            let (at, velocity) = arc.at(system?, now_s)?;
+            Some((at, coast::beta_of(velocity)))
+        }
+        // A light-year is a year of travel at `c` by definition, so a beta is already
+        // light-years per year -- and it is read from the start of the line rather than
+        // accumulated, so any two step sizes land on the same place.
+        Motive::Drifting { from_ly, since_t } => {
+            Some((*from_ly + state.beta * (now_s - since_t) / JULIAN_YEAR_S, state.beta))
+        }
+    }
+}
+
+/// Move a ship to a coordinate time.
+///
+/// Read at the new time rather than integrated from the old one, in every branch — that is
+/// [`state_at`]'s job and this calls it, so a ship that is advanced and a ship that is merely
+/// asked cannot end up in different places. A paused clock, a clock at a year a second and a
+/// dropped frame all leave the ship the same, which is what lets a client at one frame rate and
+/// a server at another agree.
+///
+/// What is left here is the part that is not a worldline: the proper-time clock, and the
+/// transition a crossing makes when it ends.
+pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, elapsed_s: f64) {
+    if let Some((at, beta)) = state_at(state, system, now_s) {
+        state.position_ly = at;
+        state.beta = beta;
+    }
+    match &state.motive {
+        Motive::Crossing(cruise) => {
+            let flight = cruise.at(now_s);
             // Read rather than integrated. Stepping `elapsed / gamma` uses one velocity for a
             // whole interval the velocity changed across, which is wrong by first order
             // everywhere and wrong by the entire last step at arrival, where the ship has
@@ -245,7 +293,7 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
                         // station *was* when the plan was made, and a step that overshoots the
                         // arrival by a little leaves the body a little further round its year:
                         // holding from the following step would show as a jump.
-                        if let Some(at) = system.and_then(|s| waypoint.place(s)) {
+                        if let Some(at) = system.and_then(|s| waypoint.place_at(s, now_s)) {
                             state.position_ly = at;
                         }
                         Motive::Holding(waypoint)
@@ -254,35 +302,13 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
                 };
             }
         }
-        Motive::Holding(waypoint) => {
+        Motive::Falling(_) if system.is_none() => {
+            // The system is gone, which means the ship has left it. Whatever the conic said,
+            // out here it is a straight line.
             state.clock_s += elapsed_s;
-            if let Some(at) = system.and_then(|s| waypoint.place(s)) {
-                state.position_ly = at;
-            }
+            state.motive = Motive::Drifting { from_ly: state.position_ly, since_t: now_s };
         }
-        Motive::Falling(arc) => {
-            state.clock_s += elapsed_s;
-            let Some(system) = system else {
-                // The system is gone, which means the ship has left it. Whatever the conic
-                // said, out here it is a straight line.
-                state.motive =
-                    Motive::Drifting { from_ly: state.position_ly, since_t: now_s };
-                return;
-            };
-            // Read, and nothing else. Re-solving the arc here would make it depend on the step
-            // size; that is [`Change::Repatch`]'s job and the authority's timing.
-            if let Some((at, velocity)) = arc.at(system, now_s) {
-                state.position_ly = at;
-                state.beta = coast::beta_of(velocity);
-            }
-        }
-        Motive::Drifting { from_ly, since_t } => {
-            state.clock_s += elapsed_s;
-            // A light-year is a year of travel at `c` by definition, so a beta is already
-            // light-years per year -- and it is read from the start of the line rather than
-            // accumulated, so any two step sizes land on the same place.
-            state.position_ly = *from_ly + state.beta * (now_s - since_t) / JULIAN_YEAR_S;
-        }
+        _ => state.clock_s += elapsed_s,
     }
 }
 
@@ -300,13 +326,8 @@ pub fn repatch_due(state: &ShipState, system: &LocalSystem, now_s: f64) -> Optio
 
 /// How fast a ship is going, metres a second, world frame.
 pub fn velocity_m_s(state: &ShipState, system: Option<&LocalSystem>, now_s: f64) -> DVec3 {
-    match &state.motive {
-        Motive::Crossing(cruise) => cruise.at(now_s).beta * crate::flight::C_M_S,
-        Motive::Holding(waypoint) => {
-            system.and_then(|s| waypoint.velocity_at(s)).unwrap_or(DVec3::ZERO)
-        }
-        Motive::Falling(_) | Motive::Drifting { .. } => state.beta * crate::flight::C_M_S,
-    }
+    let beta = state_at(state, system, now_s).map(|(_, beta)| beta).unwrap_or(state.beta);
+    beta * crate::flight::C_M_S
 }
 
 #[cfg(test)]
@@ -390,6 +411,79 @@ mod tests {
         );
         assert_eq!(server.beta, client.beta);
         assert_eq!(server.motive, client.motive);
+    }
+
+    /// The property that makes a motive a worldline: asking where a ship will be at `t` gives
+    /// the same answer whatever time the system's own clock happens to sit at.
+    ///
+    /// Before this held, a station and a conic were read out of the propagated arena, so they
+    /// were only correct at the present and a caller asking about the future got the present's
+    /// answer wearing the future's timestamp. A light-delay solve roots on a *future* time, so
+    /// this is the difference between scheduling an arrival correctly and scheduling it against
+    /// where the ship was when the question was asked.
+    #[test]
+    fn a_ship_can_be_asked_about_a_time_the_system_is_not_at() {
+        let Some(mut system) = sol() else { return };
+        let mut ship = ShipState::at(DVec3::ZERO);
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: 0.0,
+            change: orbit("Earth"),
+        })
+        .expect("a course");
+
+        // Fly it, cut the engine, and leave the ship on a conic about Earth.
+        let arrival = match &ship.motive {
+            Motive::Crossing(cruise) => cruise.duration_s(),
+            _ => unreachable!("a course is a crossing"),
+        };
+        system.advance_to(arrival);
+        advance(&mut ship, Some(&system), arrival, arrival);
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: arrival,
+            change: Change::CutDrive,
+        })
+        .expect("the engine cuts");
+        assert!(matches!(ship.motive, Motive::Falling(_)), "{:?}", ship.motive);
+
+        // A quarter of the orbit into the future, asked from three different presents.
+        let ahead = arrival + 1_800.0;
+        let asked = |at: f64| {
+            let stale = system.propagated_to(at);
+            state_at(&ship, Some(&stale), ahead).expect("an evaluable arc")
+        };
+        let from_now = asked(arrival);
+        for present in [arrival - 100_000.0, ahead, ahead + 500_000.0] {
+            let (at, beta) = asked(present);
+            assert_eq!(at, from_now.0, "the clock at {present} changed where the ship will be");
+            assert_eq!(beta, from_now.1);
+        }
+        // And it is not answering with the present: the ship has gone somewhere in the meantime.
+        let (here, _) = state_at(&ship, Some(&system), arrival).unwrap();
+        assert!(
+            (from_now.0 - here).length() * crate::system::M_PER_LY > 1.0e6,
+            "a quarter of a low orbit is a thousand kilometres and more",
+        );
+    }
+
+    /// The same for a station, which is the other motive defined against a moving body.
+    #[test]
+    fn a_station_is_read_at_the_time_asked_for() {
+        let Some(system) = sol() else { return };
+        let mut ship = ShipState::at(DVec3::ZERO);
+        let course =
+            Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
+        let waypoint = course.resolve(&system, DVec3::ZERO).expect("a place");
+        ship.begin_holding(waypoint);
+
+        let ahead = 43_200.0;
+        let here = state_at(&ship, Some(&system), 0.0).expect("a station");
+        let there = state_at(&ship, Some(&system), ahead).expect("a station");
+        let stale = state_at(&ship, Some(&system.propagated_to(ahead)), ahead).expect("a station");
+        assert_eq!(there, stale, "the system's clock changed the answer");
+        // Half a day is most of the way round the Earth's orbit *and* many low orbits.
+        assert!((there.0 - here.0).length() * crate::system::M_PER_LY > 1.0e6);
     }
 
     /// A crossing that arrives becomes a station, not a drift. The place was the point of it.
