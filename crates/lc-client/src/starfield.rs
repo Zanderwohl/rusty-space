@@ -93,7 +93,9 @@ pub const KNOBS: [(&str, fn(&mut PointStyle) -> &mut f32, f32, f32); 14] = [
     ("brightness", |s| &mut s.brightness, 0.0, 6.0),
     ("overflow per stop", |s| &mut s.overflow_gain, 0.0, 6.0),
     ("halo gain", |s| &mut s.halo_gain, 0.0, 2.0),
-    ("halo falloff", |s| &mut s.halo_falloff, 0.4, 4.0),
+    // Down to almost nothing: a falloff under 1 is a broad flat glow rather than a tight one,
+    // and the value that looked right was below the range this slider first offered.
+    ("halo falloff", |s| &mut s.halo_falloff, 0.05, 4.0),
     ("corona strength", |s| &mut s.corona_strength, 0.0, 1.0),
     ("corona frequency", |s| &mut s.corona_frequency, 1.0, 60.0),
     ("reach shortest", |s| &mut s.corona_reach_min, 0.0, 0.9),
@@ -129,14 +131,16 @@ pub const LOCAL: PointStyle = PointStyle {
     min_px: 4.0,
     max_px: 26.0,
     glow_radius_gain: 1.4,
-    overflow_gain: 2.0,
-    brightness: 1.6,
-    halo_gain: 0.22,
-    halo_falloff: 1.25,
+    overflow_gain: 0.1,
+    brightness: 0.2,
+    halo_gain: 0.15,
+    // Well under 1: the glare falls off slowly and stays broad rather than collapsing onto the
+    // core. Tuned by eye against a live star, which is the only way to choose it.
+    halo_falloff: 0.16,
     corona_strength: 0.95,
     // Streamers per radian of sky. Halving this halves their number and doubles their width,
     // which is the single lever that matters for how a corona reads.
-    corona_frequency: 11.0,
+    corona_frequency: 12.0,
     corona_reach_min: 0.20,
     corona_reach_span: 0.50,
     corona_fade: 0.28,
@@ -664,7 +668,12 @@ mod tests {
     fn the_background_stays_small_and_a_local_star_is_allowed_to_dominate() {
         assert!(DISTANT.max_px < 4.0, "a background star must not become a ball");
         assert!(LOCAL.min_px > DISTANT.max_px, "the two ranges should not even overlap");
-        assert!(LOCAL.overflow_gain > DISTANT.overflow_gain * 4.0, "glare is the local star's");
+        // Deliberately nothing here about which pass is brighter or glares more. An earlier
+        // version asserted the local star carried more overflow, which was a belief about how
+        // it would look rather than a requirement, and tuning against a live star overturned
+        // it. What has to hold is that the two are separable in size and that the local one is
+        // the larger; everything else is taste and belongs on a slider.
+        assert_ne!(LOCAL, DISTANT);
     }
 
     #[test]
@@ -689,7 +698,6 @@ mod tests {
         let far = uniforms(&s, DVec3::ZERO, lut_scale(), rad, DISTANT);
         let near = uniforms(&s, DVec3::ZERO, lut_scale(), rad, LOCAL);
         assert!(near.max_radius_rad > far.max_radius_rad * 5.0);
-        assert!(near.overflow_gain > far.overflow_gain);
         // But they read the same sky: same exposure, same velocity, same table.
         assert_eq!(near.reference, far.reference);
         assert_eq!(near.beta, far.beta);
