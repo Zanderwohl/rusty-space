@@ -10,7 +10,7 @@
 //! rule that when the ship crosses into another body's influence the arc is re-solved about it.
 
 use em_foundations::kepler::{anomaly, state::{self, Elements}};
-use em_foundations::time::Instant;
+use em_foundations::time::{Instant, TimeDelta};
 use glam::DVec3;
 
 use crate::flight::C_M_S;
@@ -58,13 +58,29 @@ impl Coast {
         // Outside every sphere of influence the star still holds it: the system's own influence
         // has no outer edge until another star's begins.
         .unwrap_or_else(|| system.primary());
+        Self::about(system, index, position_ly, velocity_m_s, now_s)
+    }
 
+    /// Solve the arc about a *named* body, whether or not that body's sphere contains the ship.
+    ///
+    /// What a patch uses. At a join the ship is exactly on a boundary and containment is a
+    /// coin toss — it answered "still inside" and the ship never left — so the crossing says
+    /// which frame the new arc is in and this takes it as given.
+    pub fn about(
+        system: &LocalSystem,
+        index: em_sim::id::BodyIndex,
+        position_ly: DVec3,
+        velocity_m_s: DVec3,
+        now_s: f64,
+    ) -> Option<Self> {
+        let at_m = (position_ly - system.origin_ly) * M_PER_LY;
+        let (centre, carried) = system.body_state_at(index, now_s)?;
         let mu = system.sim().gravitational_constant() * system.sim().mass(index);
         if mu <= 0.0 || !mu.is_finite() {
             return None;
         }
-        let local = at_m - system.sim().position(index);
-        let relative = velocity_m_s - system.sim().velocity(index);
+        let local = at_m - centre;
+        let relative = velocity_m_s - carried;
         let mut elements = state::from_state(mu, local, relative)?;
         elements.eccentricity = nudged(elements.eccentricity);
         Some(Self {
@@ -83,12 +99,29 @@ impl Coast {
     /// arc a worldline — something a light-delay solve can evaluate at whatever time its root
     /// lands on — rather than a thing that is only correct at the present.
     pub fn at(&self, system: &LocalSystem, now_s: f64) -> Option<(DVec3, DVec3)> {
+        let (at_m, velocity) = self.sim_state_at(system, now_s)?;
+        Some((system.origin_ly + at_m / M_PER_LY, velocity))
+    }
+
+    /// The same, in simulation space: metres from the system's own origin, and metres a
+    /// second. What `em-sim` measures in, and what the crossing search wants.
+    pub fn sim_state_at(&self, system: &LocalSystem, now_s: f64) -> Option<(DVec3, DVec3)> {
         let index = system.body_named(&self.primary)?;
         let (centre, carried) = system.body_state_at(index, now_s)?;
+        let (local, relative) = self.local_state_at(now_s)?;
+        Some((centre + local, carried + relative))
+    }
+
+    /// Where round the conic the ship is, measured from the primary. Metres.
+    pub fn local_state_at(&self, now_s: f64) -> Option<(DVec3, DVec3)> {
         let mut elements = self.elements;
         elements.true_anomaly = self.true_anomaly_at(now_s)?;
-        let (local, relative) = state::to_state(self.mu, &elements)?;
-        Some((system.origin_ly + (centre + local) / M_PER_LY, carried + relative))
+        state::to_state(self.mu, &elements)
+    }
+
+    /// The arc as something [`em_sim::crossing`] can search.
+    pub fn path<'a>(&'a self, system: &'a LocalSystem) -> ConicPath<'a> {
+        ConicPath { coast: self, system }
     }
 
     /// Where round the conic the ship is, radians, at a coordinate time.
@@ -171,6 +204,40 @@ impl Coast {
 
     pub fn is_escaping(&self) -> bool {
         self.elements.eccentricity >= 1.0
+    }
+}
+
+/// A [`Coast`] as a traveller, so the crossing search can be asked when it leaves.
+///
+/// Borrowed rather than owned: the arc is the truth and the system places its primary, and a
+/// copy of either in another shape is a copy that can be stale.
+pub struct ConicPath<'a> {
+    coast: &'a Coast,
+    system: &'a LocalSystem,
+}
+
+impl em_sim::crossing::Traveller for ConicPath<'_> {
+    fn state_at(&self, time: Instant) -> Option<(DVec3, DVec3)> {
+        self.coast.sim_state_at(self.system, time.to_j2000_seconds())
+    }
+
+    fn local_state_at(&self, time: Instant) -> Option<(DVec3, DVec3)> {
+        self.coast.local_state_at(time.to_j2000_seconds())
+    }
+
+    fn period_at(&self, _time: Instant) -> Option<TimeDelta> {
+        self.coast.period_s().map(TimeDelta::from_seconds)
+    }
+
+    fn timescale_at(&self, time: Instant) -> Option<TimeDelta> {
+        if let Some(period) = self.period_at(time) {
+            return Some(period);
+        }
+        // A hyperbolic arc has no period but has the same time constant, and the traverse of
+        // a sphere is a fraction of it.
+        let a = self.coast.elements.semi_major_axis.abs();
+        let scale = std::f64::consts::TAU * (a * a * a / self.coast.mu).sqrt();
+        scale.is_finite().then(|| TimeDelta::from_seconds(scale))
     }
 }
 

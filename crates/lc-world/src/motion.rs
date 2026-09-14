@@ -14,6 +14,7 @@ use crate::coast::{self, Coast};
 use crate::flight::{Cruise, Drive, JULIAN_YEAR_S, Phase};
 use crate::navigation::{Course, Waypoint};
 use crate::system::LocalSystem;
+use em_foundations::time::{Instant, TimeDelta};
 use lc_spacetime::Worldline;
 
 /// A ship, by the identifier whoever owns it uses. Opaque here.
@@ -135,14 +136,20 @@ pub enum Change {
     /// Put out a pulse. Changes nothing about the motion, and is here because the fold is what
     /// both sides run over everything that happened.
     Transmit { power_w: f64 },
-    /// The ballistic arc crosses into another body's influence and is re-solved about it.
+    /// The ballistic arc crosses a sphere of influence and is re-solved about `about`.
     ///
     /// An event rather than something each side notices for itself. Patched conics done by
     /// detection depend on *when* the crossing is looked for, so two sides stepping differently
     /// would produce different elements and drift apart. The authority decides when it happened
     /// and everyone folds the same instant. Doc 08 says the same thing about shards: a shell
     /// crossing is already an event with a coordinate.
-    Repatch,
+    ///
+    /// The new primary is named rather than looked up. At a join the ship is *exactly* on a
+    /// boundary, so asking which sphere contains it is a coin toss — and it came up "the one
+    /// you are leaving", which re-solved the same arc and left the ship inside Earth for good.
+    /// Naming it is still an order and not a trajectory: both sides solve the same conic from
+    /// the same state, they are only told which frame to solve it in.
+    Repatch { about: String },
 }
 
 /// One thing that happened to one ship, at one coordinate time.
@@ -179,29 +186,28 @@ pub fn apply(
 ) -> Result<(), Rejected> {
     match &event.change {
         Change::Transmit { .. } => Ok(()),
-        Change::Repatch => {
-            // The arc is re-solved about whatever holds the ship *now*. Both sides get the same
-            // answer because they are given the same time -- which is the whole reason a shell
-            // crossing is an event with a coordinate rather than something each side notices.
-            let velocity = velocity_m_s(state, system, event.at_t);
-            state.motive = match system
-                .and_then(|s| Coast::from_state(s, state.position_ly, velocity, event.at_t))
-            {
-                Some(arc) => Motive::Falling(arc),
-                None => Motive::Drifting { from_ly: state.position_ly, since_t: event.at_t },
-            };
-            Ok(())
-        }
-        Change::CutDrive => {
-            let velocity = velocity_m_s(state, system, event.at_t);
-            state.beta = coast::beta_of(velocity);
-            state.motive = match system
-                .and_then(|s| Coast::from_state(s, state.position_ly, velocity, event.at_t))
-            {
+        // Both of these re-solve the ship's conic from its state at the event's own time, and
+        // both read that state rather than taking the ship's last advanced position. An event
+        // is stamped with a coordinate and may be folded later than it happened -- a predicted
+        // patch always is -- and taking the position from one time and the velocity from
+        // another produces an orbit the ship was never on.
+        Change::Repatch { .. } | Change::CutDrive => {
+            let (at, beta) = state_at(state, system, event.at_t)
+                .unwrap_or((state.position_ly, state.beta));
+            let velocity = beta * crate::flight::C_M_S;
+            state.position_ly = at;
+            state.beta = beta;
+            let solved = system.and_then(|s| match &event.change {
+                Change::Repatch { about } => {
+                    Coast::about(s, s.body_named(about)?, at, velocity, event.at_t)
+                }
+                _ => Coast::from_state(s, at, velocity, event.at_t),
+            });
+            state.motive = match solved {
                 Some(arc) => Motive::Falling(arc),
                 // Between systems, or a radial state that has no conic at all. Either way it is
                 // a straight line at the velocity it has.
-                None => Motive::Drifting { from_ly: state.position_ly, since_t: event.at_t },
+                None => Motive::Drifting { from_ly: at, since_t: event.at_t },
             };
             Ok(())
         }
@@ -313,16 +319,91 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
     }
 }
 
-/// Whether the ballistic arc has left the influence it was solved in, and the event that says
-/// so.
+/// How far ahead of an arc to look for its next patch, in revolutions.
 ///
-/// Called by whoever is authoritative — the server, or a client with no server. Everyone else
-/// is *told*, which is what keeps the two sides on the same arc.
+/// Three rather than one because an orbit can sit wholly inside a sphere for a revolution and
+/// still meet a moon on the next. The same number [`em_sim::crossing::default_horizon_of`]
+/// uses, and for the same reason.
+pub const PATCH_HORIZON_REVOLUTIONS: f64 = 3.0;
+
+/// The horizon for an arc with no revolutions to count: a hyperbola leaves, and the question
+/// is only when.
+pub const OPEN_PATCH_HORIZON_S: f64 = JULIAN_YEAR_S;
+
+/// **When** the ballistic arc will leave the influence it was solved in, and the event that
+/// says so.
+///
+/// Solved, not noticed. A patch found by looking is a patch found at whatever moment someone
+/// happened to look, and at any real time warp a ship on a hyperbola can pass clean through a
+/// small moon's sphere between two looks and never patch at all. This roots the boundary
+/// distance in `t` instead, so the answer is a property of the arc.
+///
+/// Costs a search — a few hundred evaluations per candidate sphere — so the authority is meant
+/// to call it once when an arc begins and remember the answer, not once a frame.
+///
+/// `None` when the arc meets nothing within the horizon, which is the ordinary case for an
+/// orbit that stays where it is.
+pub fn repatch_at(state: &ShipState, system: &LocalSystem, from_s: f64) -> Option<Event> {
+    let Motive::Falling(arc) = &state.motive else { return None };
+    let primary = system.body_named(&arc.primary)?;
+    let candidates = em_sim::influence::spheres_within(system.sim(), primary);
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let horizon = match arc.period_s() {
+        Some(period) => period * PATCH_HORIZON_REVOLUTIONS,
+        None => OPEN_PATCH_HORIZON_S,
+    };
+    // Off the boundary the arc may be sitting exactly on, having just been solved there. A
+    // search from the join itself finds that same crossing and the walk never advances; the
+    // tolerance is a millisecond, so a second is far clear of it and far inside any arc.
+    const CLEARANCE_S: f64 = 1.0;
+    let from = Instant::from_seconds_since_j2000(from_s + CLEARANCE_S);
+
+    let found = em_sim::crossing::first_crossing_of(
+        system.sim(),
+        &arc.path(system),
+        &candidates,
+        from,
+        TimeDelta::from_seconds(horizon),
+    )?;
+
+    // Which frame the ship lands in, from the crossing rather than from a containment test.
+    // Leaving the sphere it is in hands it up to the next primary out; entering a sibling's
+    // hands it down to that sibling. The other two cases -- entering the sphere you are
+    // already inside, leaving one you are not in -- cannot happen from a consistent state,
+    // and are not guessed at.
+    let about = if found.body == primary {
+        if found.entering {
+            return None;
+        }
+        // The star's influence has no outer edge here; there is nowhere further out to go.
+        system.sim().parent(primary)?
+    } else if found.entering {
+        found.body
+    } else {
+        return None;
+    };
+
+    Some(Event {
+        ship: ShipId(0),
+        at_t: found.time.to_j2000_seconds(),
+        change: Change::Repatch { about: system.sim().name(about).to_string() },
+    })
+}
+
+/// Whether the arc is *already* in the wrong sphere, and the event that says so.
+///
+/// The backstop to [`repatch_at`], not a substitute for it. A prediction is made when an arc
+/// begins and can be defeated by anything that happens afterwards; this catches a ship that
+/// has ended up somewhere the prediction did not cover. It fires at `now_s`, so it is the
+/// authority's clock that stamps it — everyone else folds that stamp.
 pub fn repatch_due(state: &ShipState, system: &LocalSystem, now_s: f64) -> Option<Event> {
     let Motive::Falling(arc) = &state.motive else { return None };
     let velocity = state.beta * crate::flight::C_M_S;
-    arc.repatched(system, state.position_ly, velocity, now_s)?;
-    Some(Event { ship: ShipId(0), at_t: now_s, change: Change::Repatch })
+    let found = arc.repatched(system, state.position_ly, velocity, now_s)?;
+    Some(Event { ship: ShipId(0), at_t: now_s, change: Change::Repatch { about: found.primary } })
 }
 
 /// Light-microseconds in a light-year.
@@ -569,6 +650,167 @@ mod tests {
         let at = line.position_at(a_year_us);
         assert!((at.x / LIGHT_US_PER_LY - 0.5).abs() < 1.0e-12, "{}", at.x / LIGHT_US_PER_LY);
         assert_eq!(line.velocity_at(a_year_us), ship.beta);
+    }
+
+    /// An escape from Earth leaves Earth's sphere at a time that can be *solved for*, and the
+    /// solve lands on the boundary rather than near it.
+    ///
+    /// The difference from noticing: a detector only knows the ship has left once it has
+    /// stepped past the crossing, so it is late by up to a whole step, and at any real time
+    /// warp a step is hours. Here a step is irrelevant — the answer is a property of the arc.
+    #[test]
+    fn a_patch_is_solved_for_rather_than_noticed() {
+        use em_foundations::time::Instant;
+        let Some(system) = sol() else { return };
+        let earth = system.body_named("Earth").expect("Earth");
+        let (at_m, carried) = system.body_state_at(earth, 0.0).expect("a state");
+        let radius = system.sim().radius(earth) * 3.0;
+        let mu = system.sim().gravitational_constant() * system.sim().mass(earth);
+
+        // Three Earth radii out, at 1.6 times circular: comfortably above escape, so the arc
+        // is a hyperbola that leaves rather than an ellipse that comes back.
+        let position_ly = system.origin_ly + (at_m + DVec3::X * radius) / crate::system::M_PER_LY;
+        let velocity = carried + DVec3::Y * (mu / radius).sqrt() * 1.6;
+        let arc = crate::coast::Coast::from_state(&system, position_ly, velocity, 0.0)
+            .expect("an arc");
+        assert_eq!(arc.primary, "Earth");
+        assert!(arc.is_escaping(), "e = {}", arc.elements.eccentricity);
+
+        let mut ship = ShipState::at(position_ly);
+        ship.beta = coast::beta_of(velocity);
+        ship.motive = Motive::Falling(arc.clone());
+
+        let event = repatch_at(&ship, &system, 0.0).expect("an escape leaves");
+        assert!(matches!(event.change, Change::Repatch { .. }), "{:?}", event.change);
+
+        // On the boundary, not near it: inside a second either side of the answer, and the
+        // sign flips across it.
+        let distance_at = |t: f64| {
+            em_sim::crossing::boundary_distance_of(
+                system.sim(),
+                &arc.path(&system),
+                earth,
+                Instant::from_seconds_since_j2000(t),
+            )
+            .expect("evaluable")
+        };
+        let speed = velocity.length();
+        assert!(distance_at(event.at_t).abs() < speed, "{} m off", distance_at(event.at_t));
+        assert!(distance_at(event.at_t - 60.0) < 0.0, "it was already outside a minute before");
+        assert!(distance_at(event.at_t + 60.0) > 0.0, "it was still inside a minute after");
+
+        // A few days, which is what an escape from Earth takes. Named so a change in the
+        // sphere model or the escape speed shows up as a number rather than as a pass.
+        let days = event.at_t / 86_400.0;
+        assert!((1.0..30.0).contains(&days), "{days} days to leave Earth");
+
+        // And a detector stepping at anything coarse is late by up to a step. This is the
+        // thing prediction replaces.
+        const STEP_S: f64 = 3.0 * 3_600.0;
+        let mut noticed = 0.0;
+        while distance_at(noticed) < 0.0 {
+            noticed += STEP_S;
+        }
+        assert!(noticed > event.at_t, "a detector cannot be early");
+        assert!(
+            noticed - event.at_t > 600.0,
+            "a three-hour step happened to land on the crossing; pick another",
+        );
+    }
+
+    /// And two authorities stepping at different rates reach the same arc about the same new
+    /// primary, because the patch happened at a solved coordinate rather than on a frame.
+    ///
+    /// This is the determinism test the detector could not pass. A detector fires on the step
+    /// that notices, so a server at 438 seconds and a client at 61 would re-solve the conic at
+    /// two different instants and be on two different orbits from then on.
+    #[test]
+    fn the_step_size_does_not_change_which_arc_the_ship_ends_up_on() {
+        let Some(system) = sol() else { return };
+        let earth = system.body_named("Earth").expect("Earth");
+        let (at_m, carried) = system.body_state_at(earth, 0.0).expect("a state");
+        let radius = system.sim().radius(earth) * 3.0;
+        let mu = system.sim().gravitational_constant() * system.sim().mass(earth);
+        let position_ly = system.origin_ly + (at_m + DVec3::X * radius) / crate::system::M_PER_LY;
+        let velocity = carried + DVec3::Y * (mu / radius).sqrt() * 1.6;
+
+        let start = |state: &mut ShipState| {
+            let arc = crate::coast::Coast::from_state(&system, position_ly, velocity, 0.0)
+                .expect("an arc");
+            state.beta = coast::beta_of(velocity);
+            state.motive = Motive::Falling(arc);
+        };
+
+        // What an authority does: fold the patch at the time it was solved for, then advance.
+        // The order is the point -- checking first means the event is always stamped with its
+        // own coordinate, whatever step happened to run past it.
+        let run = |step: f64, until: f64| {
+            let mut ship = ShipState::at(position_ly);
+            start(&mut ship);
+            let mut patch = repatch_at(&ship, &system, 0.0);
+            let mut now = 0.0;
+            while now < until {
+                let next = (now + step).min(until);
+                let elapsed = next - now;
+                now = next;
+                if let Some(event) = patch.take_if(|e| e.at_t <= now) {
+                    apply(&mut ship, Some(&system), &event).expect("a patch applies");
+                    patch = repatch_at(&ship, &system, event.at_t);
+                }
+                advance(&mut ship, Some(&system), now, elapsed);
+            }
+            ship
+        };
+
+        let patch = repatch_at(&ShipState {
+            motive: {
+                let mut s = ShipState::at(position_ly);
+                start(&mut s);
+                s.motive
+            },
+            ..ShipState::at(position_ly)
+        }, &system, 0.0)
+        .expect("it leaves");
+        let until = patch.at_t + 86_400.0;
+
+        let coarse = run(438.0, until);
+        let fine = run(61.0, until);
+
+        // It really did change primary: out of Earth's sphere and into the Sun's.
+        let Motive::Falling(arc) = &coarse.motive else { panic!("{:?}", coarse.motive) };
+        assert_ne!(arc.primary, "Earth", "it never left");
+        assert!((arc.epoch_s - patch.at_t).abs() < 1.0e-6, "the arc began at the wrong instant");
+
+        assert_eq!(coarse.motive, fine.motive, "two step sizes, two different arcs");
+        assert_eq!(coarse.position_ly, fine.position_ly);
+        assert_eq!(coarse.beta, fine.beta);
+    }
+
+    /// An orbit that stays where it is meets nothing, and the search says so rather than
+    /// inventing a patch at the end of its horizon.
+    #[test]
+    fn an_orbit_that_goes_nowhere_has_no_patch() {
+        let Some(system) = sol() else { return };
+        let mut ship = ShipState::at(DVec3::ZERO);
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: 0.0,
+            change: orbit("Earth"),
+        })
+        .expect("a course");
+        let arrival = match &ship.motive {
+            Motive::Crossing(cruise) => cruise.duration_s(),
+            _ => unreachable!(),
+        };
+        advance(&mut ship, Some(&system), arrival, arrival);
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: arrival,
+            change: Change::CutDrive,
+        })
+        .expect("the engine cuts");
+        assert!(matches!(ship.motive, Motive::Falling(_)));
+        assert!(repatch_at(&ship, &system, arrival).is_none(), "a circular orbit stays put");
     }
 
     /// A crossing that arrives becomes a station, not a drift. The place was the point of it.

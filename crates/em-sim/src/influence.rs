@@ -328,15 +328,21 @@ pub fn crossing_candidates_about(
     traveller: BodyIndex,
     primary: BodyIndex,
 ) -> Vec<BodyIndex> {
+    spheres_within(system, primary).into_iter().filter(|&i| i != traveller).collect()
+}
+
+/// Spheres something inside `primary`'s influence can reach without first leaving it:
+/// `primary`'s own boundary on the way out, and each of its children on the way past.
+///
+/// The same set as [`crossing_candidates_about`] without a body to leave out, for a traveller
+/// the system has no index for — a spacecraft, which is most of them.
+pub fn spheres_within(system: &System, primary: BodyIndex) -> Vec<BodyIndex> {
     let mut candidates = Vec::new();
     if soi_now(system, primary).is_some() {
         candidates.push(primary);
     }
-    candidates.extend(
-        system.children_of(primary)
-            .filter(|&sibling| sibling != traveller)
-            .filter(|&sibling| soi_now(system, sibling).is_some()),
-    );
+    candidates
+        .extend(system.children_of(primary).filter(|&child| soi_now(system, child).is_some()));
     candidates
 }
 

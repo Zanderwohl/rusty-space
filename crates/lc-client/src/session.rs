@@ -113,6 +113,12 @@ pub struct Session {
     pub system: Option<crate::system::LocalSystem>,
     /// What the renderer is about to draw besides the stars. Metered, never drawn from.
     pub scene: Scene,
+    /// The patch the current arc is heading for: when it leaves the sphere it was solved in,
+    /// and which sphere it lands in. Solved once when the arc began, not looked for every frame.
+    ///
+    /// Cached here, not in [`ShipState`], because it is derived: the arc is the fact and this
+    /// is an answer about it. A server would hold the same event and send it.
+    patch: Option<motion::Event>,
     targets: HashMap<StarId, Target>,
 }
 
@@ -139,6 +145,7 @@ impl Session {
             ship: ShipState::at(DVec3::ZERO),
             scene: Scene::default(),
             system: None,
+            patch: None,
             targets,
         };
         session.retune();
@@ -153,6 +160,44 @@ impl Session {
 
     /// Load or drop the local system, and propagate it to now.
     ///
+    /// Fold the patch the arc was solved for, if its time has come, and solve for the next.
+    ///
+    /// With no server the client is the authority, so it is the one that decides when a
+    /// ballistic arc crossed into another body's influence. It folds the event it made; a
+    /// connected client would be told the same event instead. Either way the arc changes at a
+    /// *coordinate*, and here that coordinate is the solved crossing time rather than the
+    /// frame that noticed — so the same ship at any frame rate reaches the same arc.
+    ///
+    /// The backstop below catches a ship that has ended up in a sphere the prediction did not
+    /// cover, which a course change or a system reload can do.
+    fn patch_if_due(&mut self, now: f64) {
+        // A prediction is about one conic. Anything that is not that conic -- a course set, a
+        // station held, a shell crossed -- makes it an answer to a question nobody is asking,
+        // and folding it would cut the drive on a flight that is under way.
+        let on_an_arc = matches!(self.ship.motive, motion::Motive::Falling(_));
+        let Some(system) = self.system.as_ref().filter(|_| on_an_arc) else {
+            self.patch = None;
+            return;
+        };
+        let event = match self.patch.take_if(|e| e.at_t <= now) {
+            Some(solved) => Some(solved),
+            None => motion::repatch_due(&self.ship, system, now),
+        };
+        if let Some(event) = event {
+            let _ = motion::apply(&mut self.ship, Some(system), &event);
+            self.solve_patch(event.at_t);
+        }
+    }
+
+    /// Solve for when the current arc leaves its sphere, and remember it.
+    ///
+    /// Called when an arc begins, and never per frame: the solve is a few hundred boundary
+    /// evaluations per candidate sphere.
+    pub fn solve_patch(&mut self, from_s: f64) {
+        self.patch =
+            self.system.as_ref().and_then(|system| motion::repatch_at(&self.ship, system, from_s));
+    }
+
     /// Loading is the expensive part — two hundred and thirty bodies parsed out of a preset —
     /// so it happens only when the ship crosses into a different star's shell.
     pub fn sync_system(&mut self) {
@@ -197,15 +242,7 @@ impl Session {
         // system, and one propagated to last frame would put the ship a frame behind.
         self.sync_system();
 
-        // With no server, the client is the authority, so it is the one that decides when a
-        // ballistic arc crossed into another body's influence. It folds the event it made;
-        // a connected client would be told the same event instead. Either way the arc comes
-        // from a coordinate rather than from when someone happened to look.
-        if let Some(system) = self.system.as_ref() {
-            if let Some(event) = motion::repatch_due(&self.ship, system, now) {
-                let _ = motion::apply(&mut self.ship, Some(system), &event);
-            }
-        }
+        self.patch_if_due(now);
         motion::advance(&mut self.ship, self.system.as_ref(), now, elapsed);
         self.sync_observer();
     }
@@ -251,6 +288,8 @@ impl Session {
             change: motion::Change::CutDrive,
         };
         let _ = motion::apply(&mut self.ship, self.system.as_ref(), &event);
+        // A new arc, so the old answer to "when does it leave" is about a different conic.
+        self.solve_patch(event.at_t);
         self.coast().cloned()
     }
 
