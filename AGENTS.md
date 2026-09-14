@@ -60,6 +60,11 @@ Each of these cost real time. None of them are visible from the code that hits t
 
 **Rendering**
 
+- `Camera::world_to_viewport` **errors** for anything behind the camera, so nothing built on it
+  can point at what is behind you. Work in clip space and keep `w`: `clip.w` is `-view.z`, so
+  behind the camera it is negative while `clip.x` keeps the sign of `view.x`. Dividing anyway
+  mirrors the point through the centre. See `em_ui::reticle::place`.
+
 - Depth is **reversed**. `clip.z = clip.w` is the *near* plane. Background geometry wants a
   tiny positive value, not zero — the buffer clears to zero and the test is strictly greater.
 - `AlphaMode::Add` is *premultiplied*: `src + dst*(1-alpha)`. For pure additive the fragment
@@ -96,6 +101,9 @@ Each of these cost real time. None of them are visible from the code that hits t
 
 **egui**
 
+- An overlay on `Order::Background` is painted *under* every panel and floating area, so the
+  interface covers it. `Order::Foreground` is over all of them — keep such an overlay inside
+  `ctx.available_rect()` so it does not draw on top of a docked panel.
 - The default font has no U+2715 `✕` — it renders as a tofu box. U+00D7 `×` is fine.
 - `add_enabled` wrapping a `SelectableLabel` reports clicks nobody made. A plain
   `selectable_label` does not.

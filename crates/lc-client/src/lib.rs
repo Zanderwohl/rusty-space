@@ -19,6 +19,7 @@ pub mod hud;
 pub mod input;
 pub mod menu;
 pub mod panels;
+pub mod pick;
 pub mod plot;
 pub mod resolved;
 pub mod session;

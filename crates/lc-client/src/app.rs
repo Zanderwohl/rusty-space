@@ -146,6 +146,7 @@ impl Plugin for ClientPlugin {
                 Update,
                 (aim_camera, update_sky).chain().run_if(in_state(AppState::MainMenu)),
             )
+            .add_plugins(crate::pick::PickPlugin)
             .add_systems(
                 EguiPrimaryContextPass,
                 (

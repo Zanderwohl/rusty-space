@@ -45,6 +45,11 @@ pub fn parse(args: &[String]) -> (DevEntry, Option<String>) {
     {
         actions.push(Action::SetCurveBand(*band));
     }
+    // Turning is the only way to put something off screen, and an edge indicator cannot be
+    // photographed without one.
+    if let Some(degrees) = value::<f64>(args, "--turn") {
+        actions.push(Action::Look { yaw: degrees.to_radians(), pitch: 0.0 });
+    }
     if flag("--fly") {
         // Index 0 of the sorted sky is the Sun in the full catalogue; 1 is interstellar.
         actions.push(Action::FlyToNearest);

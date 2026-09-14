@@ -27,6 +27,11 @@ pub enum Marker {
 /// Place the indicator for something at `clip`, its position in **clip space** — the projection
 /// applied, the perspective divide *not*.
 ///
+/// `viewport` maps the projection onto pixels; `safe` is where a mark is allowed to be, which is
+/// not the same rectangle. It is the part of the window the view is actually visible through,
+/// less a border — so with a panel open, an edge arrow sits at the edge of the *sky* rather than
+/// behind the panel. [`safe_rect`] builds the whole-window case.
+///
 /// Clip space rather than a viewport position, because a viewport position cannot describe the
 /// half of the sky that matters here. Bevy's `world_to_viewport` returns an error for anything
 /// behind the camera, so an arrow pointing at what is behind you cannot be built from it at all.
@@ -36,9 +41,8 @@ pub enum Marker {
 /// `view.x`. Something behind you and to the right divides to an `ndc.x` of the wrong sign and
 /// the arrow goes to the left edge, pointing away from it. So `w <= 0` never divides: it takes
 /// the direction straight from `clip.xy`, whose sign was right all along.
-pub fn place(clip: Vec4, radius_px: f32, viewport: Vec2, inset_px: f32) -> Marker {
-    let safe = safe_rect(viewport, inset_px);
-    let centre = viewport * 0.5;
+pub fn place(clip: Vec4, radius_px: f32, viewport: Vec2, safe: Rect) -> Marker {
+    let centre = (safe.max + safe.min) * 0.5;
 
     if clip.w <= 0.0 {
         // Behind the camera, or exactly abeam. The projected point is meaningless; the way to
@@ -132,17 +136,21 @@ pub fn brackets(at: Vec2, radius_px: f32, arm_px: f32) -> Vec<[Vec2; 2]> {
     out
 }
 
-/// A solid-looking arrowhead at the edge, pointing along `direction`.
+/// An arrowhead pointing along `direction`, with its **tip at `at`**.
+///
+/// The tip, not the middle. `at` comes from [`place`], which puts it on the safe rect, and the
+/// whole reason for that inset is that the arrow be visible: a triangle centred there reaches
+/// `size_px` past the border and loses its point off the edge of the window.
 pub fn arrow(at: Vec2, direction: Vec2, size_px: f32) -> Vec<[Vec2; 2]> {
     let d = direction.normalize_or_zero();
     if d == Vec2::ZERO {
         return Vec::new();
     }
     let side = Vec2::new(-d.y, d.x);
-    let tip = at + d * size_px;
-    let left = at - d * size_px * 0.4 + side * size_px * 0.6;
-    let right = at - d * size_px * 0.4 - side * size_px * 0.6;
-    vec![[tip, left], [left, right], [right, tip]]
+    let back = at - d * size_px;
+    let left = back + side * size_px * 0.5;
+    let right = back - side * size_px * 0.5;
+    vec![[at, left], [left, right], [right, at]]
 }
 
 /// A screen-space direction from clip-space `xy`. Clip `y` is up, the viewport's is down.
@@ -184,7 +192,7 @@ mod tests {
 
     #[test]
     fn something_in_the_middle_of_the_view_is_marked_where_it_is() {
-        let Marker::On { at, radius_px } = place(in_front(0.0, 0.0, 5.0), 20.0, VIEW, EDGE_INSET_PX)
+        let Marker::On { at, radius_px } = place(in_front(0.0, 0.0, 5.0), 20.0, VIEW, safe())
         else {
             panic!("the middle of the screen is on screen")
         };
@@ -192,7 +200,7 @@ mod tests {
         assert_eq!(radius_px, 20.0);
 
         // Clip `y` is up and the viewport's is down, so the top of the screen is +1.
-        let Marker::On { at, .. } = place(in_front(0.0, 0.9, 5.0), 0.0, VIEW, EDGE_INSET_PX) else {
+        let Marker::On { at, .. } = place(in_front(0.0, 0.9, 5.0), 0.0, VIEW, safe()) else {
             panic!("still on screen")
         };
         assert!(at.y < VIEW.y * 0.5, "up in clip space should be up on screen: {at}");
@@ -210,7 +218,7 @@ mod tests {
     fn something_behind_the_camera_points_the_way_it_actually_is() {
         // Five metres behind the camera and two to the right.
         let behind = Vec4::new(2.716, 0.0, -1.0, -5.0);
-        let Marker::Off { at, direction } = place(behind, 0.0, VIEW, EDGE_INSET_PX) else {
+        let Marker::Off { at, direction } = place(behind, 0.0, VIEW, safe()) else {
             panic!("behind the camera is not on screen")
         };
         assert!(direction.x > 0.0, "it is behind and to the right: {direction}");
@@ -221,7 +229,7 @@ mod tests {
 
         // And its mirror image goes to the other side, as it must.
         let other = Vec4::new(-2.716, 0.0, -1.0, -5.0);
-        let Marker::Off { direction, .. } = place(other, 0.0, VIEW, EDGE_INSET_PX) else {
+        let Marker::Off { direction, .. } = place(other, 0.0, VIEW, safe()) else {
             panic!("still behind")
         };
         assert!(direction.x < 0.0, "{direction}");
@@ -231,7 +239,7 @@ mod tests {
     #[test]
     fn an_arrow_stays_inside_the_safe_border() {
         for (x, y) in [(4.0, 0.0), (-4.0, 0.0), (0.0, 4.0), (0.0, -4.0), (3.0, 3.0)] {
-            let Marker::Off { at, .. } = place(in_front(x, y, 1.0), 0.0, VIEW, EDGE_INSET_PX)
+            let Marker::Off { at, .. } = place(in_front(x, y, 1.0), 0.0, VIEW, safe())
             else {
                 panic!("{x},{y} is off the screen")
             };
@@ -251,7 +259,7 @@ mod tests {
     #[test]
     fn something_exactly_abeam_is_still_placed() {
         let to_the_right = Vec4::new(1.0, 0.0, 0.0, 0.0);
-        let Marker::Off { at, direction } = place(to_the_right, 0.0, VIEW, EDGE_INSET_PX) else {
+        let Marker::Off { at, direction } = place(to_the_right, 0.0, VIEW, safe()) else {
             panic!("nothing in the camera's own plane is on screen")
         };
         assert!(direction.x > 0.0 && at.is_finite(), "{direction} {at}");
@@ -338,14 +346,24 @@ mod tests {
         assert!(segments.iter().all(|[a, b]| a.distance(mid_top) > 1.0 && b.distance(mid_top) > 1.0));
     }
 
+    /// The tip sits on the anchor and the body trails behind it, so an arrow placed on the
+    /// safe rect is entirely inside the window. Drawn the other way round it reaches a whole
+    /// arrow-length past the border and its point is clipped away.
     #[test]
-    fn an_arrow_is_a_closed_triangle_pointing_the_right_way() {
+    fn an_arrow_keeps_its_point_on_the_anchor() {
         let at = Vec2::new(10.0, 300.0);
-        let segments = arrow(at, Vec2::new(-1.0, 0.0), 12.0);
+        let pointing_left = Vec2::new(-1.0, 0.0);
+        let segments = arrow(at, pointing_left, 12.0);
         assert_eq!(segments.len(), 3);
-        let tip = segments[0][0];
-        assert!(tip.x < at.x, "the tip should lead: {tip}");
-        assert!(segments[2][1].distance(tip) < 1.0e-3, "the triangle should close");
+        assert_eq!(segments[0][0], at, "the tip is the anchor");
+        assert!(segments[2][1].distance(at) < 1.0e-3, "the triangle should close");
+
+        // Nothing reaches past the anchor in the direction it points.
+        for [a, b] in &segments {
+            for point in [a, b] {
+                assert!(point.x >= at.x - 1.0e-3, "{point} is outboard of {at}");
+            }
+        }
         assert!(arrow(at, Vec2::ZERO, 12.0).is_empty(), "no direction, nothing to draw");
     }
 }

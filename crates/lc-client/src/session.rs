@@ -379,21 +379,29 @@ impl Session {
         }
     }
 
+    /// Which way a star is *drawn*: its true direction aberrated into the ship's frame.
+    ///
+    /// Picking reads this too, so that a click lands on what the sky pass put there rather than
+    /// on where the star is. At speed the two are nowhere near each other.
+    pub fn apparent_dir(&self, star: &CatalogueStar) -> DVec3 {
+        let true_dir = self.offset_to(star).normalize_or_zero();
+        if self.ship.motion.beta == DVec3::ZERO || true_dir == DVec3::ZERO {
+            true_dir
+        } else {
+            lc_spacetime::doppler::apparent_source_direction(true_dir, self.ship.motion.beta)
+        }
+    }
+
     /// Every star, shaded for the current band mapping and exposure, in the ship's frame.
     pub fn sky(&self) -> Vec<SkyStar> {
         self.stars
             .iter()
             .map(|s| {
                 let offset_ly = self.offset_to(s);
-                let true_dir = offset_ly.normalize_or_zero();
                 SkyStar {
                     id: s.id,
                     offset_ly,
-                    apparent_dir: if self.ship.motion.beta == DVec3::ZERO || true_dir == DVec3::ZERO {
-                        true_dir
-                    } else {
-                        lc_spacetime::doppler::apparent_source_direction(true_dir, self.ship.motion.beta)
-                    },
+                    apparent_dir: self.apparent_dir(s),
                     shaded: self.tone.shade(&self.radiance_from(s), &self.mapping),
                     light_age_s: offset_ly.length() * M_PER_LY / 299_792_458.0,
                     doppler: self.doppler_to(s),
