@@ -158,7 +158,7 @@ mod tests {
     use super::*;
     use crate::journal::Memory;
     use crate::server::Server;
-    use crate::world::Path;
+    use crate::world::still;
 
     /// Wait for something to turn up, rather than sleeping a fixed time and hoping.
     async fn until<T>(mut f: impl FnMut() -> Vec<T>) -> Vec<T> {
@@ -184,7 +184,7 @@ mod tests {
         let id = joined[0];
 
         let mut server = Server::new(Memory::default(), 0, 1);
-        server.admit(id, ShipId(1), Path::still(glam::DVec3::ZERO), 0.0);
+        server.admit(id, ShipId(1), still(glam::DVec3::ZERO), 0.0);
 
         client
             .send(Message::Binary(
@@ -224,7 +224,7 @@ mod tests {
         let id = until(|| wire.accepted()).await[0];
 
         let mut server = Server::new(Memory::default(), 0, 1);
-        server.admit(id, ShipId(1), Path::still(glam::DVec3::ZERO), 0.0);
+        server.admit(id, ShipId(1), still(glam::DVec3::ZERO), 0.0);
 
         client
             .send(Message::Binary(

@@ -4372,6 +4372,7 @@ dependencies = [
  "lc-proto",
  "lc-spacetime",
  "lc-store",
+ "lc-world",
  "tokio",
  "tokio-postgres",
  "tokio-tungstenite",

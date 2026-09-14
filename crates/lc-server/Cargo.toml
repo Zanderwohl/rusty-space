@@ -9,6 +9,7 @@ authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 [dependencies]
 lc-proto = { path = "../lc-proto" }
 lc-spacetime = { path = "../lc-spacetime" }
+lc-world = { path = "../lc-world", default-features = false }
 lc-store = { path = "../lc-store" }
 glam = "0.30"
 tokio-postgres = "0.7"

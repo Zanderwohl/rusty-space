@@ -14,6 +14,7 @@ use crate::coast::{self, Coast};
 use crate::flight::{Cruise, Drive, JULIAN_YEAR_S, Phase};
 use crate::navigation::{Course, Waypoint};
 use crate::system::LocalSystem;
+use lc_spacetime::Worldline;
 
 /// A ship, by the identifier whoever owns it uses. Opaque here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -324,6 +325,64 @@ pub fn repatch_due(state: &ShipState, system: &LocalSystem, now_s: f64) -> Optio
     Some(Event { ship: ShipId(0), at_t: now_s, change: Change::Repatch })
 }
 
+/// Light-microseconds in a light-year.
+///
+/// A light-year is a Julian year of travel at `c` and a light-microsecond is a microsecond of
+/// it, so the conversion is the year in microseconds and nothing else. `lc-spacetime` measures
+/// in light-microseconds because that is the unit light delay is naturally counted in; the world
+/// model measures in light-years because that is the unit a galaxy is. This is the join.
+pub const LIGHT_US_PER_LY: f64 = JULIAN_YEAR_S * 1.0e6;
+
+/// A ship's worldline, for the light-delay solve.
+///
+/// Borrowed rather than owned: the motive and the system are the truth, and a copy of them in
+/// another shape is a copy that can be stale. Holding the two together is what makes the
+/// worldline total — a station and a conic mean nothing without the bodies they are defined
+/// against.
+///
+/// The frame is `lc-spacetime`'s: light-microseconds from the world origin, and coordinate
+/// microseconds. Note the precision this costs at galactic distances — a position is a `f64`
+/// count of light-microseconds, so a ship in a system a hundred light-years out is at `3e15`
+/// and resolves to about a hundred metres. Fine for a light-delay solve, useless for an orbit,
+/// and the reason doc 08 shards the frame rather than keeping one origin for everything.
+pub struct Flight<'a> {
+    state: &'a ShipState,
+    system: Option<&'a LocalSystem>,
+}
+
+impl<'a> Flight<'a> {
+    pub fn new(state: &'a ShipState, system: Option<&'a LocalSystem>) -> Self {
+        Self { state, system }
+    }
+
+    /// Position and beta at a coordinate microsecond, in light-years.
+    ///
+    /// Falls back to the ship's last known position when the motive cannot be evaluated — a
+    /// body that has gone, or a chain that is integrated. The same choice [`advance`] makes:
+    /// keep what is known rather than invent a position from nothing.
+    fn read(&self, t_us: f64) -> (DVec3, DVec3) {
+        state_at(self.state, self.system, t_us * 1.0e-6)
+            .unwrap_or((self.state.position_ly, self.state.beta))
+    }
+}
+
+impl Worldline for Flight<'_> {
+    fn position_at(&self, t: f64) -> DVec3 {
+        self.read(t).0 * LIGHT_US_PER_LY
+    }
+
+    fn velocity_at(&self, t: f64) -> DVec3 {
+        self.read(t).1
+    }
+
+    /// Total in `t`. A crossing clamps to its endpoints outside its own span rather than
+    /// ending, so every arm answers everywhere and the solve never has to ask whether a ship
+    /// existed yet.
+    fn defined_over(&self) -> (f64, f64) {
+        (f64::NEG_INFINITY, f64::INFINITY)
+    }
+}
+
 /// How fast a ship is going, metres a second, world frame.
 pub fn velocity_m_s(state: &ShipState, system: Option<&LocalSystem>, now_s: f64) -> DVec3 {
     let beta = state_at(state, system, now_s).map(|(_, beta)| beta).unwrap_or(state.beta);
@@ -484,6 +543,32 @@ mod tests {
         assert_eq!(there, stale, "the system's clock changed the answer");
         // Half a day is most of the way round the Earth's orbit *and* many low orbits.
         assert!((there.0 - here.0).length() * crate::system::M_PER_LY > 1.0e6);
+    }
+
+    /// The unit join, checked against the thing that consumes it: a light-microsecond of
+    /// distance has to be a microsecond of delay, or every arrival the server schedules is
+    /// wrong by whatever the conversion is out by.
+    #[test]
+    fn a_light_microsecond_away_is_a_microsecond_of_delay() {
+        const LIGHT_SECOND_LY: f64 = 1.0 / JULIAN_YEAR_S;
+        let ship = ShipState::at(DVec3::new(LIGHT_SECOND_LY, 0.0, 0.0));
+        let line = Flight::new(&ship, None);
+        let arrive = lc_spacetime::arrival_time_at(0.0, DVec3::ZERO, &line).expect("it arrives");
+        assert!((arrive - 1.0e6).abs() < 1.0, "a light-second took {arrive} microseconds");
+    }
+
+    /// And a moving ship is read along its own line, not held at where it started.
+    #[test]
+    fn a_drifting_ship_is_somewhere_else_a_year_later() {
+        let mut ship = ShipState::at(DVec3::ZERO);
+        ship.beta = DVec3::new(0.5, 0.0, 0.0);
+        ship.set_adrift(0.0);
+        let line = Flight::new(&ship, None);
+        // A Julian year of coordinate time at half light is half a light-year.
+        let a_year_us = JULIAN_YEAR_S * 1.0e6;
+        let at = line.position_at(a_year_us);
+        assert!((at.x / LIGHT_US_PER_LY - 0.5).abs() < 1.0e-12, "{}", at.x / LIGHT_US_PER_LY);
+        assert_eq!(line.velocity_at(a_year_us), ship.beta);
     }
 
     /// A crossing that arrives becomes a station, not a drift. The place was the point of it.

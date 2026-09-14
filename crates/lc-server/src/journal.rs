@@ -303,7 +303,7 @@ mod tests {
     async fn a_second_server_delivers_what_the_first_one_scheduled() {
         use crate::server::{Server, TICK_US};
         use crate::transport::Loopback;
-        use crate::world::Path;
+        use crate::world::still;
         use lc_proto::{Inbound, Intent, Order, Outbound};
 
         const ACTOR: i64 = 30_000;
@@ -328,8 +328,8 @@ mod tests {
         let mut wire = Loopback::new();
         let mut server = Server::new(journal, 0, SHARD);
         let actor = lc_proto::ClientId(1);
-        server.admit(actor, ShipId(ACTOR), Path::still(DVec3::ZERO), 0.0);
-        server.admit(lc_proto::ClientId(2), ShipId(WATCHER), Path::still(far), 0.0);
+        server.admit(actor, ShipId(ACTOR), still(DVec3::ZERO), 0.0);
+        server.admit(lc_proto::ClientId(2), ShipId(WATCHER), still(far), 0.0);
 
         wire.client_says(actor, Inbound::Act(Intent {
             ship_id: ShipId(ACTOR),
@@ -345,7 +345,7 @@ mod tests {
         let Ok(journal) = Postgres::open().await else { return };
         let mut restarted = Server::new(journal, arrives - TICK_US, SHARD + 1);
         let watcher = lc_proto::ClientId(1);
-        restarted.admit(watcher, ShipId(WATCHER), Path::still(far), 0.0);
+        restarted.admit(watcher, ShipId(WATCHER), still(far), 0.0);
         let mut wire = Loopback::new();
         // It has read nothing, so it asks from before the arrival.
         wire.client_says(watcher, Inbound::ResumeFrom { arrive_t: 0 });
@@ -372,7 +372,7 @@ mod tests {
         let Ok(journal) = Postgres::open().await else { return };
         let mut early = Server::new(journal, arrives - TICK_US * 3, SHARD + 2);
         let watcher = lc_proto::ClientId(1);
-        early.admit(watcher, ShipId(WATCHER), Path::still(far), 0.0);
+        early.admit(watcher, ShipId(WATCHER), still(far), 0.0);
         let mut wire = Loopback::new();
         wire.client_says(watcher, Inbound::ResumeFrom { arrive_t: 0 });
         early.tick(&mut wire).await.unwrap();

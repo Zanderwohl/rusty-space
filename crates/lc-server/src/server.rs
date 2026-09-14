@@ -7,13 +7,13 @@ use lc_proto::{
     ClientId, Cleared, Inbound, Intent, Order, Outbound, PROTOCOL_VERSION, Refusal, ShipId,
     Sighting, Withheld,
 };
-use lc_spacetime::Worldline;
 use lc_store::id::Minter;
 
 use crate::journal::{Journal, JournalError, PREPARE_AHEAD_US};
 use crate::rate::Budget;
 use crate::transport::Transport;
-use crate::world::{Event, Path, Scheduled, Ship, schedule};
+use crate::world::{Event, Scheduled, Ship, schedule};
+use lc_world::motion::ShipState;
 
 /// Real milliseconds a tick covers.
 pub const TICK_MS: i64 = 50;
@@ -91,8 +91,8 @@ impl<J: Journal> Server<J> {
     /// The identifier comes from the caller rather than from here, because who is connected is
     /// the transport's fact: a connection exists before the world has anything to say about it,
     /// and authentication will one day decide what it is called.
-    pub fn admit(&mut self, owner: ClientId, ship_id: ShipId, path: Path, noise_floor: f32) {
-        self.ships.push(Ship { id: ship_id, owner, path, noise_floor });
+    pub fn admit(&mut self, owner: ClientId, ship_id: ShipId, motion: ShipState, noise_floor: f32) {
+        self.ships.push(Ship { id: ship_id, owner, motion, system: None, noise_floor });
         self.clients.insert(owner, Connected {
             ship: ship_id,
             // Nothing received yet, so nothing is provable: an intent may be stamped anywhere
@@ -217,8 +217,8 @@ impl<J: Journal> Server<J> {
                 if !beta.is_finite() || beta.length() >= 1.0 {
                     return Err(Refusal::Impossible);
                 }
-                let here = self.ships[index].path.position_at(at as f64);
-                self.ships[index].path = Path::coasting(here, beta, at);
+                let here = self.ships[index].position_at(at as f64);
+                self.ships[index].motion = crate::world::coasting(here, beta, at);
                 // A burn is not silent -- it is the most visible thing a ship does -- but what
                 // it radiates is the drive's business. Nominal, until there is a drive model.
                 (KIND_BURN, BURN_POWER_W, format!("{{\"beta\":{beta:?}}}"))
@@ -226,7 +226,7 @@ impl<J: Journal> Server<J> {
         };
 
         let source = self.ships[index].id;
-        let at_position = self.ships[index].path.position_at(at as f64);
+        let at_position = self.ships[index].position_at(at as f64);
         let id = self.minter.mint(at).ok_or(Refusal::Impossible)?.get();
         let event = Event { id, source, t: at, at: at_position, kind, power_w, payload };
         for observer in &self.ships {
@@ -259,8 +259,8 @@ impl<J: Journal> Server<J> {
             let mut cleared = Vec::new();
             let mut latest = state.last_reception_t;
             for (scheduled, event) in due {
-                let direction = (event.at - ship.path.position_at(scheduled.arrive_t as f64))
-                    .normalize_or_zero();
+                let direction =
+                    (event.at - ship.position_at(scheduled.arrive_t as f64)).normalize_or_zero();
                 let sighting = Sighting {
                     event_id: event.id,
                     source_id: event.source.0,
@@ -331,10 +331,10 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let actor = ClientId(1);
-        server.admit(actor, ShipId(1), Path::still(DVec3::ZERO), 0.0);
+        server.admit(actor, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
         let watcher = ClientId(2);
         server
-            .admit(watcher, ShipId(2), Path::still(DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0)), 0.0);
+            .admit(watcher, ShipId(2), crate::world::still(DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0)), 0.0);
 
         wire.client_says(actor, Inbound::Act(Intent {
             ship_id: ShipId(1),
@@ -398,7 +398,7 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = ClientId(1);
-        server.admit(client, ShipId(1), Path::still(DVec3::ZERO), 0.0);
+        server.admit(client, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
 
         let order = |t| Inbound::Act(Intent {
             ship_id: ShipId(1),
@@ -459,8 +459,8 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let first = ClientId(1);
-        server.admit(first, ShipId(1), Path::still(DVec3::ZERO), 0.0);
-        server.admit(ClientId(2), ShipId(2), Path::still(DVec3::ZERO), 0.0);
+        server.admit(first, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
+        server.admit(ClientId(2), ShipId(2), crate::world::still(DVec3::ZERO), 0.0);
 
         wire.client_says(first, Inbound::Act(Intent {
             ship_id: ShipId(2),
@@ -483,7 +483,7 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = ClientId(1);
-        server.admit(client, ShipId(1), Path::still(DVec3::ZERO), 0.0);
+        server.admit(client, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
 
         // The future: clamped down to now.
         wire.client_says(client, Inbound::Act(Intent {
@@ -526,7 +526,7 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = ClientId(1);
-        server.admit(client, ShipId(1), Path::still(DVec3::ZERO), 0.0);
+        server.admit(client, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
 
         // Let the cursor run well past where the intent claims to have been issued.
         for _ in 0..5 {
@@ -561,7 +561,7 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = ClientId(1);
-        server.admit(client, ShipId(1), Path::still(DVec3::ZERO), 0.0);
+        server.admit(client, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
 
         for order in [
             Order::Burn { beta: [1.0, 0.0, 0.0] },
@@ -593,7 +593,10 @@ use crate::transport::Loopback;
         }));
         server.tick(&mut wire).await.unwrap();
         assert_eq!(server.journal().events.len(), 1);
-        assert!(matches!(server.ship(ShipId(1)).unwrap().path, Path::Coasting(_)));
+        // And the burn left the ship moving, on the shared model's own terms.
+        let after = &server.ship(ShipId(1)).unwrap().motion;
+        assert!(matches!(after.motive, lc_world::motion::Motive::Drifting { .. }));
+        assert!((after.beta.x - 0.99).abs() < 1.0e-12, "{}", after.beta.x);
     }
 
     /// Arrival is not detection. A signal that reaches a receiver below its noise floor is not
@@ -603,12 +606,12 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let actor = ClientId(1);
-        server.admit(actor, ShipId(1), Path::still(DVec3::ZERO), 0.0);
+        server.admit(actor, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
         let deaf = ClientId(2);
         server.admit(
             deaf,
             ShipId(2),
-            Path::still(DVec3::new(1_000_000.0, 0.0, 0.0)),
+            crate::world::still(DVec3::new(1_000_000.0, 0.0, 0.0)),
             1.0e6,
         );
 
@@ -639,7 +642,7 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let actor = ClientId(1);
-        server.admit(actor, ShipId(1), Path::still(DVec3::ZERO), 0.0);
+        server.admit(actor, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
 
         wire.client_says(actor, Inbound::Act(Intent {
             ship_id: ShipId(1),
@@ -671,7 +674,7 @@ use crate::transport::Loopback;
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = ClientId(1);
-        server.admit(client, ShipId(1), Path::still(DVec3::ZERO), 0.0);
+        server.admit(client, ShipId(1), crate::world::still(DVec3::ZERO), 0.0);
 
         wire.client_says(client, Inbound::Hello { protocol: PROTOCOL_VERSION + 1 });
         server.tick(&mut wire).await.unwrap();
@@ -688,9 +691,16 @@ use crate::transport::Loopback;
     fn the_tick_size_does_not_change_where_anything_is() {
         let at = DVec3::new(500_000.0, 0.0, 0.0);
         let beta = DVec3::new(0.3, -0.1, 0.0);
-        let path = Path::coasting(at, beta, 0);
+        let ship = Ship {
+            id: ShipId(1),
+            owner: ClientId(1),
+            motion: crate::world::coasting(at, beta, 0),
+            system: None,
+            noise_floor: 0.0,
+        };
         let after = 40 * TICK_US;
-        // One step or forty, the closed form is the same place to the last bit.
-        assert_eq!(path.position_at(after as f64), at + beta * after as f64);
+        // One step or forty, the closed form is the same place to the last bit -- and it stays
+        // exact across the conversion into light-years the world model works in and back.
+        assert_eq!(ship.position_at(after as f64), at + beta * after as f64);
     }
 }
