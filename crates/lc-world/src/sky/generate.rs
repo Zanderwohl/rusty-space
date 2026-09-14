@@ -156,6 +156,7 @@ fn populations(seed: u64, star: &CatalogueStar, planets: &[Planet]) -> Vec<Popul
             count: 1e6 * factor,
             cross_section: 3.0e6,
             band_response: PerBand::splat(1.0),
+            radiating_ratio: Population::SPHERICAL,
         },
         // Kuiper analogue: wide, cold, many small bodies.
         Population {
@@ -166,6 +167,7 @@ fn populations(seed: u64, star: &CatalogueStar, planets: &[Planet]) -> Vec<Popul
             count: 1e9 * factor,
             cross_section: 7.8e9,
             band_response: PerBand::splat(1.0),
+            radiating_ratio: Population::SPHERICAL,
         },
         // Oort cloud: isotropic, very wide, nearly parabolic. Invisible, and the reason the
         // shell radius is where it is.
@@ -177,6 +179,7 @@ fn populations(seed: u64, star: &CatalogueStar, planets: &[Planet]) -> Vec<Popul
             count: 1e12 * factor,
             cross_section: 3.1e6,
             band_response: dust_response,
+            radiating_ratio: Population::SPHERICAL,
         },
     ]
     .into_iter()
@@ -184,7 +187,58 @@ fn populations(seed: u64, star: &CatalogueStar, planets: &[Planet]) -> Vec<Popul
         p.count *= rng::uniform_in(rng::hash(&[seed, 0xc10d, p.count.to_bits()]), 0.5, 2.0);
         p
     })
+    // After the jitter: a swarm's coverage is drawn deliberately and is not a natural
+    // population with an uncertain mass.
+    .chain(swarm(seed, star))
     .collect()
+}
+
+/// Fraction of systems carrying an engineered swarm.
+///
+/// Low on purpose. What makes a technosignature worth anything is that most stars do not have
+/// one; a sky where every third star is engineered is a sky nobody searches.
+pub const SWARM_FRACTION: f64 = 0.03;
+
+/// An engineered swarm, if this star has one. See [`swarm_for`] for the public entry.
+///
+/// Coverage is log-uniform from a thousandth to nine tenths, which is the range that makes the
+/// instrument worth having. At the bottom it is a few tenths of a percent of grey deficit and a
+/// thermal excess that needs integrating to see at all. At the top the star is most of a
+/// magnitude down in V and brighter at ten microns than in the visible.
+///
+/// Isotropic, circular and grey. Those three together are the signature, and no natural
+/// population has all three: an isotropic natural population is an Oort cloud, which is
+/// eccentric and made of dust, and dust reddens where panels do not.
+/// Whether a star has a swarm, without generating its whole system.
+///
+/// The renderer needs this for every star in the sky and a full system for almost none of them,
+/// so the draw is separable: one hash per star rather than a planet set and three populations.
+pub fn swarm_for(star: &CatalogueStar) -> Option<Population> {
+    swarm(star.seed(), star)
+}
+
+fn swarm(seed: u64, star: &CatalogueStar) -> Option<Population> {
+    if rng::uniform(rng::hash(&[seed, 0x5761_726d])) > SWARM_FRACTION {
+        return None;
+    }
+    let u = rng::uniform(rng::hash(&[seed, 0x436f_7665]));
+    let coverage = 1.0e-3f64.powf(1.0 - u) * 0.9f64.powf(u);
+
+    // Where the light is: the radius at which a collector sees about what Earth sees.
+    let radius = AU * star.luminosity_solar.max(1e-4).sqrt();
+    // A square kilometre apiece, which is a size the moment inversion can recover.
+    let element = 1.0e6;
+
+    Some(Population {
+        pole: DVec3::Z,
+        semi_major: Distribution::normal(radius, radius * 0.05, 9),
+        eccentricity: Distribution::uniform(0.0, 0.02, 3),
+        inclination: Inclination::isotropic(),
+        count: coverage * 4.0 * std::f64::consts::PI * radius * radius / element,
+        cross_section: element,
+        band_response: PerBand::splat(1.0),
+        radiating_ratio: Population::PANEL,
+    })
 }
 
 fn debug_ball(radius: f64, rgb: (u16, u16, u16)) -> Appearance {

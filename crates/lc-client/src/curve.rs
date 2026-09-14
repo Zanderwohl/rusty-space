@@ -164,6 +164,7 @@ mod tests {
             count: 1.5e6,
             cross_section: 1e12,
             band_response: PerBand::splat(1.0),
+            radiating_ratio: Population::SPHERICAL,
         });
         let frame = SystemFrame::new(Coord::new(Micros::ORIGIN, (30.0 * LY_US) as i64, 0, 0).unwrap());
         let target = Target::new(frame, model);

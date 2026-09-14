@@ -568,3 +568,59 @@ None of them blocks a first version.
   precisely the regime a completed Dyson swarm occupies. Use `1 - exp(-tau)` with
   `tau = sum d_i` rather than the linear sum once any population exceeds a few percent.
 - Non-spherical stars and gravity darkening for rapid rotators. Deferred.
+
+
+## Re-emission
+
+A population that blocks light absorbs it, and what it absorbs it radiates again. Occultation
+alone is only half the model, and the half that cannot find anything: a swarm that only
+subtracted would make its star *dimmer* at ten microns as well, and the thermal preset would
+show a hole rather than a source.
+
+The temperature comes from the energy balance rather than a formula. Write the illuminated area
+as `f * 4 pi a^2` and the radiating area as `ratio` times that, and the absorbed fraction cancels
+from both sides:
+
+```
+T_eq = (L / (ratio * 4 pi a^2 sigma))^(1/4)
+```
+
+`ratio` is radiating area over intercepting cross-section: 4 for rubble and grains, 2 for a flat
+collector absorbing on one face and radiating from both. An element reaches the same temperature
+alone as it does in a complete shell, which is right — only mutual heating would change it, and a
+swarm thick enough for that has its inner elements shadowed anyway.
+
+| | | |
+|---|---|---|
+| sphere at 1 AU, sun-like star | 278 K | peaks at 10.4 um |
+| panel at 1 AU, sun-like star | 331 K | peaks at 8.75 um |
+
+Both peak inside the ten micron band. That is why the band is there.
+
+The consequence worth stating plainly: **bolometrically, the re-emitted flux is exactly the
+absorbed fraction times the star's own flux.** Energy in, energy out, for any coverage, radius or
+geometry. Nothing else needs checking for conservation — that is the statement, and it is the
+test.
+
+`a` is the flux-weighted radius, `1/sqrt(E[1/r^2])`, not the mean semi-major axis. What sets an
+element's temperature is the flux it receives, and `E[1/r^2]` is already the correct average of
+that.
+
+### It is also the diagnostic, not only the signature
+
+What a population absorbs is set by how much of the sky around the star it covers, and that does
+not change as it orbits. So a swarm's transits flicker in the visible while its ten-micron excess
+sits perfectly still. Occultation is a function of direction and time; re-emission is a function
+of neither.
+
+For a swarm covering half the sphere at one astronomical unit around a sun-like star:
+
+| band | what it does |
+|---|---|
+| V | down by half, flickering |
+| K | down by half; re-emission is under a percent |
+| 10 um | **up by a factor of 135**, steady |
+
+Isotropic, circular and grey together are the signature, and no natural population has all three.
+An isotropic natural population is an Oort cloud, which is eccentric and made of dust, and dust
+reddens where panels do not.

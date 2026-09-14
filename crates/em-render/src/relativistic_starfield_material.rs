@@ -26,6 +26,14 @@ pub const ATTRIBUTE_STAR_CORNER: MeshVertexAttribute =
 pub const ATTRIBUTE_STAR_PARAMS: MeshVertexAttribute =
     MeshVertexAttribute::new("RelStarParams", 0x5245_4C53_0002, VertexFormat::Float32x4);
 
+/// What orbits it and is warm: `(temperature K, radiance over the star's disc, grey deficit, -)`.
+///
+/// All zero for a system with nothing in it, which is almost all of them. Steady rather than
+/// per-frame: what a population absorbs is set by how much of the sky around the star it covers,
+/// and that does not change as it orbits.
+pub const ATTRIBUTE_STAR_WARM: MeshVertexAttribute =
+    MeshVertexAttribute::new("RelStarWarm", 0x5245_4C53_0003, VertexFormat::Float32x4);
+
 /// Bands carried from emission to display. Must match `em_spectra::BANDS`.
 pub const BANDS: usize = 7;
 
@@ -115,6 +123,7 @@ impl Material for RelativisticStarfieldMaterial {
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             ATTRIBUTE_STAR_CORNER.at_shader_location(1),
             ATTRIBUTE_STAR_PARAMS.at_shader_location(2),
+            ATTRIBUTE_STAR_WARM.at_shader_location(3),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         descriptor.primitive.cull_mode = None;

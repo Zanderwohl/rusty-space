@@ -12,6 +12,7 @@
 //   POSITION : star position relative to the bake origin, light-years, render axes
 //   CORNER   : quad corner in [-1, 1]^2, also the radial falloff coordinate
 //   PARAMS   : (effective temperature K, radius m, unused, unused)
+//   WARM     : (population temperature K, its radiance over the star's disc, grey deficit, -)
 //
 // Everything else is a uniform. See lightcone/docs/07-rendering.md.
 
@@ -47,6 +48,7 @@ struct Vertex {
     @location(0) position: vec3<f32>,
     @location(1) corner: vec2<f32>,
     @location(2) params: vec4<f32>,
+    @location(3) warm: vec4<f32>,
 };
 
 struct VertexOutput {
@@ -113,9 +115,21 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let shrink = vertex.params.y / (distance_ly * 9.4607305e15);
     let geometry = PI * shrink * shrink;
 
+    // A population absorbs starlight and re-emits it as a blackbody at the temperature its
+    // orbit sets. Occultation is grey and removes; re-emission is cold and adds, which in the
+    // thermal infrared can be a hundred times what the star itself puts out. Both shift with
+    // the same Doppler factor, because both are blackbodies.
+    let warm_t = max(vertex.warm.x * doppler(to_source, beta), 1.0);
+    let warm_scale = vertex.warm.y;
+    let survives = 1.0 - vertex.warm.z;
+
     var linear = vec3<f32>(0.0);
     for (var b = 0u; b < BANDS; b = b + 1u) {
-        linear = linear + material.band_to_display[b].rgb * band_radiance(b, teff) * geometry;
+        var radiance = band_radiance(b, teff) * survives;
+        if (warm_scale > 0.0) {
+            radiance = radiance + band_radiance(b, warm_t) * warm_scale;
+        }
+        linear = linear + material.band_to_display[b].rgb * radiance * geometry;
     }
 
     // The tone map of crate::tonemap, evaluated per star: stops above the window's top, with

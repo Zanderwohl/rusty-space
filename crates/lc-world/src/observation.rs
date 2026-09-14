@@ -49,9 +49,14 @@ impl Target {
 /// One band of one observation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BandMeasurement {
-    /// Fractional deficit actually leaving the system.
+    /// Fractional deficit from occultation alone, `[0, 1]`. What the moment inversion wants.
     pub true_deficit: f64,
-    /// What the instrument recorded, noise included.
+    /// Thermal re-emission from the populations, as a fraction of the star's band flux. Zero
+    /// for a system with nothing warm in it, and larger than one in the thermal infrared for a
+    /// substantial swarm.
+    pub reradiated: f64,
+    /// Net fractional change the instrument recorded, noise included. Signed: positive is a
+    /// deficit, negative an excess, and a swarm produces both at once in different bands.
     pub measured_deficit: f64,
     /// One sigma on `measured_deficit`.
     pub uncertainty: f64,
@@ -60,9 +65,15 @@ pub struct BandMeasurement {
 }
 
 impl BandMeasurement {
-    /// How many sigma the measured deficit stands above zero.
+    /// How many sigma the measured change stands from zero. Negative for an excess.
     pub fn significance(&self) -> f64 {
         if self.uncertainty > 0.0 { self.measured_deficit / self.uncertainty } else { 0.0 }
+    }
+
+    /// Flux actually arriving, over what the bare star would give. Above one where re-emission
+    /// beats occultation.
+    pub fn relative_flux(&self) -> f64 {
+        1.0 - self.true_deficit + self.reradiated
     }
 }
 
@@ -123,6 +134,7 @@ pub fn observe(
     let model = target.model_at(Micros::new(t_r as i64));
     let local_t = target.frame.local_seconds(t_r);
     let deficit = model.deficit(direction, local_t);
+    let reradiated = model.reradiated();
     let star = &model.star;
 
     // Flux of an unobscured sphere at this distance: L_band / (4 pi d^2) is R^2 pi B / d^2.
@@ -134,18 +146,28 @@ pub fn observe(
             return None;
         }
         let baseline = blackbody::band_radiance(band, star.teff_k) * geometry;
-        let source = instrument.counts_from_flux(band, baseline, exposure_s);
+        let bare = instrument.counts_from_flux(band, baseline, exposure_s);
+        if bare <= 0.0 {
+            return None;
+        }
+        // What actually arrives: the star less what is blocked, plus what the populations
+        // re-emit. The shot noise is on that, not on the bare star.
+        let occulted = deficit[band] as f64;
+        let extra = reradiated[band] as f64;
+        let source = (bare * (1.0 - occulted + extra)).max(0.0);
         let background = instrument.self_emission_counts(band, exposure_s);
         if source <= 0.0 {
             return None;
         }
-        // Photon statistics on source plus background, expressed as a fractional depth.
-        let uncertainty = (source + background).sqrt() / source;
-        let truth = deficit[band] as f64;
+        // Photon statistics, expressed as a fraction of the bare star's flux, which is the
+        // unit every deficit here is in.
+        let uncertainty = (source + background).sqrt() / bare;
+        let net = occulted - extra;
         let noise = rng::gaussian(rng::hash(&[seed, band.index() as u64, t_r.to_bits()]));
         Some(BandMeasurement {
-            true_deficit: truth,
-            measured_deficit: truth + noise * uncertainty,
+            true_deficit: occulted,
+            reradiated: extra,
+            measured_deficit: net + noise * uncertainty,
             uncertainty,
             source_photons: source,
             background_photons: background,
@@ -182,6 +204,7 @@ mod tests {
             count,
             cross_section: 1e12,
             band_response: response,
+            radiating_ratio: Population::SPHERICAL,
         }
     }
 
@@ -383,5 +406,83 @@ mod tests {
         let obs = observe(&target, too_early, &big_scope(), 1.0, 1);
         assert!(obs.is_some(), "a static star has always been emitting");
         assert!(obs.unwrap().retarded_time < 0.0, "so the light on arrival left before t = 0");
+    }
+
+    /// A swarm covering `coverage` of the sphere at one astronomical unit.
+    ///
+    /// The count is derived, not written: an element count is not a covering fraction, and
+    /// guessing one produced a swarm seven orders of magnitude thinner than intended.
+    fn swarm_of(coverage: f64) -> Population {
+        let radius = 1.495_978_707e11;
+        let element = 1.0e6;
+        Population {
+            pole: DVec3::Z,
+            semi_major: Distribution::normal(radius, radius * 0.05, 9),
+            eccentricity: Distribution::uniform(0.0, 0.02, 3),
+            inclination: Inclination::isotropic(),
+            count: coverage * 4.0 * std::f64::consts::PI * radius * radius / element,
+            cross_section: element,
+            band_response: PerBand::splat(1.0),
+            radiating_ratio: Population::PANEL,
+        }
+    }
+
+    /// The exit criterion of phase 6, at the level the instrument sees it: a star half dimmed
+    /// in the visible and blazing at ten microns, from one population.
+    #[test]
+    fn a_swarm_dims_the_visible_and_lights_up_the_thermal_infrared() {
+        let mut model = EmissionModel::new(Star::SOL, 7);
+        model.populations.push(swarm_of(0.5));
+
+        let extra = model.reradiated();
+        let occulted = model.deficit(DVec3::X, 0.0);
+        assert!(occulted[Band::V] > 0.3, "V should be well down, got {}", occulted[Band::V]);
+        assert!(extra[Band::V] < 1e-9, "and nothing warm emits visible light");
+        assert!(extra[Band::ThermalIr] > 50.0,
+            "ten microns should be swamped, got {}", extra[Band::ThermalIr]);
+
+        // And the two are the same population: occultation is grey, so V and I agree.
+        let ratio = occulted[Band::I] / occulted[Band::V];
+        assert!((ratio - 1.0).abs() < 0.02, "solid occultation is grey, got {ratio}");
+    }
+
+    /// The diagnostic, not merely the signature: transits move and waste heat does not. A swarm
+    /// flickers in the visible while sitting perfectly still at ten microns.
+    #[test]
+    fn the_thermal_excess_is_steady_while_the_visible_flickers() {
+        let mut model = EmissionModel::new(Star::SOL, 11);
+        model.populations.push(swarm_of(0.5));
+
+        let steady = model.reradiated()[Band::ThermalIr];
+        let mut visible = Vec::new();
+        for k in 0..64 {
+            let t = k as f64 * 3.0e6;
+            assert_eq!(model.reradiated()[Band::ThermalIr], steady, "heat does not flicker");
+            visible.push(model.deficit(DVec3::X, t)[Band::V]);
+        }
+        let mean = visible.iter().sum::<f32>() / visible.len() as f32;
+        let spread = visible.iter().map(|v| (v - mean).abs()).fold(0.0f32, f32::max);
+        assert!(spread > 0.0, "the visible deficit should move, and it did not");
+        assert!(mean > 0.0);
+    }
+
+    /// What the instrument records, with noise, through the same path the client uses.
+    #[test]
+    fn an_observation_carries_the_deficit_and_the_excess_separately() {
+        let mut model = EmissionModel::new(Star::SOL, 3);
+        model.populations.push(swarm_of(0.5));
+        let target = Target::new(SystemFrame::new(Coord::ORIGIN), model);
+        let far = Coord::new(Micros::new(400_000_000_000), 300_000_000, 0, 0).unwrap();
+        let instrument = Instrument::BASELINE.with_aperture(20.0).with_bands(BandMask::ALL);
+        let obs = observe(&target, far, &instrument, 1.0e5, 0x5117).expect("an observation");
+
+        let v = obs.band(Band::V).expect("a V measurement");
+        assert!(v.true_deficit > 0.0 && v.reradiated < 1e-9);
+        assert!(v.relative_flux() < 1.0, "the visible is a shadow");
+
+        let ir = obs.band(Band::ThermalIr).expect("a thermal measurement");
+        assert!(ir.reradiated > 1.0, "the thermal band is a source, got {}", ir.reradiated);
+        assert!(ir.relative_flux() > 1.0, "and it arrives brighter than the bare star");
+        assert!(ir.measured_deficit < 0.0, "a net excess reads as a negative deficit");
     }
 }

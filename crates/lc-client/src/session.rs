@@ -316,8 +316,10 @@ fn received(observation: &Observation, teff_k: f64, radius_m: f64, distance_m: f
     PerBand::new(std::array::from_fn(|i| {
         let band = Band::ALL[i];
         let full = blackbody::band_radiance(band, teff_k) * g;
-        let deficit = observation.band(band).map(|m| m.true_deficit).unwrap_or(0.0);
-        (full * (1.0 - deficit)) as f32
+        // Relative flux, not one minus the deficit: a warm population adds where a cold one
+        // only subtracts, and in the thermal infrared the sum can exceed the bare star.
+        let relative = observation.band(band).map(|m| m.relative_flux()).unwrap_or(1.0);
+        (full * relative) as f32
     }))
 }
 

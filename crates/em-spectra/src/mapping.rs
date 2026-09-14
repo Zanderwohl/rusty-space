@@ -35,6 +35,28 @@ impl BandMapping {
         }
     }
 
+    /// One band per channel, each weighted so a blackbody at `reference_k` comes out neutral.
+    ///
+    /// Required whenever the three bands are far apart in wavelength, and the reason is
+    /// arithmetic rather than taste: a sun-like star delivers 88 times more band-integrated
+    /// radiance in V than at ten microns. Unweighted, that renders every ordinary star blue and
+    /// leaves any swarm below about half coverage invisible, because its thermal excess has to
+    /// beat the star's own visible light before it shows at all. Making the *baseline* neutral
+    /// is what turns an excess in one band into a colour.
+    ///
+    /// This is what a false-colour astronomical image does, and it is why they are readable.
+    /// [`presets::natural`] does not need it: B, V and R are close enough together that a
+    /// blackbody is already nearly neutral across them.
+    pub fn direct_normalised(r: Band, g: Band, b: Band, reference_k: f64) -> Self {
+        let mut mapping = Self::direct(r, g, b);
+        for (channel, band) in [r, g, b].into_iter().enumerate() {
+            let at_reference = crate::blackbody::band_radiance(band, reference_k);
+            mapping.matrix[channel][band.index()] =
+                if at_reference > 0.0 { (1.0 / at_reference) as f32 } else { 0.0 };
+        }
+        mapping
+    }
+
     #[must_use]
     pub fn with_available(mut self, available: BandMask) -> Self {
         self.available = available;
@@ -105,19 +127,24 @@ pub mod presets {
         m
     }
 
-    /// Industry and waste heat.
+    /// The star a normalised preset is neutral against. Sun-like, because that is the star a
+    /// player has an intuition for.
+    pub const REFERENCE_K: f64 = 5772.0;
+
+    /// Industry and waste heat. A sun-like star is white; excess at ten microns is red.
     pub fn thermal() -> BandMapping {
-        BandMapping::direct(Band::ThermalIr, Band::K, Band::V).with_bloom(Band::ThermalIr, 1.0)
+        BandMapping::direct_normalised(Band::ThermalIr, Band::K, Band::V, REFERENCE_K)
+            .with_bloom(Band::ThermalIr, 1.0)
     }
 
     /// Through clouds that are opaque in the optical.
     pub fn dust_penetration() -> BandMapping {
-        BandMapping::direct(Band::Radio, Band::ThermalIr, Band::K)
+        BandMapping::direct_normalised(Band::Radio, Band::ThermalIr, Band::K, REFERENCE_K)
     }
 
     /// Grey versus reddening, made visible: dust reads orange, a swarm reads neutral.
     pub fn composition() -> BandMapping {
-        BandMapping::direct(Band::K, Band::V, Band::B)
+        BandMapping::direct_normalised(Band::K, Band::V, Band::B, REFERENCE_K)
     }
 
     /// A monochrome sky in which only excess heat is coloured.
@@ -232,5 +259,64 @@ mod tests {
         assert!(cool[0] > cool[2], "3000 K must be red-dominant");
         let hot = presets::natural().apply(&radiance_at(20000.0));
         assert!(hot[2] > hot[0], "20000 K must be blue-dominant");
+    }
+
+    /// The bug this exists for: an unweighted thermal mapping renders every star blue.
+    ///
+    /// A sun-like star delivers 88 times more band-integrated radiance in V than at ten
+    /// microns, so V wins the display and every swarm under about half coverage is invisible.
+    /// The physics was right and the mapping could not show it.
+    #[test]
+    fn a_wide_mapping_must_be_normalised_or_one_band_wins_outright() {
+        let solar = PerBand::new(std::array::from_fn(|i| {
+            crate::blackbody::band_radiance(Band::ALL[i], presets::REFERENCE_K) as f32
+        }));
+
+        let naive = BandMapping::direct(Band::ThermalIr, Band::K, Band::V).apply(&solar);
+        let ratio = naive[2] / naive[0];
+        assert!(ratio > 50.0, "V should swamp the thermal band, got {ratio}");
+
+        let fixed = presets::thermal().apply(&solar);
+        for c in fixed {
+            assert!((c - 1.0).abs() < 1e-4, "the reference star must be neutral: {fixed:?}");
+        }
+    }
+
+    /// What the preset is for: waste heat, as a colour.
+    #[test]
+    fn a_thermal_excess_reads_as_red_once_the_baseline_is_neutral() {
+        let mut radiance = PerBand::new(std::array::from_fn(|i| {
+            crate::blackbody::band_radiance(Band::ALL[i], presets::REFERENCE_K) as f32
+        }));
+        // A swarm covering half the sphere: ten microns up by two orders, the visible halved.
+        radiance[Band::ThermalIr] *= 135.0;
+        radiance[Band::V] *= 0.5;
+
+        let rgb = presets::thermal().apply(&radiance);
+        assert!(rgb[0] > 100.0, "red should carry the excess, got {rgb:?}");
+        assert!(rgb[0] > 50.0 * rgb[2], "and dominate the visible channel, got {rgb:?}");
+    }
+
+    /// Normalising must not disturb the preset that was already right. B, V and R sit close
+    /// enough together that a blackbody is nearly neutral across them without any weighting.
+    #[test]
+    fn the_natural_preset_is_left_alone() {
+        let m = presets::natural();
+        for channel in 0..3 {
+            assert!(m.matrix[channel].iter().any(|w| (*w - 1.0).abs() < 1e-9), "weights changed");
+        }
+    }
+
+    #[test]
+    fn every_normalised_preset_is_neutral_on_the_reference_star() {
+        let solar = PerBand::new(std::array::from_fn(|i| {
+            crate::blackbody::band_radiance(Band::ALL[i], presets::REFERENCE_K) as f32
+        }));
+        for mapping in [presets::thermal(), presets::dust_penetration(), presets::composition()] {
+            let rgb = mapping.apply(&solar);
+            for c in rgb {
+                assert!((c - 1.0).abs() < 1e-3, "{rgb:?}");
+            }
+        }
     }
 }

@@ -108,12 +108,38 @@ impl EmissionModel {
         }))
     }
 
-    /// Radiance leaving the system in `direction`, per band, W m^-2 sr^-1.
-    pub fn radiance(&self, direction: DVec3, t: f64) -> PerBand<f32> {
-        let deficit = self.deficit(direction, t);
+    /// Thermal re-emission from the populations, as a fraction of the star's own band flux.
+    ///
+    /// Steady, and deliberately not a function of direction or time. What the populations
+    /// absorb is set by how much of the sky around the star they cover, which does not change
+    /// as they orbit, and they radiate very nearly isotropically. So a swarm's transits flicker
+    /// in the visible while its ten-micron excess sits perfectly still — which is itself the
+    /// diagnostic, and the reason this is worth computing separately from the deficit.
+    pub fn reradiated(&self) -> PerBand<f32> {
+        let mut total = PerBand::splat(0.0f64);
+        for p in &self.populations {
+            let r = p.reradiated_radiance(&self.star);
+            for b in Band::ALL {
+                total[b] += r[b];
+            }
+        }
         PerBand::new(std::array::from_fn(|i| {
             let b = Band::ALL[i];
-            (blackbody::band_radiance(b, self.star.teff_k) * (1.0 - deficit[b] as f64)) as f32
+            (total[b] / blackbody::band_radiance(b, self.star.teff_k).max(f64::MIN_POSITIVE)) as f32
+        }))
+    }
+
+    /// Radiance leaving the system in `direction`, per band, W m^-2 sr^-1.
+    ///
+    /// Occultation removes and re-emission adds, so in the thermal infrared this can exceed
+    /// what the bare star puts out.
+    pub fn radiance(&self, direction: DVec3, t: f64) -> PerBand<f32> {
+        let deficit = self.deficit(direction, t);
+        let extra = self.reradiated();
+        PerBand::new(std::array::from_fn(|i| {
+            let b = Band::ALL[i];
+            let bare = blackbody::band_radiance(b, self.star.teff_k);
+            (bare * (1.0 - deficit[b] as f64 + extra[b] as f64)) as f32
         }))
     }
 }
@@ -171,6 +197,7 @@ mod tests {
             count: 1.5e6,
             cross_section: 1e12,
             band_response: PerBand::splat(1.0),
+            radiating_ratio: Population::SPHERICAL,
         }
     }
 

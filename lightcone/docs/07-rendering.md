@@ -346,6 +346,22 @@ pub struct BandMapping {
 | composition | K, V, B | the grey-versus-reddening diagnostic, made visible: dust reads orange, a swarm reads neutral |
 | survey | V as luminance, 10 um as chroma | a monochrome sky in which only excess heat is coloured |
 
+### A wide mapping has to be normalised
+
+A preset whose three bands are far apart in wavelength cannot use weight 1 on each. A sun-like
+star delivers **88 times** more band-integrated radiance in V than at ten microns, so an
+unweighted thermal mapping renders every ordinary star blue, and a swarm's thermal excess has to
+beat its own star's visible light before it shows at all. Everything under about half coverage
+stays invisible. The physics was right and the mapping could not show it.
+
+`BandMapping::direct_normalised` weights each channel by `1 / B_band(5772 K)`, so a sun-like star
+comes out neutral and an excess in any band is a colour. That is what a false-colour astronomical
+image does and why they are readable. `thermal`, `dust_penetration` and `composition` all use it.
+
+`natural` does not, and must not: B, V and R sit close enough together that a blackbody is
+already nearly neutral across them, and the small departure from neutral is the star's real
+colour.
+
 **The natural preset is the default and exists for the player, not for the science.** It buys
 no information the others do not, and a human looking at a sky that looks like a sky is worth
 a band. B, V and R are close enough to the display primaries that a direct assignment works.

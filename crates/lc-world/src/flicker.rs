@@ -163,6 +163,7 @@ mod tests {
             count,
             cross_section,
             band_response: PerBand::splat(1.0),
+            radiating_ratio: Population::SPHERICAL,
         }
     }
 

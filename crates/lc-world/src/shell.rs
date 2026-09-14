@@ -252,6 +252,7 @@ mod tests {
             count: 1.5e6,
             cross_section: 1e12,
             band_response: PerBand::splat(1.0),
+            radiating_ratio: Population::SPHERICAL,
         }
     }
 

@@ -10,13 +10,13 @@ use bevy::camera::visibility::NoFrustumCulling;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_mesh::{Indices, PrimitiveTopology};
 use em_render::relativistic_starfield_material::{
-    ATTRIBUTE_STAR_CORNER, ATTRIBUTE_STAR_PARAMS, BANDS, RelativisticStarfieldMaterial,
-    RelativisticStarfieldUniform,
+    ATTRIBUTE_STAR_CORNER, ATTRIBUTE_STAR_PARAMS, ATTRIBUTE_STAR_WARM, BANDS,
+    RelativisticStarfieldMaterial, RelativisticStarfieldUniform,
 };
 use em_render::render_space::sim_to_render;
 use em_spectra::{Band, BandMapping, blackbody};
 use glam::DVec3;
-use lc_world::sky::CatalogueStar;
+use lc_world::sky::{CatalogueStar, generate};
 
 use crate::session::{POINT_STOPS, Session};
 
@@ -92,17 +92,20 @@ pub fn build_mesh(stars: &[CatalogueStar], origin_ly: DVec3) -> Mesh {
     let mut positions = Vec::with_capacity(n * 4);
     let mut corners = Vec::with_capacity(n * 4);
     let mut params = Vec::with_capacity(n * 4);
+    let mut warm = Vec::with_capacity(n * 4);
     let mut indices = Vec::with_capacity(n * 6);
 
     for star in stars {
         // Differenced in f64 and narrowed after, which is the whole point of the bake origin.
         let at = sim_to_render(star.position_ly - origin_ly).as_vec3().to_array();
         let physics = [star.star.teff_k as f32, star.star.radius_m as f32, 0.0, 0.0];
+        let heat = warm_params(star);
         let base = positions.len() as u32;
         for corner in QUAD {
             positions.push(at);
             corners.push(corner);
             params.push(physics);
+            warm.push(heat);
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
@@ -111,8 +114,29 @@ pub fn build_mesh(stars: &[CatalogueStar], origin_ly: DVec3) -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(ATTRIBUTE_STAR_CORNER, corners);
     mesh.insert_attribute(ATTRIBUTE_STAR_PARAMS, params);
+    mesh.insert_attribute(ATTRIBUTE_STAR_WARM, warm);
     mesh.insert_indices(Indices::U32(indices));
     mesh
+}
+
+/// A star's swarm, as the shader wants it: temperature, radiance against the stellar disc, and
+/// the grey deficit it removes. Zeros where there is nothing.
+///
+/// Drawn from the same generator the telescope reads, so a star that measures as engineered
+/// also looks engineered. The swarm is separable from the rest of the system on purpose: this
+/// runs for every star in the sky, and generating a full planetary system for each would not.
+pub fn warm_params(star: &CatalogueStar) -> [f32; 4] {
+    let Some(swarm) = generate::swarm_for(star) else { return [0.0; 4] };
+    let r = star.star.radius_m;
+    [
+        swarm.equilibrium_temperature(&star.star) as f32,
+        // The same ratio `reradiated_radiance` applies, and for the same reason: expressed
+        // against the stellar disc, the shader's existing geometry term carries it.
+        (swarm.radiating_area() / (4.0 * std::f64::consts::PI * r * r)) as f32,
+        // Isotropic, so the deficit along any line of sight is the absorbed fraction.
+        swarm.absorbed_fraction() as f32,
+        0.0,
+    ]
 }
 
 /// The uniforms that change: where the ship is, how fast, and how it is looking.
@@ -199,7 +223,7 @@ pub fn update_sky(
 #[cfg(test)]
 mod tests {
     use em_spectra::presets;
-    use lc_world::sky::AuthoredStars;
+    use lc_world::sky::{AuthoredStars, StarProvider};
 
     use super::*;
 
@@ -362,5 +386,43 @@ mod tests {
         let before = seen(DVec3::ZERO);
         let after = seen(ship);
         assert!((before - after).length() < 1e-6, "{before:?} vs {after:?}");
+    }
+
+    /// The renderer and the instrument have to agree about a swarm, or a star measures as
+    /// engineered and looks ordinary.
+    #[test]
+    fn the_warm_attribute_matches_what_the_emission_model_computes() {
+        let stars = lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv");
+        let Ok(provider) = stars else { return };
+        let swarmed: Vec<_> = provider
+            .stars()
+            .iter()
+            .filter(|s| generate::swarm_for(s).is_some())
+            .take(8)
+            .collect();
+        assert!(!swarmed.is_empty(), "the catalogue should hold some swarms");
+
+        for star in swarmed {
+            let [teff, scale, deficit, _] = warm_params(star);
+            let swarm = generate::swarm_for(star).unwrap();
+            assert!(teff > 0.0 && scale > 0.0, "{teff} K, scale {scale}");
+            assert!((0.0..=1.0).contains(&deficit), "a deficit must be a fraction: {deficit}");
+
+            // The shader computes band_radiance(b, teff) * scale; the model computes the same
+            // thing through reradiated_radiance. They must be one number.
+            let want = swarm.reradiated_radiance(&star.star)[Band::ThermalIr];
+            let got = blackbody::band_radiance(Band::ThermalIr, teff as f64) * scale as f64;
+            assert!((got / want - 1.0).abs() < 1e-5, "{got} against {want}");
+        }
+    }
+
+    #[test]
+    fn a_star_with_nothing_around_it_carries_no_heat() {
+        let s = sky();
+        for star in &s.stars {
+            if generate::swarm_for(star).is_none() {
+                assert_eq!(warm_params(star), [0.0; 4]);
+            }
+        }
     }
 }
