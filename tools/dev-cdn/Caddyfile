@@ -1,0 +1,55 @@
+# The development CDN.
+#
+# It is a static file server, because that is what a CDN is. The URL shape a build is served
+# at -- /game/<build-id>/... -- is a directory layout and needs no routing.
+#
+# What this file is really for is the headers. Every one below is something the real CDN must
+# also be told to do, and something that breaks quietly if it is not:
+#
+#   - `Content-Type: application/wasm` or the browser refuses to stream-compile, silently
+#     falling back to the slow path.
+#   - Pre-compressed `.br` served with `Content-Encoding: br` and the *original* content type.
+#     Getting the type from the `.br` extension instead is the classic way to break this.
+#   - CORS, because the page and its assets are different origins by construction.
+#   - `immutable`, because nothing here is ever overwritten -- a new build is a new directory.
+#
+# Treat this as the specification to hand to R2 or Bunny later, not as a toy.
+
+{
+	admin off
+	auto_https off
+}
+
+:3101 {
+	root * /srv/cdn
+
+	# In production this is the site's origin, not a wildcard. Set CDN_ALLOW_ORIGIN to
+	# rehearse that; the default is open because a dev CDN serves several local origins.
+	header {
+		Access-Control-Allow-Origin "{$CDN_ALLOW_ORIGIN:*}"
+		Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
+		Cache-Control "public, max-age=31536000, immutable"
+		-Server
+	}
+
+	# Caddy's MIME table does not know these three, and a wrong type on the first one costs
+	# streaming compilation.
+	@wasm path *.wasm
+	header @wasm Content-Type "application/wasm"
+	@wgsl path *.wgsl
+	header @wgsl Content-Type "text/plain; charset=utf-8"
+	@sky path *.lcsky
+	header @sky Content-Type "application/octet-stream"
+
+	# A build directory that does not exist is a 404, not a fallback to anything. A CDN that
+	# guesses is a CDN that serves last week's client to half the players.
+	file_server {
+		precompressed br gzip
+		hide .git
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

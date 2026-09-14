@@ -87,15 +87,23 @@ JSON
 
 cp tools/wasm-index.html "$OUT/index.html"
 
+# Pre-compress, beside the original. This is what the real upload does -- object storage will
+# not compress for you, and forgetting it triples the download. Caddy and every CDN worth the
+# name serve `foo.wasm.br` with `Content-Encoding: br` while keeping the original content type.
+echo "==> brotli"
+if command -v brotli >/dev/null; then
+  find "$OUT" -type f \( -name '*.wasm' -o -name '*.js' -o -name '*.wgsl' \
+       -o -name '*.lcsky' -o -name '*.json' -o -name '*.html' \) -print0 \
+    | while IFS= read -r -d '' f; do brotli -q 11 -f -k "$f" -o "$f.br"; done
+else
+  echo "    brotli not installed -- the CDN will serve uncompressed" >&2
+fi
+
 echo
 echo "==> $OUT"
-if command -v brotli >/dev/null; then
-  for f in "$OUT/${BIN}_bg.wasm" "$OUT/$BIN.js" "$OUT/assets/sky/hyg-v42.lcsky"; do
-    raw=$(wc -c < "$f" | tr -d ' ')
-    br=$(brotli -q 11 -c "$f" | wc -c | tr -d ' ')
-    printf '    %-28s %8.2f MB raw  %8.2f MB brotli\n' \
-      "$(basename "$f")" "$(echo "$raw/1000000" | bc -l)" "$(echo "$br/1000000" | bc -l)"
-  done
-else
-  echo "    (install brotli for compressed sizes)"
-fi
+for f in "$OUT/${BIN}_bg.wasm" "$OUT/$BIN.js" "$OUT/assets/sky/hyg-v42.lcsky"; do
+  raw=$(wc -c < "$f" | tr -d ' ')
+  if [ -f "$f.br" ]; then br=$(wc -c < "$f.br" | tr -d ' '); else br=0; fi
+  printf '    %-28s %8.2f MB raw  %8.2f MB brotli\n' \
+    "$(basename "$f")" "$(echo "$raw/1000000" | bc -l)" "$(echo "$br/1000000" | bc -l)"
+done
