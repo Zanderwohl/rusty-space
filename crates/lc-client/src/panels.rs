@@ -10,7 +10,7 @@ use crate::app::{Game, Ui};
 use crate::hud;
 use crate::input::Requested;
 use crate::plot::CurvePlot;
-use crate::navigation::{Course, LagrangePoint, Plane};
+use crate::navigation::Target;
 use crate::ui::{MenuPage, Panel};
 
 fn ask(out: &mut MessageWriter<Requested>, action: Action) {
@@ -112,8 +112,8 @@ pub fn open_panels(
     mut out: MessageWriter<Requested>,
     mut curve: Local<CurvePlot>,
     sky: Option<Res<crate::starfield::Starfield>>,
-    bodies: Option<Res<crate::starfield::Bodies>>,
-    mut nav: Local<NavState>,
+    mut show_all: Local<bool>,
+    mut revealed: Local<Option<Target>>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
     for panel in ui_state.open_panels().to_vec() {
@@ -123,9 +123,8 @@ pub fn open_panels(
             Panel::Settings => settings(ui, &ui_state),
             Panel::Debug => debug(ui, &ui_state, &game, sky.as_deref(), &mut out),
             Panel::Telescope => telescope(ui, &ui_state, &mut game, &mut out, &mut curve),
-            Panel::System => system(ui, &ui_state, &game),
+            Panel::System => system(ui, &ui_state, &game, &mut show_all, &mut revealed, &mut out),
             Panel::Flight => flight(ui, &ui_state, &game, &mut out),
-            Panel::Navigation => navigation(ui, &ui_state, &game, bodies.as_deref(), &mut nav, &mut out),
             Panel::Tuning => tuning(ui, &ui_state, &mut out),
         });
         if !open {
@@ -369,170 +368,124 @@ fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Re
     ui.weak(format!("at {:.3}, {:.3}, {:.3} ly", p.x, p.y, p.z));
 }
 
-fn system(ui: &mut egui::Ui, state: &Ui, game: &Game) {
-    let Some(id) = state.selected else {
-        ui.label("Nothing selected.");
-        return;
-    };
-    let Some(star) = game.star(id) else {
-        ui.label("That star is not loaded.");
-        return;
-    };
-    ui.label(star.name.clone().unwrap_or_else(|| "unnamed".into()));
-    ui.label(format!("{:.2} ly", game.distance_to(star)));
-    ui.label(format!("{:.0} K", star.star.teff_k));
-    ui.label(format!("{:.3} solar luminosities", star.luminosity_solar));
-    ui.label(format!("[Fe/H] {:+.2}", star.metallicity));
-    ui.separator();
-    ui.weak("Everything here is the retarded state: what left the system, not what is there.");
-}
-
-/// What the navigation panel remembers between frames.
+/// The system window: what is here, and where the ship can be sent.
 ///
-/// Which body is picked and how high an orbit to ask for are questions about the panel, not
-/// about the ship: nothing is committed until a course button is pressed, and until then the
-/// session must not hear about it.
-#[derive(Default)]
-pub struct NavState {
-    pub body: Option<String>,
-    pub altitude: usize,
-    pub plane: Plane,
-}
-
-/// How many bodies the picker lists.
-///
-/// The solar system has two hundred and thirty and most of them are numbered rocks. Nearest
-/// first, because a ship picking somewhere to go is picking somewhere near.
-const LISTED_BODIES: usize = 24;
-
-fn navigation(
+/// Two sections. The inventory runs outward from the star with each body's satellites behind
+/// it; picking one opens its courses. Nothing is flown until Go, so a player can read the
+/// options without committing to one.
+fn system(
     ui: &mut egui::Ui,
     state: &Ui,
     game: &Game,
-    bodies: Option<&crate::starfield::Bodies>,
-    nav: &mut NavState,
+    show_all: &mut bool,
+    revealed: &mut Option<Target>,
     out: &mut MessageWriter<Requested>,
 ) {
     let Some(system) = game.system.as_ref() else {
-        ui.label("Between systems. There is nowhere local to go.");
+        ui.label("Between systems. There is nothing local to go to.");
         return;
     };
-    ui.label(format!("in {}", system.star_name));
+    ui.horizontal(|ui| {
+        ui.label(format!("{} — {} bodies", system.star_name, system.len()));
+        ui.checkbox(show_all, "all");
+    });
+    station(ui, state, game, out);
+    ui.separator();
 
-    match &game.station {
-        Some(station) => {
-            ui.label(format!("holding: {}", station.label()));
-            if let Some(period) = station.period_s(system) {
-                ui.weak(format!("one turn in {}", duration(period)));
-                // The clock outruns an orbit by default and the view is then a strobe. Say so
-                // where the decision is made rather than leaving it to be discovered.
-                if period < state.time_rate * crate::session::TIME_RATE * 4.0 {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(220, 170, 90),
-                        "faster than the clock — slow time down to watch it",
-                    );
-                }
-            }
+    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+        for entry in system.inventory().iter().filter(|e| *show_all || e.major) {
+            let picked = state.focus.as_ref() == Some(&entry.target);
             ui.horizontal(|ui| {
-                if ui.button("Look at it").clicked() {
-                    ask(out, Action::LookAtStation);
+                ui.add_space(entry.depth as f32 * 12.0);
+                let row = ui.selectable_label(picked, &entry.designation);
+                if row.clicked() {
+                    let next = (!picked).then(|| entry.target.clone());
+                    ask(out, Action::FocusTarget(next));
                 }
-                if ui.button("Give up the station").clicked() {
-                    ask(out, Action::HoldHere);
+                // Once, when the focus changes. Every frame would fight the player's own
+                // scrolling, and never would hide a body picked from anywhere but this list.
+                if picked && revealed.as_ref() != Some(&entry.target) {
+                    *revealed = Some(entry.target.clone());
+                    row.scroll_to_me(Some(egui::Align::Center));
                 }
+                ui.weak(span_m(entry.orbit_radius_m));
             });
         }
-        None => {
-            ui.label("adrift");
+    });
+    ui.separator();
+
+    let Some(target) = state.focus.as_ref() else {
+        ui.label("Pick something to go to.");
+        return;
+    };
+    let Some(entry) = system.inventory().iter().find(|e| &e.target == target) else { return };
+    ui.heading(&entry.designation);
+    ui.weak(match entry.orbit_radius_m {
+        r if r > 0.0 => format!(
+            "{} — {} out, {} away",
+            entry.kind.label(),
+            span_m(r),
+            span(range_to(game, system, target)),
+        ),
+        _ => format!("{} — {} away", entry.kind.label(), span(range_to(game, system, target))),
+    });
+
+    for (label, course) in crate::navigation::options_for(system, target) {
+        let armed = state.course.as_ref() == Some(&course);
+        if ui.selectable_label(armed, &label).clicked() {
+            ask(out, Action::ChooseCourse((!armed).then_some(course)));
         }
     }
     ui.separator();
+    ui.horizontal(|ui| {
+        let ready = state.course.is_some();
+        if ui.add_enabled(ready, egui::Button::new("Go")).clicked() {
+            if let Some(course) = state.course.clone() {
+                ask(out, Action::SetCourse(course));
+            }
+        }
+        ui.weak(format!("brachistochrone at {:.0} g", game.drive.accel_g));
+    });
+}
 
-    let mut near: Vec<(f64, &crate::system::Drawable)> = bodies
-        .map(|b| {
-            b.drawn
-                .iter()
-                .map(|d| (d.position_ly.distance(game.position_ly), d))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    near.sort_by(|a, b| a.0.total_cmp(&b.0));
-    near.truncate(LISTED_BODIES);
-
-    egui::ComboBox::from_label("body")
-        .selected_text(nav.body.clone().unwrap_or_else(|| "—".into()))
-        .show_ui(ui, |ui| {
-            for (distance, body) in &near {
-                let label = format!("{} — {}", body.name, span(*distance));
-                if ui.selectable_label(nav.body.as_deref() == Some(&body.name), label).clicked() {
-                    nav.body = Some(body.name.clone());
-                }
-            }
-        });
-
-    if let Some(body) = nav.body.clone() {
-        ui.horizontal(|ui| {
-            for (index, (_, name)) in nav_alt().iter().enumerate() {
-                if ui.selectable_label(nav.altitude == index, *name).clicked() {
-                    nav.altitude = index;
-                }
-            }
-        });
-        ui.horizontal(|ui| {
-            for plane in [Plane::Equatorial, Plane::Polar] {
-                let name = if plane == Plane::Equatorial { "equatorial" } else { "polar" };
-                if ui.selectable_label(nav.plane == plane, name).clicked() {
-                    nav.plane = plane;
-                }
-            }
-        });
-        ui.horizontal(|ui| {
-            if ui.button("Orbit").clicked() {
-                ask(out, Action::SetCourse(Course::Orbit {
-                    body: body.clone(),
-                    altitude_radii: nav_alt()[nav.altitude].0,
-                    plane: nav.plane,
-                }));
-            }
-            if ui.button("L1").clicked() {
-                ask(out, Action::SetCourse(Course::Lagrange {
-                    body: body.clone(),
-                    point: LagrangePoint::L1,
-                }));
-            }
-            if ui.button("L2").clicked() {
-                ask(out, Action::SetCourse(Course::Lagrange {
-                    body: body.clone(),
-                    point: LagrangePoint::L2,
-                }));
-            }
-            let ringed = near.iter().any(|(_, d)| d.name == body && d.rings.is_some());
-            if ui.add_enabled(ringed, egui::Button::new("Rings")).clicked() {
-                ask(out, Action::SetCourse(Course::Rings(body.clone())));
-            }
-        });
-    }
-
-    ui.separator();
-    ui.label("bands");
-    for (index, population) in system.populations.iter().enumerate() {
-        let radius = population.thermal_radius() / crate::navigation::AU;
-        let kind = if crate::navigation::is_flat(population) { "belt" } else { "cloud" };
-        if ui.button(format!("{kind} — {radius:.0} AU")).clicked() {
-            ask(out, Action::SetCourse(Course::Belt(index)));
+/// Where the ship is holding, if it is holding anywhere.
+fn station(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {
+    let Some(system) = game.system.as_ref() else { return };
+    let Some(waypoint) = game.station.as_ref() else {
+        ui.weak("adrift");
+        return;
+    };
+    ui.label(format!("holding: {}", waypoint.label()));
+    if let Some(period) = waypoint.period_s(system) {
+        ui.weak(format!("one turn in {}", duration(period)));
+        // The clock outruns an orbit by default and the view is then a strobe. Say so where the
+        // decision is made rather than leaving it to be discovered.
+        if period < state.time_rate * crate::session::TIME_RATE * 4.0 {
+            ui.colored_label(
+                egui::Color32::from_rgb(220, 170, 90),
+                "faster than the clock — slow time down to watch it",
+            );
         }
     }
-
-    ui.separator();
-    if ui.button("Leave the system").clicked() {
-        ask(out, Action::SetCourse(Course::LeaveSystem));
-    }
-    ui.weak("out along the star's axis, clear of the cloud");
+    ui.horizontal(|ui| {
+        if ui.button("Look at it").clicked() {
+            ask(out, Action::LookAtStation);
+        }
+        if ui.button("Give up the station").clicked() {
+            ask(out, Action::HoldHere);
+        }
+    });
 }
 
-fn nav_alt() -> &'static [(f64, &'static str)] {
-    &crate::navigation::ALTITUDES
+/// How far the ship is from a target, light-years.
+fn range_to(game: &Game, system: &crate::system::LocalSystem, target: &Target) -> f64 {
+    let at = match target {
+        Target::Body(name) => system.body_position_ly(name),
+        Target::Band(_) => Some(system.star_position_ly()),
+    };
+    at.map(|at| at.distance(game.position_ly)).unwrap_or(0.0)
 }
+
 
 /// A duration in whatever unit makes it readable.
 fn duration(seconds: f64) -> String {
@@ -547,10 +500,17 @@ fn duration(seconds: f64) -> String {
 
 /// A distance in whatever unit makes it readable.
 fn span(light_years: f64) -> String {
-    let metres = light_years * crate::system::M_PER_LY;
+    span_m(light_years * crate::system::M_PER_LY)
+}
+
+fn span_m(metres: f64) -> String {
     match metres {
+        // The primary orbits nothing, and "0 thousand km" reads as a measurement.
+        m if m <= 0.0 => "the centre".to_string(),
+        m if m < 1.0e6 => format!("{:.0} km", m / 1.0e3),
         m if m < 1.0e9 => format!("{:.0} thousand km", m / 1.0e6),
+        m if m < 1.0e11 => format!("{:.2} million km", m / 1.0e9),
         m if m < 1.0e14 => format!("{:.2} AU", m / crate::navigation::AU),
-        _ => format!("{light_years:.2} ly"),
+        m => format!("{:.2} ly", m / crate::system::M_PER_LY),
     }
 }

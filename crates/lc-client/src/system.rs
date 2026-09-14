@@ -22,6 +22,12 @@ pub const UNIT_M: f64 = 1.495_978_707e11;
 /// only the fallback.
 pub const DEFAULT_ALBEDO: f64 = 0.3;
 
+/// When the inventory's radii and ordering are taken, seconds since J2000.
+///
+/// Any instant would do and none is better: what matters is that it is one instant rather than
+/// this one, so the list does not reshuffle while it is being read.
+pub const INVENTORY_EPOCH_S: f64 = 0.0;
+
 /// The catalogue name of the system whose data is real rather than generated.
 pub const SOL: &str = "Sol";
 
@@ -64,6 +70,10 @@ pub struct LocalSystem {
     pub origin_ly: DVec3,
     sim: System,
     primary: BodyIndex,
+    /// Everything here a ship can be sent to, ordered outward. Built once: the order comes
+    /// from where the bodies were at load, so a list cannot reshuffle itself while a player is
+    /// reading it.
+    inventory: Vec<crate::navigation::Entry>,
     /// The primary's radius and temperature, which set every reflection in the system.
     star_radius_m: f64,
     star_teff_k: f64,
@@ -81,17 +91,25 @@ impl LocalSystem {
         let primary = sim
             .indices()
             .max_by(|a, b| sim.info(*a).mass.total_cmp(&sim.info(*b).mass))?;
-        Some(Self {
+        let mut system = Self {
             star: star.id,
             star_name: star.name.clone().unwrap_or_else(|| format!("{:x}", star.id.get())),
             populations,
             origin_ly: star.position_ly,
             sim,
             primary,
+            inventory: Vec::new(),
             star_radius_m: star.star.radius_m,
             star_teff_k: star.star.teff_k,
             star_luminosity_w: star.star.luminosity(),
-        })
+        };
+        // Propagate before taking the inventory. Straight out of the file every body sits at
+        // the origin and has no parent -- the derived columns are rebuilt by the first
+        // evaluation -- so the ordering came out as file order with every radius zero.
+        system.advance_to(INVENTORY_EPOCH_S);
+        system.inventory =
+            build_inventory(&system.sim, primary, &system.star_name, &system.populations);
+        Some(system)
     }
 
     fn contents_for(star: &CatalogueStar) -> UniverseFileContents {
@@ -188,6 +206,12 @@ impl LocalSystem {
                 })
             })
             .collect()
+    }
+
+    /// Everything in the system a ship can be sent to, ordered outward from the primary with
+    /// each body's own satellites behind it.
+    pub fn inventory(&self) -> &[crate::navigation::Entry] {
+        &self.inventory
     }
 
     /// The propagated bodies, for anything that needs more than [`LocalSystem::drawables`].
@@ -353,6 +377,98 @@ pub fn equilibrium_temperature(luminosity_w: f64, distance_m: f64) -> f64 {
     let denominator =
         16.0 * std::f64::consts::PI * distance_m * distance_m * em_spectra::blackbody::SIGMA;
     (luminosity_w / denominator).powf(0.25)
+}
+
+/// Everything in a system a ship can be sent to, ordered outward.
+///
+/// The order is hierarchical, not by distance from the star: a moon's heliocentric distance is
+/// its planet's, so ordering on that would shuffle Jupiter's moons into whatever arrangement
+/// they happened to be in this instant. Each body is keyed by the chain of orbital radii from
+/// the primary down to itself, so planets come out by their own distance and a planet's moons
+/// come out behind it by theirs.
+fn build_inventory(
+    sim: &System,
+    primary: BodyIndex,
+    star_name: &str,
+    populations: &[lc_world::population::Population],
+) -> Vec<crate::navigation::Entry> {
+    use crate::navigation::{Entry, Kind, Target, designate};
+
+    // Rank among its siblings, for a body with nothing better to be called.
+    let mut ranked: Vec<(BodyIndex, f64)> = Vec::new();
+    let mut keyed: Vec<(Vec<f64>, BodyIndex)> = Vec::new();
+    for i in sim.indices() {
+        let mut chain = Vec::new();
+        let mut at = i;
+        while at != primary {
+            let Some(parent) = sim.parent(at) else { break };
+            chain.push((sim.position(at) - sim.position(parent)).length());
+            at = parent;
+        }
+        chain.reverse();
+        keyed.push((chain, i));
+        ranked.push((i, 0.0));
+    }
+    keyed.sort_by(|a, b| {
+        a.0.iter()
+            .zip(b.0.iter())
+            .find_map(|(x, y)| match x.total_cmp(y) {
+                std::cmp::Ordering::Equal => None,
+                other => Some(other),
+            })
+            .unwrap_or_else(|| a.0.len().cmp(&b.0.len()))
+    });
+
+    let mut seen_under: std::collections::HashMap<Option<BodyIndex>, usize> = Default::default();
+    let mut entries: Vec<(f64, Entry)> = Vec::new();
+    for (chain, i) in keyed {
+        let parent = (i != primary).then(|| sim.parent(i)).flatten();
+        let rank = seen_under.entry(parent).or_insert(0);
+        *rank += 1;
+        let info = sim.info(i);
+        let under = parent.map(|p| sim.info(p).name.clone().unwrap_or_else(|| sim.name(p).into()));
+        entries.push((
+            chain.first().copied().unwrap_or(0.0),
+            Entry {
+                designation: designate(
+                    info.name.as_deref(),
+                    info.designation.as_deref(),
+                    under.as_deref().unwrap_or(star_name),
+                    *rank,
+                ),
+                kind: Kind::of(&info.tags),
+                orbit_radius_m: chain.last().copied().unwrap_or(0.0),
+                depth: chain.len(),
+                major: sim.is_major(i),
+                target: Target::Body(sim.info(i).name.clone().unwrap_or_else(|| sim.name(i).into())),
+            },
+        ));
+    }
+
+    for (index, population) in populations.iter().enumerate() {
+        let radius = population.thermal_radius();
+        let flat = crate::navigation::is_flat(population);
+        entries.push((
+            radius,
+            Entry {
+                designation: format!(
+                    "{} at {:.1} AU",
+                    if flat { "belt" } else { "cloud" },
+                    radius / crate::navigation::AU
+                ),
+                kind: Kind::Band,
+                orbit_radius_m: radius,
+                depth: 0,
+                major: true,
+                target: Target::Band(index),
+            },
+        ));
+    }
+
+    // One stable sort on the outermost key puts the bands among the planets by radius; the
+    // hierarchy inside each planet is already in place and a stable sort leaves it alone.
+    entries.sort_by(|a, b| a.0.total_cmp(&b.0));
+    entries.into_iter().map(|(_, entry)| entry).collect()
 }
 
 #[cfg(test)]

@@ -284,6 +284,17 @@ impl Course {
         }
     }
 
+    /// What this course is about, for an interface that wants to show it.
+    pub fn target(&self) -> Option<Target> {
+        match self {
+            Course::To(_) | Course::LeaveSystem => None,
+            Course::Orbit { body, .. } | Course::Lagrange { body, .. } | Course::Rings(body) => {
+                Some(Target::Body(body.clone()))
+            }
+            Course::Belt(index) => Some(Target::Band(*index)),
+        }
+    }
+
     /// Read a course from a development flag: `orbit:Earth`, `polar:Titan:high`,
     /// `rings:Saturn`, `l2:Earth`, `belt:0`, `leave`.
     ///
@@ -327,6 +338,148 @@ impl Plane {
             Plane::Polar => basis(pole).0,
         }
     }
+}
+
+/// What kind of thing a destination is, out of the body's own tags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Star,
+    Planet,
+    Moon,
+    /// Asteroids, comets, trans-Neptunians and whatever else is loose.
+    Minor,
+    /// A population: a belt, a swarm or a cloud.
+    Band,
+}
+
+impl Kind {
+    /// From `em-sim`'s tags, which the solar system preset already carries and the generator
+    /// already writes. Nothing here re-derives what the data says.
+    pub fn of(tags: &[String]) -> Self {
+        let has = |t: &str| tags.iter().any(|x| x == t);
+        if has("Star") {
+            Kind::Star
+        } else if has("Planet") || has("Dwarf Planet") {
+            Kind::Planet
+        } else if has("Moon") {
+            Kind::Moon
+        } else {
+            Kind::Minor
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Kind::Star => "star",
+            Kind::Planet => "planet",
+            Kind::Moon => "moon",
+            Kind::Minor => "minor body",
+            Kind::Band => "band",
+        }
+    }
+}
+
+/// What a destination is, as little as the interface needs to name one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Target {
+    Body(String),
+    /// A population, by its index in the system's list.
+    Band(usize),
+}
+
+/// One place in the system, as the interface lists it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Entry {
+    pub designation: String,
+    pub kind: Kind,
+    /// Metres from whatever it orbits, so a moon reads against its planet and a planet against
+    /// the star. Taken at load and never recomputed: a list that reorders itself while a player
+    /// is reading it is worse than one that is a few per cent stale.
+    pub orbit_radius_m: f64,
+    /// Steps down from the primary. Indentation, and nothing else.
+    pub depth: usize,
+    /// One of the bodies a system is usually described by. The solar system has forty-one of
+    /// those and a hundred and eighty-nine others.
+    pub major: bool,
+    pub target: Target,
+}
+
+/// What to call a body.
+///
+/// Its own name first, then whatever catalogue designation it carries, and only then a made-up
+/// one: the primary's name and a numeral, which is how an unnamed body has been designated
+/// since Galileo. Players will be able to name planets, and that name goes in the first slot.
+pub fn designate(
+    name: Option<&str>,
+    catalogue: Option<&str>,
+    primary: &str,
+    rank: usize,
+) -> String {
+    match (name, catalogue) {
+        (Some(name), _) if !name.is_empty() => name.to_string(),
+        (_, Some(catalogue)) if !catalogue.is_empty() => catalogue.to_string(),
+        _ => format!("{primary} {}", roman(rank)),
+    }
+}
+
+/// `n` in Roman numerals, one-based. Zero and anything past the table fall back to the digits,
+/// which is wrong-looking enough to be noticed rather than silently absurd.
+pub fn roman(n: usize) -> String {
+    const TABLE: [(usize, &str); 13] = [
+        (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"),
+        (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+    ];
+    if n == 0 || n > 3999 {
+        return n.to_string();
+    }
+    let mut left = n;
+    let mut out = String::new();
+    for (value, glyph) in TABLE {
+        while left >= value {
+            out.push_str(glyph);
+            left -= value;
+        }
+    }
+    out
+}
+
+/// Every course a destination offers, with what to call it.
+///
+/// The list is what exists, not what is sensible: a body with no parent has no libration points
+/// and one without rings has nowhere above them, and neither appears rather than appearing
+/// greyed. Whether a course can be flown is [`Course::resolve`]'s business and it is asked
+/// again when the player presses Go.
+pub fn options_for(system: &LocalSystem, target: &Target) -> Vec<(String, Course)> {
+    let mut out = Vec::new();
+    let Target::Body(name) = target else {
+        let Target::Band(index) = target else { return out };
+        out.push(("into the band".to_string(), Course::Belt(*index)));
+        return out;
+    };
+    let Some(index) = system.body_named(name) else { return out };
+
+    for (plane, what) in [(Plane::Equatorial, "equatorial"), (Plane::Polar, "polar")] {
+        for (altitude_radii, height) in ALTITUDES {
+            out.push((
+                format!("{what} orbit, {height}"),
+                Course::Orbit { body: name.clone(), altitude_radii, plane },
+            ));
+        }
+    }
+    if system.sim().parent(index).is_some() {
+        for (point, what) in
+            [(LagrangePoint::L1, "L1 companion"), (LagrangePoint::L2, "L2 companion")]
+        {
+            out.push((what.to_string(), Course::Lagrange { body: name.clone(), point }));
+        }
+    }
+    if lc_world::rings::for_body(system.sim().name(index)).is_some() {
+        out.push(("above the rings".to_string(), Course::Rings(name.clone())));
+    }
+    if index == system.primary() {
+        out.push(("leave the system".to_string(), Course::LeaveSystem));
+    }
+    out
 }
 
 /// Plan a crossing to where a waypoint will be when the ship arrives.
@@ -649,6 +802,118 @@ mod tests {
             hold(&mut session);
         }
         assert!((altitude(&session) - 3.0).abs() < 0.05, "drifted to {}", altitude(&session));
+    }
+
+    /// The list a player reads: outward from the star, with each planet's moons behind it.
+    #[test]
+    fn the_inventory_runs_outward_and_keeps_moons_with_their_planet() {
+        let system = sol();
+        let inventory = system.inventory();
+        let named = |name: &str| {
+            inventory.iter().position(|e| e.designation == name).unwrap_or_else(|| {
+                panic!("{name} is not in the inventory")
+            })
+        };
+        // The primary comes first, then the planets by their own distance.
+        assert_eq!(inventory[0].kind, Kind::Star);
+        for pair in ["Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn"].windows(2) {
+            assert!(named(pair[0]) < named(pair[1]), "{} is not inside {}", pair[0], pair[1]);
+        }
+        // A moon sits behind its planet and before the next one out.
+        assert!(named("Jupiter") < named("Io"));
+        assert!(named("Io") < named("Europa"), "and moons run outward too");
+        assert!(named("Europa") < named("Ganymede"));
+        assert!(named("Ganymede") < named("Saturn"));
+        // The asteroid belt lands where it belongs, between Mars and Jupiter.
+        let belt = inventory
+            .iter()
+            .position(|e| e.kind == Kind::Band && e.designation.starts_with("belt"))
+            .expect("a belt");
+        assert!(named("Mars") < belt && belt < named("Jupiter"), "the belt is misplaced");
+        // And a moon is one step down from a planet, which is what indents it.
+        assert_eq!(inventory[named("Jupiter")].depth, 1);
+        assert_eq!(inventory[named("Io")].depth, 2);
+    }
+
+    /// Kinds come from the data's own tags rather than from anything re-derived here.
+    #[test]
+    fn the_inventory_knows_what_each_thing_is() {
+        let system = sol();
+        let kind = |name: &str| {
+            system.inventory().iter().find(|e| e.designation == name).map(|e| e.kind)
+        };
+        assert_eq!(kind("Sol"), Some(Kind::Star));
+        assert_eq!(kind("Earth"), Some(Kind::Planet));
+        assert_eq!(kind("Luna"), Some(Kind::Moon));
+        assert_eq!(kind("Pluto"), Some(Kind::Planet), "a dwarf planet is still a planet to fly to");
+        // Forty-one of the solar system's two hundred and thirty bodies are the ones it is
+        // usually described by, and a list of all of them is unreadable without that.
+        let major = system.inventory().iter().filter(|e| e.major).count();
+        assert!((30..80).contains(&major), "{major} major bodies is not a system summary");
+        assert!(system.inventory().len() > 200, "and the rest are still there to be asked for");
+    }
+
+    /// A body is called what it is called; only one with nothing at all gets invented a name.
+    #[test]
+    fn a_designation_prefers_the_name_then_the_catalogue_then_a_numeral() {
+        assert_eq!(designate(Some("Titan"), Some("S VI"), "Saturn", 6), "Titan");
+        assert_eq!(designate(None, Some("S/2004 S 13"), "Saturn", 40), "S/2004 S 13");
+        assert_eq!(designate(None, None, "Saturn", 7), "Saturn VII");
+        assert_eq!(designate(Some(""), None, "Kepler", 3), "Kepler III", "empty is not a name");
+    }
+
+    #[test]
+    fn roman_numerals_are_roman() {
+        for (n, want) in [(1, "I"), (4, "IV"), (9, "IX"), (14, "XIV"), (40, "XL"), (1987, "MCMLXXXVII")] {
+            assert_eq!(roman(n), want);
+        }
+        // Out of range falls back to digits rather than to nonsense.
+        assert_eq!(roman(0), "0");
+        assert_eq!(roman(4000), "4000");
+    }
+
+    /// What is offered is what exists: no libration points without a parent, no rings without
+    /// rings, and leaving the system is the star's own option.
+    #[test]
+    fn the_options_offered_are_the_ones_that_exist() {
+        let system = sol();
+        let labels = |name: &str| {
+            options_for(&system, &Target::Body(name.into()))
+                .into_iter()
+                .map(|(label, _)| label)
+                .collect::<Vec<_>>()
+        };
+        let earth = labels("Earth");
+        assert!(earth.contains(&"equatorial orbit, low".to_string()));
+        assert!(earth.contains(&"polar orbit, distant".to_string()));
+        assert!(earth.contains(&"L1 companion".to_string()));
+        assert!(!earth.iter().any(|l| l.contains("rings")));
+
+        assert!(labels("Saturn").contains(&"above the rings".to_string()));
+
+        let star = labels("Sol");
+        assert!(star.contains(&"leave the system".to_string()));
+        assert!(!star.iter().any(|l| l.contains("companion")), "the primary has no parent");
+
+        assert_eq!(labels("Nowhere"), Vec::<String>::new());
+        let band = options_for(&system, &Target::Band(0));
+        assert_eq!(band.len(), 1);
+        assert!(band[0].1.resolve(&system).is_some(), "and it is a course that resolves");
+    }
+
+    /// Every option the interface offers has to resolve, or a Go button lies.
+    #[test]
+    fn every_offered_option_resolves_into_somewhere() {
+        let system = sol();
+        for entry in system.inventory().iter().filter(|e| e.major) {
+            for (label, course) in options_for(&system, &entry.target) {
+                assert!(
+                    course.resolve(&system).is_some(),
+                    "{} offers {label} and it does not resolve",
+                    entry.designation
+                );
+            }
+        }
     }
 
     /// The basis has to be orthonormal whatever it is handed, including a degenerate pole.    /// The basis has to be orthonormal whatever it is handed, including a degenerate pole.

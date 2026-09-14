@@ -41,6 +41,11 @@ fn main() {
     if flag("--tune").is_some() {
         actions.push(Action::OpenPanel(lc_client::ui::Panel::Tuning));
     }
+    if let Some(i) = flag("--panel") {
+        if let Some(panel) = args.get(i + 1).and_then(|n| lc_client::ui::Panel::named(n)) {
+            actions.push(Action::OpenPanel(panel));
+        }
+    }
     if flag("--watch").is_some() || flag("--swarm").is_some() {
         actions.push(Action::SelectNearest);
         actions.push(Action::OpenPanel(lc_client::ui::Panel::Telescope));

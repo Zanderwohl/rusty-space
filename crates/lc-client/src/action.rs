@@ -8,7 +8,7 @@
 use em_spectra::{Band, presets};
 use lc_world::sky::StarId;
 
-use crate::navigation::Course;
+use crate::navigation::{Course, Target};
 use crate::session::Session;
 use crate::starfield::{PointStyle, Which};
 use crate::ui::{Look, MenuPage, Panel, UiState};
@@ -54,7 +54,12 @@ pub enum Action {
     /// Cross to the nearest star that is actually interstellar.
     FlyToNearest,
     AbortFlight,
-    /// Go somewhere in the local system, and hold there once arrived.
+    /// Pick something out of the local system's inventory. Clears whatever course was armed
+    /// for the last one.
+    FocusTarget(Option<Target>),
+    /// Arm one of the focused target's courses, without flying it.
+    ChooseCourse(Option<Course>),
+    /// Go somewhere in the local system, and hold there once arrived. What Go sends.
     SetCourse(Course),
     /// Cut the drive and give up the station.
     HoldHere,
@@ -192,6 +197,11 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 effects.push(Effect::Notify("drive cut".into()));
             }
         }
+        Action::FocusTarget(target) => {
+            ui.course = None;
+            ui.focus = target;
+        }
+        Action::ChooseCourse(course) => ui.course = course,
         Action::SetCourse(course) => {
             let note = match session.set_course(&course) {
                 Some(label) => format!("course: {label}"),
@@ -730,5 +740,40 @@ mod tests {
         s.station = Some(crate::navigation::Waypoint::Fixed(glam::DVec3::X));
         s.fly_to(s.stars[0].id);
         assert!(s.station.is_none());
+    }
+
+    /// The System window's whole flow: pick something, arm one of its courses, press Go.
+    /// Nothing flies until Go, which is the point of arming it separately.
+    #[test]
+    fn focusing_arming_and_going_are_three_separate_steps() {
+        let provider =
+            lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv");
+        let Ok(provider) = provider else { return };
+        let mut ui = UiState::default();
+        let mut s = Session::new(&provider, 64);
+        s.sync_system();
+        let system = s.system.as_ref().expect("the solar system");
+
+        let target = crate::navigation::Target::Body("Earth".into());
+        let (_, course) = crate::navigation::options_for(system, &target)
+            .into_iter()
+            .find(|(label, _)| label == "polar orbit, high")
+            .expect("Earth offers a high polar orbit");
+
+        apply(Action::FocusTarget(Some(target.clone())), &mut ui, &mut s);
+        assert_eq!(ui.focus, Some(target.clone()));
+        assert!(ui.course.is_none(), "focusing arms nothing");
+
+        apply(Action::ChooseCourse(Some(course.clone())), &mut ui, &mut s);
+        assert_eq!(ui.course, Some(course.clone()));
+        assert!(s.cruise.is_none() && s.station.is_none(), "arming flies nothing");
+
+        let effects = apply(Action::SetCourse(course), &mut ui, &mut s);
+        assert_eq!(effects.len(), 1, "Go says where it is going");
+        assert!(s.cruise.is_some() && s.station.is_some());
+
+        // Focusing something else drops the armed course: it belonged to the last one.
+        apply(Action::FocusTarget(Some(crate::navigation::Target::Band(0))), &mut ui, &mut s);
+        assert!(ui.course.is_none());
     }
 }

@@ -230,6 +230,7 @@ fn place_on_station(
     let Some(waypoint) = course.resolve(system) else { return };
     let Some(at) = waypoint.place(system) else { return };
     let label = waypoint.label();
+    ui.focus = course.target();
     if let Some(look) = waypoint.focus(system).and_then(|f| crate::ui::Look::aimed_at(f - at)) {
         ui.look = look;
     }

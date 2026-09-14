@@ -34,21 +34,24 @@ pub enum Panel {
     Telescope,
     System,
     Flight,
-    Navigation,
     Tuning,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 8] = [
+    pub const ALL: [Panel; 7] = [
         Panel::Escape,
         Panel::Settings,
         Panel::Debug,
         Panel::Telescope,
         Panel::System,
         Panel::Flight,
-        Panel::Navigation,
         Panel::Tuning,
     ];
+
+    /// A panel by the name a development flag would use.
+    pub fn named(name: &str) -> Option<Self> {
+        Panel::ALL.into_iter().find(|p| p.title().to_lowercase().starts_with(name))
+    }
 
     pub fn title(&self) -> &'static str {
         match self {
@@ -58,7 +61,6 @@ impl Panel {
             Panel::Telescope => "Telescope",
             Panel::System => "System",
             Panel::Flight => "Flight",
-            Panel::Navigation => "Navigation",
             Panel::Tuning => "Starfield tuning",
         }
     }
@@ -167,6 +169,12 @@ pub struct UiState {
     /// Open panels, most recently opened last. Order is what "back" walks.
     open: Vec<Panel>,
     pub selected: Option<StarId>,
+    /// What is picked out of the local system's inventory, and which of its courses is armed.
+    ///
+    /// Here rather than in the panel because picking a body out of the sky will set the same
+    /// two fields, and because naming a world later has to change what this is pointing at.
+    pub focus: Option<crate::navigation::Target>,
+    pub course: Option<crate::navigation::Course>,
     pub look: Look,
     /// How the two starfield passes are drawn. State rather than constants so they can be
     /// turned while the thing they affect is on screen, which is the only way to tune a look.
@@ -193,6 +201,8 @@ impl Default for UiState {
             menu_page: MenuPage::Root,
             open: Vec::new(),
             selected: None,
+            focus: None,
+            course: None,
             look: Look::default(),
             distant: crate::starfield::DISTANT,
             local: crate::starfield::LOCAL,

@@ -173,7 +173,7 @@ Omit the path for the three authored sample stars.
 | key | does |
 |---|---|
 | `Esc` | close the top panel, then the menu |
-| `T` `Y` `F` `V` `F3` `F4` | telescope, system, flight, navigation, debug, starfield tuning |
+| `T` `Y` `F` `F3` `F4` | telescope, system, flight, debug, starfield tuning |
 | arrows, right-drag | look |
 | | the cursor is pinned while the right button is held, and released on let go |
 | `L` | look at the selection |
@@ -205,6 +205,7 @@ fast clock never looks normal.
 | `--frames <n>` | frames before the shutter |
 | `--at <body>` | stand off a named body of the local system |
 | `--station <course>` | put the ship straight on a station: `orbit:Earth`, `polar:Mars:high`, `rings:Saturn`, `l2:Earth`, `belt:0`, `leave` |
+| `--panel <name>` | open a panel by name |
 | `--burst <n>` | photograph `n` consecutive frames, numbered. For flicker: two runs stopped at frame `n` and frame `n+1` have accumulated different wall time and are not consecutive at all |
 
 These emit [`Action`]s rather than opening a second path into the client, so they can only do
@@ -245,6 +246,44 @@ Three things the shapes buy:
   aiming at where the body will be converges in three rounds. It matters: Earth runs a
   fiftieth of an astronomical unit during a crossing from Mars, which is four thousand
   planetary radii of miss.
+
+### The System window
+
+![The System window](../images/system-window.png)
+
+Two sections, and nothing flies between them.
+
+The **inventory** runs outward from the star with each body's satellites behind it. The
+ordering is hierarchical rather than by distance from the star, because a moon's heliocentric
+distance *is* its planet's: ordering on that would shuffle Jupiter's moons into whatever
+arrangement they happened to be in this instant. Each body is keyed by the chain of orbital
+radii from the primary down to itself, so planets come out by their own distance and a planet's
+moons come out behind them by theirs. Bands land among the planets by radius, which puts the
+asteroid belt between Mars and Jupiter where it belongs.
+
+The whole thing is built **once, when the system loads**, from the positions at one epoch. A
+list that reorders itself while a player is reading it is worse than one that is a few per cent
+stale. Straight out of the file every body sits at the origin and has no parent — the derived
+columns are rebuilt by the first evaluation — so the first version of this came out in file
+order with every radius zero.
+
+Forty-one of the solar system's bodies are the ones it is usually described by and a hundred
+and eighty-nine are not, so the list shows the former until you ask for `all`.
+
+Picking one opens its **courses**: equatorial and polar orbits at three altitudes, the two
+collinear libration points if it has a parent, above the rings if it has rings, and leaving the
+system if it is the star. What is offered is what exists — a moon of nothing has no libration
+points, and rather than grey the option out it is not there. A test flies every option every
+major body offers and fails if any of them fails to resolve, so the list cannot lie.
+
+Arming a course and flying it are separate: **Go** is what commits, and it uses the ship's own
+acceleration. The crossing is a brachistochrone to the injection point and then the ship holds
+station on it.
+
+**A body is called what it is called.** Its own name first, then whatever catalogue designation
+it carries, and only then a made-up one — the primary's name and a Roman numeral, which is how
+an unnamed body has been designated since Galileo. When players can name worlds, that name goes
+in the first slot and nothing else changes.
 
 ### The clock has to slow down for an orbit
 
