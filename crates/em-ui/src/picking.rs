@@ -75,6 +75,36 @@ pub fn pick(candidates: &[Candidate], cursor: Vec2, slack_px: f32) -> Option<u64
         .map(|(_, _, id)| id)
 }
 
+/// The nearest point to `cursor` on any of `runs`, and how far off it is.
+///
+/// For a candidate with extent and no surface — a belt, a ring, a trajectory. The caller passes
+/// the nearest point as the candidate's [`at`](Candidate::at) with a zero radius, which makes
+/// the whole length of it clickable through the ordinary slack without this module needing to
+/// know what a belt is.
+///
+/// Segments, not vertices. A ring sampled every few degrees has vertices far apart where it
+/// passes close by, and snapping to the nearest of those puts the answer — and the mark drawn
+/// on it — visibly off the line.
+pub fn nearest_on_path(runs: &[Vec<Vec2>], cursor: Vec2) -> Option<(Vec2, f32)> {
+    runs.iter()
+        .flat_map(|run| run.windows(2))
+        .map(|pair| {
+            let at = nearest_on_segment(pair[0], pair[1], cursor);
+            (at, cursor.distance(at))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+/// The point of the segment `a`-`b` nearest `to`.
+fn nearest_on_segment(a: Vec2, b: Vec2, to: Vec2) -> Vec2 {
+    let span = b - a;
+    let length_squared = span.length_squared();
+    if length_squared <= f32::MIN_POSITIVE {
+        return a;
+    }
+    a + span * ((to - a).dot(span) / length_squared).clamp(0.0, 1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,5 +195,51 @@ mod tests {
         let disc = [at(1, 0.0, 0.0, 10.0, rank::BODY)];
         assert_eq!(pick(&disc, Vec2::new(9.9, 0.0), 0.0), Some(1));
         assert_eq!(pick(&disc, Vec2::new(10.1, 0.0), 0.0), None);
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    /// Along the segment, not snapped to an end of it. A ring sampled every few degrees has
+    /// vertices a long way apart where it passes close by.
+    #[test]
+    fn the_nearest_point_is_on_the_line_and_not_at_a_vertex() {
+        let run = vec![vec![Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0)]];
+        let (at, distance) = nearest_on_path(&run, Vec2::new(40.0, 7.0)).expect("a segment");
+        assert_eq!(at, Vec2::new(40.0, 0.0));
+        assert!((distance - 7.0).abs() < 1.0e-4);
+    }
+
+    /// Past an end it stops at the end, rather than running off along the line.
+    #[test]
+    fn a_cursor_past_the_end_gets_the_end() {
+        let run = vec![vec![Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0)]];
+        let (at, _) = nearest_on_path(&run, Vec2::new(140.0, 0.0)).unwrap();
+        assert_eq!(at, Vec2::new(100.0, 0.0));
+    }
+
+    /// Several runs — which is what a ring cut by the camera plane comes back as — and the
+    /// nearest of all of them wins.
+    #[test]
+    fn the_nearest_of_several_runs_wins() {
+        let runs = vec![
+            vec![Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0)],
+            vec![Vec2::new(0.0, 50.0), Vec2::new(100.0, 50.0)],
+        ];
+        let (at, _) = nearest_on_path(&runs, Vec2::new(50.0, 40.0)).unwrap();
+        assert_eq!(at.y, 50.0);
+        assert!(nearest_on_path(&[], Vec2::ZERO).is_none());
+        assert!(nearest_on_path(&[vec![Vec2::ZERO]], Vec2::ZERO).is_none(), "a point is not a path");
+    }
+
+    /// A degenerate segment is a point, not a division by zero.
+    #[test]
+    fn a_zero_length_segment_is_its_own_nearest_point() {
+        let run = vec![vec![Vec2::new(5.0, 5.0), Vec2::new(5.0, 5.0)]];
+        let (at, distance) = nearest_on_path(&run, Vec2::new(5.0, 9.0)).unwrap();
+        assert_eq!(at, Vec2::new(5.0, 5.0));
+        assert!((distance - 4.0).abs() < 1.0e-4);
     }
 }

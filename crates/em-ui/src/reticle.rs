@@ -85,8 +85,7 @@ pub fn place(clip: Vec4, radius_px: f32, viewport: Vec2, frame: Frame<'_>) -> Ma
         return Marker::Off { at: on_edge(centre, direction, frame), direction };
     }
 
-    let ndc = Vec2::new(clip.x / clip.w, clip.y / clip.w);
-    let at = Vec2::new((ndc.x + 1.0) * 0.5 * viewport.x, (1.0 - ndc.y) * 0.5 * viewport.y);
+    let at = to_screen(clip, viewport);
     if frame.safe.contains(at) {
         return Marker::On { at, radius_px };
     }
@@ -136,6 +135,92 @@ pub fn place_label(
         .map(offset)
         .find(|centre| fits(*centre))
         .unwrap_or_else(|| clamp_into(first, size, frame.safe))
+}
+
+/// How far past the camera plane a clipped vertex is placed, as a fraction of the visible
+/// end's `w`.
+///
+/// A line crossing the camera plane goes to infinity on screen, so the crossing vertex has to
+/// stop somewhere. Two per cent puts it about fifty screen-widths out, which reads as "off the
+/// edge" at any zoom and stays a finite number.
+const CLIP_FRACTION: f32 = 0.02;
+
+/// How far outside the viewport a projected vertex may land before it is pulled in, in
+/// viewport widths. Purely to keep a renderer from being handed an astronomical coordinate.
+const MAX_OVERSHOOT: f32 = 60.0;
+
+/// A path of clip-space points as runs of screen positions, cut where it crosses behind the
+/// camera.
+///
+/// One run per stretch that is in front of the camera; a closed curve seen from inside comes
+/// back as two open runs, or as none when it is entirely behind. This is the part that cannot
+/// be done by projecting each point and discarding the failures: dropping the vertices that
+/// are behind leaves a segment joining the two survivors *across* the view, which draws a
+/// chord through a ring that has no chord.
+pub fn project_path(clips: &[Vec4], viewport: Vec2) -> Vec<Vec<Vec2>> {
+    let mut runs: Vec<Vec<Vec2>> = Vec::new();
+    let mut run: Vec<Vec2> = Vec::new();
+
+    for pair in clips.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        match (a.w > 0.0, b.w > 0.0) {
+            (true, true) => {
+                if run.is_empty() {
+                    run.push(to_screen(a, viewport));
+                }
+                run.push(to_screen(b, viewport));
+            }
+            // Leaving: carry the line out to where it crosses, then end the run.
+            (true, false) => {
+                if run.is_empty() {
+                    run.push(to_screen(a, viewport));
+                }
+                run.push(to_screen(cross(a, b), viewport));
+                runs.push(std::mem::take(&mut run));
+            }
+            // Arriving: start a fresh run at the crossing.
+            (false, true) => {
+                if !run.is_empty() {
+                    runs.push(std::mem::take(&mut run));
+                }
+                run.push(to_screen(cross(b, a), viewport));
+                run.push(to_screen(b, viewport));
+            }
+            (false, false) => {
+                if !run.is_empty() {
+                    runs.push(std::mem::take(&mut run));
+                }
+            }
+        }
+    }
+    if !run.is_empty() {
+        runs.push(run);
+    }
+    runs.retain(|run| run.len() > 1);
+    runs
+}
+
+/// A run of screen positions as line segments, for a caller that draws in pairs.
+pub fn path_segments(runs: &[Vec<Vec2>]) -> Vec<[Vec2; 2]> {
+    runs.iter().flat_map(|run| run.windows(2).map(|p| [p[0], p[1]])).collect()
+}
+
+/// Where the segment from `visible` to `behind` crosses the camera plane, as a clip-space
+/// point just in front of it.
+fn cross(visible: Vec4, behind: Vec4) -> Vec4 {
+    let target = visible.w * CLIP_FRACTION;
+    let span = behind.w - visible.w;
+    let t = if span.abs() > f32::MIN_POSITIVE { (target - visible.w) / span } else { 0.0 };
+    visible + (behind - visible) * t.clamp(0.0, 1.0)
+}
+
+/// Clip space to viewport pixels. Only meaningful for a positive `w`.
+fn to_screen(clip: Vec4, viewport: Vec2) -> Vec2 {
+    let w = clip.w.max(f32::MIN_POSITIVE);
+    let ndc = Vec2::new(clip.x / w, clip.y / w);
+    let at = Vec2::new((ndc.x + 1.0) * 0.5 * viewport.x, (1.0 - ndc.y) * 0.5 * viewport.y);
+    let bound = viewport * MAX_OVERSHOOT;
+    at.clamp(-bound, bound)
 }
 
 /// The viewport less its border. Where an arrow or a label is allowed to be.
@@ -481,6 +566,67 @@ mod tests {
             above.intersect(Rect::from_corners(stepped - half, stepped + half)).is_empty(),
             "{stepped} still overlaps {above:?}",
         );
+    }
+
+    /// A closed curve the camera sits inside comes back as runs that stop at the camera plane,
+    /// not as one run with a chord across the view.
+    ///
+    /// Projecting every point and discarding the failures is the obvious thing and is wrong:
+    /// the two survivors either side of the gap get joined, and a ring acquires a straight line
+    /// through the middle of it that no ring has.
+    #[test]
+    fn a_path_that_passes_behind_the_camera_is_cut_rather_than_joined() {
+        // Half in front, half behind, in order — a ring seen from inside it.
+        let ring: Vec<Vec4> = (0..=16)
+            .map(|i| {
+                let theta = std::f32::consts::TAU * i as f32 / 16.0;
+                // `w` is `-view.z`: positive ahead, negative behind.
+                Vec4::new(theta.sin(), 0.0, 0.0, theta.cos())
+            })
+            .collect();
+
+        let runs = project_path(&ring, VIEW);
+        assert_eq!(runs.len(), 2, "two arcs in front, cut at the two crossings: {runs:?}");
+        for run in &runs {
+            assert!(run.len() > 1);
+            assert!(run.iter().all(|p| p.is_finite()), "{run:?}");
+        }
+
+        // Every drawn point is finite and bounded, however close to the plane it was cut.
+        let bound = VIEW * MAX_OVERSHOOT;
+        for [a, b] in path_segments(&runs) {
+            assert!(a.abs().cmple(bound).all() && b.abs().cmple(bound).all(), "{a} {b}");
+        }
+    }
+
+    /// Entirely in front is one run; entirely behind is none.
+    #[test]
+    fn a_path_wholly_on_one_side_is_all_or_nothing() {
+        let ahead: Vec<Vec4> =
+            (0..5).map(|i| Vec4::new(i as f32 * 0.1, 0.0, 0.0, 1.0)).collect();
+        assert_eq!(project_path(&ahead, VIEW).len(), 1);
+
+        let behind: Vec<Vec4> =
+            (0..5).map(|i| Vec4::new(i as f32 * 0.1, 0.0, 0.0, -1.0)).collect();
+        assert!(project_path(&behind, VIEW).is_empty());
+
+        assert!(project_path(&[], VIEW).is_empty());
+        assert!(project_path(&[Vec4::new(0.0, 0.0, 0.0, 1.0)], VIEW).is_empty(), "one point is not a path");
+    }
+
+    /// The cut lands well off screen, so the line reads as leaving the view rather than
+    /// stopping in the middle of it.
+    #[test]
+    fn a_cut_end_is_carried_off_the_edge() {
+        let crossing = [Vec4::new(0.1, 0.0, 0.0, 1.0), Vec4::new(0.1, 0.0, 0.0, -1.0)];
+        let runs = project_path(&crossing, VIEW);
+        assert_eq!(runs.len(), 1);
+        let end = *runs[0].last().unwrap();
+        assert!(
+            end.x > VIEW.x * 2.0,
+            "the cut should be far outside the viewport, not at {end}",
+        );
+        assert!(end.is_finite());
     }
 
     #[test]

@@ -40,6 +40,8 @@ const ARROW_PX: f32 = 11.0;
 pub enum Subject {
     Body(String),
     Star(StarId, String),
+    /// A population, by its index in the system's list.
+    Swarm(usize, String),
 }
 
 impl Subject {
@@ -48,6 +50,7 @@ impl Subject {
         match (self, other) {
             (Subject::Body(a), Subject::Body(b)) => a == b,
             (Subject::Star(a, _), Subject::Star(b, _)) => a == b,
+            (Subject::Swarm(a, _), Subject::Swarm(b, _)) => a == b,
             _ => false,
         }
     }
@@ -58,6 +61,7 @@ impl Subject {
         match self {
             Subject::Body(name) => Action::FocusTarget(Some(Target::Body(name.clone()))),
             Subject::Star(id, _) => Action::SelectTarget(Some(*id)),
+            Subject::Swarm(index, _) => Action::FocusTarget(Some(Target::Band(*index))),
         }
     }
 }
@@ -69,9 +73,13 @@ impl Subject {
 /// as panels open.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Mark {
+    /// Where the bracket, the ring or the arrow goes. For something with extent, the part of
+    /// it nearest whatever the mark is *for* — the cursor when hovering.
     pub clip: Vec4,
     pub radius_px: f32,
     pub label: String,
+    /// The curve it is drawn along, for anything that is not a point.
+    pub outline: Option<Vec<Vec4>>,
 }
 
 /// What the overlay draws. Rebuilt every frame, so a mark never survives what it was on.
@@ -103,10 +111,22 @@ impl Plugin for PickPlugin {
 struct Sighted {
     subject: Subject,
     /// Clip space, from a direction: the projection applied and the divide not.
+    ///
+    /// For something with extent this is filled in once the cursor is known, since where the
+    /// nearest part of it is depends on where the cursor is.
     clip: Vec4,
     radius_px: f32,
     rank: u8,
+    /// The curve it is drawn along, clip space, for anything that is not a point. A swarm is
+    /// picked and marked along this rather than at a centre it does not have.
+    outline: Option<Vec<Vec4>>,
 }
+
+/// How many points a swarm's circle is sampled at.
+///
+/// Sixty-four is a fifth of a degree of error against a true circle at the widest, which is far
+/// below a pixel at any distance the thing is drawn at.
+const SWARM_SAMPLES: usize = 64;
 
 /// Find what the cursor is on, mark what is selected, and act on a click.
 #[allow(clippy::too_many_arguments)]
@@ -136,23 +156,37 @@ fn survey(
     // Against the whole window, because that is where the cursor can be. A thing under a panel
     // is not pickable anyway: egui takes the pointer first, which is checked below.
     let whole = Frame::bare(reticle::safe_rect(viewport, 0.0));
+    let cursor = (!egui.wants_any_pointer_input()).then(|| window.cursor_position()).flatten();
+
     // Only what is actually on screen can be under the cursor. An off-screen thing is placed on
     // the border, and taking that as a position would make the edges pick whatever is out there.
     let mut candidates = Vec::with_capacity(sighted.len());
     for (index, seen) in sighted.iter().enumerate() {
-        if let Marker::On { at, radius_px } =
-            reticle::place(seen.clip, seen.radius_px, viewport, whole)
+        let at = match (&seen.outline, cursor) {
+            // A curve has no one place it is: the nearest part of it to the cursor is what the
+            // cursor is on, and that is a different point for every cursor position.
+            (Some(outline), Some(cursor)) => {
+                let runs = reticle::project_path(outline, viewport);
+                picking::nearest_on_path(&runs, cursor).map(|(at, _)| (at, 0.0))
+            }
+            (Some(_), None) => None,
+            (None, _) => match reticle::place(seen.clip, seen.radius_px, viewport, whole) {
+                Marker::On { at, radius_px } => Some((at, radius_px)),
+                Marker::Off { .. } => None,
+            },
+        };
+        if let Some((at, radius_px)) = at
+            && whole.safe.contains(at)
         {
             candidates.push(Candidate { id: index as u64, at, radius_px, rank: seen.rank });
         }
     }
 
-    if !egui.wants_any_pointer_input()
-        && let Some(cursor) = window.cursor_position()
+    if let Some(cursor) = cursor
         && let Some(id) = picking::pick(&candidates, cursor, picking::SLACK_PX)
     {
         let seen = &sighted[id as usize];
-        picked.hover = Some(mark(seen));
+        picked.hover = Some(mark(seen, viewport, cursor));
         if buttons.just_pressed(PICK_BUTTON) {
             out.write(Requested(seen.subject.select()));
         }
@@ -163,7 +197,9 @@ fn survey(
     if let Some(chosen) = selected(&ui)
         && let Some(seen) = sighted.iter().find(|s| s.subject.is(&chosen))
     {
-        picked.selected = Some(mark(seen));
+        // Marked against the middle of the view rather than the cursor: a selection stands
+        // whether or not anyone is pointing at it.
+        picked.selected = Some(mark(seen, viewport, viewport * 0.5));
     }
 }
 
@@ -171,22 +207,45 @@ fn survey(
 fn selected(ui: &Ui) -> Option<Subject> {
     match &ui.focus {
         Some(Target::Body(name)) => Some(Subject::Body(name.clone())),
-        // A band is not a point and gets no reticle until swarms are picked.
-        Some(Target::Band(_)) => None,
+        Some(Target::Band(index)) => Some(Subject::Swarm(*index, String::new())),
         // Matched on the identifier alone; the name rides along for the label.
         None => ui.selected.map(|id| Subject::Star(id, String::new())),
     }
 }
 
-fn mark(seen: &Sighted) -> Mark {
+/// A mark on `seen`, anchored at whatever part of it is nearest `toward`.
+fn mark(seen: &Sighted, viewport: Vec2, toward: Vec2) -> Mark {
+    let clip = match &seen.outline {
+        Some(outline) => nearest_sample(outline, viewport, toward).unwrap_or(seen.clip),
+        None => seen.clip,
+    };
     Mark {
-        clip: seen.clip,
+        clip,
         radius_px: seen.radius_px,
         label: match &seen.subject {
             Subject::Body(name) => name.clone(),
-            Subject::Star(_, name) => name.clone(),
+            Subject::Star(_, name) | Subject::Swarm(_, name) => name.clone(),
         },
+        outline: seen.outline.clone(),
     }
+}
+
+/// The sample of `outline` that lands nearest `toward` on screen.
+///
+/// Clip space out as well as in, so a marker can be placed from it by the same path as anything
+/// else — including the edge arrow, when the whole curve is behind the camera. Sample accuracy
+/// is enough for an anchor; picking uses the segments.
+fn nearest_sample(outline: &[Vec4], viewport: Vec2, toward: Vec2) -> Option<Vec4> {
+    outline
+        .iter()
+        .filter(|clip| clip.w > 0.0)
+        .map(|clip| {
+            let ndc = Vec2::new(clip.x / clip.w, clip.y / clip.w);
+            let at = Vec2::new((ndc.x + 1.0) * 0.5 * viewport.x, (1.0 - ndc.y) * 0.5 * viewport.y);
+            (toward.distance(at), *clip)
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, clip)| clip)
 }
 
 /// A simulation-space *direction* in clip space.
@@ -228,6 +287,7 @@ fn sight(
             clip: project(offset.normalize_or_zero()),
             radius_px: radius_px.max(0.0),
             rank: rank::BODY,
+            outline: None,
         });
     }
 
@@ -245,10 +305,73 @@ fn sight(
             clip: project(direction),
             radius_px: 0.0,
             rank: rank::STAR,
+            outline: None,
         });
     }
 
+    // A swarm is a shell about the star, not a ring, so it has no silhouette to click. What it
+    // does have is its own orbit circle: the radius its elements sit at, in its own plane.
+    // Seen from outside that projects to an ellipse and from inside it wraps right round, and
+    // the same curve serves as the skeleton drawn on hover and as the thing the cursor is
+    // measured against.
+    if let Some(system) = game.system.as_ref() {
+        let star = system.star_position_at(game.coordinate_time_s()).unwrap_or(ship);
+        for (index, population) in system.populations.iter().enumerate() {
+            if !crate::envelope::visible(population) {
+                continue;
+            }
+            let outline: Vec<Vec4> = swarm_circle(star, ship, population)
+                .into_iter()
+                .map(&project)
+                .collect();
+            if outline.len() < 2 {
+                continue;
+            }
+            out.push(Sighted {
+                subject: Subject::Swarm(index, swarm_name(population)),
+                // Filled in against the cursor; a circle has no one place it is.
+                clip: outline[0],
+                radius_px: 0.0,
+                rank: rank::SWARM,
+                outline: Some(outline),
+            });
+        }
+    }
+
     out
+}
+
+/// What the interface calls a population, matching its row in the system list.
+fn swarm_name(population: &lc_world::population::Population) -> String {
+    let radius = population.thermal_radius();
+    format!(
+        "{} at {:.1} AU",
+        if lc_world::navigation::is_flat(population) { "belt" } else { "cloud" },
+        radius / lc_world::navigation::AU,
+    )
+}
+
+/// The population's own orbit circle, as directions from the ship.
+///
+/// Sampled in the population's plane at its thermal radius, which is the radius its light
+/// comes from. Closed: the last point repeats the first, so the curve has no seam.
+fn swarm_circle(
+    star_ly: DVec3,
+    ship_ly: DVec3,
+    population: &lc_world::population::Population,
+) -> Vec<DVec3> {
+    let radius_m = population.thermal_radius();
+    if radius_m <= 0.0 {
+        return Vec::new();
+    }
+    let (u, v) = lc_world::navigation::basis(population.pole);
+    let centre = (star_ly - ship_ly) * M_PER_LY;
+    (0..=SWARM_SAMPLES)
+        .map(|i| {
+            let theta = std::f64::consts::TAU * i as f64 / SWARM_SAMPLES as f64;
+            centre + (u * theta.cos() + v * theta.sin()) * radius_m
+        })
+        .collect()
 }
 
 /// Paint the marks.
@@ -294,6 +417,10 @@ const HOVER: egui::Color32 = egui::Color32::from_rgb(150, 170, 190);
 const SELECTED: egui::Color32 = egui::Color32::from_rgb(235, 200, 120);
 const LABEL_SIZE: f32 = 12.0;
 
+/// How much fainter a swarm's skeleton is than the mark on it. The curve is long and would
+/// otherwise read as the brightest thing in the sky.
+const SKELETON_FADE: f32 = 0.45;
+
 /// Every visible floating area, as rectangles to keep marks out of.
 ///
 /// Docked panels are not areas and do not appear here; they are already out of
@@ -327,6 +454,16 @@ fn paint(
     bracketed: bool,
 ) {
     let stroke = egui::Stroke::new(1.0_f32, colour);
+
+    // The skeleton first, under whatever marks the anchor. A swarm is a shell and has no
+    // outline of its own on screen; this is the circle its elements are drawn from, which is
+    // the only line in it a player can be said to be pointing at.
+    if let Some(outline) = &mark.outline {
+        let faint = egui::Stroke::new(1.0_f32, colour.gamma_multiply(SKELETON_FADE));
+        let runs = reticle::project_path(outline, viewport);
+        draw_segments(painter, &reticle::path_segments(&runs), faint);
+    }
+
     let (anchor, radius_px, preferred) =
         match reticle::place(mark.clip, mark.radius_px, viewport, frame) {
         Marker::On { at, radius_px } => {

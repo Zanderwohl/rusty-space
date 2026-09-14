@@ -60,6 +60,10 @@ Each of these cost real time. None of them are visible from the code that hits t
 
 **Rendering**
 
+- Projecting a *path* by projecting each point and dropping the ones behind the camera draws a
+  **chord**: the two survivors either side of the gap get joined, and a ring seen from inside it
+  acquires a straight line across the view that no ring has. Cut the segments at the camera
+  plane instead — `em_ui::reticle::project_path`.
 - `Camera::world_to_viewport` **errors** for anything behind the camera, so nothing built on it
   can point at what is behind you. Work in clip space and keep `w`: `clip.w` is `-view.z`, so
   behind the camera it is negative while `clip.x` keeps the sign of `view.x`. Dividing anyway
