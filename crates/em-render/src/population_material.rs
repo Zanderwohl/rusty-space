@@ -74,7 +74,8 @@ impl Material for PopulationMaterial {
     ) -> Result<(), SpecializedMeshPipelineError> {
         let vertex_layout = layout.0.get_layout(&[
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
-            ATTRIBUTE_SHELL_DENSITY.at_shader_location(1),
+            Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
+            ATTRIBUTE_SHELL_DENSITY.at_shader_location(2),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         // Both faces: the ship is usually inside the shell looking out through the far side.

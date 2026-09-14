@@ -28,10 +28,19 @@ pub const DEFAULT_ALBEDO: f64 = 0.3;
 /// The catalogue name of the system whose data is real rather than generated.
 pub const SOL: &str = "Sol";
 
+/// A body's rings, as the renderer wants them.
+#[derive(Clone, Copy, Debug)]
+pub struct Rings {
+    pub system: &'static lc_world::rings::RingSystem,
+    /// Unit normal of the ring plane, simulation axes.
+    pub pole: DVec3,
+}
+
 /// One body, as the renderer wants it.
 #[derive(Clone, Debug)]
 pub struct Drawable {
     pub name: String,
+    pub rings: Option<Rings>,
     /// Where it is, light-years from the world origin, simulation axes.
     pub position_ly: DVec3,
     pub radius_m: f64,
@@ -123,15 +132,43 @@ impl LocalSystem {
                 if radius_m <= 0.0 || distance_m <= 0.0 {
                     return None;
                 }
-                let phase = phase_factor(star_at - at, observer_m - at);
+                let to_star = star_at - at;
+                let to_observer = observer_m - at;
+                let phase = phase_factor(to_star, to_observer);
+
+                // The rings are found by the body's `em-sim` id, and their plane is that body's
+                // own pole out of the preset's IAU rotation. A second copy of a pole here would
+                // be a second chance to have it wrong.
+                let rings = lc_world::rings::for_body(self.sim.name(i)).and_then(|system| {
+                    pole_of(self.sim.rotation(i)?).map(|pole| Rings { system, pole })
+                });
+
+                // What actually reflects: the lit disc, plus whatever of the rings is turned
+                // toward both the star and the observer.
+                let mut area = std::f64::consts::PI * radius_m * radius_m * phase;
+                let mut albedo = DEFAULT_ALBEDO;
+                if let Some(rings) = rings {
+                    let lit = rings.pole.dot(to_star.normalize_or_zero()).abs();
+                    let seen = rings.pole.dot(to_observer.normalize_or_zero()).abs();
+                    let ring_area = rings.system.cross_section_m2() * lit * seen;
+                    if ring_area > 0.0 {
+                        // One albedo for the pair, weighted by what each contributes. Saturn's
+                        // ice is brighter than Saturn.
+                        let total = area + ring_area;
+                        albedo = (albedo * area + rings.system.albedo * ring_area) / total;
+                        area = total;
+                    }
+                }
+
                 Some(Drawable {
                     name: self.sim.info(i).name.clone().unwrap_or_else(|| self.sim.name(i).into()),
+                    rings,
                     position_ly: self.origin_ly + at / M_PER_LY,
                     radius_m,
-                    effective_radius_m: effective_radius(
+                    effective_radius_m: effective_radius_from_area(
                         self.star_radius_m,
-                        radius_m,
-                        DEFAULT_ALBEDO * phase,
+                        area,
+                        albedo,
                         distance_m,
                     ),
                     equilibrium_k: equilibrium_temperature(self.star_luminosity_w, distance_m),
@@ -156,10 +193,39 @@ impl LocalSystem {
 /// strongly coloured albedo — Mars — comes out the star's colour rather than its own, and that
 /// is the approximation being made.
 pub fn effective_radius(star_radius_m: f64, radius_m: f64, albedo: f64, distance_m: f64) -> f64 {
-    if distance_m <= 0.0 || albedo <= 0.0 {
+    effective_radius_from_area(
+        star_radius_m,
+        std::f64::consts::PI * radius_m * radius_m,
+        albedo,
+        distance_m,
+    )
+}
+
+/// The same, for a reflector of any shape: `R_eff = R_star sqrt(p A / pi) / d`.
+///
+/// Taking an area rather than a radius is what lets a ringed planet be one source. Saturn's
+/// rings reflect a few times what Saturn does when they are open, and nothing about that is a
+/// sphere.
+pub fn effective_radius_from_area(
+    star_radius_m: f64,
+    area_m2: f64,
+    albedo: f64,
+    distance_m: f64,
+) -> f64 {
+    if distance_m <= 0.0 || albedo <= 0.0 || area_m2 <= 0.0 {
         return 0.0;
     }
-    star_radius_m * radius_m * albedo.sqrt() / distance_m
+    star_radius_m * (albedo * area_m2 / std::f64::consts::PI).sqrt() / distance_m
+}
+
+/// A body's pole, from whichever way its rotation is described.
+pub fn pole_of(rotation: &em_sim::body::BodyRotation) -> Option<DVec3> {
+    use em_sim::body::RotationMode;
+    let pole = match &rotation.mode {
+        RotationMode::Spinning { orientation_at_epoch, .. } => *orientation_at_epoch * DVec3::Z,
+        RotationMode::TidallyLocked { pole, .. } => *pole,
+    };
+    (pole.length_squared() > 0.0).then(|| pole.normalize())
 }
 
 /// Lambert phase function: how much of a lit sphere is turned toward the observer.
@@ -337,5 +403,68 @@ mod tests {
         }
         // And the Moon, which is the brightest of all from here.
         assert!(top.contains(&"Luna") || top.contains(&"Moon"), "{top:?}");
+    }
+
+    /// The 0.7 magnitude that was missing when Saturn was a bare sphere. Its rings reflect a
+    /// few times what the planet does when they are open, and nothing at all when edge-on.
+    #[test]
+    fn saturns_rings_brighten_it_and_the_tilt_decides_by_how_much() {
+        let Some(provider) = catalogue() else { return };
+        let Some(sun) = provider.stars().iter().find(|s| s.name.as_deref() == Some(SOL)) else {
+            return;
+        };
+        let mut sys = LocalSystem::for_star(sun).unwrap();
+        sys.advance_to(0.0);
+
+        let saturn = sys
+            .drawables(sun.position_ly)
+            .into_iter()
+            .find(|d| d.name == "Saturn")
+            .expect("the preset carries Saturn");
+        let rings = saturn.rings.expect("and Saturn has rings");
+        assert!(rings.pole.is_normalized());
+
+        // Saturn's obliquity is 26.7 degrees, so its pole is well off the ecliptic.
+        let tilt = rings.pole.dot(DVec3::Z).acos().to_degrees();
+        assert!((tilt - 26.7).abs() < 3.0, "obliquity came out {tilt} degrees");
+
+        // Bare sphere against sphere plus rings, at the same place.
+        let bare = effective_radius(6.957e8, saturn.radius_m, DEFAULT_ALBEDO, 9.583 * AU);
+        assert!(saturn.effective_radius_m > bare, "rings should add light");
+        let magnitudes = -2.5 * (saturn.effective_radius_m / bare).powi(2).log10();
+        assert!(magnitudes < -0.3, "rings should be worth real brightness: {magnitudes}");
+    }
+
+    #[test]
+    fn a_ring_seen_edge_on_reflects_nothing() {
+        let s = lc_world::rings::for_body("Saturn").unwrap();
+        // The formula's two cosines: face-on is the whole cross-section, edge-on is none.
+        let face = s.cross_section_m2() * 1.0 * 1.0;
+        let edge = s.cross_section_m2() * 0.0 * 1.0;
+        assert!(face > 0.0);
+        assert_eq!(edge, 0.0);
+        assert_eq!(effective_radius_from_area(6.957e8, 0.0, 0.5, AU), 0.0);
+    }
+
+    /// The area form and the radius form have to be the same function.
+    #[test]
+    fn the_area_and_radius_forms_agree_for_a_sphere() {
+        let r = 6.9911e7;
+        let a = std::f64::consts::PI * r * r;
+        let by_radius = effective_radius(6.957e8, r, 0.538, 5.204 * AU);
+        let by_area = effective_radius_from_area(6.957e8, a, 0.538, 5.204 * AU);
+        assert!((by_radius / by_area - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_body_without_rings_has_none_and_is_unaffected() {
+        let Some(provider) = catalogue() else { return };
+        let Some(sun) = provider.stars().iter().find(|s| s.name.as_deref() == Some(SOL)) else {
+            return;
+        };
+        let mut sys = LocalSystem::for_star(sun).unwrap();
+        sys.advance_to(0.0);
+        let earth = sys.drawables(sun.position_ly).into_iter().find(|d| d.name == "Earth").unwrap();
+        assert!(earth.rings.is_none());
     }
 }

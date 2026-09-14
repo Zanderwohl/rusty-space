@@ -13,6 +13,7 @@ pub mod instrument;
 pub mod observation;
 pub mod occluder;
 pub mod population;
+pub mod rings;
 pub mod rng;
 pub mod shell;
 pub mod sky;

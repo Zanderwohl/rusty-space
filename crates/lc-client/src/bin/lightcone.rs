@@ -55,8 +55,11 @@ fn main() {
         actions.push(Action::FlyToNearest);
     }
     let dev = DevEntry {
-        observe_immediately: flag("--observe").is_some() || flag("--shot").is_some(),
+        observe_immediately: flag("--observe").is_some()
+            || flag("--shot").is_some()
+            || flag("--at").is_some(),
         target_swarm: flag("--swarm").is_some(),
+        at_body: flag("--at").and_then(|i| args.get(i + 1).cloned()),
         screenshot: flag("--shot").and_then(|i| args.get(i + 1).cloned()),
         after_frames: value::<u32>(&args, "--frames").unwrap_or(120),
         actions,

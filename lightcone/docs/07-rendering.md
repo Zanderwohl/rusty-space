@@ -324,6 +324,34 @@ band near the plane and it reads as a ring; an isotropic swarm's is flat and it 
 sphere. Nothing special-cases either, and the mesh is built from the inclination distribution
 alone, so it is static — what changes as the ship moves is the transform.
 
+### Rings
+
+![Saturn](../images/rings.png)
+
+A ring is not a shell. It has radial structure and no latitude, so it gets a flat annulus with
+each vertex's opacity from the optical depth *at that radius*. Saturn's rings span a factor of
+1.8 in radius with a division in the middle that is the most recognisable thing about them;
+drawn as a shell at one radius they would be a circle.
+
+Both shapes go through one material, and the difference is a vertex normal: a shell's is its own
+direction, a ring's is the pole. Passing it rather than deriving it is the whole of the change,
+and it gets the limb term right for both — an edge-on ring has a normal across the view and
+lights up, which is correct.
+
+The data is in `lc_world::rings`: band radii from IAU and Cassini results, optical depths
+area-averaged per band. Poles are *not* there — `em-sim`'s presets already carry every body's
+IAU rotation, and a second copy of a pole is a second chance to have it wrong.
+
+Rings take no display gain, unlike a population. The gain exists because even a Kuiper belt is a
+trace; Saturn's rings cover a third of their own annulus and need no help. Applied to them it
+rendered Jupiter's — three parts per million, and it took Voyager to find them — at a fifth
+opacity.
+
+Rings also reflect, which is why `effective_radius` takes an *area* rather than a radius. Saturn
+plus rings is one source with one effective radius, and the ring contribution carries two
+cosines: how much of it is turned toward the star, and how much toward the observer. Edge-on it
+contributes nothing, which is the real 1.1 magnitude swing over Saturn's ring cycle.
+
 ### Two numbers that had to be found by looking
 
 **The opacity mapping is a fourth root.** Covering fraction spans fourteen decades: an asteroid

@@ -8,8 +8,9 @@
 // and it reads as a sphere. Nothing special-cases either.
 //
 // Per-vertex:
-//   POSITION : unit direction in the population's frame; the transform scales and orients it
-//   DENSITY  : sky density at that latitude, with the peak at one
+//   POSITION : the surface in the population's own frame, with the transform scaling it
+//   NORMAL   : the surface normal there -- its own direction for a shell, the pole for a ring
+//   DENSITY  : density there, with the peak at one
 //
 // See lightcone/docs/07-rendering.md.
 
@@ -22,14 +23,16 @@
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
     @location(0) position: vec3<f32>,
-    @location(1) density: f32,
+    @location(1) normal: vec3<f32>,
+    @location(2) density: f32,
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) world_position: vec3<f32>,
     @location(1) local_direction: vec3<f32>,
-    @location(2) density: f32,
+    @location(2) normal: vec3<f32>,
+    @location(3) density: f32,
 }
 
 struct PopulationUniform {
@@ -88,6 +91,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.world_position = world.xyz;
     out.clip_position = position_world_to_clip(world.xyz);
     out.local_direction = normalize(vertex.position);
+    out.normal = normalize(mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex.instance_index));
     out.density = vertex.density;
     return out;
 }
@@ -98,9 +102,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let to_camera = normalize(view.world_position.xyz - in.world_position);
-    // The shell's normal is its own direction, which is what makes this cheap: a sphere's
-    // normal at a point is the point.
-    let facing = abs(dot(in.local_direction, to_camera));
+    // A shell's normal is its own direction; a ring's is its pole. Passing it rather than
+    // deriving it is what lets one shader draw both, and it is the whole of the difference: an
+    // edge-on ring has a normal across the view and lights up, which is correct.
+    let facing = abs(dot(in.normal, to_camera));
     let limb = 1.0 + material.limb_gain * (1.0 / max(facing, 0.08) - 1.0);
 
     let speckle = mix(1.0, grain(in.local_direction, material.seed), material.grain_strength);

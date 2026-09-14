@@ -50,6 +50,9 @@ pub struct DevEntry {
     pub observe_immediately: bool,
     /// Point at the nearest star carrying a swarm, for showing the thing off.
     pub target_swarm: bool,
+    /// Put the ship beside a body of the local system, by name. There is no action for this and
+    /// there never will be; it exists so a thing too small to fly to can be looked at.
+    pub at_body: Option<String>,
     pub screenshot: Option<String>,
     /// Frames to let the sky settle before the shutter. Pipelines compile lazily.
     pub after_frames: u32,
@@ -88,6 +91,7 @@ impl Plugin for ClientPlugin {
                 (
                     boot.run_if(in_state(AppState::Boot)),
                     photograph.run_if(in_state(AppState::InGame)),
+                    place_at_body.run_if(in_state(AppState::InGame)),
                     (read_keys, grab_cursor, look_around).chain().run_if(in_state(AppState::InGame)),
                     dispatch,
                     // The clock is deliberately not gated on any panel or overlay. See
@@ -197,6 +201,32 @@ fn run_dev_actions(dev: Res<DevEntry>, game: Res<Game>, mut out: MessageWriter<R
             out.write(Requested(Action::SelectTarget(Some(id))));
         }
     }
+}
+
+/// Development entry: stand off from a named body, once its system has loaded.
+fn place_at_body(
+    dev: Res<DevEntry>,
+    bodies: Res<crate::starfield::Bodies>,
+    mut game: ResMut<Game>,
+    mut ui: ResMut<Ui>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    let Some(want) = &dev.at_body else { return };
+    let Some(body) = bodies.drawn.iter().find(|d| &d.name == want) else { return };
+    // Far enough out that the body is a disc rather than a wall. Rings reach a couple of
+    // planetary radii, so this has to clear them.
+    let stand_off = body.radius_m * 12.0 / crate::system::M_PER_LY;
+    let from_star = (body.position_ly - bodies.system.as_ref().map(|s| s.origin_ly).unwrap_or_default())
+        .normalize_or_zero();
+    game.place_at(body.position_ly + from_star * stand_off);
+    if let Some(look) = crate::ui::Look::aimed_at(-from_star) {
+        ui.look = look;
+    }
+    ui.notify(format!("standing off {want}"), game.coordinate_time_s());
+    *done = true;
 }
 
 /// Photograph the sky through the real pipeline, then quit.

@@ -165,7 +165,7 @@ fn debug(
             sky.distant.count, sky.local.count, sky.bodies.count
         ));
     }
-    match bodies.and_then(|b| b.0.as_ref()) {
+    match bodies.and_then(|b| b.system.as_ref()) {
         Some(system) => ui.label(format!("in {} — {} bodies loaded", system.star_name, system.len())),
         None => ui.label("between systems"),
     };

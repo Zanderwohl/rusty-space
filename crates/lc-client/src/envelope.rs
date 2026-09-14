@@ -29,7 +29,12 @@ pub const SEGMENTS: usize = 96;
 pub const OPACITY_GAIN: f32 = 8.0;
 
 /// What a shell is dimmed to when the ship is inside it.
-pub const INSIDE_FADE: f32 = 0.22;
+///
+/// Low, because "inside" spans a lot of ground. At one astronomical unit the Kuiper shell is
+/// forty times further out than the ship and reads as an even wash; at Uranus it is barely
+/// twice as far, lines of sight through it are oblique, and at a fade that suited the first
+/// case it became a grey barrel filling the frame.
+pub const INSIDE_FADE: f32 = 0.09;
 
 /// Below this covering fraction a population is not drawn at all.
 ///
@@ -61,6 +66,15 @@ pub fn opacity_of(covering: f64) -> f32 {
 #[derive(Component)]
 pub struct EnvelopeMesh;
 
+/// A ring system, which unlike a population is attached to a body and therefore moves.
+#[derive(Component)]
+pub struct RingMesh {
+    /// The body's name, to find it again in this frame's drawables.
+    pub body: String,
+    /// Outer radius in render units.
+    pub radius: f32,
+}
+
 /// One population, as something to draw.
 pub struct Shell {
     pub mesh: Handle<Mesh>,
@@ -76,6 +90,7 @@ pub struct Shell {
 /// the ship moves is the transform, never the mesh.
 pub fn build_shell(population: &Population) -> Mesh {
     let mut positions = Vec::with_capacity((RINGS + 1) * (SEGMENTS + 1));
+    let mut normals = Vec::with_capacity(positions.capacity());
     let mut density = Vec::with_capacity(positions.capacity());
     let mut indices = Vec::with_capacity(RINGS * SEGMENTS * 6);
 
@@ -97,7 +112,10 @@ pub fn build_shell(population: &Population) -> Mesh {
             let (st, ct) = theta.sin_cos();
             // The population's own frame: its pole is +Z, and the transform turns it.
             let dir = DVec3::new(cp * ct, cp * st, sp);
-            positions.push(sim_to_render(dir).as_vec3().to_array());
+            let p = sim_to_render(dir).as_vec3().to_array();
+            positions.push(p);
+            // A sphere's normal at a point is the point.
+            normals.push(p);
             density.push(at);
         }
     }
@@ -113,6 +131,61 @@ pub fn build_shell(population: &Population) -> Mesh {
 
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::RENDER_WORLD);
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(ATTRIBUTE_SHELL_DENSITY, density);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
+/// Radial divisions of a ring. Enough that the Cassini Division is a gap rather than a hint.
+pub const RADIAL: usize = 96;
+
+/// A flat annulus carrying each vertex's optical depth, normalised so the deepest band is one.
+///
+/// A ring is not a shell: it has radial structure and no latitude. Drawing it as a shell at one
+/// radius would put Saturn's rings on a circle, and they span a factor of 1.8 in radius with a
+/// division in the middle that is the most recognisable thing about them.
+///
+/// Unit scale is the outer edge, so the transform is one number.
+pub fn build_ring(rings: &lc_world::rings::RingSystem) -> Mesh {
+    let (inner, outer) = (rings.inner_m(), rings.outer_m());
+    let peak = rings.bands.iter().map(|b| b.optical_depth).fold(0.0f64, f64::max);
+    let peak = peak.max(f64::MIN_POSITIVE);
+
+    let mut positions = Vec::with_capacity((RADIAL + 1) * (SEGMENTS + 1));
+    let mut normals = Vec::with_capacity(positions.capacity());
+    let mut density = Vec::with_capacity(positions.capacity());
+    let mut indices = Vec::with_capacity(RADIAL * SEGMENTS * 6);
+
+    let pole = sim_to_render(DVec3::Z).as_vec3().to_array();
+    for r in 0..=RADIAL {
+        let radius_m = inner + (outer - inner) * r as f64 / RADIAL as f64;
+        // Sampled at the midpoint of the step, so a band edge does not fall exactly on a
+        // vertex and vanish.
+        let at = (rings.depth_at(radius_m + (outer - inner) * 0.5 / RADIAL as f64) / peak) as f32;
+        let unit = radius_m / outer;
+        for s in 0..=SEGMENTS {
+            let theta = std::f64::consts::TAU * s as f64 / SEGMENTS as f64;
+            let (st, ct) = theta.sin_cos();
+            positions.push(sim_to_render(DVec3::new(unit * ct, unit * st, 0.0)).as_vec3().to_array());
+            // Flat: every normal is the pole.
+            normals.push(pole);
+            density.push(at);
+        }
+    }
+
+    let row = SEGMENTS + 1;
+    for r in 0..RADIAL {
+        for s in 0..SEGMENTS {
+            let a = (r * row + s) as u32;
+            let (b, c, d) = (a + 1, a + row as u32, a + row as u32 + 1);
+            indices.extend_from_slice(&[a, c, b, b, c, d]);
+        }
+    }
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::RENDER_WORLD);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(ATTRIBUTE_SHELL_DENSITY, density);
     mesh.insert_indices(Indices::U32(indices));
     mesh
@@ -207,6 +280,47 @@ pub fn spawn(
         .collect()
 }
 
+/// Spawn a ring for every body in the system that has one.
+fn spawn_rings(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<PopulationMaterial>,
+    drawn: &[crate::system::Drawable],
+    gain: f32,
+) {
+    for (i, body) in drawn.iter().enumerate() {
+        let Some(rings) = body.rings else { continue };
+        // Rings are solid and reflective rather than a shadow, so their opacity is what they
+        // cover of their own annulus, not of a sphere.
+        let annulus = std::f64::consts::PI * rings.system.outer_m().powi(2);
+        let covering = rings.system.cross_section_m2() / annulus.max(f64::MIN_POSITIVE);
+        // No display gain, unlike a population. The gain exists because even a Kuiper belt is
+        // a trace and would otherwise be nothing; Saturn's rings cover a third of their own
+        // annulus and need no help. Applying it here made Jupiter's rings -- three parts per
+        // million, and it took Voyager to find them -- render at a fifth opacity.
+        let _ = gain;
+        let uniform = PopulationUniform {
+            tint: Vec4::new(0.88, 0.84, 0.76, 1.0),
+            opacity: opacity_of(covering),
+            seed: i as f32 * 3.77 + 0.5,
+            // A ring is not a cloud: its texture is banding, not speckle.
+            grain_frequency: 12.0,
+            grain_strength: 0.35,
+            ..default()
+        };
+        commands.spawn((
+            Mesh3d(meshes.add(build_ring(rings.system))),
+            MeshMaterial3d(materials.add(PopulationMaterial { uniforms: uniform })),
+            Transform::default(),
+            NoFrustumCulling,
+            RingMesh {
+                body: body.name.clone(),
+                radius: (rings.system.outer_m() / UNIT_M) as f32,
+            },
+        ));
+    }
+}
+
 /// The envelopes currently drawn, and which system they belong to.
 #[derive(Resource, Default)]
 pub struct Envelopes {
@@ -223,35 +337,49 @@ pub fn update_envelopes(
     mut envelopes: ResMut<Envelopes>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<PopulationMaterial>>,
-    existing: Query<Entity, With<EnvelopeMesh>>,
-    mut placed: Query<&mut Transform, With<EnvelopeMesh>>,
+    existing: Query<Entity, Or<(With<EnvelopeMesh>, With<RingMesh>)>>,
+    mut placed: Query<&mut Transform, (With<EnvelopeMesh>, Without<RingMesh>)>,
+    mut ringed: Query<(&mut Transform, &RingMesh), Without<EnvelopeMesh>>,
 ) {
-    let here = bodies.0.as_ref().map(|s| s.star);
+    let here = bodies.system.as_ref().map(|s| s.star);
     if envelopes.star != here {
         for entity in &existing {
             commands.entity(entity).despawn();
         }
         envelopes.star = here;
-        envelopes.shells = match bodies.0.as_ref() {
-            Some(system) => spawn(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &system.populations,
-                ui.envelope_gain,
-            ),
+        envelopes.shells = match bodies.system.as_ref() {
+            Some(system) => {
+                spawn_rings(&mut commands, &mut meshes, &mut materials, &bodies.drawn, ui.envelope_gain);
+                spawn(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &system.populations,
+                    ui.envelope_gain,
+                )
+            }
             None => Vec::new(),
         };
         // Nothing is placed until next frame, when the spawns exist.
         return;
     }
 
-    let Some(system) = bodies.0.as_ref() else { return };
+    let Some(system) = bodies.system.as_ref() else { return };
     for (mut transform, shell) in placed.iter_mut().zip(&envelopes.shells) {
         transform.translation =
             sim_to_render((system.origin_ly - session.position_ly) * M_PER_LY / UNIT_M).as_vec3();
         transform.rotation = shell.orientation;
         transform.scale = Vec3::splat(shell.radius);
+    }
+
+    // Rings ride their body, so unlike a shell they are placed every frame.
+    for (mut transform, ring) in ringed.iter_mut() {
+        let Some(body) = bodies.drawn.iter().find(|d| d.name == ring.body) else { continue };
+        let Some(rings) = body.rings else { continue };
+        transform.translation =
+            sim_to_render((body.position_ly - session.position_ly) * M_PER_LY / UNIT_M).as_vec3();
+        transform.rotation = orientation(rings.pole);
+        transform.scale = Vec3::splat(ring.radius);
     }
 
     // The display gain is a knob, so it has to reach the material rather than only the spawn.
@@ -285,6 +413,13 @@ mod tests {
             cross_section: 3.0e6,
             band_response: em_spectra::PerBand::splat(1.0),
             radiating_ratio: Population::SPHERICAL,
+        }
+    }
+
+    fn normals(mesh: &Mesh) -> Vec<[f32; 3]> {
+        match mesh.attribute(Mesh::ATTRIBUTE_NORMAL).unwrap() {
+            bevy_mesh::VertexAttributeValues::Float32x3(v) => v.clone(),
+            _ => panic!("normals must be Float32x3"),
         }
     }
 
@@ -360,5 +495,49 @@ mod tests {
         assert_eq!(out.inside_fade, 1.0);
         assert!(inside.inside_fade < 0.5, "inside, a shell covers the whole sky");
         assert_eq!(out.opacity, inside.opacity, "only the fade differs, not the physics");
+    }
+
+    #[test]
+    fn a_ring_mesh_has_the_gaps_the_data_says_it_has() {
+        let saturn = lc_world::rings::for_body("Saturn").unwrap();
+        let mesh = build_ring(saturn);
+        let d = densities(&mesh);
+        assert!(d.iter().any(|v| *v > 0.99), "the B ring is the peak");
+        assert!(d.iter().any(|v| *v < 0.1 && *v > 0.0), "and the division is thin, not empty");
+
+        // Walking outward, the profile must rise, fall into the division and rise again.
+        let row = SEGMENTS + 1;
+        let profile: Vec<f32> = (0..=RADIAL).map(|r| d[r * row]).collect();
+        let peak = profile.iter().cloned().fold(0.0f32, f32::max);
+        let peak_at = profile.iter().position(|v| *v == peak).unwrap();
+        let after = &profile[peak_at..];
+        let dip = after.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(dip < peak / 5.0, "there should be a division past the B ring: {dip} vs {peak}");
+        assert!(after.iter().rev().take(10).any(|v| *v > dip * 3.0), "and an A ring past that");
+    }
+
+    #[test]
+    fn a_ring_is_flat_and_a_shell_is_not() {
+        let saturn = lc_world::rings::for_body("Saturn").unwrap();
+        let ring = normals(&build_ring(saturn));
+        let shell = normals(&build_shell(&population(Inclination::isotropic(), 1e6)));
+        let first = ring[0];
+        assert!(ring.iter().all(|n| *n == first), "every ring normal is the pole");
+        assert!(shell.iter().any(|n| *n != shell[0]), "a shell's normals point everywhere");
+    }
+
+    /// The four ring systems, in the order a person would rank them by eye.
+    #[test]
+    fn the_ring_systems_come_out_in_the_right_order() {
+        let drawn = |id: &str| {
+            let r = lc_world::rings::for_body(id).unwrap();
+            opacity_of(r.cross_section_m2() / (std::f64::consts::PI * r.outer_m().powi(2)))
+        };
+        let (saturn, uranus, neptune, jupiter) =
+            (drawn("Saturn"), drawn("Uranus"), drawn("Neptune"), drawn("Jupiter"));
+        assert!(saturn > 0.5, "Saturn's rings are the thing you see: {saturn}");
+        assert!(uranus < saturn * 0.5 && uranus > 0.05, "Uranus's are faint but real: {uranus}");
+        assert!(neptune < uranus, "Neptune's fainter still: {neptune}");
+        assert!(jupiter < 0.05, "and Jupiter's took Voyager to find: {jupiter}");
     }
 }

@@ -493,7 +493,12 @@ pub fn spawn_sky(
 
 /// The system the ship is inside, if it is inside one.
 #[derive(Resource, Default)]
-pub struct Bodies(pub Option<crate::system::LocalSystem>);
+pub struct Bodies {
+    pub system: Option<crate::system::LocalSystem>,
+    /// This frame's bodies. Kept so the envelope pass can place rings on them without
+    /// propagating the system a second time.
+    pub drawn: Vec<crate::system::Drawable>,
+}
 
 /// Load, propagate and re-mesh the local system's bodies.
 ///
@@ -507,25 +512,22 @@ pub fn update_bodies(
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let here = local_star(&session.0).map(|s| s.id);
-    if bodies.0.as_ref().map(|s| s.star) != here {
-        bodies.0 = local_star(&session.0).and_then(crate::system::LocalSystem::for_star);
+    if bodies.system.as_ref().map(|s| s.star) != here {
+        bodies.system = local_star(&session.0).and_then(crate::system::LocalSystem::for_star);
     }
 
     let origin = sky.origin_ly;
-    let points: Vec<Point> = match bodies.0.as_mut() {
+    let (drawn, teff) = match bodies.system.as_mut() {
         Some(system) => {
             // Coordinate time, not retarded. Inside a system the delay is minutes to hours and
             // moves a planet by far less than a pixel; between systems there is nothing to draw.
             system.advance_to(session.coordinate_time_s());
-            let teff = system.star_teff_k();
-            system
-                .drawables(session.position_ly)
-                .iter()
-                .map(|d| Point::body(d, teff))
-                .collect()
+            (system.drawables(session.position_ly), system.star_teff_k())
         }
-        None => Vec::new(),
+        None => (Vec::new(), 0.0),
     };
+    let points: Vec<Point> = drawn.iter().map(|d| Point::body(d, teff)).collect();
+    bodies.drawn = drawn;
 
     if points.len() == sky.bodies.count && points.is_empty() {
         return;

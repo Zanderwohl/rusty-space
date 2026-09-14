@@ -177,6 +177,15 @@ impl Session {
         self.cruise.as_ref()
     }
 
+    /// Put the ship somewhere, cutting any crossing. Development only: there is no action for
+    /// it and the server would never accept one.
+    pub fn place_at(&mut self, position_ly: DVec3) {
+        self.cruise = None;
+        self.beta = DVec3::ZERO;
+        self.position_ly = position_ly;
+        self.sync_observer();
+    }
+
     /// Cut the drive where it is. Leaves the ship coasting at whatever it had reached.
     pub fn abort_flight(&mut self) {
         self.cruise = None;
