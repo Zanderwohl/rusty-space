@@ -4255,6 +4255,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "lc-proto"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "lc-server"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "lc-proto",
+ "lc-spacetime",
+ "lc-store",
+]
+
+[[package]]
 name = "lc-spacetime"
 version = "0.1.0"
 dependencies = [

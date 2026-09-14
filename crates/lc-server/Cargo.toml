@@ -1,0 +1,13 @@
+[package]
+name = "lc-server"
+version = "0.1.0"
+edition = "2024"
+description = "The Lightcone server: the tick loop, intent validation and the single send gate."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[dependencies]
+lc-proto = { path = "../lc-proto" }
+lc-spacetime = { path = "../lc-spacetime" }
+lc-store = { path = "../lc-store" }
+glam = "0.30"

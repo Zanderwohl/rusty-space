@@ -49,6 +49,22 @@ on `(observer_id, arrive_t)`.
 Make this one function, in one place, with tests that assert the negative case. Every other
 send path calls it. Do not allow a second code path to emit to a socket.
 
+**Built as a type, not a convention.** `Cleared<Sighting>` has a private field and one
+constructor, `Cleared::clear`, which is the gate; `Outbound::Sightings` can hold nothing else.
+"There is no second path to a socket" is then a fact the compiler enforces rather than a rule a
+reviewer has to notice being broken, and the two `compile_fail` doctests on the type are what
+say so — one for a struct literal, one for a destructuring pattern.
+
+Two details the gate turns on:
+
+- **The causality test comes first.** Below the noise floor and still in flight are both
+  withheld, but a signal that is *both* is reported as in flight. The order matters because the
+  noise floor is a detection rule that a feature could one day want to relax, and the light cone
+  is not.
+- **Arrival times round up, never down.** Rounding a solved arrival down would put it a
+  microsecond before its true time and the gate would release it a microsecond early, which is
+  the only error this whole mechanism exists to prevent.
+
 ## Transport
 
 | target | primary | fallback |
@@ -81,6 +97,11 @@ The server advances coordinate time continuously at 8766x and processes in fixed
 real tick     = 50 ms  (20 Hz)
 coordinate dt = 50 ms * 8766 = 438 s of in-game time
 ```
+
+A client's cursor starts *before* everything rather than at the current time. "Told everything
+up to now" would swallow an event stamped at exactly now — a ship's own act, on the tick it
+acts — and the same start is what serves a brand-new client, which is the catch-up path run
+from the beginning.
 
 Per tick:
 
