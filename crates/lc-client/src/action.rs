@@ -9,6 +9,7 @@ use em_spectra::{Band, presets};
 use lc_world::sky::StarId;
 
 use crate::session::Session;
+use crate::starfield::PointStyle;
 use crate::ui::{Look, MenuPage, Panel, UiState};
 
 /// Everything the interface can be asked to do.
@@ -52,6 +53,12 @@ pub enum Action {
     AbortFlight,
     /// Proper acceleration for the next crossing, in g.
     SetDriveAccel(f64),
+
+    // --- appearance -------------------------------------------------------------------
+    /// Replace a starfield pass's drawing parameters. Carries the whole style rather than one
+    /// field, so a slider being dragged is one action a frame and the panel stays stateless.
+    SetPointStyle { local: bool, style: PointStyle },
+    ResetPointStyle { local: bool },
 
     // --- development ------------------------------------------------------------------
     ToggleGodView,
@@ -167,6 +174,18 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::SetDriveAccel(g) => {
             session.drive.accel_g = g.clamp(MIN_ACCEL_G, MAX_ACCEL_G);
             effects.push(Effect::Notify(format!("drive set to {:.0} g", session.drive.accel_g)));
+        }
+
+        Action::SetPointStyle { local, style } => {
+            *if local { &mut ui.local } else { &mut ui.distant } = style;
+        }
+        Action::ResetPointStyle { local } => {
+            if local {
+                ui.local = crate::starfield::LOCAL;
+            } else {
+                ui.distant = crate::starfield::DISTANT;
+            }
+            effects.push(Effect::Notify("starfield reset".into()));
         }
 
         Action::ToggleGodView => {
@@ -602,5 +621,45 @@ mod tests {
         apply(Action::SelectTarget(Some(last)), &mut ui, &mut s);
         assert!(s.target(last).is_some(), "pointing at a star should model it");
         assert!(s.observe(1.0e4).is_some());
+    }
+
+    #[test]
+    fn a_tuning_change_reaches_the_pass_it_names_and_not_the_other() {
+        let (mut ui, mut s) = fixture();
+        let mut style = ui.local;
+        style.corona_frequency = 3.0;
+        apply(Action::SetPointStyle { local: true, style }, &mut ui, &mut s);
+        assert_eq!(ui.local.corona_frequency, 3.0);
+        assert_eq!(ui.distant.corona_frequency, crate::starfield::DISTANT.corona_frequency);
+    }
+
+    #[test]
+    fn resetting_restores_the_shipped_values() {
+        let (mut ui, mut s) = fixture();
+        for local in [true, false] {
+            let mut style = if local { ui.local } else { ui.distant };
+            style.brightness = 99.0;
+            apply(Action::SetPointStyle { local, style }, &mut ui, &mut s);
+            apply(Action::ResetPointStyle { local }, &mut ui, &mut s);
+        }
+        assert_eq!(ui.local, crate::starfield::LOCAL);
+        assert_eq!(ui.distant, crate::starfield::DISTANT);
+    }
+
+    /// A knob with no slider is a knob nobody finds. The panel is built from this table, so the
+    /// check is that the table covers the style rather than that the panel does.
+    #[test]
+    fn every_tunable_field_is_reachable_and_its_default_is_inside_its_range() {
+        let mut style = crate::starfield::LOCAL;
+        let mut seen: Vec<*const f32> = Vec::new();
+        for (name, field, lo, hi) in crate::starfield::KNOBS {
+            assert!(lo < hi, "{name} has an empty range");
+            let at = field(&mut style);
+            assert!(*at >= lo && *at <= hi, "{name} ships at {at}, outside {lo}..{hi}");
+            let ptr = at as *const f32;
+            assert!(!seen.contains(&ptr), "{name} is bound to a field another knob already has");
+            seen.push(ptr);
+        }
+        assert!(seen.len() >= 10, "only {} knobs reached", seen.len());
     }
 }

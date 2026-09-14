@@ -38,6 +38,9 @@ fn main() {
     if let Some(rate) = value::<f64>(&args, "--rate") {
         actions.push(Action::SetTimeRate(rate));
     }
+    if flag("--tune").is_some() {
+        actions.push(Action::OpenPanel(lc_client::ui::Panel::Tuning));
+    }
     if flag("--watch").is_some() || flag("--swarm").is_some() {
         actions.push(Action::SelectNearest);
         actions.push(Action::OpenPanel(lc_client::ui::Panel::Telescope));

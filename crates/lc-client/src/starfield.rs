@@ -66,11 +66,42 @@ pub struct PointStyle {
     pub brightness: f32,
     /// How much of the output the glare carries, against the source itself.
     pub halo_gain: f32,
+    /// Exponent of the glare's power-law falloff from the source.
+    pub halo_falloff: f32,
     /// How much angular structure the glare carries. Zero leaves it a smooth halo.
     pub corona_strength: f32,
-    /// Filaments per radian of sky.
+    /// Filaments per radian of sky. Halving it halves their number and doubles their width.
     pub corona_frequency: f32,
+    /// Shortest streamer, and how much longer the longest is, as fractions of the quad.
+    pub corona_reach_min: f32,
+    pub corona_reach_span: f32,
+    /// Width of the fade at a streamer's tip.
+    pub corona_fade: f32,
+    /// Brightness between the streamers, and how much they add on top.
+    pub corona_floor: f32,
+    pub corona_gain: f32,
 }
+
+/// Every knob, with the range a slider should offer and whether it is a corona setting.
+///
+/// A table rather than a hand-written panel: a knob that exists and has no slider is a knob
+/// nobody finds, and the two drift apart the moment one is added.
+pub const KNOBS: [(&str, fn(&mut PointStyle) -> &mut f32, f32, f32); 14] = [
+    ("min radius px", |s| &mut s.min_px, 0.5, 40.0),
+    ("max radius px", |s| &mut s.max_px, 1.0, 120.0),
+    ("glare per stop", |s| &mut s.glow_radius_gain, 0.0, 4.0),
+    ("brightness", |s| &mut s.brightness, 0.0, 6.0),
+    ("overflow per stop", |s| &mut s.overflow_gain, 0.0, 6.0),
+    ("halo gain", |s| &mut s.halo_gain, 0.0, 2.0),
+    ("halo falloff", |s| &mut s.halo_falloff, 0.4, 4.0),
+    ("corona strength", |s| &mut s.corona_strength, 0.0, 1.0),
+    ("corona frequency", |s| &mut s.corona_frequency, 1.0, 60.0),
+    ("reach shortest", |s| &mut s.corona_reach_min, 0.0, 0.9),
+    ("reach spread", |s| &mut s.corona_reach_span, 0.0, 0.9),
+    ("tip fade", |s| &mut s.corona_fade, 0.02, 0.8),
+    ("corona floor", |s| &mut s.corona_floor, 0.0, 1.5),
+    ("corona contrast", |s| &mut s.corona_gain, 0.0, 4.0),
+];
 
 /// The background. Small, tight, and it must stay readable as a field of thousands.
 pub const DISTANT: PointStyle = PointStyle {
@@ -81,8 +112,14 @@ pub const DISTANT: PointStyle = PointStyle {
     brightness: 1.2,
     halo_gain: 0.25,
     // Nothing three pixels across has visible structure, and noise at that size is a shimmer.
+    halo_falloff: 1.9,
     corona_strength: 0.0,
-    corona_frequency: 0.0,
+    corona_frequency: 11.0,
+    corona_reach_min: 0.2,
+    corona_reach_span: 0.5,
+    corona_fade: 0.28,
+    corona_floor: 0.22,
+    corona_gain: 1.45,
 };
 
 /// A star whose system the ship is inside. Allowed to dominate the screen, because it does.
@@ -95,10 +132,16 @@ pub const LOCAL: PointStyle = PointStyle {
     overflow_gain: 2.0,
     brightness: 1.6,
     halo_gain: 0.22,
+    halo_falloff: 1.25,
     corona_strength: 0.95,
     // Streamers per radian of sky. Halving this halves their number and doubles their width,
     // which is the single lever that matters for how a corona reads.
     corona_frequency: 11.0,
+    corona_reach_min: 0.20,
+    corona_reach_span: 0.50,
+    corona_fade: 0.28,
+    corona_floor: 0.22,
+    corona_gain: 1.45,
 };
 
 /// Inside this of a star, the ship is in its system and the star is drawn as an object rather
@@ -124,8 +167,12 @@ const QUAD: [[f32; 2]; 4] = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]
 pub struct Pass {
     pub mesh: Handle<Mesh>,
     pub material: Handle<RelativisticStarfieldMaterial>,
-    pub style: PointStyle,
+    /// Which style this pass takes from the interface.
+    pub local: bool,
     pub count: usize,
+    /// What was last uploaded, so an unchanged frame writes nothing. Reaching for `get_mut`
+    /// marks the asset changed whether or not anything differs, and re-uploads the buffer.
+    pub sent: RelativisticStarfieldUniform,
 }
 
 /// Where the current meshes were baked, and what is drawing them.
@@ -266,6 +313,12 @@ pub fn uniforms(
         halo_gain: style.halo_gain,
         corona_strength: style.corona_strength,
         corona_frequency: style.corona_frequency,
+        halo_falloff: style.halo_falloff,
+        corona_reach_min: style.corona_reach_min,
+        corona_reach_span: style.corona_reach_span,
+        corona_fade: style.corona_fade,
+        corona_floor: style.corona_floor,
+        corona_gain: style.corona_gain,
         log_t_min: LOG_T_MIN,
         log_t_scale: lut_scale,
         lut_samples: LUT_SAMPLES as f32,
@@ -303,6 +356,7 @@ fn camera_scale(camera: &Query<(&Projection, &Camera), With<Camera3d>>) -> f32 {
 pub fn spawn_sky(
     mut commands: Commands,
     session: Res<crate::app::Game>,
+    ui: Res<crate::app::Ui>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<RelativisticStarfieldMaterial>>,
     mut images: ResMut<Assets<Image>>,
@@ -318,10 +372,12 @@ pub fn spawn_sky(
     let lut = images.add(band_lut());
     let (distant_stars, local_stars) = partition(&session.0);
 
-    let mut pass = |stars: &[CatalogueStar], style: PointStyle| {
+    let mut pass = |stars: &[CatalogueStar], is_local: bool| {
+        let style = if is_local { ui.local } else { ui.distant };
+        let uniform = uniforms(&session.0, origin_ly, lut_scale(), rad_per_px, style);
         let mesh = meshes.add(build_mesh(stars, origin_ly));
         let material = materials.add(RelativisticStarfieldMaterial {
-            uniforms: uniforms(&session.0, origin_ly, lut_scale(), rad_per_px, style),
+            uniforms: uniform.clone(),
             band_lut: lut.clone(),
         });
         commands.spawn((
@@ -332,17 +388,18 @@ pub fn spawn_sky(
             NoFrustumCulling,
             SkyMesh,
         ));
-        Pass { mesh, material, style, count: stars.len() }
+        Pass { mesh, material, local: is_local, count: stars.len(), sent: uniform }
     };
 
-    let distant = pass(&distant_stars, DISTANT);
-    let local = pass(&local_stars, LOCAL);
+    let distant = pass(&distant_stars, false);
+    let local = pass(&local_stars, true);
     commands.insert_resource(Starfield { origin_ly, distant, local });
 }
 
 /// Push this frame's uniforms, and re-bake if the ship has outrun the origin or left a system.
 pub fn update_sky(
     session: Res<crate::app::Game>,
+    ui: Res<crate::app::Ui>,
     mut sky: ResMut<Starfield>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<RelativisticStarfieldMaterial>>,
@@ -366,10 +423,17 @@ pub fn update_sky(
     }
 
     let rad_per_px = camera_scale(&camera);
-    for pass in [&sky.distant, &sky.local] {
+    let origin = sky.origin_ly;
+    let Starfield { distant, local, .. } = &mut *sky;
+    for pass in [distant, local] {
+        let style = if pass.local { ui.local } else { ui.distant };
+        let next = uniforms(&session.0, origin, lut_scale(), rad_per_px, style);
+        if next == pass.sent {
+            continue;
+        }
         if let Some(material) = materials.get_mut(&pass.material) {
-            material.uniforms =
-                uniforms(&session.0, sky.origin_ly, lut_scale(), rad_per_px, pass.style);
+            material.uniforms = next.clone();
+            pass.sent = next;
         }
     }
 }

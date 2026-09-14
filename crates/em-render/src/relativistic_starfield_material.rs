@@ -37,7 +37,7 @@ pub const ATTRIBUTE_STAR_WARM: MeshVertexAttribute =
 /// Bands carried from emission to display. Must match `em_spectra::BANDS`.
 pub const BANDS: usize = 7;
 
-#[derive(Clone, Debug, ShaderType)]
+#[derive(Clone, Debug, PartialEq, ShaderType)]
 pub struct RelativisticStarfieldUniform {
     /// Band-to-display matrix by column: entry `b` is band `b`'s contribution to `(r, g, b)`.
     pub band_to_display: [Vec4; BANDS],
@@ -72,6 +72,17 @@ pub struct RelativisticStarfieldUniform {
     pub corona_strength: f32,
     /// Filaments per radian of sky. Higher is finer structure.
     pub corona_frequency: f32,
+    /// Exponent of the glare's power-law falloff from the source.
+    pub halo_falloff: f32,
+    /// Shortest streamer, and how much longer the longest is, as fractions of the quad.
+    pub corona_reach_min: f32,
+    pub corona_reach_span: f32,
+    /// Width of the fade at a streamer's tip. Reach plus fade is clamped below 1 in the shader:
+    /// a fade that runs past the quad's edge is cut by the discard and draws a hard circle.
+    pub corona_fade: f32,
+    /// Brightness between the streamers, and how much they add on top.
+    pub corona_floor: f32,
+    pub corona_gain: f32,
     /// Lookup domain: `index = (log2(T) - log_t_min) * log_t_scale`.
     pub log_t_min: f32,
     pub log_t_scale: f32,
@@ -95,7 +106,13 @@ impl Default for RelativisticStarfieldUniform {
             overflow_gain: 1.0,
             halo_gain: 0.3,
             corona_strength: 0.0,
-            corona_frequency: 42.0,
+            corona_frequency: 11.0,
+            halo_falloff: 1.25,
+            corona_reach_min: 0.20,
+            corona_reach_span: 0.50,
+            corona_fade: 0.28,
+            corona_floor: 0.22,
+            corona_gain: 1.45,
             log_t_min: 0.0,
             log_t_scale: 1.0,
             lut_samples: 1.0,

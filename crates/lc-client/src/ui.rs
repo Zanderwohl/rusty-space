@@ -34,16 +34,18 @@ pub enum Panel {
     Telescope,
     System,
     Flight,
+    Tuning,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 6] = [
+    pub const ALL: [Panel; 7] = [
         Panel::Escape,
         Panel::Settings,
         Panel::Debug,
         Panel::Telescope,
         Panel::System,
         Panel::Flight,
+        Panel::Tuning,
     ];
 
     pub fn title(&self) -> &'static str {
@@ -54,6 +56,7 @@ impl Panel {
             Panel::Telescope => "Telescope",
             Panel::System => "System",
             Panel::Flight => "Flight",
+            Panel::Tuning => "Starfield tuning",
         }
     }
 }
@@ -151,6 +154,10 @@ pub struct UiState {
     open: Vec<Panel>,
     pub selected: Option<StarId>,
     pub look: Look,
+    /// How the two starfield passes are drawn. State rather than constants so they can be
+    /// turned while the thing they affect is on screen, which is the only way to tune a look.
+    pub distant: crate::starfield::PointStyle,
+    pub local: crate::starfield::PointStyle,
     /// Stops away from the automatic exposure.
     pub exposure_offset: f32,
     pub preset: usize,
@@ -169,6 +176,8 @@ impl Default for UiState {
             open: Vec::new(),
             selected: None,
             look: Look::default(),
+            distant: crate::starfield::DISTANT,
+            local: crate::starfield::LOCAL,
             exposure_offset: 0.0,
             preset: 0,
             integration_s: 1.0e4,

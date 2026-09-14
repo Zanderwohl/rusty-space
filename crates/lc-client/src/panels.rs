@@ -121,6 +121,7 @@ pub fn open_panels(
             Panel::Telescope => telescope(ui, &ui_state, &mut game, &mut out, &mut curve),
             Panel::System => system(ui, &ui_state, &game),
             Panel::Flight => flight(ui, &ui_state, &game, &mut out),
+            Panel::Tuning => tuning(ui, &ui_state, &mut out),
         });
         if !open {
             ask(&mut out, Action::ClosePanel(panel));
@@ -256,6 +257,35 @@ fn telescope(
         };
         ui.label(format!("last: {label} {value:.4e}   deepest dip {:.3e}", game.curve.deepest()));
     }
+}
+
+/// Every starfield knob, driven from the table in `starfield` so a knob cannot exist without a
+/// slider. Each drag emits one action per frame carrying the whole style; nothing here mutates.
+fn tuning(ui: &mut egui::Ui, state: &Ui, out: &mut MessageWriter<Requested>) {
+    for (local, label) in [(true, "Local star"), (false, "Background")] {
+        let current = if local { state.local } else { state.distant };
+        egui::CollapsingHeader::new(label).default_open(local).show(ui, |ui| {
+            let mut style = current;
+            let mut changed = false;
+            for (name, field, lo, hi) in crate::starfield::KNOBS {
+                let corona = name.starts_with("corona")
+                    || name.starts_with("reach")
+                    || name.starts_with("tip");
+                // A corona knob on the background pass would do nothing: it has no corona.
+                let live = local || !corona;
+                let slider = egui::Slider::new(field(&mut style), lo..=hi).text(name);
+                changed |= ui.add_enabled(live, slider).changed();
+            }
+            if changed {
+                ask(out, Action::SetPointStyle { local, style });
+            }
+            if ui.button("Reset").clicked() {
+                ask(out, Action::ResetPointStyle { local });
+            }
+        });
+    }
+    ui.separator();
+    ui.weak("Values apply as they are dragged. Nothing here is saved.");
 }
 
 fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {

@@ -41,6 +41,16 @@ struct StarfieldUniform {
     corona_strength: f32,
     /// Filaments per radian of sky. Higher is finer structure.
     corona_frequency: f32,
+    /// Exponent of the glare's power-law falloff from the source.
+    halo_falloff: f32,
+    /// Shortest streamer, and how much longer the longest is, as fractions of the quad.
+    corona_reach_min: f32,
+    corona_reach_span: f32,
+    /// Width of the fade at a streamer's tip.
+    corona_fade: f32,
+    /// Brightness between the streamers, and how much they add on top.
+    corona_floor: f32,
+    corona_gain: f32,
     // Lookup domain: index = (log2(T) - log_t_min) * log_t_scale.
     log_t_min: f32,
     log_t_scale: f32,
@@ -292,7 +302,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // off with distance from the star; `pow(1 - r, n)` is a property of where the quad happens
     // to end, which is a different shape and reads as a ball.
     let rr = max(r, in.core);
-    let profile = pow(in.core / rr, 1.25);
+    let profile = pow(in.core / rr, material.halo_falloff);
 
     var halo = profile * (1.0 - smoothstep(0.55, 1.0, r));
     if (material.corona_strength > 0.0 && length(in.sky) > 1e-6) {
@@ -305,9 +315,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         // How far this streamer goes, which is ragged rather than a circle. The fade has to
         // *finish* inside the quad: run it past r = 1 and the discard at the edge cuts it into
         // a hard disc, which is the circle this was meant to avoid, only sharper.
-        let reach = 0.20 + reach_of(dir, in.seed) * 0.50;
-        let edge = 1.0 - smoothstep(reach, min(reach + 0.28, 0.99), r);
-        halo = profile * edge * mix(1.0, 0.22 + threads * 1.45, material.corona_strength);
+        let reach = material.corona_reach_min + reach_of(dir, in.seed) * material.corona_reach_span;
+        let edge = 1.0 - smoothstep(reach, min(reach + material.corona_fade, 0.99), r);
+        let lit = material.corona_floor + threads * material.corona_gain;
+        halo = profile * edge * mix(1.0, lit, material.corona_strength);
     }
 
     // Alpha zero, and it has to be. AlphaMode::Add is premultiplied blending, `src + dst *

@@ -173,7 +173,7 @@ Omit the path for the three authored sample stars.
 | key | does |
 |---|---|
 | `Esc` | close the top panel, then the menu |
-| `T` `Y` `F` `F3` | telescope, system, flight, debug |
+| `T` `Y` `F` `F3` `F4` | telescope, system, flight, debug, starfield tuning |
 | arrows, right-drag | look |
 | | the cursor is pinned while the right button is held, and released on let go |
 | `L` | look at the selection |
@@ -200,6 +200,7 @@ fast clock never looks normal.
 | `--watch` | target the nearest system and open the telescope |
 | `--swarm` | target the nearest star carrying a swarm |
 | `--curve <n>` | which band the light curve measures |
+| `--tune` | open the starfield tuning panel |
 | `--frames <n>` | frames before the shutter |
 
 These emit [`Action`]s rather than opening a second path into the client, so they can only do
@@ -235,6 +236,24 @@ excess a number.
 
 A band the sensor cannot reach is shown as unavailable rather than omitted, so the instrument's
 limits are visible instead of merely enforced.
+
+## Tuning the starfield
+
+`F4` opens every drawing parameter of both starfield passes as a slider, applied as it is
+dragged. The panel is generated from a table beside the parameters themselves, so a knob cannot
+be added without a slider appearing for it, and a test checks that the table covers the struct
+and that every shipped value falls inside the range its slider offers.
+
+It follows the same rule as everything else: the panel reads state and emits actions, and a
+drag is one `SetPointStyle` per frame carrying the whole style. Nothing in the panel mutates,
+so the same tuning can be driven from a test or a script.
+
+Uniforms are written only when a value actually differs from the last upload. Reaching for
+`get_mut` on a Bevy asset marks it changed whether or not anything did, and re-uploads the
+buffer; at rest the starfield now uploads nothing at all.
+
+Nothing here is saved. These are numbers to find, not settings to keep — once one is right it
+belongs in `DISTANT` or `LOCAL` where it can be read and reasoned about.
 
 ## Not in this phase
 

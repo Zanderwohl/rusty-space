@@ -23,6 +23,7 @@ pub fn bindings() -> Vec<(KeyCode, Action)> {
         (KeyCode::KeyY, Action::TogglePanel(Panel::System)),
         (KeyCode::F3, Action::TogglePanel(Panel::Debug)),
         (KeyCode::KeyF, Action::TogglePanel(Panel::Flight)),
+        (KeyCode::F4, Action::TogglePanel(Panel::Tuning)),
         (KeyCode::Digit1, Action::SetBandPreset(0)),
         (KeyCode::Digit2, Action::SetBandPreset(1)),
         (KeyCode::Digit3, Action::SetBandPreset(2)),
