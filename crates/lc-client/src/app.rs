@@ -8,6 +8,7 @@ use bevy::render::view::Hdr;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 use lc_world::sky::{AuthoredStars, StarProvider};
 
+use em_render::population_material::PopulationMaterialPlugin;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterialPlugin;
 use em_render::render_space::sim_to_render;
 
@@ -64,7 +65,11 @@ pub struct ClientPlugin;
 
 impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((EguiPlugin::default(), RelativisticStarfieldMaterialPlugin))
+        app.add_plugins((
+            EguiPlugin::default(),
+            RelativisticStarfieldMaterialPlugin,
+            PopulationMaterialPlugin,
+        ))
             .init_state::<AppState>()
             .add_message::<Requested>()
             .insert_resource(Ui(UiState::default()))
@@ -73,6 +78,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<DevEntry>()
             .init_resource::<Looking>()
             .init_resource::<Bodies>()
+            .init_resource::<crate::envelope::Envelopes>()
             .add_systems(Startup, spawn_camera)
             .add_systems(OnEnter(AppState::Loading), load_world)
             .add_systems(OnEnter(AppState::InGame), (spawn_sky, run_dev_actions))
@@ -94,7 +100,7 @@ impl Plugin for ClientPlugin {
             )
             .add_systems(
                 Update,
-                (aim_camera, update_sky, update_bodies)
+                (aim_camera, update_sky, update_bodies, crate::envelope::update_envelopes)
                     .chain()
                     .run_if(in_state(AppState::InGame)),
             )
@@ -117,6 +123,13 @@ impl Plugin for ClientPlugin {
 fn spawn_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
+        // A system spans a hundred thousand astronomical units and the render unit is one, so
+        // the default thousand-unit far plane would clip everything past Saturn.
+        Projection::Perspective(PerspectiveProjection {
+            near: 1.0e-5,
+            far: 1.0e9,
+            ..default()
+        }),
         Hdr,
         Bloom::NATURAL,
         Tonemapping::TonyMcMapface,

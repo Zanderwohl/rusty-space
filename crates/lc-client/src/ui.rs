@@ -159,6 +159,9 @@ pub struct UiState {
     pub distant: crate::starfield::PointStyle,
     pub local: crate::starfield::PointStyle,
     pub bodies: crate::starfield::PointStyle,
+    /// How far a population's covering fraction is amplified for display. A belt blocks a
+    /// millionth of the light and a millionth of a pixel is nothing.
+    pub envelope_gain: f32,
     /// Stops away from the automatic exposure.
     pub exposure_offset: f32,
     pub preset: usize,
@@ -180,6 +183,7 @@ impl Default for UiState {
             distant: crate::starfield::DISTANT,
             local: crate::starfield::LOCAL,
             bodies: crate::starfield::BODIES,
+            envelope_gain: crate::envelope::OPACITY_GAIN,
             exposure_offset: 0.0,
             preset: 0,
             integration_s: 1.0e4,

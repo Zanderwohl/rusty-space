@@ -14,6 +14,10 @@ use lc_world::sky::{CatalogueStar, StarId, generate};
 /// Metres in a light-year.
 pub const M_PER_LY: f64 = 9.460_730_472_580_8e15;
 
+/// Metres in one render unit inside a system. An astronomical unit, so a belt's radius is a
+/// number of order ten rather than of order 1e11.
+pub const UNIT_M: f64 = 1.495_978_707e11;
+
 /// Geometric albedo used for every body.
 ///
 /// A placeholder, and the one number here that wants a real table: the solar system spans
@@ -41,6 +45,10 @@ pub struct Drawable {
 pub struct LocalSystem {
     pub star: StarId,
     pub star_name: String,
+    /// Swarms, belts and clouds. Generated even for the real solar system: `em-sim`'s preset
+    /// carries bodies and no distributions, and a system with a Kuiper belt and no Kuiper belt
+    /// in it would be the stranger of the two errors.
+    pub populations: Vec<lc_world::population::Population>,
     /// Where the system's barycentre sits, light-years from the world origin.
     pub origin_ly: DVec3,
     sim: System,
@@ -54,6 +62,7 @@ pub struct LocalSystem {
 impl LocalSystem {
     /// Load the system around a star, real where there is real data and generated otherwise.
     pub fn for_star(star: &CatalogueStar) -> Option<Self> {
+        let populations = generate::system_for(star).populations;
         let contents = Self::contents_for(star);
         let sim = System::from_contents(&contents).ok()?;
         // The most massive body is the primary. Not the first: a multiple is a barycentre with
@@ -64,6 +73,7 @@ impl LocalSystem {
         Some(Self {
             star: star.id,
             star_name: star.name.clone().unwrap_or_else(|| format!("{:x}", star.id.get())),
+            populations,
             origin_ly: star.position_ly,
             sim,
             primary,

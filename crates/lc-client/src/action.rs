@@ -59,6 +59,8 @@ pub enum Action {
     /// field, so a slider being dragged is one action a frame and the panel stays stateless.
     SetPointStyle { which: Which, style: PointStyle },
     ResetPointStyle { which: Which },
+    /// How far a population envelope's covering fraction is amplified for display.
+    SetEnvelopeGain(f32),
 
     // --- development ------------------------------------------------------------------
     ToggleGodView,
@@ -181,6 +183,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             Which::Local => ui.local = style,
             Which::Bodies => ui.bodies = style,
         },
+        Action::SetEnvelopeGain(gain) => ui.envelope_gain = gain.max(0.0),
         Action::ResetPointStyle { which } => {
             match which {
                 Which::Distant => ui.distant = crate::starfield::DISTANT,

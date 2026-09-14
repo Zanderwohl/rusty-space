@@ -308,6 +308,12 @@ fn tuning(ui: &mut egui::Ui, state: &Ui, out: &mut MessageWriter<Requested>) {
         });
     }
     ui.separator();
+    let mut gain = state.envelope_gain;
+    if ui.add(egui::Slider::new(&mut gain, 0.0..=60.0).text("envelope opacity")).changed() {
+        ask(out, Action::SetEnvelopeGain(gain));
+    }
+    ui.weak("How far a population's covering fraction is amplified. A belt really does block\nabout a millionth of a millionth of the light.");
+    ui.separator();
     ui.weak("Values apply as they are dragged. Nothing here is saved.");
 }
 

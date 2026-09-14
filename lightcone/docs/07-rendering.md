@@ -316,7 +316,37 @@ bottleneck.
 
 ## Rendering populations
 
-**Decided: a shell of proxy geometry with a layered-swarm surface shader.** A population has no
+![A belt from outside](../images/belt.png)
+
+**Decided: a shell of proxy geometry whose opacity at each latitude is the population's own sky
+density.** One shape covers every case: a belt's inclinations are narrow, so the density is a
+band near the plane and it reads as a ring; an isotropic swarm's is flat and it reads as a
+sphere. Nothing special-cases either, and the mesh is built from the inclination distribution
+alone, so it is static — what changes as the ship moves is the transform.
+
+### Two numbers that had to be found by looking
+
+**The opacity mapping is a fourth root.** Covering fraction spans fourteen decades: an asteroid
+belt covers 2.6e-12 of its star's sky, a Kuiper analogue 3e-8, a half-built swarm 0.4. Linearly,
+everything natural is exactly zero and only a technosignature shows — true photometrically and
+useless as a picture, for the same reason a linear tone map of sixty stops renders a black sky.
+
+A logarithm was the first attempt and overcorrected badly: it put a Kuiper belt at 0.46, and
+since the ship is *inside* that shell the result was a grey wash over the whole sky. A fourth
+root gives 0.001, 0.013 and 0.80 — a trace, a haze and a structure, which is the right reading
+of all three.
+
+**A shell the ship is inside is dimmed to about a fifth.** From outside a belt is a ring and the
+eye reads it as structure; from inside it covers the entire sky, and the opacity that made the
+ring legible buries the star field. The same number cannot serve both. Dimmed, the inside case
+is what it should be: a faint band along the plane, the way the zodiacal light is.
+
+An envelope is a visualisation either way — an orbit line, not a photograph. What it carries
+honestly is the ordering.
+
+### The rest
+
+**Decided: a layered-swarm surface shader.** A population has no
 members to draw — that is the entire point of
 [04-stellar-photometry.md](04-stellar-photometry.md) — so the renderer cannot instance from
 world state and should not invent world state to instance from.
