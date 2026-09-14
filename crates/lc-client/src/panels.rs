@@ -110,6 +110,8 @@ pub fn open_panels(
     mut game: ResMut<Game>,
     mut out: MessageWriter<Requested>,
     mut curve: Local<CurvePlot>,
+    sky: Option<Res<crate::starfield::Starfield>>,
+    bodies: Option<Res<crate::starfield::Bodies>>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
     for panel in ui_state.open_panels().to_vec() {
@@ -117,7 +119,7 @@ pub fn open_panels(
         egui::Window::new(panel.title()).open(&mut open).show(ctx, |ui| match panel {
             Panel::Escape => escape(ui, &mut out),
             Panel::Settings => settings(ui, &ui_state),
-            Panel::Debug => debug(ui, &ui_state, &game, &mut out),
+            Panel::Debug => debug(ui, &ui_state, &game, sky.as_deref(), bodies.as_deref(), &mut out),
             Panel::Telescope => telescope(ui, &ui_state, &mut game, &mut out, &mut curve),
             Panel::System => system(ui, &ui_state, &game),
             Panel::Flight => flight(ui, &ui_state, &game, &mut out),
@@ -148,8 +150,25 @@ fn settings(ui: &mut egui::Ui, state: &Ui) {
     ui.label("Settings apply immediately; there is no resume to apply them on.");
 }
 
-fn debug(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {
+fn debug(
+    ui: &mut egui::Ui,
+    state: &Ui,
+    game: &Game,
+    sky: Option<&crate::starfield::Starfield>,
+    bodies: Option<&crate::starfield::Bodies>,
+    out: &mut MessageWriter<Requested>,
+) {
     ui.label(format!("stars: {}", game.stars.len()));
+    if let Some(sky) = sky {
+        ui.label(format!(
+            "drawn: {} background, {} local, {} bodies",
+            sky.distant.count, sky.local.count, sky.bodies.count
+        ));
+    }
+    match bodies.and_then(|b| b.0.as_ref()) {
+        Some(system) => ui.label(format!("in {} — {} bodies loaded", system.star_name, system.len())),
+        None => ui.label("between systems"),
+    };
     ui.label(format!("curve samples: {}", game.curve.len()));
     ui.label(format!("coordinate time: {:.3} s", game.coordinate_time_s()));
     ui.separator();
@@ -262,25 +281,29 @@ fn telescope(
 /// Every starfield knob, driven from the table in `starfield` so a knob cannot exist without a
 /// slider. Each drag emits one action per frame carrying the whole style; nothing here mutates.
 fn tuning(ui: &mut egui::Ui, state: &Ui, out: &mut MessageWriter<Requested>) {
-    for (local, label) in [(true, "Local star"), (false, "Background")] {
-        let current = if local { state.local } else { state.distant };
-        egui::CollapsingHeader::new(label).default_open(local).show(ui, |ui| {
+    use crate::starfield::Which;
+    for (which, label) in
+        [(Which::Local, "Local star"), (Which::Bodies, "Planets and moons"), (Which::Distant, "Background")]
+    {
+        let current = crate::starfield::style_for(state, which);
+        let corona_pass = which == Which::Local;
+        egui::CollapsingHeader::new(label).default_open(corona_pass).show(ui, |ui| {
             let mut style = current;
             let mut changed = false;
             for (name, field, lo, hi) in crate::starfield::KNOBS {
                 let corona = name.starts_with("corona")
                     || name.starts_with("reach")
                     || name.starts_with("tip");
-                // A corona knob on the background pass would do nothing: it has no corona.
-                let live = local || !corona;
+                // A corona knob on a pass with no corona would do nothing.
+                let live = corona_pass || !corona;
                 let slider = egui::Slider::new(field(&mut style), lo..=hi).text(name);
                 changed |= ui.add_enabled(live, slider).changed();
             }
             if changed {
-                ask(out, Action::SetPointStyle { local, style });
+                ask(out, Action::SetPointStyle { which, style });
             }
             if ui.button("Reset").clicked() {
-                ask(out, Action::ResetPointStyle { local });
+                ask(out, Action::ResetPointStyle { which });
             }
         });
     }

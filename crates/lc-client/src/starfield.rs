@@ -124,6 +124,24 @@ pub const DISTANT: PointStyle = PointStyle {
     corona_gain: 1.45,
 };
 
+/// Lit bodies: planets, moons, anything reflecting. No corona, and small.
+pub const BODIES: PointStyle = PointStyle {
+    min_px: 1.6,
+    max_px: 9.0,
+    glow_radius_gain: 0.2,
+    overflow_gain: 0.2,
+    brightness: 1.2,
+    halo_gain: 0.3,
+    halo_falloff: 1.6,
+    corona_strength: 0.0,
+    corona_frequency: 11.0,
+    corona_reach_min: 0.2,
+    corona_reach_span: 0.37,
+    corona_fade: 0.28,
+    corona_floor: 0.22,
+    corona_gain: 1.45,
+};
+
 /// A star whose system the ship is inside. Allowed to dominate the screen, because it does.
 /// The ranges do not overlap: crossing the shell boundary is a visible step, and a step is
 /// better than a star that shrinks as the ship approaches it.
@@ -166,11 +184,18 @@ pub fn radians_per_pixel(fov_y: f32, viewport_height: f32) -> f32 {
 const QUAD: [[f32; 2]; 4] = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]];
 
 /// One of the two passes: its mesh, its material, and which stars are in it.
+/// Which of the three passes, and therefore which style and which mesh contents.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Which {
+    Distant,
+    Local,
+    Bodies,
+}
+
 pub struct Pass {
     pub mesh: Handle<Mesh>,
     pub material: Handle<RelativisticStarfieldMaterial>,
-    /// Which style this pass takes from the interface.
-    pub local: bool,
+    pub which: Which,
     pub count: usize,
     /// What was last uploaded, so an unchanged frame writes nothing. Reaching for `get_mut`
     /// marks the asset changed whether or not anything differs, and re-uploads the buffer.
@@ -183,23 +208,41 @@ pub struct Starfield {
     pub origin_ly: DVec3,
     pub distant: Pass,
     pub local: Pass,
+    pub bodies: Pass,
+}
+
+impl Starfield {
+    fn passes(&mut self) -> [&mut Pass; 3] {
+        [&mut self.distant, &mut self.local, &mut self.bodies]
+    }
+}
+
+/// The style a pass draws with, from the interface.
+pub fn style_for(ui: &crate::ui::UiState, which: Which) -> PointStyle {
+    match which {
+        Which::Distant => ui.distant,
+        Which::Local => ui.local,
+        Which::Bodies => ui.bodies,
+    }
 }
 
 #[derive(Component)]
 pub struct SkyMesh;
 
 /// Split the sky into the background and the system the ship is in.
-pub fn partition(session: &Session) -> (Vec<CatalogueStar>, Vec<CatalogueStar>) {
+pub fn partition(session: &Session) -> (Vec<Point>, Vec<Point>) {
     let mut distant = Vec::with_capacity(session.stars.len());
     let mut local = Vec::new();
     for star in &session.stars {
-        if session.distance_to(star) < LOCAL_SHELL_LY {
-            local.push(star.clone());
-        } else {
-            distant.push(star.clone());
-        }
+        let target = if session.distance_to(star) < LOCAL_SHELL_LY { &mut local } else { &mut distant };
+        target.push(Point::star(star));
     }
     (distant, local)
+}
+
+/// Which star's system the ship is inside, if any.
+pub fn local_star(session: &Session) -> Option<&CatalogueStar> {
+    session.stars.iter().find(|s| session.distance_to(s) < LOCAL_SHELL_LY)
 }
 
 /// `log2` of band radiance against temperature: one column per sample, one row per band.
@@ -234,29 +277,73 @@ pub fn band_lut() -> Image {
     image
 }
 
-/// Four vertices per star, positions relative to `origin_ly`, in render axes.
-pub fn build_mesh(stars: &[CatalogueStar], origin_ly: DVec3) -> Mesh {
-    let n = stars.len();
+/// One thing drawn as a point source: where it is, and what the shader needs to shade it.
+///
+/// Stars and lit bodies both become these. A planet reflects its star's spectrum, so it is a
+/// blackbody at the star's temperature with a smaller radius — see
+/// [`crate::system::effective_radius`] — and one shader serves both.
+#[derive(Clone, Copy, Debug)]
+pub struct Point {
+    pub position_ly: DVec3,
+    pub teff_k: f32,
+    /// What the shader treats as the source's radius. For a lit body this is the effective
+    /// radius, not the physical one.
+    pub radius_m: f32,
+    pub seed: f32,
+    /// `(temperature K, radiance over the source's disc, grey deficit, unused)`.
+    pub warm: [f32; 4],
+}
+
+impl Point {
+    pub fn star(s: &CatalogueStar) -> Self {
+        Self {
+            position_ly: s.position_ly,
+            teff_k: s.star.teff_k as f32,
+            radius_m: s.star.radius_m as f32,
+            // Hashed rather than taken raw so two adjacent catalogue ids do not give two stars
+            // the same corona.
+            seed: (rng::mix(s.seed()) >> 40) as f32 * 1.0e-3,
+            warm: warm_params(s),
+        }
+    }
+
+    /// A body lit by a star of `star_teff_k`.
+    pub fn body(d: &crate::system::Drawable, star_teff_k: f64) -> Self {
+        // What it re-radiates, against its own drawn disc rather than the star's.
+        let thermal_scale = if d.effective_radius_m > 0.0 {
+            (d.radius_m / d.effective_radius_m).powi(2)
+        } else {
+            0.0
+        };
+        Self {
+            position_ly: d.position_ly,
+            teff_k: star_teff_k as f32,
+            radius_m: d.effective_radius_m as f32,
+            seed: 0.0,
+            warm: [d.equilibrium_k as f32, thermal_scale as f32, 0.0, 0.0],
+        }
+    }
+}
+
+/// Four vertices per point, positions relative to `origin_ly`, in render axes.
+pub fn build_mesh(points: &[Point], origin_ly: DVec3) -> Mesh {
+    let n = points.len();
     let mut positions = Vec::with_capacity(n * 4);
     let mut corners = Vec::with_capacity(n * 4);
     let mut params = Vec::with_capacity(n * 4);
     let mut warm = Vec::with_capacity(n * 4);
     let mut indices = Vec::with_capacity(n * 6);
 
-    for star in stars {
+    for point in points {
         // Differenced in f64 and narrowed after, which is the whole point of the bake origin.
-        let at = sim_to_render(star.position_ly - origin_ly).as_vec3().to_array();
-        // The corona seed. Hashed rather than taken raw so two adjacent catalogue ids do not
-        // give two stars the same threads.
-        let seed = (rng::mix(star.seed()) >> 40) as f32 * 1.0e-3;
-        let physics = [star.star.teff_k as f32, star.star.radius_m as f32, seed, 0.0];
-        let heat = warm_params(star);
+        let at = sim_to_render(point.position_ly - origin_ly).as_vec3().to_array();
+        let physics = [point.teff_k, point.radius_m, point.seed, 0.0];
         let base = positions.len() as u32;
         for corner in QUAD {
             positions.push(at);
             corners.push(corner);
             params.push(physics);
-            warm.push(heat);
+            warm.push(point.warm);
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
@@ -374,8 +461,8 @@ pub fn spawn_sky(
     let lut = images.add(band_lut());
     let (distant_stars, local_stars) = partition(&session.0);
 
-    let mut pass = |stars: &[CatalogueStar], is_local: bool| {
-        let style = if is_local { ui.local } else { ui.distant };
+    let mut pass = |stars: &[Point], which: Which| {
+        let style = style_for(&ui.0, which);
         let uniform = uniforms(&session.0, origin_ly, lut_scale(), rad_per_px, style);
         let mesh = meshes.add(build_mesh(stars, origin_ly));
         let material = materials.add(RelativisticStarfieldMaterial {
@@ -390,12 +477,58 @@ pub fn spawn_sky(
             NoFrustumCulling,
             SkyMesh,
         ));
-        Pass { mesh, material, local: is_local, count: stars.len(), sent: uniform }
+        Pass { mesh, material, which, count: stars.len(), sent: uniform }
     };
 
-    let distant = pass(&distant_stars, false);
-    let local = pass(&local_stars, true);
-    commands.insert_resource(Starfield { origin_ly, distant, local });
+    let distant = pass(&distant_stars, Which::Distant);
+    let local = pass(&local_stars, Which::Local);
+    let bodies = pass(&[], Which::Bodies);
+    commands.insert_resource(Starfield { origin_ly, distant, local, bodies });
+}
+
+/// The system the ship is inside, if it is inside one.
+#[derive(Resource, Default)]
+pub struct Bodies(pub Option<crate::system::LocalSystem>);
+
+/// Load, propagate and re-mesh the local system's bodies.
+///
+/// The mesh is rebuilt every frame rather than on a threshold, because unlike the stars these
+/// move: a body's whole reason to be drawn is that it is somewhere different from last frame.
+/// A few hundred bodies is a thousand vertices, which is nothing.
+pub fn update_bodies(
+    session: Res<crate::app::Game>,
+    mut bodies: ResMut<Bodies>,
+    mut sky: ResMut<Starfield>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    let here = local_star(&session.0).map(|s| s.id);
+    if bodies.0.as_ref().map(|s| s.star) != here {
+        bodies.0 = local_star(&session.0).and_then(crate::system::LocalSystem::for_star);
+    }
+
+    let origin = sky.origin_ly;
+    let points: Vec<Point> = match bodies.0.as_mut() {
+        Some(system) => {
+            // Coordinate time, not retarded. Inside a system the delay is minutes to hours and
+            // moves a planet by far less than a pixel; between systems there is nothing to draw.
+            system.advance_to(session.coordinate_time_s());
+            let teff = system.star_teff_k();
+            system
+                .drawables(session.position_ly)
+                .iter()
+                .map(|d| Point::body(d, teff))
+                .collect()
+        }
+        None => Vec::new(),
+    };
+
+    if points.len() == sky.bodies.count && points.is_empty() {
+        return;
+    }
+    if let Some(mesh) = meshes.get_mut(&sky.bodies.mesh) {
+        *mesh = build_mesh(&points, origin);
+    }
+    sky.bodies.count = points.len();
 }
 
 /// Push this frame's uniforms, and re-bake if the ship has outrun the origin or left a system.
@@ -426,9 +559,8 @@ pub fn update_sky(
 
     let rad_per_px = camera_scale(&camera);
     let origin = sky.origin_ly;
-    let Starfield { distant, local, .. } = &mut *sky;
-    for pass in [distant, local] {
-        let style = if pass.local { ui.local } else { ui.distant };
+    for pass in sky.passes() {
+        let style = style_for(&ui.0, pass.which);
         let next = uniforms(&session.0, origin, lut_scale(), rad_per_px, style);
         if next == pass.sent {
             continue;
@@ -557,7 +689,7 @@ mod tests {
     #[test]
     fn the_mesh_is_one_quad_per_star() {
         let s = sky();
-        let mesh = build_mesh(&s.stars, DVec3::ZERO);
+        let mesh = build_mesh(&points_of(&s), DVec3::ZERO);
         assert_eq!(mesh.count_vertices(), s.stars.len() * 4);
         assert_eq!(mesh.indices().unwrap().len(), s.stars.len() * 6);
     }
@@ -568,8 +700,8 @@ mod tests {
     fn positions_are_relative_to_the_bake_origin() {
         let s = sky();
         let star = &s.stars[0];
-        let far = build_mesh(&s.stars, DVec3::ZERO);
-        let near = build_mesh(&s.stars, star.position_ly);
+        let far = build_mesh(&points_of(&s), DVec3::ZERO);
+        let near = build_mesh(&points_of(&s), star.position_ly);
         let first = |m: &Mesh| match m.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() {
             bevy_mesh::VertexAttributeValues::Float32x3(v) => Vec3::from_array(v[0]),
             _ => panic!("positions must be Float32x3"),
@@ -685,7 +817,8 @@ mod tests {
         s.advance(40_000.0);
         let (distant, local) = partition(&s);
         assert_eq!(local.len(), 1, "arriving should put exactly the destination in the system");
-        assert_eq!(local[0].id, id);
+        let want = s.star(id).unwrap().position_ly;
+        assert!(local[0].position_ly.distance(want) < 1e-12, "the wrong star went local");
         assert_eq!(distant.len() + local.len(), s.stars.len(), "no star may be in both or neither");
     }
 
@@ -738,6 +871,10 @@ mod tests {
         assert!(stops > 20.0, "arrival should be tens of stops brighter, got {stops}");
     }
 
+    fn points_of(s: &Session) -> Vec<Point> {
+        s.stars.iter().map(Point::star).collect()
+    }
+
     fn seeds(mesh: &Mesh) -> Vec<f32> {
         match mesh.attribute(ATTRIBUTE_STAR_PARAMS).unwrap() {
             bevy_mesh::VertexAttributeValues::Float32x4(v) => v.iter().map(|p| p[2]).collect(),
@@ -751,8 +888,8 @@ mod tests {
     #[test]
     fn a_star_gets_the_same_corona_every_time_it_is_baked() {
         let s = sky();
-        let a = seeds(&build_mesh(&s.stars, DVec3::ZERO));
-        let b = seeds(&build_mesh(&s.stars, DVec3::new(3.0, -1.0, 2.0)));
+        let a = seeds(&build_mesh(&points_of(&s), DVec3::ZERO));
+        let b = seeds(&build_mesh(&points_of(&s), DVec3::new(3.0, -1.0, 2.0)));
         assert_eq!(a, b, "a different bake origin must not change the threads");
         assert!(a.iter().all(|v| v.is_finite()));
     }
@@ -760,7 +897,7 @@ mod tests {
     #[test]
     fn two_stars_do_not_share_a_corona() {
         let s = sky();
-        let mut per_star: Vec<f32> = seeds(&build_mesh(&s.stars, DVec3::ZERO));
+        let mut per_star: Vec<f32> = seeds(&build_mesh(&points_of(&s), DVec3::ZERO));
         // Four vertices per star carry the same seed; one per star is what must differ.
         per_star.dedup();
         assert_eq!(per_star.len(), s.stars.len(), "adjacent catalogue ids collided: {per_star:?}");

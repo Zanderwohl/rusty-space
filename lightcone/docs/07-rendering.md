@@ -156,17 +156,57 @@ Two things that looked like tuning and are not:
   `r = 1` means the `discard` at the edge cuts it, and the ragged silhouette becomes a hard
   circle — the exact artifact it was added to remove, only sharper.
 
+### Lit bodies reuse the star shader
+
+![The solar system from Earth](../images/planets.png)
+
+A planet is drawn by the starfield shader, as a blackbody at **its star's** temperature with a
+smaller radius. Reflected light has the star's spectrum, so the only thing that differs is how
+much of it arrives, and that is a radius:
+
+```
+R_eff = R_star * R_body * sqrt(p * phase) / d
+```
+
+from equating `pi R_eff^2 B / D^2` with the standard `L p R^2 / (4 pi d^2 D^2)`. Exact for a grey
+reflector, and checked against a measured magnitude rather than asserted: Jupiter at opposition
+comes out at -2.72 against an observed -2.70.
+
+The phase term is not optional. Venus at a tenth of an astronomical unit is a razor crescent, and
+a full-phase calculation puts it three magnitudes too bright.
+
+The body's own thermal emission goes in the same slot a swarm's does, because it is the same
+physics: it absorbs starlight and re-radiates at the temperature its orbit sets. So a planet is
+warm in the thermal preset without any separate machinery.
+
+What this does not carry is a coloured albedo. Mars comes out the Sun's colour rather than its
+own, because the model says reflected light has the star's spectrum. A per-body albedo colour is
+the next thing this wants, and the preset carries a visualisation colour rather than a measured
+albedo, so it wants a real table too.
+
+### Where the bodies come from
+
+Nothing is modelled here. `em-sim` holds and propagates systems, `em_sim::presets` already
+carries the solar system — 230 bodies, moons and comets, fitted against JPL — and
+`lc_world::sky::generate` already emits a generated system in the form `em-sim` consumes. The
+client joins them: the real data where there is real data, a generated system otherwise.
+
+The end-to-end check is that from where the Earth is, the brightest things in the sky are Luna,
+Venus, Jupiter, Mars and Saturn. Real elements, real propagation, and photometry that agrees
+with what a person standing outside would see.
+
 ### Two passes, two laws
 
-The sky is drawn twice, and the two obey different rules. This is the arrangement Exotic Matters
+The sky is drawn three times, and the passes obey different rules. This is the arrangement Exotic Matters
 arrived at with `starfield` and `local_starfield`, and it is right for the same reason here.
 
-| | background | local |
-|---|---|---|
-| what it is | a dome at infinity | an object at a distance |
-| size | from brightness, 1 to 3 pixels | the angle it subtends, floored at 4 pixels |
-| glare | slight | allowed to fill the screen |
-| changes as the ship moves | only which stars are in it | continuously |
+| | background | local star | lit bodies |
+|---|---|---|---|
+| what it is | a dome at infinity | an object at a distance | objects in orbit |
+| size | from brightness, 1 to 3 pixels | the angle it subtends, floored at 4 pixels | from reflected flux, 1.6 to 9 pixels |
+| glare | slight | allowed to fill the screen | slight |
+| corona | none | yes | none |
+| rebuilt | when the ship crosses a shell | likewise | every frame, because they move |
 
 A star joins the local pass when the ship is inside its Oort shell, 1.6 light-years, which
 [03-world-model.md](03-world-model.md) already makes the partition boundary: being inside it is

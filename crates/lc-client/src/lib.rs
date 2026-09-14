@@ -15,6 +15,7 @@ pub mod panels;
 pub mod plot;
 pub mod session;
 pub mod starfield;
+pub mod system;
 pub mod tonemap;
 pub mod ui;
 pub mod view;

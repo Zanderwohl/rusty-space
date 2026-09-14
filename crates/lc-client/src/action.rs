@@ -9,7 +9,7 @@ use em_spectra::{Band, presets};
 use lc_world::sky::StarId;
 
 use crate::session::Session;
-use crate::starfield::PointStyle;
+use crate::starfield::{PointStyle, Which};
 use crate::ui::{Look, MenuPage, Panel, UiState};
 
 /// Everything the interface can be asked to do.
@@ -57,8 +57,8 @@ pub enum Action {
     // --- appearance -------------------------------------------------------------------
     /// Replace a starfield pass's drawing parameters. Carries the whole style rather than one
     /// field, so a slider being dragged is one action a frame and the panel stays stateless.
-    SetPointStyle { local: bool, style: PointStyle },
-    ResetPointStyle { local: bool },
+    SetPointStyle { which: Which, style: PointStyle },
+    ResetPointStyle { which: Which },
 
     // --- development ------------------------------------------------------------------
     ToggleGodView,
@@ -176,14 +176,16 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             effects.push(Effect::Notify(format!("drive set to {:.0} g", session.drive.accel_g)));
         }
 
-        Action::SetPointStyle { local, style } => {
-            *if local { &mut ui.local } else { &mut ui.distant } = style;
-        }
-        Action::ResetPointStyle { local } => {
-            if local {
-                ui.local = crate::starfield::LOCAL;
-            } else {
-                ui.distant = crate::starfield::DISTANT;
+        Action::SetPointStyle { which, style } => match which {
+            Which::Distant => ui.distant = style,
+            Which::Local => ui.local = style,
+            Which::Bodies => ui.bodies = style,
+        },
+        Action::ResetPointStyle { which } => {
+            match which {
+                Which::Distant => ui.distant = crate::starfield::DISTANT,
+                Which::Local => ui.local = crate::starfield::LOCAL,
+                Which::Bodies => ui.bodies = crate::starfield::BODIES,
             }
             effects.push(Effect::Notify("starfield reset".into()));
         }
@@ -628,7 +630,7 @@ mod tests {
         let (mut ui, mut s) = fixture();
         let mut style = ui.local;
         style.corona_frequency = 3.0;
-        apply(Action::SetPointStyle { local: true, style }, &mut ui, &mut s);
+        apply(Action::SetPointStyle { which: Which::Local, style }, &mut ui, &mut s);
         assert_eq!(ui.local.corona_frequency, 3.0);
         assert_eq!(ui.distant.corona_frequency, crate::starfield::DISTANT.corona_frequency);
     }
@@ -636,14 +638,15 @@ mod tests {
     #[test]
     fn resetting_restores_the_shipped_values() {
         let (mut ui, mut s) = fixture();
-        for local in [true, false] {
-            let mut style = if local { ui.local } else { ui.distant };
+        for which in [Which::Local, Which::Distant, Which::Bodies] {
+            let mut style = crate::starfield::style_for(&ui, which);
             style.brightness = 99.0;
-            apply(Action::SetPointStyle { local, style }, &mut ui, &mut s);
-            apply(Action::ResetPointStyle { local }, &mut ui, &mut s);
+            apply(Action::SetPointStyle { which, style }, &mut ui, &mut s);
+            apply(Action::ResetPointStyle { which }, &mut ui, &mut s);
         }
         assert_eq!(ui.local, crate::starfield::LOCAL);
         assert_eq!(ui.distant, crate::starfield::DISTANT);
+        assert_eq!(ui.bodies, crate::starfield::BODIES);
     }
 
     /// A knob with no slider is a knob nobody finds. The panel is built from this table, so the

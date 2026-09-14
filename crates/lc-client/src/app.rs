@@ -15,7 +15,7 @@ use crate::action::{Action, Effect, apply, refresh_exposure};
 use crate::input::{Looking, Requested, grab_cursor, look_around, read_keys};
 use crate::panels;
 use crate::session::Session;
-use crate::starfield::{spawn_sky, update_sky};
+use crate::starfield::{Bodies, spawn_sky, update_bodies, update_sky};
 use crate::ui::{Screen, UiState};
 
 /// Where the application is. Not what is on top of it: panels are a separate set, because
@@ -72,6 +72,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<Catalogue>()
             .init_resource::<DevEntry>()
             .init_resource::<Looking>()
+            .init_resource::<Bodies>()
             .add_systems(Startup, spawn_camera)
             .add_systems(OnEnter(AppState::Loading), load_world)
             .add_systems(OnEnter(AppState::InGame), (spawn_sky, run_dev_actions))
@@ -91,7 +92,12 @@ impl Plugin for ClientPlugin {
                 )
                     .chain(),
             )
-            .add_systems(Update, (aim_camera, update_sky).chain().run_if(in_state(AppState::InGame)))
+            .add_systems(
+                Update,
+                (aim_camera, update_sky, update_bodies)
+                    .chain()
+                    .run_if(in_state(AppState::InGame)),
+            )
             .add_systems(
                 EguiPrimaryContextPass,
                 (
