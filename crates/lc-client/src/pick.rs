@@ -78,8 +78,8 @@ pub struct Mark {
     pub clip: Vec4,
     pub radius_px: f32,
     pub label: String,
-    /// The curve it is drawn along, for anything that is not a point.
-    pub outline: Option<Vec<Vec4>>,
+    /// The curves it is drawn along, for anything that is not a point.
+    pub outline: Option<Vec<Vec<Vec4>>>,
 }
 
 /// What the overlay draws. Rebuilt every frame, so a mark never survives what it was on.
@@ -117,16 +117,22 @@ struct Sighted {
     clip: Vec4,
     radius_px: f32,
     rank: u8,
-    /// The curve it is drawn along, clip space, for anything that is not a point. A swarm is
-    /// picked and marked along this rather than at a centre it does not have.
-    outline: Option<Vec<Vec4>>,
+    /// The curves it is drawn along, clip space, for anything that is not a point. A swarm is
+    /// picked and marked along these rather than at a centre it does not have.
+    outline: Option<Vec<Vec<Vec4>>>,
 }
 
-/// How many points a swarm's circle is sampled at.
+/// How many points a swarm's curves are sampled at.
 ///
 /// Sixty-four is a fifth of a degree of error against a true circle at the widest, which is far
 /// below a pixel at any distance the thing is drawn at.
 const SWARM_SAMPLES: usize = 64;
+
+/// How many cross-sections are drawn round the torus.
+///
+/// Four reads as a donut and no more; the two edge circles carry the shape and these say which
+/// way round it is thick.
+const SWARM_CROSS_SECTIONS: usize = 4;
 
 /// Find what the cursor is on, mark what is selected, and act on a click.
 #[allow(clippy::too_many_arguments)]
@@ -166,7 +172,7 @@ fn survey(
             // A curve has no one place it is: the nearest part of it to the cursor is what the
             // cursor is on, and that is a different point for every cursor position.
             (Some(outline), Some(cursor)) => {
-                let runs = reticle::project_path(outline, viewport);
+                let runs = screen_runs(outline, viewport);
                 picking::nearest_on_path(&runs, cursor).map(|(at, _)| (at, 0.0))
             }
             (Some(_), None) => None,
@@ -235,9 +241,10 @@ fn mark(seen: &Sighted, viewport: Vec2, toward: Vec2) -> Mark {
 /// Clip space out as well as in, so a marker can be placed from it by the same path as anything
 /// else — including the edge arrow, when the whole curve is behind the camera. Sample accuracy
 /// is enough for an anchor; picking uses the segments.
-fn nearest_sample(outline: &[Vec4], viewport: Vec2, toward: Vec2) -> Option<Vec4> {
+fn nearest_sample(outline: &[Vec<Vec4>], viewport: Vec2, toward: Vec2) -> Option<Vec4> {
     outline
         .iter()
+        .flatten()
         .filter(|clip| clip.w > 0.0)
         .map(|clip| {
             let ndc = Vec2::new(clip.x / clip.w, clip.y / clip.w);
@@ -320,17 +327,15 @@ fn sight(
             if !crate::envelope::visible(population) {
                 continue;
             }
-            let outline: Vec<Vec4> = swarm_circle(star, ship, population)
+            let outline: Vec<Vec<Vec4>> = swarm_outlines(star, ship, population)
                 .into_iter()
-                .map(&project)
+                .map(|curve| curve.into_iter().map(&project).collect())
                 .collect();
-            if outline.len() < 2 {
-                continue;
-            }
+            let Some(first) = outline.iter().flatten().next().copied() else { continue };
             out.push(Sighted {
                 subject: Subject::Swarm(index, swarm_name(population)),
-                // Filled in against the cursor; a circle has no one place it is.
-                clip: outline[0],
+                // Filled in against the cursor; a torus has no one place it is.
+                clip: first,
                 radius_px: 0.0,
                 rank: rank::SWARM,
                 outline: Some(outline),
@@ -351,27 +356,80 @@ fn swarm_name(population: &lc_world::population::Population) -> String {
     )
 }
 
-/// The population's own orbit circle, as directions from the ship.
+/// How far a population reaches: inner radius, outer radius, and half-thickness angle.
 ///
-/// Sampled in the population's plane at its thermal radius, which is the radius its light
-/// comes from. Closed: the last point repeats the first, so the curve has no seam.
-fn swarm_circle(
+/// The eccentricity matters as much as the semi-major axis does. An element with semi-major
+/// axis `a` and eccentricity `e` is somewhere between `a(1-e)` and `a(1+e)` over its year, so
+/// the tube is wider than the spread of `a` alone — and for the belt it is wider by more than
+/// the spread of `a` is.
+fn swarm_extent(population: &lc_world::population::Population) -> Option<(f64, f64, f64)> {
+    let axes = population.semi_major.nodes();
+    let eccentricities = population.eccentricity.nodes();
+    let a_lo = axes.iter().map(|(v, _)| *v).fold(f64::INFINITY, f64::min);
+    let a_hi = axes.iter().map(|(v, _)| *v).fold(0.0, f64::max);
+    let e_hi = eccentricities.iter().map(|(v, _)| *v).fold(0.0, f64::max).clamp(0.0, 0.95);
+    let inner = a_lo * (1.0 - e_hi);
+    let outer = a_hi * (1.0 + e_hi);
+    (inner > 0.0 && outer > inner)
+        .then(|| (inner, outer, population.inclination.max_inclination()))
+}
+
+/// The population as a torus, in curves: its inner and outer edges, and cross-sections round
+/// it.
+///
+/// A belt is a donut, and the model says so — a spread of semi-major axes, a spread of
+/// eccentricities, a spread of inclinations, and *no* node or periapsis angle anywhere, which
+/// is what leaves it symmetric about its pole. One circle was the core of that torus and not
+/// the torus.
+///
+/// It degenerates correctly: an isotropic cloud has a half-thickness of a right angle, its
+/// cross-sections close into meridians and the whole thing reads as the shell it is.
+fn swarm_outlines(
     star_ly: DVec3,
     ship_ly: DVec3,
     population: &lc_world::population::Population,
-) -> Vec<DVec3> {
-    let radius_m = population.thermal_radius();
-    if radius_m <= 0.0 {
-        return Vec::new();
-    }
+) -> Vec<Vec<DVec3>> {
+    let Some((inner, outer, half_angle)) = swarm_extent(population) else { return Vec::new() };
     let (u, v) = lc_world::navigation::basis(population.pole);
+    let pole = population.pole.normalize_or_zero();
     let centre = (star_ly - ship_ly) * M_PER_LY;
-    (0..=SWARM_SAMPLES)
-        .map(|i| {
-            let theta = std::f64::consts::TAU * i as f64 / SWARM_SAMPLES as f64;
-            centre + (u * theta.cos() + v * theta.sin()) * radius_m
-        })
-        .collect()
+
+    let ring = |radius: f64, lift: f64| -> Vec<DVec3> {
+        (0..=SWARM_SAMPLES)
+            .map(|i| {
+                let theta = std::f64::consts::TAU * i as f64 / SWARM_SAMPLES as f64;
+                centre + (u * theta.cos() + v * theta.sin()) * radius + pole * lift
+            })
+            .collect()
+    };
+
+    let mut out = vec![ring(inner, 0.0), ring(outer, 0.0)];
+
+    // The tube, as seen in a plane containing the pole: half as wide as the gap between the
+    // edges, and as tall as the inclination tips the far edge.
+    let core = (inner + outer) * 0.5;
+    let half_width = (outer - inner) * 0.5;
+    let half_height = core * half_angle.sin();
+    for k in 0..SWARM_CROSS_SECTIONS {
+        let phi = std::f64::consts::TAU * k as f64 / SWARM_CROSS_SECTIONS as f64;
+        let outward = u * phi.cos() + v * phi.sin();
+        out.push(
+            (0..=SWARM_SAMPLES)
+                .map(|i| {
+                    let theta = std::f64::consts::TAU * i as f64 / SWARM_SAMPLES as f64;
+                    centre
+                        + outward * (core + half_width * theta.cos())
+                        + pole * (half_height * theta.sin())
+                })
+                .collect(),
+        );
+    }
+    out
+}
+
+/// Every curve of an outline, projected and cut at the camera plane.
+fn screen_runs(outline: &[Vec<Vec4>], viewport: Vec2) -> Vec<Vec<Vec2>> {
+    outline.iter().flat_map(|curve| reticle::project_path(curve, viewport)).collect()
 }
 
 /// Paint the marks.
@@ -460,7 +518,7 @@ fn paint(
     // the only line in it a player can be said to be pointing at.
     if let Some(outline) = &mark.outline {
         let faint = egui::Stroke::new(1.0_f32, colour.gamma_multiply(SKELETON_FADE));
-        let runs = reticle::project_path(outline, viewport);
+        let runs = screen_runs(outline, viewport);
         draw_segments(painter, &reticle::path_segments(&runs), faint);
     }
 
@@ -508,6 +566,23 @@ fn draw_segments(painter: &egui::Painter, segments: &[[Vec2; 2]], stroke: egui::
 mod tests {
     use super::*;
     use bevy::camera::CameraProjection;
+
+    /// The asteroid belt as the generator builds one: a spread of axes about 2.7 AU,
+    /// eccentricities to a quarter, inclinations to a fifth of a radian.
+    fn belt() -> lc_world::population::Population {
+        use lc_world::distribution::{Distribution, Inclination};
+        let au = lc_world::navigation::AU;
+        lc_world::population::Population {
+            pole: DVec3::Z,
+            semi_major: Distribution::normal(2.7 * au, 0.5 * au, 9),
+            eccentricity: Distribution::uniform(0.0, 0.25, 5),
+            inclination: Inclination::uniform_angle(0.0, 0.2, 12),
+            count: 1.0e6,
+            cross_section: 3.0e6,
+            band_response: em_spectra::PerBand::splat(1.0),
+            radiating_ratio: lc_world::population::Population::SPHERICAL,
+        }
+    }
 
     /// The camera as [`crate::app::aim_camera`] builds it, so the test and the app cannot
     /// disagree about which way the swizzle goes.
@@ -583,6 +658,109 @@ mod tests {
         let id = StarId::synthesise("test", 7);
         let star = Subject::Star(id, "Sol".into());
         assert_eq!(star.select(), Action::SelectTarget(Some(id)));
+    }
+
+    /// A belt is a donut, and the model already says so: a spread of semi-major axes, a
+    /// spread of eccentricities, a spread of inclinations, and no node or periapsis angle
+    /// anywhere — which is what leaves it symmetric about its pole.
+    ///
+    /// The eccentricity is the part it is easy to leave out. This belt's axes run 1.37 to 4.03
+    /// AU; with eccentricities to 0.225 it actually reaches 1.06 to 4.94, half again as wide.
+    #[test]
+    fn a_belts_extent_comes_from_the_eccentricity_as_much_as_the_axis() {
+        let belt = belt();
+        let (inner, outer, half_angle) = swarm_extent(&belt).expect("a belt has extent");
+
+        let au = lc_world::navigation::AU;
+        let axes = belt.semi_major.nodes();
+        let a_lo = axes.iter().map(|(v, _)| *v).fold(f64::INFINITY, f64::min);
+        let a_hi = axes.iter().map(|(v, _)| *v).fold(0.0, f64::max);
+
+        // The extreme node, not the extreme of the range: `Distribution::uniform` places
+        // *midpoints*, so a spread asked for as `0.0..0.25` has a largest node of 0.225.
+        let e_hi = belt.eccentricity.nodes().iter().map(|(v, _)| *v).fold(0.0, f64::max);
+        assert!((e_hi - 0.225).abs() < 1.0e-9, "{e_hi}");
+
+        assert!((inner / au - 1.0592).abs() < 1.0e-3, "{:.4} AU", inner / au);
+        assert!((outer / au - 4.9408).abs() < 1.0e-3, "{:.4} AU", outer / au);
+        assert!(inner < a_lo && outer > a_hi, "the tube is wider than the axes alone");
+
+        // Half again as wide as the spread of `a` by itself.
+        let widening = (outer - inner) / (a_hi - a_lo);
+        assert!((widening - 1.456).abs() < 0.01, "{widening}");
+        assert!((half_angle - 0.2).abs() < 1.0e-6, "{half_angle}");
+    }
+
+    /// The curves are the two edges of the plane and cross-sections round the tube, and every
+    /// one of them stays inside the extent it came from.
+    #[test]
+    fn the_outline_is_a_torus_about_the_star() {
+        let belt = belt();
+        let (inner, outer, half_angle) = swarm_extent(&belt).unwrap();
+        // Inside the system, which is the only place anyone sees one. Putting the star light-
+        // years off instead costs metres of cancellation against an AU-scale radius, and the
+        // first version of this test read that as a geometry error.
+        let star = DVec3::splat(1.0e-5);
+        let curves = swarm_outlines(star, DVec3::ZERO, &belt);
+        assert_eq!(curves.len(), 2 + SWARM_CROSS_SECTIONS);
+
+        let centre = (star - DVec3::ZERO) * M_PER_LY;
+        for (which, curve) in curves.iter().enumerate() {
+            assert_eq!(curve.len(), SWARM_SAMPLES + 1, "curve {which} is not closed");
+            assert!(
+                curve[0].distance(*curve.last().unwrap()) < 1.0e3,
+                "curve {which} has a seam",
+            );
+            for at in curve {
+                let local = *at - centre;
+                let radius = (local - belt.pole * local.dot(belt.pole)).length();
+                assert!(
+                    radius >= inner - 1.0e3 && radius <= outer + 1.0e3,
+                    "curve {which} reaches {radius:e}, outside [{inner:e}, {outer:e}]",
+                );
+                // And it is no taller than the inclination allows.
+                let height = local.dot(belt.pole).abs();
+                let ceiling = (inner + outer) * 0.5 * half_angle.sin();
+                assert!(height <= ceiling + 1.0e3, "curve {which} is {height:e} above the plane");
+            }
+        }
+
+        // The first two are flat: the edges of the plane.
+        for edge in &curves[..2] {
+            assert!(edge.iter().all(|at| (*at - centre).dot(belt.pole).abs() < 1.0e3));
+        }
+    }
+
+    /// An isotropic cloud has no plane to be flat in, so its tube closes into meridians and
+    /// the whole thing reads as the shell it is. The same construction, degenerating.
+    #[test]
+    fn an_isotropic_cloud_comes_out_spherical() {
+        let cloud = lc_world::population::Population {
+            inclination: lc_world::distribution::Inclination::isotropic(),
+            ..belt()
+        };
+        let (inner, outer, half_angle) = swarm_extent(&cloud).unwrap();
+        assert!((half_angle - std::f64::consts::FRAC_PI_2).abs() < 1.0e-9, "{half_angle}");
+
+        let curves = swarm_outlines(DVec3::ZERO, DVec3::ZERO, &cloud);
+        let tallest = curves
+            .iter()
+            .flatten()
+            .map(|at| at.dot(cloud.pole).abs())
+            .fold(0.0f64, f64::max);
+        // As tall as the tube's own centre radius: a sphere, not a donut.
+        assert!((tallest / ((inner + outer) * 0.5) - 1.0).abs() < 0.01, "{tallest:e}");
+    }
+
+    /// A population with nothing in it has no outline, rather than a degenerate one.
+    #[test]
+    fn an_empty_population_has_no_outline() {
+        let nothing = lc_world::population::Population {
+            semi_major: lc_world::distribution::Distribution::delta(0.0),
+            ..belt()
+        };
+        assert!(swarm_extent(&nothing).is_none());
+        assert!(swarm_outlines(DVec3::ZERO, DVec3::ZERO, &nothing).is_empty());
     }
 
     /// The selection is matched by identity, not by the name that rides along for the label.
