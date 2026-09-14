@@ -45,16 +45,30 @@
       'adapter. That is usually a disabled or blocklisted GPU driver.');
   }
 
+  // `?base=` points at a build on a CDN. Without it everything is relative, so the staged
+  // directory also works served straight from disk. The site's own /play page is this same
+  // arrangement: a shell on one origin, a build on another.
+  const params = new URLSearchParams(location.search);
+  const base = (params.get('base') || '.').replace(/\/$/, '');
+  const at = path => `${base}/${path}`;
+
   say('Loading', 'Fetching the manifest.');
-  const manifest = await fetch('manifest.json').then(r => r.json()).catch(() => null);
-  if (!manifest) fail('No manifest', 'This build is missing its <code>manifest.json</code>.');
+  const manifest = await fetch(at('manifest.json')).then(r => r.json()).catch(() => null);
+  if (!manifest) fail('No manifest', `No <code>manifest.json</code> at <code>${base}</code>.`);
+
+  // The client resolves its own assets against this, so a cross-origin build needs it made
+  // absolute here -- the wasm has no idea which page loaded it.
+  if (!params.has('assets')) {
+    params.set('assets', new URL(at(manifest.asset_base || 'assets'), location.href).href);
+    history.replaceState(null, '', `${location.pathname}?${params}`);
+  }
 
   // Streaming compilation *and* a progress bar: tee the body through a counting transform and
   // hand the rebuilt Response to instantiateStreaming. Picking one or the other is the usual
   // mistake, and the headers have to be carried over or the content type is lost.
   say('Loading', `Downloading the client (${(manifest.bytes.wasm / 1e6).toFixed(1)} MB).`);
   bar.hidden = false;
-  const response = await fetch(manifest.wasm);
+  const response = await fetch(at(manifest.wasm));
   if (!response.ok) fail('Download failed', `The wasm returned ${response.status}.`);
 
   const total = Number(response.headers.get('content-length')) || manifest.bytes.wasm;
@@ -70,7 +84,7 @@
     { headers: response.headers },
   );
 
-  const init = (await import(`./${manifest.entry}`)).default;
+  const init = (await import(new URL(at(manifest.entry), location.href).href)).default;
   say('Starting', 'Compiling and handing over.');
   try {
     await init({ module_or_path: counted });
