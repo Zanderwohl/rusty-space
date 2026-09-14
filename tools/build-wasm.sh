@@ -88,16 +88,24 @@ JSON
 cp tools/wasm-index.html "$OUT/index.html"
 
 # Pre-compress, beside the original. This is what the real upload does -- object storage will
-# not compress for you, and forgetting it triples the download. Caddy and every CDN worth the
-# name serve `foo.wasm.br` with `Content-Encoding: br` while keeping the original content type.
-echo "==> brotli"
-if command -v brotli >/dev/null; then
+# not compress for you, and forgetting it quadruples the download. A CDN serves `foo.wasm.br`
+# with `Content-Encoding: br` while keeping the original content type.
+#
+# Gzip as well as brotli, and not for old browsers: **Chrome only advertises `br` on a secure
+# origin**. The development CDN is plain HTTP, so a real browser asks it for `gzip, deflate`
+# and would silently take the whole 27 MB uncompressed if gzip were absent -- which is a
+# compression path that only ever gets exercised in production, where nobody is watching it.
+echo "==> pre-compress"
+compressible() {
   find "$OUT" -type f \( -name '*.wasm' -o -name '*.js' -o -name '*.wgsl' \
-       -o -name '*.lcsky' -o -name '*.json' -o -name '*.html' \) -print0 \
-    | while IFS= read -r -d '' f; do brotli -q 11 -f -k "$f" -o "$f.br"; done
+    -o -name '*.lcsky' -o -name '*.json' -o -name '*.html' \) -print0
+}
+if command -v brotli >/dev/null; then
+  compressible | while IFS= read -r -d '' f; do brotli -q 11 -f -k "$f" -o "$f.br"; done
 else
-  echo "    brotli not installed -- the CDN will serve uncompressed" >&2
+  echo "    brotli not installed -- no .br, and production would serve uncompressed" >&2
 fi
+compressible | while IFS= read -r -d '' f; do gzip -9 -f -k -c "$f" > "$f.gz"; done
 
 echo
 echo "==> $OUT"
