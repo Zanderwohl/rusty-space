@@ -3,7 +3,6 @@ mod save_load;
 pub mod escape;
 mod home;
 mod drift;
-pub mod widgets;
 
 use std::fs;
 
@@ -48,7 +47,7 @@ pub enum MenuState {
 impl Plugin for MenuPlugin {
     fn build (&self, app: &mut App) {
         app
-            .add_plugins((HomeMenuPlugin, MenuDriftPlugin))
+            .add_plugins((em_ui::MenuUiPlugin, HomeMenuPlugin, MenuDriftPlugin))
             .insert_state(MenuState::Home)
             .init_resource::<UiState>()
             .init_resource::<PlanetariumFiles>()
@@ -58,7 +57,7 @@ impl Plugin for MenuPlugin {
                 (save_load::planetarium_menu,).run_if(in_state(AppState::MainMenu).and(in_state(MenuState::Planetarium))),
                 (settings_menu,).run_if(in_state(AppState::MainMenu).and(in_state(MenuState::Settings))),
             ))
-            .add_systems(Update, (quit_system, widgets::button_hover_system))
+            .add_systems(Update, quit_system)
         ;
     }
 }

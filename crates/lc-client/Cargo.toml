@@ -12,6 +12,7 @@ em-plot = { path = "../em-plot", features = ["raster"] }
 em-render = { path = "../em-render" }
 em-spectra = { path = "../em-spectra" }
 em-sim = { path = "../em-sim", features = ["bevy"] }
+em-ui = { path = "../em-ui" }
 lc-spacetime = { path = "../lc-spacetime" }
 lc-world = { path = "../lc-world", default-features = false }
 bevy = "0.17.2"

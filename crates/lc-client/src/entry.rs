@@ -50,11 +50,12 @@ pub fn parse(args: &[String]) -> (DevEntry, Option<String>) {
         actions.push(Action::FlyToNearest);
     }
 
+    // `--menu` holds the entry at the main menu, so `--shot` can photograph it. Without it a
+    // screenshot run goes straight to the sky, which is what every other capture wants.
+    let stay_in_menu = flag("--menu");
     let dev = DevEntry {
-        observe_immediately: flag("--observe")
-            || flag("--shot")
-            || flag("--at")
-            || flag("--station"),
+        observe_immediately: !stay_in_menu
+            && (flag("--observe") || flag("--shot") || flag("--at") || flag("--station")),
         target_swarm: flag("--swarm"),
         at_body: after("--at"),
         station: after("--station"),
@@ -171,6 +172,13 @@ mod tests {
         assert!(dev.observe_immediately);
         assert_eq!(dev.screenshot.as_deref(), Some("out.png"));
         assert_eq!(dev.after_frames, 90);
+    }
+
+    #[test]
+    fn menu_holds_the_entry_even_when_a_shot_was_asked_for() {
+        let (dev, _) = parse(&args("--menu --shot menu.png"));
+        assert!(!dev.observe_immediately, "--menu must not fall through to the sky");
+        assert_eq!(dev.screenshot.as_deref(), Some("menu.png"));
     }
 
     #[test]

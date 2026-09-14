@@ -11,45 +11,10 @@ use crate::hud;
 use crate::input::Requested;
 use crate::plot::CurvePlot;
 use crate::navigation::Target;
-use crate::ui::{MenuPage, Panel};
+use crate::ui::Panel;
 
 fn ask(out: &mut MessageWriter<Requested>, action: Action) {
     out.write(Requested(action));
-}
-
-pub fn main_menu(
-    mut contexts: EguiContexts,
-    ui_state: Res<Ui>,
-    mut out: MessageWriter<Requested>,
-) {
-    let Ok(ctx) = contexts.ctx_mut() else { return };
-    egui::CentralPanel::default().show(ctx, |ui| {
-        ui.vertical_centered(|ui| {
-            ui.add_space(80.0);
-            ui.heading("LIGHTCONE");
-            ui.label("everything you see already happened");
-            ui.add_space(40.0);
-            match ui_state.menu_page {
-                MenuPage::Root => {
-                    if ui.button("Observe").clicked() {
-                        ask(&mut out, Action::StartGame);
-                    }
-                    if ui.button("Settings").clicked() {
-                        ask(&mut out, Action::GoToMenuPage(MenuPage::Settings));
-                    }
-                    if ui.button("Quit").clicked() {
-                        ask(&mut out, Action::Quit);
-                    }
-                }
-                _ => {
-                    ui.label(format!("{:?}", ui_state.menu_page));
-                    if ui.button("Back").clicked() {
-                        ask(&mut out, Action::GoToMenuPage(MenuPage::Root));
-                    }
-                }
-            }
-        });
-    });
 }
 
 pub fn loading(mut contexts: EguiContexts) {

@@ -14,7 +14,7 @@ use crate::gui::app::AppState;
 use crate::sim::SimTime;
 
 use super::{MenuState, UiState, SaveFileMeta};
-use super::widgets::{spawn_button, spawn_message, spawn_panel, spawn_title};
+use em_ui::{MenuTheme, MenuUi};
 use crate::gui::style::vfd;
 
 // ============================================================================
@@ -234,12 +234,13 @@ pub fn setup_main_menu(mut commands: Commands) {
     let overlay = spawn_overlay(&mut commands);
     commands.entity(overlay).insert(MainMenuScreen);
 
-    let panel = spawn_panel(&mut commands, overlay);
-    spawn_title(&mut commands, panel, "Paused");
-    spawn_button(&mut commands, panel, "Resume", MenuAction::Resume);
-    spawn_button(&mut commands, panel, "Settings", MenuAction::Settings);
-    spawn_button(&mut commands, panel, "Save", MenuAction::Save);
-    spawn_button(&mut commands, panel, "Quit", MenuAction::Quit);
+    let mut ui = MenuUi::new(&mut commands, MenuTheme::VFD);
+    let panel = ui.panel(overlay);
+    ui.title(panel, "Paused");
+    ui.button(panel, "Resume", MenuAction::Resume);
+    ui.button(panel, "Settings", MenuAction::Settings);
+    ui.button(panel, "Save", MenuAction::Save);
+    ui.button(panel, "Quit", MenuAction::Quit);
 }
 
 pub fn cleanup_main_menu(
@@ -325,12 +326,13 @@ pub fn setup_save_nag(mut commands: Commands) {
     let overlay = spawn_overlay(&mut commands);
     commands.entity(overlay).insert(SaveNagScreen);
 
-    let panel = spawn_panel(&mut commands, overlay);
-    spawn_title(&mut commands, panel, "Unsaved Changes");
-    spawn_message(&mut commands, panel, "You have unsaved changes.");
-    spawn_button(&mut commands, panel, "Save and Quit", MenuAction::SaveAndQuit);
-    spawn_button(&mut commands, panel, "Quit without Saving", MenuAction::QuitWithoutSaving);
-    spawn_button(&mut commands, panel, "Back", MenuAction::Back);
+    let mut ui = MenuUi::new(&mut commands, MenuTheme::VFD);
+    let panel = ui.panel(overlay);
+    ui.title(panel, "Unsaved Changes");
+    ui.message(panel, "You have unsaved changes.");
+    ui.button(panel, "Save and Quit", MenuAction::SaveAndQuit);
+    ui.button(panel, "Quit without Saving", MenuAction::QuitWithoutSaving);
+    ui.button(panel, "Back", MenuAction::Back);
 }
 
 pub fn cleanup_save_nag(
@@ -413,9 +415,10 @@ pub fn setup_naming(mut commands: Commands, mut context: ResMut<EscMenuContext>)
     let overlay = spawn_overlay(&mut commands);
     commands.entity(overlay).insert(NamingScreen);
 
-    let panel = spawn_panel(&mut commands, overlay);
-    spawn_title(&mut commands, panel, "Save As");
-    spawn_message(&mut commands, panel, "Enter a name for your save file:");
+    let mut ui = MenuUi::new(&mut commands, MenuTheme::VFD);
+    let panel = ui.panel(overlay);
+    ui.title(panel, "Save As");
+    ui.message(panel, "Enter a name for your save file:");
 
     let input = commands
         .spawn((
@@ -437,8 +440,9 @@ pub fn setup_naming(mut commands: Commands, mut context: ResMut<EscMenuContext>)
         .id();
     commands.entity(panel).add_child(input);
 
-    spawn_button(&mut commands, panel, "Save", MenuAction::ConfirmSave);
-    spawn_button(&mut commands, panel, "Cancel", MenuAction::CancelNaming);
+    let mut ui = MenuUi::new(&mut commands, MenuTheme::VFD);
+    ui.button(panel, "Save", MenuAction::ConfirmSave);
+    ui.button(panel, "Cancel", MenuAction::CancelNaming);
 }
 
 pub fn cleanup_naming(
@@ -538,15 +542,12 @@ pub fn setup_confirm_overwrite(mut commands: Commands, context: Res<EscMenuConte
     let overlay = spawn_overlay(&mut commands);
     commands.entity(overlay).insert(ConfirmOverwriteScreen);
 
-    let panel = spawn_panel(&mut commands, overlay);
-    spawn_title(&mut commands, panel, "Confirm Overwrite");
-    spawn_message(
-        &mut commands,
-        panel,
-        &format!("\"{}\" already exists. Overwrite?", context.intended_name),
-    );
-    spawn_button(&mut commands, panel, "Overwrite", MenuAction::Overwrite);
-    spawn_button(&mut commands, panel, "Back", MenuAction::Back);
+    let mut ui = MenuUi::new(&mut commands, MenuTheme::VFD);
+    let panel = ui.panel(overlay);
+    ui.title(panel, "Confirm Overwrite");
+    ui.message(panel, &format!("\"{}\" already exists. Overwrite?", context.intended_name));
+    ui.button(panel, "Overwrite", MenuAction::Overwrite);
+    ui.button(panel, "Back", MenuAction::Back);
 }
 
 pub fn cleanup_confirm_overwrite(

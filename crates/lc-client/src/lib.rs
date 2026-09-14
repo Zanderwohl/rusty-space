@@ -14,6 +14,7 @@ pub mod envelope;
 pub mod flight;
 pub mod hud;
 pub mod input;
+pub mod menu;
 pub mod navigation;
 pub mod panels;
 pub mod plot;

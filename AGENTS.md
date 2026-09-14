@@ -45,6 +45,7 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--burst <n>` | photograph `n` **consecutive** frames — the only way to see a flicker |
 | `--at <body>` / `--station <course>` | stand off a body, or start on a station |
 | `--panel <name>` / `--tune` | open a panel |
+| `--menu` | hold at the main menu, so `--shot` photographs that instead of the sky |
 | `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable |
 
 Most of what has gone wrong in the renderer was found this way and could not have been found

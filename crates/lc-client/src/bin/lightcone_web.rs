@@ -12,23 +12,29 @@
 //! The page is expected to have checked `navigator.gpu` before loading this, because the
 //! check is free and the download is not.
 
-#![cfg(target_arch = "wasm32")]
-
+#[cfg(target_arch = "wasm32")]
 use bevy::asset::{AssetMetaCheck, AssetPlugin};
+#[cfg(target_arch = "wasm32")]
 use bevy::prelude::*;
+#[cfg(target_arch = "wasm32")]
 use bevy::render::RenderPlugin;
+#[cfg(target_arch = "wasm32")]
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
+#[cfg(target_arch = "wasm32")]
 use lc_client::app::{Catalogue, ClientPlugin};
 
 /// The canvas the game draws into. The page owns it; Bevy finds it by selector.
+#[cfg(target_arch = "wasm32")]
 const CANVAS: &str = "#lightcone";
 
 /// Where assets are fetched from when the page does not say.
 ///
 /// Relative, so a build served from a plain static directory works with no configuration. The
 /// hosted build passes an absolute CDN URL instead.
+#[cfg(target_arch = "wasm32")]
 const DEFAULT_ASSET_BASE: &str = "assets";
 
+#[cfg(target_arch = "wasm32")]
 fn main() {
     // Without this a Rust panic is an unhelpful "unreachable executed" in the console.
     console_error_panic_hook::set_once();
@@ -39,8 +45,8 @@ fn main() {
     let args = lc_client::entry::from_query(&search);
     let (dev, catalogue) = lc_client::entry::parse(&args);
 
-    let asset_base = lc_client::entry::param(&search, "assets")
-        .unwrap_or_else(|| DEFAULT_ASSET_BASE.to_owned());
+    let asset_base =
+        lc_client::entry::param(&search, "assets").unwrap_or_else(|| DEFAULT_ASSET_BASE.to_owned());
     info!("assets from {asset_base}");
 
     App::new()
@@ -76,4 +82,19 @@ fn main() {
         .insert_resource(dev)
         .add_plugins(ClientPlugin)
         .run();
+}
+
+/// Building this binary for a desktop is a mistake worth naming.
+///
+/// The target-gated `main` above leaves nothing behind on a native target, and a bin with no
+/// `main` fails to compile — which `cargo test --workspace` hits, because it builds every
+/// binary in the workspace whether or not anyone intends to run it.
+#[cfg(not(target_arch = "wasm32"))]
+fn main() {
+    eprintln!(
+        "lightcone_web is the browser build; it runs in a browser and nowhere else.\n\
+         On a desktop use `lightcone`. To build this one:\n\
+         \n    tools/build-wasm.sh\n"
+    );
+    std::process::exit(2);
 }
