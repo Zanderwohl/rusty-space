@@ -14,6 +14,7 @@ pub mod propagate;
 pub mod system;
 pub mod events;
 pub mod id;
+pub mod collision;
 pub mod crossing;
 pub mod influence;
 pub mod time;
