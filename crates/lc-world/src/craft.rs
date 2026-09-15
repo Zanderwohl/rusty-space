@@ -159,6 +159,16 @@ impl Craft {
         self.worldline().position_at(t_us)
     }
 
+    /// Put it on an approach, and drop whatever the old motive had predicted.
+    ///
+    /// Not an [`Event`], because an approach is not an order a client sends: it is what the
+    /// authority works out *from* a standing order, once per re-solve, against a sighting only
+    /// it can vouch for. The client receives the answer as a motive and folds it.
+    pub fn begin_rendezvous(&mut self, plan: crate::pursuit::Rendezvous, now_s: f64) {
+        self.motion.begin_rendezvous(plan);
+        self.solve_patch(now_s);
+    }
+
     /// Fold an event, and re-solve the patch if the arc changed.
     pub fn apply(&mut self, event: &Event) -> Result<(), Rejected> {
         motion::apply(&mut self.motion, self.system.as_deref(), event)?;

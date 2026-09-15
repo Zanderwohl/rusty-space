@@ -153,6 +153,13 @@ pub struct Uplink {
     /// merged: the list is what the server can see of this ship's surroundings, and a contact
     /// missing from it is a contact that is no longer there.
     pub contacts: Vec<Contact>,
+    /// Who this ship has a standing order to close on.
+    ///
+    /// The interface's copy of a policy the server owns, kept so a button can read as pressed
+    /// the moment the order is accepted. Not authoritative: what the ship is actually *doing*
+    /// is its motive, and the server drops the pursuit without saying so when the quarry goes
+    /// out of sight — which is why this is cleared by a refusal and by losing the contact.
+    pub chasing: Option<ShipId>,
     /// What the server last said about an order, for the interface to show once and drop. The
     /// client cannot write its own here: an order's outcome is the server's to state.
     pub applied: Option<String>,
@@ -372,6 +379,12 @@ fn fold(
         Outbound::Present(cleared) => {
             uplink.contacts =
                 cleared.into_iter().map(|c| Contact::from(c.into_inner())).collect();
+            // The server drops a pursuit when its quarry goes out of sight and does not say
+            // so — saying so would be a message about somewhere this client can no longer see.
+            // Losing the contact is the same fact arriving the only way it can.
+            if uplink.chasing.is_some_and(|id| !uplink.contacts.iter().any(|c| c.ship_id == id)) {
+                uplink.chasing = None;
+            }
         }
         Outbound::Sightings(cleared) => {
             uplink
@@ -430,6 +443,18 @@ fn fold(
                     };
                     Some(note)
                 }
+                // A standing intercept folds into nothing here. What it *does* arrives as a
+                // motive, once per re-solve, through the same placement path a reconnect uses
+                // — so the client is told the approach its ship is flying rather than working
+                // one out from a quarry it can only see the past of.
+                Order::Intercept { ship_id } => {
+                    uplink.chasing = Some(*ship_id);
+                    Some(format!("closing on {}", ship_id.0))
+                }
+                Order::BreakOff => {
+                    uplink.chasing = None;
+                    Some("broke off".into())
+                }
                 // Nothing to fold into the ship's motion. A transmission is an event, and the
                 // client learns of it the same way anyone else does: when its light arrives.
                 Order::Transmit { .. } | Order::Burn { .. } => None,
@@ -451,9 +476,14 @@ fn fold(
         }
         Outbound::Refused { ship_id, reason } => {
             warn!(?ship_id, ?reason, "an order was refused");
+            if matches!(reason, Refusal::NotInSight | Refusal::TooFast) {
+                uplink.chasing = None;
+            }
             uplink.applied = Some(match reason {
                 Refusal::Impossible => "the server refused that order".into(),
                 Refusal::NotYours | Refusal::NotYou => "that is not your ship".into(),
+                Refusal::NotInSight => "there is nothing there to close on".into(),
+                Refusal::TooFast => "too fast to match; kill the closing speed first".into(),
             });
         }
         Outbound::Throttled { retry_after_ticks } => {

@@ -423,7 +423,7 @@ fn system(
     station(ui, state, game, out);
     ui.separator();
     if *tab == SystemTab::Ships {
-        ships(ui, game, uplink);
+        ships(ui, game, uplink, out);
         return;
     }
     ui.horizontal(|ui| {
@@ -492,7 +492,12 @@ fn system(
 /// Every row is a *sighting*, and the age of the light is a column rather than a footnote:
 /// across a system it runs from seconds to hours, and a range read as though it were current
 /// is the one mistake this list exists to stop a player making.
-fn ships(ui: &mut egui::Ui, game: &Game, uplink: &crate::uplink::Uplink) {
+fn ships(
+    ui: &mut egui::Ui,
+    game: &Game,
+    uplink: &crate::uplink::Uplink,
+    out: &mut MessageWriter<Requested>,
+) {
     if uplink.contacts.is_empty() {
         ui.weak(match game.remote {
             true => "Nobody else is in this system.",
@@ -510,12 +515,33 @@ fn ships(ui: &mut egui::Ui, game: &Game, uplink: &crate::uplink::Uplink) {
     egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
         for contact in rows {
             let range = here.distance(contact.position_ly);
+            let chasing = uplink.chasing == Some(contact.ship_id);
             ui.horizontal(|ui| {
                 ui.label(&contact.name);
                 ui.weak(span(range));
+                // Right-aligned, because the name and the range are what a list is read down
+                // and a button in the middle of that column breaks the scan.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if chasing {
+                        if ui.button("break off").clicked() {
+                            ask(out, Action::BreakOff);
+                        }
+                    } else if ui.button("intercept").clicked() {
+                        ask(out, Action::Intercept(contact.ship_id));
+                    }
+                });
             });
             ui.horizontal(|ui| {
                 ui.add_space(12.0);
+                if chasing {
+                    // What the ship is *doing* rather than what was asked for: a standing
+                    // order and the approach it most recently produced are different facts,
+                    // and only the second one says where the ship will actually be.
+                    ui.weak(match game.ship.motion.pursuing() {
+                        Some(_) => "closing",
+                        None => "alongside",
+                    });
+                }
                 ui.weak(format!(
                     "{} hull — {:.4}c — light is {} old",
                     span_m(contact.length_m),

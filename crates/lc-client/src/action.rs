@@ -75,6 +75,10 @@ pub enum Action {
     SetCourse(Course),
     /// Proper acceleration for the next crossing, in g.
     SetDriveAccel(f64),
+    /// Close on another ship, match its velocity, and hold station alongside it.
+    Intercept(lc_proto::ShipId),
+    /// Give up a standing intercept. The ship keeps flying whatever it was flying.
+    BreakOff,
 
     // --- appearance -------------------------------------------------------------------
     /// Replace a starfield pass's drawing parameters. Carries the whole style rather than one
@@ -245,6 +249,22 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             ui.focus = target;
         }
         Action::ChooseCourse(course) => ui.course = course,
+        // Both of these only exist against a server. An intercept is a *standing* order and
+        // what makes it stand is the authority re-solving it against sightings; a client
+        // holding the policy itself would be a client steering by a quarry it can only see
+        // the past of, which is the one thing the design will not have.
+        Action::Intercept(ship_id) => {
+            if session.remote {
+                effects.push(Effect::Send(lc_proto::Order::Intercept { ship_id }));
+            } else {
+                effects.push(Effect::Notify("no server, so nobody to close on".into()));
+            }
+        }
+        Action::BreakOff => {
+            if session.remote {
+                effects.push(Effect::Send(lc_proto::Order::BreakOff));
+            }
+        }
         Action::SetCourse(course) => {
             if session.remote {
                 // Sent, not applied. What the server does with it comes back as `Accepted`,

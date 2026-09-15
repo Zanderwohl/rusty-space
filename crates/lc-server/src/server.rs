@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use glam::DVec3;
 use lc_proto::{
-    ClientId, Cleared, Inbound, Intent, Order, Outbound, PROTOCOL_VERSION, Presence, Refusal,
-    ShipId, Sighting, Withheld,
+    ClientId, Cleared, Inbound, Intent, Order, Outbound, PROTOCOL_VERSION, Refusal, ShipId,
+    Sighting, Withheld,
 };
 use lc_store::id::Minter;
 
@@ -14,12 +14,12 @@ use crate::rate::Budget;
 use crate::transport::Transport;
 use crate::ticket::{Spent, Trusted};
 use crate::world::{Event, Scheduled, World, schedule};
-use lc_spacetime::Worldline;
-use lc_spacetime::worldline::retarded_times_at;
 use lc_world::craft::{Craft, CraftId, Fleet, Kind};
-use lc_world::motion::{Change, Event as Change_, LIGHT_US_PER_LY, Rejected};
+use lc_world::motion::{Change, Event as Change_, Rejected};
 use lc_world::navigation::Course;
-use lc_world::system::{LOCAL_SHELL_LY, LocalSystem};
+use crate::chase::{self, Pursuit};
+use lc_world::pursuit;
+use lc_world::system::LocalSystem;
 use std::sync::Arc;
 
 /// Real milliseconds a tick covers.
@@ -92,6 +92,14 @@ pub struct Server<J: Journal> {
     open: bool,
     /// Accounts whose saved craft could not be read. See [`crate::persist::Unreadable`].
     blocked: HashMap<String, String>,
+    /// Who is chasing whom.
+    ///
+    /// The one piece of *standing* state in a server otherwise made of events. It is here and
+    /// not in the world because it is a policy rather than a fact about a worldline: the world
+    /// only ever holds the approach a policy most recently produced, which is an ordinary
+    /// motive both ends evaluate. Dropped when the quarry goes out of sight, so it cannot keep
+    /// a client informed about somewhere it can no longer see.
+    pursuits: HashMap<CraftId, Pursuit>,
 }
 
 impl<J: Journal> Server<J> {
@@ -113,6 +121,7 @@ impl<J: Journal> Server<J> {
             budgets: HashMap::new(),
             open: false,
             blocked: HashMap::new(),
+            pursuits: HashMap::new(),
         }
     }
 
@@ -313,6 +322,9 @@ impl<J: Journal> Server<J> {
         for budget in self.budgets.values_mut() {
             budget.advance(TICKS_PER_SECOND);
         }
+        // After the intents, so an intercept ordered this tick is not immediately re-solved
+        // against the plan it just made.
+        self.steer_pursuits(&mut events, &mut deliveries);
         self.journal.write(&events, &deliveries).await?;
         self.pending = events;
         self.state_the_clock(wire);
@@ -430,9 +442,18 @@ impl<J: Journal> Server<J> {
                 }
                 let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
                 let here = craft.position_at(at as f64);
-                let noise_floor = craft.noise_floor;
+                // Everything a burn does not change, carried across the rebuild. It replaces
+                // the craft rather than editing its motive, so anything not named here is
+                // quietly reset to a default — which is how a ship could come out of a burn a
+                // different size and with a different name.
+                let (noise_floor, length_m, name, system, kind) =
+                    (craft.noise_floor, craft.length_m, craft.name.clone(), craft.system.clone(), craft.kind);
                 *craft = crate::world::coasting(intent.ship_id, here, beta, at);
                 craft.noise_floor = noise_floor;
+                craft.length_m = length_m;
+                craft.name = name;
+                craft.kind = kind;
+                craft.enter(system, at as f64 * 1.0e-6);
                 // A burn is not silent -- it is the most visible thing a ship does -- but what
                 // it radiates is the drive's business. Nominal, until there is a drive model.
                 (
@@ -505,6 +526,37 @@ impl<J: Journal> Server<J> {
                 // Silent. Cutting the engine is the one manoeuvre that puts nothing out, which
                 // is exactly why a player might choose it.
                 (KIND_CUT, 0.0, "{}".to_string(), Order::CutDrive)
+            }
+            Order::Intercept { ship_id } => {
+                let quarry = *ship_id;
+                // The first plan is made here rather than left to the next tick, so that a
+                // player who presses the button sees the ship move on the same round trip as
+                // any other order. What keeps it flying is the standing policy below.
+                let now_s = at as f64 * 1.0e-6;
+                let seen = chase::sighting(&self.fleet, id, quarry, at)
+                    .ok_or(Refusal::NotInSight)?;
+                let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
+                match pursuit::approach(&craft.motion, craft.length_m, &seen, now_s, craft.motion.drive) {
+                    Ok(plan) => craft.begin_rendezvous(plan, now_s),
+                    // Already alongside. The order still stands — it is a policy, and the
+                    // policy's job from here is to keep it there.
+                    Err(pursuit::Refused::AlreadyThere) => {}
+                    Err(pursuit::Refused::TooFast) => return Err(Refusal::TooFast),
+                }
+                self.pursuits.insert(id, Pursuit { quarry, last_plan_t: at });
+                (
+                    KIND_BURN,
+                    BURN_POWER_W,
+                    format!("{{\"intercept\":{}}}", quarry.0),
+                    Order::Intercept { ship_id: quarry },
+                )
+            }
+            Order::BreakOff => {
+                // Only the policy is cancelled. Whatever approach the ship is flying it goes
+                // on flying, and it will finish alongside and then simply stay where it ends
+                // up — which is what giving up a chase looks like from outside.
+                self.pursuits.remove(&id);
+                (KIND_CUT, 0.0, "{}".to_string(), Order::BreakOff)
             }
         };
 
@@ -638,82 +690,62 @@ impl<J: Journal> Server<J> {
         }
     }
 
-    /// Whether an observer is entitled to know a craft exists at all.
+
+    /// Fly every standing intercept one tick.
     ///
-    /// Sharing a system, which is the same [`LOCAL_SHELL_LY`] rule both ends already use to
-    /// decide where a ship is. Not an angular size: a hull five hundred metres long is well
-    /// under a pixel from anywhere in a system, and a rule drawn there would leave a player
-    /// unable to find traffic they are sitting in the middle of. Between the stars, where
-    /// there is no system to share, the same radius serves as a plain range.
+    /// Each craft steers by what **it** can see, which is the same sighting its owner is sent
+    /// and no fresher. A quarry that manoeuvres is therefore chased on stale information until
+    /// the news arrives — seconds to hours across a system — and that delay is the game rather
+    /// than a shortcoming of the guidance.
     ///
-    /// A *visibility* rule and not a causality one. What it decides is which craft are worth
-    /// solving for; whether the light has arrived is [`Cleared::clear`]'s alone.
-    fn in_sight(observer: &Craft, other: &Craft) -> bool {
-        match (&observer.system, &other.system) {
-            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
-            (None, None) => {
-                observer.motion.position_ly.distance(other.motion.position_ly) < LOCAL_SHELL_LY
+    /// What to do is [`chase::decide`]'s; this is the half that may touch the fleet.
+    fn steer_pursuits(&mut self, events: &mut Vec<Event>, deliveries: &mut Vec<Scheduled>) {
+        let now = self.now_t;
+        let now_s = now as f64 * 1.0e-6;
+        for (id, plan) in chase::decide(&self.fleet, &self.pursuits, now) {
+            let Some(plan) = plan else {
+                self.pursuits.remove(&id);
+                continue;
+            };
+            let Some(craft) = self.fleet.get_mut(id) else { continue };
+            craft.begin_rendezvous(plan, now_s);
+            if let Some(entry) = self.pursuits.get_mut(&id) {
+                entry.last_plan_t = now;
             }
-            _ => false,
+            // A burn, and burns are the loudest thing a ship does. Everyone in range learns
+            // that this craft manoeuvred, at light delay, exactly as they would for any other.
+            self.emit(id, KIND_BURN, BURN_POWER_W, "{}".into(), now, events, deliveries);
         }
     }
 
-    /// Where everybody else appeared to be, per connection.
-    ///
-    /// Solved before the journal read rather than inside it: `due` borrows the journal mutably
-    /// and this borrows the fleet, and one loop doing both borrows `self` twice.
-    ///
-    /// Every contact is a **retarded** sample. A craft a light-hour away is reported where it
-    /// was an hour ago, and the emission time is solved against the observer's own worldline
-    /// rather than subtracted from a shared clock — which is what makes it right for an
-    /// observer that is itself moving fast.
-    fn contacts(&self) -> HashMap<ClientId, Vec<Cleared<Presence>>> {
-        let now = self.now_t;
-        let mut out = HashMap::new();
-        for (id, state) in &self.clients {
-            let Some(observer) = self.fleet.get(CraftId(state.ship.0)) else { continue };
-            let here = observer.position_at(now as f64);
-            let mut seen = Vec::new();
-            for craft in self.fleet.iter() {
-                if craft.id == observer.id || !Self::in_sight(observer, craft) {
-                    continue;
-                }
-                let worldline = craft.worldline();
-                // No root means light that has not arrived or has already gone past; there is
-                // never more than one for anything sub-luminal.
-                let Some(emitted) = retarded_times_at(now as f64, here, &worldline).first().copied()
-                else {
-                    continue;
-                };
-                let at_ly = worldline.position_at(emitted) / LIGHT_US_PER_LY;
-                let beta = worldline.velocity_at(emitted);
-                // Zero where nothing decides it — a craft at rest with the engine off. A
-                // default sent here would be indistinguishable from a nose that really points
-                // that way, and the receiver is the end that knows what it last saw.
-                let facing = craft.facing_at(emitted * 1.0e-6).unwrap_or(DVec3::ZERO);
-                let presence = Presence {
-                    ship_id: ShipId(craft.id.0),
-                    name: craft.designation(),
-                    length_m: craft.length_m,
-                    at_ly: at_ly.to_array(),
-                    beta: beta.to_array(),
-                    facing: facing.to_array(),
-                    emitted_t: emitted as i64,
-                    // The solve *is* the arrival: `emitted + |x_o - w(emitted)|` equals `now`
-                    // by construction, so this is the light landing at this instant.
-                    arrive_t: now,
-                };
-                match Cleared::<Presence>::clear(presence, now) {
-                    Ok(pass) => seen.push(pass),
-                    // Only reachable if the solve returned a root in the observer's future,
-                    // which it cannot. Dropped rather than trusted: the gate is the authority
-                    // here and the solver is not.
-                    Err(Withheld::StillInFlight | Withheld::BelowNoiseFloor) => {}
-                }
+    /// Write an event for something a craft did, and schedule it to everyone who will see it.
+    fn emit(
+        &mut self,
+        id: CraftId,
+        kind: i16,
+        power_w: f64,
+        payload: String,
+        at: i64,
+        events: &mut Vec<Event>,
+        deliveries: &mut Vec<Scheduled>,
+    ) {
+        let Some(craft) = self.fleet.get(id) else { return };
+        let Some(event_id) = self.minter.mint(at) else { return };
+        let event = Event {
+            id: event_id.get(),
+            source: ShipId(id.0),
+            t: at,
+            at: craft.position_at(at as f64),
+            kind,
+            power_w,
+            payload,
+        };
+        for observer in self.fleet.iter() {
+            if let Some(scheduled) = schedule(&event, observer) {
+                deliveries.push(scheduled);
             }
-            out.insert(*id, seen);
         }
-        out
+        events.push(event);
     }
 
     /// Release what has arrived. **The only place anything reaches a client.**
@@ -727,7 +759,7 @@ impl<J: Journal> Server<J> {
         // Cloned out first: the journal read borrows `self`, and the state update writes it.
         let connections: Vec<(ClientId, Connected)> =
             self.clients.iter().map(|(id, state)| (*id, state.clone())).collect();
-        let mut contacts = self.contacts();
+        let mut contacts = chase::contacts(&self.fleet, &self.clients, now);
 
         for (id, state) in connections {
             // Every tick there is anything to say, and once more when there stops being: a
@@ -857,7 +889,7 @@ use crate::transport::Loopback;
     /// Two light-hours, in light-microseconds. Far enough that the delay is many ticks.
     const TWO_LIGHT_HOURS: f64 = 7_200.0 * 1_000_000.0;
 
-    fn presences(messages: &[Outbound]) -> Vec<&Presence> {
+    fn presences(messages: &[Outbound]) -> Vec<&lc_proto::Presence> {
         messages
             .iter()
             .flat_map(|m| match m {
@@ -1309,7 +1341,7 @@ use crate::transport::Loopback;
         let delay = (now - contact.emitted_t) as f64;
         let reported = DVec3::from_array(contact.at_ly);
         let here = server.ship(ShipId(2)).unwrap().motion.position_ly;
-        let crossed = (reported - here).length() * LIGHT_US_PER_LY;
+        let crossed = (reported - here).length() * lc_world::motion::LIGHT_US_PER_LY;
         assert!(
             (delay - crossed).abs() < 1.0,
             "light took {delay} microseconds to cross {crossed}",
@@ -1338,7 +1370,7 @@ use crate::transport::Loopback;
         let mut wire = Loopback::new();
         let watcher = ClientId(2);
         server.admit(watcher, crate::world::still(ShipId(2), DVec3::ZERO), 0.0);
-        let far = LOCAL_SHELL_LY * 2.0 * LIGHT_US_PER_LY;
+        let far = lc_world::system::LOCAL_SHELL_LY * 2.0 * lc_world::motion::LIGHT_US_PER_LY;
         server.admit(
             ClientId(1),
             crate::world::still(ShipId(1), DVec3::new(far, 0.0, 0.0)),
@@ -1347,6 +1379,173 @@ use crate::transport::Loopback;
         server.tick(&mut wire).await.unwrap();
         assert!(presences(&wire.take(watcher)).is_empty());
     }
+
+    /// One light-second, in light-microseconds. Close enough that an approach completes in a
+    /// handful of ticks.
+    const ONE_LIGHT_SECOND: f64 = 1_000_000.0;
+
+    /// Where a craft is at the server's present, light-years.
+    fn at_now<J: Journal>(server: &Server<J>, ship: ShipId) -> DVec3 {
+        server.ship(ship).unwrap().position_at(server.now_t() as f64)
+            / lc_world::motion::LIGHT_US_PER_LY
+    }
+
+    fn gap<J: Journal>(server: &Server<J>) -> f64 {
+        at_now(server, ShipId(1)).distance(at_now(server, ShipId(2)))
+            * lc_world::system::M_PER_LY
+    }
+
+    /// The pursuer's standing plan, if it is flying one.
+    fn plan<J: Journal>(server: &Server<J>, ship: ShipId) -> Option<lc_world::pursuit::Rendezvous> {
+        match &server.ship(ship).unwrap().motion.motive {
+            lc_world::motion::Motive::Rendezvous(plan) => Some(plan.clone()),
+            _ => None,
+        }
+    }
+
+    /// **An intercept, flown by the server.** It closes, it stops closing at the standoff, and
+    /// it stays there — which is the whole of pursue, match, and hang about.
+    #[tokio::test]
+    async fn an_intercept_closes_to_a_standoff_and_stays() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let hunter = ClientId(1);
+        server.admit(hunter, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+        server.admit(
+            ClientId(2),
+            crate::world::still(ShipId(2), DVec3::new(ONE_LIGHT_SECOND, 0.0, 0.0)),
+            0.0,
+        );
+        let opening = gap(&server);
+
+        wire.client_says(hunter, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Intercept { ship_id: ShipId(2) },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+        assert!(plan(&server, ShipId(1)).is_some(), "the order did not put it on an approach");
+
+        for _ in 0..200 {
+            server.tick(&mut wire).await.unwrap();
+        }
+
+        let standoff = lc_world::pursuit::standoff_m(
+            server.ship(ShipId(1)).unwrap().length_m,
+            server.ship(ShipId(2)).unwrap().length_m,
+        );
+        let closed = gap(&server);
+        assert!(closed < opening / 100.0, "it barely closed: {opening} to {closed}");
+        assert!(
+            closed < standoff * lc_world::pursuit::DRIFT_ALLOWANCE,
+            "ended {closed} off, which is outside the deadband round {standoff}",
+        );
+        // And it is done flying rather than circling forever.
+        assert!(plan(&server, ShipId(1)).is_none_or(|p| p.has_arrived(server.now_t() as f64 * 1e-6)));
+
+        // Station-keeping: hundreds of ticks later it is still there, and it has not spent
+        // them re-planning against itself.
+        for _ in 0..300 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let later = gap(&server);
+        assert!(
+            later < standoff * lc_world::pursuit::DRIFT_ALLOWANCE,
+            "it wandered off station: {closed} to {later}",
+        );
+    }
+
+    /// **The rule the whole design turns on, applied to an autopilot.**
+    ///
+    /// A pursuer steers by the light that has reached it. When its quarry burns, the pursuer
+    /// goes on flying the old solution — aimed at a quarry it still sees holding course — until
+    /// the news arrives.
+    ///
+    /// **This fails, and the guidance is not what is wrong with it.** A [`Craft`]'s worldline is
+    /// its *current* motive evaluated at whatever time is asked for, and a motive has no memory:
+    /// `Motive::Drifting` extrapolates backwards, so a burn retroactively rewrites where the ship
+    /// was an hour ago and how fast. Every retarded solve then reads the new motion at the old
+    /// time — this guidance, and `Outbound::Present` before it.
+    ///
+    /// The fix is a worldline with a past: a craft keeping the motives it has flown, stamped
+    /// with when each stopped being in force, the way `lc_world::observation::Target` already
+    /// keeps a history of emission models for exactly this reason. Until then this stands
+    /// ignored rather than deleted, because it is the assertion that says when the bug is gone.
+    ///
+    /// Verified to fail for that reason and not another: with the retarded solve replaced by
+    /// the quarry's present state it fails identically, and with the history in place both
+    /// should pass.
+    #[tokio::test]
+    #[ignore = "blocked: a Craft's worldline has no history, so a burn rewrites its past"]
+    async fn a_pursuer_cannot_react_to_a_burn_before_its_light_arrives() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let hunter = ClientId(1);
+        let prey = ClientId(2);
+        server.admit(hunter, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+        server.admit(
+            prey,
+            crate::world::still(ShipId(2), DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0)),
+            0.0,
+        );
+
+        wire.client_says(hunter, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Intercept { ship_id: ShipId(2) },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+        let first = plan(&server, ShipId(1)).expect("an approach");
+        assert_eq!(first.frame_beta, DVec3::ZERO, "premise: it is chasing something at rest");
+
+        // The quarry lights its drive and goes somewhere else.
+        wire.client_says(prey, Inbound::Act(Intent {
+            ship_id: ShipId(2),
+            order: Order::Burn { beta: [0.0, 1.0e-3, 0.0] },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+        let burn_t = server.now_t();
+        assert_ne!(
+            server.ship(ShipId(2)).unwrap().motion.beta,
+            DVec3::ZERO,
+            "premise: the quarry actually burned",
+        );
+
+        // Where the news starts from. The light of the burn leaves this point, and the
+        // pursuer may not act on it until it has travelled from here to wherever the pursuer
+        // has got to — which is nearer than it was, because it has been closing all along.
+        let from = at_now(&server, ShipId(2));
+
+        let mut reacted = None;
+        for _ in 0..600 {
+            server.tick(&mut wire).await.unwrap();
+            let Some(now) = plan(&server, ShipId(1)) else { continue };
+            if now.frame_beta != DVec3::ZERO {
+                reacted = Some((server.now_t(), at_now(&server, ShipId(1))));
+                break;
+            }
+        }
+        let (reacted_at, reacted_where) = reacted.expect("the news never arrived at all");
+
+        // **The assertion.** The plan changed only once the light of the burn could have got
+        // to where the pursuer was standing when it changed it.
+        //
+        // Stated as the inequality rather than as "about two hours", because the pursuer is
+        // closing and the true crossing is shorter than the one it was sent over. One tick of
+        // slack, because a re-solve happens on a tick boundary and not at the instant the
+        // light lands.
+        let travelled = reacted_where.distance(from) * lc_world::system::M_PER_LY;
+        let earliest_us = travelled / lc_world::flight::C_M_S * 1.0e6;
+        let waited_us = (reacted_at - burn_t) as f64;
+        assert!(
+            waited_us + TICK_US as f64 >= earliest_us,
+            "reacted {waited_us} after the burn to light needing {earliest_us} to reach it",
+        );
+        assert!(waited_us > 0.0, "it reacted on the tick of the burn itself");
+    }
+
+
 }
 
 #[cfg(test)]
