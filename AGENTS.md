@@ -106,6 +106,14 @@ Each of these cost real time. None of them are visible from the code that hits t
   coin toss and it comes up "the sphere you are leaving". Take the new primary from the
   crossing, as `em_sim::patch` does.
 
+**Editing by script**
+
+- `str.replace` in a Python one-liner **fails silently** when the pattern is absent, and
+  `cargo fmt` reflowing a match arm is enough to make it absent. Two edits were lost that way
+  and the code still compiled, because the thing they set had a `Default`. Assert the text
+  changed (`assert s != before`) or grep for the result afterwards — a compile is not evidence
+  the edit landed.
+
 **Formatting**
 
 - **`cargo fmt` is not run on the game workspace.** CI fmt-checks `auth/` and `web/` only, and

@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -203,7 +203,21 @@ impl<T> Cleared<T> {
 pub enum Outbound {
     /// The control channel's first message. A client that gets anything else first is talking
     /// to a server it does not understand.
-    Welcome { client_id: ClientId, protocol: u32, ship_id: ShipId, now_t: i64, name: String },
+    Welcome {
+        client_id: ClientId,
+        protocol: u32,
+        ship_id: ShipId,
+        now_t: i64,
+        name: String,
+        /// Where the ship is, in light-years. Without it the client has no idea: it knows the
+        /// clock and its own identity and would place its ship wherever it happened to start,
+        /// which is the origin — empty space, and not where the server has it.
+        ///
+        /// Enough for a ship at rest, which is what a new one is. A ship found **mid-flight**
+        /// needs its motive as well, and that is the resume problem rather than this one: see
+        /// `Inbound::ResumeFrom` and `lightcone/docs/17-reconciliation.md`.
+        ship_at: [f64; 3],
+    },
     /// The event channel. Cleared, by construction.
     Sightings(Vec<Cleared<Sighting>>),
     /// An intent that stood, and **what was actually done with it** — which is not always
@@ -289,8 +303,11 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 /// test on these fails. A deployed client would otherwise read the new shape as the old one and
 /// be confidently wrong rather than refused.
 pub mod golden {
-    /// `Outbound::Welcome { client_id: 7, protocol: PROTOCOL_VERSION, ship_id: 42, now_t: 1e6 }`
-    pub const WELCOME: &[u8] = &[0, 7, 5, 84, 128, 137, 122, 3, 65, 100, 97];
+    /// `Outbound::Welcome { client_id: 7, .., ship_id: 42, now_t: 1e6, ship_at: [4.2, 0, 0] }`
+    pub const WELCOME: &[u8] = &[
+        0, 7, 6, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ];
 
     /// `Inbound::Act(Intent { ship_id: 42, order: Transmit { power_w: 1500.0 }, .. })`
     pub const ACT: &[u8] =
@@ -306,7 +323,7 @@ pub mod golden {
     ///
     /// Pinned because it is now the message that decides whether anyone gets in at all. A
     /// field moving here is a server reading someone else's ticket as this one's.
-    pub const HELLO: &[u8] = &[0, 5, 5, 97, 46, 98, 46, 99];
+    pub const HELLO: &[u8] = &[0, 6, 5, 97, 46, 98, 46, 99];
 
     pub const SET_COURSE: &[u8] = &[
         1, 84, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0, 0, 0, 0, 0, 0, 20,
@@ -347,6 +364,7 @@ mod tests {
             ship_id: ShipId(42),
             now_t: 1_000_000,
             name: "Ada".into(),
+            ship_at: [4.2, 0.0, 0.0],
         }
     }
 

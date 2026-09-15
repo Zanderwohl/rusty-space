@@ -34,6 +34,10 @@ ureq = { version = "2", features = ["json", "tls"] }
 # The game socket. Blocking, on a thread of its own, for the same reason `ureq` is here: the
 # client has no async runtime and this does not justify one.
 tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+# The server in the box, for `--local`. The desktop build contains a server because its
+# single-player mode is a server with one player; the browser build has none. See `src/local.rs`.
+lc-server = { path = "../lc-server" }
+tokio = { version = "1", features = ["rt", "macros", "time"] }
 
 # The browser build. `getrandom` needs its wasm backend named here as well as in
 # `.cargo/config.toml`; one without the other is not enough.
@@ -45,9 +49,7 @@ bevy = { version = "0.17.2", features = ["webgpu"] }
 web-sys = { version = "0.3", features = ["Window", "Location", "UrlSearchParams", "Document", "Element", "HtmlCanvasElement"] }
 console_error_panic_hook = "0.1"
 
-# The seam test, and only it: the client depends on `lc-proto` and never on the server.
 [dev-dependencies]
-lc-server = { path = "../lc-server" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
 [[bin]]

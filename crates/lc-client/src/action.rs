@@ -826,4 +826,71 @@ mod tests {
         apply(Action::FocusTarget(Some(crate::navigation::Target::Band(0))), &mut ui, &mut s);
         assert!(ui.course.is_none());
     }
+    /// With a server answering, a flight order is **sent**, not applied. Applying it locally
+    /// would use the acceleration that was asked for rather than the one the server flew.
+    #[test]
+    fn a_remote_session_sends_its_flight_orders_instead_of_flying_them() {
+        let mut ui = UiState::default();
+        let mut s = Session::new(&AuthoredStars::sample(), 3);
+        s.remote = true;
+        s.ship.motion.drive.accel_g = 7.0;
+        let before = s.ship.motion.position_ly;
+
+        let effects = apply(
+            Action::SetCourse(crate::navigation::Course::LeaveSystem),
+            &mut ui,
+            &mut s,
+        );
+        let sent: Vec<_> = effects
+            .iter()
+            .filter_map(|e| match e {
+                Effect::Send(order) => Some(order),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            sent.as_slice(),
+            [&lc_proto::Order::SetCourse {
+                course: lc_proto::Course::LeaveSystem,
+                accel_g: 7.0,
+            }],
+            "{effects:?}",
+        );
+        assert_eq!(s.ship.motion.position_ly, before, "it flew as well as sent");
+    }
+
+    /// And with no server it still flies, which is every build before there was one.
+    #[test]
+    fn a_local_session_still_flies_its_own_orders() {
+        let mut ui = UiState::default();
+        let mut s = Session::new(&AuthoredStars::sample(), 3);
+        assert!(!s.remote);
+        let effects = apply(
+            Action::SetCourse(crate::navigation::Course::LeaveSystem),
+            &mut ui,
+            &mut s,
+        );
+        assert!(
+            !effects.iter().any(|e| matches!(e, Effect::Send(_))),
+            "a single-process session sent an order to nobody: {effects:?}",
+        );
+    }
+
+    /// An interstellar crossing has no `Order`, so against a server it is refused out loud
+    /// rather than flown locally into a position the server does not have.
+    #[test]
+    fn a_remote_session_will_not_fly_between_stars_yet() {
+        let mut ui = UiState::default();
+        let mut s = Session::new(&AuthoredStars::sample(), 3);
+        s.remote = true;
+        let before = s.ship.motion.position_ly;
+
+        let effects = apply(Action::FlyTo(Some(s.stars[0].id)), &mut ui, &mut s);
+        assert!(
+            effects.iter().any(|e| matches!(e, Effect::Notify(t) if t.contains("not on the wire"))),
+            "{effects:?}",
+        );
+        assert!(s.cruise().is_none(), "it started a crossing the server knows nothing about");
+        assert_eq!(s.ship.motion.position_ly, before);
+    }
 }

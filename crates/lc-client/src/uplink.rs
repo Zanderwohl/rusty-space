@@ -46,6 +46,35 @@ pub struct Joined {
 #[derive(Resource, Default)]
 pub struct ServerAddress(pub Option<String>);
 
+/// Whether to run a shard in this process rather than connect to one. See [`crate::local`].
+#[derive(Resource, Default)]
+pub struct LocalShard(pub bool);
+
+/// Start the in-process shard, and point [`ServerAddress`] at it.
+///
+/// On entering the world rather than at boot, because the shard has to be given the stars the
+/// client actually ended up with: both ends put craft into systems by position against the same
+/// shell radius, and two different skies would disagree about which system a ship is in.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn start_local(
+    local: Res<LocalShard>,
+    game: Res<crate::app::Game>,
+    mut address: ResMut<ServerAddress>,
+) {
+    if !local.0 || address.0.is_some() {
+        return;
+    }
+    match crate::local::start(game.0.stars.clone()) {
+        Ok(at) => {
+            info!("a shard is running in this process at {at}");
+            address.0 = Some(at);
+        }
+        // Not fatal. Without an address the client stays the single-process game, which is
+        // what it was a moment ago and is still playable.
+        Err(why) => error!("could not start a local shard: {why}"),
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct Uplink {
     /// `Mutex` because the native link holds an `mpsc::Receiver`, which is `Send` and not
@@ -124,8 +153,19 @@ pub fn connect(mut uplink: ResMut<Uplink>, address: Res<ServerAddress>) {
     if uplink.state != State::Offline {
         return;
     }
-    info!("connecting to {address}");
-    uplink.open(Box::new(crate::link::WebSocketLink::connect(address)));
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        info!("connecting to {address}");
+        uplink.open(Box::new(crate::link::WebSocketLink::connect(address)));
+    }
+    // The browser's half of `Link` is the next piece of work: a `web-sys` WebSocket behind the
+    // same trait. Until it exists, a browser build handed a shard address says so plainly
+    // rather than sitting in `Connecting` forever with nothing opening.
+    #[cfg(target_arch = "wasm32")]
+    {
+        error!("this build cannot open a socket yet, so {address} is unreachable");
+        uplink.state = State::Refused("this build cannot reach a server yet".into());
+    }
 }
 
 /// Read the socket, and fold what it said.
@@ -167,13 +207,21 @@ fn fold(uplink: &mut Uplink, game: &mut crate::app::Game, message: Outbound) {
             ship_id,
             now_t,
             name,
+            ship_at,
             ..
         } => {
-            info!(?ship_id, %name, "welcomed");
+            info!(?ship_id, %name, ?ship_at, "welcomed");
             // The server's clock, adopted whole. Both ends propagate analytically from a
             // coordinate time, so agreeing on it is the whole of agreeing about where anything
             // is — and the client's own clock started whenever this process did.
             game.0.set_coordinate_time_us(now_t);
+            // And then the place. Without this the client flies a ship the server has
+            // somewhere else: it would keep its own starting position, which is the origin —
+            // empty interstellar space, and not where any account's craft is.
+            game.0.place_at(glam::DVec3::from_array(ship_at));
+            // From here the client stops applying its own flight orders and starts sending
+            // them. See `Session::remote`.
+            game.0.remote = true;
             uplink.state = State::Joined(Joined {
                 client_id,
                 ship_id,
@@ -269,6 +317,10 @@ impl Plugin for UplinkPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Uplink>()
             .init_resource::<ServerAddress>()
+            .init_resource::<LocalShard>();
+        #[cfg(not(target_arch = "wasm32"))]
+        app.add_systems(OnEnter(crate::app::AppState::InGame), start_local);
+        app
             // Not gated on a state. The socket is not the game, and a connection that only
             // lived inside one screen would drop every time the player opened a menu.
             .add_systems(Update, (connect, pump).chain());
@@ -282,12 +334,17 @@ mod tests {
     use lc_proto::{Cleared, Refusal};
 
     fn welcome(now_t: i64) -> Outbound {
+        welcome_at(now_t, [0.0, 0.0, 0.0])
+    }
+
+    fn welcome_at(now_t: i64, ship_at: [f64; 3]) -> Outbound {
         Outbound::Welcome {
             client_id: ClientId(3),
             protocol: PROTOCOL_VERSION,
             ship_id: ShipId(7),
             now_t,
             name: "Ada".into(),
+            ship_at,
         }
     }
 
@@ -323,6 +380,19 @@ mod tests {
             a_while_in as f64 * 1e-6,
             "the client kept its own clock",
         );
+    }
+
+    /// The other half of `Welcome`, and the one that was missing: a client that adopted only
+    /// the clock flies a ship the server has somewhere else entirely.
+    #[test]
+    fn a_welcome_puts_the_ship_where_the_server_has_it() {
+        let (mut uplink, mut game) = app();
+        let out_there = [4.2, -1.5, 0.25];
+        fold(&mut uplink, &mut game, welcome_at(0, out_there));
+        let at = game.0.ship.motion.position_ly;
+        assert_eq!([at.x, at.y, at.z], out_there, "the client kept its own position");
+        // And the observer follows the ship, or the sky is drawn from the old place.
+        assert!(game.0.observer.x != 0, "the observer was left behind");
     }
 
     #[test]

@@ -418,6 +418,23 @@ docker --context rocinante start lightcone-db
 
 ## A shard and a client, locally
 
+One process, for tuning game mechanics against the real server:
+
+```bash
+cargo run -p lc-client --bin lightcone -- --local
+```
+
+`--local` runs the same `lc-server` a shard runs, on a loopback socket, in this process — the
+light-delay gate, the intent clamps, the tick, all of it. Not a simulation of a server and not a
+second implementation. It is given the stars the client itself loaded, because both ends put
+craft into systems by position and two different skies would disagree about which system a ship
+is in.
+
+Running with **no** `--server` and no `--local` is the single-process game: local fleet, no
+socket, and the client applies its own flight orders. That is what every build before the seam
+did, and it still works — but it is not what a deployment does, so a mechanic tuned there is
+tuned against something else.
+
 The smallest thing that is actually two processes:
 
 ```bash

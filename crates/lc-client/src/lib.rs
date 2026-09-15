@@ -22,6 +22,8 @@ pub mod envelope;
 pub mod hud;
 pub mod input;
 pub mod link;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod local;
 pub mod menu;
 pub mod panels;
 pub mod pick;

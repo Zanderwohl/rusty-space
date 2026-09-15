@@ -43,6 +43,19 @@ impl World {
         self.stars.is_empty()
     }
 
+    /// Where a craft with nowhere else to be is put.
+    ///
+    /// Inside the first star's system rather than at the origin, which is empty interstellar
+    /// space — a new player dropped there sees nothing at all and has nothing to fly to.
+    /// Offset by [`START_OFFSET_AU`] because the star's own position is inside the star.
+    ///
+    /// Still a crude answer to a game question, as the origin was. It is a better one because
+    /// there is something to look at.
+    pub fn start(&self) -> Option<DVec3> {
+        let star = self.stars.first()?;
+        Some(star.position_ly + DVec3::X * START_OFFSET_AU * AU_LY)
+    }
+
     /// The system containing `position_ly`, loaded if this is the first craft to arrive.
     ///
     /// `None` between the stars, which is most of the volume and most of the flying.
@@ -63,6 +76,13 @@ impl World {
 
 /// Microseconds of coordinate time in one second.
 pub const MICROS_PER_SECOND: i64 = 1_000_000;
+
+/// How far from its star a new craft starts, in astronomical units. Far enough out to see the
+/// system rather than be inside the star, close enough that its planets are somewhere to go.
+pub const START_OFFSET_AU: f64 = 5.0;
+
+/// Light-years in an astronomical unit.
+const AU_LY: f64 = 1.495_978_707e11 / 9.460_730_472_580_8e15;
 
 /// A craft at rest at a point, light-microseconds from the world origin.
 pub fn still(id: ShipId, at: DVec3) -> Craft {

@@ -250,13 +250,22 @@ impl<J: Journal> Server<J> {
                     return;
                 }
                 match self.sign_in(from, &ticket) {
-                    Some((ship_id, name)) => wire.send(from, Outbound::Welcome {
-                        client_id: from,
-                        protocol: PROTOCOL_VERSION,
-                        ship_id,
-                        now_t: self.now_t,
-                        name,
-                    }),
+                    Some((ship_id, name)) => {
+                        // Where it is, not where it started: an account coming back finds its
+                        // craft wherever it left it.
+                        let ship_at = self
+                            .ship(ship_id)
+                            .map(|craft| craft.motion.position_ly.to_array())
+                            .unwrap_or_default();
+                        wire.send(from, Outbound::Welcome {
+                            client_id: from,
+                            protocol: PROTOCOL_VERSION,
+                            ship_id,
+                            now_t: self.now_t,
+                            name,
+                            ship_at,
+                        })
+                    }
                     None => wire.send(from, Outbound::Unauthenticated),
                 }
             }
@@ -439,7 +448,10 @@ impl<J: Journal> Server<J> {
                 // question and this is the crudest possible answer to it.
                 let ship = ShipId(self.next_ship);
                 self.next_ship += 1;
-                let mut craft = Craft::at(CraftId(ship.0), Kind::Ship, DVec3::ZERO);
+                // Inside a system if this server has one, because the origin is empty space
+                // and a player put there has nothing to look at or fly to.
+                let at = self.world.start().unwrap_or(DVec3::ZERO);
+                let mut craft = Craft::at(CraftId(ship.0), Kind::Ship, at);
                 craft.name = Some(claims.name.clone());
                 self.fleet.insert(craft);
                 self.by_account.insert(claims.sub.clone(), ship);
@@ -1550,6 +1562,42 @@ mod hello_tests {
     }
 
     /// A ticket minted for another shard is not a ticket here, however valid it is there.
+    /// A player dropped at the origin sees nothing: it is empty interstellar space. The point
+    /// of starting inside a system is that there is something there.
+    #[tokio::test]
+    async fn a_new_ship_starts_inside_a_system_when_the_world_has_one() {
+        let star = crate::server::course_tests::a_star().expect("the sample star");
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        server.load_world(World::new(vec![star.clone()]));
+        let mut wire = Loopback::new();
+
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let ship_id = welcomed(&mut wire, ClientId(1));
+        // A tick, because membership is resolved by where a craft is rather than by being told.
+        server.tick(&mut wire).await.unwrap();
+
+        let craft = server.ship(ship_id).expect("the ship");
+        assert_eq!(
+            craft.system.as_ref().map(|s| s.star),
+            Some(star.id),
+            "a new ship was left in interstellar space",
+        );
+        // And not inside the star it is orbiting.
+        assert!(craft.motion.position_ly.distance(star.position_ly) > 0.0);
+    }
+
+    /// With no world there is nowhere better, and the origin is still the answer.
+    #[tokio::test]
+    async fn a_new_ship_starts_at_the_origin_when_there_is_no_world() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        let mut wire = Loopback::new();
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let ship_id = welcomed(&mut wire, ClientId(1));
+        assert_eq!(server.ship(ship_id).expect("the ship").motion.position_ly, DVec3::ZERO);
+    }
+
     /// The bug the seam test found. Being welcomed and owning the craft are two facts, and
     /// `act` checks the second: a client that signed in with a ticket could be given a ship and
     /// then refused `NotYours` on everything it did with it.

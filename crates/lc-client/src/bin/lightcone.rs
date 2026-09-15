@@ -40,7 +40,12 @@ fn main() {
                 .set(AssetPlugin { file_path: asset_path(), ..default() }),
         )
         .insert_resource(Catalogue(entry.catalogue))
-        .insert_resource(lc_client::uplink::ServerAddress(entry.server))
+        // `--local` wins over `--server`: asking for one in this process is the more specific
+        // request, and its address is not known until the socket is bound.
+        .insert_resource(lc_client::uplink::ServerAddress(
+            if entry.local { None } else { entry.server },
+        ))
+        .insert_resource(lc_client::uplink::LocalShard(entry.local))
         .insert_resource(entry.dev)
         .add_plugins(ClientPlugin)
         .run();

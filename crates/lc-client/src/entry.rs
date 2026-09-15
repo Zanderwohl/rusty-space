@@ -16,6 +16,9 @@ pub struct Entry {
     /// The shard to connect to. `None` is the single-process game, which is every build before
     /// there was a server to connect to and is still what `--shot` and the snapshot use.
     pub server: Option<String>,
+    /// Run a shard in this process and connect to that. Beats `server` when both are given,
+    /// because asking for a local one is the more specific request.
+    pub local: bool,
 }
 
 /// Parses the flag vocabulary both binaries accept.
@@ -91,7 +94,7 @@ pub fn parse(args: &[String]) -> Entry {
     // The first argument only. Scanning for any non-flag token would pick up a flag's own
     // value: in `--band 2` the `2` looks exactly like a path.
     let catalogue = args.first().filter(|a| !a.starts_with("--")).cloned();
-    Entry { dev, catalogue, server: after("--server") }
+    Entry { dev, catalogue, server: after("--server"), local: flag("--local") }
 }
 
 /// Reads the flags out of a URL query string.
@@ -224,12 +227,22 @@ mod tests {
 
     #[test]
     fn nothing_at_all_is_a_plain_start() {
-        let Entry { dev, catalogue: cat, server } = parse(&[]);
+        let Entry { dev, catalogue: cat, server, local } = parse(&[]);
         assert!(!dev.observe_immediately);
         assert!(dev.actions.is_empty());
         assert_eq!(cat, None);
         // No server named is the single-process game, not a default address.
         assert_eq!(server, None);
+        assert!(!local);
+    }
+
+    /// `--local` is its own thing, not an address, because the port is not known until the
+    /// socket is bound.
+    #[test]
+    fn a_local_shard_is_asked_for_rather_than_addressed() {
+        assert!(parse(&args("--local")).local);
+        assert_eq!(parse(&args("--local")).server, None);
+        assert!(!parse(&args("--server ws://host:1/")).local);
     }
 
     #[test]

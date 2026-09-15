@@ -123,7 +123,12 @@ The one cost of having no async runtime in the client is that the reading thread
 read timeout and looks at the outgoing queue when it expires. That puts an upper bound of ten
 milliseconds on how long a message waits to be written, which is well under a tick.
 
-What the server does **not** send is ship positions. Both ends run the same `lc-world` physics
+`Welcome` carries `now_t` **and** `ship_at`. Both are needed and for the same reason: the client
+propagates from a coordinate time and an initial position, so a client given only the clock flies
+a ship the server has somewhere else. A craft found mid-flight needs its motive as well, which is
+the resume problem rather than this one.
+
+What the server does **not** send, continuously, is ship positions. Both ends run the same `lc-world` physics
 from the same coordinate time, so the client computes where everything is and the server is
 authoritative only where they disagree. This is why `Welcome` carries `now_t`: adopting the
 server's clock is the whole of agreeing about where anything is.
