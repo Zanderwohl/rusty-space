@@ -107,6 +107,24 @@ impl Broker {
     }
 }
 
+/// Who a ticket says it is for.
+///
+/// The claims are read **without verifying the signature**, and that is not a shortcut. The
+/// ticket arrived over TLS from the broker in answer to a request this process made, and the
+/// client is not deciding anything with it — the *game server* verifies it, and a forged name
+/// here would only mislead a player about their own account. Reading it is what lets a
+/// returning player see their name instead of the word "signed in".
+pub fn identity_in(ticket: &str) -> Option<Identity> {
+    use base64::Engine;
+    let payload = ticket.split('.').nth(1)?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload).ok()?;
+    let claims: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    Some(Identity {
+        account_id: claims.get("sub")?.as_str()?.to_owned(),
+        display_name: claims.get("name").and_then(|n| n.as_str()).unwrap_or("").to_owned(),
+    })
+}
+
 fn field(value: &serde_json::Value, name: &str) -> Result<String, BrokerError> {
     value
         .get(name)
@@ -141,5 +159,43 @@ mod tests {
         let fault = BrokerError::Unreachable("connection refused".into());
         assert!(fault.to_string().contains("could not reach"));
         assert!(!matches!(fault, BrokerError::Refused));
+    }
+    /// A returning player should see their own name, not the word "signed in".
+    #[test]
+    fn a_tickets_claims_say_who_it_is_for() {
+        use base64::Engine;
+        let b64 = |v: &str| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(v);
+        let claims = r#"{"sub":"acct-7","name":"Ada Lovelace","aud":"shard-1","exp":9}"#;
+        let ticket = format!("{}.{}.{}", b64("{}"), b64(claims), "not-checked");
+
+        let who = identity_in(&ticket).expect("claims");
+        assert_eq!(who.account_id, "acct-7");
+        assert_eq!(who.display_name, "Ada Lovelace");
+    }
+
+    /// Anything that is not a ticket reads as nobody, rather than as a panic in a frame.
+    #[test]
+    fn something_that_is_not_a_ticket_names_nobody() {
+        for junk in ["", "a", "a.b", "a.b.c", "....", "a.!!!!.c"] {
+            assert!(identity_in(junk).is_none(), "{junk:?} named somebody");
+        }
+        // Well-formed base64 of well-formed JSON that is not a ticket: still nobody, because
+        // the one claim that matters is missing.
+        use base64::Engine;
+        let b64 = |v: &str| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(v);
+        let no_sub = format!("{}.{}.{}", b64("{}"), b64(r#"{"name":"Ada"}"#), "x");
+        assert!(identity_in(&no_sub).is_none());
+    }
+
+    /// A ticket with no name is still an account. The server falls back to a placeholder
+    /// rather than showing an empty label.
+    #[test]
+    fn a_nameless_ticket_still_names_an_account() {
+        use base64::Engine;
+        let b64 = |v: &str| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(v);
+        let ticket = format!("{}.{}.{}", b64("{}"), b64(r#"{"sub":"acct-7"}"#), "x");
+        let who = identity_in(&ticket).expect("claims");
+        assert_eq!(who.account_id, "acct-7");
+        assert!(who.display_name.is_empty());
     }
 }

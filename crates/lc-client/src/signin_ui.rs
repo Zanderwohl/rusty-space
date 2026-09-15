@@ -117,12 +117,20 @@ impl Plugin for SigninPlugin {
 }
 
 /// Where a device grant is kept when there is no keychain.
+///
+/// Per-platform, and not the XDG layout applied everywhere: this used to write
+/// `~/.config/lightcone` on macOS and Windows too, which is the right answer on one of the
+/// three platforms it runs on. `ProjectDirs` gives `~/Library/Application Support/lightcone`,
+/// `%APPDATA%\lightcone` and `$XDG_CONFIG_HOME/lightcone` respectively.
+///
+/// The keychain is still preferred over any of them — see [`crate::vault::Vault::best`]. This
+/// is where the fallback lands, and the fallback is a file.
 fn config_dir() -> PathBuf {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-        .unwrap_or_else(std::env::temp_dir)
-        .join("lightcone")
+    directories::ProjectDirs::from("", "", "lightcone")
+        .map(|dirs| dirs.config_dir().to_path_buf())
+        // No home directory to put it in. A grant here does not survive a reboot, which is
+        // worse than the keychain and better than signing in every launch.
+        .unwrap_or_else(|| std::env::temp_dir().join("lightcone"))
 }
 
 /// Trade the stored grant for an identity, at startup.
@@ -137,15 +145,16 @@ fn resume(mut signin: ResMut<Signin>) {
     let to_main = signin.to_main.clone();
     IoTaskPool::get()
         .spawn(async move {
-            // A ticket is asked for and thrown away: this is only to find out whether the
-            // grant is still good, and who it belongs to.
+            // The ticket is not used to connect — it is asked for to find out whether the
+            // grant is still good, and the claims say who it belongs to. See
+            // `broker::identity_in` for why reading them unverified is right here.
             let _ = match broker.ticket(&grant) {
-                Ok(_) => to_main.send(Report::Granted {
+                Ok(ticket) => to_main.send(Report::Granted {
                     grant: grant.clone(),
-                    identity: Identity {
+                    identity: crate::broker::identity_in(&ticket).unwrap_or(Identity {
                         account_id: String::new(),
                         display_name: "signed in".into(),
-                    },
+                    }),
                 }),
                 Err(BrokerError::Refused) => to_main.send(Report::Rejected),
                 Err(why) => to_main.send(Report::Failed(why.to_string())),
@@ -602,10 +611,25 @@ mod tests {
         }
     }
 
-    /// The config directory is somewhere the player owns, and named for this game.
+    /// The config directory is somewhere the player owns, named for this game, and **where
+    /// this platform keeps such things** — not the XDG layout applied to all three.
     #[test]
-    fn the_grant_is_kept_somewhere_of_ours() {
+    fn the_grant_is_kept_where_this_platform_keeps_things() {
         let dir = config_dir();
         assert!(dir.ends_with("lightcone"), "{dir:?}");
+        let said = dir.to_string_lossy();
+
+        #[cfg(target_os = "macos")]
+        assert!(
+            said.contains("Library/Application Support"),
+            "macOS does not keep this in {said}",
+        );
+        #[cfg(target_os = "windows")]
+        assert!(said.contains("AppData"), "Windows does not keep this in {said}");
+        #[cfg(target_os = "linux")]
+        assert!(
+            said.contains(".config") || said.contains("XDG"),
+            "Linux does not keep this in {said}",
+        );
     }
 }

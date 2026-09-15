@@ -35,6 +35,7 @@ pub fn router(broker: Broker) -> Router {
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/signin", get(page))
+        .route("/register", get(register_page))
         .route("/signin/password", post(sign_in))
         .route("/signin/register", post(register))
         // The native pair. Same credentials, same budgets, no redirect — so no code either:
@@ -80,6 +81,20 @@ impl Destination {
 async fn page(State(broker): State<Broker>, Query(to): Query<Destination>) -> Response {
     match to.check(&broker.config) {
         Ok(()) => sign_in_page(&broker, &to, None).into_response(),
+        Err(refused) => refusal(refused).into_response(),
+    }
+}
+
+/// The sign-up page. A separate address so a person can be sent straight to it, and so the
+/// browser's password manager sees two pages rather than one that changes meaning.
+async fn register_page(State(broker): State<Broker>, Query(to): Query<Destination>) -> Response {
+    // Not enabled is not found, the same answer the native endpoint gives. A page that renders
+    // a form which can only ever be refused is worse than no page.
+    if !broker.config.providers.allows(Provider::Password) {
+        return refusal(Refused::NoSuchProvider).into_response();
+    }
+    match to.check(&broker.config) {
+        Ok(()) => credentials_page(&broker, &to, None, Which::Register).into_response(),
         Err(refused) => refusal(refused).into_response(),
     }
 }
@@ -159,7 +174,14 @@ async fn complete(
         Err(refused) => {
             broker.attempts.failed(&by_account);
             broker.attempts.failed(&by_address);
-            return sign_in_page(broker, &form.to, Some(&refused)).into_response();
+            // Back to the page they were on. Sending a failed sign-up to the sign-in form
+            // loses what they typed and reads as though the account was made.
+            let which = if new_account {
+                Which::Register
+            } else {
+                Which::SignIn
+            };
+            return credentials_page(broker, &form.to, Some(&refused), which).into_response();
         }
     };
     broker.attempts.cleared(&by_account);
@@ -527,8 +549,51 @@ pub(crate) fn refusal(refused: Refused) -> impl IntoResponse {
     (status, shell("Sign in", html! { p { (said) } }))
 }
 
-pub(crate) fn sign_in_page(broker: &Broker, to: &Destination, refused: Option<&Refused>) -> Markup {
-    let complaint = refused.map(|refused| match refused {
+/// Which of the two credential pages is being drawn.
+///
+/// One function rather than two, because the pair differ in four strings and a form action and
+/// would otherwise drift apart — which for a sign-in and a sign-up means the two paths into an
+/// account stop looking like the same product.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Which {
+    SignIn,
+    Register,
+}
+
+impl Which {
+    fn title(self) -> &'static str {
+        match self {
+            Which::SignIn => "Sign in",
+            Which::Register => "Create an account",
+        }
+    }
+
+    fn action(self) -> &'static str {
+        match self {
+            Which::SignIn => "/signin/password",
+            Which::Register => "/signin/register",
+        }
+    }
+
+    /// What the browser's password manager should do. Getting this wrong is how a manager
+    /// offers to fill a new-account form with an existing password, or offers to save nothing.
+    fn autocomplete(self) -> &'static str {
+        match self {
+            Which::SignIn => "current-password",
+            Which::Register => "new-password",
+        }
+    }
+
+    fn other(self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            Which::SignIn => ("No account yet?", "/register", "Create one"),
+            Which::Register => ("Already have an account?", "/signin", "Sign in"),
+        }
+    }
+}
+
+fn complaint_for(refused: &Refused) -> String {
+    match refused {
         // One message for both, the same as the refusal itself.
         Refused::BadCredentials => "That address and password do not match.".to_string(),
         Refused::Taken => "That address already has an account.".to_string(),
@@ -545,25 +610,68 @@ pub(crate) fn sign_in_page(broker: &Broker, to: &Destination, refused: Option<&R
             "That provider could not be reached. Try again, or use another way in.".to_string()
         }
         _ => "Something went wrong.".to_string(),
-    });
+    }
+}
+
+/// A destination carried through a link rather than a form.
+pub(crate) fn with_destination(path: &str, to: &Destination) -> String {
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("return_to", &to.return_to)
+        .append_pair("state", &to.state)
+        .finish();
+    format!("{path}?{query}")
+}
+
+pub(crate) fn sign_in_page(broker: &Broker, to: &Destination, refused: Option<&Refused>) -> Markup {
+    credentials_page(broker, to, refused, Which::SignIn)
+}
+
+pub(crate) fn credentials_page(
+    broker: &Broker,
+    to: &Destination,
+    refused: Option<&Refused>,
+    which: Which,
+) -> Markup {
+    let complaint = refused.map(complaint_for);
+    let password = broker.config.providers.allows(Provider::Password);
+    let (prompt, path, link) = which.other();
 
     shell(
-        "Sign in",
+        which.title(),
         html! {
-            h1 { "Sign in" }
+            h1 { (which.title()) }
             @if let Some(complaint) = &complaint {
                 p role="alert" class="complaint" { (complaint) }
             }
-            @if broker.config.providers.allows(Provider::Password) {
-                form method="post" action="/signin/password" class="signin-form" {
+            @if password {
+                form method="post" action=(which.action()) class="signin-form" {
                     input type="hidden" name="return_to" value=(to.return_to);
                     input type="hidden" name="state" value=(to.state);
+                    @if which == Which::Register {
+                        label for="display_name" { "Name" }
+                        // What other players see. Optional, because a person who has not
+                        // decided should still be able to finish.
+                        input id="display_name" name="display_name" type="text"
+                            autocomplete="nickname" maxlength="60";
+                    }
                     label for="email" { "Email" }
                     input id="email" name="email" type="email" autocomplete="username" required;
                     label for="password" { "Password" }
                     input id="password" name="password" type="password"
-                        autocomplete="current-password" required;
-                    button type="submit" { "Sign in" }
+                        autocomplete=(which.autocomplete())
+                        minlength=(crate::password::MIN_LENGTH) required;
+                    @if which == Which::Register {
+                        // Said before it is refused, because a rule a person meets on the first
+                        // try is not a rule they had to be told off about.
+                        p class="fine-print" {
+                            "At least " (crate::password::MIN_LENGTH) " characters. "
+                            "There is no password reset yet, so keep it somewhere."
+                        }
+                    }
+                    button type="submit" { (which.title()) }
+                }
+                p class="other-way" {
+                    (prompt) " " a href=(with_destination(path, to)) { (link) }
                 }
             }
             @for provider in broker.config.providers.live() {
@@ -729,6 +837,65 @@ mod tests {
             page.contains("/signin/google?return_to=https%3A%2F%2Flightcone.example%2Fauth%2Freturn&amp;state=nonce1"),
             "{page}"
         );
+    }
+
+    /// The sign-up page exists and carries the destination, or a person who follows it from
+    /// the sign-in page arrives somewhere that cannot finish.
+    #[test]
+    fn the_sign_up_page_keeps_the_destination_and_offers_the_way_back() {
+        let broker = broker(config());
+        let to = destination("https://lightcone.example/auth/return", "nonce1");
+        let page = credentials_page(&broker, &to, None, Which::Register).into_string();
+
+        assert!(page.contains("action=\"/signin/register\""), "{page}");
+        assert!(page.contains("https://lightcone.example/auth/return"));
+        assert!(page.contains("nonce1"));
+        // A new account needs a name and a new-password field, not a current-password one.
+        assert!(page.contains("display_name"), "{page}");
+        assert!(page.contains("new-password"), "{page}");
+        assert!(!page.contains("current-password"), "{page}");
+        // And the way back, with the destination intact.
+        assert!(
+            page.contains(
+                "/signin?return_to=https%3A%2F%2Flightcone.example%2Fauth%2Freturn&amp;state=nonce1"
+            ),
+            "{page}",
+        );
+    }
+
+    /// And the sign-in page offers the way to it, or nobody can make an account at all.
+    #[test]
+    fn the_sign_in_page_offers_a_way_to_make_an_account() {
+        let page = sign_in_page(
+            &broker(config()),
+            &destination("https://lightcone.example/auth/return", "nonce1"),
+            None,
+        )
+        .into_string();
+        assert!(
+            page.contains("/register?return_to=https%3A%2F%2Flightcone.example%2Fauth%2Freturn&amp;state=nonce1"),
+            "{page}",
+        );
+        assert!(page.contains("current-password"), "{page}");
+        assert!(
+            !page.contains("display_name"),
+            "a sign-in asked for a name: {page}"
+        );
+    }
+
+    /// A failed sign-up comes back to the sign-up page. Sending it to the sign-in form reads as
+    /// though the account was made.
+    #[test]
+    fn a_refused_sign_up_says_so_on_the_sign_up_page() {
+        let page = credentials_page(
+            &broker(config()),
+            &destination("https://lightcone.example/auth/return", "n"),
+            Some(&Refused::Taken),
+            Which::Register,
+        )
+        .into_string();
+        assert!(page.contains("already has an account"), "{page}");
+        assert!(page.contains("action=\"/signin/register\""), "{page}");
     }
 
     /// Off unless enabled, like everything else here.

@@ -46,6 +46,54 @@ impl AppState {
     }
 }
 
+/// Keep an active player signed in.
+///
+/// A session is a fortnight from when it was issued, so without this somebody who uses the
+/// site every day is still signed out a fortnight after signing in. Re-issuing it once it is
+/// past halfway makes the fortnight count from the last visit instead.
+///
+/// **It must not undo a response that is already setting the cookie.** `/signout` clears it and
+/// `/auth/return` replaces it, and both read as a valid session on the way in — appending a
+/// refreshed cookie afterwards would make signing out a no-op.
+pub async fn refresh(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let now = chrono::Utc::now().timestamp();
+    let renewed = state
+        .identity()
+        .zip(state.who(request.headers()))
+        .filter(|(_, session)| session::worth_refreshing(session, now))
+        .map(|(identity, session)| {
+            session::set(
+                &session::seal(identity.key, &session::renewed(&session, now)),
+                session::LIFETIME_S,
+                state.secure_cookies,
+            )
+        });
+
+    let mut response = next.run(request).await;
+    let Some(cookie) = renewed else { return response };
+    if sets_the_session(&response) {
+        return response;
+    }
+    if let Ok(value) = cookie.parse() {
+        response.headers_mut().append(header::SET_COOKIE, value);
+    }
+    response
+}
+
+/// Whether a response already has something to say about the session cookie.
+fn sets_the_session(response: &Response) -> bool {
+    response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| value.starts_with(&format!("{}=", session::COOKIE)))
+}
+
 /// Send the player to the broker.
 pub async fn signin(State(state): State<AppState>) -> Response {
     let Some(identity) = state.identity() else {
@@ -197,6 +245,42 @@ mod tests {
         );
         // The separators a query cannot carry raw are exactly the ones that must be encoded.
         assert!(!urlencode("a&b=c#d").contains(['&', '=', '#']));
+    }
+
+    fn with_cookies(values: &[String]) -> Response {
+        let mut response = Response::new(axum::body::Body::empty());
+        for value in values {
+            response.headers_mut().append(header::SET_COOKIE, value.parse().unwrap());
+        }
+        response
+    }
+
+    /// The trap the refresh exists around. `/signout` clears the cookie, but the *request* it
+    /// answers still carries a valid session — so a refresh that did not look at the response
+    /// would append a fresh cookie behind it and make signing out do nothing at all.
+    #[test]
+    fn a_response_that_clears_the_session_is_left_alone() {
+        assert!(sets_the_session(&with_cookies(&[session::clear(true)])));
+        assert!(sets_the_session(&with_cookies(&[session::set("v", 60, true)])));
+    }
+
+    /// And an ordinary page is refreshed, or the whole thing does nothing.
+    #[test]
+    fn an_ordinary_response_is_refreshed() {
+        assert!(!sets_the_session(&with_cookies(&[])));
+    }
+
+    /// The sign-in nonce is a different cookie and must not be mistaken for the session, or
+    /// `/signin` would stop extending a session that is about to lapse mid-sign-in.
+    #[test]
+    fn the_nonce_cookie_is_not_the_session_cookie() {
+        assert!(!sets_the_session(&with_cookies(&[session::set_state("n", true)])));
+        assert!(!sets_the_session(&with_cookies(&[session::clear_state(true)])));
+        // And a response carrying both is still recognised by the one that matters.
+        assert!(sets_the_session(&with_cookies(&[
+            session::clear_state(true),
+            session::set("v", 60, true),
+        ])));
     }
 
     /// The path the broker allowlists carries no query of its own, or the join is ambiguous

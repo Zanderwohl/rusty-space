@@ -30,6 +30,25 @@ pub const LIFETIME_S: i64 = 14 * 24 * 60 * 60;
 /// How long a sign-in has to complete.
 pub const SIGNIN_WINDOW_S: i64 = 10 * 60;
 
+/// How much of a session's life must be left before a request stops re-issuing it.
+///
+/// Half. Re-issuing on every request would put a `Set-Cookie` on every response for no gain;
+/// re-issuing only near the very end means somebody who uses the site daily is still signed
+/// out the one time they leave it a fortnight. Half is the cheap middle: an active player is
+/// signed in indefinitely, an absent one lapses on schedule.
+pub const REFRESH_BELOW: i64 = LIFETIME_S / 2;
+
+/// Whether this session is worth re-issuing, given the clock.
+pub fn worth_refreshing(session: &Session, now: i64) -> bool {
+    session.exp - now < REFRESH_BELOW
+}
+
+/// The same person, with the clock wound forward. Nothing else about the session changes —
+/// notably not `sub`, so this can never turn one account's cookie into another's.
+pub fn renewed(session: &Session, now: i64) -> Session {
+    Session { exp: now + LIFETIME_S, ..session.clone() }
+}
+
 /// What the cookie says.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Session {
@@ -227,5 +246,42 @@ mod tests {
         assert_eq!(one.len(), 32);
         assert!(one.chars().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(one, nonce());
+    }
+    /// A session is re-issued once it is past halfway, and not before.
+    #[test]
+    fn a_session_is_refreshed_in_the_second_half_of_its_life() {
+        let fresh = Session { exp: NOW + LIFETIME_S, ..a_session() };
+        assert!(!worth_refreshing(&fresh, NOW), "a brand-new session was re-issued");
+
+        let halfway = Session { exp: NOW + LIFETIME_S / 2 - 1, ..a_session() };
+        assert!(worth_refreshing(&halfway, NOW));
+
+        let nearly_gone = Session { exp: NOW + 60, ..a_session() };
+        assert!(worth_refreshing(&nearly_gone, NOW));
+    }
+
+    /// Winding the clock forward changes the clock and nothing else. If it could change `sub`
+    /// this would be a way to turn one account's cookie into another's.
+    #[test]
+    fn renewing_moves_the_expiry_and_nothing_else() {
+        // Half spent, which is the only state this is ever called in — `a_session()` is fresh,
+        // and renewing a fresh one is correctly a no-op.
+        let before = Session { exp: NOW + LIFETIME_S / 4, ..a_session() };
+        let after = renewed(&before, NOW);
+        assert_eq!(after.exp, NOW + LIFETIME_S);
+        assert!(after.exp > before.exp, "the clock did not move");
+        assert_eq!(after.sub, before.sub);
+        assert_eq!(after.name, before.name);
+    }
+
+    /// And a renewed session is still one this site will accept back.
+    #[test]
+    fn a_renewed_session_still_opens() {
+        let key = b"a-key";
+        let sealed = seal(key, &renewed(&a_session(), NOW));
+        let read = open(key, &sealed, NOW + LIFETIME_S - 1).expect("still current");
+        assert_eq!(read.sub, a_session().sub);
+        // And it has actually been extended past where the original would have lapsed.
+        assert!(open(key, &sealed, NOW + LIFETIME_S / 2).is_some());
     }
 }

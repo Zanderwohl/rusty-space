@@ -174,7 +174,10 @@ async fn main() -> anyhow::Result<()> {
         watch::spawn(&config, assets.clone(), state.clone());
     }
 
-    let app = Router::new()
+    // Pages a person navigates, and the only routes the session refresh is on. **Not** the
+    // asset route below it: those responses are cached for a year by anything in front of the
+    // site, and a `Set-Cookie` on one is a session handed to whoever gets the cached copy.
+    let pages = Router::new()
         .route("/", get(views::home::page))
         .route("/about", get(views::page::about))
         .route("/play", get(views::play::page))
@@ -184,6 +187,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/blog", get(views::blog::index))
         .route("/blog/{slug}", get(views::blog::post))
         .route("/blog/tag/{tag}", get(views::blog::tag))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), auth::refresh));
+
+    let app = pages
         .route("/feed.xml", get(feed::rss))
         .route("/feed.json", get(feed::json))
         .route("/sitemap.xml", get(feed::sitemap))
