@@ -28,12 +28,12 @@ use lc_world::system::M_PER_LY;
 /// `stars` should be the ones the client itself loaded. Both ends place craft into systems by
 /// position against the same shell radius, so a server with a different sky would disagree with
 /// the client about which system a ship is in.
-/// How far the nearest craft `--traffic` puts out stands off, metres.
+/// How far a craft `--traffic` puts out stands off, in its own hull lengths.
 ///
-/// Eight kilometres, where a five-hundred-metre hull is some forty pixels across and reads as
-/// a ship. Each one after it is half again as far, so the set spans the range over which a
-/// hull stops being a shape and becomes a mark.
-const TRAFFIC_NEAREST_M: f64 = 8.0e3;
+/// Range scaled by size rather than fixed, because the sizes span two decades: sixteen lengths
+/// puts a five-hundred-metre hull forty pixels across and a fifty-kilometre one the same,
+/// which is the only arrangement where they are all worth looking at in one frame.
+const TRAFFIC_STANDOFF_LENGTHS: f64 = 16.0;
 
 /// How far off the axis the player starts looking along they are fanned, radians.
 ///
@@ -76,20 +76,27 @@ pub fn start(stars: Vec<CatalogueStar>, traffic: usize) -> Result<String, String
 /// Identifiers well above the ones a sign-in mints, so a player's own ship cannot collide with
 /// one of these.
 fn company(near_ly: DVec3, count: usize) -> Vec<Craft> {
+    let (smallest, largest) = lc_world::craft::LENGTH_RANGE_M;
     (0..count)
         .map(|i| {
             let phase = std::f64::consts::TAU * i as f64 / count.max(1) as f64;
-            // Ahead of where the player starts looking, fanned about that axis and stepped
-            // back in range, so the four are four marks rather than one.
+            // Ahead of where the player starts looking, fanned about that axis, so they are
+            // that many marks rather than one.
             let bearing = DVec3::new(
                 1.0,
                 TRAFFIC_SPREAD_RAD * phase.cos(),
                 TRAFFIC_SPREAD_RAD * phase.sin(),
             )
             .normalize();
-            let range = TRAFFIC_NEAREST_M * (1.0 + 0.8 * i as f64);
+            // Geometric across the designed range, because the range is two decades and
+            // stepping it linearly would make every one of them large but the first.
+            let rung = if count > 1 { i as f64 / (count - 1) as f64 } else { 0.0 };
+            let length_m = smallest * (largest / smallest).powf(rung);
+            let range = length_m * TRAFFIC_STANDOFF_LENGTHS;
             let at = near_ly + bearing * (range / M_PER_LY);
             let mut craft = Craft::at(CraftId(1_000 + i as i64), Kind::Ship, at);
+            craft.length_m = length_m;
+            craft.name = Some(format!("{length_m:.0} m"));
             // Held rather than drifting. A shard runs at 8766 times real time, so the slowest
             // speed worth calling a speed carries a craft out of sight in seconds — the first
             // version of this gave them thirty metres a second apiece and they were three

@@ -694,7 +694,7 @@ impl<J: Journal> Server<J> {
                 let presence = Presence {
                     ship_id: ShipId(craft.id.0),
                     name: craft.designation(),
-                    length_m: craft.length_m(),
+                    length_m: craft.length_m,
                     at_ly: at_ly.to_array(),
                     beta: beta.to_array(),
                     facing: facing.to_array(),

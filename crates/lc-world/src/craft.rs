@@ -69,12 +69,7 @@ impl Kind {
         }
     }
 
-    /// How long a hull of this kind is, metres.
-    ///
-    /// One number per kind, because nothing yet gives an individual craft a size of its own.
-    /// The wire carries the length rather than the kind for exactly that reason — see
-    /// `lc_proto::Presence` — so ships varying within [`LENGTH_RANGE_M`] needs no protocol
-    /// change, only somewhere for the number to come from.
+    /// How long a hull of this kind is by default, metres. A craft may be given another.
     pub fn length_m(self) -> f64 {
         match self {
             Kind::Ship => 500.0,
@@ -102,6 +97,10 @@ pub struct Craft {
     /// What a player calls it. `None` until someone does.
     pub name: Option<String>,
     pub motion: ShipState,
+    /// How long the hull is, metres. Defaults to the kind's, and is a field rather than a
+    /// lookup because two ships of one kind are allowed to be different sizes — see
+    /// [`LENGTH_RANGE_M`], which is the span the camera and the reticle are built for.
+    pub length_m: f64,
     /// The system its motive is defined against, if it is in one.
     ///
     /// Shared and never mutated: every motive is evaluated at the time asked for rather than
@@ -128,6 +127,7 @@ impl Craft {
             kind,
             name: None,
             motion,
+            length_m: kind.length_m(),
             system: None,
             sensor: kind.sensor(),
             noise_floor: 0.0,
@@ -146,11 +146,6 @@ impl Craft {
     /// The craft as something a light-delay solve can evaluate.
     pub fn worldline(&self) -> Flight<'_> {
         Flight::new(&self.motion, self.system.as_deref())
-    }
-
-    /// How long the hull is, metres.
-    pub fn length_m(&self) -> f64 {
-        self.kind.length_m()
     }
 
     /// Which way the nose points at a coordinate second, or `None` when nothing decides it.

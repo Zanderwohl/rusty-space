@@ -186,7 +186,7 @@ pub fn sample_scene(
     // Hulls, the player's own included. A ship filling half the frame is the brightest thing
     // in it, and an exposure metered without it puts the picture's subject off the top of the
     // window — which is a white blob where the ship is.
-    let hulls = std::iter::once((game.ship.length_m(), eye.boom_m, observer))
+    let hulls = std::iter::once((game.ship.length_m, eye.boom_m, observer))
         .chain(uplink.contacts.iter().map(|c| {
             (c.length_m, c.position_ly.distance(observer) * M_PER_LY, c.position_ly)
         }));

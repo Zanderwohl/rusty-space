@@ -184,7 +184,7 @@ pub fn place_eye(
         _ => (ui.boom_lengths, ui.boom_lengths),
     };
     ui.boom_lengths = ui.boom_lengths.clamp(near, far);
-    let boom_m = ui.boom_lengths * game.ship.length_m();
+    let boom_m = ui.boom_lengths * game.ship.length_m;
     eye.boom_m = boom_m;
     eye.at_ly = game.ship.motion.position_ly - ui.look.forward() * (boom_m / M_PER_LY);
 }
@@ -251,7 +251,7 @@ fn drawn(game: &Session, uplink: &Uplink, eye: &Eye, look: DVec3) -> Vec<(Option
             // The one thing drawn at an offset from the render origin, and by exactly the boom
             // the eye was pulled back by.
             offset_m: look * eye.boom_m,
-            length_m: game.ship.length_m(),
+            length_m: game.ship.length_m,
             facing: game.ship.facing_at(now).unwrap_or(DVec3::ZERO),
             at_ly: game.ship.motion.position_ly,
         },
