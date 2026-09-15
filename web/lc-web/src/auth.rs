@@ -108,10 +108,18 @@ fn sets_the_session(response: &Response) -> bool {
 }
 
 /// Send the player to the broker.
-pub async fn signin(State(state): State<AppState>) -> Response {
+///
+/// Unless they are already signed in, in which case there is nothing to send them for. Showing
+/// a signed-in person a sign-in form is wrong on its own, and it also breaks: the dance ends at
+/// `/auth/return`, which compares a nonce against a cookie that a completed sign-in has already
+/// cleared, so the second attempt is refused as though it had failed.
+pub async fn signin(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let Some(identity) = state.identity() else {
         return (StatusCode::NOT_FOUND, "this site has no sign-in").into_response();
     };
+    if let Some(session) = state.who(&headers) {
+        return already(&session).into_response();
+    }
     let nonce = session::nonce();
     let url = format!(
         "{}/signin?return_to={}&state={nonce}",
@@ -147,16 +155,16 @@ pub async fn ret(
 
     let (Some(code), Some(nonce), Some(expected)) = (returned.code, returned.state, expected)
     else {
-        return refuse(&state);
+        return refuse(&state, &headers);
     };
     if nonce != expected {
-        return refuse(&state);
+        return refuse(&state, &headers);
     }
 
     let asked = exchange(&identity, &format!("{}{RETURN_PATH}", state.base_url), &code).await;
     let Ok((sub, name)) = asked else {
         tracing::warn!("a sign-in code did not exchange");
-        return refuse(&state);
+        return refuse(&state, &headers);
     };
 
     let session = Session { sub, name, exp: chrono::Utc::now().timestamp() + session::LIFETIME_S };
@@ -223,13 +231,46 @@ pub async fn ticket(state: &AppState, session: &Session) -> Option<String> {
 ///
 /// It says nothing about which step failed. A browser that learned whether its `state` was
 /// wrong, or its code expired, or the broker refused it, would be telling whoever sent it.
-fn refuse(state: &AppState) -> Response {
+///
+/// **Already signed in is not a failure.** A stale sign-in finishing in a browser that already
+/// holds a session is the back button, not an attack, and the code is simply dropped — which is
+/// strictly safer than honouring it, since honouring a sign-in nobody here started is the login
+/// CSRF the nonce exists to stop.
+fn refuse(state: &AppState, headers: &HeaderMap) -> Response {
+    if let Some(session) = state.who(headers) {
+        return (
+            [(header::SET_COOKIE, session::clear_state(state.secure_cookies))],
+            already(&session),
+        )
+            .into_response();
+    }
     (
         StatusCode::BAD_REQUEST,
         [(header::SET_COOKIE, session::clear_state(state.secure_cookies))],
         "that sign-in did not complete; try again",
     )
         .into_response()
+}
+
+/// What a signed-in person sees where a sign-in form would be.
+///
+/// It is also the only place this site offers a way *out*: nothing in the masthead says who is
+/// signed in, so without this a player has a sign-in they cannot repeat and a sign-out they
+/// cannot find.
+fn already(session: &Session) -> maud::Markup {
+    crate::views::shell(
+        crate::views::Head::new("Signed in", "You are already signed in."),
+        maud::html! {
+            section class="stack" {
+                h1 { "Signed in as " (session.name) }
+                p class="lede" {
+                    "There is nothing to sign in to — this browser already holds a session."
+                }
+                p { a class="cta" href="/play" { "Play" } }
+                p { a href="/signout" { "Sign out" } }
+            }
+        },
+    )
 }
 
 /// Percent-encode a URL for use as a query value.
@@ -318,6 +359,22 @@ mod tests {
         // The one a person sees is the public one; the one a socket opens is not.
         assert!(split.base.starts_with("https://"));
         assert!(!split.api.contains("accounts.example"));
+    }
+
+    /// Where a sign-in form would be, a signed-in person gets their name and the two things
+    /// they might actually want. The sign-out link matters more than it looks: nothing in the
+    /// masthead says who is signed in, so this is the only way off the account.
+    #[test]
+    fn a_signed_in_person_is_told_so_and_offered_the_way_out() {
+        let page = already(&Session { sub: "acct-1".into(), name: "Ada Lovelace".into(), exp: 0 })
+            .into_string();
+
+        assert!(page.contains("Ada Lovelace"), "{page}");
+        assert!(page.contains("href=\"/signout\""), "no way to sign out: {page}");
+        assert!(page.contains("href=\"/play\""), "{page}");
+        // And emphatically not a form to sign in again, which is the thing that was broken.
+        assert!(!page.contains("<form"), "it still offered a sign-in: {page}");
+        assert!(!page.contains("did not complete"), "{page}");
     }
 
     /// The path the broker allowlists carries no query of its own, or the join is ambiguous
