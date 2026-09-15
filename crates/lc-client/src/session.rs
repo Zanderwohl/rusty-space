@@ -13,7 +13,7 @@ use lc_world::observation::{Observation, Target, observe};
 use lc_world::sky::{CatalogueStar, StarId, StarProvider, generate};
 
 use crate::curve::LightCurve;
-use crate::flight::{Cruise, STANDOFF_LY};
+use crate::flight::Cruise;
 use crate::tonemap::{Shaded, ToneMap};
 
 /// One in-game Julian year per real hour.
@@ -276,7 +276,8 @@ impl Session {
         self.observer.z = grid.z as i64;
     }
 
-    /// Begin a crossing to a star, stopping [`STANDOFF_LY`] short of it.
+    /// Begin a crossing to a star, stopping [`STANDOFF_LY`](crate::flight::STANDOFF_LY)
+    /// short of it.
     ///
     /// The catalogue position is treated as fixed: nothing in this model has proper motion
     /// yet, so aiming at where it is recorded and aiming at where it will be are the same.
@@ -697,6 +698,7 @@ mod tests {
     use lc_world::sky::AuthoredStars;
 
     use super::*;
+    use crate::flight::STANDOFF_LY;
 
     fn session() -> Session {
         Session::new(&AuthoredStars::sample(), 3)

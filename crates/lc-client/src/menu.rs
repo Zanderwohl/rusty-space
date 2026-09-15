@@ -34,7 +34,10 @@ impl Plugin for MainMenuPlugin {
             .add_systems(OnExit(AppState::MainMenu), cleanup)
             .add_systems(
                 Update,
-                (sync_screen, drift, press).run_if(in_state(AppState::MainMenu)),
+                (sync_screen, drift, press)
+                    .chain()
+                    .in_set(crate::app::Stage::Act)
+                    .run_if(in_state(AppState::MainMenu)),
             );
     }
 }

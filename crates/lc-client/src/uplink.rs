@@ -454,7 +454,7 @@ impl Plugin for UplinkPlugin {
         app
             // Not gated on a state. The socket is not the game, and a connection that only
             // lived inside one screen would drop every time the player opened a menu.
-            .add_systems(Update, (connect, pump).chain());
+            .add_systems(Update, (connect, pump).chain().in_set(crate::app::Stage::Link));
     }
 }
 

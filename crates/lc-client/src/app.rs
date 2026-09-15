@@ -31,6 +31,32 @@ pub enum AppState {
     InGame,
 }
 
+/// The order a frame is built in. Every system in [`Update`] belongs to one of these.
+///
+/// The schedule used to declare none of this, and Bevy reported 133 pairs of systems with
+/// conflicting access and no order between them. Most were harmless; one was not. [`survey`]
+/// reads the camera the sky is about to be rendered with, and it was unordered against
+/// [`aim_camera`], which writes it — so a reticle was drawn from whichever pose the executor
+/// happened to leave in the component, and trailed the view by a frame whenever that was the
+/// old one.
+///
+/// [`survey`]: crate::pick
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Stage {
+    /// What the server has said since the last frame.
+    Link,
+    /// Input, orders, and the clock.
+    Act,
+    /// Where the camera points, and where everything is drawn.
+    Scene,
+    /// What the cursor is on, against the scene just placed.
+    ///
+    /// A click found here reaches [`dispatch`] on the *next* frame, which is the honest
+    /// reading of it: the player clicked on the image they were looking at, and that image is
+    /// the one this stage measures.
+    Mark,
+}
+
 #[derive(Resource, Deref, DerefMut)]
 pub struct Ui(pub UiState);
 
@@ -106,6 +132,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<Bodies>()
             .init_resource::<crate::envelope::Envelopes>()
             .init_resource::<crate::resolved::Resolved>()
+            .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
             .add_systems(Startup, spawn_camera)
             .add_systems(OnEnter(AppState::Loading), begin_load)
             .add_systems(OnEnter(AppState::InGame), (spawn_sky, run_dev_actions))
@@ -128,7 +155,8 @@ impl Plugin for ClientPlugin {
                     observe.run_if(in_state(AppState::InGame)),
                     hold_exposure.run_if(in_state(AppState::InGame)),
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(Stage::Act),
             )
             .add_systems(
                 Update,
@@ -143,13 +171,17 @@ impl Plugin for ClientPlugin {
                     crate::envelope::update_envelopes,
                 )
                     .chain()
+                    .in_set(Stage::Scene)
                     .run_if(in_state(AppState::InGame)),
             )
             // The menu's backdrop is the same starfield pass, so it needs the same two
             // systems. Nothing else: there are no bodies and nothing to resolve.
             .add_systems(
                 Update,
-                (aim_camera, update_sky).chain().run_if(in_state(AppState::MainMenu)),
+                (aim_camera, update_sky)
+                    .chain()
+                    .in_set(Stage::Scene)
+                    .run_if(in_state(AppState::MainMenu)),
             )
             // Absent unless something inserted one: the browser build reads it off the page
             // before the app is built, and the desktop mints one from its device grant.
@@ -610,6 +642,49 @@ mod tests {
         let transform = *app.world().entity(camera).get::<Transform>().unwrap();
         assert_eq!(transform.translation, Vec3::ZERO, "the camera must stay at the origin");
         assert!(transform.rotation.is_finite() && transform.rotation.length() > 0.5);
+    }
+
+    /// Where a mark placed in [`Stage::Mark`] found the camera.
+    #[derive(Resource, Default)]
+    struct Seen(Option<Vec3>);
+
+    fn probe(camera: Query<&Transform, With<Camera3d>>, mut seen: ResMut<Seen>) {
+        seen.0 = camera.single().ok().map(|t| *t.forward());
+    }
+
+    /// The bug this pins: a reticle is drawn over a rendered sky, so it has to be measured
+    /// against the camera that sky was rendered with. Nothing ordered [`survey`] after
+    /// [`aim_camera`], so the executor was free to run it first and the marks trailed the view
+    /// by exactly one frame.
+    ///
+    /// [`survey`]: crate::pick
+    #[test]
+    fn a_mark_is_placed_against_this_frames_camera_and_not_last_frames() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .init_state::<AppState>()
+            .add_message::<Requested>()
+            .add_message::<AppExit>()
+            .insert_resource(Ui(UiState::default()))
+            .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
+            .init_resource::<crate::uplink::Uplink>()
+            .init_resource::<Seen>()
+            .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
+            .add_systems(Update, dispatch.in_set(Stage::Act))
+            .add_systems(Update, aim_camera.in_set(Stage::Scene))
+            .add_systems(Update, probe.in_set(Stage::Mark));
+        app.insert_state(AppState::InGame);
+        let camera = app.world_mut().spawn((Camera3d::default(), Transform::default())).id();
+        app.update();
+        let before = app.world().resource::<Seen>().0.expect("the mark stage should have run");
+
+        app.world_mut().write_message(Requested(Action::Look { yaw: 1.2, pitch: 0.3 }));
+        app.update();
+
+        let aimed = *app.world().entity(camera).get::<Transform>().unwrap().forward();
+        let seen = app.world().resource::<Seen>().0.unwrap();
+        assert_ne!(seen, before, "the turn never reached the camera at all");
+        assert_eq!(seen, aimed, "the mark was placed against last frame's camera");
     }
 
     #[test]

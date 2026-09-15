@@ -94,7 +94,14 @@ pub struct PickPlugin;
 impl Plugin for PickPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Picked>()
-            .add_systems(Update, survey.run_if(in_state(crate::app::AppState::InGame)))
+            // Last of the frame. It measures where things were drawn, so everything that
+            // decides that has to have run: see [`crate::app::Stage`].
+            .add_systems(
+                Update,
+                survey
+                    .in_set(crate::app::Stage::Mark)
+                    .run_if(in_state(crate::app::AppState::InGame)),
+            )
             .add_systems(
                 bevy_egui::EguiPrimaryContextPass,
                 // After the interface, not before it. `available_rect` is built up as panels

@@ -103,11 +103,16 @@ impl Plugin for SigninPlugin {
             .add_systems(OnEnter(AppState::MainMenu), open_dev_form)
             .add_systems(
                 Update,
-                (handle, collect, listen, press).chain().run_if(in_state(AppState::MainMenu)),
+                (handle, collect, listen, press)
+                    .chain()
+                    .in_set(crate::app::Stage::Act)
+                    .run_if(in_state(AppState::MainMenu)),
             )
             .add_systems(
                 Update,
-                draw.run_if(in_state(AppState::MainMenu)).after(collect),
+                draw.in_set(crate::app::Stage::Act)
+                    .run_if(in_state(AppState::MainMenu))
+                    .after(collect),
             )
             .add_systems(
                 bevy_egui::EguiPrimaryContextPass,
