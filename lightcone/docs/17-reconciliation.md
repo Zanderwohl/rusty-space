@@ -148,3 +148,33 @@ A protocol version bump, since `Accepted` and `Resync` change the shape of what 
   It would also make every trajectory slower and uglier. Measure first.
 - **Does a re-acquire have a duration, or a condition?** Seconds is simplest. "Until you have a
   fix from two known bodies" is better, and is a sensor mechanic the game does not have yet.
+
+## The clock is the first thing that drifts
+
+Before any of the above matters, the two ends have to agree about *when* the ship is. They did
+not, and the way that showed up was not a clock complaint — it was a ship that **teleported**.
+
+The client runs its own clock between frames, because it draws far faster than anything arrives.
+Nothing corrected it, and the rate ladder let a player multiply it by 3600. So the client's
+clock ran away, every order it sent came back stamped in its own past, and folding an order from
+the past means folding a manoeuvre that has already finished: the ship jumps to its destination.
+Meanwhile the server still believed the ship was in transit, so every order about the system the
+client thought it had reached was refused.
+
+Two halves, both needed:
+
+- **The server owns the rate.** [13-client-shell.md](13-client-shell.md) already said so — "a
+  client that can change it is a client that can cheat" — and the client simply did not enforce
+  it. It is also the client that suffers, which is worth saying because it makes the rule easy
+  to keep rather than a tax.
+- **The server states its clock**, about once a real second, and the client corrects when it is
+  more than an hour of coordinate time out. Not every statement: snapping to each one would drag
+  the clock backwards by however long that message spent in flight, once a second, forever.
+
+The slack exists for the honest case, which is not cheating: a browser tab in the background has
+its frames throttled, so its clock nearly stops while the world does not. It comes back hours
+behind and is pulled straight.
+
+A correction moves the **world's** clock and not the crew's. The ship's proper time is however
+long they have actually lived through, and no amount of resynchronising un-ages anybody — which
+is a distinct method for exactly that reason.

@@ -283,6 +283,15 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 effects.push(Effect::Notify("god view is not compiled into this build".into()));
             }
         }
+        // **The server owns the rate**, which `lightcone/docs/13-client-shell.md` calls dev
+        // only and says why: a client that can change it is a client that can cheat. It is also
+        // the client that suffers — its clock runs away from the server's, so an order comes
+        // back stamped in its own past and folds as a manoeuvre that already finished. The ship
+        // appears to teleport, and the server goes on refusing orders about a system it does
+        // not believe the ship has reached.
+        Action::SetTimeRate(_) | Action::TimeRateUp | Action::TimeRateDown if session.remote => {
+            effects.push(Effect::Notify("the server keeps the clock".into()));
+        }
         Action::SetTimeRate(rate) => ui.time_rate = rate.max(0.0),
         Action::TimeRateUp | Action::TimeRateDown => {
             ui.time_rate = crate::ui::rate_step(ui.time_rate, action == Action::TimeRateUp);
@@ -917,5 +926,34 @@ mod tests {
         let effects = apply(Action::FlyTo(Some(s.stars[0].id)), &mut ui, &mut s);
         assert!(!effects.iter().any(|e| matches!(e, Effect::Send(_))), "{effects:?}");
         assert!(s.cruise().is_some(), "it sent an order to nobody instead of flying");
+    }
+    /// The server owns the rate — doc 13 says so, and the client never enforced it. A client
+    /// that warps runs its clock away from the server's, and then every order it sends comes
+    /// back stamped in its own past.
+    #[test]
+    fn a_remote_session_cannot_take_the_clock() {
+        let mut ui = UiState::default();
+        let mut s = Session::new(&AuthoredStars::sample(), 3);
+        s.remote = true;
+        let before = ui.time_rate;
+
+        for action in [Action::TimeRateUp, Action::TimeRateDown, Action::SetTimeRate(3600.0)] {
+            let effects = apply(action, &mut ui, &mut s);
+            assert_eq!(ui.time_rate, before, "the client took the clock");
+            assert!(
+                effects.iter().any(|e| matches!(e, Effect::Notify(t) if t.contains("server"))),
+                "it changed nothing and said nothing: {effects:?}",
+            );
+        }
+    }
+
+    /// And offline it is still the player's, which is the single-process game and the whole
+    /// reason the ladder exists.
+    #[test]
+    fn a_local_session_still_owns_its_own_clock() {
+        let mut ui = UiState::default();
+        let mut s = Session::new(&AuthoredStars::sample(), 3);
+        apply(Action::SetTimeRate(60.0), &mut ui, &mut s);
+        assert_eq!(ui.time_rate, 60.0);
     }
 }

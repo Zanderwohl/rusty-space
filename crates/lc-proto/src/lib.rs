@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -231,6 +231,19 @@ pub enum Outbound {
     },
     /// The event channel. Cleared, by construction.
     Sightings(Vec<Cleared<Sighting>>),
+    /// What time it is, stated periodically.
+    ///
+    /// The client runs its own clock between these — it has to, because it draws frames far
+    /// faster than this arrives — and that clock drifts. A browser tab in the background is the
+    /// honest case: its frames are throttled, so its clock nearly stops while the world does
+    /// not, and it comes back hours of coordinate time behind.
+    ///
+    /// Without this the client and the server disagree about *when* the ship is, which reads as
+    /// disagreeing about **where** it is: an order the server stamps in the client's past folds
+    /// as a manoeuvre that has already finished, so the ship appears to teleport to its
+    /// destination, and the server goes on refusing orders about a system it does not think the
+    /// ship has reached.
+    Clock { now_t: i64 },
     /// An intent that stood, and **what was actually done with it** — which is not always
     /// what was asked for.
     ///
@@ -316,7 +329,7 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 pub mod golden {
     /// `Outbound::Welcome { client_id: 7, .., ship_id: 42, now_t: 1e6, ship_at: [4.2, 0, 0] }`
     pub const WELCOME: &[u8] = &[
-        0, 7, 7, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
+        0, 7, 8, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ];
 
@@ -334,7 +347,7 @@ pub mod golden {
     ///
     /// Pinned because it is now the message that decides whether anyone gets in at all. A
     /// field moving here is a server reading someone else's ticket as this one's.
-    pub const HELLO: &[u8] = &[0, 7, 5, 97, 46, 98, 46, 99];
+    pub const HELLO: &[u8] = &[0, 8, 5, 97, 46, 98, 46, 99];
 
     pub const SET_COURSE: &[u8] = &[
         1, 84, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0, 0, 0, 0, 0, 0, 20,
@@ -355,7 +368,7 @@ pub mod golden {
     /// Pinned because it is the message a client reconciles against. A field moving here is a
     /// client folding the wrong number into where it believes its own ship is.
     pub const ACCEPTED: &[u8] = &[
-        2, 84, 18, 128, 137, 122, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0,
+        3, 84, 18, 128, 137, 122, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0,
         0, 0, 0, 0, 0, 8, 64,
     ];
 }
@@ -485,6 +498,7 @@ mod tests {
                 Cleared::clear(sighting(500, 2.5), 1_000, 0.0).unwrap(),
             ]),
             accepted(),
+            Outbound::Clock { now_t: 1_000_000 },
             Outbound::Refused { ship_id: ShipId(-3), reason: Refusal::NotYours },
             Outbound::WrongProtocol { server: 9 },
         ];

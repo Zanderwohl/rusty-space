@@ -109,6 +109,15 @@ pub struct Uplink {
     placement: Option<Placement>,
 }
 
+/// How far the clock may be out before it is pulled back, in coordinate microseconds.
+///
+/// One coordinate hour, which is about four tenths of a real second at the design rate. It has
+/// to be comfortably more than a statement's own age — a tick plus the network, so a thousand
+/// coordinate seconds or so — or every statement would drag the clock backwards by however long
+/// it spent in flight. Below this the difference is smaller than the frames either side draws;
+/// above it, positions disagree.
+pub const CLOCK_SLACK_US: i64 = 3_600 * 1_000_000;
+
 /// How many sightings are remembered. A bound rather than a policy: the fold that replaces
 /// this will not keep a list at all.
 const REMEMBERED: usize = 256;
@@ -329,6 +338,18 @@ fn fold(uplink: &mut Uplink, game: &mut crate::app::Game, message: Outbound) {
             debug!(?ship_id, at_t, ?order, "accepted");
             uplink.applied = said;
         }
+        Outbound::Clock { now_t } => {
+            // Only when it matters. Snapping to every statement would pull the clock back by
+            // the statement's flight time, once a second, forever.
+            let out_by = now_t - (game.0.coordinate_time_s() * 1e6) as i64;
+            if out_by.abs() > CLOCK_SLACK_US {
+                game.0.correct_coordinate_time_us(now_t);
+                let hours = out_by.abs() as f64 / 3.6e9;
+                // Said out loud, because the world jumps when this happens and a jump nobody
+                // explained reads as a bug in the physics.
+                uplink.applied = Some(format!("clock corrected by {hours:.1} hours"));
+            }
+        }
         Outbound::Refused { ship_id, reason } => {
             warn!(?ship_id, ?reason, "an order was refused");
             uplink.applied = Some(match reason {
@@ -484,6 +505,55 @@ mod tests {
         uplink.place(&mut game.0);
         assert_eq!(game.0.ship.motion.position_ly, glam::DVec3::new(1.0, 2.0, 3.0));
         assert!(!game.0.remote);
+    }
+
+    /// A clock statement in step with the client changes nothing. Snapping to every one would
+    /// drag the clock backwards by the statement's own flight time, once a second, forever.
+    #[test]
+    fn a_clock_in_step_is_left_alone() {
+        let (mut uplink, mut game) = app();
+        fold(&mut uplink, &mut game, welcome_at(10 * CLOCK_SLACK_US, [0.0; 3]));
+        let before = game.0.coordinate_time_s();
+
+        // A statement a fraction of the slack away, which is what a healthy connection looks
+        // like: the message spent a tick and a network hop getting here.
+        let close = (before * 1e6) as i64 - CLOCK_SLACK_US / 4;
+        fold(&mut uplink, &mut game, Outbound::Clock { now_t: close });
+
+        assert_eq!(game.0.coordinate_time_s(), before, "a healthy offset moved the clock");
+        assert!(uplink.applied.is_none(), "it complained about nothing");
+    }
+
+    /// **The bug behind the teleporting.** A client whose clock has run away — a warp, or a
+    /// throttled background tab — is pulled back, and told, because the world jumps.
+    #[test]
+    fn a_clock_that_has_run_away_is_pulled_back() {
+        let (mut uplink, mut game) = app();
+        fold(&mut uplink, &mut game, welcome_at(0, [0.0; 3]));
+
+        // A day of coordinate time ahead of the server, which a warp reaches in seconds.
+        let server_t = 0;
+        game.0.correct_coordinate_time_us(24 * CLOCK_SLACK_US);
+        fold(&mut uplink, &mut game, Outbound::Clock { now_t: server_t });
+
+        assert_eq!(game.0.coordinate_time_s(), 0.0, "the client kept its own clock");
+        let said = uplink.applied.clone().expect("a jump nobody explained reads as a bug");
+        assert!(said.contains("clock corrected"), "{said}");
+    }
+
+    /// A correction moves the world's clock and **not** the crew's. The ship's proper time is
+    /// however long they have actually lived through, and no amount of resynchronising the
+    /// coordinate clock un-ages anybody.
+    #[test]
+    fn a_correction_does_not_un_age_the_crew() {
+        let (mut uplink, mut game) = app();
+        fold(&mut uplink, &mut game, welcome_at(0, [0.0; 3]));
+        game.0.ship.motion.clock_s = 12_345.0;
+
+        game.0.correct_coordinate_time_us(24 * CLOCK_SLACK_US);
+        fold(&mut uplink, &mut game, Outbound::Clock { now_t: 0 });
+
+        assert_eq!(game.0.ship.motion.clock_s, 12_345.0, "the crew was un-aged");
     }
 
     #[test]

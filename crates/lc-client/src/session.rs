@@ -374,6 +374,17 @@ impl Session {
         self.sync_observer();
     }
 
+    /// Pull the coordinate clock back to the authority's, leaving the ship's own alone.
+    ///
+    /// **Not** [`Session::set_coordinate_time_us`], which also resets the ship's proper clock.
+    /// That is right when placing a craft, whose crew has lived through nothing yet, and wrong
+    /// for a correction — it would wipe however many years they have actually aged.
+    pub fn correct_coordinate_time_us(&mut self, micros: i64) {
+        self.observer.t = Micros::new(micros);
+        self.sync_system();
+        self.sync_observer();
+    }
+
     pub fn coordinate_time_s(&self) -> f64 {
         self.observer.t.get() as f64 * 1e-6
     }

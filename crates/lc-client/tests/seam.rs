@@ -214,6 +214,32 @@ async fn a_crossing_to_a_star_the_server_does_not_have_is_refused() {
     );
 }
 
+/// The server states its clock unprompted, which is what a client's own clock is corrected
+/// against. Without it a client that drifts stays drifted forever.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_server_says_what_time_it_is_without_being_asked() {
+    let address = shard(true).await;
+    let mut link = WebSocketLink::connect(&address);
+
+    greet(&mut link, PROTOCOL_VERSION, "").await;
+    assert!(matches!(hear(&mut link, "a welcome").await, Outbound::Welcome { .. }));
+
+    // Nothing is sent from here: a clock statement is the server's own doing.
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    loop {
+        if let Some(Outbound::Clock { now_t }) = link
+            .poll()
+            .into_iter()
+            .find(|m| matches!(m, Outbound::Clock { .. }))
+        {
+            assert!(now_t > 0, "the clock it stated was {now_t}");
+            return;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "the server never stated its clock");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 /// The negotiation that exists so a stale client fails legibly instead of misreading bytes.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_client_on_the_wrong_protocol_is_told_the_number() {

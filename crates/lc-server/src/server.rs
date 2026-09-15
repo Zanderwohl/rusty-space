@@ -231,6 +231,7 @@ impl<J: Journal> Server<J> {
         }
         self.journal.write(&events, &deliveries).await?;
         self.pending = events;
+        self.state_the_clock(wire);
         // 3 and 4. Everything that has arrived since the last tick, through the gate.
         self.flush(wire).await
     }
@@ -522,6 +523,23 @@ impl<J: Journal> Server<J> {
                 continue;
             }
             craft.enter(system, now_s);
+        }
+    }
+
+    /// Say what time it is, about once a real second.
+    ///
+    /// Cheap — one integer per client per second — and it is what keeps a client's own clock
+    /// from wandering. A client draws frames far faster than this and must run its own clock
+    /// between them; a browser tab in the background has its frames throttled and its clock
+    /// nearly stops. Without a statement to come back to, that divergence is permanent, and a
+    /// client that disagrees about *when* the ship is disagrees about where it is.
+    fn state_the_clock(&mut self, wire: &mut impl Transport) {
+        if self.now_t / TICK_US % i64::from(TICKS_PER_SECOND) != 0 {
+            return;
+        }
+        let now_t = self.now_t;
+        for client in self.clients.keys().copied().collect::<Vec<_>>() {
+            wire.send(client, Outbound::Clock { now_t });
         }
     }
 
