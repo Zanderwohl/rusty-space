@@ -49,6 +49,15 @@ pub struct Config {
     pub session_key: Option<String>,
     /// Which game server tickets are minted for.
     pub shard: String,
+    /// Where that shard is reachable **from a browser**, as a `ws://` or `wss://` URL.
+    ///
+    /// Distinct from [`Config::shard`], which is the audience a ticket is minted for. One is a
+    /// name the broker and the server agree on; the other is an address, and a deployment can
+    /// change the second without reissuing anything.
+    ///
+    /// Absent means `/play` launches a client with no shard, which is the single-process game
+    /// and is what this site shipped before there was a server to reach.
+    pub shard_url: Option<String>,
 }
 
 impl Config {
@@ -81,6 +90,7 @@ impl Config {
             identity_secret: var("LC_IDENTITY_SECRET"),
             session_key: var("SITE_SESSION_KEY"),
             shard: var("LC_SHARD").unwrap_or_else(|| "shard-1".into()),
+            shard_url: var("LC_SHARD_URL"),
         })
     }
 }

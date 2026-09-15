@@ -207,6 +207,170 @@ mod native {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+pub use browser::BrowserLink;
+
+#[cfg(target_arch = "wasm32")]
+mod browser {
+    use std::sync::{Arc, Mutex};
+
+    use lc_proto::{Inbound, Outbound};
+    use send_wrapper::SendWrapper;
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::closure::Closure;
+    use web_sys::{BinaryType, CloseEvent, MessageEvent, WebSocket};
+
+    use super::{Link, Status};
+
+    /// What the callbacks write and the frame reads.
+    ///
+    /// `Arc<Mutex<_>>` rather than the `Rc<RefCell<_>>` a browser-only type would normally use,
+    /// because the struct holding it has to be `Send` to live in a Bevy resource. On a
+    /// single-threaded target the lock is never contended and costs nothing.
+    #[derive(Default)]
+    struct Shared {
+        incoming: Vec<Outbound>,
+        /// Set once, by whichever of close, error or a bad frame happens first.
+        closed: Option<String>,
+    }
+
+    /// The socket, and the closures that have to outlive the call that registered them.
+    ///
+    /// Dropping a `Closure` unregisters it, so they are kept rather than `forget()`-ed — a
+    /// forgotten closure is a leak of one per connection, which a reconnecting client repeats.
+    struct Inner {
+        socket: WebSocket,
+        _on_message: Closure<dyn FnMut(MessageEvent)>,
+        _on_close: Closure<dyn FnMut(CloseEvent)>,
+        _on_error: Closure<dyn FnMut(web_sys::Event)>,
+    }
+
+    /// A WebSocket the browser owns.
+    ///
+    /// No thread, because there is none to have: the browser calls back into this on the same
+    /// task the frame runs on. That is why [`Link`] is shaped around polling rather than around
+    /// a future — the two implementations want the same interface for opposite reasons.
+    pub struct BrowserLink {
+        /// `SendWrapper` because `WebSocket` and `Closure` are `!Send` and a Bevy resource must
+        /// be `Send`. Sound here for the reason it is sound anywhere: this target has one
+        /// thread, so the check it makes on every access can never fail.
+        inner: SendWrapper<Inner>,
+        shared: Arc<Mutex<Shared>>,
+        /// Handed over before the socket opened. `WebSocket.send` throws until then, so these
+        /// wait for the first poll that finds it open.
+        queued: Vec<Inbound>,
+    }
+
+    impl BrowserLink {
+        pub fn connect(url: &str) -> Result<Self, String> {
+            let socket = WebSocket::new(url).map_err(|why| describe(&why))?;
+            // Without this the browser delivers a `Blob`, which can only be read
+            // asynchronously — and a frame has nothing to await on.
+            socket.set_binary_type(BinaryType::Arraybuffer);
+            let shared = Arc::new(Mutex::new(Shared::default()));
+
+            let on_message = {
+                let shared = shared.clone();
+                Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
+                    let Ok(buffer) = event.data().dyn_into::<js_sys::ArrayBuffer>() else {
+                        // Text, or something else this protocol does not speak. Ignored rather
+                        // than fatal: a proxy may send its own.
+                        return;
+                    };
+                    let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+                    let mut shared = shared.lock().unwrap();
+                    match lc_proto::decode::<Outbound>(&bytes) {
+                        Ok(message) => shared.incoming.push(message),
+                        // The peer is not speaking this version, whatever it claimed.
+                        Err(why) => shared.closed = Some(format!("undecodable message: {why}")),
+                    }
+                })
+            };
+            socket.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+
+            let on_close = {
+                let shared = shared.clone();
+                Closure::<dyn FnMut(CloseEvent)>::new(move |event: CloseEvent| {
+                    let said = event.reason();
+                    let why = if said.is_empty() {
+                        format!("the server closed the connection ({})", event.code())
+                    } else {
+                        said
+                    };
+                    let mut shared = shared.lock().unwrap();
+                    shared.closed.get_or_insert(why);
+                })
+            };
+            socket.set_onclose(Some(on_close.as_ref().unchecked_ref()));
+
+            let on_error = {
+                let shared = shared.clone();
+                Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+                    // A browser deliberately says nothing about why a socket failed — telling
+                    // a page would let it probe the network it is on. There is nothing more to
+                    // report than that it did.
+                    let mut shared = shared.lock().unwrap();
+                    shared.closed.get_or_insert_with(|| "the connection failed".to_string());
+                })
+            };
+            socket.set_onerror(Some(on_error.as_ref().unchecked_ref()));
+
+            Ok(Self {
+                inner: SendWrapper::new(Inner {
+                    socket,
+                    _on_message: on_message,
+                    _on_close: on_close,
+                    _on_error: on_error,
+                }),
+                shared,
+                queued: Vec::new(),
+            })
+        }
+
+        fn is_open(&self) -> bool {
+            self.inner.socket.ready_state() == WebSocket::OPEN
+        }
+    }
+
+    fn describe(why: &wasm_bindgen::JsValue) -> String {
+        why.as_string().unwrap_or_else(|| "the socket could not be opened".to_string())
+    }
+
+    impl Link for BrowserLink {
+        fn poll(&mut self) -> Vec<Outbound> {
+            // Anything handed over while the socket was still opening goes out now. Before the
+            // first open there is nowhere to put it but here.
+            if self.is_open() && !self.queued.is_empty() {
+                for message in std::mem::take(&mut self.queued) {
+                    let _ = self.inner.socket.send_with_u8_array(&lc_proto::encode(&message));
+                }
+            }
+            std::mem::take(&mut self.shared.lock().unwrap().incoming)
+        }
+
+        fn send(&mut self, message: Inbound) {
+            if self.is_open() {
+                let _ = self.inner.socket.send_with_u8_array(&lc_proto::encode(&message));
+            } else {
+                self.queued.push(message);
+            }
+        }
+
+        fn status(&self) -> Status {
+            // The recorded reason wins over the ready state, which only ever says *that* it
+            // closed.
+            if let Some(why) = &self.shared.lock().unwrap().closed {
+                return Status::Closed(why.clone());
+            }
+            match self.inner.socket.ready_state() {
+                WebSocket::CONNECTING => Status::Connecting,
+                WebSocket::OPEN => Status::Open,
+                _ => Status::Closed("the connection closed".to_string()),
+            }
+        }
+    }
+}
+
 /// A link with no socket under it, for tests and for the offline build.
 #[derive(Default)]
 pub struct Offline {

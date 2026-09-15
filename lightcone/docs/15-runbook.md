@@ -455,6 +455,22 @@ curl -s http://127.0.0.1:3210/.well-known/jwks.json > /tmp/shard.jwks
 cargo run -p lc-server --bin lightcone-server -- --jwks /tmp/shard.jwks --audience shard-1
 ```
 
+### The browser build
+
+`/play` hands the client two things on `#boot`: the ticket, and `data-server` — the shard's
+address, from `LC_SHARD_URL`. Both come off the page rather than the query string. The ticket
+because a credential in a URL is a credential in history, in an access log and in a `Referer`;
+the address because which shard a build talks to is part of the handover rather than something
+a player types. A `?server=` flag still wins, which is how a build gets pointed at a shard
+nobody has deployed yet.
+
+`LC_SHARD_URL` is an address and `LC_SHARD` is an audience name. They are separate on purpose:
+one is what the broker and the shard agree a ticket is *for*, the other is where the shard
+happens to be, and moving it should not reissue anything.
+
+A page served over TLS may only open `wss://`. A browser refuses `ws://` from an `https://`
+origin outright, which is the one failure here that looks like the server being down.
+
 A shard given neither refuses to start. Starting without either would mean refusing every
 connection, which from the outside is indistinguishable from everyone's credentials being wrong
 at once.

@@ -158,13 +158,18 @@ pub fn connect(mut uplink: ResMut<Uplink>, address: Res<ServerAddress>) {
         info!("connecting to {address}");
         uplink.open(Box::new(crate::link::WebSocketLink::connect(address)));
     }
-    // The browser's half of `Link` is the next piece of work: a `web-sys` WebSocket behind the
-    // same trait. Until it exists, a browser build handed a shard address says so plainly
-    // rather than sitting in `Connecting` forever with nothing opening.
     #[cfg(target_arch = "wasm32")]
     {
-        error!("this build cannot open a socket yet, so {address} is unreachable");
-        uplink.state = State::Refused("this build cannot reach a server yet".into());
+        info!("connecting to {address}");
+        match crate::link::BrowserLink::connect(address) {
+            Ok(link) => uplink.open(Box::new(link)),
+            // Opening throws only for an address the browser will not take at all — a bad URL,
+            // or plain `ws://` from a page served over TLS. Not something retrying fixes.
+            Err(why) => {
+                error!("could not open a socket to {address}: {why}");
+                uplink.state = State::Refused(why);
+            }
+        }
     }
 }
 

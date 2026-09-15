@@ -97,7 +97,12 @@ pub async fn page(
             // The ticket rides here too. It is worth sixty seconds and one socket, so it may
             // be in a page the browser will forget — and it is **not** in the URL, where it
             // would be in history, in an access log, and in a `Referer`.
-            div #boot data-base=(base) data-build=(build) data-ticket=[ticket.as_deref()] {
+            //
+            // So does the shard's address. Not for secrecy — it is public — but because which
+            // shard a build talks to is part of the handover rather than something a player
+            // types, and a deployment moving it should be a configuration change here.
+            div #boot data-base=(base) data-build=(build) data-ticket=[ticket.as_deref()]
+                data-server=[state.shard_url.as_deref()] {
                 h1 #stage { "Starting" }
                 p #detail { "Checking what this browser can do." }
                 progress #bar max="100" value="0" hidden {}

@@ -63,6 +63,8 @@ pub struct AppState {
     pub session_key: Option<Arc<str>>,
     /// Which game server tickets are minted for.
     pub shard: Arc<str>,
+    /// Where that shard is, for a browser to open a socket to. See [`config::Config::shard_url`].
+    pub shard_url: Option<Arc<str>>,
     /// Whether cookies are marked `Secure`. Off in development, which is the only place this
     /// site is ever reached over plain HTTP.
     pub secure_cookies: bool,
@@ -158,6 +160,7 @@ async fn main() -> anyhow::Result<()> {
         identity_secret: config.identity_secret.clone().map(Into::into),
         session_key: config.session_key.clone().map(Into::into),
         shard: config.shard.clone().into(),
+        shard_url: config.shard_url.clone().map(Into::into),
         secure_cookies: config.env.is_production(),
         pool: pool.clone(),
         db_expected: config.database_url.is_some(),

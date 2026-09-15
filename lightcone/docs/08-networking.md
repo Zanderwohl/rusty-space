@@ -115,9 +115,22 @@ a protocol that needs it.
 crates share `lc-proto` and nothing else, so the same shape is written twice on purpose.
 
 **Poll-based and never blocking.** A frame cannot await, so everything either has already
-happened or has not. The desktop implementation owns a thread and reaches it over channels;
-the browser's will own callbacks and do the same, and that is the whole reason the interface is
-not built around a future.
+happened or has not. Two implementations reach that shape from opposite directions: the desktop
+owns a thread and reaches it over channels, and the browser owns callbacks the runtime invokes
+on the same task the frame runs on. Neither wants a future, for different reasons.
+
+The browser one has three details worth stating, because each is a silent failure otherwise:
+
+- **`binaryType` must be `arraybuffer`.** The default is `Blob`, which can only be read
+  asynchronously, and there is nothing in a frame to await on.
+- **The closures are kept, not forgotten.** Dropping a `Closure` unregisters it; `forget()`-ing
+  one leaks it, once per connection, which a reconnecting client repeats.
+- **`send` throws before the socket is open**, so anything handed over early is queued and
+  flushed by the first poll that finds it open.
+
+`WebSocket` and `Closure` are `!Send` and a Bevy resource must be `Send`, so the browser link
+holds them in a `SendWrapper`. That is sound here for the reason it is sound anywhere: the
+target has one thread, so the check it makes on every access cannot fail.
 
 The one cost of having no async runtime in the client is that the reading thread blocks on a
 read timeout and looks at the outgoing queue when it expires. That puts an upper bound of ten

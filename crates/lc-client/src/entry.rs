@@ -127,6 +127,21 @@ pub fn from_query(query: &str) -> Vec<String> {
     positional
 }
 
+/// The shard the launching page points this build at.
+///
+/// From the page rather than the query string, like the ticket and for a related reason: the
+/// site knows which shard a build belongs to and the address is part of the handover, not
+/// something a player types. A `?server=` flag still wins when one is given, because that is
+/// how a build gets pointed at a shard nobody has deployed yet.
+#[cfg(target_arch = "wasm32")]
+pub fn server_from_page() -> Option<String> {
+    web_sys::window()?
+        .document()?
+        .get_element_by_id("boot")?
+        .get_attribute("data-server")
+        .filter(|at| !at.is_empty())
+}
+
 /// The game ticket the launching page put on `#boot`.
 ///
 /// An attribute and **not** a query parameter, deliberately. A ticket in the URL is a ticket in

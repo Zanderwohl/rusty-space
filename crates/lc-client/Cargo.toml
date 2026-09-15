@@ -46,7 +46,14 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 wasm-bindgen = "0.2"
 # WebGPU. Bevy's wasm default is WebGL2, which this renderer does not target.
 bevy = { version = "0.17.2", features = ["webgpu"] }
-web-sys = { version = "0.3", features = ["Window", "Location", "UrlSearchParams", "Document", "Element", "HtmlCanvasElement"] }
+web-sys = { version = "0.3", features = [
+    "Window", "Location", "UrlSearchParams", "Document", "Element", "HtmlCanvasElement",
+    "WebSocket", "MessageEvent", "CloseEvent", "Event", "BinaryType",
+] }
+js-sys = "0.3"
+# `WebSocket` and `Closure` are `!Send`, and a Bevy resource must be `Send`. This target has
+# one thread, so the check it makes on every access can never fail. See `src/link.rs`.
+send_wrapper = "0.6"
 console_error_panic_hook = "0.1"
 
 [dev-dependencies]
