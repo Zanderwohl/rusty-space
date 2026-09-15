@@ -767,6 +767,37 @@ mod tests {
         assert_eq!(game.0.ship.motion.clock_s, 12_345.0, "the crew was un-aged");
     }
 
+    /// A statement about other craft becomes the list the renderer and the reticle draw from,
+    /// carrying the retarded position rather than a recipe for working out a present one.
+    #[test]
+    fn a_presence_becomes_a_contact_to_draw() {
+        let (mut uplink, mut game, mut ui) = app();
+        let presence = lc_proto::Presence {
+            ship_id: ShipId(7),
+            name: "Vela".into(),
+            length_m: 1_200.0,
+            at_ly: [1.0, 2.0, 3.0],
+            beta: [0.0, 0.1, 0.0],
+            facing: [0.0, 0.0, 2.0],
+            emitted_t: 500_000,
+            arrive_t: 1_000_000,
+        };
+        let cleared = lc_proto::Cleared::<lc_proto::Presence>::clear(presence, 1_000_000).unwrap();
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Present(vec![cleared]));
+
+        let [contact] = uplink.contacts.as_slice() else { panic!("{:?}", uplink.contacts) };
+        assert_eq!(contact.name, "Vela");
+        assert_eq!(contact.length_m, 1_200.0);
+        assert_eq!(contact.position_ly, glam::DVec3::new(1.0, 2.0, 3.0));
+        // Normalised on the way in, so nothing downstream has to wonder.
+        assert_eq!(contact.facing, glam::DVec3::Z);
+        assert_eq!(contact.emitted_s, 0.5);
+
+        // Replaced wholesale, not merged: a contact missing from a statement is gone.
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Present(Vec::new()));
+        assert!(uplink.contacts.is_empty(), "a dropped contact was kept");
+    }
+
     #[test]
     fn a_protocol_mismatch_says_both_numbers() {
         let (mut uplink, mut game, mut ui) = app();

@@ -491,6 +491,29 @@ mod tests {
         assert!((s.tone.reference - auto).abs() < auto * 1e-6);
     }
 
+    /// Zoom is multiplicative and unbounded here on purpose: how close the camera may come is
+    /// an angle, and only the frame that knows how wide a pixel is can clamp it.
+    #[test]
+    fn zooming_scales_the_boom_rather_than_stepping_it() {
+        let (mut ui, mut s) = fixture();
+        let start = ui.boom_lengths;
+        apply(Action::Zoom(1.0), &mut ui, &mut s);
+        let closer = ui.boom_lengths;
+        assert!(closer < start, "a notch in must come closer: {start} to {closer}");
+        apply(Action::Zoom(-1.0), &mut ui, &mut s);
+        assert!((ui.boom_lengths - start).abs() < start * 1e-9, "a notch back is where it began");
+
+        // Ten notches out is the same as one notch out ten times, which is what a wheel with a
+        // pixel-precision device actually sends.
+        let mut once = UiState::default();
+        apply(Action::Zoom(-10.0), &mut once, &mut s);
+        let mut ten = UiState::default();
+        for _ in 0..10 {
+            apply(Action::Zoom(-1.0), &mut ten, &mut s);
+        }
+        assert!((once.boom_lengths - ten.boom_lengths).abs() < ten.boom_lengths * 1e-9);
+    }
+
     #[test]
     fn exposure_is_bounded() {
         let (mut ui, mut s) = fixture();

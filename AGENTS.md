@@ -50,7 +50,12 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--signin` | hold at the sign-in modal, which draws over the menu and no action can reach |
 | `--password` | hold at the password form, the one egui surface inside the menu |
 | `--turn <deg>` / `--pitch <deg>` | turn the view, the only way to put something off screen |
+| `--zoom <notches>` | move the orbit camera; both its stops are clamps, so ask for far too much |
+| `--traffic <n>` | put `n` craft near the start, so there is another ship to photograph |
 | `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable |
+
+`--turn`, `--pitch` and `--zoom` are applied **last**, after anything that aims — `--fly` ends
+by pointing the view at what it is flying to, and pushed first the turn was simply undone.
 
 Most of what has gone wrong in the renderer was found this way and could not have been found
 any other way.

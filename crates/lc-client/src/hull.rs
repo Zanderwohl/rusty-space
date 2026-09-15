@@ -18,7 +18,7 @@ use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform};
 use em_render::render_space::sim_to_render;
-use em_spectra::{Band, PerBand};
+use em_spectra::PerBand;
 use glam::DVec3;
 use lc_proto::ShipId;
 use lc_world::craft::{BEAM_PER_LENGTH, HEIGHT_PER_LENGTH};
@@ -361,18 +361,11 @@ pub fn update_hulls(
     }
 }
 
-/// The band sum of what a hull sends the eye, for metering. Unweighted; only ever compared
-/// against the rest of the scene.
-pub fn radiance_at(session: &Session, at_ly: DVec3) -> PerBand<f32> {
-    match lighting(session) {
-        Some((star_ly, radius, teff)) => crate::resolved::lit_radiance(
-            ALBEDO,
-            radius,
-            teff,
-            star_ly.distance(at_ly) * M_PER_LY,
-        ),
-        None => PerBand::splat(0.0),
-    }
+/// What a hull at `at_ly` sends the eye, per band, for metering. `None` where there is no star
+/// to light it, which is a sky with nothing in it.
+pub fn radiance_at(session: &Session, at_ly: DVec3) -> Option<PerBand<f32>> {
+    let (star_ly, radius, teff) = lighting(session)?;
+    Some(crate::resolved::lit_radiance(ALBEDO, radius, teff, star_ly.distance(at_ly) * M_PER_LY))
 }
 
 /// How much sky a hull of `length_m` covers from `distance_m`, steradians.
@@ -387,10 +380,6 @@ pub fn solid_angle_sr(length_m: f64, distance_m: f64) -> f32 {
     (std::f64::consts::PI * (radius / distance_m).powi(2)) as f32
 }
 
-/// Whether a band sum is worth anything at all, for the metering path.
-pub fn any(radiance: &PerBand<f32>) -> bool {
-    Band::ALL.iter().any(|b| radiance[*b] > 0.0)
-}
 
 #[cfg(test)]
 mod tests {

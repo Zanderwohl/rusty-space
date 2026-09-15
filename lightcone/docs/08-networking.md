@@ -63,11 +63,41 @@ say anything; the Postgres one has its own, which skip when there is none.
 Make this one function, in one place, with tests that assert the negative case. Every other
 send path calls it. Do not allow a second code path to emit to a socket.
 
-**Built as a type, not a convention.** `Cleared<Sighting>` has a private field and one
-constructor, `Cleared::clear`, which is the gate; `Outbound::Sightings` can hold nothing else.
-"There is no second path to a socket" is then a fact the compiler enforces rather than a rule a
+**Built as a type, not a convention.** `Cleared<T>` has a private field and no constructor but
+its `clear` gates; `Outbound::Sightings` and `Outbound::Present` can hold nothing else. "There
+is no second path to a socket" is then a fact the compiler enforces rather than a rule a
 reviewer has to notice being broken, and the two `compile_fail` doctests on the type are what
 say so — one for a struct literal, one for a destructuring pattern.
+
+### Seeing other ships
+
+`Outbound::Present` is the second gated channel, and it exists because a ship's *position* is
+not an event. Nothing happens when a hull moves, so there is nothing for the event store to
+schedule, and a client with only the event channel can be told that somebody transmitted and
+never told that anybody is there.
+
+A `Presence` is an **appearance**, never a state. The distinction is the whole of it: `Motion`
+is a recipe a receiver evaluates at whatever time it likes, so handing one over for somebody
+else's ship would defeat the light cone in a different shape — the client would simply compute
+where that ship is *now*. So a presence carries one retarded sample — position, velocity,
+attitude, and the coordinate time the light left — and nothing that can be run forward. A
+client holds a contact still between statements or interpolates what it was already told.
+
+`beta` and `facing` are in it because both are measurable at a distance: velocity is what the
+light arrives Doppler-shifted and aberrated by, and a hull's attitude is its silhouette.
+
+Solved per observer against that observer's own worldline, by the same `retarded_times` the
+rest of the design turns on, so it is right for an observer that is itself moving fast. Stated
+every tick there is anything to state, and once more when there stops being — a client that had
+a contact and stops hearing about it has to be able to tell that from a message that went
+missing, and one that has never had any needs no message twenty times a second saying so.
+
+Which craft are worth solving for is a **visibility** rule and not a causality one: sharing a
+system, which is the same `LOCAL_SHELL_LY` both ends already use to decide where a ship is. Not
+an angular size — a five-hundred-metre hull is well under a pixel from anywhere in a system,
+and a rule drawn there would leave a player unable to find traffic they are sitting in the
+middle of. A client hears nothing at all about craft outside it, so a system with nobody in it
+and a system whose traffic is all elsewhere look the same from inside.
 
 Two details the gate turns on:
 

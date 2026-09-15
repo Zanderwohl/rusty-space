@@ -611,6 +611,64 @@ a ring. It is unusable for navigation, which is correct, and it is the most stri
 renderer can produce. Capturing a still from a ship in transit is worth making an explicit
 affordance; `--shot` does it.
 
+## Ships, and the camera that looks at one
+
+**Decided: third person, on an orbit camera.** A ship is the thing a player owns and the thing
+they are told about other people, and neither is visible from inside it.
+
+A hull is one ovoid at a size: five long by three across by one deep, from
+`lc_world::craft::BEAM_PER_LENGTH` and its neighbour, over a designed range of five hundred
+metres to fifty kilometres. It is drawn by the resolved-body material with the contrast set to
+zero, which turns the generated surface off and leaves a flat grey lit by the system's own star
+and metered into the same exposure as everything else. Shape is a constant rather than a field
+because nothing yet lets one craft differ from another in it; the *length* is on the wire, so
+ships varying in size costs no protocol version.
+
+**The nose follows the drive, not the velocity.** `lc_world::motion::facing` reads the thrust
+where there is thrust and the motion where there is not — *proper* acceleration, so a ballistic
+arc counts as unpowered rather than pointing at whatever it is falling towards. The visible
+consequence is the right one: a crossing is burn, flip and burn, so for its whole second half
+the ship points back the way it came while still travelling forward at a large fraction of `c`.
+A craft at rest with the engine off has no attitude anything decides, and `facing` says so
+rather than inventing one; the renderer keeps the last it saw.
+
+### The camera still does not translate
+
+What moves is the origin everything is drawn relative to. `hull::Eye` is a boom's length behind
+the hull along the view, and every pass that read the ship's position now reads that — the
+starfield uniform, the bodies, the resolved spheres, the envelopes and the reticle. The ship
+becomes the one thing drawn at an offset from the render origin.
+
+This is not bookkeeping. At the far end of the zoom a fifty-kilometre hull is thirteen thousand
+kilometres from the eye, which is a couple of pixels of parallax against a small moon; drawing
+the sky from the ship and the moon from the camera would have put the two a measurable distance
+apart with nothing in the code to say why.
+
+### Both zoom stops are angles
+
+Stored in **hull lengths**, not metres, so the number is scale-free: a player who changes ships
+keeps the framing rather than finding themselves inside a bigger one. The near stop puts the
+hull at the width of the window and the far one at five pixels across, below which a shape is a
+smudge and backing further off reads as the ship vanishing rather than as distance. For the
+designed range of hulls that is a boom of 0.84 to 261 lengths.
+
+Both come from the angular diameter, `2 asin(a/d)`, and not from a chord over a distance. The
+difference is invisible at the far stop and several per cent at the near one, where the camera
+is less than a length away — enough to hang the nose and the tail off the edges of the window.
+
+### Other ships
+
+Drawn from `Outbound::Present` — see [08-networking.md](08-networking.md) — which is to say at
+their **retarded** positions. A contact under way is drawn behind where it actually is, and the
+faster it is going the further behind. That is the game rather than a lag.
+
+Every craft in the system is marked and named on the reticle whether or not the cursor is on
+it, which is the one place a ship differs from a body or a star: it is a few pixels at any
+range worth seeing it from and has nothing in the sky to tell it apart from the background, so
+a name that only appeared on hover would be a name nobody found. Clicking one asks for nothing
+yet — every `Target` is somewhere a course can be plotted to, and a course to a ship is a
+rendezvous with something moving that this client only knows the past of.
+
 ## Checking a renderer without a window
 
 ![Observer snapshot](../images/observer-snapshot.png)
