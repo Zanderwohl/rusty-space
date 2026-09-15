@@ -780,7 +780,7 @@ mod tests {
                 kind: 0,
                 payload: String::new(),
             };
-            let cleared = Cleared::clear(sighting, i64::MAX, 0.0).unwrap();
+            let cleared = Cleared::<Sighting>::clear(sighting, i64::MAX, 0.0).unwrap();
             fold(&mut uplink, &mut game, &mut ui, Outbound::Sightings(vec![cleared]));
         }
         assert_eq!(uplink.seen.len(), REMEMBERED);

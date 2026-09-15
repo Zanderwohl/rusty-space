@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use glam::DVec3;
 use lc_proto::{
-    ClientId, Cleared, Inbound, Intent, Order, Outbound, PROTOCOL_VERSION, Refusal, ShipId,
-    Sighting, Withheld,
+    ClientId, Cleared, Inbound, Intent, Order, Outbound, PROTOCOL_VERSION, Presence, Refusal,
+    ShipId, Sighting, Withheld,
 };
 use lc_store::id::Minter;
 
@@ -14,10 +14,12 @@ use crate::rate::Budget;
 use crate::transport::Transport;
 use crate::ticket::{Spent, Trusted};
 use crate::world::{Event, Scheduled, World, schedule};
+use lc_spacetime::Worldline;
+use lc_spacetime::worldline::retarded_times_at;
 use lc_world::craft::{Craft, CraftId, Fleet, Kind};
-use lc_world::motion::{Change, Event as Change_, Rejected};
+use lc_world::motion::{Change, Event as Change_, LIGHT_US_PER_LY, Rejected};
 use lc_world::navigation::Course;
-use lc_world::system::LocalSystem;
+use lc_world::system::{LOCAL_SHELL_LY, LocalSystem};
 use std::sync::Arc;
 
 /// Real milliseconds a tick covers.
@@ -51,6 +53,12 @@ pub struct Connected {
     pub last_reception_t: i64,
     /// How far its delivery stream has been read.
     pub cursor_t: i64,
+    /// Whether the last contact list sent had anything in it.
+    ///
+    /// So that emptying is stated once and emptiness is then silent. A client that had a
+    /// contact and stops hearing about it must be told; one that has never had any needs no
+    /// message twenty times a second to say so again.
+    pub had_contacts: bool,
 }
 
 pub struct Server<J: Journal> {
@@ -268,6 +276,7 @@ impl<J: Journal> Server<J> {
             // own act, on the tick it acts. The same start serves a brand-new client, which is
             // the catch-up path run from the beginning.
             cursor_t: i64::MIN,
+            had_contacts: false,
         });
     }
 
@@ -575,6 +584,7 @@ impl<J: Journal> Server<J> {
             ship,
             last_reception_t: i64::MIN,
             cursor_t: i64::MIN,
+            had_contacts: false,
         });
         // Being welcomed is not the same fact as owning the craft, and `act` checks the
         // second. Without this a signed-in client is welcomed, given a ship, and then refused
@@ -628,18 +638,107 @@ impl<J: Journal> Server<J> {
         }
     }
 
+    /// Whether an observer is entitled to know a craft exists at all.
+    ///
+    /// Sharing a system, which is the same [`LOCAL_SHELL_LY`] rule both ends already use to
+    /// decide where a ship is. Not an angular size: a hull five hundred metres long is well
+    /// under a pixel from anywhere in a system, and a rule drawn there would leave a player
+    /// unable to find traffic they are sitting in the middle of. Between the stars, where
+    /// there is no system to share, the same radius serves as a plain range.
+    ///
+    /// A *visibility* rule and not a causality one. What it decides is which craft are worth
+    /// solving for; whether the light has arrived is [`Cleared::clear`]'s alone.
+    fn in_sight(observer: &Craft, other: &Craft) -> bool {
+        match (&observer.system, &other.system) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => {
+                observer.motion.position_ly.distance(other.motion.position_ly) < LOCAL_SHELL_LY
+            }
+            _ => false,
+        }
+    }
+
+    /// Where everybody else appeared to be, per connection.
+    ///
+    /// Solved before the journal read rather than inside it: `due` borrows the journal mutably
+    /// and this borrows the fleet, and one loop doing both borrows `self` twice.
+    ///
+    /// Every contact is a **retarded** sample. A craft a light-hour away is reported where it
+    /// was an hour ago, and the emission time is solved against the observer's own worldline
+    /// rather than subtracted from a shared clock — which is what makes it right for an
+    /// observer that is itself moving fast.
+    fn contacts(&self) -> HashMap<ClientId, Vec<Cleared<Presence>>> {
+        let now = self.now_t;
+        let mut out = HashMap::new();
+        for (id, state) in &self.clients {
+            let Some(observer) = self.fleet.get(CraftId(state.ship.0)) else { continue };
+            let here = observer.position_at(now as f64);
+            let mut seen = Vec::new();
+            for craft in self.fleet.iter() {
+                if craft.id == observer.id || !Self::in_sight(observer, craft) {
+                    continue;
+                }
+                let worldline = craft.worldline();
+                // No root means light that has not arrived or has already gone past; there is
+                // never more than one for anything sub-luminal.
+                let Some(emitted) = retarded_times_at(now as f64, here, &worldline).first().copied()
+                else {
+                    continue;
+                };
+                let at_ly = worldline.position_at(emitted) / LIGHT_US_PER_LY;
+                let beta = worldline.velocity_at(emitted);
+                let facing = craft.facing_at(emitted * 1.0e-6).unwrap_or(DVec3::X);
+                let presence = Presence {
+                    ship_id: ShipId(craft.id.0),
+                    name: craft.designation(),
+                    length_m: craft.length_m(),
+                    at_ly: at_ly.to_array(),
+                    beta: beta.to_array(),
+                    facing: facing.to_array(),
+                    emitted_t: emitted as i64,
+                    // The solve *is* the arrival: `emitted + |x_o - w(emitted)|` equals `now`
+                    // by construction, so this is the light landing at this instant.
+                    arrive_t: now,
+                };
+                match Cleared::<Presence>::clear(presence, now) {
+                    Ok(pass) => seen.push(pass),
+                    // Only reachable if the solve returned a root in the observer's future,
+                    // which it cannot. Dropped rather than trusted: the gate is the authority
+                    // here and the solver is not.
+                    Err(Withheld::StillInFlight | Withheld::BelowNoiseFloor) => {}
+                }
+            }
+            out.insert(*id, seen);
+        }
+        out
+    }
+
     /// Release what has arrived. **The only place anything reaches a client.**
     ///
-    /// Every sighting here goes through [`Cleared::clear`], which is the only constructor of
-    /// the only type [`Outbound::Sightings`] can hold. Adding a second path out would mean
-    /// adding a second way to build a `Cleared`, and there is not one.
+    /// Every sighting and every contact here goes through a [`Cleared::clear`], which is the
+    /// only constructor of the only type [`Outbound::Sightings`] and [`Outbound::Present`] can
+    /// hold. Adding a second path out would mean adding a second way to build a `Cleared`, and
+    /// there is not one.
     async fn flush(&mut self, wire: &mut impl Transport) -> Result<(), JournalError> {
         let now = self.now_t;
         // Cloned out first: the journal read borrows `self`, and the state update writes it.
         let connections: Vec<(ClientId, Connected)> =
             self.clients.iter().map(|(id, state)| (*id, state.clone())).collect();
+        let mut contacts = self.contacts();
 
         for (id, state) in connections {
+            // Every tick there is anything to say, and once more when there stops being: a
+            // client that has stopped hearing about a contact has to be able to tell that from
+            // a message that did not arrive, and one that has never had any needs no message
+            // twenty times a second repeating it.
+            let seen = contacts.remove(&id).unwrap_or_default();
+            if !seen.is_empty() || state.had_contacts {
+                let any = !seen.is_empty();
+                wire.send(id, Outbound::Present(seen));
+                if let Some(mine) = self.clients.get_mut(&id) {
+                    mine.had_contacts = any;
+                }
+            }
             let Some(ship) = self.fleet.get(CraftId(state.ship.0)).cloned() else {
                 continue;
             };
@@ -661,7 +760,7 @@ impl<J: Journal> Server<J> {
                     kind: event.kind,
                     payload: event.payload.clone(),
                 };
-                match Cleared::clear(sighting, now, ship.noise_floor) {
+                match Cleared::<Sighting>::clear(sighting, now, ship.noise_floor) {
                     Ok(pass) => {
                         latest = latest.max(scheduled.arrive_t);
                         cleared.push(pass);
@@ -754,6 +853,16 @@ use crate::transport::Loopback;
 
     /// Two light-hours, in light-microseconds. Far enough that the delay is many ticks.
     const TWO_LIGHT_HOURS: f64 = 7_200.0 * 1_000_000.0;
+
+    fn presences(messages: &[Outbound]) -> Vec<&Presence> {
+        messages
+            .iter()
+            .flat_map(|m| match m {
+                Outbound::Present(list) => list.iter().map(|c| c.get()).collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .collect()
+    }
 
     fn sightings(messages: &[Outbound]) -> Vec<&Sighting> {
         messages
@@ -917,10 +1026,10 @@ use crate::transport::Loopback;
         }));
         server.tick(&mut wire).await.unwrap();
         assert!(server.journal().events.is_empty(), "an event was written for someone else's ship");
-        assert!(matches!(
-            wire.take(first).as_slice(),
-            [Outbound::Refused { reason: Refusal::NotYours, .. }]
-        ));
+        assert!(wire.take(first).iter().any(|m| matches!(
+            m,
+            Outbound::Refused { reason: Refusal::NotYours, .. }
+        )));
     }
 
     /// The clamp. An intent stamped earlier than the last thing the client can prove it
@@ -1151,6 +1260,89 @@ use crate::transport::Loopback;
         // One step or forty, the closed form is the same place to the last bit -- and it stays
         // exact across the conversion into light-years the world model works in and back.
         assert_eq!(ship.position_at(after as f64), at + beta * after as f64);
+    }
+
+    /// **Where another ship is drawn, and when.**
+    ///
+    /// The position a client is handed is retarded: a craft two light-hours away is reported
+    /// where it was two hours ago, so a craft that is moving is reported somewhere it is not.
+    /// Asserting the *gap* rather than merely that a contact arrived is the point — a server
+    /// that reported everybody's present position would pass any test that only checked the
+    /// name, and would hand every client a faster-than-light view of the traffic around it.
+    #[tokio::test]
+    async fn a_contact_is_reported_where_its_light_left_and_not_where_it_is() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let watcher = ClientId(2);
+        server.admit(watcher, crate::world::still(ShipId(2), DVec3::ZERO), 0.0);
+        // Drifting across the line of sight, so where it was and where it is differ in `y`
+        // alone and the light delay is the same two hours throughout.
+        let beta = DVec3::new(0.0, 0.1, 0.0);
+        let adrift =
+            crate::world::coasting(ShipId(1), DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0), beta, 0);
+        server.admit(ClientId(1), adrift, 0.0);
+
+        // Far enough in that the light now landing left after the epoch rather than before it.
+        for _ in 0..40 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        // The last tick's alone: a contact is stated every tick, so the accumulated queue holds
+        // one of these per tick and only the newest is about now.
+        wire.take(watcher);
+        server.tick(&mut wire).await.unwrap();
+        let seen = wire.take(watcher);
+        let contacts = presences(&seen);
+        assert_eq!(contacts.len(), 1, "one other craft is in the system");
+        let contact = contacts[0];
+        assert_eq!(contact.ship_id, ShipId(1));
+        assert_eq!(contact.length_m, Kind::Ship.length_m());
+
+        let now = server.now_t();
+        assert_eq!(contact.arrive_t, now, "this is the light landing now");
+        // The delay *is* the distance to the reported point, which is the whole of the solve.
+        // Not "about two light-hours": the craft drifts across the line of sight, so the true
+        // range grows, and an assertion against the nominal separation would be asserting the
+        // approximation rather than the answer.
+        let delay = (now - contact.emitted_t) as f64;
+        let reported = DVec3::from_array(contact.at_ly);
+        let here = server.ship(ShipId(2)).unwrap().motion.position_ly;
+        let crossed = (reported - here).length() * LIGHT_US_PER_LY;
+        assert!(
+            (delay - crossed).abs() < 1.0,
+            "light took {delay} microseconds to cross {crossed}",
+        );
+        assert!(delay > TWO_LIGHT_HOURS, "and the separation is at least the two hours set up");
+
+        // And the gap that delay opens up, against where the craft actually is now.
+        let actually = server.ship(ShipId(1)).unwrap().motion.position_ly;
+        let behind = (actually - reported).length();
+        let expected = beta.length() * delay * 1.0e-6 / lc_world::flight::JULIAN_YEAR_S;
+        assert!(
+            (behind - expected).abs() < expected * 0.01,
+            "reported {behind} light-years behind, expected {expected}",
+        );
+        assert!(behind > 0.0, "a moving contact reported at its present position");
+    }
+
+    /// Nothing at all is said about craft in another system.
+    ///
+    /// Silence rather than a filtered list: a client that could tell "nobody is here" from "the
+    /// people here are out of range" would be reading something off the shape of what it was
+    /// not told.
+    #[tokio::test]
+    async fn a_craft_in_another_system_is_not_a_contact() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let watcher = ClientId(2);
+        server.admit(watcher, crate::world::still(ShipId(2), DVec3::ZERO), 0.0);
+        let far = LOCAL_SHELL_LY * 2.0 * LIGHT_US_PER_LY;
+        server.admit(
+            ClientId(1),
+            crate::world::still(ShipId(1), DVec3::new(far, 0.0, 0.0)),
+            0.0,
+        );
+        server.tick(&mut wire).await.unwrap();
+        assert!(presences(&wire.take(watcher)).is_empty());
     }
 }
 
@@ -2309,10 +2501,16 @@ mod hello_tests {
         assert_eq!(watched.clock_s, alone.clock_s, "the crews aged differently");
     }
 
+    /// The ship a welcome named, out of whatever else the tick also sent.
+    ///
+    /// Searched rather than matched as the whole queue: a tick that welcomes a client may also
+    /// state the traffic around it, and `Welcome` being first is the invariant that matters
+    /// rather than it being alone.
     fn welcomed(wire: &mut Loopback, client: ClientId) -> ShipId {
-        match wire.take(client).as_slice() {
-            [Outbound::Welcome { ship_id, .. }] => *ship_id,
-            other => panic!("{other:?}"),
+        let said = wire.take(client);
+        match said.first() {
+            Some(Outbound::Welcome { ship_id, .. }) => *ship_id,
+            _ => panic!("{said:?}"),
         }
     }
 }

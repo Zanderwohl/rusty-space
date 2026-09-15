@@ -3,7 +3,8 @@
 //! Bandwidth here is low and the filter is everything. A bug that leaks an event to a client
 //! before its light arrives is not a rendering glitch; it deletes the game. So the rule that
 //! decides what a client may know is not a convention this crate documents — it is
-//! [`Cleared::clear`], the only constructor of the only type the event channel can carry.
+//! [`Cleared`], whose only constructors are its two `clear` gates and which is the only type
+//! the channels carrying [`Sighting`] and [`Presence`] can hold.
 //!
 //! The wire format is `postcard`: compact, `serde`-based, and not self-describing. Not
 //! self-describing is the point rather than a cost — a stale client that half-understood a
@@ -22,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -227,6 +228,38 @@ pub struct Sighting {
     pub payload: String,
 }
 
+/// One craft as another sees it: where it appeared to be, and when that light left.
+///
+/// An **appearance**, never a state. [`Motion`] is a recipe, and a recipe for someone else's
+/// ship is a recipe a client can evaluate at its own clock — which is the whole of what the
+/// light-cone gate exists to prevent, handed over in a different shape. So this carries one
+/// sample of a worldline and nothing that can be run forward from it: a client drawing a
+/// contact between updates has to hold it still or interpolate what it was already told, and
+/// either way it cannot get ahead of the light.
+///
+/// [`Presence`] is therefore not a small [`Motion`] and must not grow into one. `beta` is here
+/// because it is *measurable* at a distance — it is what the light arrives Doppler-shifted and
+/// aberrated by — and `facing` because a hull's attitude is simply its silhouette.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Presence {
+    pub ship_id: ShipId,
+    /// What to call it on screen.
+    pub name: String,
+    /// How long the hull is, metres. On the wire rather than derived from a kind, so craft
+    /// varying in size costs no protocol version.
+    pub length_m: f64,
+    /// Light-years from the world origin, at the moment the light left.
+    pub at_ly: [f64; 3],
+    /// Velocity then, as a fraction of `c`.
+    pub beta: [f64; 3],
+    /// Unit vector the nose pointed along then.
+    pub facing: [f64; 3],
+    /// Coordinate microseconds the light left. Always earlier than [`Presence::arrive_t`].
+    pub emitted_t: i64,
+    /// Coordinate microseconds it arrives. Never later than the server's `t` when it is sent.
+    pub arrive_t: i64,
+}
+
 /// A sighting that has passed the gate, and the only thing the event channel can carry.
 ///
 /// The point of the wrapper is that it cannot be built any other way. "Every outbound message
@@ -289,6 +322,22 @@ impl Cleared<Sighting> {
     }
 }
 
+impl Cleared<Presence> {
+    /// **The same gate, for what a client is told about other craft.**
+    ///
+    /// One test rather than two: `arrive_t <= now_t` or the client is being shown a ship where
+    /// it has not yet been seen to be. There is no second test here because there is no
+    /// `strength` to compare — whether a hull is large enough to make out is a question about
+    /// the observer and the distance, which the caller has and this does not, so the visibility
+    /// cull happens before a `Presence` is built at all. Causality is what the type enforces.
+    pub fn clear(presence: Presence, now_t: i64) -> Result<Self, Withheld> {
+        if presence.arrive_t > now_t {
+            return Err(Withheld::StillInFlight);
+        }
+        Ok(Self { inner: presence })
+    }
+}
+
 impl<T> Cleared<T> {
     pub fn get(&self) -> &T {
         &self.inner
@@ -324,6 +373,13 @@ pub enum Outbound {
     },
     /// The event channel. Cleared, by construction.
     Sightings(Vec<Cleared<Sighting>>),
+    /// Who else is in sight, and where they appeared to be. Cleared, by construction.
+    ///
+    /// Stated every tick rather than on change, because a contact's *position* is what moved
+    /// and there is no event in that. A client hears nothing at all about craft it cannot see,
+    /// which is how a system with nobody in it and a system whose traffic is all out of range
+    /// look the same from inside.
+    Present(Vec<Cleared<Presence>>),
     /// What time it is, stated periodically.
     ///
     /// The client runs its own clock between these — it has to, because it draws frames far
@@ -422,19 +478,18 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 pub mod golden {
     /// `Outbound::Welcome { .., ship: Motion { at [4.2, 0, 0], holding a 12 Mm orbit of Earth } }`
     pub const WELCOME: &[u8] = &[
-        0, 7, 9, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16,
-        64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0,
-        0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 1, 1, 1, 5, 69, 97, 114,
-        116, 104, 0, 0, 0, 0, 96, 227, 102, 65, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0,
-        0, 0, 0, 0, 224, 63,
+        0, 7, 10, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210,
+        77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0, 0,
+        20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 1, 1, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0,
+        0, 96, 227, 102, 65, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        240, 63, 0, 0, 0, 0, 0, 0, 224, 63,
     ];
 
     /// `Inbound::Act(Intent { ship_id: 42, order: Transmit { power_w: 1500.0 }, .. })`
-    pub const ACT: &[u8] =
-        &[1, 84, 0, 0, 0, 0, 0, 0, 112, 151, 64, 128, 137, 122];
+    pub const ACT: &[u8] = &[
+        1, 84, 0, 0, 0, 0, 0, 0, 112, 151, 64, 128, 137, 122,
+    ];
 
     /// `Inbound::Act(Intent { ship_id: 42, order: SetCourse { Orbit of Earth, polar, 2 radii,
     /// 5 g }, .. })`
@@ -446,7 +501,9 @@ pub mod golden {
     ///
     /// Pinned because it is now the message that decides whether anyone gets in at all. A
     /// field moving here is a server reading someone else's ticket as this one's.
-    pub const HELLO: &[u8] = &[0, 9, 5, 97, 46, 98, 46, 99];
+    pub const HELLO: &[u8] = &[
+        0, 10, 5, 97, 46, 98, 46, 99,
+    ];
 
     pub const SET_COURSE: &[u8] = &[
         1, 84, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0, 0, 0, 0, 0, 0, 20,
@@ -467,9 +524,20 @@ pub mod golden {
     /// Pinned because it is the message a client reconciles against. A field moving here is a
     /// client folding the wrong number into where it believes its own ship is.
     pub const ACCEPTED: &[u8] = &[
-        3, 84, 18, 128, 137, 122, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0,
+        4, 84, 18, 128, 137, 122, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0,
         0, 0, 0, 0, 0, 8, 64,
     ];
+    /// `Outbound::Present([Presence { ship 42 "Ada", 500 m, at [4.2, 0, 0], nose +y }])`
+    ///
+    /// Pinned because it is the one message that says where somebody *else* is. A field moving
+    /// here is a client drawing a contact somewhere its light never came from.
+    pub const PRESENT: &[u8] = &[
+        2, 1, 84, 3, 65, 100, 97, 0, 0, 0, 0, 0, 64, 127, 64, 205, 204, 204, 204, 204, 204, 16,
+        64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169,
+        241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 192, 132, 61, 128, 137, 122,
+    ];
+
 }
 
 #[cfg(test)]
@@ -569,6 +637,25 @@ mod tests {
         })
     }
 
+    fn present() -> Outbound {
+        Outbound::Present(vec![
+            Cleared::<Presence>::clear(
+                Presence {
+                    ship_id: ShipId(42),
+                    name: "Ada".into(),
+                    length_m: 500.0,
+                    at_ly: [4.2, 0.0, 0.0],
+                    beta: [0.0, 0.001, 0.0],
+                    facing: [0.0, 1.0, 0.0],
+                    emitted_t: 500_000,
+                    arrive_t: 1_000_000,
+                },
+                1_000_000,
+            )
+            .expect("its light has arrived"),
+        ])
+    }
+
     #[test]
     fn the_wire_format_for_this_version_has_not_moved() {
         assert_eq!(
@@ -601,6 +688,11 @@ mod tests {
             golden::ACCEPTED,
             "Outbound::Accepted changed shape at protocol version {PROTOCOL_VERSION}",
         );
+        assert_eq!(
+            encode(&present()),
+            golden::PRESENT,
+            "Outbound::Present changed shape at protocol version {PROTOCOL_VERSION}",
+        );
     }
 
     #[test]
@@ -608,8 +700,9 @@ mod tests {
         let out = [
             welcome(),
             Outbound::Sightings(vec![
-                Cleared::clear(sighting(500, 2.5), 1_000, 0.0).unwrap(),
+                Cleared::<Sighting>::clear(sighting(500, 2.5), 1_000, 0.0).unwrap(),
             ]),
+            present(),
             accepted(),
             Outbound::Clock { now_t: 1_000_000 },
             Outbound::Refused { ship_id: ShipId(-3), reason: Refusal::NotYours },
@@ -637,6 +730,31 @@ mod tests {
         }
     }
 
+    /// The gate, for the channel that says where other people are.
+    ///
+    /// The same rule and the same reason: a contact drawn from light that has not arrived is a
+    /// client seeing a ship move before it could have.
+    #[test]
+    fn no_contact_arrives_before_its_light_does() {
+        let now = 1_000_000;
+        let at = |arrive_t: i64| Presence {
+            ship_id: ShipId(7),
+            name: "Vela".into(),
+            length_m: 500.0,
+            at_ly: [1.0, 0.0, 0.0],
+            beta: [0.0; 3],
+            facing: [1.0, 0.0, 0.0],
+            emitted_t: arrive_t - 1_000,
+            arrive_t,
+        };
+        assert_eq!(
+            Cleared::<Presence>::clear(at(now + 1), now),
+            Err(Withheld::StillInFlight),
+        );
+        assert!(Cleared::<Presence>::clear(at(now), now).is_ok(), "exactly on the cone");
+        assert!(Cleared::<Presence>::clear(at(now - 1), now).is_ok());
+    }
+
     /// Rubbish is a decode error, not a message. A format that is not self-describing will
     /// happily read the wrong shape, so this is only a check that it fails when it can.
     #[test]
@@ -651,13 +769,13 @@ mod tests {
     fn nothing_still_in_flight_gets_through() {
         let now = 1_000_000;
         assert_eq!(
-            Cleared::clear(sighting(now + 1, 1.0), now, 0.0),
+            Cleared::<Sighting>::clear(sighting(now + 1, 1.0), now, 0.0),
             Err(Withheld::StillInFlight),
             "a sighting one microsecond early was cleared",
         );
         // The boundary is inclusive: light arriving exactly now has arrived.
-        assert!(Cleared::clear(sighting(now, 1.0), now, 0.0).is_ok());
-        assert!(Cleared::clear(sighting(now - 1, 1.0), now, 0.0).is_ok());
+        assert!(Cleared::<Sighting>::clear(sighting(now, 1.0), now, 0.0).is_ok());
+        assert!(Cleared::<Sighting>::clear(sighting(now - 1, 1.0), now, 0.0).is_ok());
     }
 
     /// Arrival is not detection, and the two refusals are distinguishable — a client that is
@@ -666,14 +784,14 @@ mod tests {
     fn arrival_is_not_detection() {
         let now = 1_000_000;
         assert_eq!(
-            Cleared::clear(sighting(now, 0.5), now, 1.0),
+            Cleared::<Sighting>::clear(sighting(now, 0.5), now, 1.0),
             Err(Withheld::BelowNoiseFloor),
         );
-        assert!(Cleared::clear(sighting(now, 1.0), now, 1.0).is_ok(), "exactly at the floor");
+        assert!(Cleared::<Sighting>::clear(sighting(now, 1.0), now, 1.0).is_ok(), "exactly at the floor");
         // In flight *and* faint is reported as in flight: the causality test comes first and
         // is the one that may never be relaxed.
         assert_eq!(
-            Cleared::clear(sighting(now + 1, 0.0), now, 1.0),
+            Cleared::<Sighting>::clear(sighting(now + 1, 0.0), now, 1.0),
             Err(Withheld::StillInFlight),
         );
     }
