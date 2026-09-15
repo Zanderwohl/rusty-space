@@ -7,11 +7,19 @@
 use crate::action::Action;
 use crate::app::DevEntry;
 
+/// What a request to start the client asked for.
+pub struct Entry {
+    pub dev: DevEntry,
+    /// The catalogue to load: the first positional argument, and an **asset** path rather than
+    /// a filesystem one.
+    pub catalogue: Option<String>,
+    /// The shard to connect to. `None` is the single-process game, which is every build before
+    /// there was a server to connect to and is still what `--shot` and the snapshot use.
+    pub server: Option<String>,
+}
+
 /// Parses the flag vocabulary both binaries accept.
-///
-/// Returns the entry and the catalogue to load: the first positional argument, which is an
-/// asset path rather than a filesystem one.
-pub fn parse(args: &[String]) -> (DevEntry, Option<String>) {
+pub fn parse(args: &[String]) -> Entry {
     let flag = |name: &str| args.iter().any(|a| a == name);
     let after = |name: &str| {
         args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
@@ -83,7 +91,7 @@ pub fn parse(args: &[String]) -> (DevEntry, Option<String>) {
     // The first argument only. Scanning for any non-flag token would pick up a flag's own
     // value: in `--band 2` the `2` looks exactly like a path.
     let catalogue = args.first().filter(|a| !a.starts_with("--")).cloned();
-    (dev, catalogue)
+    Entry { dev, catalogue, server: after("--server") }
 }
 
 /// Reads the flags out of a URL query string.
@@ -192,16 +200,16 @@ mod tests {
 
     #[test]
     fn the_catalogue_is_the_first_argument_and_only_the_first() {
-        let (_, cat) = parse(&args("sky/hyg-v42.lcsky --band 2"));
+        let cat = parse(&args("sky/hyg-v42.lcsky --band 2")).catalogue;
         assert_eq!(cat.as_deref(), Some("sky/hyg-v42.lcsky"));
         // `2` is the band's value, and looks exactly like a path.
-        let (_, none) = parse(&args("--band 2"));
+        let none = parse(&args("--band 2")).catalogue;
         assert_eq!(none, None);
     }
 
     #[test]
     fn a_shot_implies_observing_immediately() {
-        let (dev, _) = parse(&args("--shot out.png --frames 90"));
+        let dev = parse(&args("--shot out.png --frames 90")).dev;
         assert!(dev.observe_immediately);
         assert_eq!(dev.screenshot.as_deref(), Some("out.png"));
         assert_eq!(dev.after_frames, 90);
@@ -209,16 +217,30 @@ mod tests {
 
     #[test]
     fn menu_holds_the_entry_even_when_a_shot_was_asked_for() {
-        let (dev, _) = parse(&args("--menu --shot menu.png"));
+        let dev = parse(&args("--menu --shot menu.png")).dev;
         assert!(!dev.observe_immediately, "--menu must not fall through to the sky");
         assert_eq!(dev.screenshot.as_deref(), Some("menu.png"));
     }
 
     #[test]
     fn nothing_at_all_is_a_plain_start() {
-        let (dev, cat) = parse(&[]);
+        let Entry { dev, catalogue: cat, server } = parse(&[]);
         assert!(!dev.observe_immediately);
         assert!(dev.actions.is_empty());
         assert_eq!(cat, None);
+        // No server named is the single-process game, not a default address.
+        assert_eq!(server, None);
+    }
+
+    #[test]
+    fn a_server_is_taken_from_the_flag_and_not_guessed() {
+        assert_eq!(
+            parse(&args("--server ws://127.0.0.1:8080")).server.as_deref(),
+            Some("ws://127.0.0.1:8080"),
+        );
+        // And it is not mistaken for the catalogue, which is the first positional argument.
+        let entry = parse(&args("sky/hyg-v42.lcsky --server ws://host:1/"));
+        assert_eq!(entry.catalogue.as_deref(), Some("sky/hyg-v42.lcsky"));
+        assert_eq!(entry.server.as_deref(), Some("ws://host:1/"));
     }
 }

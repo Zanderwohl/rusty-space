@@ -21,6 +21,7 @@ pub mod entry;
 pub mod envelope;
 pub mod hud;
 pub mod input;
+pub mod link;
 pub mod menu;
 pub mod panels;
 pub mod pick;
@@ -33,6 +34,7 @@ pub mod sky_asset;
 pub mod starfield;
 pub mod tonemap;
 pub mod ui;
+pub mod uplink;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod vault;
 pub mod view;

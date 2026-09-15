@@ -72,6 +72,9 @@ pub struct Server<J: Journal> {
     /// What each connection is allowed to send. Kept per `ClientId` rather than per admitted
     /// client, so a connection that has not been given a ship still cannot flood.
     budgets: HashMap<ClientId, Budget>,
+    /// Whether a connection whose ticket does not verify is admitted anyway. See
+    /// [`Server::admit_without_tickets`].
+    open: bool,
 }
 
 impl<J: Journal> Server<J> {
@@ -91,6 +94,7 @@ impl<J: Journal> Server<J> {
             minter: Minter::new(shard).expect("a shard inside the identifier's field"),
             pending: Vec::new(),
             budgets: HashMap::new(),
+            open: false,
         }
     }
 
@@ -111,6 +115,20 @@ impl<J: Journal> Server<J> {
         self.trusted = trusted;
     }
 
+    /// **Development only: let anyone in, ticket or not.**
+    ///
+    /// The same decision the site makes when no broker is configured — a deployment with no
+    /// identity service launches the game for whoever asks, which is the single-player and
+    /// development case. Off by default, because the direction that failure should point is
+    /// "nobody gets in".
+    ///
+    /// An anonymous connection is keyed by its `ClientId`, so reconnecting gets a *new* ship.
+    /// That is the honest consequence of having no account to come back to, and it is a second
+    /// reason this is not a deployment mode.
+    pub fn admit_without_tickets(&mut self, yes: bool) {
+        self.open = yes;
+    }
+
     /// Give the server the stars it is authoritative over.
     ///
     /// Craft are placed into systems by where they *are*, on the tick after this, rather than
@@ -126,6 +144,16 @@ impl<J: Journal> Server<J> {
     /// how whatever owns the world reaches in. Reading it is [`Server::ship`].
     pub fn fleet_mut(&mut self) -> &mut Fleet {
         &mut self.fleet
+    }
+
+    /// Forget a connection that has closed.
+    ///
+    /// The craft stays: a ship does not vanish because its pilot's socket did, and the account
+    /// comes back to it. What goes is the per-connection state, which would otherwise
+    /// accumulate one entry per connection for the life of the process.
+    pub fn disconnected(&mut self, client: ClientId) {
+        self.clients.remove(&client);
+        self.budgets.remove(&client);
     }
 
     pub fn ship(&self, id: ShipId) -> Option<&Craft> {
@@ -351,9 +379,22 @@ impl<J: Journal> Server<J> {
     /// looked up from the ticket's subject. A client that could ask for a `ShipId` could ask
     /// for someone else's.
     fn sign_in(&mut self, from: ClientId, ticket: &str) -> Option<(ShipId, String)> {
-        let claims = self.trusted.check(ticket).ok()?;
-        // Spent only after it verifies, or an invalid ticket could burn a valid one's identifier.
-        self.spent.claim(&claims, self.now_t / crate::world::MICROS_PER_SECOND).ok()?;
+        let claims = match self.trusted.check(ticket) {
+            Ok(claims) => {
+                // Spent only after it verifies, or an invalid ticket could burn a valid one's
+                // identifier.
+                self.spent.claim(&claims, self.now_t / crate::world::MICROS_PER_SECOND).ok()?;
+                claims
+            }
+            // No account to key an anonymous player by, so the connection is the account.
+            Err(_) if self.open => crate::ticket::Claims {
+                sub: format!("anonymous:{}", from.0),
+                name: format!("Traveller {}", from.0),
+                exp: i64::MAX,
+                jti: format!("anonymous:{}", from.0),
+            },
+            Err(_) => return None,
+        };
 
         let ship = match self.by_account.get(&claims.sub) {
             Some(ship) => *ship,
@@ -1370,6 +1411,63 @@ mod hello_tests {
     }
 
     /// A ticket minted for another shard is not a ticket here, however valid it is there.
+    /// The default, and the one that matters: a server nobody configured lets nobody in.
+    #[tokio::test]
+    async fn admitting_without_tickets_is_off_unless_asked_for() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        let mut wire = Loopback::new();
+        says(&mut server, &mut wire, ClientId(1), "not a ticket".into()).await;
+        assert!(
+            matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Unauthenticated]),
+            "a bad ticket was admitted by a server that was never told to",
+        );
+    }
+
+    /// And when it is asked for, a bad ticket gets a ship anyway — which is the whole point,
+    /// and the reason the flag is named after what it switches off.
+    #[tokio::test]
+    async fn admitting_without_tickets_gives_an_anonymous_connection_a_ship() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.admit_without_tickets(true);
+        let mut wire = Loopback::new();
+        says(&mut server, &mut wire, ClientId(7), String::new()).await;
+        let welcome = wire.take(ClientId(7));
+        let Some(Outbound::Welcome { ship_id, name, .. }) = welcome.first() else {
+            panic!("no welcome: {welcome:?}");
+        };
+        assert_eq!(*ship_id, ShipId(1));
+        assert!(name.contains('7'), "the name should say which connection it is: {name}");
+        assert!(server.ship(ShipId(1)).is_some(), "the ship was not put in the world");
+    }
+
+    /// Two anonymous connections are two players, not one. They are keyed by connection
+    /// because there is no account to key them by.
+    #[tokio::test]
+    async fn two_anonymous_connections_are_two_ships() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.admit_without_tickets(true);
+        let mut wire = Loopback::new();
+        says(&mut server, &mut wire, ClientId(1), String::new()).await;
+        says(&mut server, &mut wire, ClientId(2), String::new()).await;
+        assert_eq!(welcomed(&mut wire, ClientId(1)), ShipId(1));
+        assert_eq!(welcomed(&mut wire, ClientId(2)), ShipId(2));
+    }
+
+    /// Open house does not mean a valid ticket stops being honoured. A real account still
+    /// reaches its own ship, which is what keeps one code path on the client.
+    #[tokio::test]
+    async fn a_real_ticket_still_names_its_account_when_the_door_is_open() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        server.admit_without_tickets(true);
+        let mut wire = Loopback::new();
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let first = welcomed(&mut wire, ClientId(1));
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-1", SHARD, 60, "j2")).await;
+        assert_eq!(welcomed(&mut wire, ClientId(2)), first, "the account lost its ship");
+    }
+
     #[tokio::test]
     async fn a_ticket_for_another_shard_is_refused() {
         let broker = Broker::new([1u8; 32]);

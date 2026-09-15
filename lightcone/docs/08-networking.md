@@ -109,6 +109,25 @@ a peer.
 Raw UDP is not available in the browser, so it is not an option for any tier. Do not design
 a protocol that needs it.
 
+### The client's half
+
+`lc_client::link::Link`, and it mirrors `Transport` rather than inheriting from it: the two
+crates share `lc-proto` and nothing else, so the same shape is written twice on purpose.
+
+**Poll-based and never blocking.** A frame cannot await, so everything either has already
+happened or has not. The desktop implementation owns a thread and reaches it over channels;
+the browser's will own callbacks and do the same, and that is the whole reason the interface is
+not built around a future.
+
+The one cost of having no async runtime in the client is that the reading thread blocks on a
+read timeout and looks at the outgoing queue when it expires. That puts an upper bound of ten
+milliseconds on how long a message waits to be written, which is well under a tick.
+
+What the server does **not** send is ship positions. Both ends run the same `lc-world` physics
+from the same coordinate time, so the client computes where everything is and the server is
+authoritative only where they disagree. This is why `Welcome` carries `now_t`: adopting the
+server's clock is the whole of agreeing about where anything is.
+
 Channels:
 
 | channel | delivery | contents |

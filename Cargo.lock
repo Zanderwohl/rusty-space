@@ -4488,10 +4488,14 @@ dependencies = [
  "getrandom 0.3.3",
  "glam",
  "keyring",
+ "lc-proto",
+ "lc-server",
  "lc-spacetime",
  "lc-world",
  "serde",
  "serde_json",
+ "tokio",
+ "tungstenite",
  "ureq",
  "wasm-bindgen",
  "web-sys",
@@ -4524,6 +4528,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tokio-tungstenite",
+ "ureq",
 ]
 
 [[package]]
@@ -7378,9 +7383,12 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.8.8",
+ "rustls",
+ "rustls-pki-types",
  "sha1",
  "thiserror 1.0.69",
  "utf-8",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]

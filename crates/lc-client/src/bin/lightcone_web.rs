@@ -43,7 +43,7 @@ fn main() {
         .and_then(|w| w.location().search().ok())
         .unwrap_or_default();
     let args = lc_client::entry::from_query(&search);
-    let (dev, catalogue) = lc_client::entry::parse(&args);
+    let entry = lc_client::entry::parse(&args);
 
     // Off the launching page, not the query string: a ticket in a URL is a ticket in history,
     // in an access log, and in a `Referer`.
@@ -84,8 +84,9 @@ fn main() {
                     ..default()
                 }),
         )
-        .insert_resource(Catalogue(catalogue))
-        .insert_resource(dev)
+        .insert_resource(Catalogue(entry.catalogue))
+        .insert_resource(lc_client::uplink::ServerAddress(entry.server))
+        .insert_resource(entry.dev)
         .add_plugins(ClientPlugin)
         .run();
 }

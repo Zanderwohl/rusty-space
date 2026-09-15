@@ -106,6 +106,13 @@ Each of these cost real time. None of them are visible from the code that hits t
   coin toss and it comes up "the sphere you are leaving". Take the new primary from the
   crossing, as `em_sim::patch` does.
 
+**Formatting**
+
+- **`cargo fmt` is not run on the game workspace.** CI fmt-checks `auth/` and `web/` only, and
+  the game's code is hand-formatted — `cargo fmt --all` at the repository root rewrites 204
+  files and 22 000 lines, burying a change in churn. Format the files you write to match their
+  neighbours and leave the rest alone.
+
 **axum**
 
 - An array of header pairs in a response **inserts**, which replaces any header of the same

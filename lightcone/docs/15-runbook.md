@@ -416,6 +416,36 @@ docker --context rocinante start lightcone-db
 
 ---
 
+## A shard and a client, locally
+
+The smallest thing that is actually two processes:
+
+```bash
+cargo run -p lc-server --bin lightcone-server -- --bind 127.0.0.1:8080 --open
+cargo run -p lc-client --bin lightcone -- --server ws://127.0.0.1:8080 --observe
+```
+
+`--open` admits a connection with no valid ticket. It is the same decision the site makes when
+no broker is configured, and it is development only for two reasons: it lets anyone in, and an
+anonymous player is keyed by their connection, so every reconnection is a new ship.
+
+With a broker, point the shard at its published keys instead. A **file** is as good as a URL
+and is how a shard starts when the broker is down — it verifies locally and never asks per
+connection:
+
+```bash
+curl -s http://127.0.0.1:3210/.well-known/jwks.json > /tmp/shard.jwks
+cargo run -p lc-server --bin lightcone-server -- --jwks /tmp/shard.jwks --audience shard-1
+```
+
+A shard given neither refuses to start. Starting without either would mean refusing every
+connection, which from the outside is indistinguishable from everyone's credentials being wrong
+at once.
+
+The HUD says which of these happened: `LINKED <name>` on a welcome, `REFUSED — <why>` on a
+ticket the shard would not take. The words carry it and the colour only agrees — see
+[18-ui-style.md](18-ui-style.md).
+
 ## Checks
 
 ```bash

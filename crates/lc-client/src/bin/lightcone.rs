@@ -28,7 +28,7 @@ fn asset_path() -> String {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (dev, catalogue) = lc_client::entry::parse(&args);
+    let entry = lc_client::entry::parse(&args);
 
     App::new()
         .add_plugins(
@@ -39,8 +39,9 @@ fn main() {
                 })
                 .set(AssetPlugin { file_path: asset_path(), ..default() }),
         )
-        .insert_resource(Catalogue(catalogue))
-        .insert_resource(dev)
+        .insert_resource(Catalogue(entry.catalogue))
+        .insert_resource(lc_client::uplink::ServerAddress(entry.server))
+        .insert_resource(entry.dev)
         .add_plugins(ClientPlugin)
         .run();
 }

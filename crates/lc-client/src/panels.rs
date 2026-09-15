@@ -28,11 +28,21 @@ pub fn loading(mut contexts: EguiContexts) {
     });
 }
 
+/// The palette for a connection state. The words are `uplink`'s; only the colour is here.
+fn connection_colour(note: crate::uplink::Note) -> egui::Color32 {
+    match note {
+        crate::uplink::Note::Quiet => egui::Color32::from_rgb(140, 170, 150),
+        crate::uplink::Note::Working => egui::Color32::from_rgb(240, 170, 60),
+        crate::uplink::Note::Wrong => egui::Color32::from_rgb(235, 110, 100),
+    }
+}
+
 /// The always-visible readout. Never in a closable panel: it is the premise.
 pub fn hud(
     mut contexts: EguiContexts,
     ui_state: Res<Ui>,
     game: Res<Game>,
+    uplink: Res<crate::uplink::Uplink>,
     mut out: MessageWriter<Requested>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
@@ -48,6 +58,10 @@ pub fn hud(
             if let Some(warning) = &lines.warning {
                 ui.separator();
                 ui.colored_label(egui::Color32::from_rgb(240, 170, 60), warning);
+            }
+            if let Some((note, words)) = crate::uplink::note(&uplink.state) {
+                ui.separator();
+                ui.colored_label(connection_colour(note), words);
             }
         });
         if let Some(target) = &lines.target {

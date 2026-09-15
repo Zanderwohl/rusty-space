@@ -311,6 +311,20 @@ impl Session {
         self.offset_to(star).length()
     }
 
+    /// Adopt a coordinate time, which is what a `Welcome` carries.
+    ///
+    /// Both ends propagate analytically from this number, so agreeing on it is the whole of
+    /// agreeing about where anything is. The ship's own clock follows it: a craft that has not
+    /// flown reads coordinate time, and one that has carries its proper time forward from here
+    /// rather than from whenever this process started.
+    pub fn set_coordinate_time_us(&mut self, micros: i64) {
+        self.observer.t = Micros::new(micros);
+        let now = self.coordinate_time_s();
+        self.ship.motion.clock_s = now;
+        self.sync_system();
+        self.sync_observer();
+    }
+
     pub fn coordinate_time_s(&self) -> f64 {
         self.observer.t.get() as f64 * 1e-6
     }
