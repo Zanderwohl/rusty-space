@@ -132,6 +132,27 @@ indexed by position so an observer visits its own neighbourhood rather than the 
 and a statement rate that falls off with range. Neither is built, and the visibility rule above
 is deliberately a single readable predicate so that replacing it is replacing one function.
 
+**The gate decides *when*, not *what*.** It is exact about arrival times and says nothing about
+how the content of a message was computed — and that is where this went wrong once, badly
+enough to be worth writing down. A craft's worldline used to be its *current* motive evaluated
+at whatever time was asked for. A motive is a closed form total in `t`, so it answers about
+times before it was ever flown, and `Drifting` extrapolates backwards: a burn retroactively
+moved the ship an hour earlier and changed how fast it was going there. Every retarded solve
+read the new motion at the old time, so `Outbound::Present` showed every client in the system a
+manoeuvre on the tick it happened, at any range. Every message passed the gate. Every message
+was a lie.
+
+A worldline has a past now — `lc_world::motion::Flight` over the stretches a craft has flown,
+each stamped with when it stopped being in force, which is the shape `lc_world::observation`
+already used for emission models. The memory is bounded, so the past runs out; `defined_over`
+says where, and a solve that falls off the end returns nothing rather than a guess. An observer
+too far away to be answered honestly sees nothing at all, which is the only safe way to not
+know.
+
+The lesson generalises: **anything computed from a worldline has to be computed from the
+worldline as it was**, and a type that cannot represent "as it was" will let a gate pass
+something that should never have left.
+
 Two details the gate turns on:
 
 - **The causality test comes first.** Below the noise floor and still in flight are both

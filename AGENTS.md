@@ -73,6 +73,21 @@ The store's tests need PostgreSQL (`createdb lc_store`; `LC_STORE_URL` overrides
 
 Each of these cost real time. None of them are visible from the code that hits them.
 
+**The light-cone model**
+
+- A motive is a **closed form total in `t`**, which means it cheerfully answers about times
+  before it was ever flown. `Craft` keeps a history of the stretches it has flown for exactly
+  this reason — without one, changing a motive rewrites the craft's whole past, and every
+  retarded solve reads the new motion at the old time. That shipped once and leaked every
+  manoeuvre instantly to every client in the system. Change a motive only through
+  `Craft`'s own methods; they are what record it.
+- `Cleared::clear` gates **when** a message may be sent and says nothing about how its content
+  was computed. A message can pass the gate and still be a fact from the future.
+- A test that asserts "X did not happen early" passes trivially if X never happens at all, or
+  if it happens for an unrelated reason. Break the mechanism on purpose and check the test
+  fails — both of the light-delay tests in `lc-server` were wrong the first time, and both
+  looked right.
+
 **Rendering**
 
 - Projecting a *path* by projecting each point and dropping the ones behind the camera draws a
