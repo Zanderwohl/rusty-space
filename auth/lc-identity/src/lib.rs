@@ -16,3 +16,4 @@ pub mod providers;
 pub mod routes;
 pub mod signin;
 pub mod store;
+pub mod ticket;

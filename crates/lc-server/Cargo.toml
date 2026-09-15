@@ -12,10 +12,17 @@ lc-spacetime = { path = "../lc-spacetime" }
 lc-world = { path = "../lc-world", default-features = false }
 lc-store = { path = "../lc-store" }
 glam = "0.30"
+# Verifying game tickets. The server depends on a JWT library and a public key, never on the
+# identity broker: see lightcone/docs/16-identity.md.
+jsonwebtoken = "9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tokio-postgres = "0.7"
 tokio = { version = "1", features = ["rt", "net", "sync", "macros", "time"] }
 tokio-tungstenite = "0.24"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 
 [dev-dependencies]
+ed25519-dalek = { version = "2", features = ["pkcs8"] }
+base64 = "0.22"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

@@ -12,8 +12,9 @@ use lc_store::id::Minter;
 use crate::journal::{Journal, JournalError, PREPARE_AHEAD_US};
 use crate::rate::Budget;
 use crate::transport::Transport;
+use crate::ticket::{Spent, Trusted};
 use crate::world::{Event, Scheduled, World, schedule};
-use lc_world::craft::{Craft, CraftId, Fleet};
+use lc_world::craft::{Craft, CraftId, Fleet, Kind};
 use lc_world::motion::{Change, Event as Change_, Rejected};
 use lc_world::navigation::Course;
 use lc_world::system::LocalSystem;
@@ -52,6 +53,14 @@ pub struct Server<J: Journal> {
     /// The stars this shard is authoritative over. Empty until one is loaded, which is the
     /// state every test that is not about systems runs in.
     world: World,
+    /// Whose word this server takes about who someone is. **Empty means nobody's**: with no
+    /// published key learned, every ticket is refused and only [`Server::admit`] can put a
+    /// craft in play, which is the state a test runs in.
+    trusted: Trusted,
+    spent: Spent,
+    /// Which craft belongs to which account, so signing in twice reaches the same ship.
+    by_account: HashMap<String, ShipId>,
+    next_ship: i64,
     /// Who owns what. The server's fact, not the world's: a probe has a worldline and no
     /// client, and a client is a connection rather than a thing in space.
     owners: HashMap<CraftId, ClientId>,
@@ -72,6 +81,10 @@ impl<J: Journal> Server<J> {
             now_t: start_t,
             fleet: Fleet::new(),
             world: World::default(),
+            trusted: Trusted::default(),
+            spent: Spent::default(),
+            by_account: HashMap::new(),
+            next_ship: 1,
             owners: HashMap::new(),
             clients: HashMap::new(),
             journal,
@@ -87,6 +100,15 @@ impl<J: Journal> Server<J> {
 
     pub fn journal(&self) -> &J {
         &self.journal
+    }
+
+    /// Whose signature this server accepts as proof of identity, and under what audience.
+    ///
+    /// Learned from the broker's published key set, never by asking it per connection. Until
+    /// this is called no ticket verifies, which is the safe direction: a server that has not
+    /// been told who to trust trusts no one.
+    pub fn trust(&mut self, trusted: Trusted) {
+        self.trusted = trusted;
     }
 
     /// Give the server the stars it is authoritative over.
@@ -187,18 +209,20 @@ impl<J: Journal> Server<J> {
         deliveries: &mut Vec<Scheduled>,
     ) {
         match message {
-            Inbound::Hello { protocol } => {
+            Inbound::Hello { protocol, ticket } => {
                 if protocol != PROTOCOL_VERSION {
                     wire.send(from, Outbound::WrongProtocol { server: PROTOCOL_VERSION });
                     return;
                 }
-                if let Some(state) = self.clients.get(&from) {
-                    wire.send(from, Outbound::Welcome {
+                match self.sign_in(from, &ticket) {
+                    Some((ship_id, name)) => wire.send(from, Outbound::Welcome {
                         client_id: from,
                         protocol: PROTOCOL_VERSION,
-                        ship_id: state.ship,
+                        ship_id,
                         now_t: self.now_t,
-                    });
+                        name,
+                    }),
+                    None => wire.send(from, Outbound::Unauthenticated),
                 }
             }
             Inbound::Act(intent) => {
@@ -319,6 +343,41 @@ impl<J: Journal> Server<J> {
         }
         events.push(event);
         Ok(())
+    }
+
+    /// Verify a ticket and bind the connection to the account's craft.
+    ///
+    /// The client never names its own ship: the identifier comes back in `Welcome` and is
+    /// looked up from the ticket's subject. A client that could ask for a `ShipId` could ask
+    /// for someone else's.
+    fn sign_in(&mut self, from: ClientId, ticket: &str) -> Option<(ShipId, String)> {
+        let claims = self.trusted.check(ticket).ok()?;
+        // Spent only after it verifies, or an invalid ticket could burn a valid one's identifier.
+        self.spent.claim(&claims, self.now_t / crate::world::MICROS_PER_SECOND).ok()?;
+
+        let ship = match self.by_account.get(&claims.sub) {
+            Some(ship) => *ship,
+            None => {
+                // First sign-in: the account gets a craft. Where a new player starts is a game
+                // question and this is the crudest possible answer to it.
+                let ship = ShipId(self.next_ship);
+                self.next_ship += 1;
+                let mut craft = Craft::at(CraftId(ship.0), Kind::Ship, DVec3::ZERO);
+                craft.name = Some(claims.name.clone());
+                self.fleet.insert(craft);
+                self.by_account.insert(claims.sub.clone(), ship);
+                ship
+            }
+        };
+        // A reconnection replaces the old connection's claim on the craft rather than sharing
+        // it: two sockets acting for one ship is two clients predicting different futures.
+        self.clients.retain(|_, state| state.ship != ship);
+        self.clients.insert(from, Connected {
+            ship,
+            last_reception_t: i64::MIN,
+            cursor_t: i64::MIN,
+        });
+        Some((ship, claims.name))
     }
 
     /// Put every craft in the system it is actually inside.
@@ -576,7 +635,10 @@ use crate::transport::Loopback;
         let mut wire = Loopback::new();
         let stranger = ClientId(99);
         for _ in 0..(crate::rate::BURST as i64 * 3) {
-            wire.client_says(stranger, Inbound::Hello { protocol: PROTOCOL_VERSION });
+            wire.client_says(stranger, Inbound::Hello {
+                protocol: PROTOCOL_VERSION,
+                ticket: "not a ticket".into(),
+            });
         }
         server.tick(&mut wire).await.unwrap();
         assert!(server.usage(stranger).unwrap().refused > 0, "an unadmitted flood was free");
@@ -795,16 +857,28 @@ use crate::transport::Loopback;
 
     #[tokio::test]
     async fn a_client_on_the_wrong_protocol_is_told_so_and_not_welcomed() {
+        use crate::testing::Broker;
+        let broker = Broker::new([3u8; 32]);
         let mut server = Server::new(Memory::default(), 0, 1);
+        let mut trusted = crate::ticket::Trusted::new("shard-1");
+        trusted.learn(&broker.jwks());
+        server.trust(trusted);
         let mut wire = Loopback::new();
         let client = ClientId(1);
-        server.admit(client, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
 
-        wire.client_says(client, Inbound::Hello { protocol: PROTOCOL_VERSION + 1 });
+        // The version is checked before the ticket, so a stale client is told which problem it
+        // has rather than being told it is not signed in.
+        wire.client_says(client, Inbound::Hello {
+            protocol: PROTOCOL_VERSION + 1,
+            ticket: broker.mint("acct-1", "shard-1", 60, "j1"),
+        });
         server.tick(&mut wire).await.unwrap();
         assert!(matches!(wire.take(client).as_slice(), [Outbound::WrongProtocol { .. }]));
 
-        wire.client_says(client, Inbound::Hello { protocol: PROTOCOL_VERSION });
+        wire.client_says(client, Inbound::Hello {
+            protocol: PROTOCOL_VERSION,
+            ticket: broker.mint("acct-1", "shard-1", 60, "j2"),
+        });
         server.tick(&mut wire).await.unwrap();
         assert!(matches!(wire.take(client).as_slice(), [Outbound::Welcome { .. }]));
     }
@@ -1146,5 +1220,170 @@ mod world_tests {
         );
         assert_eq!(flown.motion.motive, mirror.motion.motive);
         assert_eq!(flown.motion.beta, mirror.motion.beta);
+    }
+}
+
+#[cfg(test)]
+mod hello_tests {
+    use super::*;
+    use crate::journal::Memory;
+    use crate::testing::Broker;
+    use crate::ticket::Trusted;
+    use crate::transport::Loopback;
+
+    const SHARD: &str = "shard-1";
+
+    fn trusting(broker: &Broker) -> Server<Memory> {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut trusted = Trusted::new(SHARD);
+        assert_eq!(trusted.learn(&broker.jwks()), 1);
+        server.trust(trusted);
+        server
+    }
+
+    async fn says(server: &mut Server<Memory>, wire: &mut Loopback, from: ClientId, ticket: String) {
+        wire.client_says(from, Inbound::Hello { protocol: PROTOCOL_VERSION, ticket });
+        server.tick(wire).await.unwrap();
+    }
+
+    /// The hole this closes. Before a ticket, `Hello` carried no identity and a craft went to
+    /// whoever connected.
+    #[tokio::test]
+    async fn a_connection_with_no_ticket_gets_no_ship() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        let mut wire = Loopback::new();
+        let client = ClientId(1);
+
+        says(&mut server, &mut wire, client, "not a ticket".into()).await;
+        assert!(matches!(wire.take(client).as_slice(), [Outbound::Unauthenticated]));
+        assert!(server.ship(ShipId(1)).is_none(), "a craft was handed out anyway");
+    }
+
+    /// A server that has not been told whose word to take takes nobody's.
+    #[tokio::test]
+    async fn a_server_that_trusts_nobody_admits_nobody() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let client = ClientId(1);
+
+        says(&mut server, &mut wire, client, broker.mint("acct-1", SHARD, 60, "j1")).await;
+        assert!(matches!(wire.take(client).as_slice(), [Outbound::Unauthenticated]));
+    }
+
+    /// A valid ticket gets a craft, and the client is never asked which one it wants.
+    #[tokio::test]
+    async fn a_ticket_names_the_account_and_the_server_names_the_ship() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        let mut wire = Loopback::new();
+        let client = ClientId(1);
+
+        says(&mut server, &mut wire, client, broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let said = wire.take(client);
+        let [Outbound::Welcome { ship_id, name, client_id, .. }] = said.as_slice() else {
+            panic!("no welcome: {said:?}")
+        };
+        assert_eq!(*client_id, client);
+        assert_eq!(name, "Ada");
+        assert!(server.ship(*ship_id).is_some(), "the ship it was given does not exist");
+    }
+
+    /// Signing in again reaches the same ship. A player who reconnects is not a new player.
+    #[tokio::test]
+    async fn the_same_account_comes_back_to_the_same_ship() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        let mut wire = Loopback::new();
+
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let first = welcomed(&mut wire, ClientId(1));
+
+        // A different connection, a fresh ticket, the same account.
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-1", SHARD, 60, "j2")).await;
+        assert_eq!(welcomed(&mut wire, ClientId(2)), first, "the account got a second ship");
+
+        // And a different account does not.
+        says(&mut server, &mut wire, ClientId(3), broker.mint("acct-2", SHARD, 60, "j3")).await;
+        assert_ne!(welcomed(&mut wire, ClientId(3)), first);
+    }
+
+    /// Two sockets acting for one ship is two clients predicting different futures, so the
+    /// newer connection takes the craft and the older one stops owning it.
+    #[tokio::test]
+    async fn a_reconnection_displaces_the_connection_it_replaces() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        let mut wire = Loopback::new();
+
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let ship = welcomed(&mut wire, ClientId(1));
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-1", SHARD, 60, "j2")).await;
+        let _ = wire.take(ClientId(2));
+
+        // The displaced connection can no longer act for it.
+        wire.client_says(ClientId(1), Inbound::Act(Intent {
+            ship_id: ship,
+            order: Order::Transmit { power_w: 1.0 },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+        assert!(
+            wire.take(ClientId(1))
+                .iter()
+                .any(|out| matches!(out, Outbound::Refused { reason: Refusal::NotYours, .. })),
+            "the replaced connection still acted for the ship",
+        );
+    }
+
+    /// One ticket, one connection. A ticket in a log or a screenshot is worth nothing twice.
+    #[tokio::test]
+    async fn a_ticket_cannot_be_replayed() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        let mut wire = Loopback::new();
+        let ticket = broker.mint("acct-1", SHARD, 60, "only-once");
+
+        says(&mut server, &mut wire, ClientId(1), ticket.clone()).await;
+        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }]));
+
+        says(&mut server, &mut wire, ClientId(2), ticket).await;
+        assert!(matches!(wire.take(ClientId(2)).as_slice(), [Outbound::Unauthenticated]));
+    }
+
+    /// A ticket that does not verify must not burn the identifier of one that would. Otherwise
+    /// anyone who saw a `jti` could lock its owner out by presenting a forgery first.
+    #[tokio::test]
+    async fn a_forged_ticket_does_not_spend_a_real_ones_identifier() {
+        let ours = Broker::new([1u8; 32]);
+        let stranger = Broker::new([2u8; 32]);
+        let mut server = trusting(&ours);
+        let mut wire = Loopback::new();
+
+        says(&mut server, &mut wire, ClientId(9), stranger.mint("acct-1", SHARD, 60, "j1")).await;
+        assert!(matches!(wire.take(ClientId(9)).as_slice(), [Outbound::Unauthenticated]));
+
+        // The real one, with the same identifier, still works.
+        says(&mut server, &mut wire, ClientId(1), ours.mint("acct-1", SHARD, 60, "j1")).await;
+        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }]));
+    }
+
+    /// A ticket minted for another shard is not a ticket here, however valid it is there.
+    #[tokio::test]
+    async fn a_ticket_for_another_shard_is_refused() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        let mut wire = Loopback::new();
+
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", "shard-2", 60, "j1")).await;
+        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Unauthenticated]));
+    }
+
+    fn welcomed(wire: &mut Loopback, client: ClientId) -> ShipId {
+        match wire.take(client).as_slice() {
+            [Outbound::Welcome { ship_id, .. }] => *ship_id,
+            other => panic!("{other:?}"),
+        }
     }
 }

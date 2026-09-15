@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -203,7 +203,7 @@ impl<T> Cleared<T> {
 pub enum Outbound {
     /// The control channel's first message. A client that gets anything else first is talking
     /// to a server it does not understand.
-    Welcome { client_id: ClientId, protocol: u32, ship_id: ShipId, now_t: i64 },
+    Welcome { client_id: ClientId, protocol: u32, ship_id: ShipId, now_t: i64, name: String },
     /// The event channel. Cleared, by construction.
     Sightings(Vec<Cleared<Sighting>>),
     /// An intent that did not survive validation, and why. Not an error: a client is allowed
@@ -211,6 +211,12 @@ pub enum Outbound {
     Refused { ship_id: ShipId, reason: Refusal },
     /// The protocol version did not match. The last thing sent on that connection.
     WrongProtocol { server: u32 },
+    /// The ticket did not verify, or none was offered before something that needed one. The
+    /// last thing sent on that connection: there is nobody to keep talking to.
+    ///
+    /// It says nothing about *why*. A client that learned whether its ticket was expired, or
+    /// spent, or for another server, would have learned how close it got.
+    Unauthenticated,
     /// This client is sending faster than the server will take, and the message was dropped
     /// unread. Not a disconnection: a client that hits this has a bug, and is told so it can be
     /// fixed. Nothing about the world leaks through it — it is a fact about the client's own
@@ -223,6 +229,10 @@ pub enum Outbound {
 pub enum Refusal {
     /// No such ship, or it is not this client's.
     NotYours,
+    /// The ticket did not verify: wrong audience, expired, already spent, or not signed by a
+    /// key this server publishes trust in. **Deliberately one variant** — a client learning
+    /// *which* is a client learning how close it got.
+    NotYou,
     /// The order itself is impossible — a burn past `c`, a transmitter at negative power.
     Impossible,
 }
@@ -230,7 +240,13 @@ pub enum Refusal {
 /// Everything a client says.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Inbound {
-    Hello { protocol: u32 },
+    /// The first message, and the only one accepted before it.
+    ///
+    /// The ticket is a signed assertion from the identity broker, audience-scoped to this
+    /// server and worth sixty seconds. The server verifies it against a published key without
+    /// calling the broker — see `lightcone/docs/16-identity.md`. A connection that sends
+    /// anything else first is closed rather than refused: there is nobody to refuse.
+    Hello { protocol: u32, ticket: String },
     Act(Intent),
     /// Reconnecting: replay from the last reception this client actually has.
     ResumeFrom { arrive_t: i64 },
@@ -256,7 +272,7 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 /// be confidently wrong rather than refused.
 pub mod golden {
     /// `Outbound::Welcome { client_id: 7, protocol: PROTOCOL_VERSION, ship_id: 42, now_t: 1e6 }`
-    pub const WELCOME: &[u8] = &[0, 7, 3, 84, 128, 137, 122];
+    pub const WELCOME: &[u8] = &[0, 7, 4, 84, 128, 137, 122, 3, 65, 100, 97];
 
     /// `Inbound::Act(Intent { ship_id: 42, order: Transmit { power_w: 1500.0 }, .. })`
     pub const ACT: &[u8] =
@@ -268,6 +284,12 @@ pub mod golden {
     /// Pinned as well as the other two because a course is the first thing on this wire with a
     /// *shape* — nested enums, a string, two floats — rather than a number. It is the message
     /// most able to move a field without anyone noticing.
+    /// `Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: "a.b.c" }`
+    ///
+    /// Pinned because it is now the message that decides whether anyone gets in at all. A
+    /// field moving here is a server reading someone else's ticket as this one's.
+    pub const HELLO: &[u8] = &[0, 4, 5, 97, 46, 98, 46, 99];
+
     pub const SET_COURSE: &[u8] = &[
         1, 84, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0, 0, 0, 0, 0, 0, 20,
         64, 128, 137, 122,
@@ -297,6 +319,7 @@ mod tests {
             protocol: PROTOCOL_VERSION,
             ship_id: ShipId(42),
             now_t: 1_000_000,
+            name: "Ada".into(),
         }
     }
 
@@ -342,6 +365,11 @@ mod tests {
             "Inbound::Act changed shape at protocol version {PROTOCOL_VERSION}",
         );
         assert_eq!(
+            encode(&Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: "a.b.c".into() }),
+            golden::HELLO,
+            "Inbound::Hello changed shape at protocol version {PROTOCOL_VERSION}",
+        );
+        assert_eq!(
             encode(&set_course()),
             golden::SET_COURSE,
             "Order::SetCourse changed shape at protocol version {PROTOCOL_VERSION}",
@@ -363,7 +391,8 @@ mod tests {
             assert_eq!(decode::<Outbound>(&bytes).unwrap(), message);
         }
         let inbound = [
-            Inbound::Hello { protocol: PROTOCOL_VERSION },
+            Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: "a.b.c".into() },
+            Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: String::new() },
             act(),
             Inbound::Act(Intent {
                 ship_id: ShipId(1),

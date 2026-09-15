@@ -69,7 +69,7 @@ mod tests {
     #[test]
     fn what_goes_in_comes_out_once() {
         let mut wire = Loopback::new();
-        wire.client_says(ClientId(1), Inbound::Hello { protocol: PROTOCOL_VERSION });
+        wire.client_says(ClientId(1), Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: String::new() });
         assert_eq!(wire.poll().len(), 1);
         assert!(wire.poll().is_empty(), "a message was delivered twice");
 

@@ -12,6 +12,9 @@
 pub mod journal;
 pub mod rate;
 pub mod server;
+#[cfg(test)]
+pub mod testing;
+pub mod ticket;
 pub mod transport;
 pub mod websocket;
 pub mod world;

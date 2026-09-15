@@ -183,13 +183,19 @@ mod tests {
         assert_eq!(joined.len(), 1, "the connection was never seen");
         let id = joined[0];
 
+        let broker = crate::testing::Broker::new([5u8; 32]);
         let mut server = Server::new(Memory::default(), 0, 1);
-        server.admit(id, still(ShipId(1), glam::DVec3::ZERO), 0.0);
+        let mut trusted = crate::ticket::Trusted::new("shard-1");
+        trusted.learn(&broker.jwks());
+        server.trust(trusted);
 
+        // No `admit`: the craft comes from the ticket, which is the point. A connection that
+        // has not proved who it is has no ship, over a real socket as much as anywhere else.
         client
-            .send(Message::Binary(
-                lc_proto::encode(&Inbound::Hello { protocol: PROTOCOL_VERSION }),
-            ))
+            .send(Message::Binary(lc_proto::encode(&Inbound::Hello {
+                protocol: PROTOCOL_VERSION,
+                ticket: broker.mint("acct-1", "shard-1", 60, "ws-1"),
+            })))
             .await
             .unwrap();
 
