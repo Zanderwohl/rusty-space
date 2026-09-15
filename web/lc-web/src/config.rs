@@ -42,6 +42,9 @@ pub struct Config {
     /// supported state: the site is a content site that can also launch a game, and it serves
     /// every page of that without knowing who anyone is.
     pub identity_base: Option<String>,
+    /// Where the site calls the broker's server-to-server endpoints, when that is not the
+    /// public name. See [`crate::auth::Identity::api`].
+    pub identity_api: Option<String>,
     /// What the site presents to the broker's server-to-server endpoints.
     pub identity_secret: Option<String>,
     /// Signs the session cookie. Absent disables sign-in even if a broker is configured: an
@@ -87,6 +90,7 @@ impl Config {
             database_url: var("DATABASE_URL"),
             release_token: var("RELEASE_TOKEN"),
             identity_base: var("LC_IDENTITY_BASE").map(|b| b.trim_end_matches('/').to_owned()),
+            identity_api: var("LC_IDENTITY_API").map(|b| b.trim_end_matches('/').to_owned()),
             identity_secret: var("LC_IDENTITY_SECRET"),
             session_key: var("SITE_SESSION_KEY"),
             shard: var("LC_SHARD").unwrap_or_else(|| "shard-1".into()),

@@ -19,7 +19,16 @@ pub const RETURN_PATH: &str = "/auth/return";
 
 /// What a handler needs to talk to the broker, when there is one to talk to.
 pub struct Identity<'a> {
+    /// Where the **browser** is sent. Public, and the origin a person sees in the address bar.
     pub base: &'a str,
+    /// Where **this process** calls the broker's server-to-server endpoints.
+    ///
+    /// Usually the same, and deliberately separable. In a container deployment they are not:
+    /// the public name resolves to the host's own address, and a container reaching the host's
+    /// published port by that address hairpins through the NAT and hangs. The symptom is a 504
+    /// on `/auth/return` with nothing in either log, because nothing arrived anywhere. The
+    /// answer is to call the broker by its name on the shared network instead.
+    pub api: &'a str,
     pub secret: &'a str,
     pub key: &'a [u8],
 }
@@ -30,8 +39,12 @@ impl AppState {
     /// All three or none. A broker with no session key would sign people in and then hand them
     /// a cookie anybody could forge, which is worse than no sign-in.
     pub fn identity(&self) -> Option<Identity<'_>> {
+        let base = self.identity_base.as_deref()?;
         Some(Identity {
-            base: self.identity_base.as_deref()?,
+            base,
+            // Falls back to the public name, which is right for every deployment where the two
+            // are reachable the same way — including every test and every local run.
+            api: self.identity_api.as_deref().unwrap_or(base),
             secret: self.identity_secret.as_deref()?,
             key: self.session_key.as_deref()?.as_bytes(),
         })
@@ -174,7 +187,7 @@ async fn exchange(
     code: &str,
 ) -> Result<(String, String), ()> {
     let answer = reqwest::Client::new()
-        .post(format!("{}/exchange", identity.base))
+        .post(format!("{}/exchange", identity.api))
         .bearer_auth(identity.secret)
         .json(&serde_json::json!({ "code": code, "return_to": return_to }))
         .send()
@@ -192,7 +205,7 @@ async fn exchange(
 pub async fn ticket(state: &AppState, session: &Session) -> Option<String> {
     let identity = state.identity()?;
     let answer = reqwest::Client::new()
-        .post(format!("{}/ticket", identity.base))
+        .post(format!("{}/ticket", identity.api))
         .bearer_auth(identity.secret)
         .json(&serde_json::json!({ "account_id": session.sub, "audience": state.shard }))
         .send()
@@ -281,6 +294,30 @@ mod tests {
             session::clear_state(true),
             session::set("v", 60, true),
         ])));
+    }
+
+    fn identity<'a>(base: &'a str, api: Option<&'a str>) -> Identity<'a> {
+        Identity { base, api: api.unwrap_or(base), secret: "s", key: b"k" }
+    }
+
+    /// The two addresses are the same thing until a deployment makes them different, and the
+    /// fallback is what keeps every local run and every test on one value.
+    #[test]
+    fn the_api_address_falls_back_to_the_public_one() {
+        let one = identity("https://accounts.example", None);
+        assert_eq!(one.api, one.base);
+    }
+
+    /// And when they differ, the browser gets the public name while the server-to-server call
+    /// gets the internal one. Crossing them is a 504 on `/auth/return` with nothing in any log.
+    #[test]
+    fn a_split_deployment_sends_the_browser_and_the_server_to_different_places() {
+        let split = identity("https://accounts.example", Some("http://lightcone-identity:3200"));
+        assert_eq!(split.base, "https://accounts.example");
+        assert_eq!(split.api, "http://lightcone-identity:3200");
+        // The one a person sees is the public one; the one a socket opens is not.
+        assert!(split.base.starts_with("https://"));
+        assert!(!split.api.contains("accounts.example"));
     }
 
     /// The path the broker allowlists carries no query of its own, or the join is ambiguous

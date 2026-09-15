@@ -1,0 +1,13 @@
+# The build context for `crates/lc-server/Dockerfile` is the repository root, and `target/`
+# reaches seventy gigabytes. Without this the context is uploaded to the docker host before the
+# build starts, over ssh, every time.
+target
+auth/target
+web/target
+.git
+.claude
+# Staged browser builds. They go to the CDN, never into an image.
+target/web
+# The bundled catalogue is 34 MB of CSV the server never reads; `skypack` turns it into the
+# chunk the client downloads, and that happens outside any image.
+assets/catalogs

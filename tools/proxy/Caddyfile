@@ -39,12 +39,27 @@
 		}
 	}
 
+	# The identity broker. Its own name so its cookies, its origin and its rate limits are its
+	# own — and so it can move to another machine later without the site changing.
+	@accounts host accounts.{$LC_DOMAIN}
+	handle @accounts {
+		reverse_proxy lightcone-identity:3200
+	}
+
 	@cdn host cdn.{$LC_DOMAIN}
 	handle @cdn {
 		# The CDN keeps its own header policy -- content types, immutability, pre-compressed
 		# encodings. Proxying preserves all of it, so there is still one place that decides
 		# what a CDN response looks like.
 		reverse_proxy lightcone-cdn:3101
+	}
+
+	# The shard's socket, on a path rather than a name of its own: a WebSocket upgrade
+	# proxies cleanly either way, and a path needs no second DNS record. `wss://` and not
+	# `ws://` is not a preference — a page served over TLS may only open a secure socket, and
+	# a browser refuses the other outright.
+	handle /ws* {
+		reverse_proxy lightcone-shard:8080
 	}
 
 	handle {

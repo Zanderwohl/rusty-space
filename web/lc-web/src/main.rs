@@ -59,6 +59,8 @@ pub struct AppState {
     /// The identity broker, if this deployment has one. All three of these or none: a broker
     /// with no session key would sign people in and hand them a cookie anybody could forge.
     pub identity_base: Option<Arc<str>>,
+    /// Where server-to-server calls go, when that differs. See [`auth::Identity::api`].
+    pub identity_api: Option<Arc<str>>,
     pub identity_secret: Option<Arc<str>>,
     pub session_key: Option<Arc<str>>,
     /// Which game server tickets are minted for.
@@ -157,6 +159,7 @@ async fn main() -> anyhow::Result<()> {
         cdn_base: config.cdn_base.clone().into(),
         build_id: config.fallback_build_id.clone().map(Into::into),
         identity_base: config.identity_base.clone().map(Into::into),
+        identity_api: config.identity_api.clone().map(Into::into),
         identity_secret: config.identity_secret.clone().map(Into::into),
         session_key: config.session_key.clone().map(Into::into),
         shard: config.shard.clone().into(),

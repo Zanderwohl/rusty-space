@@ -416,6 +416,83 @@ docker --context rocinante start lightcone-db
 
 ---
 
+## The broker and a shard, on rocinante
+
+Three containers beside the site, all on the `lightcone` network.
+
+```bash
+# Secrets, generated on the host so they never pass through a laptop's shell history.
+ssh zandy@rocinante.local
+cd ~/.config/lightcone && umask 077
+rand() { head -c 32 /dev/urandom | base64 | tr -d '\n=' | tr '+/' '-_'; }
+# identity.env      — DATABASE_URL, LC_IDENTITY_* (see config.rs for the full list)
+# site-identity.env — LC_IDENTITY_BASE, LC_IDENTITY_API, LC_IDENTITY_SECRET,
+#                     SITE_SESSION_KEY, LC_SHARD, LC_SHARD_URL
+```
+
+`LC_IDENTITY_EXCHANGE_SECRET` on the broker and `LC_IDENTITY_SECRET` on the site are the **same
+value**. `LC_IDENTITY_SIGNING_SEED` must be set, or every restart publishes a new key and every
+ticket minted before it stops verifying.
+
+Its own role and database, like the site's:
+
+```sql
+CREATE ROLE lc_identity LOGIN PASSWORD '...';
+CREATE DATABASE lc_identity OWNER lc_identity;
+```
+
+```bash
+docker --context rocinante build -f auth/Dockerfile -t lightcone-identity:<tag> auth
+docker --context rocinante build -f crates/lc-server/Dockerfile -t lightcone-shard:<tag> .
+
+# Over ssh, because --env-file is read by the CLI you invoke and that file is on rocinante.
+ssh zandy@rocinante.local '
+  docker rm -f lightcone-identity 2>/dev/null
+  docker run -d --name lightcone-identity --restart unless-stopped --network lightcone \
+      --env-file ~/.config/lightcone/identity.env lightcone-identity:<tag>'
+
+docker --context rocinante run -d --name lightcone-shard --restart unless-stopped \
+    --network lightcone lightcone-shard:<tag> \
+    --bind 0.0.0.0:8080 --audience shard-1 \
+    --jwks http://lightcone-identity:3200/.well-known/jwks.json
+```
+
+The shard reads the broker's keys **at boot**, so the broker has to be up first. It then
+verifies locally and never asks again, which is the point — a broker outage does not stop
+anyone reconnecting. A shard that restarts while the broker is down will not start, and
+`--restart unless-stopped` retries until it can.
+
+### Two addresses for the broker, and why
+
+`LC_IDENTITY_BASE` is where the **browser** is sent: `https://accounts.lc.zanderlowry.com`.
+`LC_IDENTITY_API` is where the **site** calls `/exchange` and `/ticket`:
+`http://lightcone-identity:3200`.
+
+They must differ in a container deployment and it is not obvious why. The public name resolves
+to the host's own LAN address, and a container reaching the host's published port by that
+address hairpins through the NAT and hangs. The symptom is a **504 on `/auth/return` with
+nothing in any log**, because nothing arrived anywhere. `LC_IDENTITY_API` is unset everywhere
+else and falls back to the public name.
+
+### Routes
+
+The proxy gains two. Reload rather than recreate — the container holds the ACME account and
+the certificates, and a restart it did not need is a restart that can go wrong:
+
+```bash
+docker --context rocinante cp tools/proxy/Caddyfile lightcone-proxy:/etc/caddy/Caddyfile
+ssh zandy@rocinante.local \
+  'docker exec lightcone-proxy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile'
+```
+
+`accounts.` is a host route and needs its own A record. The shard is a **path** — `/ws` — which
+needs none, and a WebSocket upgrade proxies cleanly either way. It must be `wss://`: a page
+served over TLS may only open a secure socket, and a browser refuses the other outright.
+
+Testing that upgrade by hand needs `--http1.1`. Without it curl negotiates HTTP/2, where a
+WebSocket is Extended CONNECT rather than an `Upgrade:` header, and Caddy answers **502** —
+which looks exactly like the shard being unreachable and is not.
+
 ## A shard and a client, locally
 
 One process, for tuning game mechanics against the real server:
