@@ -119,6 +119,22 @@ which from outside *is* a pursuer tracking a burn. One rule cannot disagree with
 boundary. Hanging about falls out of the same rule with a deadband: once alongside, close again
 only after a real drift.
 
+**Matching velocity is arriving at rest in the quarry's frame**, so the approach is planned
+there: boost in, hand the brachistochrone planner the pursuer's state as measured in that frame
+and a destination a standoff short of the origin, and burn-flip-burn comes out as a rendezvous
+with no separate injection. The boost is a real one, so this holds at any speed a ship can
+reach — an earlier version composed velocities by subtracting and had to refuse anything past a
+tenth of `c`.
+
+Two consequences worth knowing. The frame's clock and the world's disagree about which events
+are *simultaneous*, and by an amount that changes as the ship moves through the frame, so
+reading a plan back out at a world time is a root find and not a division — `flight_at` is the
+one place that reconciliation happens, and sampling the cruise directly is a mistake with no
+symptom until something arrives months late. And the standoff is a **proper** distance,
+measured in the frame the pair end up sharing: in the world's reckoning two ships running
+together are closer than they are, so a deadband on the world's number would let them converge
+as they accelerated.
+
 `Outbound::Flying` exists because of this and nothing else. A client folds its own orders, but
 it cannot fold a re-solve it did not ask for and could not reproduce, so the authority states
 what the ship is now flying — the same `Motion` a welcome carries. It leaks nothing: a
