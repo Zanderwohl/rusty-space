@@ -129,6 +129,20 @@ Each of these cost real time. None of them are visible from the code that hits t
 - A static path beats `{param}` in the router, so `/signin/password` and `/signin/{provider}`
   coexist. They are only reached by different methods here, which is worth keeping true.
 
+**Stylesheets**
+
+- The broker's `_tokens.scss` is a **copy** of the site's, and
+  `assets::tests::the_tokens_are_the_sites_tokens` compares them byte for byte. If it fails, one
+  of the two was edited — copy the site's over the broker's rather than making them "close
+  enough". Broker-only additions go in `auth/lc-identity/static/styles/_status.scss`.
+- The broker compiles its sheet in `build.rs`, so a SCSS error is a failed build. The site
+  compiles at boot and needs `cargo run --bin lc-web -- --check-styles` to catch one earlier.
+  They are different on purpose; `lightcone/docs/16-identity.md` says why.
+- **Chrome paints an autofilled input itself** and ignores `background` and `color` outright,
+  which on a dark panel is a pale box with invisible text. Only a tall inset
+  `-webkit-box-shadow` plus `-webkit-text-fill-color` reaches it. A sign-in form is the one
+  place this always shows up.
+
 **OAuth2, upstream**
 
 - The ID token from a token-endpoint exchange is **not** signature-checked, deliberately: it

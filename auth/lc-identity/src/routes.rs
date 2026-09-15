@@ -34,6 +34,7 @@ pub struct Broker {
 pub fn router(broker: Broker) -> Router {
     Router::new()
         .route("/health", get(|| async { "ok" }))
+        .route(crate::assets::ROUTE, get(crate::assets::serve))
         .route("/signin", get(page))
         .route("/register", get(register_page))
         .route("/signin/password", post(sign_in))
@@ -58,7 +59,18 @@ pub fn router(broker: Broker) -> Router {
 /// the broker remembers.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Destination {
+    /// `#[serde(default)]` on both, so a URL missing one of them reaches [`check`] and is
+    /// refused there. Without it the extractor rejects first, and axum's rejection is a bare
+    /// plain-text 400 — an unstyled page for an ordinary mistake, from a service whose entire
+    /// job is to look like the site it belongs to.
+    ///
+    /// The empty string is safe to fall through to: `Config::from_env` drops empty allowlist
+    /// entries, so it can never match one.
+    ///
+    /// [`check`]: Destination::check
+    #[serde(default)]
     pub return_to: String,
+    #[serde(default)]
     pub state: String,
 }
 
@@ -150,7 +162,8 @@ async fn complete(
             shell(
                 "Too many attempts",
                 html! {
-                    p { "Too many failed attempts. Try again later." }
+                    h1 { "Too many attempts" }
+                    p { "Too many failed sign-ins from here. Try again in a few minutes." }
                 },
             ),
         )
@@ -526,27 +539,48 @@ fn presented_secret(headers: &HeaderMap, expected: &str) -> bool {
 }
 
 pub(crate) fn refusal(refused: Refused) -> impl IntoResponse {
-    let (status, said): (StatusCode, &str) = match refused {
-        // Never name what *would* be allowed: that is a list of targets.
-        Refused::BadReturn | Refused::BadState => (StatusCode::BAD_REQUEST, "Bad sign-in request."),
+    let (status, heading, said): (StatusCode, &str, &str) = match refused {
+        // Never name what *would* be allowed: that is a list of targets. The heading is as
+        // uninformative as the sentence, for the same reason.
+        Refused::BadReturn | Refused::BadState => (
+            StatusCode::BAD_REQUEST,
+            "Bad sign-in request",
+            "That sign-in link is not one this service will follow.",
+        ),
         // The caller's fault, not ours, and specifically not a 500: an expired or replayed
         // state is an ordinary thing that happens to people who leave a tab open, and paging
         // somebody every time one does is how alarms get ignored.
         Refused::NoFlow => (
             StatusCode::BAD_REQUEST,
-            "That sign-in expired or was already used. Start again.",
+            "That sign-in expired",
+            "It was already used, or it sat too long. Start again.",
         ),
         Refused::Upstream(_) => (
             StatusCode::BAD_GATEWAY,
-            "That provider could not be reached. Try again shortly.",
+            "That provider is not answering",
+            "Try again shortly, or use another way in.",
         ),
         Refused::NoSuchProvider => (
             StatusCode::NOT_FOUND,
-            "That way of signing in is not enabled here.",
+            "Not enabled here",
+            "That way of signing in is not available on this server.",
         ),
-        _ => (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong."),
+        _ => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Something went wrong",
+            "Nothing you did. Try again in a moment.",
+        ),
     };
-    (status, shell("Sign in", html! { p { (said) } }))
+    (
+        status,
+        shell(
+            heading,
+            html! {
+                h1 { (heading) }
+                p { (said) }
+            },
+        ),
+    )
 }
 
 /// Which of the two credential pages is being drawn.
@@ -634,6 +668,13 @@ pub(crate) fn credentials_page(
 ) -> Markup {
     let complaint = refused.map(complaint_for);
     let password = broker.config.providers.allows(Provider::Password);
+    let upstream: Vec<Provider> = broker
+        .config
+        .providers
+        .live()
+        .into_iter()
+        .filter(|p| p.is_upstream())
+        .collect();
     let (prompt, path, link) = which.other();
 
     shell(
@@ -670,17 +711,24 @@ pub(crate) fn credentials_page(
                     }
                     button type="submit" { (which.title()) }
                 }
-                p class="other-way" {
-                    (prompt) " " a href=(with_destination(path, to)) { (link) }
+            }
+            // Only between two things. On a deployment with one way in it is a separator
+            // separating nothing, which reads as a missing form.
+            @if password && !upstream.is_empty() {
+                p class="or" { "or" }
+            }
+            @for provider in &upstream {
+                // A link and not a form: starting a dance writes a row and redirects, and
+                // neither is a state change this page is responsible for.
+                a class="provider-link" href=(crate::upstream::start_url(*provider, to)) {
+                    "Continue with " (provider.label())
                 }
             }
-            @for provider in broker.config.providers.live() {
-                @if provider.is_upstream() {
-                    // A link and not a form: starting a dance writes a row and redirects, and
-                    // neither is a state change this page is responsible for.
-                    a class="provider-link" href=(crate::upstream::start_url(provider, to)) {
-                        "Continue with " (provider.label())
-                    }
+            // Last, under the rule: it is the way off this page, not one of the ways through
+            // it, and above the providers it read as the end of the form.
+            @if password {
+                p class="other-way" {
+                    (prompt) " " a href=(with_destination(path, to)) { (link) }
                 }
             }
         },
@@ -694,10 +742,24 @@ fn shell(title: &str, body: Markup) -> Markup {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
+                // Every URL here carries a `return_to` and a `state`. A `Referer` would hand
+                // both to whatever a page links out to.
                 meta name="referrer" content="no-referrer";
-                title { (title) }
+                // Nothing here is a destination. A sign-in page in an index is a sign-in page
+                // reached without the query that makes it work.
+                meta name="robots" content="noindex, nofollow";
+                title { (title) " \u{2014} Lightcone" }
+                link rel="stylesheet" href=(crate::assets::url());
             }
-            body { main { (body) } }
+            body {
+                // Text, not a link. Everywhere a browser goes from these pages is on the
+                // allowlist, and a masthead is one more place to be sent that is not.
+                p class="wordmark" { "Lightcone" }
+                main { (body) }
+                footer class="fine-print" {
+                    "A relativistic sandbox in a volume of real stars."
+                }
+            }
         }
     }
 }
@@ -791,14 +853,21 @@ mod tests {
     }
 
     /// The refusal a browser sees says nothing about what would have worked.
-    #[test]
-    fn a_bad_return_url_is_not_told_what_a_good_one_is() {
+    ///
+    /// Asserted against the **rendered response**, not against a page rebuilt here. The first
+    /// version of this built its own copy of the markup and would have passed whatever the
+    /// handler actually sent.
+    #[tokio::test]
+    async fn a_bad_return_url_is_not_told_what_a_good_one_is() {
+        use http_body_util::BodyExt;
+
         let rendered = refusal(Refused::BadReturn).into_response();
         assert_eq!(rendered.status(), StatusCode::BAD_REQUEST);
-        let page = shell("Sign in", html! { p { "Bad sign-in request." } }).into_string();
+        let bytes = rendered.into_body().collect().await.unwrap().to_bytes();
+        let page = String::from_utf8(bytes.to_vec()).unwrap();
         assert!(
             !page.contains("lightcone.example"),
-            "the allowlist leaked into the page"
+            "the allowlist leaked into the page: {page}"
         );
     }
 
@@ -1238,6 +1307,192 @@ mod endpoint_tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    /// A browser GET, with the peer address every metered route extracts.
+    fn get(path: &str) -> Request<Body> {
+        let mut request = Request::get(path).body(Body::empty()).unwrap();
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 40000))));
+        request
+    }
+
+    /// A form POST, which is how a browser submits credentials.
+    fn form(path: &str, body: &str) -> Request<Body> {
+        let mut request = Request::post(path)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body.to_owned()))
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 40000))));
+        request
+    }
+
+    async fn page(broker: &Broker, request: Request<Body>) -> (StatusCode, Option<String>, String) {
+        let response = router(broker.clone()).oneshot(request).await.unwrap();
+        let status = response.status();
+        let location = response
+            .headers()
+            .get(axum::http::header::LOCATION)
+            .map(|v| v.to_str().unwrap().to_owned());
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        (status, location, String::from_utf8(bytes.to_vec()).unwrap())
+    }
+
+    /// Every way into this service that names where to go afterwards, refused for the same
+    /// `return_to`.
+    ///
+    /// The unit tests cover `is_allowed_return` itself; this covers the **wiring**, which is
+    /// the half that breaks silently. A route that forgot to call `check` would pass every one
+    /// of those and still be an open redirect.
+    #[tokio::test]
+    async fn no_route_will_send_a_browser_somewhere_off_the_allowlist() {
+        let mut config = Config {
+            // Google too, so `/signin/google` below is a live route rather than a 404 that
+            // would pass this test without ever reaching the check.
+            providers: crate::providers::resolve("password,google", |name| {
+                matches!(name, "GOOGLE_CLIENT_ID" | "GOOGLE_CLIENT_SECRET").then(|| "x".to_string())
+            })
+            .unwrap(),
+            ..Config::clone(&a_broker().config)
+        };
+        config.loopback_paths = vec!["/return".into()];
+        let broker = Broker {
+            config: Arc::new(config),
+            ..a_broker()
+        };
+        an_account(&broker).await;
+
+        for hostile in [
+            // The prefix and suffix tricks a `starts_with` or `ends_with` check would pass.
+            "https://lightcone.example.attacker.test/auth/return",
+            "https://attacker.test/https://lightcone.example/auth/return",
+            "https://attacker.test#https://lightcone.example/auth/return",
+            // Protocol-relative, which a browser reads as another origin entirely.
+            "//attacker.test/auth/return",
+            // Scheme downgrades and non-http schemes.
+            "http://lightcone.example/auth/return",
+            "javascript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            // Userinfo, which puts the real host after an @ that a person will not read.
+            "https://lightcone.example%2Fauth%2Freturn@attacker.test/",
+            // A loopback that is not one, and a loopback path nobody allowlisted.
+            "http://127.0.0.1.attacker.test:7635/return",
+            "http://localhost:7635/return",
+            "http://127.0.0.1:7635/anything-else",
+            // Nothing at all.
+            "",
+        ] {
+            let escaped =
+                url::form_urlencoded::byte_serialize(hostile.as_bytes()).collect::<String>();
+
+            // The two pages a person lands on, which carry the destination in the query.
+            for path in [
+                format!("/signin?return_to={escaped}&state=nonce1"),
+                format!("/register?return_to={escaped}&state=nonce1"),
+                // And starting an upstream dance, which is a redirect out of here.
+                format!("/signin/google?return_to={escaped}&state=nonce1"),
+            ] {
+                let (status, location, body) = page(&broker, get(&path)).await;
+                assert!(
+                    status.is_client_error(),
+                    "{path} answered {status} for {hostile:?}"
+                );
+                assert_eq!(location, None, "{path} redirected for {hostile:?}");
+                assert!(
+                    !body.contains("lightcone.example"),
+                    "{path} leaked the allowlist for {hostile:?}"
+                );
+            }
+
+            // And the form POST, where the destination is a hidden field the browser sends
+            // back. **This is the one that matters**: a hidden field is whatever it was
+            // edited to, so a check done only when the page was drawn is no check at all.
+            let credentials = format!(
+                "return_to={escaped}&state=nonce1&email=ada%40example.test&password=a+good+password"
+            );
+            for path in ["/signin/password", "/signin/register"] {
+                let (status, location, _) = page(&broker, form(path, &credentials)).await;
+                assert_eq!(
+                    status,
+                    StatusCode::BAD_REQUEST,
+                    "{path} accepted {hostile:?}"
+                );
+                assert_eq!(location, None, "{path} redirected to {hostile:?}");
+            }
+        }
+    }
+
+    /// And the allowlisted destination still works, or the test above passes on a broker that
+    /// refuses everyone.
+    #[tokio::test]
+    async fn the_allowlisted_destination_still_completes_a_sign_in() {
+        let broker = a_broker();
+        an_account(&broker).await;
+        let here = "https%3A%2F%2Flightcone.example%2Fauth%2Freturn";
+
+        let (status, _, body) =
+            page(&broker, get(&format!("/signin?return_to={here}&state=n1"))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("Sign in"), "{body}");
+
+        let (status, location, _) = page(
+            &broker,
+            form(
+                "/signin/password",
+                &format!(
+                    "return_to={here}&state=n1&email=ada%40example.test&password=a+good+password"
+                ),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let location = location.expect("a redirect");
+        assert!(
+            location.starts_with("https://lightcone.example/auth/return?code="),
+            "{location}"
+        );
+        assert!(location.ends_with("&state=n1"), "{location}");
+    }
+
+    /// A URL with the destination missing is a refusal, not an extractor rejection.
+    ///
+    /// Same 400 either way; the difference is that this one is a page. Axum's rejection is
+    /// bare plain text, which from a service whose whole job is to look like the site it
+    /// belongs to is a broken-looking 400 for an ordinary mistake.
+    #[tokio::test]
+    async fn a_sign_in_url_missing_its_destination_gets_a_page() {
+        let broker = a_broker();
+        for path in ["/signin", "/signin?state=nonce1", "/signin?return_to="] {
+            let (status, _, body) = page(&broker, get(path)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{path}");
+            assert!(body.starts_with("<!DOCTYPE html>"), "{path} sent {body:?}");
+            assert!(body.contains("stylesheet"), "{path} sent an unstyled page");
+        }
+    }
+
+    /// The stylesheet is served, and cached forever — which is only safe because its URL
+    /// carries a digest of its own bytes.
+    #[tokio::test]
+    async fn the_stylesheet_is_served_and_cacheable() {
+        let broker = a_broker();
+        let response = router(broker)
+            .oneshot(get(&crate::assets::url()))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[axum::http::header::CONTENT_TYPE],
+            "text/css; charset=utf-8"
+        );
+        assert!(
+            response.headers()[axum::http::header::CACHE_CONTROL]
+                .to_str()
+                .unwrap()
+                .contains("immutable")
+        );
     }
 
     /// The key set is public, and it is what a game server verifies against.

@@ -1,0 +1,162 @@
+// The panel and what goes in it. Every page here is the same shape: a heading, sometimes a
+// complaint, and the ways in.
+
+// The width of the panel and of the lines above and below it. One value, because three
+// different ones read as three unrelated objects rather than one column.
+$panel: 24rem;
+
+// Not a link, so it needs the wordmark's weight without the anchor colour.
+.wordmark {
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--step-1);
+  font-weight: 640;
+  letter-spacing: -0.02em;
+}
+
+body > main {
+  background: var(--ground-raised);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  max-width: $panel;
+  padding: var(--space-4);
+  width: 100%;
+
+  > * + * {
+    margin-block-start: var(--space-3);
+  }
+}
+
+body > footer {
+  color: var(--ink-dim);
+  font-family: var(--font-ui);
+  max-width: $panel;
+  text-align: center;
+}
+
+// `role="alert"`, and it has to look like one. The palette has no other warm colour, so this
+// is the only thing on the page that is not ink or accent.
+.complaint {
+  border-inline-start: 2px solid var(--warn);
+  color: var(--warn);
+  font-family: var(--font-ui);
+  font-size: var(--step--1);
+  line-height: 1.5;
+  padding-inline-start: var(--space-2);
+}
+
+label {
+  color: var(--ink-dim);
+  display: block;
+  font-family: var(--font-ui);
+  font-size: var(--step--1);
+  letter-spacing: 0.04em;
+  margin-block-end: var(--space-1);
+  text-transform: uppercase;
+}
+
+// `:not([type="hidden"])` throughout: the destination rides through the form as two hidden
+// fields, and a hidden input that picked up a border would be a stripe above the first label.
+input:not([type="hidden"]) {
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  color: var(--ink);
+  display: block;
+  font-family: var(--font-ui);
+  font-size: var(--step-0);
+  padding: var(--space-2);
+  width: 100%;
+
+  &:focus {
+    border-color: var(--accent);
+  }
+
+  // Chrome paints an autofilled field itself and ignores `background` and `color` outright,
+  // which on a dark panel is a pale yellow box with invisible text. An inset shadow tall
+  // enough to cover the field is the only thing that reaches it.
+  &:-webkit-autofill {
+    -webkit-box-shadow: 0 0 0 100px var(--ground) inset;
+    -webkit-text-fill-color: var(--ink);
+    caret-color: var(--ink);
+  }
+
+  + label {
+    margin-block-start: var(--space-3);
+  }
+
+  + .fine-print {
+    margin-block-start: var(--space-2);
+  }
+}
+
+button {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--ground);
+  cursor: pointer;
+  display: block;
+  font-family: var(--font-ui);
+  font-size: var(--step-0);
+  font-weight: 620;
+  letter-spacing: 0.02em;
+  margin-block-start: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  width: 100%;
+
+  &:hover {
+    background: var(--ink);
+    border-color: var(--ink);
+  }
+}
+
+// The separator between the password form and the providers. It is the word, not a rule,
+// because two rules with a word between them is more furniture than a panel this size can
+// carry.
+.or {
+  color: var(--ink-dim);
+  font-family: var(--font-ui);
+  font-size: var(--step--1);
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.provider-link {
+  border: 1px solid var(--accent-dim);
+  border-radius: 3px;
+  display: block;
+  font-family: var(--font-ui);
+  font-size: var(--step--1);
+  letter-spacing: 0.02em;
+  padding: var(--space-2) var(--space-3);
+  text-align: center;
+  text-decoration: none;
+
+  // The panel is `--ground-raised`, so hovering *down* to `--ground` is what reads as a
+  // press here. On the site, which is the other way round, `.cta` hovers up.
+  &:hover {
+    background: var(--ground);
+    border-color: var(--accent);
+  }
+
+  + .provider-link {
+    margin-block-start: var(--space-2);
+  }
+}
+
+.other-way {
+  border-block-start: 1px solid var(--rule);
+  color: var(--ink-dim);
+  font-family: var(--font-ui);
+  font-size: var(--step--1);
+  padding-block-start: var(--space-3);
+  text-align: center;
+}
+
+.fine-print {
+  font-size: var(--step--1);
+  line-height: 1.5;
+  opacity: 0.75;
+}
