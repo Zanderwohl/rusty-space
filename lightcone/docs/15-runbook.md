@@ -102,6 +102,13 @@ LC_CDN=https://cdn.lc.zanderlowry.com tools/release.sh register <build-id>
 that environment variable does **not** move builds already registered, which is the intended
 behaviour and reliably surprising the first time.
 
+**Set `LC_CDN` when you register.** It defaults to the development CDN, so a build registered
+without it carries `http://rocinante.local:3101` no matter what the site is configured with.
+Against an https site a browser then blocks the assets as mixed content, and what `/play`
+reports is *"the site is pointing at a build that is not on the CDN"* — naming a URL that is
+perfectly reachable by hand, which sends you looking at the CDN instead of at the row.
+`release.sh register` now refuses an http CDN for an https site outright.
+
 If a build is actively harmful, `tools/release.sh yank <build-id>` marks it unpromotable
 without deleting it, so nobody re-promotes it by muscle memory. The bytes stay on the CDN:
 anything already running against them keeps working, and deleting the evidence of a bad build
