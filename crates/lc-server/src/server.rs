@@ -1854,6 +1854,136 @@ mod hello_tests {
         );
     }
 
+    /// **A trip finishes while nobody is watching.** The fleet is advanced by the tick, not by
+    /// a connection, so a course set before signing out is a course flown while signed out —
+    /// and signing back in finds the ship already on station.
+    ///
+    /// The whole ship-side of this is that `Server::disconnected` drops the *connection* and
+    /// leaves the craft. What makes it visible is the welcome carrying the motive.
+    #[tokio::test]
+    async fn a_course_set_before_signing_out_is_flown_while_signed_out() {
+        let Some(star) = a_star() else { return };
+        let Some(system) = a_system() else { return };
+        let Some(body) = orbitable(&system) else { return };
+
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        server.load_world(World::new(vec![star.clone()]));
+        let mut wire = Loopback::new();
+
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let ship = welcomed(&mut wire, ClientId(1));
+        server.fleet_mut().get_mut(CraftId(ship.0)).unwrap().motion.position_ly = star.position_ly;
+        server.tick(&mut wire).await.unwrap();
+
+        wire.client_says(ClientId(1), Inbound::Act(Intent {
+            ship_id: ship,
+            order: Order::SetCourse {
+                course: lc_proto::Course::Orbit {
+                    body,
+                    altitude_radii: 2.0,
+                    plane: lc_proto::Plane::Equatorial,
+                },
+                accel_g: 5.0,
+            },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+        let Motive::Crossing(cruise) = &server.ship(ship).unwrap().motion.motive else {
+            panic!("the course did not become a crossing")
+        };
+        let ticks = ((cruise.duration_s() * 1.0e6 / TICK_US as f64).ceil() as usize + 2).min(20_000);
+
+        // Sign out **under way**, a long way from arriving.
+        for _ in 0..(ticks / 8) {
+            server.tick(&mut wire).await.unwrap();
+        }
+        assert!(
+            matches!(server.ship(ship).unwrap().motion.motive, Motive::Crossing(_)),
+            "the premise is a ship still in transit when the socket drops",
+        );
+        server.disconnected(ClientId(1));
+        wire.take(ClientId(1));
+
+        // Nobody is connected at all, and the world goes on.
+        for _ in 0..ticks {
+            server.tick(&mut wire).await.unwrap();
+        }
+
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-1", SHARD, 60, "j2")).await;
+        let welcome = wire
+            .take(ClientId(2))
+            .into_iter()
+            .find_map(|m| match m {
+                Outbound::Welcome { ship, .. } => Some(ship),
+                _ => None,
+            })
+            .expect("a welcome");
+        let restored = lc_world::resume::Snapshot::from(&welcome)
+            .restore(Some(&system), server.now_t() as f64 / 1.0e6);
+        assert!(
+            matches!(restored.motive, lc_world::motion::Motive::Holding(_)),
+            "signing back in found the ship {:?}, not on station",
+            restored.motive,
+        );
+    }
+
+    /// A crossing **between stars** arrives at a standoff and stops there, with no station.
+    ///
+    /// Not an oversight: `Change::Cross` is given no waypoint, because "go to that star" names
+    /// a system and not a place inside one. Arriving puts the ship in the new system at rest,
+    /// and choosing an orbit there is a second order. Pinned because the opposite is the
+    /// natural expectation.
+    #[tokio::test]
+    async fn crossing_to_a_star_arrives_in_its_system_at_rest_and_not_in_an_orbit() {
+        let Some(here) = a_star() else { return };
+        let mut there = here.clone();
+        there.id = lc_world::sky::StarId::synthesise("test", 7);
+        // Further apart than `LOCAL_SHELL_LY`, or the two shells overlap and being "in" one of
+        // them is whichever the lookup reaches first rather than a fact about where the ship is.
+        there.position_ly = here.position_ly + DVec3::new(2.0, 0.0, 0.0);
+
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        server.load_world(World::new(vec![here.clone(), there.clone()]));
+        let mut wire = Loopback::new();
+
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let ship = welcomed(&mut wire, ClientId(1));
+        server.fleet_mut().get_mut(CraftId(ship.0)).unwrap().motion.position_ly = here.position_ly;
+        server.tick(&mut wire).await.unwrap();
+
+        wire.client_says(ClientId(1), Inbound::Act(Intent {
+            ship_id: ship,
+            order: Order::Cross { star: there.id.get(), accel_g: 5.0 },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+        let Motive::Crossing(cruise) = &server.ship(ship).unwrap().motion.motive else {
+            panic!("the crossing did not begin")
+        };
+        let ticks = (cruise.duration_s() * 1.0e6 / TICK_US as f64).ceil() as usize + 4;
+        assert!(ticks < 400_000, "{ticks} ticks is too long to run in a test");
+
+        server.disconnected(ClientId(1));
+        for _ in 0..ticks {
+            server.tick(&mut wire).await.unwrap();
+        }
+
+        let arrived = server.ship(ship).expect("the ship");
+        assert!(
+            matches!(arrived.motion.motive, Motive::Drifting { .. }),
+            "it arrived {:?}",
+            arrived.motion.motive,
+        );
+        assert_eq!(arrived.motion.beta, DVec3::ZERO, "arriving is stopping");
+        assert_eq!(
+            arrived.system.as_ref().map(|s| s.star),
+            Some(there.id),
+            "it should at least be in the system it crossed to",
+        );
+    }
+
     fn welcomed(wire: &mut Loopback, client: ClientId) -> ShipId {
         match wire.take(client).as_slice() {
             [Outbound::Welcome { ship_id, .. }] => *ship_id,

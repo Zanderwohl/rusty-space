@@ -145,6 +145,17 @@ it carries the same `Motion` when it arrives.
 Nor is any of it durable. The fleet lives in the shard's memory, so a restart forgets every ship
 and every account it belonged to: this resumes a *connection*, not a world.
 
+Within one shard's life, though, a signed-out ship keeps flying. The tick advances the whole
+fleet and `disconnected` drops only the connection, so a course set before signing out is flown
+while signed out, and signing back in finds the ship on station. At 8766 coordinate-seconds a
+real second, an hour away is a year of flight. Two tests pin it, because the natural instinct
+is to gate the world on somebody watching it.
+
+A crossing **between stars** is the exception to "arrive and be on station": `Change::Cross`
+carries no waypoint, because naming a star names a system and not a place inside one. It arrives
+at the 63-au standoff, at rest, in the new system — and choosing an orbit there is a second
+order.
+
 A protocol version bump, since `Accepted` and `Resync` change the shape of what a client reads.
 
 ## Open
