@@ -16,6 +16,7 @@ Decisions not yet made, grouped by what they block. Each topic document carries 
 | Deposit granularity | Per-body totals. |
 | Event ID allocation | `(shard, coordinate_time, sequence)`, snowflake-style. Locally generated and time-ordered whether or not sharding happens. |
 | Von Neumann termination | Replication orders carry a generation TTL. Drift can corrupt the counter, producing self-perpetuating drifters, which is a mechanic rather than a bug. |
+| Ice giant internal heat | One number for both. Uranus radiates 1.06 times what it absorbs and Neptune 2.61 though it is half again as far out, and nothing derivable from a body's mass, radius or temperature separates them. Taken nearer Uranus; see [04-stellar-photometry.md](04-stellar-photometry.md#a-giant-does-the-same-thing-and-less-of-it). |
 | Superluminal travel | Not built, not foreclosed. Three cheap signature decisions keep the option open; see [10-superluminal.md](10-superluminal.md). |
 
 ## Blocking the prototype

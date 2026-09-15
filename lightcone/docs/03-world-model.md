@@ -133,6 +133,7 @@ coordinate time is analytic. The game adds:
 | composition | what mining yields |
 | surface and atmosphere flags | whether landing, refining, habitation are possible |
 | occluder role | radius and albedo, for the transit model |
+| internal heat | radiated power over absorbed, which is 1 for everything that is not a giant |
 
 Composition is generated with the system and does not change. Depletion is per-deposit
 state, which does change, and is therefore event-backed.
