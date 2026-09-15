@@ -151,6 +151,9 @@ impl Plugin for ClientPlugin {
                 Update,
                 (aim_camera, update_sky).chain().run_if(in_state(AppState::MainMenu)),
             )
+            // Absent unless something inserted one: the browser build reads it off the page
+            // before the app is built, and the desktop mints one from its device grant.
+            .init_resource::<crate::Ticket>()
             .add_plugins(crate::pick::PickPlugin)
             // Desktop only: a browser build arrives with a session.
             .add_plugins(SigninPlugins)

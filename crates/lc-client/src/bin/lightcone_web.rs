@@ -45,11 +45,17 @@ fn main() {
     let args = lc_client::entry::from_query(&search);
     let (dev, catalogue) = lc_client::entry::parse(&args);
 
+    // Off the launching page, not the query string: a ticket in a URL is a ticket in history,
+    // in an access log, and in a `Referer`.
+    let ticket = lc_client::Ticket(lc_client::entry::ticket_from_page());
+    info!(signed_in = ticket.0.is_some(), "entry");
+
     let asset_base =
         lc_client::entry::param(&search, "assets").unwrap_or_else(|| DEFAULT_ASSET_BASE.to_owned());
     info!("assets from {asset_base}");
 
     App::new()
+        .insert_resource(ticket)
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {

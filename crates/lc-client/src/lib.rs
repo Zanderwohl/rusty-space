@@ -36,3 +36,14 @@ pub mod ui;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod vault;
 pub mod view;
+
+/// The game ticket this client will present when it opens a socket.
+///
+/// Where it comes from differs by build and the ticket does not: the browser reads it off the
+/// launching page, and the desktop trades a device grant for one. That is the point of
+/// `lightcone/docs/16-identity.md`'s ticket — the server has one code path and no notion of
+/// which build it is talking to.
+///
+/// `None` on a deployment with no sign-in, which is the development and offline case.
+#[derive(bevy::prelude::Resource, Default)]
+pub struct Ticket(pub Option<String>);

@@ -5,11 +5,13 @@
 //! See `lightcone/docs/14-hosting.md`.
 
 mod assets;
+mod auth;
 mod config;
 mod content;
 mod feed;
 mod internal;
 mod releases;
+mod session;
 mod views;
 
 use std::time::Duration;
@@ -54,6 +56,16 @@ pub struct AppState {
     /// to tell those apart or it reports the second as fine.
     pub db_expected: bool,
     pub release_token: Option<Arc<str>>,
+    /// The identity broker, if this deployment has one. All three of these or none: a broker
+    /// with no session key would sign people in and hand them a cookie anybody could forge.
+    pub identity_base: Option<Arc<str>>,
+    pub identity_secret: Option<Arc<str>>,
+    pub session_key: Option<Arc<str>>,
+    /// Which game server tickets are minted for.
+    pub shard: Arc<str>,
+    /// Whether cookies are marked `Secure`. Off in development, which is the only place this
+    /// site is ever reached over plain HTTP.
+    pub secure_cookies: bool,
 }
 
 impl AppState {
@@ -142,6 +154,11 @@ async fn main() -> anyhow::Result<()> {
         base_url: config.base_url.clone().into(),
         cdn_base: config.cdn_base.clone().into(),
         build_id: config.fallback_build_id.clone().map(Into::into),
+        identity_base: config.identity_base.clone().map(Into::into),
+        identity_secret: config.identity_secret.clone().map(Into::into),
+        session_key: config.session_key.clone().map(Into::into),
+        shard: config.shard.clone().into(),
+        secure_cookies: config.env.is_production(),
         pool: pool.clone(),
         db_expected: config.database_url.is_some(),
         release_token: config.release_token.clone().map(Into::into),
@@ -158,6 +175,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/", get(views::home::page))
         .route("/about", get(views::page::about))
         .route("/play", get(views::play::page))
+        .route("/signin", get(auth::signin))
+        .route(auth::RETURN_PATH, get(auth::ret))
+        .route("/signout", get(auth::signout))
         .route("/blog", get(views::blog::index))
         .route("/blog/{slug}", get(views::blog::post))
         .route("/blog/tag/{tag}", get(views::blog::tag))

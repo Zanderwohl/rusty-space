@@ -106,6 +106,12 @@ Each of these cost real time. None of them are visible from the code that hits t
   coin toss and it comes up "the sphere you are leaving". Take the new primary from the
   crossing, as `em_sim::patch` does.
 
+**axum**
+
+- An array of header pairs in a response **inserts**, which replaces any header of the same
+  name. Two `Set-Cookie` entries therefore leave one — the last — and a sign-in that sets a
+  session and clears a nonce silently drops the session. Use `AppendHeaders`.
+
 **egui**
 
 - Interface rules live in `lightcone/docs/18-ui-style.md`: which toolkit a surface belongs to,

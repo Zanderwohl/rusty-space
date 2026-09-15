@@ -6,6 +6,7 @@
 //! and the game.
 
 use axum::extract::{Query as AxumQuery, State};
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use maud::{Markup, html};
 
@@ -60,9 +61,27 @@ pub struct Query {
     pub channel: Option<String>,
 }
 
-pub async fn page(State(state): State<AppState>, AxumQuery(query): AxumQuery<Query>) -> Response {
+pub async fn page(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumQuery(query): AxumQuery<Query>,
+) -> Response {
     let Some((build, base)) = resolve(&state, &query).await else {
         return unavailable(&query).into_response();
+    };
+
+    // A deployment with no broker launches the game for anyone, which is the development and
+    // single-player case and the state this site shipped in. One with a broker needs to know
+    // who is asking, because the ticket is minted for an account.
+    let ticket = match (state.identity().is_some(), state.who(&headers)) {
+        (false, _) => None,
+        (true, Some(session)) => match crate::auth::ticket(&state, &session).await {
+            Some(ticket) => Some(ticket),
+            // Signed in, and the broker would not mint. Not a sign-in problem, so do not send
+            // them round the loop again: they would arrive back here and fail the same way.
+            None => return unreachable_broker().into_response(),
+        },
+        (true, None) => return sign_in_first().into_response(),
     };
 
     document(
@@ -74,7 +93,11 @@ pub async fn page(State(state): State<AppState>, AxumQuery(query): AxumQuery<Que
 
             // The handover, and the only thing the page tells the client. A data attribute
             // rather than an inline script, so the CSP needs no nonce for it.
-            div #boot data-base=(base) data-build=(build) {
+            //
+            // The ticket rides here too. It is worth sixty seconds and one socket, so it may
+            // be in a page the browser will forget — and it is **not** in the URL, where it
+            // would be in history, in an access log, and in a `Referer`.
+            div #boot data-base=(base) data-build=(build) data-ticket=[ticket.as_deref()] {
                 h1 #stage { "Starting" }
                 p #detail { "Checking what this browser can do." }
                 progress #bar max="100" value="0" hidden {}
@@ -85,6 +108,43 @@ pub async fn page(State(state): State<AppState>, AxumQuery(query): AxumQuery<Que
         },
     )
     .into_response()
+}
+
+/// Signed out, on a deployment that needs an account.
+fn sign_in_first() -> Markup {
+    super::shell(
+        Head::new("Play", DESCRIPTION),
+        html! {
+            section class="stack" {
+                h1 { "Sign in to play" }
+                p class="lede" {
+                    "This server keeps a world per account, so it needs to know who you are "
+                    "before it can hand you a ship."
+                }
+                p { a class="cta" href="/signin" { "Sign in" } }
+            }
+        },
+    )
+}
+
+/// Signed in, and the broker would not answer.
+///
+/// Distinct from being signed out, and deliberately not a redirect to the sign-in: a player
+/// sent round that loop arrives back here and fails the same way, having learned nothing.
+fn unreachable_broker() -> Markup {
+    super::shell(
+        Head::new("Play", DESCRIPTION),
+        html! {
+            section class="stack" {
+                h1 { "Cannot start a session" }
+                p class="lede" {
+                    "You are signed in, but the sign-in service did not answer. This is our "
+                    "problem rather than yours; try again shortly."
+                }
+                p { a class="cta" href="/" { "Back to the start" } }
+            }
+        },
+    )
 }
 
 /// Nothing to launch. Says so rather than showing a loader with nothing to load.

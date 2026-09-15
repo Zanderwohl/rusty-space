@@ -38,6 +38,17 @@ pub struct Config {
     pub database_url: Option<String>,
     /// Shared secret for the internal endpoints. Absent means they are all closed.
     pub release_token: Option<String>,
+    /// Where the identity broker is. **Absent means there is no sign-in at all**, which is a
+    /// supported state: the site is a content site that can also launch a game, and it serves
+    /// every page of that without knowing who anyone is.
+    pub identity_base: Option<String>,
+    /// What the site presents to the broker's server-to-server endpoints.
+    pub identity_secret: Option<String>,
+    /// Signs the session cookie. Absent disables sign-in even if a broker is configured: an
+    /// unsigned session cookie is a cookie that says whatever its holder likes.
+    pub session_key: Option<String>,
+    /// Which game server tickets are minted for.
+    pub shard: String,
 }
 
 impl Config {
@@ -66,6 +77,10 @@ impl Config {
             fallback_build_id: var("FALLBACK_BUILD_ID"),
             database_url: var("DATABASE_URL"),
             release_token: var("RELEASE_TOKEN"),
+            identity_base: var("LC_IDENTITY_BASE").map(|b| b.trim_end_matches('/').to_owned()),
+            identity_secret: var("LC_IDENTITY_SECRET"),
+            session_key: var("SITE_SESSION_KEY"),
+            shard: var("LC_SHARD").unwrap_or_else(|| "shard-1".into()),
         })
     }
 }

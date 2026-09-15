@@ -116,6 +116,23 @@ pub fn from_query(query: &str) -> Vec<String> {
     positional
 }
 
+/// The game ticket the launching page put on `#boot`.
+///
+/// An attribute and **not** a query parameter, deliberately. A ticket in the URL is a ticket in
+/// browser history, in the site's access log, and in a `Referer` if anything on the page is
+/// third-party. On an element it is gone when the page is.
+///
+/// `None` on a deployment with no sign-in, which is the development case and the state this
+/// build shipped in.
+#[cfg(target_arch = "wasm32")]
+pub fn ticket_from_page() -> Option<String> {
+    web_sys::window()?
+        .document()?
+        .get_element_by_id("boot")?
+        .get_attribute("data-ticket")
+        .filter(|t| !t.is_empty())
+}
+
 /// One query parameter, decoded.
 ///
 /// Decoding is not optional: an absolute URL in a parameter comes back percent-encoded, and
