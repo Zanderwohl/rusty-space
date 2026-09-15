@@ -149,21 +149,21 @@ fn a_crossing_ordered_from_an_orbit_keeps_its_speed() {
     );
 }
 
-/// **The limit of a straight-line plan, pinned so it is a known shape rather than a surprise.**
+/// **A hard sideways re-aim sheds what is across the line, rather than losing it.**
 ///
-/// Re-aiming ninety degrees at relativistic speed: the component along the new line is carried
-/// exactly, and the component across it is not, because shedding it curves the path and a
-/// `Cruise` is a straight line between two points. Fixing that means giving the plan a matching
-/// segment of its own.
+/// Ninety degrees off at relativistic speed is the case a straight-line plan could not express:
+/// almost all of the velocity is across the new line, and shedding it is a burn of its own. It
+/// now is one — the crossing begins with a match, which takes real time and covers real ground,
+/// and the speed is still there the instant after the order.
 #[test]
-fn a_hard_sideways_re_aim_still_loses_what_is_across_the_line() {
+fn a_hard_sideways_re_aim_sheds_across_the_line_rather_than_losing_it() {
     let mut craft = crossing_craft();
     let Motive::Crossing(cruise) = &craft.motion.motive else { panic!("premise") };
     let at = cruise.duration_s() * 0.10;
     craft.advance(at, at);
     let moving = craft.motion.beta.length();
+    assert!(moving > 0.5, "premise: genuinely fast, at {moving}c");
 
-    // Ninety degrees off: almost all of the velocity is across the new line.
     motion::apply(
         &mut craft.motion,
         craft.system.as_deref(),
@@ -175,11 +175,31 @@ fn a_hard_sideways_re_aim_still_loses_what_is_across_the_line() {
     )
     .expect("accepted");
 
+    // A frame later the ship is still going what it was going. Momentum does not vanish
+    // because a destination was chosen.
     craft.advance(at + 1.0, 1.0);
-    let after = craft.motion.beta.length();
-    assert!(after < moving, "premise: the across-the-line part is what is lost");
+    let just_after = craft.motion.beta.length();
     assert!(
-        after > 0.0,
-        "even a sideways re-aim keeps what little is along the new line: {after}c",
+        just_after > moving * 0.99,
+        "the ship was at {moving}c and a frame later was at {just_after}c",
+    );
+
+    // And the match is real: it takes time, and by the end of it the ship is on the line.
+    let Motive::Crossing(plan) = &craft.motion.motive else { panic!("still crossing") };
+    // At the end, not near it: a brake still has speed at 99.9% of the way through.
+    let arrived = plan.at(at + plan.duration_s());
+    assert!(
+        arrived.beta.length() < 1.0e-6,
+        "a crossing still ends at rest: {}c",
+        arrived.beta.length(),
+    );
+    // And once the match is done the ship flies a line: its heading at two different moments
+    // mid-flight is the same heading. Taken from the trajectory rather than from `from_ly`,
+    // which is where the ship was *ordered*, not where the line begins.
+    let one = plan.at(at + plan.duration_s() * 0.5).beta.normalize();
+    let two = plan.at(at + plan.duration_s() * 0.6).beta.normalize();
+    assert!(
+        one.dot(two) > 0.999_999,
+        "the heading wandered mid-flight: {one:?} then {two:?}",
     );
 }

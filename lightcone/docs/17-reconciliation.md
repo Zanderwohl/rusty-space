@@ -188,3 +188,27 @@ behind and is pulled straight.
 A correction moves the **world's** clock and not the crew's. The ship's proper time is however
 long they have actually lived through, and no amount of resynchronising un-ages anybody — which
 is a distinct method for exactly that reason.
+
+## A crossing starts from whatever the ship is doing
+
+Two things had to be true for "go to that star" to mean anything from a ship that is already
+moving, and neither was.
+
+**The speed along the line is carried.** A burn at constant proper acceleration starting at `b0`
+*is* the burn from rest entered part-way through — if a ship boosting from rest reaches `b0` at
+`t0`, this ship's trajectory is that one's from `t0` onward. So the generalisation is an offset
+and every closed form is unchanged, the brake included, since it still ends at rest. Signed, so
+a target behind the ship is the same trajectory entered before it turns around.
+
+**The speed across the line is shed, not lost.** A crossing is a straight line and a ship cannot
+fly a line it is moving across, so the plan begins with a **match**: a burn in its own direction
+that sheds the across-line velocity. It takes real time and covers real ground, and the line is
+drawn from where the ship ends up rather than from where it was — which is why a plan's
+`from_ly` (where it was ordered) and the start of its line are two different points.
+
+The one approximation, named because it is not visible otherwise: the along-line speed is held
+through the match rather than integrated. A rest-frame boost perpendicular to the velocity
+leaves the parallel component exactly unchanged, and this thrust is perpendicular to the *line*
+rather than to the velocity — so it is exact when the ship is moving purely across the line,
+which is the case the match exists for, and the error grows with the along-line speed while the
+match itself shortens with it.
