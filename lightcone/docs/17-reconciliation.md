@@ -167,9 +167,19 @@ Two halves, both needed:
   client that can change it is a client that can cheat" — and the client simply did not enforce
   it. It is also the client that suffers, which is worth saying because it makes the rule easy
   to keep rather than a tax.
+
+  Refusing to let a player *change* it is not enough, and getting only that far was its own
+  lesson: the client's **default** is sixty times the server's, so a joined client ran away from
+  it at 143.7 coordinate hours a real second with nobody touching a key. Joining adopts the
+  server's rate. A multiplier of one is exactly the 8766 the server advances by, and a test pins
+  that correspondence rather than leaving it to be remembered in two crates.
 - **The server states its clock**, about once a real second, and the client corrects when it is
   more than an hour of coordinate time out. Not every statement: snapping to each one would drag
   the clock backwards by however long that message spent in flight, once a second, forever.
+
+A correction that fires **every second and never fixes anything** is not drift — it is a rate
+mismatch, because the client re-diverges as fast as it is pulled back. That is the alarm working
+and is worth recognising on sight; the size of the correction names the ratio.
 
 The slack exists for the honest case, which is not cheating: a browser tab in the background has
 its frames throttled, so its clock nearly stops while the world does not. It comes back hours

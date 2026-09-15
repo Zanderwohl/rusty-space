@@ -109,6 +109,19 @@ pub struct Uplink {
     placement: Option<Placement>,
 }
 
+/// The rate multiplier at which the client's clock runs at the server's.
+///
+/// One, because `session::TIME_RATE` — the coordinate seconds a multiplier of 1 buys per real
+/// second — is the same 8766 the server advances by every tick. The client's default is sixty
+/// times that, which is a development convenience whose own constant says "the server owns the
+/// rate in a real session and this multiplier does not exist there". It does not exist there
+/// from here on: joining adopts this.
+///
+/// If the two ever stop corresponding, the symptom is the clock correction below firing every
+/// second and never fixing anything, because the client re-diverges as fast as it is pulled
+/// back. That is the alarm working; it is not drift.
+pub const SERVER_RATE: f64 = 1.0;
+
 /// How far the clock may be out before it is pulled back, in coordinate microseconds.
 ///
 /// One coordinate hour, which is about four tenths of a real second at the design rate. It has
@@ -231,7 +244,7 @@ pub fn pump(
     }
 
     for message in uplink.take() {
-        fold(&mut uplink, &mut game, message);
+        fold(&mut uplink, &mut game, &mut ui, message);
     }
 
     // The server's word on an order, shown once. Written here rather than by the action fold
@@ -242,7 +255,12 @@ pub fn pump(
     }
 }
 
-fn fold(uplink: &mut Uplink, game: &mut crate::app::Game, message: Outbound) {
+fn fold(
+    uplink: &mut Uplink,
+    game: &mut crate::app::Game,
+    ui: &mut crate::app::Ui,
+    message: Outbound,
+) {
     match message {
         Outbound::Welcome {
             client_id,
@@ -260,6 +278,11 @@ fn fold(uplink: &mut Uplink, game: &mut crate::app::Game, message: Outbound) {
             // See `Placement` for what goes wrong when it is only applied once.
             uplink.placement = Some(Placement { now_t, ship_at });
             uplink.place(&mut game.0);
+            // **The server's rate, adopted.** Refusing to *change* the rate was not enough:
+            // the client's own default is sixty times the server's, so a joined client ran
+            // away from it at a hundred and forty coordinate hours a second without anybody
+            // touching a key.
+            ui.0.time_rate = SERVER_RATE;
             uplink.state = State::Joined(Joined {
                 client_id,
                 ship_id,
@@ -426,20 +449,21 @@ mod tests {
         }
     }
 
-    fn app() -> (Uplink, crate::app::Game) {
+    fn app() -> (Uplink, crate::app::Game, crate::app::Ui) {
         (
             Uplink::default(),
             crate::app::Game(crate::session::Session::new(
                 &lc_world::sky::AuthoredStars::sample(),
                 3,
             )),
+            crate::app::Ui(crate::ui::UiState::default()),
         )
     }
 
     #[test]
     fn a_welcome_is_who_we_are() {
-        let (mut uplink, mut game) = app();
-        fold(&mut uplink, &mut game, welcome(0));
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
         let joined = uplink.joined().expect("joined");
         assert_eq!(joined.ship_id, ShipId(7));
         assert_eq!(joined.client_id, ClientId(3));
@@ -450,9 +474,9 @@ mod tests {
     /// process did would place every body somewhere the server does not have it.
     #[test]
     fn a_welcome_sets_the_clock_to_the_servers() {
-        let (mut uplink, mut game) = app();
+        let (mut uplink, mut game, mut ui) = app();
         let a_while_in = 1_234_567_890_123;
-        fold(&mut uplink, &mut game, welcome(a_while_in));
+        fold(&mut uplink, &mut game, &mut ui, welcome(a_while_in));
         assert_eq!(
             game.0.coordinate_time_s(),
             a_while_in as f64 * 1e-6,
@@ -464,9 +488,9 @@ mod tests {
     /// the clock flies a ship the server has somewhere else entirely.
     #[test]
     fn a_welcome_puts_the_ship_where_the_server_has_it() {
-        let (mut uplink, mut game) = app();
+        let (mut uplink, mut game, mut ui) = app();
         let out_there = [4.2, -1.5, 0.25];
-        fold(&mut uplink, &mut game, welcome_at(0, out_there));
+        fold(&mut uplink, &mut game, &mut ui, welcome_at(0, out_there));
         let at = game.0.ship.motion.position_ly;
         assert_eq!([at.x, at.y, at.z], out_there, "the client kept its own position");
         // And the observer follows the ship, or the sky is drawn from the old place.
@@ -480,8 +504,8 @@ mod tests {
     /// still says LINKED.
     #[test]
     fn a_session_rebuilt_after_a_welcome_is_still_the_servers() {
-        let (mut uplink, mut game) = app();
-        fold(&mut uplink, &mut game, welcome_at(9_000_000, [4.2, 0.0, 0.0]));
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome_at(9_000_000, [4.2, 0.0, 0.0]));
 
         // What `enter_game` does when the sky arrives.
         game.0 = crate::session::Session::new(&lc_world::sky::AuthoredStars::sample(), 3);
@@ -500,25 +524,57 @@ mod tests {
     /// where the ship is.
     #[test]
     fn a_session_rebuilt_with_no_server_is_not_touched() {
-        let (uplink, mut game) = app();
+        let (uplink, mut game, mut _ui) = app();
         game.0.place_at(glam::DVec3::new(1.0, 2.0, 3.0));
         uplink.place(&mut game.0);
         assert_eq!(game.0.ship.motion.position_ly, glam::DVec3::new(1.0, 2.0, 3.0));
         assert!(!game.0.remote);
     }
 
+    /// **The bug behind "clock corrected by 140 hours", every second.** Refusing to let a
+    /// player *change* the rate was not enough: the client's own default is sixty times the
+    /// server's, so a joined client ran away from it without anybody touching a key — and the
+    /// correction fired every second and never fixed anything, because it re-diverged as fast
+    /// as it was pulled back.
+    #[test]
+    fn joining_adopts_the_servers_rate() {
+        let (mut uplink, mut game, mut ui) = app();
+        ui.0.time_rate = crate::ui::TEST_TIME_RATE;
+        assert!(ui.0.time_rate > SERVER_RATE, "premise: the default outruns the server");
+
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+
+        assert_eq!(ui.0.time_rate, SERVER_RATE, "the client kept its own rate");
+    }
+
+    /// The arithmetic that made the number recognisable, kept so the correspondence is pinned
+    /// rather than remembered: a multiplier of one is the server's 8766 coordinate seconds per
+    /// real second, and the old default was sixty of those — 143.7 coordinate hours a second,
+    /// which is what the report said.
+    #[test]
+    fn the_servers_rate_is_the_one_the_clocks_agree_at() {
+        assert_eq!(crate::session::TIME_RATE * SERVER_RATE, 8766.0);
+        let gained_per_second =
+            crate::session::TIME_RATE * (crate::ui::TEST_TIME_RATE - SERVER_RATE);
+        assert!(
+            (gained_per_second / 3600.0 - 143.7).abs() < 0.1,
+            "{} coordinate hours a second",
+            gained_per_second / 3600.0,
+        );
+    }
+
     /// A clock statement in step with the client changes nothing. Snapping to every one would
     /// drag the clock backwards by the statement's own flight time, once a second, forever.
     #[test]
     fn a_clock_in_step_is_left_alone() {
-        let (mut uplink, mut game) = app();
-        fold(&mut uplink, &mut game, welcome_at(10 * CLOCK_SLACK_US, [0.0; 3]));
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome_at(10 * CLOCK_SLACK_US, [0.0; 3]));
         let before = game.0.coordinate_time_s();
 
         // A statement a fraction of the slack away, which is what a healthy connection looks
         // like: the message spent a tick and a network hop getting here.
         let close = (before * 1e6) as i64 - CLOCK_SLACK_US / 4;
-        fold(&mut uplink, &mut game, Outbound::Clock { now_t: close });
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: close });
 
         assert_eq!(game.0.coordinate_time_s(), before, "a healthy offset moved the clock");
         assert!(uplink.applied.is_none(), "it complained about nothing");
@@ -528,13 +584,13 @@ mod tests {
     /// throttled background tab — is pulled back, and told, because the world jumps.
     #[test]
     fn a_clock_that_has_run_away_is_pulled_back() {
-        let (mut uplink, mut game) = app();
-        fold(&mut uplink, &mut game, welcome_at(0, [0.0; 3]));
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome_at(0, [0.0; 3]));
 
         // A day of coordinate time ahead of the server, which a warp reaches in seconds.
         let server_t = 0;
         game.0.correct_coordinate_time_us(24 * CLOCK_SLACK_US);
-        fold(&mut uplink, &mut game, Outbound::Clock { now_t: server_t });
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: server_t });
 
         assert_eq!(game.0.coordinate_time_s(), 0.0, "the client kept its own clock");
         let said = uplink.applied.clone().expect("a jump nobody explained reads as a bug");
@@ -546,22 +602,23 @@ mod tests {
     /// coordinate clock un-ages anybody.
     #[test]
     fn a_correction_does_not_un_age_the_crew() {
-        let (mut uplink, mut game) = app();
-        fold(&mut uplink, &mut game, welcome_at(0, [0.0; 3]));
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome_at(0, [0.0; 3]));
         game.0.ship.motion.clock_s = 12_345.0;
 
         game.0.correct_coordinate_time_us(24 * CLOCK_SLACK_US);
-        fold(&mut uplink, &mut game, Outbound::Clock { now_t: 0 });
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: 0 });
 
         assert_eq!(game.0.ship.motion.clock_s, 12_345.0, "the crew was un-aged");
     }
 
     #[test]
     fn a_protocol_mismatch_says_both_numbers() {
-        let (mut uplink, mut game) = app();
+        let (mut uplink, mut game, mut ui) = app();
         fold(
             &mut uplink,
             &mut game,
+            &mut ui,
             Outbound::WrongProtocol { server: 99 },
         );
         let State::Refused(why) = &uplink.state else {
@@ -575,8 +632,8 @@ mod tests {
 
     #[test]
     fn a_refused_ticket_is_terminal_and_says_so() {
-        let (mut uplink, mut game) = app();
-        fold(&mut uplink, &mut game, Outbound::Unauthenticated);
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Unauthenticated);
         assert!(matches!(uplink.state, State::Refused(_)));
     }
 
@@ -584,12 +641,12 @@ mod tests {
     /// is true and tells a person nothing about what to do.
     #[test]
     fn a_close_after_a_refusal_keeps_the_refusal() {
-        let (mut uplink, mut game) = app();
+        let (mut uplink, mut game, mut ui) = app();
         let mut link = Offline::new();
         link.status = Some(Status::Closed("connection closed".into()));
         uplink.open(Box::new(link));
         uplink.greeted = true;
-        fold(&mut uplink, &mut game, Outbound::Unauthenticated);
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Unauthenticated);
         uplink.take();
         let State::Refused(why) = &uplink.state else {
             panic!("{:?}", uplink.state)
@@ -599,7 +656,7 @@ mod tests {
 
     #[test]
     fn a_link_that_closes_before_a_refusal_reports_the_close() {
-        let (mut uplink, _game) = app();
+        let (mut uplink, _game, mut _ui) = app();
         let mut link = Offline::new();
         link.status = Some(Status::Closed("connection refused".into()));
         uplink.open(Box::new(link));
@@ -611,7 +668,7 @@ mod tests {
     /// A bound, so a long session does not grow without limit before the fold exists.
     #[test]
     fn remembered_sightings_are_bounded_and_keep_the_newest() {
-        let (mut uplink, mut game) = app();
+        let (mut uplink, mut game, mut ui) = app();
         for n in 0..(REMEMBERED as i64 + 10) {
             let sighting = Sighting {
                 event_id: n,
@@ -624,7 +681,7 @@ mod tests {
                 payload: String::new(),
             };
             let cleared = Cleared::clear(sighting, i64::MAX, 0.0).unwrap();
-            fold(&mut uplink, &mut game, Outbound::Sightings(vec![cleared]));
+            fold(&mut uplink, &mut game, &mut ui, Outbound::Sightings(vec![cleared]));
         }
         assert_eq!(uplink.seen.len(), REMEMBERED);
         assert_eq!(
@@ -670,11 +727,12 @@ mod tests {
     /// An order the server would not take is not a disconnection.
     #[test]
     fn a_refused_order_leaves_the_connection_alone() {
-        let (mut uplink, mut game) = app();
-        fold(&mut uplink, &mut game, welcome(0));
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
         fold(
             &mut uplink,
             &mut game,
+            &mut ui,
             Outbound::Refused {
                 ship_id: ShipId(7),
                 reason: Refusal::Impossible,
