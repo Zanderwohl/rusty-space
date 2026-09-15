@@ -11,6 +11,8 @@
 pub use lc_world::{coast, flight, navigation, system};
 
 pub mod action;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod auth;
 pub mod app;
 pub mod curve;
 pub mod entry;

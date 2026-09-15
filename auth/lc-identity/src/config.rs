@@ -16,6 +16,8 @@ pub struct Config {
     /// An exact-match list, not prefixes. An open redirect on an auth service is how a sign-in
     /// gets stolen, and prefix matching is how open redirects happen.
     pub return_to: Vec<String>,
+    /// Paths a **loopback** redirect may use, on any port. See [`is_allowed_return`].
+    pub loopback_paths: Vec<String>,
     /// Shared secret for `/exchange` and `/ticket`, which are server to server and never
     /// reachable from a browser.
     pub exchange_secret: String,
@@ -77,6 +79,13 @@ impl Config {
                 .ok_or_else(|| anyhow::anyhow!("DATABASE_URL is required"))?,
             providers,
             return_to,
+            loopback_paths: var("LC_IDENTITY_LOOPBACK_PATHS")
+                .unwrap_or_else(|| "/return".into())
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect(),
             exchange_secret: var("LC_IDENTITY_EXCHANGE_SECRET")
                 .ok_or_else(|| anyhow::anyhow!("LC_IDENTITY_EXCHANGE_SECRET is required"))?,
             audiences,
@@ -99,6 +108,30 @@ fn var(name: &str) -> Option<String> {
 /// parser and has been the source of a long line of bypasses.
 pub fn is_allowed_return(allowed: &[String], candidate: &str) -> bool {
     allowed.iter().any(|a| a == candidate)
+}
+
+/// The one exception: a **loopback** redirect, on any port.
+///
+/// A native client listens on a port the operating system gives it, so its redirect cannot be
+/// known in advance and cannot be on an exact list. RFC 8252 §7.3 says exactly this — an
+/// authorization server must not require a fixed port for loopback — and it is safe for the
+/// reason the rest of the allowlist is not: `127.0.0.1` is not reachable from anywhere else, so
+/// a redirect there cannot deliver a code to anyone but the person at the machine.
+///
+/// Everything *except* the port is still pinned, and this is the one place a URL is parsed
+/// rather than compared. The conditions are deliberately all of: plain `http`, a literal
+/// loopback address and not a name that resolves to one, an allowlisted path, no query, no
+/// fragment, and no credentials.
+pub fn is_allowed_loopback(paths: &[String], candidate: &str) -> bool {
+    let Ok(url) = url::Url::parse(candidate) else { return false };
+    let loopback = matches!(url.host_str(), Some("127.0.0.1") | Some("[::1]") | Some("::1"));
+    url.scheme() == "http"
+        && loopback
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.query().is_none()
+        && url.fragment().is_none()
+        && paths.iter().any(|p| p == url.path())
 }
 
 #[cfg(test)]
@@ -127,6 +160,46 @@ mod tests {
                 "{hostile} was allowed"
             );
         }
+    }
+
+    /// The port is the *only* thing a loopback redirect may vary, because it is the only thing
+    /// a native client cannot know in advance.
+    #[test]
+    fn a_loopback_redirect_may_use_any_port_and_nothing_else() {
+        let paths = vec!["/return".to_string()];
+        for port in ["1024", "49152", "65535"] {
+            assert!(is_allowed_loopback(&paths, &format!("http://127.0.0.1:{port}/return")));
+        }
+        assert!(is_allowed_loopback(&paths, "http://[::1]:7635/return"));
+
+        for hostile in [
+            // Not loopback, however much it looks like it.
+            "http://127.0.0.1.attacker.test:7635/return",
+            "http://localhost:7635/return",
+            "http://evil.test:7635/return",
+            // A path nobody allowlisted.
+            "http://127.0.0.1:7635/anything-else",
+            "http://127.0.0.1:7635/return/../evil",
+            // Carrying something of its own.
+            "http://127.0.0.1:7635/return?next=x",
+            "http://127.0.0.1:7635/return#x",
+            "http://user:pass@127.0.0.1:7635/return",
+            // Not plain loopback http.
+            "https://127.0.0.1:7635/return",
+            "file:///return",
+            "",
+        ] {
+            assert!(!is_allowed_loopback(&paths, hostile), "{hostile} was allowed");
+        }
+    }
+
+    /// `localhost` is a name, and a name is something someone else can be made to resolve. The
+    /// literal address is the whole point of the exception.
+    #[test]
+    fn loopback_means_the_address_and_not_the_name() {
+        let paths = vec!["/return".to_string()];
+        assert!(is_allowed_loopback(&paths, "http://127.0.0.1:7635/return"));
+        assert!(!is_allowed_loopback(&paths, "http://localhost:7635/return"));
     }
 
     #[test]

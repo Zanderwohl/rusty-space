@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 
 use crate::attempts::{Attempts, PER_ACCOUNT, PER_ADDRESS};
-use crate::config::{Config, is_allowed_return};
+use crate::config::{Config, is_allowed_loopback, is_allowed_return};
 use crate::providers::Provider;
 use crate::signin::{self, Refused};
 use crate::store::Store;
@@ -52,7 +52,11 @@ pub struct Destination {
 
 impl Destination {
     fn check(&self, config: &Config) -> Result<(), Refused> {
-        if !is_allowed_return(&config.return_to, &self.return_to) {
+        // Either an exact allowlist entry, or a loopback on any port — which is the native
+        // client, whose port the operating system picks. See `config::is_allowed_loopback`.
+        let allowed = is_allowed_return(&config.return_to, &self.return_to)
+            || is_allowed_loopback(&config.loopback_paths, &self.return_to);
+        if !allowed {
             return Err(Refused::BadReturn);
         }
         if !signin::is_nonce(&self.state) {
@@ -469,6 +473,7 @@ mod tests {
             database_url: String::new(),
             providers: crate::providers::resolve("password", |_| None).unwrap(),
             return_to: vec!["https://lightcone.example/auth/return".into()],
+            loopback_paths: vec!["/return".into()],
             exchange_secret: "shared".into(),
             audiences: vec!["shard-1".into()],
             issuer: "https://accounts.lightcone.example".into(),
@@ -601,6 +606,7 @@ mod endpoint_tests {
                 database_url: String::new(),
                 providers: crate::providers::resolve("password", |_| None).unwrap(),
                 return_to: vec!["https://lightcone.example/auth/return".into()],
+            loopback_paths: vec!["/return".into()],
                 exchange_secret: "shared".into(),
                 audiences: vec![SHARD.into()],
                 issuer: "https://accounts.lightcone.example".into(),

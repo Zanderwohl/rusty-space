@@ -35,6 +35,9 @@ rand_core = "0.6"
 getrandom = "0.2"
 base64 = "0.22"
 sha2 = "0.10"
+# Only for the loopback exception in `config::is_allowed_return`. Everything else compares
+# strings, deliberately; a loopback redirect cannot, because its port is chosen at runtime.
+url = "2"
 subtle = "2"
 
 [dev-dependencies]
