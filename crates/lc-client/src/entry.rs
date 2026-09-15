@@ -7,11 +7,22 @@
 use crate::action::Action;
 use crate::app::DevEntry;
 
+/// What a request to start the client asked for.
+pub struct Entry {
+    pub dev: DevEntry,
+    /// The catalogue to load: the first positional argument, and an **asset** path rather than
+    /// a filesystem one.
+    pub catalogue: Option<String>,
+    /// The shard to connect to. `None` is the single-process game, which is every build before
+    /// there was a server to connect to and is still what `--shot` and the snapshot use.
+    pub server: Option<String>,
+    /// Run a shard in this process and connect to that. Beats `server` when both are given,
+    /// because asking for a local one is the more specific request.
+    pub local: bool,
+}
+
 /// Parses the flag vocabulary both binaries accept.
-///
-/// Returns the entry and the catalogue to load: the first positional argument, which is an
-/// asset path rather than a filesystem one.
-pub fn parse(args: &[String]) -> (DevEntry, Option<String>) {
+pub fn parse(args: &[String]) -> Entry {
     let flag = |name: &str| args.iter().any(|a| a == name);
     let after = |name: &str| {
         args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
@@ -45,14 +56,26 @@ pub fn parse(args: &[String]) -> (DevEntry, Option<String>) {
     {
         actions.push(Action::SetCurveBand(*band));
     }
+    // Turning is the only way to put something off screen, and an edge indicator cannot be
+    // photographed without one.
+    if let Some(degrees) = value::<f64>(args, "--turn") {
+        actions.push(Action::Look { yaw: degrees.to_radians(), pitch: 0.0 });
+    }
+    if let Some(degrees) = value::<f64>(args, "--pitch") {
+        actions.push(Action::Look { yaw: 0.0, pitch: degrees.to_radians() });
+    }
     if flag("--fly") {
         // Index 0 of the sorted sky is the Sun in the full catalogue; 1 is interstellar.
         actions.push(Action::FlyToNearest);
     }
 
+    // The sign-in modal draws over the main menu, so it cannot be reached by an action that
+    // runs on entering the sky. This is the only way to photograph it.
+    let menu_page = (flag("--signin") || flag("--password")).then_some(crate::ui::MenuPage::SignIn);
+
     // `--menu` holds the entry at the main menu, so `--shot` can photograph it. Without it a
     // screenshot run goes straight to the sky, which is what every other capture wants.
-    let stay_in_menu = flag("--menu");
+    let stay_in_menu = flag("--menu") || menu_page.is_some();
     let dev = DevEntry {
         observe_immediately: !stay_in_menu
             && (flag("--observe") || flag("--shot") || flag("--at") || flag("--station")),
@@ -62,12 +85,16 @@ pub fn parse(args: &[String]) -> (DevEntry, Option<String>) {
         screenshot: after("--shot"),
         after_frames: value(args, "--frames").unwrap_or(120),
         burst: value(args, "--burst").unwrap_or(1),
+        menu_page,
+        // The password form is the one egui surface in the menu, and it is opened by a button
+        // rather than by a page, so it needs its own way in to be photographed.
+        open_password_form: flag("--password"),
         actions,
     };
     // The first argument only. Scanning for any non-flag token would pick up a flag's own
     // value: in `--band 2` the `2` looks exactly like a path.
     let catalogue = args.first().filter(|a| !a.starts_with("--")).cloned();
-    (dev, catalogue)
+    Entry { dev, catalogue, server: after("--server"), local: flag("--local") }
 }
 
 /// Reads the flags out of a URL query string.
@@ -98,6 +125,38 @@ pub fn from_query(query: &str) -> Vec<String> {
     // The catalogue leads, because that is where `parse` looks for it.
     positional.extend(flags);
     positional
+}
+
+/// The shard the launching page points this build at.
+///
+/// From the page rather than the query string, like the ticket and for a related reason: the
+/// site knows which shard a build belongs to and the address is part of the handover, not
+/// something a player types. A `?server=` flag still wins when one is given, because that is
+/// how a build gets pointed at a shard nobody has deployed yet.
+#[cfg(target_arch = "wasm32")]
+pub fn server_from_page() -> Option<String> {
+    web_sys::window()?
+        .document()?
+        .get_element_by_id("boot")?
+        .get_attribute("data-server")
+        .filter(|at| !at.is_empty())
+}
+
+/// The game ticket the launching page put on `#boot`.
+///
+/// An attribute and **not** a query parameter, deliberately. A ticket in the URL is a ticket in
+/// browser history, in the site's access log, and in a `Referer` if anything on the page is
+/// third-party. On an element it is gone when the page is.
+///
+/// `None` on a deployment with no sign-in, which is the development case and the state this
+/// build shipped in.
+#[cfg(target_arch = "wasm32")]
+pub fn ticket_from_page() -> Option<String> {
+    web_sys::window()?
+        .document()?
+        .get_element_by_id("boot")?
+        .get_attribute("data-ticket")
+        .filter(|t| !t.is_empty())
 }
 
 /// One query parameter, decoded.
@@ -159,16 +218,16 @@ mod tests {
 
     #[test]
     fn the_catalogue_is_the_first_argument_and_only_the_first() {
-        let (_, cat) = parse(&args("sky/hyg-v42.lcsky --band 2"));
+        let cat = parse(&args("sky/hyg-v42.lcsky --band 2")).catalogue;
         assert_eq!(cat.as_deref(), Some("sky/hyg-v42.lcsky"));
         // `2` is the band's value, and looks exactly like a path.
-        let (_, none) = parse(&args("--band 2"));
+        let none = parse(&args("--band 2")).catalogue;
         assert_eq!(none, None);
     }
 
     #[test]
     fn a_shot_implies_observing_immediately() {
-        let (dev, _) = parse(&args("--shot out.png --frames 90"));
+        let dev = parse(&args("--shot out.png --frames 90")).dev;
         assert!(dev.observe_immediately);
         assert_eq!(dev.screenshot.as_deref(), Some("out.png"));
         assert_eq!(dev.after_frames, 90);
@@ -176,16 +235,40 @@ mod tests {
 
     #[test]
     fn menu_holds_the_entry_even_when_a_shot_was_asked_for() {
-        let (dev, _) = parse(&args("--menu --shot menu.png"));
+        let dev = parse(&args("--menu --shot menu.png")).dev;
         assert!(!dev.observe_immediately, "--menu must not fall through to the sky");
         assert_eq!(dev.screenshot.as_deref(), Some("menu.png"));
     }
 
     #[test]
     fn nothing_at_all_is_a_plain_start() {
-        let (dev, cat) = parse(&[]);
+        let Entry { dev, catalogue: cat, server, local } = parse(&[]);
         assert!(!dev.observe_immediately);
         assert!(dev.actions.is_empty());
         assert_eq!(cat, None);
+        // No server named is the single-process game, not a default address.
+        assert_eq!(server, None);
+        assert!(!local);
+    }
+
+    /// `--local` is its own thing, not an address, because the port is not known until the
+    /// socket is bound.
+    #[test]
+    fn a_local_shard_is_asked_for_rather_than_addressed() {
+        assert!(parse(&args("--local")).local);
+        assert_eq!(parse(&args("--local")).server, None);
+        assert!(!parse(&args("--server ws://host:1/")).local);
+    }
+
+    #[test]
+    fn a_server_is_taken_from_the_flag_and_not_guessed() {
+        assert_eq!(
+            parse(&args("--server ws://127.0.0.1:8080")).server.as_deref(),
+            Some("ws://127.0.0.1:8080"),
+        );
+        // And it is not mistaken for the catalogue, which is the first positional argument.
+        let entry = parse(&args("sky/hyg-v42.lcsky --server ws://host:1/"));
+        assert_eq!(entry.catalogue.as_deref(), Some("sky/hyg-v42.lcsky"));
+        assert_eq!(entry.server.as_deref(), Some("ws://host:1/"));
     }
 }

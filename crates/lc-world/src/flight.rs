@@ -57,6 +57,8 @@ pub const MAX_BETA: f64 = 1.0 - 1e-9;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
+    /// Shedding the velocity that is across the line, before the crossing proper.
+    Match,
     Boost,
     Coast,
     Brake,
@@ -78,16 +80,38 @@ pub struct FlightState {
 ///
 /// The plan is computed once and then only sampled, so the trajectory does not drift with
 /// the frame rate and a paused or fast-forwarded clock lands in the same place.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Cruise {
     pub from_ly: DVec3,
     pub to_ly: DVec3,
+    /// The velocity the ship had when this was planned.
+    ///
+    /// Kept because it is a *parameter* of the plan and everything below is derived from it:
+    /// a crossing is put back on the wire as the five values [`Cruise::plan_from`] takes, and
+    /// re-planned at the far end rather than shipped as a solved trajectory. See
+    /// [`crate::resume`].
+    beta0: DVec3,
     /// Coordinate seconds at which the burn began.
     pub start_s: f64,
     pub drive: Drive,
     direction: DVec3,
     distance_ls: f64,
     alpha: f64,
+    /// Shedding whatever velocity is across the line, before the crossing proper. Zero for a
+    /// ship already on the line — which includes every ship starting from rest.
+    match_s: f64,
+    /// The direction the ship is drifting across the line, and the ground it covers doing so.
+    match_dir: DVec3,
+    match_ls: f64,
+    /// The along-line speed, carried through the match.
+    match_along: f64,
+    /// Where the ship is once the match is done, which is where the line begins.
+    matched_ly: DVec3,
+    /// Where on the rest profile the boost begins, in seconds.
+    ///
+    /// Zero for a ship starting from rest. Signed: negative means the ship is moving *away*
+    /// from the target and the burn first brings it back through zero. See [`Cruise::plan_from`].
+    t0_s: f64,
     /// Seconds from start: end of boost, start of brake, arrival.
     boost_s: f64,
     brake_s: f64,
@@ -103,32 +127,104 @@ pub struct Cruise {
 impl Cruise {
     /// Plan a crossing. A zero-length one is already arrived.
     pub fn plan(from_ly: DVec3, to_ly: DVec3, start_s: f64, drive: Drive) -> Self {
-        let delta = to_ly - from_ly;
-        let distance_ls = delta.length() * JULIAN_YEAR_S;
-        let direction = delta.normalize_or_zero();
+        Self::plan_from(from_ly, DVec3::ZERO, to_ly, start_s, drive)
+    }
+
+    /// Plan a crossing **from whatever velocity the ship already has**.
+    ///
+    /// A burn at constant proper acceleration starting at speed `b0` is the same burn started
+    /// from rest, entered part-way through: if a ship boosting from rest reaches `b0` at time
+    /// `t0`, then this ship's trajectory is that one's from `t0` onward. So the whole profile
+    /// generalises by an offset and the closed forms below are unchanged — including the brake,
+    /// which still ends at rest and so is not touched at all.
+    ///
+    /// `t0` is **signed**. Negative means the ship is moving away from the target, and the burn
+    /// first brings it back through zero — which is the same trajectory, entered before the
+    /// point where it turns around.
+    ///
+    /// **Only the component along the line is carried.** A straight-line plan cannot express
+    /// shedding a sideways velocity, because shedding it curves the path. For a ship leaving an
+    /// orbit that component is thousandths of a percent of `c` and the error is nothing; for a
+    /// ship re-aiming hard sideways at relativistic speed it is not, and that case wants a
+    /// trajectory model that bends.
+    pub fn plan_from(
+        from_ly: DVec3,
+        beta0: DVec3,
+        to_ly: DVec3,
+        start_s: f64,
+        drive: Drive,
+    ) -> Self {
         let alpha = drive.alpha();
         let cap = drive.cap();
+        let ordered_from = from_ly;
+
+        // **The match.** A crossing is a straight line, and a ship cannot fly a line it is
+        // moving across — so before the crossing proper it sheds whatever velocity is not along
+        // it. That is a burn of its own, in its own direction, and it takes real time and covers
+        // real ground; the line is drawn from where the ship ends up, not from where it was.
+        let aim = (to_ly - from_ly).normalize_or_zero();
+        let along_ordered = beta0.dot(aim);
+        let across_v = beta0 - aim * along_ordered;
+        let across = across_v.length().min(MAX_BETA);
+        let (match_s, match_dir, match_ls, from_ly) = if across > 1.0e-12 {
+            let match_dir = across_v / across_v.length();
+            // Where the rest profile is already at `across`; braking from there reaches zero.
+            let m_t0 = across / (1.0 - across * across).sqrt() / alpha;
+            let across_ls = distance_of(alpha, m_t0);
+            // The along-line component carries on through the match. Held rather than
+            // integrated: a rest-frame boost perpendicular to the velocity leaves the parallel
+            // component exactly unchanged, and this thrust is perpendicular to the *line*
+            // rather than to the velocity — so it is exact when the ship is moving purely
+            // across the line, which is the case the match exists for, and the error grows with
+            // the along-line speed while the match shortens with it.
+            let carried = ordered_from
+                + (match_dir * across_ls + aim * (along_ordered * m_t0)) / JULIAN_YEAR_S;
+            (m_t0, match_dir, across_ls, carried)
+        } else {
+            (0.0, DVec3::ZERO, 0.0, from_ly)
+        };
+
+        let delta = to_ly - from_ly;
+        let direction = delta.normalize_or_zero();
+        let mut distance_ls = delta.length() * JULIAN_YEAR_S;
+
+        // Signed speed along the line, once the ship is on it.
+        let along = beta0.dot(direction).clamp(-MAX_BETA, MAX_BETA);
+        // `sinh(phi) = gamma * beta`, so this is where the rest profile is already at `along`.
+        let t0_s = along / (1.0 - along * along).sqrt() / alpha;
+        // Even in `t0`: a profile run backwards covers the same ground.
+        let x0 = distance_of(alpha, t0_s);
 
         // Speed and distance at which the boost would reach the cap.
         let gamma_cap = (1.0 - cap * cap).sqrt().recip();
         let cap_ls = (gamma_cap - 1.0) / alpha;
+        let t_cap = gamma_cap * cap / alpha;
 
+        // Too fast to stop in what is left: the shortest flight from here is to brake the whole
+        // way, and it ends past the target. Saying so is better than pretending a drive can do
+        // what it cannot — the ship stops where it actually stops.
+        let mut to_ly = to_ly;
+        if t0_s > 0.0 && distance_ls < x0 {
+            distance_ls = x0;
+            to_ly = from_ly + direction * (x0 / JULIAN_YEAR_S);
+        }
+
+        // Boost and brake together cover the distance: `2 x(peak) - x(t0) = D`.
+        let x_peak = (distance_ls + x0) / 2.0;
         let (boost_s, boost_ls, coast_s, coast_beta) = if distance_ls <= 0.0 {
             (0.0, 0.0, 0.0, 0.0)
-        } else if cap_ls >= distance_ls / 2.0 {
+        } else if x_peak <= cap_ls {
             // Flip and burn: the cap is never reached.
-            let half = distance_ls / 2.0;
-            let k = alpha * half;
+            let k = alpha * x_peak;
             // From x = (sqrt(1 + (at)^2) - 1)/a, so (at)^2 = k^2 + 2k.
-            let t = (k * k + 2.0 * k).sqrt() / alpha;
-            (t, half, 0.0, 0.0)
+            let t_peak = (k * k + 2.0 * k).sqrt() / alpha;
+            ((t_peak - t0_s).max(0.0), x_peak - x0, 0.0, 0.0)
         } else {
-            let t = gamma_cap * cap / alpha;
-            let coast_ls = distance_ls - 2.0 * cap_ls;
-            (t, cap_ls, coast_ls / cap, cap)
+            let coast_ls = distance_ls - (cap_ls - x0) - cap_ls;
+            ((t_cap - t0_s).max(0.0), cap_ls - x0, (coast_ls / cap).max(0.0), cap)
         };
 
-        let boost_proper_s = proper_of(alpha, boost_s);
+        let boost_proper_s = proper_of(alpha, t0_s + boost_s) - proper_of(alpha, t0_s);
         let coast_proper_s = if coast_beta > 0.0 {
             coast_s * (1.0 - coast_beta * coast_beta).sqrt()
         } else {
@@ -136,13 +232,20 @@ impl Cruise {
         };
 
         Self {
-            from_ly,
+            from_ly: ordered_from,
             to_ly,
+            beta0,
             start_s,
             drive,
             direction,
             distance_ls,
             alpha,
+            match_s,
+            match_dir,
+            match_ls,
+            match_along: along_ordered,
+            matched_ly: from_ly,
+            t0_s,
             boost_s,
             brake_s: boost_s + coast_s,
             arrive_s: 2.0 * boost_s + coast_s,
@@ -153,9 +256,14 @@ impl Cruise {
         }
     }
 
-    /// Coordinate seconds the whole crossing takes.
+    /// The velocity this was planned from. With the other four public fields, the whole recipe.
+    pub fn initial_beta(&self) -> DVec3 {
+        self.beta0
+    }
+
+    /// Coordinate seconds the whole crossing takes, the match included.
     pub fn duration_s(&self) -> f64 {
-        self.arrive_s
+        self.match_s + self.arrive_s
     }
 
     /// Ship seconds the whole crossing takes. Never more than [`Cruise::duration_s`].
@@ -165,35 +273,63 @@ impl Cruise {
 
     /// The fastest the ship goes, as a fraction of `c`.
     pub fn peak_beta(&self) -> f64 {
-        if self.coast_beta > 0.0 { self.coast_beta } else { beta_of(self.alpha, self.boost_s) }
+        if self.coast_beta > 0.0 {
+            self.coast_beta
+        } else {
+            beta_of(self.alpha, self.t0_s + self.boost_s)
+        }
     }
 
     pub fn has_arrived(&self, now_s: f64) -> bool {
-        now_s - self.start_s >= self.arrive_s
+        now_s - self.start_s >= self.duration_s()
     }
 
     /// Fraction of the crossing completed, `[0, 1]`.
     pub fn progress(&self, now_s: f64) -> f64 {
-        if self.arrive_s <= 0.0 {
+        let whole = self.duration_s();
+        if whole <= 0.0 {
             return 1.0;
         }
-        ((now_s - self.start_s) / self.arrive_s).clamp(0.0, 1.0)
+        ((now_s - self.start_s) / whole).clamp(0.0, 1.0)
     }
 
     /// Sample the trajectory. Outside the burn it holds the endpoints, at rest.
     pub fn at(&self, now_s: f64) -> FlightState {
-        let t = (now_s - self.start_s).clamp(0.0, self.arrive_s);
+        let since = now_s - self.start_s;
+        // The match comes first, in its own direction. See `plan_from`.
+        if since < self.match_s {
+            let left = self.match_s - since.max(0.0);
+            let across_ls = self.match_ls - distance_of(self.alpha, left);
+            let along_ls = self.match_along * since.max(0.0);
+            return FlightState {
+                position_ly: self.from_ly
+                    + (self.match_dir * across_ls + self.direction * along_ls) / JULIAN_YEAR_S,
+                beta: self.match_dir * beta_of(self.alpha, left) + self.direction * self.match_along,
+                proper_s: proper_of(self.alpha, self.match_s) - proper_of(self.alpha, left),
+                phase: Phase::Match,
+            };
+        }
+        let matched_proper = proper_of(self.alpha, self.match_s);
+        let t = (since - self.match_s).clamp(0.0, self.arrive_s);
         if self.arrive_s <= 0.0 {
             return FlightState {
                 position_ly: self.to_ly,
                 beta: DVec3::ZERO,
-                proper_s: 0.0,
+                proper_s: matched_proper,
                 phase: Phase::Arrived,
             };
         }
 
         let (travelled_ls, speed, proper_s, phase) = if t < self.boost_s {
-            (distance_of(self.alpha, t), beta_of(self.alpha, t), proper_of(self.alpha, t), Phase::Boost)
+            // Offset onto the rest profile: this ship entered that trajectory at `t0`. See
+            // `plan_from`.
+            let on = self.t0_s + t;
+            (
+                distance_of(self.alpha, on) - distance_of(self.alpha, self.t0_s),
+                beta_of(self.alpha, on),
+                proper_of(self.alpha, on) - proper_of(self.alpha, self.t0_s),
+                Phase::Boost,
+            )
         } else if t < self.brake_s {
             let c = t - self.boost_s;
             let inv_gamma = (1.0 - self.coast_beta * self.coast_beta).sqrt();
@@ -216,9 +352,12 @@ impl Cruise {
         };
 
         FlightState {
-            position_ly: self.from_ly + self.direction * (travelled_ls / JULIAN_YEAR_S),
+            // From the matched point, which is where the line begins. For a ship that started
+            // on the line already, that is where it started.
+            position_ly: self.matched_ly + self.direction * (travelled_ls / JULIAN_YEAR_S),
             beta: self.direction * speed,
-            proper_s,
+            // The crew aged through the match too.
+            proper_s: matched_proper + proper_s,
             phase,
         }
     }

@@ -5,6 +5,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod picking;
+pub mod reticle;
 pub mod theme;
 pub mod widgets;
 

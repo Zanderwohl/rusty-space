@@ -102,6 +102,13 @@ LC_CDN=https://cdn.lc.zanderlowry.com tools/release.sh register <build-id>
 that environment variable does **not** move builds already registered, which is the intended
 behaviour and reliably surprising the first time.
 
+**Set `LC_CDN` when you register.** It defaults to the development CDN, so a build registered
+without it carries `http://rocinante.local:3101` no matter what the site is configured with.
+Against an https site a browser then blocks the assets as mixed content, and what `/play`
+reports is *"the site is pointing at a build that is not on the CDN"* — naming a URL that is
+perfectly reachable by hand, which sends you looking at the CDN instead of at the row.
+`release.sh register` now refuses an http CDN for an https site outright.
+
 If a build is actively harmful, `tools/release.sh yank <build-id>` marks it unpromotable
 without deleting it, so nobody re-promotes it by muscle memory. The bytes stay on the CDN:
 anything already running against them keeps working, and deleting the evidence of a bad build
@@ -415,6 +422,186 @@ docker --context rocinante start lightcone-db
 ```
 
 ---
+
+## The broker and a shard, on rocinante
+
+Three containers beside the site, all on the `lightcone` network.
+
+```bash
+# Secrets, generated on the host so they never pass through a laptop's shell history.
+ssh zandy@rocinante.local
+cd ~/.config/lightcone && umask 077
+rand() { head -c 32 /dev/urandom | base64 | tr -d '\n=' | tr '+/' '-_'; }
+# identity.env      — DATABASE_URL, LC_IDENTITY_* (see config.rs for the full list)
+# site-identity.env — LC_IDENTITY_BASE, LC_IDENTITY_API, LC_IDENTITY_SECRET,
+#                     SITE_SESSION_KEY, LC_SHARD, LC_SHARD_URL
+```
+
+`LC_IDENTITY_EXCHANGE_SECRET` on the broker and `LC_IDENTITY_SECRET` on the site are the **same
+value**. `LC_IDENTITY_SIGNING_SEED` must be set, or every restart publishes a new key and every
+ticket minted before it stops verifying.
+
+Its own role and database, like the site's:
+
+```sql
+CREATE ROLE lc_identity LOGIN PASSWORD '...';
+CREATE DATABASE lc_identity OWNER lc_identity;
+```
+
+```bash
+docker --context rocinante build -f auth/Dockerfile -t lightcone-identity:<tag> auth
+docker --context rocinante build -f crates/lc-server/Dockerfile -t lightcone-shard:<tag> .
+
+# Over ssh, because --env-file is read by the CLI you invoke and that file is on rocinante.
+ssh zandy@rocinante.local '
+  docker rm -f lightcone-identity 2>/dev/null
+  docker run -d --name lightcone-identity --restart unless-stopped --network lightcone \
+      --env-file ~/.config/lightcone/identity.env lightcone-identity:<tag>'
+
+docker --context rocinante run -d --name lightcone-shard --restart unless-stopped \
+    --network lightcone --env-file ~/.config/lightcone/shard.env lightcone-shard:<tag> \
+    --bind 0.0.0.0:8080 --audience shard-1 \
+    --jwks http://lightcone-identity:3200/.well-known/jwks.json
+```
+
+### The shard's own database
+
+**A shard without `--db` is a sandcastle.** It runs, and every craft in it — and every
+account's claim on one — is gone when it stops. Give it a role and a database like the
+others:
+
+```sql
+CREATE ROLE lc_store LOGIN PASSWORD '...';
+CREATE DATABASE lc_store OWNER lc_store;
+```
+
+The URL goes in `~/.config/lightcone/shard.env` as `LC_SHARD_DB`, which the shard reads when no
+`--db` is given. The environment and not the command line because it carries a password, and an
+argument is visible to anything that can list processes. The schema is applied at boot, so there
+is no migration step to remember.
+
+What is kept is a **checkpoint**, not a history: every craft as of an instant, plus the shard's
+clock and its identifier counter. Written every twenty real seconds and again on the way out,
+`docker stop` included — the shard traps `SIGTERM`. A crash loses at most twenty seconds, and
+what it loses is *orders*, not flight: every motive is stamped in absolute coordinate time, so
+a checkpoint replayed forward puts a ship exactly where it would have been anyway.
+
+The clock is the part that is easy to leave out and impossible to do without. Every motive
+carries an absolute coordinate time, so a shard that came back at zero would read every saved
+craft as one whose crossing has not begun, and fly them all again from decades in the past.
+
+A restart resumes the clock where it stopped rather than advancing it by however long the
+process was down. The alternative asserts that things happened in the missing time, when
+nothing was journalled and nobody was told.
+
+**Point `--sky` at the promoted build's own chunk**, by the CDN's *container* name —
+`http://lightcone-cdn:3101/game/<build>/assets/sky/hyg-v42.lcsky`. Not the public
+`https://cdn.…` name: that resolves to the host's own address and hairpins, exactly as the
+site's call to the broker does. Same container, same bytes, different route. Both ends place craft into systems by position
+against the same shell radius, so two catalogues is two answers to which system a ship is in —
+and nothing anywhere reports the disagreement. Reading the same bytes the client downloads is
+what makes them agreeing a fact rather than a convention somebody has to keep. A shard started
+without it says so loudly and falls back to three hand-written stars, which is right only for a
+shard no real client connects to.
+
+The shard reads the broker's keys **at boot**, so the broker has to be up first. It then
+verifies locally and never asks again, which is the point — a broker outage does not stop
+anyone reconnecting. A shard that restarts while the broker is down will not start, and
+`--restart unless-stopped` retries until it can.
+
+### Two addresses for the broker, and why
+
+`LC_IDENTITY_BASE` is where the **browser** is sent: `https://accounts.lc.zanderlowry.com`.
+`LC_IDENTITY_API` is where the **site** calls `/exchange` and `/ticket`:
+`http://lightcone-identity:3200`.
+
+They must differ in a container deployment and it is not obvious why. The public name resolves
+to the host's own LAN address, and a container reaching the host's published port by that
+address hairpins through the NAT and hangs. The symptom is a **504 on `/auth/return` with
+nothing in any log**, because nothing arrived anywhere. `LC_IDENTITY_API` is unset everywhere
+else and falls back to the public name.
+
+### Routes
+
+The proxy gains two. Reload rather than recreate — the container holds the ACME account and
+the certificates, and a restart it did not need is a restart that can go wrong:
+
+```bash
+docker --context rocinante cp tools/proxy/Caddyfile lightcone-proxy:/etc/caddy/Caddyfile
+ssh zandy@rocinante.local \
+  'docker exec lightcone-proxy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile'
+```
+
+`accounts.` is a host route and needs its own A record. The shard is a **path** — `/ws` — which
+needs none, and a WebSocket upgrade proxies cleanly either way. It must be `wss://`: a page
+served over TLS may only open a secure socket, and a browser refuses the other outright.
+
+Testing that upgrade by hand needs `--http1.1`. Without it curl negotiates HTTP/2, where a
+WebSocket is Extended CONNECT rather than an `Upgrade:` header, and Caddy answers **502** —
+which looks exactly like the shard being unreachable and is not.
+
+## A shard and a client, locally
+
+One process, for tuning game mechanics against the real server:
+
+```bash
+cargo run -p lc-client --bin lightcone -- --local
+```
+
+`--local` runs the same `lc-server` a shard runs, on a loopback socket, in this process — the
+light-delay gate, the intent clamps, the tick, all of it. Not a simulation of a server and not a
+second implementation. It is given the stars the client itself loaded, because both ends put
+craft into systems by position and two different skies would disagree about which system a ship
+is in.
+
+Running with **no** `--server` and no `--local` is the single-process game: local fleet, no
+socket, and the client applies its own flight orders. That is what every build before the seam
+did, and it still works — but it is not what a deployment does, so a mechanic tuned there is
+tuned against something else.
+
+The smallest thing that is actually two processes:
+
+```bash
+cargo run -p lc-server --bin lightcone-server -- --bind 127.0.0.1:8080 --open
+cargo run -p lc-client --bin lightcone -- --server ws://127.0.0.1:8080 --observe
+```
+
+`--open` admits a connection with no valid ticket. It is the same decision the site makes when
+no broker is configured, and it is development only for two reasons: it lets anyone in, and an
+anonymous player is keyed by their connection, so every reconnection is a new ship.
+
+With a broker, point the shard at its published keys instead. A **file** is as good as a URL
+and is how a shard starts when the broker is down — it verifies locally and never asks per
+connection:
+
+```bash
+curl -s http://127.0.0.1:3210/.well-known/jwks.json > /tmp/shard.jwks
+cargo run -p lc-server --bin lightcone-server -- --jwks /tmp/shard.jwks --audience shard-1
+```
+
+### The browser build
+
+`/play` hands the client two things on `#boot`: the ticket, and `data-server` — the shard's
+address, from `LC_SHARD_URL`. Both come off the page rather than the query string. The ticket
+because a credential in a URL is a credential in history, in an access log and in a `Referer`;
+the address because which shard a build talks to is part of the handover rather than something
+a player types. A `?server=` flag still wins, which is how a build gets pointed at a shard
+nobody has deployed yet.
+
+`LC_SHARD_URL` is an address and `LC_SHARD` is an audience name. They are separate on purpose:
+one is what the broker and the shard agree a ticket is *for*, the other is where the shard
+happens to be, and moving it should not reissue anything.
+
+A page served over TLS may only open `wss://`. A browser refuses `ws://` from an `https://`
+origin outright, which is the one failure here that looks like the server being down.
+
+A shard given neither refuses to start. Starting without either would mean refusing every
+connection, which from the outside is indistinguishable from everyone's credentials being wrong
+at once.
+
+The HUD says which of these happened: `LINKED <name>` on a welcome, `REFUSED — <why>` on a
+ticket the shard would not take. The words carry it and the colour only agrees — see
+[18-ui-style.md](18-ui-style.md).
 
 ## Checks
 

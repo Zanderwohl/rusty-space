@@ -31,6 +31,32 @@ pub enum AppState {
     InGame,
 }
 
+/// The order a frame is built in. Every system in [`Update`] belongs to one of these.
+///
+/// The schedule used to declare none of this, and Bevy reported 133 pairs of systems with
+/// conflicting access and no order between them. Most were harmless; one was not. [`survey`]
+/// reads the camera the sky is about to be rendered with, and it was unordered against
+/// [`aim_camera`], which writes it — so a reticle was drawn from whichever pose the executor
+/// happened to leave in the component, and trailed the view by a frame whenever that was the
+/// old one.
+///
+/// [`survey`]: crate::pick
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Stage {
+    /// What the server has said since the last frame.
+    Link,
+    /// Input, orders, and the clock.
+    Act,
+    /// Where the camera points, and where everything is drawn.
+    Scene,
+    /// What the cursor is on, against the scene just placed.
+    ///
+    /// A click found here reaches [`dispatch`] on the *next* frame, which is the honest
+    /// reading of it: the player clicked on the image they were looking at, and that image is
+    /// the one this stage measures.
+    Mark,
+}
+
 #[derive(Resource, Deref, DerefMut)]
 pub struct Ui(pub UiState);
 
@@ -71,6 +97,11 @@ pub struct DevEntry {
     pub after_frames: u32,
     /// How many consecutive frames to photograph. More than one for diagnosing a flicker.
     pub burst: u32,
+    /// A menu page to open on arrival. The only way to photograph one that draws over the
+    /// root, which an action running on entering the sky cannot reach.
+    pub menu_page: Option<crate::ui::MenuPage>,
+    /// Open the password form on arrival, for the same reason.
+    pub open_password_form: bool,
     /// Run once on reaching the sky. Actions rather than flags, so a development entry can
     /// reach anything the interface can and needs no plumbing of its own.
     pub actions: Vec<Action>,
@@ -101,6 +132,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<Bodies>()
             .init_resource::<crate::envelope::Envelopes>()
             .init_resource::<crate::resolved::Resolved>()
+            .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
             .add_systems(Startup, spawn_camera)
             .add_systems(OnEnter(AppState::Loading), begin_load)
             .add_systems(OnEnter(AppState::InGame), (spawn_sky, run_dev_actions))
@@ -123,7 +155,8 @@ impl Plugin for ClientPlugin {
                     observe.run_if(in_state(AppState::InGame)),
                     hold_exposure.run_if(in_state(AppState::InGame)),
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(Stage::Act),
             )
             .add_systems(
                 Update,
@@ -138,14 +171,25 @@ impl Plugin for ClientPlugin {
                     crate::envelope::update_envelopes,
                 )
                     .chain()
+                    .in_set(Stage::Scene)
                     .run_if(in_state(AppState::InGame)),
             )
             // The menu's backdrop is the same starfield pass, so it needs the same two
             // systems. Nothing else: there are no bodies and nothing to resolve.
             .add_systems(
                 Update,
-                (aim_camera, update_sky).chain().run_if(in_state(AppState::MainMenu)),
+                (aim_camera, update_sky)
+                    .chain()
+                    .in_set(Stage::Scene)
+                    .run_if(in_state(AppState::MainMenu)),
             )
+            // Absent unless something inserted one: the browser build reads it off the page
+            // before the app is built, and the desktop mints one from its device grant.
+            .init_resource::<crate::Ticket>()
+            .add_plugins(crate::pick::PickPlugin)
+            .add_plugins(crate::uplink::UplinkPlugin)
+            // Desktop only: a browser build arrives with a session.
+            .add_plugins(SigninPlugins)
             .add_systems(
                 EguiPrimaryContextPass,
                 (
@@ -207,7 +251,7 @@ fn aim_camera(ui: Res<Ui>, mut camera: Query<&mut Transform, With<Camera3d>>) {
 /// than it was at rest, which is a white screen with a fixed window. Re-placed on progress
 /// rather than every frame, because placing it costs a pass over every star.
 fn hold_exposure(ui: Res<Ui>, mut game: ResMut<Game>, mut last: Local<f64>) {
-    let Some(cruise) = &game.cruise else {
+    let Some(cruise) = &game.cruise() else {
         *last = -1.0;
         return;
     };
@@ -241,20 +285,23 @@ fn place_on_station(
         *done = true;
         return;
     };
-    let Some(system) = game.system.as_ref() else { return };
-    let here = game.position_ly;
-    let Some(waypoint) = course.resolve(system, here) else { return };
+    let now = game.coordinate_time_s();
+    let Some(system) = game.system.clone() else { return };
+    let here = game.ship.motion.position_ly;
+    let Some(waypoint) = course.resolve(&system, here, now) else { return };
     // Aimed at where the ship already is, so `--station` lands on the near side of an orbit
     // rather than wherever the clock had it.
-    let waypoint = waypoint.nearest_to(here, system);
-    let Some(at) = waypoint.place(system) else { return };
+    let waypoint = waypoint.nearest_to(here, &system, now);
+    let Some(at) = waypoint.place_at(&system, now) else { return };
     let label = waypoint.label();
     ui.focus = course.target();
-    if let Some(look) = waypoint.focus(system).and_then(|f| crate::ui::Look::aimed_at(f - at)) {
+    if let Some(look) =
+        waypoint.focus(&system, now).and_then(|f| crate::ui::Look::aimed_at(f - at))
+    {
         ui.look = look;
     }
     game.0.place_at(at);
-    game.0.station = Some(waypoint);
+    game.0.ship.motion.begin_holding(waypoint);
     ui.notify(format!("on station: {label}"), game.coordinate_time_s());
     *done = true;
 }
@@ -360,6 +407,7 @@ fn begin_load(
     mut commands: Commands,
     mut game: ResMut<Game>,
     mut ui: ResMut<Ui>,
+    uplink: Res<crate::uplink::Uplink>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     match catalogue.0.as_deref() {
@@ -368,17 +416,17 @@ fn begin_load(
         #[cfg(feature = "hyg")]
         Some(path) if path.ends_with(".csv") => {
             match lc_world::sky::hyg::HygProvider::load(path) {
-                Ok(p) => enter_game(&mut game, &mut ui, &mut next, &p),
+                Ok(p) => enter_game(&mut game, &mut ui, &mut next, &p, &uplink),
                 Err(e) => {
                     ui.notify(format!("catalogue: {e}"), 0.0);
-                    enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample());
+                    enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink);
                 }
             }
         }
         Some(path) => {
             commands.insert_resource(LoadingSky(assets.load(path.to_owned())));
         }
-        None => enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample()),
+        None => enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink),
     }
 }
 
@@ -393,6 +441,7 @@ fn finish_load(
     mut commands: Commands,
     mut game: ResMut<Game>,
     mut ui: ResMut<Ui>,
+    uplink: Res<crate::uplink::Uplink>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     let Some(loading) = loading else { return };
@@ -400,7 +449,7 @@ fn finish_load(
         if sky.skipped > 0 {
             ui.notify(format!("{} sky records were unusable", sky.skipped), 0.0);
         }
-        enter_game(&mut game, &mut ui, &mut next, sky);
+        enter_game(&mut game, &mut ui, &mut next, sky, &uplink);
         commands.remove_resource::<LoadingSky>();
     } else if let Some(state) = assets.get_load_state(&loading.0)
         && state.is_failed()
@@ -408,7 +457,7 @@ fn finish_load(
         // A sky that will not load is worth saying out loud rather than silently becoming
         // three hand-written stars.
         ui.notify("sky failed to load; using the sample", 0.0);
-        enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample());
+        enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink);
         commands.remove_resource::<LoadingSky>();
     }
 }
@@ -418,9 +467,14 @@ fn enter_game(
     ui: &mut Ui,
     next: &mut NextState<AppState>,
     provider: &dyn StarProvider,
+    uplink: &crate::uplink::Uplink,
 ) {
     let count = provider.len();
     game.0 = Session::new(provider, SKY_LIMIT);
+    // The session was just replaced, and with it everything the server had said about where
+    // and when this ship is. Put it back, or the client flies locally from the origin while
+    // the interface still says LINKED. See `uplink::Placement`.
+    uplink.place(&mut game.0);
     ui.notify(format!("{count} stars loaded"), 0.0);
     ui.screen = Screen::InGame;
     next.set(AppState::InGame);
@@ -431,6 +485,8 @@ fn dispatch(
     mut requests: MessageReader<Requested>,
     mut ui: ResMut<Ui>,
     mut game: ResMut<Game>,
+    mut uplink: ResMut<crate::uplink::Uplink>,
+    time: Res<Time>,
     mut next: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -452,6 +508,27 @@ fn dispatch(
                     let at = game.coordinate_time_s();
                     ui.notify(text, at);
                 }
+                Effect::Send(order) => {
+                    // A ship the server has not named is a ship this client does not have, so
+                    // there is nothing to send an order for.
+                    if let Some(ship_id) = uplink.joined().map(|joined| joined.ship_id) {
+                        uplink.say(lc_proto::Inbound::Act(lc_proto::Intent {
+                            ship_id,
+                            order,
+                            // Advisory, and clamped on arrival. Saying now is the honest
+                            // claim: the client is acting on all it has been told so far.
+                            issued_at_client_t: (game.coordinate_time_s() * 1e6) as i64,
+                        }));
+                        uplink.asked(time.elapsed_secs_f64());
+                    }
+                }
+                // Handled in `signin_ui`, which has the socket, the browser and the vault.
+                // Nothing here, rather than nothing anywhere: in a browser the page that
+                // launched the game already has a session and these never fire.
+                Effect::SignIn
+                | Effect::CancelSignIn
+                | Effect::SignInWithPassword { .. }
+                | Effect::SignOut => {}
             }
         }
     }
@@ -483,6 +560,9 @@ mod tests {
             .add_message::<AppExit>()
             .insert_resource(Ui(UiState::default()))
             .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
+            // The dispatcher routes orders to it. Absent, not connected: these tests are the
+            // single-process game, which is what a session with no server still is.
+            .init_resource::<crate::uplink::Uplink>()
             .add_systems(Update, (dispatch, advance_clock).chain());
         app.insert_state(AppState::InGame);
         app
@@ -540,15 +620,15 @@ mod tests {
         app.world_mut().write_message(Requested(Action::SelectTarget(Some(id))));
         app.world_mut().write_message(Requested(Action::FlyTo(None)));
         app.update();
-        assert!(app.world().resource::<Game>().cruise.is_some(), "the crossing should have begun");
+        assert!(app.world().resource::<Game>().cruise().is_some(), "the crossing should have begun");
 
         for _ in 0..64 {
             app.update();
         }
         let game = app.world().resource::<Game>();
         assert!(game.distance_to(game.star(id).unwrap()) < before, "the ship did not move");
-        assert!(game.beta.length() > 0.0, "and it is not under way");
-        assert!(game.ship_clock_s < game.coordinate_time_s(), "the ship clock should lag");
+        assert!(game.ship.motion.beta.length() > 0.0, "and it is not under way");
+        assert!(game.ship.motion.clock_s < game.coordinate_time_s(), "the ship clock should lag");
     }
 
     /// The camera turns; it does not travel. Everything drawn is at a fixed radius around it.
@@ -564,6 +644,49 @@ mod tests {
         assert!(transform.rotation.is_finite() && transform.rotation.length() > 0.5);
     }
 
+    /// Where a mark placed in [`Stage::Mark`] found the camera.
+    #[derive(Resource, Default)]
+    struct Seen(Option<Vec3>);
+
+    fn probe(camera: Query<&Transform, With<Camera3d>>, mut seen: ResMut<Seen>) {
+        seen.0 = camera.single().ok().map(|t| *t.forward());
+    }
+
+    /// The bug this pins: a reticle is drawn over a rendered sky, so it has to be measured
+    /// against the camera that sky was rendered with. Nothing ordered [`survey`] after
+    /// [`aim_camera`], so the executor was free to run it first and the marks trailed the view
+    /// by exactly one frame.
+    ///
+    /// [`survey`]: crate::pick
+    #[test]
+    fn a_mark_is_placed_against_this_frames_camera_and_not_last_frames() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .init_state::<AppState>()
+            .add_message::<Requested>()
+            .add_message::<AppExit>()
+            .insert_resource(Ui(UiState::default()))
+            .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
+            .init_resource::<crate::uplink::Uplink>()
+            .init_resource::<Seen>()
+            .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
+            .add_systems(Update, dispatch.in_set(Stage::Act))
+            .add_systems(Update, aim_camera.in_set(Stage::Scene))
+            .add_systems(Update, probe.in_set(Stage::Mark));
+        app.insert_state(AppState::InGame);
+        let camera = app.world_mut().spawn((Camera3d::default(), Transform::default())).id();
+        app.update();
+        let before = app.world().resource::<Seen>().0.expect("the mark stage should have run");
+
+        app.world_mut().write_message(Requested(Action::Look { yaw: 1.2, pitch: 0.3 }));
+        app.update();
+
+        let aimed = *app.world().entity(camera).get::<Transform>().unwrap().forward();
+        let seen = app.world().resource::<Seen>().0.unwrap();
+        assert_ne!(seen, before, "the turn never reached the camera at all");
+        assert_eq!(seen, aimed, "the mark was placed against last frame's camera");
+    }
+
     #[test]
     fn a_zero_time_rate_is_a_debug_control_not_a_pause() {
         // Setting the rate to zero does stop the clock -- that is what the control is for.
@@ -577,4 +700,20 @@ mod tests {
         }
         assert_eq!(app.world().resource::<Game>().coordinate_time_s(), before);
     }
+}
+
+/// The desktop sign-in, or nothing at all in a browser.
+///
+/// A plugin group of one rather than a `#[cfg]` inside `build`, so the browser build does not
+/// carry a branch about a thing it cannot do.
+struct SigninPlugins;
+
+impl Plugin for SigninPlugins {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn build(&self, app: &mut App) {
+        app.add_plugins(crate::signin_ui::SigninPlugin);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn build(&self, _app: &mut App) {}
 }

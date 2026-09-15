@@ -9,7 +9,7 @@ use em_sim::system::System;
 use em_sim::universe::UniverseFileContents;
 use em_foundations::time::Instant;
 use glam::DVec3;
-use lc_world::sky::{CatalogueStar, StarId, generate};
+use crate::sky::{CatalogueStar, StarId, generate};
 
 /// Metres in a light-year.
 pub const M_PER_LY: f64 = 9.460_730_472_580_8e15;
@@ -28,13 +28,21 @@ pub const DEFAULT_ALBEDO: f64 = 0.3;
 /// this one, so the list does not reshuffle while it is being read.
 pub const INVENTORY_EPOCH_S: f64 = 0.0;
 
+/// Inside this of a star, the ship is in its system and the star is drawn as an object rather
+/// than as a point of the background.
+///
+/// An Oort cloud reaches about a hundred thousand astronomical units, which is 1.6 light-years,
+/// and 03-world-model.md already makes that shell the partition boundary. Being inside it is
+/// the same statement as being in the system.
+pub const LOCAL_SHELL_LY: f64 = 1.6;
+
 /// The catalogue name of the system whose data is real rather than generated.
 pub const SOL: &str = "Sol";
 
 /// A body's rings, as the renderer wants them.
 #[derive(Clone, Copy, Debug)]
 pub struct Rings {
-    pub system: &'static lc_world::rings::RingSystem,
+    pub system: &'static crate::rings::RingSystem,
     /// Unit normal of the ring plane, simulation axes.
     pub pole: DVec3,
 }
@@ -45,7 +53,7 @@ pub struct Drawable {
     pub name: String,
     pub rings: Option<Rings>,
     /// What it looks like, from what it is.
-    pub surface: lc_world::surface::Surface,
+    pub surface: crate::surface::Surface,
     /// Spin axis, simulation axes. Ecliptic north where the data says nothing.
     pub pole: DVec3,
     /// Where it is, light-years from the world origin, simulation axes.
@@ -65,7 +73,7 @@ pub struct LocalSystem {
     /// Swarms, belts and clouds. Generated even for the real solar system: `em-sim`'s preset
     /// carries bodies and no distributions, and a system with a Kuiper belt and no Kuiper belt
     /// in it would be the stranger of the two errors.
-    pub populations: Vec<lc_world::population::Population>,
+    pub populations: Vec<crate::population::Population>,
     /// Where the system's barycentre sits, light-years from the world origin.
     pub origin_ly: DVec3,
     sim: System,
@@ -134,15 +142,23 @@ impl LocalSystem {
         self.sim.len() == 0
     }
 
-    /// Every body except the primary, as seen from `observer_ly`.
-    pub fn drawables(&self, observer_ly: DVec3) -> Vec<Drawable> {
-        let star_at = self.sim.position(self.primary);
+    /// Every body except the primary, as seen from `observer_ly` at a coordinate time.
+    ///
+    /// The last thing in the client that read the propagated arena. Placing bodies
+    /// analytically here is what lets a system be shared, immutable, between every craft in
+    /// it — nothing has to advance one to ask it a question any more.
+    pub fn drawables_at(&self, observer_ly: DVec3, seconds: f64) -> Vec<Drawable> {
+        let time = Instant::from_seconds_since_j2000(seconds);
+        let star_at = match em_sim::propagate::position_at(&self.sim, self.primary, time) {
+            Some(at) => at,
+            None => return Vec::new(),
+        };
         let observer_m = (observer_ly - self.origin_ly) * M_PER_LY;
         self.sim
             .indices()
             .filter(|i| *i != self.primary)
             .filter_map(|i| {
-                let at = self.sim.position(i);
+                let at = em_sim::propagate::position_at(&self.sim, i, time)?;
                 if !at.is_finite() {
                     return None;
                 }
@@ -160,11 +176,11 @@ impl LocalSystem {
                 // own pole out of the preset's IAU rotation. A second copy of a pole here would
                 // be a second chance to have it wrong.
                 let pole = self.sim.rotation(i).and_then(pole_of).unwrap_or(DVec3::Z);
-                let rings = lc_world::rings::for_body(self.sim.name(i))
+                let rings = crate::rings::for_body(self.sim.name(i))
                     .map(|system| Rings { system, pole });
 
                 let equilibrium_k = equilibrium_temperature(self.star_luminosity_w, distance_m);
-                let surface = lc_world::surface::Surface::classify(
+                let surface = crate::surface::Surface::classify(
                     radius_m,
                     self.sim.info(i).mass,
                     equilibrium_k,
@@ -232,10 +248,40 @@ impl LocalSystem {
             .find(|i| self.sim.info(*i).name.as_deref() == Some(name) || self.sim.name(*i) == name)
     }
 
-    /// Where a named body is, light-years from the world origin.
+    /// Where a named body is in the arena as it currently stands, light-years from the world
+    /// origin.
+    ///
+    /// The arena holds one instant and nothing advances it any more, so outside a test that
+    /// set it deliberately this is the load-time position. Use
+    /// [`body_position_at`](Self::body_position_at) and say which instant you mean.
     pub fn body_position_ly(&self, name: &str) -> Option<DVec3> {
         let index = self.body_named(name)?;
         Some(self.origin_ly + self.sim.position(index) / M_PER_LY)
+    }
+
+    /// Where a named body is at a coordinate time, light-years from the world origin.
+    pub fn body_position_at(&self, name: &str, seconds: f64) -> Option<DVec3> {
+        let (at, _) = self.body_state_at(self.body_named(name)?, seconds)?;
+        Some(self.origin_ly + at / M_PER_LY)
+    }
+
+    /// Where the primary is at a coordinate time. It moves: a star with planets orbits their
+    /// common centre, which for the Sun and Jupiter is outside the Sun.
+    pub fn star_position_at(&self, seconds: f64) -> Option<DVec3> {
+        let (at, _) = self.body_state_at(self.primary, seconds)?;
+        Some(self.origin_ly + at / M_PER_LY)
+    }
+
+    /// A body's position and velocity at a coordinate time, simulation frame, metres and
+    /// metres a second — without propagating this system to get there.
+    ///
+    /// [`LocalSystem::sim`]'s accessors read the arena, which holds one instant: asking them
+    /// where a body *will* be means propagating a copy first. This walks the body's parent
+    /// chain analytically instead, so anything defined against a body is evaluable at an
+    /// arbitrary time without the caller having to arrange the clock. `None` for a body whose
+    /// chain is integrated rather than evaluated, which has no closed form to ask.
+    pub fn body_state_at(&self, index: BodyIndex, seconds: f64) -> Option<(DVec3, DVec3)> {
+        em_sim::propagate::state_at(&self.sim, index, Instant::from_seconds_since_j2000(seconds))
     }
 
     /// A body's spin axis, simulation axes. Ecliptic north where the data says nothing.
@@ -280,7 +326,7 @@ impl LocalSystem {
             .iter()
             .map(|p| p.semi_major.nodes().iter().map(|(a, _)| *a).fold(0.0f64, f64::max))
             .fold(0.0f64, f64::max);
-        (bodies.max(populations) / M_PER_LY).max(crate::starfield::LOCAL_SHELL_LY)
+        (bodies.max(populations) / M_PER_LY).max(LOCAL_SHELL_LY)
     }
 
     pub fn star_teff_k(&self) -> f64 {
@@ -340,7 +386,7 @@ pub fn name_seed(name: &str) -> u64 {
         h ^= *b as u64;
         h = h.wrapping_mul(0x1000_0000_01b3);
     }
-    lc_world::rng::mix(h)
+    crate::rng::mix(h)
 }
 
 /// A body's pole, from whichever way its rotation is described.
@@ -368,7 +414,7 @@ pub fn phase_factor(to_star: DVec3, to_observer: DVec3) -> f64 {
 
 /// What a body at `distance_m` from a star of `luminosity_w` settles at, kelvin.
 ///
-/// The sphere case of the balance in `lc_world::population`: absorbing on a cross-section and
+/// The sphere case of the balance in `crate::population`: absorbing on a cross-section and
 /// radiating from the whole surface.
 pub fn equilibrium_temperature(luminosity_w: f64, distance_m: f64) -> f64 {
     if distance_m <= 0.0 {
@@ -390,7 +436,7 @@ fn build_inventory(
     sim: &System,
     primary: BodyIndex,
     star_name: &str,
-    populations: &[lc_world::population::Population],
+    populations: &[crate::population::Population],
 ) -> Vec<crate::navigation::Entry> {
     use crate::navigation::{Entry, Kind, Target, designate};
 
@@ -473,14 +519,14 @@ fn build_inventory(
 
 #[cfg(test)]
 mod tests {
-    use lc_world::sky::{AuthoredStars, StarProvider};
+    use crate::sky::{AuthoredStars, StarProvider};
 
     use super::*;
 
     const AU: f64 = 1.495_978_707e11;
 
-    fn catalogue() -> Option<lc_world::sky::hyg::HygProvider> {
-        lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv").ok()
+    fn catalogue() -> Option<crate::sky::hyg::HygProvider> {
+        crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv").ok()
     }
 
     #[test]
@@ -494,7 +540,7 @@ mod tests {
 
         let other = provider.stars().iter().find(|s| s.name.as_deref() != Some(SOL)).unwrap();
         let made = LocalSystem::for_star(other).expect("a generated system loads");
-        assert!(made.len() >= 1 && made.len() < real.len());
+        assert!(!made.is_empty() && made.len() < real.len());
     }
 
     #[test]
@@ -503,7 +549,7 @@ mod tests {
         let star = &sky.stars()[0];
         let mut sys = LocalSystem::for_star(star).expect("a system");
         sys.advance_to(0.0);
-        for d in sys.drawables(star.position_ly + DVec3::X * 1e-4) {
+        for d in sys.drawables_at(star.position_ly + DVec3::X * 1e-4, 0.0) {
             assert!(d.position_ly.is_finite() && d.radius_m > 0.0, "{d:?}");
             assert!(d.equilibrium_k > 0.0);
         }
@@ -558,13 +604,12 @@ mod tests {
         let Some(sun) = provider.stars().iter().find(|s| s.name.as_deref() == Some(SOL)) else {
             return;
         };
-        let mut sys = LocalSystem::for_star(sun).unwrap();
+        let sys = LocalSystem::for_star(sun).unwrap();
         let observer = sun.position_ly + DVec3::X * (AU / M_PER_LY);
 
-        sys.advance_to(0.0);
-        let before = sys.drawables(observer);
-        sys.advance_to(200.0 * 86_400.0);
-        let after = sys.drawables(observer);
+        // Two times, one system. Nothing has to be propagated to ask where a body will be.
+        let before = sys.drawables_at(observer, 0.0);
+        let after = sys.drawables_at(observer, 200.0 * 86_400.0);
 
         assert_eq!(before.len(), after.len());
         assert!(!before.is_empty(), "the solar system should have something in it");
@@ -599,13 +644,13 @@ mod tests {
 
         // Roughly where the Earth is at J2000, which is where the catalogue puts the observer.
         let earth = sys
-            .drawables(sun.position_ly)
+            .drawables_at(sun.position_ly, 0.0)
             .into_iter()
             .find(|d| d.name == "Earth")
             .expect("the preset carries the Earth");
         let observer = earth.position_ly;
 
-        let mut lit = sys.drawables(observer);
+        let mut lit = sys.drawables_at(observer, 0.0);
         // Brightness goes as the effective radius squared over the distance squared.
         lit.sort_by(|a, b| {
             let flux = |d: &Drawable| {
@@ -634,7 +679,7 @@ mod tests {
         sys.advance_to(0.0);
 
         let saturn = sys
-            .drawables(sun.position_ly)
+            .drawables_at(sun.position_ly, 0.0)
             .into_iter()
             .find(|d| d.name == "Saturn")
             .expect("the preset carries Saturn");
@@ -654,7 +699,7 @@ mod tests {
 
     #[test]
     fn a_ring_seen_edge_on_reflects_nothing() {
-        let s = lc_world::rings::for_body("Saturn").unwrap();
+        let s = crate::rings::for_body("Saturn").unwrap();
         // The formula's two cosines: face-on is the whole cross-section, edge-on is none.
         let face = s.cross_section_m2() * 1.0 * 1.0;
         let edge = s.cross_section_m2() * 0.0 * 1.0;
@@ -681,7 +726,7 @@ mod tests {
         };
         let mut sys = LocalSystem::for_star(sun).unwrap();
         sys.advance_to(0.0);
-        let earth = sys.drawables(sun.position_ly).into_iter().find(|d| d.name == "Earth").unwrap();
+        let earth = sys.drawables_at(sun.position_ly, 0.0).into_iter().find(|d| d.name == "Earth").unwrap();
         assert!(earth.rings.is_none());
     }
 }

@@ -80,13 +80,15 @@ pub struct PointStyle {
     /// Brightness between the streamers, and how much they add on top.
     pub corona_floor: f32,
     pub corona_gain: f32,
+    /// How far the corona reaches, in **stellar radii** — a world size, not a screen one.
+    pub corona_radii: f32,
 }
 
 /// Every knob, with the range a slider should offer and whether it is a corona setting.
 ///
 /// A table rather than a hand-written panel: a knob that exists and has no slider is a knob
 /// nobody finds, and the two drift apart the moment one is added.
-pub const KNOBS: [(&str, fn(&mut PointStyle) -> &mut f32, f32, f32); 14] = [
+pub const KNOBS: [(&str, fn(&mut PointStyle) -> &mut f32, f32, f32); 15] = [
     ("min radius px", |s| &mut s.min_px, 0.5, 40.0),
     ("max radius px", |s| &mut s.max_px, 1.0, 120.0),
     ("glare per stop", |s| &mut s.glow_radius_gain, 0.0, 4.0),
@@ -103,6 +105,7 @@ pub const KNOBS: [(&str, fn(&mut PointStyle) -> &mut f32, f32, f32); 14] = [
     ("tip fade", |s| &mut s.corona_fade, 0.02, 0.8),
     ("corona floor", |s| &mut s.corona_floor, 0.0, 1.5),
     ("corona contrast", |s| &mut s.corona_gain, 0.0, 4.0),
+    ("corona radii", |s| &mut s.corona_radii, 1.0, 40.0),
 ];
 
 /// The background. Small, tight, and it must stay readable as a field of thousands.
@@ -122,6 +125,7 @@ pub const DISTANT: PointStyle = PointStyle {
     corona_fade: 0.28,
     corona_floor: 0.22,
     corona_gain: 1.45,
+    corona_radii: em_render::relativistic_starfield_material::DEFAULT_CORONA_RADII,
 };
 
 /// Lit bodies: planets, moons, anything reflecting.
@@ -145,6 +149,7 @@ pub const BODIES: PointStyle = PointStyle {
     corona_fade: 0.28,
     corona_floor: 0.22,
     corona_gain: 1.45,
+    corona_radii: em_render::relativistic_starfield_material::DEFAULT_CORONA_RADII,
 };
 
 /// A star whose system the ship is inside. Allowed to dominate the screen, because it does.
@@ -167,15 +172,11 @@ pub const LOCAL: PointStyle = PointStyle {
     corona_fade: 0.28,
     corona_floor: 0.22,
     corona_gain: 1.45,
+    corona_radii: em_render::relativistic_starfield_material::DEFAULT_CORONA_RADII,
 };
 
-/// Inside this of a star, the ship is in its system and the star is drawn as an object rather
-/// than as a point of the background.
-///
-/// An Oort cloud reaches about a hundred thousand astronomical units, which is 1.6 light-years,
-/// and 03-world-model.md already makes that shell the partition boundary. Being inside it is
-/// the same statement as being in the system.
-pub const LOCAL_SHELL_LY: f64 = 1.6;
+/// Where the local shell is, re-exported so the drawing code reads the same as the world code.
+pub use lc_world::system::LOCAL_SHELL_LY;
 
 /// Radians per pixel, vertically, for a perspective camera.
 pub fn radians_per_pixel(fov_y: f32, viewport_height: f32) -> f32 {
@@ -395,8 +396,8 @@ pub fn uniforms(
     let mapping = &session.mapping;
     RelativisticStarfieldUniform {
         band_to_display: band_columns(mapping),
-        beta: sim_to_render(session.beta).as_vec3().extend(0.0),
-        ship_offset_ly: sim_to_render(session.position_ly - origin_ly).as_vec3().extend(0.0),
+        beta: sim_to_render(session.ship.motion.beta).as_vec3().extend(0.0),
+        ship_offset_ly: sim_to_render(session.ship.motion.position_ly - origin_ly).as_vec3().extend(0.0),
         reference: session.tone.reference,
         point_stops: POINT_STOPS,
         min_radius_rad: radius(style.min_px, defaults.min_radius_rad),
@@ -413,6 +414,7 @@ pub fn uniforms(
         corona_fade: style.corona_fade,
         corona_floor: style.corona_floor,
         corona_gain: style.corona_gain,
+        corona_radii: style.corona_radii,
         log_t_min: LOG_T_MIN,
         log_t_scale: lut_scale,
         lut_samples: LUT_SAMPLES as f32,
@@ -460,7 +462,7 @@ pub fn spawn_sky(
     for entity in &existing {
         commands.entity(entity).despawn();
     }
-    let origin_ly = session.position_ly;
+    let origin_ly = session.ship.motion.position_ly;
     let rad_per_px = camera_scale(&camera);
     // One table, shared: it is a function of temperature and nothing else.
     let lut = images.add(band_lut());
@@ -517,9 +519,10 @@ pub fn update_bodies(
     session.0.sync_system();
 
     let origin = sky.origin_ly;
-    let at = session.position_ly;
+    let at = session.ship.motion.position_ly;
+    let now = session.0.coordinate_time_s();
     let (drawn, teff) = match session.0.system.as_ref() {
-        Some(system) => (system.drawables(at), system.star_teff_k()),
+        Some(system) => (system.drawables_at(at, now), system.star_teff_k()),
         None => (Vec::new(), 0.0),
     };
     let points: Vec<Point> = drawn.iter().map(|d| Point::body(d, teff)).collect();
@@ -546,9 +549,9 @@ pub fn update_sky(
     let (distant_stars, local_stars) = partition(&session.0);
     // Membership as well as distance: crossing into a system moves a star from one pass to the
     // other, and nothing about the ship's position alone says that happened.
-    let moved = session.position_ly.distance(sky.origin_ly) > REBAKE_LY;
+    let moved = session.ship.motion.position_ly.distance(sky.origin_ly) > REBAKE_LY;
     if moved || local_stars.len() != sky.local.count {
-        sky.origin_ly = session.position_ly;
+        sky.origin_ly = session.ship.motion.position_ly;
         sky.distant.count = distant_stars.len();
         sky.local.count = local_stars.len();
         for (handle, stars) in
@@ -716,7 +719,7 @@ mod tests {
     #[test]
     fn the_uniforms_follow_the_ship() {
         let mut s = sky();
-        let origin = s.position_ly;
+        let origin = s.ship.motion.position_ly;
         assert_eq!(uniforms(&s, origin, lut_scale(), 0.0, DISTANT).ship_offset_ly, Vec4::ZERO);
         s.fly_to(s.stars[0].id);
         s.advance(8_000.0);

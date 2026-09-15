@@ -57,7 +57,7 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
     let name = presets::all().get(ui.preset).map(|(n, _)| *n).unwrap_or("custom");
     Hud {
         clock: format!("T + {:.2} years", session.coordinate_time_s() / YEAR_S),
-        ship_clock: format!("ship {:.2} years", session.ship_clock_s / YEAR_S),
+        ship_clock: format!("ship {:.2} years", session.ship.motion.clock_s / YEAR_S),
         target: ui.selected.and_then(|id| {
             let star = session.star(id)?;
             // Distance directly, not by way of sky(): shading six thousand stars once a frame
@@ -72,17 +72,17 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
             o if o.abs() < 1e-6 => "auto".to_string(),
             o => format!("{o:+.1} stops"),
         },
-        flight: session.cruise.as_ref().map(|c| {
+        flight: session.cruise().as_ref().map(|c| {
             let left = (c.duration_s() - (session.coordinate_time_s() - c.start_s)).max(0.0);
             format!(
                 "{:?} — {:.0}% — {:.4}c — {:.2} years to go",
                 c.at(session.coordinate_time_s()).phase,
                 c.progress(session.coordinate_time_s()) * 100.0,
-                session.beta.length(),
+                session.ship.motion.beta.length(),
                 left / YEAR_S,
             )
         }),
-        coasting: session.coast.as_ref().map(arc),
+        coasting: session.coast().map(arc),
         // The time rate is a development control and the server owns it; say so on screen
         // rather than letting a fast clock look normal.
         warning: (ui.time_rate != 1.0).then(|| crate::ui::rate_label(ui.time_rate)),

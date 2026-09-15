@@ -29,12 +29,15 @@ impl Plugin for MainMenuPlugin {
         app.add_plugins(em_ui::MenuUiPlugin)
             .add_systems(
                 OnEnter(AppState::MainMenu),
-                (install_backdrop, crate::starfield::spawn_sky).chain(),
+                (install_backdrop, open_dev_page, crate::starfield::spawn_sky).chain(),
             )
             .add_systems(OnExit(AppState::MainMenu), cleanup)
             .add_systems(
                 Update,
-                (sync_screen, drift, press).run_if(in_state(AppState::MainMenu)),
+                (sync_screen, drift, press)
+                    .chain()
+                    .in_set(crate::app::Stage::Act)
+                    .run_if(in_state(AppState::MainMenu)),
             );
     }
 }
@@ -52,6 +55,7 @@ fn sync_screen(
     mut commands: Commands,
     ui: Res<Ui>,
     existing: Query<(Entity, &MenuScreen)>,
+    observe: ObserveEmits,
 ) {
     let page = ui.menu_page;
     if let Ok((entity, drawn)) = existing.single() {
@@ -60,22 +64,54 @@ fn sync_screen(
         }
         commands.entity(entity).despawn();
     }
-    build(&mut commands, page);
+    build(&mut commands, page, observe_action(&observe));
 }
 
-fn build(commands: &mut Commands, page: MenuPage) {
+/// What the Observe button asks for.
+///
+/// Signing in is a condition of observing, not a separate menu item: a player who is signed in
+/// never sees the modal, and a player who is not is taken to it by the button they already
+/// meant to press.
+#[cfg(not(target_arch = "wasm32"))]
+type ObserveEmits<'w> = Option<Res<'w, crate::signin_ui::Signin>>;
+#[cfg(target_arch = "wasm32")]
+type ObserveEmits<'w> = std::marker::PhantomData<&'w ()>;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn observe_action(signin: &ObserveEmits) -> Action {
+    match signin {
+        Some(signin) if !signin.may_observe() => Action::GoToMenuPage(MenuPage::SignIn),
+        _ => Action::StartGame,
+    }
+}
+
+/// The browser build arrives with a session already, so there is nothing to ask.
+#[cfg(target_arch = "wasm32")]
+fn observe_action(_: &ObserveEmits) -> Action {
+    Action::StartGame
+}
+
+fn build(commands: &mut Commands, page: MenuPage, observe: Action) {
     let mut ui = MenuUi::new(commands, MenuTheme::VFD).panel_width(520.0);
     let root = ui.screen(MenuScreen(page));
+    // **One surface at a time.** The sign-in draws its own, and a menu behind it is a second
+    // thing to read and a second set of buttons to try. The screen is still spawned, because
+    // it carries the marker that says which page is drawn.
+    if page == MenuPage::SignIn {
+        return;
+    }
     let panel = ui.panel(root);
     ui.title(panel, "LIGHTCONE");
     ui.message(panel, "Everything you see has already happened.");
 
     match page {
         MenuPage::Root => {
-            ui.button(panel, "Observe", Emit(Action::StartGame));
+            ui.button(panel, "Observe", Emit(observe));
             ui.button(panel, "Settings", Emit(Action::GoToMenuPage(MenuPage::Settings)));
             ui.button(panel, "Quit", Emit(Action::Quit));
         }
+        // Returned above; the sign-in owns the screen while it is up.
+        MenuPage::SignIn => {}
         other => {
             ui.message(panel, &format!("{other:?}"));
             ui.button(panel, "Back", Emit(Action::GoToMenuPage(MenuPage::Root)));
@@ -100,6 +136,13 @@ const DRIFT_RATE: f64 = 1.0 / 60.0;
 
 /// Pitch the field sits at, so the drift pans across it rather than around the pole.
 const DRIFT_PITCH: f64 = 0.12;
+
+/// Open the page `--signin` asked for, so it can be photographed.
+fn open_dev_page(dev: Res<crate::app::DevEntry>, mut ui: ResMut<Ui>) {
+    if let Some(page) = dev.menu_page {
+        ui.menu_page = page;
+    }
+}
 
 fn drift(time: Res<Time>, mut ui: ResMut<Ui>) {
     ui.look.pitch = DRIFT_PITCH;

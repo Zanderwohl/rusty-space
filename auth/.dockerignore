@@ -1,0 +1,6 @@
+# The build context is `auth/`, so this has to live here rather than at the repository root —
+# a `.dockerignore` only applies to the context it sits in. Without it the whole `target/`
+# directory is uploaded to the docker host over ssh before the build starts.
+target
+Dockerfile
+.dockerignore

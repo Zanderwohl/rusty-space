@@ -42,12 +42,65 @@ pub struct Population {
     pub radiating_ratio: f64,
 }
 
+/// How far a population reaches: a torus, as the three distributions describe one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Extent {
+    /// Nearest any element comes to the star, metres.
+    pub inner_m: f64,
+    /// Furthest any element goes, metres.
+    pub outer_m: f64,
+    /// Angle the inclinations tip it through: the half-thickness of the tube, as an angle from
+    /// the plane. A right angle for an isotropic cloud, which is what makes one a shell.
+    pub half_angle_rad: f64,
+}
+
+impl Extent {
+    /// Radius of the tube's centre line.
+    pub fn core_m(&self) -> f64 {
+        (self.inner_m + self.outer_m) * 0.5
+    }
+
+    /// Half-width of the tube in the plane, metres.
+    pub fn half_width_m(&self) -> f64 {
+        (self.outer_m - self.inner_m) * 0.5
+    }
+
+    /// Half-height of the tube out of the plane, metres.
+    pub fn half_height_m(&self) -> f64 {
+        self.core_m() * self.half_angle_rad.sin()
+    }
+}
+
 impl Population {
     /// A body absorbing on its cross-section and radiating from its whole surface.
     pub const SPHERICAL: f64 = 4.0;
 
     /// A flat collector absorbing on one face and radiating from both.
     pub const PANEL: f64 = 2.0;
+
+    /// The torus the population occupies.
+    ///
+    /// The eccentricity matters as much as the semi-major axis does, and is the part it is easy
+    /// to leave out: an element with semi-major axis `a` and eccentricity `e` is somewhere
+    /// between `a(1-e)` and `a(1+e)` over its year, so the tube is wider than the spread of `a`.
+    /// For the generated asteroid belt it is half again as wide.
+    ///
+    /// `None` for a population with no radius, which is one with nothing in it.
+    pub fn extent(&self) -> Option<Extent> {
+        let axes = self.semi_major.nodes();
+        let a_lo = axes.iter().map(|(v, _)| *v).fold(f64::INFINITY, f64::min);
+        let a_hi = axes.iter().map(|(v, _)| *v).fold(0.0, f64::max);
+        // Short of one, or a near-parabolic cloud has an inner radius of zero and a tube that
+        // swallows its own centre.
+        let e_hi = self.eccentricity.nodes().iter().map(|(v, _)| *v).fold(0.0, f64::max).clamp(0.0, 0.95);
+        let inner_m = a_lo * (1.0 - e_hi);
+        let outer_m = a_hi * (1.0 + e_hi);
+        (inner_m > 0.0 && outer_m > inner_m).then_some(Extent {
+            inner_m,
+            outer_m,
+            half_angle_rad: self.inclination.max_inclination(),
+        })
+    }
 
     /// Fraction of the star's output the population intercepts.
     ///

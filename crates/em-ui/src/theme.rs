@@ -26,6 +26,8 @@ pub struct MenuTheme {
     pub border: Color,
     pub text: Color,
     pub text_dim: Color,
+    /// The wash behind a modal. See [`MenuUi::overlay`](crate::widgets::MenuUi::overlay).
+    pub overlay_backdrop: Color,
 }
 
 impl MenuTheme {
@@ -36,6 +38,7 @@ impl MenuTheme {
         border: vfd::BUTTON_BORDER,
         text: vfd::TEXT,
         text_dim: vfd::TEXT_DIM,
+        overlay_backdrop: vfd::OVERLAY_BACKDROP,
     };
 }
 

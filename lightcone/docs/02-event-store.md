@@ -236,6 +236,28 @@ Three tiers:
 Replays and the god view (see [07-rendering.md](07-rendering.md)) read archived partitions,
 so archival must be reversible, not destructive.
 
+### How it is done
+
+`lc_detach_partition` takes a partition out of its table and records everything needed to put
+it back; `lc_attach_partition` puts it back. Nothing is ever dropped. Shipping the detached
+bytes to object storage is a deployment's job — it needs a bucket — so the crate records *where
+they went* and stops there, because that is the part a restore needs to survive a restart.
+
+The middle tier is the one a date comparison would get wrong. Light is in flight for years, so
+an event far past the horizon can still be the thing a scheduled delivery is *about*, and taking
+it away would leave a tick holding an identifier with nothing behind it. The check is a range
+query on `event_id` rather than a join: **the identifier packs the coordinate second above the
+shard and the sequence, so a time range is a contiguous identifier range** and a question about
+*when* can be asked of a table that only stores *which*. Scoped to `arrive_t >= now`, partition
+pruning leaves only the deliveries that have not happened yet.
+
+One hazard worth knowing, because it is invisible until it bites: **listing partitions races
+with detaching them.** `pg_get_expr` looks the object up again rather than reading the tuple in
+hand, so a detach running alongside a listing yields a row whose bounds come back NULL rather
+than a row that is absent. Filtering on `relpartbound IS NOT NULL` does not fix it; the filter
+has to be on the result. A partition whose bound cannot be read is one on its way out, and is
+not a live partition for any purpose.
+
 ## Open
 
 - `cube` versus PostGIS 3D. `cube` is contrib and sufficient for bounding-box pruning;

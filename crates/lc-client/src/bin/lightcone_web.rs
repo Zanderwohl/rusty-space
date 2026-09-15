@@ -43,13 +43,23 @@ fn main() {
         .and_then(|w| w.location().search().ok())
         .unwrap_or_default();
     let args = lc_client::entry::from_query(&search);
-    let (dev, catalogue) = lc_client::entry::parse(&args);
+    let entry = lc_client::entry::parse(&args);
+
+    // Off the launching page, not the query string: a ticket in a URL is a ticket in history,
+    // in an access log, and in a `Referer`.
+    let ticket = lc_client::Ticket(lc_client::entry::ticket_from_page());
+    info!(signed_in = ticket.0.is_some(), "entry");
+
+    // The page's shard, unless a flag names one. Same handover as the ticket.
+    let server = entry.server.or_else(lc_client::entry::server_from_page);
+    info!(shard = server.as_deref().unwrap_or("none"), "shard");
 
     let asset_base =
         lc_client::entry::param(&search, "assets").unwrap_or_else(|| DEFAULT_ASSET_BASE.to_owned());
     info!("assets from {asset_base}");
 
     App::new()
+        .insert_resource(ticket)
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
@@ -78,8 +88,9 @@ fn main() {
                     ..default()
                 }),
         )
-        .insert_resource(Catalogue(catalogue))
-        .insert_resource(dev)
+        .insert_resource(Catalogue(entry.catalogue))
+        .insert_resource(lc_client::uplink::ServerAddress(server))
+        .insert_resource(entry.dev)
         .add_plugins(ClientPlugin)
         .run();
 }

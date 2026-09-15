@@ -83,11 +83,31 @@ pub struct RelativisticStarfieldUniform {
     /// Brightness between the streamers, and how much they add on top.
     pub corona_floor: f32,
     pub corona_gain: f32,
+    /// How far the corona reaches, in **stellar radii**.
+    ///
+    /// The one size here that is a world size rather than a screen size. Everything else about
+    /// a point source is angular on purpose — glare is an artefact of looking at a star and
+    /// does not grow as you approach it. A corona is a thing that is *there*, so it has to fall
+    /// off with distance like the disc it surrounds.
+    ///
+    /// **This list's order is the shader's order.** `ShaderType` lays the uniform out by
+    /// declaration, so a field inserted here and appended there silently shifts every value
+    /// after it, and the failure is a rendering that looks merely wrong.
+    pub corona_radii: f32,
     /// Lookup domain: `index = (log2(T) - log_t_min) * log_t_scale`.
     pub log_t_min: f32,
     pub log_t_scale: f32,
     pub lut_samples: f32,
 }
+
+/// How far a corona reaches, in stellar radii.
+///
+/// Chosen so that from one astronomical unit it subtends what it did when it was tuned there —
+/// the Sun's angular radius at 1 AU is 4.65 milliradians, and the streamers reached about
+/// thirty-six milliradians of sky. Everywhere else it now follows the disc instead of the
+/// screen. A real eclipse corona reaches a few radii and this reaches rather more, which is of
+/// a piece with a corona drawn at all: see the note in `starfield.wgsl`.
+pub const DEFAULT_CORONA_RADII: f32 = 7.8;
 
 impl Default for RelativisticStarfieldUniform {
     fn default() -> Self {
@@ -113,6 +133,7 @@ impl Default for RelativisticStarfieldUniform {
             corona_fade: 0.28,
             corona_floor: 0.22,
             corona_gain: 1.45,
+            corona_radii: DEFAULT_CORONA_RADII,
             log_t_min: 0.0,
             log_t_scale: 1.0,
             lut_samples: 1.0,

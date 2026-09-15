@@ -51,6 +51,13 @@ struct StarfieldUniform {
     /// Brightness between the streamers, and how much they add on top.
     corona_floor: f32,
     corona_gain: f32,
+    /// How far the corona reaches, in **stellar radii**.
+    ///
+    /// The one quantity here that is a world size rather than a screen size. Everything else
+    /// about a point source is angular on purpose — a star's glare is an artefact of looking at
+    /// it, and does not grow as you approach. A corona is a thing that is *there*, so its
+    /// angular size has to fall off with distance like the disc it surrounds.
+    corona_radii: f32,
     // Lookup domain: index = (log2(T) - log_t_min) * log_t_scale.
     log_t_min: f32,
     log_t_scale: f32,
@@ -79,6 +86,8 @@ struct VertexOutput {
     /// World direction to the star, the axis the corona is arranged about.
     @location(4) axis: vec3<f32>,
     @location(5) seed: f32,
+    /// How much of the quad the corona fills. The rest of the quad is glare, which is angular.
+    @location(6) corona: f32,
 };
 
 fn lorentz(beta: vec3<f32>) -> f32 {
@@ -257,11 +266,19 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let glare_rad = mix(material.min_radius_rad, material.max_radius_rad, level)
         + material.glow_radius_gain * glow * material.min_radius_rad;
 
-    // The quad covers the glare; the core is a fraction of it. One quad drawing a single
-    // filled disc made a star a hundred and sixty pixels across into a flat white ball, with
-    // the disc it actually has swamped inside it.
-    let radius_rad = max(core_rad, glare_rad);
+    // The corona, which is a world size: a fixed number of stellar radii, so it subtends less
+    // as the ship draws away and more as it closes, exactly as the disc does. Tying it to the
+    // glare instead left it the same size on screen at every distance — huge from far off and
+    // a tight collar up close.
+    let corona_rad = disc_rad * material.corona_radii;
+
+    // The quad covers whichever is largest. One quad drawing a single filled disc made a star
+    // a hundred and sixty pixels across into a flat white ball, with the disc it actually has
+    // swamped inside it.
+    let radius_rad = max(max(core_rad, glare_rad), corona_rad);
     out.core = clamp(core_rad / radius_rad, 0.0, 1.0);
+    // What fraction of the quad the corona is allowed to fill.
+    out.corona = clamp(corona_rad / radius_rad, 0.0, 1.0);
 
     // Offset from the star in the plane of the sky, in world axes so the pattern is anchored
     // to the star rather than to the camera. Normalising this in the fragment discards the
@@ -326,7 +343,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         // How far this streamer goes, which is ragged rather than a circle. The fade has to
         // *finish* inside the quad: run it past r = 1 and the discard at the edge cuts it into
         // a hard disc, which is the circle this was meant to avoid, only sharper.
-        let reach = material.corona_reach_min + reach_of(dir, in.seed) * material.corona_reach_span;
+        // Scaled into the corona's own share of the quad, so a streamer's tip is a fixed
+        // distance from the star in the world rather than a fixed fraction of the sprite.
+        let reach = (material.corona_reach_min + reach_of(dir, in.seed) * material.corona_reach_span)
+            * in.corona;
         let edge = 1.0 - smoothstep(reach, min(reach + material.corona_fade, 0.99), r);
         let lit = material.corona_floor + threads * material.corona_gain;
         halo = profile * edge * mix(1.0, lit, material.corona_strength);

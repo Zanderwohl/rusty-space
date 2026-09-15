@@ -36,6 +36,15 @@ sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "chrono",
 ] }
 chrono = { version = "0.4", features = ["serde"] }
+# Signing the session cookie. A signed cookie rather than a sessions table: the site already
+# serves with the database stopped, and a sign-in that needed it would be the one page that
+# does not. See lightcone/docs/16-identity.md.
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.2"
+# Two calls to the identity broker, on the runtime the site already has.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 notify = { version = "8", optional = true }
 
 [features]

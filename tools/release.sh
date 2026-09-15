@@ -68,6 +68,18 @@ for r in d["releases"]:
   register)
     build=${1:-$(newest_staged)}
     [ -n "$build" ] || { echo "no build id and nothing staged" >&2; exit 1; }
+    # A build row carries its own CDN, and `LC_CDN` defaults to the development one. Register
+    # a plain-http CDN against an https site and every browser blocks the load as mixed
+    # content -- which surfaces as "the site is pointing at a build that is not on the CDN",
+    # naming a URL that is perfectly reachable by hand. Refuse it here instead.
+    case "$SITE:$CDN" in
+      https://*:http://*)
+        echo "refusing: $SITE is https and LC_CDN is $CDN" >&2
+        echo "a browser will not load http assets into an https page. Set LC_CDN to the" >&2
+        echo "https CDN this site serves, e.g. LC_CDN=https://cdn.lc.zanderlowry.com" >&2
+        exit 1
+        ;;
+    esac
     bytes=$(wc -c < "target/web/$build/lightcone_web_bg.wasm" 2>/dev/null | tr -d ' ' || echo null)
     call POST /internal/release \
       "{\"build_id\":\"$build\",\"cdn_base\":\"$CDN\",\"wasm_bytes\":${bytes:-null}}" >/dev/null

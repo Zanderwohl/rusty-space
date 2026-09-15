@@ -46,6 +46,9 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--at <body>` / `--station <course>` | stand off a body, or start on a station |
 | `--panel <name>` / `--tune` | open a panel |
 | `--menu` | hold at the main menu, so `--shot` photographs that instead of the sky |
+| `--signin` | hold at the sign-in modal, which draws over the menu and no action can reach |
+| `--password` | hold at the password form, the one egui surface inside the menu |
+| `--turn <deg>` / `--pitch <deg>` | turn the view, the only way to put something off screen |
 | `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable |
 
 Most of what has gone wrong in the renderer was found this way and could not have been found
@@ -59,6 +62,15 @@ The store's tests need PostgreSQL (`createdb lc_store`; `LC_STORE_URL` overrides
 Each of these cost real time. None of them are visible from the code that hits them.
 
 **Rendering**
+
+- Projecting a *path* by projecting each point and dropping the ones behind the camera draws a
+  **chord**: the two survivors either side of the gap get joined, and a ring seen from inside it
+  acquires a straight line across the view that no ring has. Cut the segments at the camera
+  plane instead — `em_ui::reticle::project_path`.
+- `Camera::world_to_viewport` **errors** for anything behind the camera, so nothing built on it
+  can point at what is behind you. Work in clip space and keep `w`: `clip.w` is `-view.z`, so
+  behind the camera it is negative while `clip.x` keeps the sign of `view.x`. Dividing anyway
+  mirrors the point through the centre. See `em_ui::reticle::place`.
 
 - Depth is **reversed**. `clip.z = clip.w` is the *near* plane. Background geometry wants a
   tiny positive value, not zero — the buffer clears to zero and the test is strictly greater.
@@ -77,9 +89,74 @@ Each of these cost real time. None of them are visible from the code that hits t
 - `System::mu(i)` is the `mu` of the orbit body `i` is *on*, i.e. `G(M_parent + M_i)`. To orbit
   *around* `i`, use `gravitational_constant() * mass(i)`.
 - `Instant::to_j2000_seconds()`, not `seconds_since_j2000()`.
+- The arena holds **one instant**. `System::position(i)`, `LocalSystem::body_position_ly` and
+  friends read it; `propagate::state_at` and `LocalSystem::body_state_at` answer for any time
+  without touching it. Mixing the two — a craft read at `t`, the body it orbits read out of the
+  arena — turns a circular orbit into a wild ellipse. Nothing in `lc-world` or `lc-client`
+  propagates any more; if you need a position, say which instant you mean.
+- **A planet's frame is not inertial.** Earth turns eight degrees in nine days, so a "straight
+  line past Earth" posed at J2000 is a curve by the time it arrives, and a flyby slower than
+  30 km/s is Earth running into the craft rather than the reverse. Any test that predicts a
+  chord, a miss distance or an impact angle has to be fast enough that the frame holds still —
+  see `FLYBY_SPEED` in `em_sim::collision`.
+- Sphere-of-influence radii scale with the **live** separation, so they breathe over an
+  eccentric year: Earth's L2 is 1.476 million km at J2000 (near perihelion) and 1.501 at the
+  mean distance. A published figure is the mean one.
+- At a patched-conic join the craft is *exactly* on a boundary, so `influence::containing` is a
+  coin toss and it comes up "the sphere you are leaving". Take the new primary from the
+  crossing, as `em_sim::patch` does.
+
+**Editing by script**
+
+- `str.replace` in a Python one-liner **fails silently** when the pattern is absent, and
+  `cargo fmt` reflowing a match arm is enough to make it absent. Two edits were lost that way
+  and the code still compiled, because the thing they set had a `Default`. Assert the text
+  changed (`assert s != before`) or grep for the result afterwards — a compile is not evidence
+  the edit landed.
+
+**Formatting**
+
+- **`cargo fmt` is not run on the game workspace.** CI fmt-checks `auth/` and `web/` only, and
+  the game's code is hand-formatted — `cargo fmt --all` at the repository root rewrites 204
+  files and 22 000 lines, burying a change in churn. Format the files you write to match their
+  neighbours and leave the rest alone.
+
+**axum**
+
+- An array of header pairs in a response **inserts**, which replaces any header of the same
+  name. Two `Set-Cookie` entries therefore leave one — the last — and a sign-in that sets a
+  session and clears a nonce silently drops the session. Use `AppendHeaders`.
+- A static path beats `{param}` in the router, so `/signin/password` and `/signin/{provider}`
+  coexist. They are only reached by different methods here, which is worth keeping true.
+
+**OAuth2, upstream**
+
+- The ID token from a token-endpoint exchange is **not** signature-checked, deliberately: it
+  arrived over a TLS connection we opened, authenticated with our client secret, so a signature
+  proves nothing the transport has not. OIDC Core §3.1.3.7 rule 6. `iss`, `aud` and `exp` are
+  still checked, and `lightcone/docs/16-identity.md` has the reasoning. Do not "fix" this by
+  adding a JWKS fetch.
+- A test that only asserts "the hostile token was refused" passes just as well when every case
+  fails for some unrelated fourth reason. Assert the **error kind** per case.
+- A stub provider that agrees with whatever it is sent proves nothing about PKCE. Make it store
+  the challenge at `/authorize` and compare `S256(verifier)` at `/token` — then check the test
+  actually fails when the verifier is wrong, because a stub asserting nothing looks identical
+  to a stub asserting everything until you break the code on purpose.
 
 **egui**
 
+- Interface rules live in `lightcone/docs/18-ui-style.md`: which toolkit a surface belongs to,
+  one surface at a time, and why anything over another panel is opaque.
+- **Bevy UI is retained**: a surface rebuilt every frame loses `Interaction`, so its buttons
+  never show a hover. Key the rebuild on *what is drawn*, not on `Res::is_changed` — the menu
+  backdrop writes `ResMut<Ui>` every frame, so that flag is always true.
+- **Bevy UI orders by spawn**, so two systems spawning into one frame have no order between
+  them — an overlay drawn by one lands *behind* the screen drawn by the other, interleaved with
+  it. `em_ui::MenuUi::overlay` sets a `GlobalZIndex` for this reason. And a translucent panel
+  over another of the same size reads as one muddled thing: a modal's panel wants full alpha.
+- An overlay on `Order::Background` is painted *under* every panel and floating area, so the
+  interface covers it. `Order::Foreground` is over all of them — keep such an overlay inside
+  `ctx.available_rect()` so it does not draw on top of a docked panel.
 - The default font has no U+2715 `✕` — it renders as a tofu box. U+00D7 `×` is fine.
 - `add_enabled` wrapping a `SelectableLabel` reports clicks nobody made. A plain
   `selectable_label` does not.

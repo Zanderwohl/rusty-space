@@ -24,6 +24,14 @@ pub enum Action {
     GoToMenuPage(MenuPage),
     StartGame,
     Quit,
+    /// Begin the desktop sign-in: open the browser and listen for the answer.
+    SignIn,
+    /// Give up on one in progress.
+    CancelSignIn,
+    /// Sign in with the local password provider, from the modal's own form.
+    SignInWithPassword { email: String, password: String },
+    /// Forget the device grant.
+    SignOut,
 
     // --- instruments ------------------------------------------------------------------
     SetBandPreset(usize),
@@ -90,6 +98,15 @@ pub enum Effect {
     StartGame,
     WriteSnapshot,
     Notify(String),
+    /// The desktop sign-in, which needs a browser, a socket and the network — none of which
+    /// belong in the action fold.
+    SignIn,
+    CancelSignIn,
+    SignInWithPassword { email: String, password: String },
+    SignOut,
+    /// An order for the server. Emitted instead of a local change when a server is
+    /// authoritative over the ship: see [`crate::session::Session::remote`].
+    Send(lc_proto::Order),
 }
 
 /// Stops of exposure per keypress.
@@ -122,6 +139,12 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
         Action::GoToMenuPage(page) => ui.menu_page = page,
         Action::StartGame => effects.push(Effect::StartGame),
+        Action::SignIn => effects.push(Effect::SignIn),
+        Action::CancelSignIn => effects.push(Effect::CancelSignIn),
+        Action::SignInWithPassword { email, password } => {
+            effects.push(Effect::SignInWithPassword { email, password })
+        }
+        Action::SignOut => effects.push(Effect::SignOut),
         Action::Quit => effects.push(Effect::Quit),
 
         Action::SetBandPreset(i) => set_preset(ui, session, i, &mut effects),
@@ -172,12 +195,12 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         },
 
         Action::LookAtStation => {
+            let now = session.coordinate_time_s();
             let at = session
-                .station
-                .as_ref()
+                .station()
                 .zip(session.system.as_ref())
-                .and_then(|(station, system)| station.focus(system));
-            match at.and_then(|at| Look::aimed_at(at - session.position_ly)) {
+                .and_then(|(station, system)| station.focus(system, now));
+            match at.and_then(|at| Look::aimed_at(at - session.ship.motion.position_ly)) {
                 Some(look) => ui.look = look,
                 None => effects.push(Effect::Notify("not on a station".into())),
             }
@@ -192,7 +215,12 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             }
         }
         Action::AbortFlight => {
-            if session.cruise.is_some() || session.station.is_some() {
+            if session.remote {
+                if session.cruise().is_some() || session.station().is_some() {
+                    effects.push(Effect::Send(lc_proto::Order::CutDrive));
+                    effects.push(Effect::Notify("cut sent".into()));
+                }
+            } else if session.cruise().is_some() || session.station().is_some() {
                 let note = match session.cancel() {
                     // What it says is where the ship ended up, because cancelling does not
                     // stop it: it keeps its velocity and that velocity is now an orbit.
@@ -208,18 +236,28 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
         Action::ChooseCourse(course) => ui.course = course,
         Action::SetCourse(course) => {
-            let note = match session.set_course(&course) {
-                Some(label) => format!("course: {label}"),
-                // Not an error dialogue: the interface offers what the system has, so this is
-                // reachable only by a stale panel or a test.
-                None => "nothing there to go to".to_string(),
-            };
-            effects.push(Effect::Notify(note));
+            if session.remote {
+                // Sent, not applied. What the server does with it comes back as `Accepted`,
+                // carrying the acceleration it actually flew and the time it actually used.
+                effects.push(Effect::Send(lc_proto::Order::SetCourse {
+                    course: (&course).into(),
+                    accel_g: session.ship.motion.drive.accel_g,
+                }));
+                effects.push(Effect::Notify("course sent".into()));
+            } else {
+                let note = match session.set_course(&course) {
+                    Some(label) => format!("course: {label}"),
+                    // Not an error dialogue: the interface offers what the system has, so this
+                    // is reachable only by a stale panel or a test.
+                    None => "nothing there to go to".to_string(),
+                };
+                effects.push(Effect::Notify(note));
+            }
         }
 
         Action::SetDriveAccel(g) => {
-            session.drive.accel_g = g.clamp(MIN_ACCEL_G, MAX_ACCEL_G);
-            effects.push(Effect::Notify(format!("drive set to {:.0} g", session.drive.accel_g)));
+            session.ship.motion.drive.accel_g = g.clamp(MIN_ACCEL_G, MAX_ACCEL_G);
+            effects.push(Effect::Notify(format!("drive set to {:.0} g", session.ship.motion.drive.accel_g)));
         }
 
         Action::SetPointStyle { which, style } => match which {
@@ -244,6 +282,15 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 // Not merely hidden: the code is not in this build.
                 effects.push(Effect::Notify("god view is not compiled into this build".into()));
             }
+        }
+        // **The server owns the rate**, which `lightcone/docs/13-client-shell.md` calls dev
+        // only and says why: a client that can change it is a client that can cheat. It is also
+        // the client that suffers — its clock runs away from the server's, so an order comes
+        // back stamped in its own past and folds as a manoeuvre that already finished. The ship
+        // appears to teleport, and the server goes on refusing orders about a system it does
+        // not believe the ship has reached.
+        Action::SetTimeRate(_) | Action::TimeRateUp | Action::TimeRateDown if session.remote => {
+            effects.push(Effect::Notify("the server keeps the clock".into()));
         }
         Action::SetTimeRate(rate) => ui.time_rate = rate.max(0.0),
         Action::TimeRateUp | Action::TimeRateDown => {
@@ -283,6 +330,32 @@ fn fly(ui: &mut UiState, session: &mut Session, id: Option<StarId>, effects: &mu
         return;
     };
     let name = star.name.clone().unwrap_or_else(|| "an unnamed star".into());
+
+    // A crossing stops short of a star, so a ship already inside a system is nearer than one
+    // would leave it. Said here rather than sent, because the answer would come back as a bare
+    // refusal and "the server refused that order" explains nothing about being already there.
+    let reach = star.position_ly - session.ship.motion.position_ly;
+    if reach.length() <= crate::flight::STANDOFF_LY {
+        effects.push(Effect::Notify(format!("already at {name}")));
+        return;
+    }
+
+    if session.remote {
+        // Sent, not flown. The crossing this client would plan and the one the server flies
+        // must be the same, so only one of them plans it — and it is the one with authority.
+        effects.push(Effect::Send(lc_proto::Order::Cross {
+            star: id.get(),
+            accel_g: session.ship.motion.drive.accel_g,
+        }));
+        // Looking at the destination is what anybody wants by default, and it costs nothing
+        // to do before the answer arrives.
+        if let Some(look) = Look::aimed_at(session.offset_to(session.star(id).unwrap())) {
+            ui.look = look;
+        }
+        effects.push(Effect::Notify(format!("{name}: course sent")));
+        return;
+    }
+
     let Some(cruise) = session.fly_to(id) else { return };
     let (years, aboard) = (
         cruise.duration_s() / crate::flight::JULIAN_YEAR_S,
@@ -511,7 +584,7 @@ mod tests {
         let (mut ui, mut s) = fixture();
         let effects = apply(Action::FlyTo(None), &mut ui, &mut s);
         assert!(matches!(effects.as_slice(), [Effect::Notify(t)] if t.contains("no destination")));
-        assert!(s.cruise.is_none());
+        assert!(s.cruise().is_none());
     }
 
     #[test]
@@ -519,7 +592,7 @@ mod tests {
         let (mut ui, mut s) = fixture();
         apply(Action::SelectTarget(Some(s.stars[0].id)), &mut ui, &mut s);
         let effects = apply(Action::FlyTo(None), &mut ui, &mut s);
-        assert!(s.cruise.is_some());
+        assert!(s.cruise().is_some());
         let text = effects
             .iter()
             .find_map(|e| match e {
@@ -547,16 +620,16 @@ mod tests {
         assert!(apply(Action::AbortFlight, &mut ui, &mut s).is_empty());
         apply(Action::FlyTo(Some(s.stars[0].id)), &mut ui, &mut s);
         assert_eq!(apply(Action::AbortFlight, &mut ui, &mut s).len(), 1);
-        assert!(s.cruise.is_none());
+        assert!(s.cruise().is_none());
     }
 
     #[test]
     fn the_drive_setting_is_clamped_to_something_flyable() {
         let (mut ui, mut s) = fixture();
         apply(Action::SetDriveAccel(1e9), &mut ui, &mut s);
-        assert_eq!(s.drive.accel_g, MAX_ACCEL_G);
+        assert_eq!(s.ship.motion.drive.accel_g, MAX_ACCEL_G);
         apply(Action::SetDriveAccel(-4.0), &mut ui, &mut s);
-        assert_eq!(s.drive.accel_g, MIN_ACCEL_G);
+        assert_eq!(s.ship.motion.drive.accel_g, MIN_ACCEL_G);
     }
 
     /// The setting has to reach the crossing, not just the readout.
@@ -566,10 +639,10 @@ mod tests {
         let id = s.stars[0].id;
         apply(Action::SetDriveAccel(1.0), &mut ui, &mut s);
         apply(Action::FlyTo(Some(id)), &mut ui, &mut s);
-        let slow = s.cruise.as_ref().unwrap().duration_s();
+        let slow = s.cruise().as_ref().unwrap().duration_s();
         apply(Action::SetDriveAccel(50.0), &mut ui, &mut s);
         apply(Action::FlyTo(Some(id)), &mut ui, &mut s);
-        assert!(s.cruise.as_ref().unwrap().duration_s() < slow);
+        assert!(s.cruise().as_ref().unwrap().duration_s() < slow);
     }
 
     #[test]
@@ -723,13 +796,13 @@ mod tests {
         // The sample sky has no system to navigate, so the course has nowhere to go.
         let refused = apply(Action::SetCourse(Course::LeaveSystem), &mut ui, &mut s);
         assert_eq!(refused.len(), 1, "it says so rather than doing nothing");
-        assert!(s.station.is_none());
+        assert!(s.station().is_none());
 
         // Holding when nothing is held is silent: it is already true.
         assert!(apply(Action::AbortFlight, &mut ui, &mut s).is_empty());
         s.fly_to(s.stars[0].id);
         assert_eq!(apply(Action::AbortFlight, &mut ui, &mut s).len(), 1);
-        assert!(s.cruise.is_none() && s.station.is_none());
+        assert!(s.cruise().is_none() && s.station().is_none());
     }
 
     /// Crossing to another star abandons the station: it was defined against bodies that will
@@ -737,9 +810,9 @@ mod tests {
     #[test]
     fn leaving_for_another_star_gives_up_the_station() {
         let mut s = Session::new(&AuthoredStars::sample(), 3);
-        s.station = Some(crate::navigation::Waypoint::Fixed(glam::DVec3::X));
+        s.ship.motion.begin_holding(crate::navigation::Waypoint::Fixed(glam::DVec3::X));
         s.fly_to(s.stars[0].id);
-        assert!(s.station.is_none());
+        assert!(s.station().is_none());
     }
 
     /// The System window's whole flow: pick something, arm one of its courses, press Go.
@@ -766,14 +839,130 @@ mod tests {
 
         apply(Action::ChooseCourse(Some(course.clone())), &mut ui, &mut s);
         assert_eq!(ui.course, Some(course.clone()));
-        assert!(s.cruise.is_none() && s.station.is_none(), "arming flies nothing");
+        assert!(s.cruise().is_none() && s.station().is_none(), "arming flies nothing");
 
         let effects = apply(Action::SetCourse(course), &mut ui, &mut s);
         assert_eq!(effects.len(), 1, "Go says where it is going");
-        assert!(s.cruise.is_some() && s.station.is_some());
+        // Crossing and holding are exclusive: the ship is flying *to* the station, and
+        // arriving is what turns one into the other.
+        assert!(s.cruise().is_some(), "Go did not begin a crossing");
+        assert!(s.ship.motion.bound_for().is_some(), "and the crossing is not for anywhere");
+        assert!(s.station().is_none(), "it cannot be holding a place it has not reached");
 
         // Focusing something else drops the armed course: it belonged to the last one.
         apply(Action::FocusTarget(Some(crate::navigation::Target::Band(0))), &mut ui, &mut s);
         assert!(ui.course.is_none());
+    }
+    /// With a server answering, a flight order is **sent**, not applied. Applying it locally
+    /// would use the acceleration that was asked for rather than the one the server flew.
+    #[test]
+    fn a_remote_session_sends_its_flight_orders_instead_of_flying_them() {
+        let mut ui = UiState::default();
+        let mut s = Session::new(&AuthoredStars::sample(), 3);
+        s.remote = true;
+        s.ship.motion.drive.accel_g = 7.0;
+        let before = s.ship.motion.position_ly;
+
+        let effects = apply(
+            Action::SetCourse(crate::navigation::Course::LeaveSystem),
+            &mut ui,
+            &mut s,
+        );
+        let sent: Vec<_> = effects
+            .iter()
+            .filter_map(|e| match e {
+                Effect::Send(order) => Some(order),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            sent.as_slice(),
+            [&lc_proto::Order::SetCourse {
+                course: lc_proto::Course::LeaveSystem,
+                accel_g: 7.0,
+            }],
+            "{effects:?}",
+        );
+        assert_eq!(s.ship.motion.position_ly, before, "it flew as well as sent");
+    }
+
+    /// And with no server it still flies, which is every build before there was one.
+    #[test]
+    fn a_local_session_still_flies_its_own_orders() {
+        let mut ui = UiState::default();
+        let mut s = Session::new(&AuthoredStars::sample(), 3);
+        assert!(!s.remote);
+        let effects = apply(
+            Action::SetCourse(crate::navigation::Course::LeaveSystem),
+            &mut ui,
+            &mut s,
+        );
+        assert!(
+            !effects.iter().any(|e| matches!(e, Effect::Send(_))),
+            "a single-process session sent an order to nobody: {effects:?}",
+        );
+    }
+
+    /// A crossing goes over the wire by **star id**, and the client does not fly it. Both ends
+    /// must plan the same crossing, so only the one with authority plans it.
+    #[test]
+    fn a_remote_session_sends_a_crossing_and_does_not_fly_it() {
+        let mut ui = UiState::default();
+        let mut s = Session::new(&AuthoredStars::sample(), 3);
+        s.remote = true;
+        s.ship.motion.drive.accel_g = 4.0;
+        let destination = s.stars[0].id;
+        let before = s.ship.motion.position_ly;
+
+        let effects = apply(Action::FlyTo(Some(destination)), &mut ui, &mut s);
+        assert!(
+            effects.iter().any(|e| matches!(
+                e,
+                Effect::Send(lc_proto::Order::Cross { star, accel_g })
+                    if *star == destination.get() && *accel_g == 4.0
+            )),
+            "{effects:?}",
+        );
+        assert!(s.cruise().is_none(), "it flew a crossing the server has not agreed to");
+        assert_eq!(s.ship.motion.position_ly, before);
+    }
+
+    /// And with no server it still flies it itself, which is the single-process game.
+    #[test]
+    fn a_local_session_flies_its_own_crossing() {
+        let mut ui = UiState::default();
+        let mut s = Session::new(&AuthoredStars::sample(), 3);
+        let effects = apply(Action::FlyTo(Some(s.stars[0].id)), &mut ui, &mut s);
+        assert!(!effects.iter().any(|e| matches!(e, Effect::Send(_))), "{effects:?}");
+        assert!(s.cruise().is_some(), "it sent an order to nobody instead of flying");
+    }
+    /// The server owns the rate — doc 13 says so, and the client never enforced it. A client
+    /// that warps runs its clock away from the server's, and then every order it sends comes
+    /// back stamped in its own past.
+    #[test]
+    fn a_remote_session_cannot_take_the_clock() {
+        let mut ui = UiState::default();
+        let mut s = Session::new(&AuthoredStars::sample(), 3);
+        s.remote = true;
+        let before = ui.time_rate;
+
+        for action in [Action::TimeRateUp, Action::TimeRateDown, Action::SetTimeRate(3600.0)] {
+            let effects = apply(action, &mut ui, &mut s);
+            assert_eq!(ui.time_rate, before, "the client took the clock");
+            assert!(
+                effects.iter().any(|e| matches!(e, Effect::Notify(t) if t.contains("server"))),
+                "it changed nothing and said nothing: {effects:?}",
+            );
+        }
+    }
+
+    /// And offline it is still the player's, which is the single-process game and the whole
+    /// reason the ladder exists.
+    #[test]
+    fn a_local_session_still_owns_its_own_clock() {
+        let mut ui = UiState::default();
+        let mut s = Session::new(&AuthoredStars::sample(), 3);
+        apply(Action::SetTimeRate(60.0), &mut ui, &mut s);
+        assert_eq!(ui.time_rate, 60.0);
     }
 }

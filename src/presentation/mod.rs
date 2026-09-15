@@ -15,6 +15,7 @@ pub use em_render::{
 };
 
 mod labels;
+mod reticle;
 mod local_starfield;
 mod rotation;
 mod chain_path;
@@ -48,6 +49,7 @@ pub use body_mesh::{
 pub use lights::adjust_lights;
 pub use rotation::render_axes;
 pub use labels::label_bodies;
+pub use reticle::draw_reticle;
 pub use local_starfield::{spawn_local_starfield, update_local_starfield, clear_local_starfield, LocalStarfield};
 pub use local_starfield_material::{LocalStarfieldMaterial, LocalStarfieldMaterialPlugin};
 pub use trajectory::{

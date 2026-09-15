@@ -13,12 +13,36 @@ em-render = { path = "../em-render" }
 em-spectra = { path = "../em-spectra" }
 em-sim = { path = "../em-sim", features = ["bevy"] }
 em-ui = { path = "../em-ui" }
+lc-proto = { path = "../lc-proto" }
 lc-spacetime = { path = "../lc-spacetime" }
 lc-world = { path = "../lc-world", default-features = false }
 bevy = "0.17.2"
 bevy_egui = "0.38.0"
 bevy_mesh = "0.17"
 glam = { version = "0.30", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# The desktop sign-in: a loopback listener, the system browser, and somewhere to keep the
+# device grant. None of it exists in a browser, where the page already has a session.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+# Where a device grant lands when there is no keychain. Per-platform, because the XDG layout is
+# the right answer on one of the three platforms this runs on.
+directories = "5"
+webbrowser = "1"
+# One blocking HTTP client for two POSTs to the broker, run on Bevy IO tasks. `reqwest` would
+# bring an async runtime the client does not otherwise have.
+ureq = { version = "2", features = ["json", "tls"] }
+# Reading a ticket's claims to show a returning player their own name. See `broker::identity_in`.
+base64 = "0.22"
+# The game socket. Blocking, on a thread of its own, for the same reason `ureq` is here: the
+# client has no async runtime and this does not justify one.
+tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+# The server in the box, for `--local`. The desktop build contains a server because its
+# single-player mode is a server with one player; the browser build has none. See `src/local.rs`.
+lc-server = { path = "../lc-server" }
+tokio = { version = "1", features = ["rt", "macros", "time"] }
 
 # The browser build. `getrandom` needs its wasm backend named here as well as in
 # `.cargo/config.toml`; one without the other is not enough.
@@ -27,8 +51,18 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 wasm-bindgen = "0.2"
 # WebGPU. Bevy's wasm default is WebGL2, which this renderer does not target.
 bevy = { version = "0.17.2", features = ["webgpu"] }
-web-sys = { version = "0.3", features = ["Window", "Location", "UrlSearchParams", "Document", "Element", "HtmlCanvasElement"] }
+web-sys = { version = "0.3", features = [
+    "Window", "Location", "UrlSearchParams", "Document", "Element", "HtmlCanvasElement",
+    "WebSocket", "MessageEvent", "CloseEvent", "Event", "BinaryType",
+] }
+js-sys = "0.3"
+# `WebSocket` and `Closure` are `!Send`, and a Bevy resource must be `Send`. This target has
+# one thread, so the check it makes on every access can never fail. See `src/link.rs`.
+send_wrapper = "0.6"
 console_error_panic_hook = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
 [[bin]]
 name = "lightcone"

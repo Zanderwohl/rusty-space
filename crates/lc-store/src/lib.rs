@@ -12,6 +12,8 @@ pub mod bvh;
 pub mod cursor;
 pub mod id;
 pub mod migrate;
+pub mod retention;
+pub mod ships;
 pub mod store;
 
 /// Where the store lives, from the environment or the development default.

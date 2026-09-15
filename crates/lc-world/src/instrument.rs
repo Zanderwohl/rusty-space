@@ -31,6 +31,25 @@ impl Instrument {
         emissivity: 0.05,
     };
 
+    /// What a crewed ship carries: four square metres, cooled, across every band.
+    pub const SHIP: Self = Self {
+        aperture_m2: 4.0,
+        throughput: 0.6,
+        bands: BandMask::ALL,
+        temperature_k: 45.0,
+        emissivity: 0.05,
+    };
+
+    /// What fits on something small enough to throw somewhere. A quarter of a square metre
+    /// and warmer, so it sees an order of magnitude less far than a ship does.
+    pub const PROBE: Self = Self {
+        aperture_m2: 0.25,
+        throughput: 0.5,
+        bands: BandMask::ALL,
+        temperature_k: 120.0,
+        emissivity: 0.08,
+    };
+
     pub fn with_bands(mut self, bands: BandMask) -> Self {
         self.bands = bands;
         self

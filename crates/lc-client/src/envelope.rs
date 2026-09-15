@@ -6,6 +6,7 @@
 //! are narrow so the density is a band near the plane and it reads as a ring; an isotropic
 //! swarm's is flat and it reads as a sphere. One shape, no special cases.
 
+use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
@@ -84,57 +85,151 @@ pub struct Shell {
     pub orientation: Quat,
 }
 
-/// A unit sphere carrying each vertex's sky density, normalised so the peak is one.
+/// Segments around the tube's own cross-section.
 ///
-/// Built from the population's inclination distribution alone, so it is static: what changes as
-/// the ship moves is the transform, never the mesh.
-pub fn build_shell(population: &Population) -> Mesh {
-    let mut positions = Vec::with_capacity((RINGS + 1) * (SEGMENTS + 1));
-    let mut normals = Vec::with_capacity(positions.capacity());
-    let mut density = Vec::with_capacity(positions.capacity());
-    let mut indices = Vec::with_capacity(RINGS * SEGMENTS * 6);
+/// Fewer than around the pole: the tube is short compared with the circumference it is swept
+/// along, and a belt's is a tenth of it.
+pub const TUBE_SEGMENTS: usize = 24;
 
-    // Peak density, to normalise against. In the plane for anything with a plane.
+/// The population's torus, normalised so its outer edge is one.
+///
+/// A belt is a donut and the model says so — a spread of semi-major axes, a spread of
+/// eccentricities, a spread of inclinations, and no node or periapsis angle anywhere, which is
+/// what leaves it symmetric about its pole. It used to be drawn as a sphere at one radius with
+/// the inclinations painted on as a band, which reads correctly from inside and as a ball from
+/// outside.
+///
+/// Normalised rather than scaled per axis, because the transform's scale has to stay uniform:
+/// the shader takes the limb brightening from the surface normal, and a non-uniform scale does
+/// not carry normals.
+///
+/// Static, like the sphere it replaces — every dimension comes from the distributions, and what
+/// changes as the ship moves is the transform.
+pub fn build_envelope(population: &Population) -> Mesh {
+    let Some(extent) = population.extent() else {
+        return Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+    };
+    let scale = extent.outer_m;
+    let core = extent.core_m() / scale;
+    // Floored, or a population with one semi-major axis or no inclination collapses the tube
+    // into a line and takes its normals with it.
+    let half_width = (extent.half_width_m() / scale).max(MIN_TUBE);
+    let half_height = (extent.half_height_m() / scale).max(MIN_TUBE);
+
     let peak = (0..=RINGS)
-        .map(|r| {
-            let phi = latitude(r);
-            population.inclination.sky_density(phi)
-        })
+        .map(|r| population.inclination.sky_density(latitude(r)))
         .fold(0.0f64, f64::max)
         .max(f64::MIN_POSITIVE);
 
-    for r in 0..=RINGS {
-        let phi = latitude(r);
-        let at = (population.inclination.sky_density(phi) / peak) as f32;
-        let (sp, cp) = phi.sin_cos();
-        for s in 0..=SEGMENTS {
-            let theta = std::f64::consts::TAU * s as f64 / SEGMENTS as f64;
-            let (st, ct) = theta.sin_cos();
-            // The population's own frame: its pole is +Z, and the transform turns it.
-            let dir = DVec3::new(cp * ct, cp * st, sp);
-            let p = sim_to_render(dir).as_vec3().to_array();
-            positions.push(p);
-            // A sphere's normal at a point is the point.
-            normals.push(p);
-            density.push(at);
+    // See [`conserving_level`]. Without it a belt comes out some two and a half times brighter
+    // than it was, because the density field used to be doing two jobs and now does one.
+    let level = conserving_level(population, core, half_width, half_height, peak);
+
+    let count = (SEGMENTS + 1) * (TUBE_SEGMENTS + 1);
+    let mut positions = Vec::with_capacity(count);
+    let mut normals = Vec::with_capacity(count);
+    let mut density = Vec::with_capacity(count);
+    let mut indices = Vec::with_capacity(SEGMENTS * TUBE_SEGMENTS * 6);
+
+    for major in 0..=SEGMENTS {
+        let theta = std::f64::consts::TAU * major as f64 / SEGMENTS as f64;
+        let (st, ct) = theta.sin_cos();
+        // The population's own frame: its pole is +Z, and the transform turns it.
+        let outward = DVec3::new(ct, st, 0.0);
+        for minor in 0..=TUBE_SEGMENTS {
+            let psi = std::f64::consts::TAU * minor as f64 / TUBE_SEGMENTS as f64;
+            let (sp, cp) = psi.sin_cos();
+            let at = outward * (core + half_width * cp) + DVec3::Z * (half_height * sp);
+            // The outward normal of an ellipse is not its radius: the axes divide, so a wide
+            // flat tube faces the plane over most of its surface rather than facing out.
+            let normal =
+                (outward * (cp / half_width) + DVec3::Z * (sp / half_height)).normalize_or_zero();
+
+            positions.push(sim_to_render(at).as_vec3().to_array());
+            normals.push(sim_to_render(normal).as_vec3().to_array());
+            // The same sky density the sphere carried, read at this point's own latitude. The
+            // shape now says where the population reaches; this still says how much is there.
+            let radius = at.length().max(f64::MIN_POSITIVE);
+            let phi = (at.z / radius).clamp(-1.0, 1.0).asin();
+            density.push(((population.inclination.sky_density(phi) / peak) * level) as f32);
         }
     }
 
-    let row = SEGMENTS + 1;
-    for r in 0..RINGS {
-        for s in 0..SEGMENTS {
-            let a = (r * row + s) as u32;
-            let (b, c, d) = (a + 1, a + row as u32, a + row as u32 + 1);
-            indices.extend_from_slice(&[a, c, b, b, c, d]);
+    for major in 0..SEGMENTS {
+        for minor in 0..TUBE_SEGMENTS {
+            let a = (major * (TUBE_SEGMENTS + 1) + minor) as u32;
+            let b = a + (TUBE_SEGMENTS + 1) as u32;
+            indices.extend_from_slice(&[a, b, a + 1, a + 1, b, b + 1]);
         }
     }
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::RENDER_WORLD);
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(ATTRIBUTE_SHELL_DENSITY, density);
     mesh.insert_indices(Indices::U32(indices));
     mesh
+}
+
+/// Smallest half-axis a tube may have, as a fraction of its outer radius.
+const MIN_TUBE: f64 = 1.0e-4;
+
+/// Quadrature steps for the two surface integrals in [`conserving_level`]. Both integrands are
+/// smooth and this is far more than either needs.
+const QUADRATURE: usize = 256;
+
+/// How much to scale the tube's density by, so the population paints what it used to.
+///
+/// The density field used to do two jobs. On a sphere it said *how much* and *where*: a belt's
+/// band was near zero over most of the surface, and that near-zero was the only thing saying
+/// the belt was flat. The shape says that now, so the density is near its peak over almost the
+/// whole tube — and the same population paints far more light than it did. Measured on the
+/// generated system, the sky from Jupiter came out three-quarters brighter.
+///
+/// The invariant is that the total scattered light cannot depend on what shape the population
+/// is drawn as. So this is the ratio of the two surface integrals of density: what the unit
+/// sphere carried, over what the tube carries. It comes out below one for a belt, because a
+/// tube has *more* area than the band it replaces once both its walls are counted.
+///
+/// [`opacity_of`] is untouched: it is the photometry, it is a fourth root, and a factor of two
+/// in it is a factor of 1.19 on screen. This is a factor on the geometry, where it belongs.
+fn conserving_level(
+    population: &Population,
+    core: f64,
+    half_width: f64,
+    half_height: f64,
+    peak: f64,
+) -> f64 {
+    // The sphere: `dA = cos(phi) dphi dtheta`, and the `2 pi` cancels against the tube's.
+    let mut on_sphere = 0.0;
+    let step = std::f64::consts::PI / QUADRATURE as f64;
+    for k in 0..QUADRATURE {
+        let phi = -std::f64::consts::FRAC_PI_2 + (k as f64 + 0.5) * step;
+        on_sphere += population.inclination.sky_density(phi) / peak * phi.cos() * step;
+    }
+
+    // The tube. Its two parameters are orthogonal, so the area element is the product of the
+    // two arc lengths: the sweep around the pole, and the ellipse's own.
+    let mut on_tube = 0.0;
+    let tube_step = std::f64::consts::TAU / QUADRATURE as f64;
+    for k in 0..QUADRATURE {
+        let psi = (k as f64 + 0.5) * tube_step;
+        let (sp, cp) = psi.sin_cos();
+        let radial = core + half_width * cp;
+        let height = half_height * sp;
+        let arc = (half_width * half_width * sp * sp + half_height * half_height * cp * cp).sqrt();
+        let radius = (radial * radial + height * height).sqrt().max(f64::MIN_POSITIVE);
+        let phi = (height / radius).clamp(-1.0, 1.0).asin();
+        on_tube += population.inclination.sky_density(phi) / peak * radial * arc * tube_step;
+    }
+
+    // And a tube is crossed twice where a shell is crossed once: a sightline through a belt
+    // enters and leaves the near side and then the far side, four surface crossings for two
+    // passes through material, where the shell gave one crossing for one pass. Each wall is
+    // therefore worth half a pass. Without this the sky from Jupiter stays three-quarters
+    // brighter than it was, and the factor is exactly two.
+    const WALLS: f64 = 2.0;
+    if on_tube > 0.0 { (on_sphere / (on_tube * WALLS)).min(1.0) } else { 1.0 }
 }
 
 /// Radial divisions of a ring. Enough that the Cassini Division is a gap rather than a hint.
@@ -183,7 +278,7 @@ pub fn build_ring(rings: &lc_world::rings::RingSystem) -> Mesh {
         }
     }
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::RENDER_WORLD);
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(ATTRIBUTE_SHELL_DENSITY, density);
@@ -257,7 +352,7 @@ pub fn spawn(
         .enumerate()
         .filter(|(_, p)| visible(p))
         .map(|(i, p)| {
-            let mesh = meshes.add(build_shell(p));
+            let mesh = meshes.add(build_envelope(p));
             let material = materials.add(PopulationMaterial {
                 uniforms: uniforms(p, i as f32 * 7.31 + 1.0, gain, true),
             });
@@ -273,7 +368,10 @@ pub fn spawn(
             Shell {
                 mesh,
                 material,
-                radius: (p.thermal_radius() / UNIT_M) as f32,
+                // The mesh is normalised to its outer edge, so that is what scales it. The
+                // thermal radius is where the light comes from, which is a different number
+                // and is what the interface names the band by.
+                radius: (p.extent().map(|e| e.outer_m).unwrap_or(0.0) / UNIT_M) as f32,
                 orientation: orientation(p.pole),
             }
         })
@@ -367,7 +465,7 @@ pub fn update_envelopes(
     let Some(system) = session.system.as_ref() else { return };
     for (mut transform, shell) in placed.iter_mut().zip(&envelopes.shells) {
         transform.translation =
-            sim_to_render((system.origin_ly - session.position_ly) * M_PER_LY / UNIT_M).as_vec3();
+            sim_to_render((system.origin_ly - session.ship.motion.position_ly) * M_PER_LY / UNIT_M).as_vec3();
         transform.rotation = shell.orientation;
         transform.scale = Vec3::splat(shell.radius);
     }
@@ -377,7 +475,7 @@ pub fn update_envelopes(
         let Some(body) = bodies.drawn.iter().find(|d| d.name == ring.body) else { continue };
         let Some(rings) = body.rings else { continue };
         transform.translation =
-            sim_to_render((body.position_ly - session.position_ly) * M_PER_LY / UNIT_M).as_vec3();
+            sim_to_render((body.position_ly - session.ship.motion.position_ly) * M_PER_LY / UNIT_M).as_vec3();
         transform.rotation = orientation(rings.pole);
         transform.scale = Vec3::splat(ring.radius);
     }
@@ -387,7 +485,7 @@ pub fn update_envelopes(
         envelopes.shells.iter().zip(system.populations.iter().filter(|p| visible(p)))
     {
         if let Some(material) = materials.get_mut(&shell.material) {
-            let inside = session.position_ly.distance(system.origin_ly) * M_PER_LY
+            let inside = session.ship.motion.position_ly.distance(system.origin_ly) * M_PER_LY
                 < population.thermal_radius();
             let next = uniforms(population, material.uniforms.seed, ui.envelope_gain, inside);
             if material.uniforms != next {
@@ -416,6 +514,13 @@ mod tests {
         }
     }
 
+    fn positions(mesh: &Mesh) -> Vec<[f32; 3]> {
+        match mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() {
+            bevy_mesh::VertexAttributeValues::Float32x3(v) => v.clone(),
+            _ => panic!("positions must be Float32x3"),
+        }
+    }
+
     fn normals(mesh: &Mesh) -> Vec<[f32; 3]> {
         match mesh.attribute(Mesh::ATTRIBUTE_NORMAL).unwrap() {
             bevy_mesh::VertexAttributeValues::Float32x3(v) => v.clone(),
@@ -430,18 +535,136 @@ mod tests {
         }
     }
 
-    /// One shape for both: a narrow inclination spread makes a band near the plane, which reads
-    /// as a ring, and an isotropic one fills the sphere. Nothing special-cases either.
+    /// One shape for both, and now it is the *shape* that says which. A narrow inclination
+    /// spread gives a flat tube and an isotropic one gives a tube as tall as it is wide, which
+    /// is a filled ball. Nothing special-cases either.
+    ///
+    /// The sphere this replaces said the same thing with a painted band and could not say the
+    /// other half of it: a belt has a radial extent and drawing it at one radius left that out
+    /// entirely.
     #[test]
-    fn a_belt_is_a_band_and_a_swarm_is_a_shell() {
-        let belt = densities(&build_shell(&population(Inclination::uniform_angle(0.0, 0.2, 12), 1e6)));
-        let swarm = densities(&build_shell(&population(Inclination::isotropic(), 1e6)));
+    fn a_belt_is_flat_and_a_swarm_is_round() {
+        let flat = population(Inclination::uniform_angle(0.0, 0.2, 12), 1e6);
+        let round = population(Inclination::isotropic(), 1e6);
 
-        let lit = |v: &[f32]| v.iter().filter(|d| **d > 0.05).count() as f32 / v.len() as f32;
-        assert!(lit(&belt) < 0.2, "a belt should cover a fraction of the sphere: {}", lit(&belt));
-        assert!(lit(&swarm) > 0.8, "a swarm should cover nearly all of it: {}", lit(&swarm));
+        let aspect = |p: &Population| {
+            let e = p.extent().expect("an extent");
+            e.half_height_m() / e.core_m()
+        };
+        assert!(aspect(&flat) < 0.25, "a belt is thin: {}", aspect(&flat));
+        assert!((aspect(&round) - 1.0).abs() < 1.0e-9, "a cloud is not: {}", aspect(&round));
+
+        // And the mesh follows: the flat one stays near its plane, the round one does not.
+        let height = |p: &Population| {
+            positions(&build_envelope(p)).iter().map(|v| v[1].abs()).fold(0.0f32, f32::max)
+        };
+        assert!(height(&flat) < 0.25, "{}", height(&flat));
+        assert!(height(&round) > 0.4, "{}", height(&round));
+
+        let belt = densities(&build_envelope(&flat));
         assert!(belt.iter().all(|d| (0.0..=1.0).contains(d)), "densities are normalised");
-        assert!(belt.iter().any(|d| *d > 0.99), "and the peak is one");
+        // The peak is the conserving level rather than one now; see
+        // `the_correction_dims_a_belt_rather_than_brightening_it`.
+        assert!(belt.iter().any(|d| *d > 0.0), "and something is drawn");
+    }
+
+    /// The invariant a change of shape has to keep: the same population paints the same total
+    /// light whatever it is drawn as. The photometry is in `covering_fraction`, and that did
+    /// not change; this is only about the geometry the opacity is spread over.
+    ///
+    /// Measured off the built mesh rather than by re-running the quadrature that built it, so
+    /// it is a check and not a restatement. Without the correction a belt came out twice as
+    /// bright, which is what `--at Jupiter` measured: a background of 29 against 14.
+    #[test]
+    fn a_tube_paints_what_the_shell_it_replaces_did() {
+        for inclination in [Inclination::uniform_angle(0.0, 0.2, 12), Inclination::isotropic()] {
+            let population = population(inclination, 1e6);
+            let mesh = build_envelope(&population);
+            let at = positions(&mesh);
+            let density = densities(&mesh);
+            let indices = match mesh.indices().unwrap() {
+                Indices::U32(v) => v.clone(),
+                _ => panic!("u32 indices"),
+            };
+
+            // Every triangle's area times its mean density, which is the surface integral.
+            let mut on_mesh = 0.0f64;
+            for tri in indices.chunks(3) {
+                let p = |k: usize| {
+                    let v = at[tri[k] as usize];
+                    DVec3::new(v[0] as f64, v[1] as f64, v[2] as f64)
+                };
+                let area = (p(1) - p(0)).cross(p(2) - p(0)).length() * 0.5;
+                let mean = tri.iter().map(|i| density[*i as usize] as f64).sum::<f64>() / 3.0;
+                on_mesh += area * mean;
+            }
+
+            // The unit sphere it replaces, over the same peak-normalised density.
+            let peak = (0..=RINGS)
+                .map(|r| population.inclination.sky_density(latitude(r)))
+                .fold(0.0f64, f64::max);
+            let mut on_sphere = 0.0;
+            let step = std::f64::consts::PI / 2048.0;
+            for k in 0..2048 {
+                let phi = -std::f64::consts::FRAC_PI_2 + (k as f64 + 0.5) * step;
+                on_sphere += population.inclination.sky_density(phi) / peak * phi.cos() * step;
+            }
+            on_sphere *= std::f64::consts::TAU;
+
+            // Twice over, because a tube has two walls where a shell has one surface.
+            //
+            // Within a few per cent, not exactly: this sums flat triangles and averaged vertex
+            // densities, where the correction integrates the curve and the continuous density.
+            // The point is that it is not a factor of two out.
+            let painted = on_mesh * 2.0;
+            assert!(
+                (painted / on_sphere - 1.0).abs() < 0.05,
+                "{painted:.4} against {on_sphere:.4}",
+            );
+        }
+    }
+
+    /// A belt's tube has *more* area than the band it replaces, once both walls are counted,
+    /// so the correction takes the density down rather than up.
+    #[test]
+    fn the_correction_dims_a_belt_rather_than_brightening_it() {
+        let belt = population(Inclination::uniform_angle(0.0, 0.2, 12), 1e6);
+        let peak = (0..=RINGS)
+            .map(|r| belt.inclination.sky_density(latitude(r)))
+            .fold(0.0f64, f64::max);
+        let extent = belt.extent().unwrap();
+        let scale = extent.outer_m;
+        let level = conserving_level(
+            &belt,
+            extent.core_m() / scale,
+            extent.half_width_m() / scale,
+            extent.half_height_m() / scale,
+            peak,
+        );
+        assert!(level < 1.0 && level > 0.0, "{level}");
+        // And the mesh carries it: nothing reaches the bare peak of one any more.
+        let brightest = densities(&build_envelope(&belt)).iter().cloned().fold(0.0f32, f32::max);
+        assert!((brightest as f64 - level).abs() < 1.0e-3, "{brightest} against {level}");
+    }
+
+    /// The thing the sphere could not say at all: a belt reaches from an inner radius to an
+    /// outer one, and every vertex lands between them.
+    #[test]
+    fn the_envelope_spans_the_radii_the_population_occupies() {
+        let belt = population(Inclination::uniform_angle(0.0, 0.2, 12), 1e6);
+        let extent = belt.extent().expect("an extent");
+        let inner = (extent.inner_m / extent.outer_m) as f32;
+
+        // Render axes are Y-up, so the plane is x-z and the pole is y.
+        let radii: Vec<f32> = positions(&build_envelope(&belt))
+            .iter()
+            .map(|v| (v[0] * v[0] + v[2] * v[2]).sqrt())
+            .collect();
+        let widest = radii.iter().cloned().fold(0.0f32, f32::max);
+        let closest = radii.iter().cloned().fold(f32::MAX, f32::min);
+        assert!((widest - 1.0).abs() < 1.0e-3, "normalised to the outer edge: {widest}");
+        assert!((closest - inner).abs() < 0.01, "{closest} against an inner edge of {inner}");
+        assert!(inner > 0.5, "this belt is narrow; a wide one would be a different test");
     }
 
     /// The mapping is a fourth root because the quantity spans fourteen decades. A logarithm
@@ -520,7 +743,7 @@ mod tests {
     fn a_ring_is_flat_and_a_shell_is_not() {
         let saturn = lc_world::rings::for_body("Saturn").unwrap();
         let ring = normals(&build_ring(saturn));
-        let shell = normals(&build_shell(&population(Inclination::isotropic(), 1e6)));
+        let shell = normals(&build_envelope(&population(Inclination::isotropic(), 1e6)));
         let first = ring[0];
         assert!(ring.iter().all(|n| *n == first), "every ring normal is the pole");
         assert!(shell.iter().any(|n| *n != shell[0]), "a shell's normals point everywhere");

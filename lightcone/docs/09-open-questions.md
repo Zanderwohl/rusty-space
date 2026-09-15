@@ -137,7 +137,17 @@ advance. Each is local to one component.
 | Transport | WebTransport availability decides whether browser and native share one transport or two. |
 | Wire format | `postcard` or `bincode`, plus a versioning scheme, since clients will lag deploys. |
 | Where the light-cone cursor lives | `lc-store` needs a database; the client wants the traversal logic. Likely splits into `lc-spacetime`. |
-| Rate limiting | A scripted client can emit intents at any rate. |
+| Rate limiting | A scripted client can emit intents at any rate. **Decided:** an integer token bucket per client, measured rather than guessed. |
+| Identity on a socket | **Designed:** [16-identity.md](16-identity.md). A broker neither product owns, a sixty-second single-use ticket, verified locally against JWKS. |
+| Does the password provider ship? | Open. It exists so development can make accounts without an upstream. Its deferred list — delivery, reset, captcha, breach lists — is the condition: empty, or it stays a development provider. |
+| Reconciliation | **Designed:** [17-reconciliation.md](17-reconciliation.md). Three tiers chosen by cause, not size. |
+
+## Blocking the client/server seam
+
+| question | notes |
+|---|---|
+| How large is the libm drift between a wasm client and a native server? | Unmeasured, and it sets the slew threshold and the drift alarm in [17-reconciliation.md](17-reconciliation.md). `sinh`, `atan2` and a Newton solver are not bit-identical across implementations, so a client that did everything right still drifts. A thousand identical events folded on both, differenced. |
+| Does a re-acquire end on a timer or on a condition? | "Until you have a fix from two known bodies" is the better answer and needs a sensor mechanic that does not exist. |
 
 ## Observation, still open
 
