@@ -19,6 +19,8 @@ pub struct Entry {
     /// Run a shard in this process and connect to that. Beats `server` when both are given,
     /// because asking for a local one is the more specific request.
     pub local: bool,
+    /// Craft to put near the start, so there is something to look at besides one's own ship.
+    pub traffic: usize,
 }
 
 /// Parses the flag vocabulary both binaries accept.
@@ -95,7 +97,16 @@ pub fn parse(args: &[String]) -> Entry {
     // The first argument only. Scanning for any non-flag token would pick up a flag's own
     // value: in `--band 2` the `2` looks exactly like a path.
     let catalogue = args.first().filter(|a| !a.starts_with("--")).cloned();
-    Entry { dev, catalogue, server: after("--server"), local: flag("--local") }
+    // Asking for traffic is asking for a shard to serve it, so it implies `--local` rather
+    // than silently doing nothing without it.
+    let traffic = value::<usize>(args, "--traffic").unwrap_or(0);
+    Entry {
+        dev,
+        catalogue,
+        server: after("--server"),
+        local: flag("--local") || traffic > 0,
+        traffic,
+    }
 }
 
 /// Reads the flags out of a URL query string.
@@ -243,13 +254,14 @@ mod tests {
 
     #[test]
     fn nothing_at_all_is_a_plain_start() {
-        let Entry { dev, catalogue: cat, server, local } = parse(&[]);
+        let Entry { dev, catalogue: cat, server, local, traffic } = parse(&[]);
         assert!(!dev.observe_immediately);
         assert!(dev.actions.is_empty());
         assert_eq!(cat, None);
         // No server named is the single-process game, not a default address.
         assert_eq!(server, None);
         assert!(!local);
+        assert_eq!(traffic, 0);
     }
 
     /// `--local` is its own thing, not an address, because the port is not known until the

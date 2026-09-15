@@ -106,6 +106,11 @@ pub struct ServerAddress(pub Option<String>);
 #[derive(Resource, Default)]
 pub struct LocalShard(pub bool);
 
+/// How many craft the in-process shard puts near the start, for `--traffic`. Development only:
+/// a deployment's traffic is other players.
+#[derive(Resource, Default)]
+pub struct Traffic(pub usize);
+
 /// Start the in-process shard, and point [`ServerAddress`] at it.
 ///
 /// On entering the world rather than at boot, because the shard has to be given the stars the
@@ -114,13 +119,14 @@ pub struct LocalShard(pub bool);
 #[cfg(not(target_arch = "wasm32"))]
 pub fn start_local(
     local: Res<LocalShard>,
+    traffic: Res<Traffic>,
     game: Res<crate::app::Game>,
     mut address: ResMut<ServerAddress>,
 ) {
     if !local.0 || address.0.is_some() {
         return;
     }
-    match crate::local::start(game.0.stars.clone()) {
+    match crate::local::start(game.0.stars.clone(), traffic.0) {
         Ok(at) => {
             info!("a shard is running in this process at {at}");
             address.0 = Some(at);
@@ -497,7 +503,8 @@ impl Plugin for UplinkPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Uplink>()
             .init_resource::<ServerAddress>()
-            .init_resource::<LocalShard>();
+            .init_resource::<LocalShard>()
+            .init_resource::<Traffic>();
         #[cfg(not(target_arch = "wasm32"))]
         app.add_systems(OnEnter(crate::app::AppState::InGame), start_local);
         app
