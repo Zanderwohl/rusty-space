@@ -99,6 +99,31 @@ and a rule drawn there would leave a player unable to find traffic they are sitt
 middle of. A client hears nothing at all about craft outside it, so a system with nobody in it
 and a system whose traffic is all elsewhere look the same from inside.
 
+### Intercept: a standing order
+
+`Order::Intercept` is the first order that is a **policy** rather than an event. Every other
+one happens at an instant and a trajectory follows from it; this one is re-solved by the
+authority whenever what the pursuer can *see* of its quarry stops agreeing with the plan it is
+flying, and each of those re-solutions is an ordinary motive both ends fold the usual way. The
+standing part lives only on the authority, so nothing about how a trajectory is agreed on has
+changed.
+
+**The pursuer steers by the same sighting its owner is sent.** One `sighting` serves both — two
+would be two answers, and the one the player watched would not be the one the autopilot used.
+So a quarry that manoeuvres is chased on stale information until the news arrives, which across
+a system is seconds to hours, and that delay is the game rather than a shortcoming.
+
+There is no separate "match its acceleration" mode. A quarry holding course never diverges from
+the plan and it runs to completion; one under thrust diverges at once and is re-solved against,
+which from outside *is* a pursuer tracking a burn. One rule cannot disagree with itself at the
+boundary. Hanging about falls out of the same rule with a deadband: once alongside, close again
+only after a real drift.
+
+`Outbound::Flying` exists because of this and nothing else. A client folds its own orders, but
+it cannot fold a re-solve it did not ask for and could not reproduce, so the authority states
+what the ship is now flying — the same `Motion` a welcome carries. It leaks nothing: a
+`Motive::Rendezvous` is relative offsets and one sighting.
+
 **The cost is quadratic and is not yet paid for.** One retarded solve per observer per craft
 per tick is fine for the handful a shard carries today and is not fine for a busy system: a
 hundred craft in one place is ten thousand solves twenty times a second. The shape of the fix

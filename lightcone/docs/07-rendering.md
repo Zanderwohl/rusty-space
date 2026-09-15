@@ -669,6 +669,19 @@ a name that only appeared on hover would be a name nobody found. Clicking one as
 yet — every `Target` is somewhere a course can be plotted to, and a course to a ship is a
 rendezvous with something moving that this client only knows the past of.
 
+### Ships in the interface
+
+The System window has two lists, because "what is here" and "who is here" are different
+questions that change at different rates — a ship that arrived a second ago would otherwise be
+filed below two hundred moons. The count is on the tab, so whether anyone is here at all costs
+no clicks.
+
+The age of the light is a column and not a footnote. It is taken from the **range**: a
+light-year is a year of travel by definition, so the distance to where the light left is its
+age, and taking it that way needs no agreement with the server about what time it is.
+Differencing the timestamps instead measures the clock skew between the two ends, which at a
+frozen client rate put a ship eight kilometres away five minutes in the past.
+
 ## Checking a renderer without a window
 
 ![Observer snapshot](../images/observer-snapshot.png)
