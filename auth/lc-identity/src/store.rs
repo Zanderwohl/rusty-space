@@ -61,6 +61,7 @@ struct Tables {
     links: HashMap<(Provider, String), Link>,
     secrets: HashMap<(Provider, String), String>,
     codes: HashMap<Vec<u8>, (Uuid, String, chrono::DateTime<chrono::Utc>)>,
+    grants: HashMap<Vec<u8>, (Uuid, chrono::DateTime<chrono::Utc>)>,
 }
 
 /// Accounts in memory, for tests. Every rule the schema enforces is enforced here too, or a
@@ -345,6 +346,89 @@ impl Store {
         Ok(taken
             .filter(|(_, issued_for, expires_at)| issued_for == return_to && *expires_at > now)
             .map(|(account_id, _, _)| account_id))
+    }
+}
+
+impl Store {
+    /// Record a device grant. `digest` is the hash of it, never the grant.
+    pub async fn put_grant(
+        &self,
+        digest: &[u8],
+        account_id: Uuid,
+        label: &str,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), StoreError> {
+        match self {
+            Store::Memory(m) => {
+                m.0.lock()
+                    .unwrap()
+                    .grants
+                    .insert(digest.to_vec(), (account_id, expires_at));
+                Ok(())
+            }
+            Store::Postgres(pool) => sqlx::query(
+                "insert into device_grants (digest, account_id, label, expires_at) \
+                 values ($1, $2, $3, $4)",
+            )
+            .bind(digest)
+            .bind(account_id)
+            .bind(label)
+            .bind(expires_at)
+            .execute(pool)
+            .await
+            .map(|_| ())
+            .map_err(|e| StoreError::Backend(e.to_string())),
+        }
+    }
+
+    /// Who a grant belongs to, if it is still good.
+    ///
+    /// **Not** spent on use, unlike a code: this is what a client holds for months, and the
+    /// whole point is that it works every launch. Revocation is deleting the row.
+    pub async fn grant_holder(
+        &self,
+        digest: &[u8],
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<Uuid>, StoreError> {
+        match self {
+            Store::Memory(m) => Ok(m
+                .0
+                .lock()
+                .unwrap()
+                .grants
+                .get(digest)
+                .filter(|(_, expires_at)| *expires_at > now)
+                .map(|(id, _)| *id)),
+            Store::Postgres(pool) => {
+                // Touched on the way past, so a revocation list can show what is actually in
+                // use rather than everything ever issued.
+                let row: Option<(Uuid,)> = sqlx::query_as(
+                    "update device_grants set last_used = now() \
+                     where digest = $1 and expires_at > $2 returning account_id",
+                )
+                .bind(digest)
+                .bind(now)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+                Ok(row.map(|(id,)| id))
+            }
+        }
+    }
+
+    pub async fn revoke_grant(&self, digest: &[u8]) -> Result<(), StoreError> {
+        match self {
+            Store::Memory(m) => {
+                m.0.lock().unwrap().grants.remove(digest);
+                Ok(())
+            }
+            Store::Postgres(pool) => sqlx::query("delete from device_grants where digest = $1")
+                .bind(digest)
+                .execute(pool)
+                .await
+                .map(|_| ())
+                .map_err(|e| StoreError::Backend(e.to_string())),
+        }
     }
 }
 
@@ -669,6 +753,77 @@ mod code_tests {
                 .await
                 .unwrap(),
             None,
+        );
+    }
+}
+
+#[cfg(test)]
+mod grant_tests {
+    use super::*;
+    use chrono::{Duration, Utc};
+
+    async fn an_account(store: &Store) -> Uuid {
+        store
+            .add_link(
+                None,
+                "Ada",
+                Link {
+                    provider: Provider::Password,
+                    subject: "ada@example.test".into(),
+                    account_id: Uuid::nil(),
+                    email: None,
+                    email_verified: false,
+                },
+            )
+            .await
+            .unwrap()
+            .id
+    }
+
+    /// Unlike a code, a grant is **not** spent on use. It is what a desktop client holds for
+    /// months, and a sign-in that only worked once would be a sign-in every launch.
+    #[tokio::test]
+    async fn a_grant_works_every_time() {
+        let store = Store::memory();
+        let id = an_account(&store).await;
+        let now = Utc::now();
+        store
+            .put_grant(b"digest", id, "Ada's laptop", now + Duration::days(90))
+            .await
+            .unwrap();
+
+        for _ in 0..3 {
+            assert_eq!(store.grant_holder(b"digest", now).await.unwrap(), Some(id));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_revoked_or_expired_grant_is_nobody() {
+        let store = Store::memory();
+        let id = an_account(&store).await;
+        let now = Utc::now();
+
+        store
+            .put_grant(b"expired", id, "old laptop", now - Duration::seconds(1))
+            .await
+            .unwrap();
+        assert_eq!(store.grant_holder(b"expired", now).await.unwrap(), None);
+
+        store
+            .put_grant(b"live", id, "laptop", now + Duration::days(90))
+            .await
+            .unwrap();
+        assert_eq!(store.grant_holder(b"live", now).await.unwrap(), Some(id));
+        store.revoke_grant(b"live").await.unwrap();
+        assert_eq!(store.grant_holder(b"live", now).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_grant_nobody_issued_is_nothing() {
+        let store = Store::memory();
+        assert_eq!(
+            store.grant_holder(b"invented", Utc::now()).await.unwrap(),
+            None
         );
     }
 }

@@ -150,10 +150,24 @@ A ticket is a signed JWT with a deliberately hostile shape:
 - **claims** `sub` (account id), `name`, `iat`, `exp`, `aud`, `jti`. Nothing else. A claim the
   game does not need is a claim that leaks.
 
-The native client cannot rely on a website session. It opens the system browser at the same
+The native client cannot rely on a website session. It opens the **system browser** at the same
 `/signin`, with a loopback `return_to`, takes the code, and exchanges it for a long-lived
 **device grant** it keeps in the OS keychain — one more row in the broker and no new flow. It
-trades that grant for the same kind of ticket whenever it connects. **Both clients present the same thing to the game server**, which
+trades that grant for the same kind of ticket whenever it connects, so the sign-in happens once
+rather than per launch.
+
+The system browser, and not a window inside the game, because that is the only way an upstream
+provider can work at all: Google will not authenticate into an embedded view it cannot show its
+own address bar in, and should not.
+
+**The password provider is the exception, and it is an argument against itself.** A local
+password form can go directly in the game's own modal — there is no third party to redirect to,
+and for the case the provider exists for, making a hundred development accounts, a browser round
+trip per account is the whole cost. But it teaches a player to type a credential into a game
+window, which is exactly the reflex phishing relies on. That is a second and independent reason
+to keep `password` out of production, alongside the deferred list below: not merely that it is
+unfinished, but that the shape it needs in the native client is a shape a public deployment
+should not train anyone into. **Both clients present the same thing to the game server**, which
 therefore has exactly one code path and no notion of which build it is talking to.
 
 ## Not an authorization server
@@ -263,9 +277,11 @@ Named so they are decisions rather than omissions:
   because a cascade across three databases is the coupling this design spent its whole budget
   avoiding. The game reaps orphans on its own schedule.
 - **Whether `password` ships.** It exists so a development environment can make a hundred
-  accounts without talking to Google. Everything a public password provider needs on top —
-  delivery, reset, captcha, breach lists — is listed above as deferred, and that list *is* the
-  decision: `password` goes to production when the list is empty, and not before.
+  accounts without talking to Google. Two conditions, not one. The deferred list above —
+  delivery, reset, captcha, breach lists — must be empty. And the native client's in-modal form
+  must go, because a public build that asks for a password in a game window trains the reflex
+  that phishing exploits. The first is work; the second is a decision about what the game
+  teaches, and it is the harder of the two.
 
 ## Where it lives
 

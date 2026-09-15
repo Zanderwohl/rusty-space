@@ -18,12 +18,14 @@ use crate::config::{Config, is_allowed_return};
 use crate::providers::Provider;
 use crate::signin::{self, Refused};
 use crate::store::Store;
+use crate::ticket::Keys;
 
 #[derive(Clone)]
 pub struct Broker {
     pub config: Arc<Config>,
     pub store: Store,
     pub attempts: Arc<Attempts>,
+    pub keys: Arc<Keys>,
 }
 
 pub fn router(broker: Broker) -> Router {
@@ -33,6 +35,9 @@ pub fn router(broker: Broker) -> Router {
         .route("/signin/password", post(sign_in))
         .route("/signin/register", post(register))
         .route("/exchange", post(exchange))
+        .route("/ticket", post(ticket))
+        .route("/grant", post(grant))
+        .route("/.well-known/jwks.json", get(jwks))
         .with_state(broker)
 }
 
@@ -212,6 +217,156 @@ async fn exchange(
     }
 }
 
+/// The public keys a game server verifies tickets against.
+///
+/// Public by design and cached by whoever reads it: the game verifies locally, so an outage
+/// here does not stop anyone reconnecting.
+async fn jwks(State(broker): State<Broker>) -> Response {
+    axum::Json(broker.keys.jwks()).into_response()
+}
+
+/// How a caller says who it is when asking for a ticket.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Asking {
+    /// The site, which has its own session for the player and the shared secret for us.
+    AsSite {
+        account_id: String,
+        audience: String,
+    },
+    /// A native client, holding what it was given the day it signed in.
+    WithGrant { grant: String, audience: String },
+}
+
+#[derive(Serialize)]
+struct Minted {
+    ticket: String,
+}
+
+/// Mint a game ticket. **Both callers get the identical object**, which is what leaves the game
+/// server with one code path and no notion of which build it is talking to.
+async fn ticket(
+    State(broker): State<Broker>,
+    headers: HeaderMap,
+    axum::Json(asking): axum::Json<Asking>,
+) -> Response {
+    let (account_id, audience) = match asking {
+        Asking::AsSite {
+            account_id,
+            audience,
+        } => {
+            // The site speaks for a player because it holds the secret, not because it says so.
+            if !presented_secret(&headers, &broker.config.exchange_secret) {
+                return StatusCode::UNAUTHORIZED.into_response();
+            }
+            let Ok(id) = account_id.parse::<uuid::Uuid>() else {
+                return StatusCode::BAD_REQUEST.into_response();
+            };
+            (id, audience)
+        }
+        Asking::WithGrant { grant, audience } => {
+            let digest = signin::digest_of(&grant);
+            match broker.store.grant_holder(&digest, Utc::now()).await {
+                Ok(Some(id)) => (id, audience),
+                Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+                Err(why) => {
+                    tracing::error!(%why, "grant lookup failed");
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                }
+            }
+        }
+    };
+
+    if !broker.config.audiences.contains(&audience) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let Ok(Some(account)) = broker.store.account(account_id).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match broker.keys.mint(
+        &account.id.to_string(),
+        &account.display_name,
+        &audience,
+        chrono::Utc::now().timestamp(),
+    ) {
+        Ok(ticket) => axum::Json(Minted { ticket }).into_response(),
+        Err(why) => {
+            tracing::error!(%why, "could not mint a ticket");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct GrantRequest {
+    code: String,
+    return_to: String,
+    label: String,
+}
+
+#[derive(Serialize)]
+struct Granted {
+    grant: String,
+    account_id: String,
+    display_name: String,
+}
+
+/// Trade a sign-in code for a device grant: what a native client keeps instead of a session.
+///
+/// The same code `/exchange` takes, spent the same way — a client gets one or the other, never
+/// both, because the code is gone either way.
+async fn grant(
+    State(broker): State<Broker>,
+    axum::Json(request): axum::Json<GrantRequest>,
+) -> Response {
+    // No shared secret: a native client cannot keep one. What authorises this is the code,
+    // which is single use, sixty seconds old, and bound to the loopback it was issued for.
+    let digest = signin::digest_of(&request.code);
+    let account_id = match broker
+        .store
+        .take_code(&digest, &request.return_to, Utc::now())
+        .await
+    {
+        Ok(Some(id)) => id,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(why) => {
+            tracing::error!(%why, "grant exchange failed");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let Ok(Some(account)) = broker.store.account(account_id).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let (grant, digest) = signin::mint_code();
+    let label: String = request.label.chars().take(120).collect();
+    if let Err(why) = broker
+        .store
+        .put_grant(
+            &digest,
+            account_id,
+            &label,
+            Utc::now() + Duration::days(GRANT_DAYS),
+        )
+        .await
+    {
+        tracing::error!(%why, "could not record a device grant");
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    axum::Json(Granted {
+        grant,
+        account_id: account.id.to_string(),
+        display_name: account.display_name,
+    })
+    .into_response()
+}
+
+/// How long a device grant lasts.
+///
+/// Long, because the point is that a desktop player signs in once. Not forever, because a
+/// credential with no expiry is one that outlives the machine it was issued to.
+pub const GRANT_DAYS: i64 = 90;
+
 /// Constant-time, because a byte-at-a-time comparison of a shared secret is guessable one byte
 /// at a time.
 fn presented_secret(headers: &HeaderMap, expected: &str) -> bool {
@@ -315,6 +470,20 @@ mod tests {
             providers: crate::providers::resolve("password", |_| None).unwrap(),
             return_to: vec!["https://lightcone.example/auth/return".into()],
             exchange_secret: "shared".into(),
+            audiences: vec!["shard-1".into()],
+            issuer: "https://accounts.lightcone.example".into(),
+            signing_seed: None,
+        }
+    }
+
+    fn broker(config: Config) -> Broker {
+        Broker {
+            config: Arc::new(config),
+            store: Store::memory(),
+            attempts: Arc::new(Attempts::default()),
+            keys: Arc::new(
+                Keys::from_seed(&[4u8; 32], "https://accounts.lightcone.example").unwrap(),
+            ),
         }
     }
 
@@ -383,11 +552,7 @@ mod tests {
     /// Wrong address and wrong password are one message, the same as they are one refusal.
     #[test]
     fn the_form_does_not_say_which_half_was_wrong() {
-        let broker = Broker {
-            config: Arc::new(config()),
-            store: Store::memory(),
-            attempts: Arc::new(Attempts::default()),
-        };
+        let broker = broker(config());
         let to = destination("https://lightcone.example/auth/return", "nonce1");
         let page = sign_in_page(&broker, &to, Some(&Refused::BadCredentials)).into_string();
         assert!(page.contains("do not match"));
@@ -408,11 +573,7 @@ mod tests {
             matches!(name, "GOOGLE_CLIENT_ID" | "GOOGLE_CLIENT_SECRET").then(|| "x".to_string())
         })
         .unwrap();
-        let broker = Broker {
-            config: Arc::new(config),
-            store: Store::memory(),
-            attempts: Arc::new(Attempts::default()),
-        };
+        let broker = broker(config);
         let to = destination("https://lightcone.example/auth/return", "n");
         let page = sign_in_page(&broker, &to, None).into_string();
         assert!(page.contains("not yet built"));
@@ -420,5 +581,234 @@ mod tests {
             !page.contains("action=\"/signin/google\""),
             "a dead button was rendered"
         );
+    }
+}
+
+#[cfg(test)]
+mod endpoint_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    const SHARD: &str = "shard-1";
+
+    fn a_broker() -> Broker {
+        Broker {
+            config: Arc::new(Config {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                database_url: String::new(),
+                providers: crate::providers::resolve("password", |_| None).unwrap(),
+                return_to: vec!["https://lightcone.example/auth/return".into()],
+                exchange_secret: "shared".into(),
+                audiences: vec![SHARD.into()],
+                issuer: "https://accounts.lightcone.example".into(),
+                signing_seed: None,
+            }),
+            store: Store::memory(),
+            attempts: Arc::new(Attempts::default()),
+            keys: Arc::new(
+                Keys::from_seed(&[4u8; 32], "https://accounts.lightcone.example").unwrap(),
+            ),
+        }
+    }
+
+    async fn an_account(broker: &Broker) -> uuid::Uuid {
+        crate::signin::register_password(
+            &broker.store,
+            "ada@example.test",
+            "a good password",
+            "Ada",
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn call(broker: &Broker, request: Request<Body>) -> (StatusCode, serde_json::Value) {
+        let response = router(broker.clone()).oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+        )
+    }
+
+    fn post(path: &str, body: serde_json::Value, secret: Option<&str>) -> Request<Body> {
+        let mut builder = Request::post(path).header("content-type", "application/json");
+        if let Some(secret) = secret {
+            builder = builder.header("authorization", format!("Bearer {secret}"));
+        }
+        builder.body(Body::from(body.to_string())).unwrap()
+    }
+
+    /// The site speaks for a player because it holds the secret, not because it says so.
+    #[tokio::test]
+    async fn the_site_cannot_mint_without_the_secret() {
+        let broker = a_broker();
+        let id = an_account(&broker).await;
+        let asking = serde_json::json!({"account_id": id.to_string(), "audience": SHARD});
+
+        let (status, _) = call(&broker, post("/ticket", asking.clone(), None)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) = call(&broker, post("/ticket", asking.clone(), Some("wrong"))).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) = call(&broker, post("/ticket", asking, Some("shared"))).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    /// An audience allowlist for the same reason `return_to` is one. "The audience is ours
+    /// anyway" stops being true the first time it is not.
+    #[tokio::test]
+    async fn a_ticket_cannot_be_minted_for_an_unknown_shard() {
+        let broker = a_broker();
+        let id = an_account(&broker).await;
+        let (status, _) = call(
+            &broker,
+            post(
+                "/ticket",
+                serde_json::json!({"account_id": id.to_string(), "audience": "somebody-elses"}),
+                Some("shared"),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// **Both callers get the identical object.** That is what leaves the game server with one
+    /// code path and no notion of which build it is talking to.
+    #[tokio::test]
+    async fn a_grant_and_the_site_mint_the_same_kind_of_ticket() {
+        let broker = a_broker();
+        let id = an_account(&broker).await;
+
+        // The native path: sign in, take a code, trade it for a grant.
+        let (code, digest) = crate::signin::mint_code();
+        let here = "https://lightcone.example/auth/return";
+        broker
+            .store
+            .put_code(&digest, id, here, Utc::now() + Duration::seconds(60))
+            .await
+            .unwrap();
+        let (status, granted) = call(
+            &broker,
+            post(
+                "/grant",
+                serde_json::json!({"code": code, "return_to": here, "label": "Ada's laptop"}),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(granted["account_id"], id.to_string());
+        let grant = granted["grant"].as_str().expect("a grant").to_string();
+
+        let (status, from_grant) = call(
+            &broker,
+            post(
+                "/ticket",
+                serde_json::json!({"grant": grant, "audience": SHARD}),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (_, from_site) = call(
+            &broker,
+            post(
+                "/ticket",
+                serde_json::json!({"account_id": id.to_string(), "audience": SHARD}),
+                Some("shared"),
+            ),
+        )
+        .await;
+
+        // Different tokens — each has its own identifier — but the same claims about who.
+        let claims = |value: &serde_json::Value| {
+            use base64::Engine;
+            let token = value["ticket"].as_str().expect("a ticket").to_string();
+            let payload = token.split('.').nth(1).expect("a payload").to_string();
+            let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(payload)
+                .unwrap();
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+        };
+        let (one, two) = (claims(&from_grant), claims(&from_site));
+        assert_eq!(one["sub"], two["sub"]);
+        assert_eq!(one["aud"], two["aud"]);
+        assert_eq!(one["name"], two["name"]);
+        assert_ne!(one["jti"], two["jti"], "two tickets shared an identifier");
+    }
+
+    /// A grant nobody issued is nobody, and the same for one that has been revoked.
+    #[tokio::test]
+    async fn an_unknown_grant_mints_nothing() {
+        let broker = a_broker();
+        an_account(&broker).await;
+        let (status, _) = call(
+            &broker,
+            post(
+                "/ticket",
+                serde_json::json!({"grant": "invented", "audience": SHARD}),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    /// A code buys a session *or* a grant, never both: it is gone either way.
+    #[tokio::test]
+    async fn a_code_spent_on_a_grant_cannot_also_be_exchanged() {
+        let broker = a_broker();
+        let id = an_account(&broker).await;
+        let (code, digest) = crate::signin::mint_code();
+        let here = "https://lightcone.example/auth/return";
+        broker
+            .store
+            .put_code(&digest, id, here, Utc::now() + Duration::seconds(60))
+            .await
+            .unwrap();
+
+        let body = serde_json::json!({"code": code, "return_to": here, "label": "laptop"});
+        assert_eq!(
+            call(&broker, post("/grant", body.clone(), None)).await.0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            call(&broker, post("/grant", body.clone(), None)).await.0,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            call(&broker, post("/exchange", body, Some("shared")))
+                .await
+                .0,
+            StatusCode::NOT_FOUND,
+        );
+    }
+
+    /// The key set is public, and it is what a game server verifies against.
+    #[tokio::test]
+    async fn the_key_set_is_published() {
+        let broker = a_broker();
+        let (status, jwks) = call(
+            &broker,
+            Request::get("/.well-known/jwks.json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(jwks["keys"][0]["kid"], broker.keys.kid());
+        assert_eq!(jwks["keys"][0]["crv"], "Ed25519");
+        // And nothing private is in it. Checked as a *field*, not a substring: `"kid"`
+        // contains `d"`, which is how the first version of this failed against correct code.
+        assert!(
+            jwks["keys"][0].get("d").is_none(),
+            "the private parameter was published"
+        );
+        assert_eq!(jwks["keys"][0]["x"], broker.keys.public_x());
     }
 }

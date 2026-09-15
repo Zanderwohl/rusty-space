@@ -16,9 +16,20 @@ pub struct Config {
     /// An exact-match list, not prefixes. An open redirect on an auth service is how a sign-in
     /// gets stolen, and prefix matching is how open redirects happen.
     pub return_to: Vec<String>,
-    /// Shared secret for `/exchange`, which is server to server and never reachable from a
-    /// browser.
+    /// Shared secret for `/exchange` and `/ticket`, which are server to server and never
+    /// reachable from a browser.
     pub exchange_secret: String,
+    /// The game servers this broker will mint tickets for.
+    ///
+    /// An allowlist for the same reason `return_to` is one: a caller that could name any
+    /// audience could mint a ticket for a shard it has no business on, and "the audience is
+    /// ours anyway" stops being true the first time it is not.
+    pub audiences: Vec<String>,
+    /// What the tickets say issued them.
+    pub issuer: String,
+    /// The Ed25519 seed, base64url. Absent generates one, which is a development convenience
+    /// and is logged as such: a generated key means every restart publishes a different one.
+    pub signing_seed: Option<String>,
 }
 
 impl Config {
@@ -45,6 +56,17 @@ impl Config {
             anyhow::bail!("LC_IDENTITY_RETURN_TO entry {bad:?} must carry no query or fragment");
         }
 
+        let audiences: Vec<String> = var("LC_IDENTITY_AUDIENCES")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect();
+        if audiences.is_empty() {
+            anyhow::bail!("LC_IDENTITY_AUDIENCES is empty; no ticket could be minted");
+        }
+
         Ok(Config {
             bind: var("BIND_ADDR")
                 .unwrap_or_else(|| "0.0.0.0:3200".into())
@@ -57,6 +79,10 @@ impl Config {
             return_to,
             exchange_secret: var("LC_IDENTITY_EXCHANGE_SECRET")
                 .ok_or_else(|| anyhow::anyhow!("LC_IDENTITY_EXCHANGE_SECRET is required"))?,
+            audiences,
+            issuer: var("LC_IDENTITY_ISSUER")
+                .unwrap_or_else(|| "https://accounts.lightcone.example".into()),
+            signing_seed: var("LC_IDENTITY_SIGNING_SEED"),
         })
     }
 }

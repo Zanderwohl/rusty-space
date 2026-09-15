@@ -39,3 +39,6 @@ subtle = "2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# Driving the router directly, without a socket.
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

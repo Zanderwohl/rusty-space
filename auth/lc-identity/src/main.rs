@@ -7,6 +7,7 @@ use lc_identity::attempts::Attempts;
 use lc_identity::config::Config;
 use lc_identity::routes::{Broker, router};
 use lc_identity::store::Store;
+use lc_identity::ticket::Keys;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -33,11 +34,37 @@ async fn main() -> anyhow::Result<()> {
     // assumes it are one artifact, which is the only way a rollback rolls back both.
     sqlx::migrate!("./migrations").run(&pool).await?;
 
+    // A seed in the environment in production; a fresh key otherwise. A generated key is said
+    // out loud because it means every restart publishes a different one, and anything caching
+    // the key set will refuse tickets until it refetches.
+    let keys = match &config.signing_seed {
+        Some(encoded) => {
+            use base64::Engine;
+            let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded)?;
+            let seed: [u8; 32] = bytes
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("LC_IDENTITY_SIGNING_SEED must be 32 bytes"))?;
+            Keys::from_seed(&seed, &config.issuer)?
+        }
+        None => {
+            tracing::warn!(
+                "no LC_IDENTITY_SIGNING_SEED: generating one, which will not survive a restart"
+            );
+            Keys::generate(&config.issuer)?
+        }
+    };
+    tracing::info!(
+        kid = keys.kid(),
+        audiences = config.audiences.len(),
+        "signing key ready"
+    );
+
     let bind = config.bind;
     let broker = Broker {
         config: Arc::new(config),
         store: Store::Postgres(pool),
         attempts: Arc::new(Attempts::default()),
+        keys: Arc::new(keys),
     };
 
     let listener = tokio::net::TcpListener::bind(bind).await?;

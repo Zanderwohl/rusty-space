@@ -66,3 +66,23 @@ create table signin_codes (
 );
 
 create index signin_codes_expiry on signin_codes (expires_at);
+
+-- What a native client keeps instead of a session.
+--
+-- The desktop build has no website session to lean on, so it signs in through the system
+-- browser once and holds this. It trades it for a game ticket on every connection, which is
+-- why the ticket can stay sixty seconds long without anyone signing in again.
+--
+-- The digest, again, not the grant: this is the longest-lived credential in the system and the
+-- one most worth not having in a backup.
+create table device_grants (
+    digest     bytea       primary key,
+    account_id uuid        not null references accounts (id) on delete cascade,
+    -- What a revocation list shows a person. "Ada's laptop", not a hex string.
+    label      text        not null,
+    created_at timestamptz not null default now(),
+    last_used  timestamptz,
+    expires_at timestamptz not null
+);
+
+create index device_grants_by_account on device_grants (account_id);
