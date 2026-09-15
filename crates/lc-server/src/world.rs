@@ -43,6 +43,15 @@ impl World {
         self.stars.is_empty()
     }
 
+    /// Where a star is, by its catalogue id.
+    ///
+    /// The only thing that resolves an id on this side, and the reason `Order::Cross` names a
+    /// star rather than a position: a client can ask for a star this shard holds and nothing
+    /// else. Both ends hold the same catalogue — see the shard's `--sky`.
+    pub fn star_at(&self, id: u64) -> Option<DVec3> {
+        self.stars.iter().find(|s| s.id.get() == id).map(|s| s.position_ly)
+    }
+
     /// Where a craft with nowhere else to be is put.
     ///
     /// Inside the first star's system rather than at the origin, which is empty interstellar

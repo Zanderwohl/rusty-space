@@ -141,6 +141,19 @@ propagates from a coordinate time and an initial position, so a client given onl
 a ship the server has somewhere else. A craft found mid-flight needs its motive as well, which is
 the resume problem rather than this one.
 
+### A crossing names a star
+
+`Order::Cross` carries a **catalogue id**, not a position. A position would let a client fly to
+somewhere it invented; an id can only name a star the shard also holds. That is what the
+shard's `--sky` buys: both ends are handed the same packed catalogue, so an id means one thing
+across the wire, and a star the server does not have is a refusal rather than a silent
+disagreement about where anybody is.
+
+It is separate from `Order::SetCourse` because a `Course` resolves a waypoint *inside* a
+system and refuses without one, and a crossing is the thing a ship does when leaving. Below
+them both is one `Change::Cross`, which takes the coordinate the authority resolved — so the
+standoff and the plan are one implementation rather than two that have to agree.
+
 What the server does **not** send, continuously, is ship positions. Both ends run the same `lc-world` physics
 from the same coordinate time, so the client computes where everything is and the server is
 authoritative only where they disagree. This is why `Welcome` carries `now_t`: adopting the

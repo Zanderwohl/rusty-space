@@ -285,6 +285,34 @@ fn fold(uplink: &mut Uplink, game: &mut crate::app::Game, message: Outbound) {
                         None => Some("that course could not be flown".into()),
                     }
                 }
+                Order::Cross { star, accel_g } => {
+                    // Resolved here too, against this client's own catalogue — the same one
+                    // the shard was given, which is what makes an id mean one thing on both
+                    // ends. A star this build does not hold is a shard and a client that were
+                    // handed different skies, and saying so is better than flying nowhere.
+                    match game.0.star_by_raw(*star).map(|s| s.position_ly) {
+                        Some(to_ly) => {
+                            let name = game
+                                .0
+                                .star_by_raw(*star)
+                                .and_then(|s| s.name.clone())
+                                .unwrap_or_else(|| "an unnamed star".into());
+                            match game.0.cross_to_at(at_s, to_ly, *accel_g) {
+                                Some(cruise) => {
+                                    let years =
+                                        cruise.duration_s() / crate::flight::JULIAN_YEAR_S;
+                                    let aboard = cruise.proper_duration_s()
+                                        / crate::flight::JULIAN_YEAR_S;
+                                    Some(format!(
+                                        "{name}: {years:.2} years out, {aboard:.2} aboard"
+                                    ))
+                                }
+                                None => Some("that crossing could not be flown".into()),
+                            }
+                        }
+                        None => Some("this build does not have that star".into()),
+                    }
+                }
                 Order::CutDrive => {
                     let note = match game.0.cut_drive_at(at_s) {
                         // What it says is where the ship ended up, because cutting does not

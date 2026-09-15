@@ -133,6 +133,16 @@ pub enum Change {
     SetCourse { course: Course, drive: Drive },
     /// Cut the engine. Not a stop: whatever velocity it had, it keeps.
     CutDrive,
+    /// Cross to another star.
+    ///
+    /// The one course that is not about the local system, which is why it is not a
+    /// [`Change::SetCourse`]: that one resolves a waypoint *inside* a system and refuses
+    /// without one, and this is the thing a ship does when leaving.
+    ///
+    /// A **position**, not a star id, because this fold is pure motion and has no catalogue to
+    /// look one up in. Naming the star is the wire's job — see `lc_proto::Order::Cross` — and
+    /// the authority resolves it before folding, so both sides fold the same coordinate.
+    Cross { to_ly: DVec3, drive: Drive },
     /// Put out a pulse. Changes nothing about the motion, and is here because the fold is what
     /// both sides run over everything that happened.
     Transmit { power_w: f64 },
@@ -209,6 +219,27 @@ pub fn apply(
                 // a straight line at the velocity it has.
                 None => Motive::Drifting { from_ly: at, since_t: event.at_t },
             };
+            Ok(())
+        }
+        Change::Cross { to_ly, drive } => {
+            // From where it actually is at the stamped time, like every other arm: an event
+            // may be folded later than it happened, and planning from the ship's last advanced
+            // position would aim from somewhere it was not.
+            let (at, _) =
+                state_at(state, system, event.at_t).unwrap_or((state.position_ly, state.beta));
+            let approach = (*to_ly - at).normalize_or_zero();
+            // Already there, or asked to cross to where it stands. Neither is a crossing.
+            if approach == DVec3::ZERO {
+                return Err(Rejected::NoSuchPlace);
+            }
+            // Stopping short, because arriving *at* a star is arriving inside it.
+            let stop = *to_ly - approach * crate::flight::STANDOFF_LY;
+            state.position_ly = at;
+            state.drive = *drive;
+            state.begin_crossing(
+                crate::flight::Cruise::plan(at, stop, event.at_t, *drive),
+                None,
+            );
             Ok(())
         }
         Change::SetCourse { course, drive } => {

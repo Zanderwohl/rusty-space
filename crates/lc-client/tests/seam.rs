@@ -18,6 +18,14 @@ use lc_server::websocket::WebSocketServer;
 /// of the bound is that a broken seam fails rather than hangs.
 const PATIENCE: Duration = Duration::from_secs(5);
 
+/// The sky both ends hold. The authored sample rather than a packed catalogue, because what
+/// matters here is that they hold the *same* one and that a star id means one thing across the
+/// wire — not which stars they are.
+fn a_sky() -> Vec<lc_world::sky::CatalogueStar> {
+    use lc_world::sky::StarProvider;
+    lc_world::sky::AuthoredStars::sample().stars().to_vec()
+}
+
 /// Start a shard on a port the operating system picks, and tick it until the test ends.
 async fn shard(open: bool) -> String {
     let mut wire = WebSocketServer::bind("127.0.0.1:0").await.expect("a port");
@@ -25,6 +33,7 @@ async fn shard(open: bool) -> String {
 
     let mut server = Server::new(Memory::default(), 0, 1);
     server.admit_without_tickets(open);
+    server.load_world(lc_server::world::World::new(a_sky()));
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_millis(TICK_MS as u64));
         loop {
@@ -147,6 +156,61 @@ async fn an_impossible_order_is_answered_too() {
     assert!(
         matches!(said, Outbound::Refused { .. }),
         "an impossible order was not refused: {said:?}",
+    );
+}
+
+/// A crossing names a **star**, and the server answers with the acceleration it actually flew.
+/// The id is only meaningful because both ends were given the same catalogue.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_crossing_names_a_star_the_server_also_holds() {
+    let address = shard(true).await;
+    let mut link = WebSocketLink::connect(&address);
+
+    greet(&mut link, PROTOCOL_VERSION, "").await;
+    let Outbound::Welcome { ship_id, .. } = hear(&mut link, "a welcome").await else {
+        panic!("no welcome");
+    };
+
+    // The last of the three authored stars, so this is not the one a ship starts at.
+    let destination = a_sky().last().expect("a star").id.get();
+    link.send(Inbound::Act(Intent {
+        ship_id,
+        // More than any craft can pull, so the answer has to differ from the request.
+        order: Order::Cross { star: destination, accel_g: 1000.0 },
+        issued_at_client_t: 0,
+    }));
+
+    let said = hear(&mut link, "an acceptance").await;
+    let Outbound::Accepted { order: Order::Cross { star, accel_g }, .. } = said else {
+        panic!("a crossing was not accepted: {said:?}");
+    };
+    assert_eq!(star, destination, "it agreed to a different star");
+    assert!(accel_g < 1000.0, "the acceleration was taken at face value");
+    assert!(accel_g > 0.0, "it flew at nothing");
+}
+
+/// A star this shard does not hold is not somewhere anyone may fly to, whatever the client
+/// believes it has. This is the whole reason the wire carries an id and not a position.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_crossing_to_a_star_the_server_does_not_have_is_refused() {
+    let address = shard(true).await;
+    let mut link = WebSocketLink::connect(&address);
+
+    greet(&mut link, PROTOCOL_VERSION, "").await;
+    let Outbound::Welcome { ship_id, .. } = hear(&mut link, "a welcome").await else {
+        panic!("no welcome");
+    };
+
+    link.send(Inbound::Act(Intent {
+        ship_id,
+        order: Order::Cross { star: 0xdead_beef_dead_beef, accel_g: 1.0 },
+        issued_at_client_t: 0,
+    }));
+
+    let said = hear(&mut link, "a refusal").await;
+    assert!(
+        matches!(said, Outbound::Refused { .. }),
+        "a made-up star was accepted: {said:?}",
     );
 }
 

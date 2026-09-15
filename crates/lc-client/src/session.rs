@@ -281,15 +281,31 @@ impl Session {
     /// The catalogue position is treated as fixed: nothing in this model has proper motion
     /// yet, so aiming at where it is recorded and aiming at where it will be are the same.
     pub fn fly_to(&mut self, id: StarId) -> Option<&Cruise> {
-        let star = self.star(id)?;
-        let target = star.position_ly;
-        let approach = (target - self.ship.motion.position_ly).normalize_or_zero();
-        let stop = target - approach * STANDOFF_LY;
-        self.ship.motion.begin_crossing(
-            Cruise::plan(self.ship.motion.position_ly, stop, self.coordinate_time_s(), self.ship.motion.drive),
-            None,
-        );
+        let to_ly = self.star(id)?.position_ly;
+        let accel_g = self.ship.motion.drive.accel_g;
+        self.cross_to_at(self.coordinate_time_s(), to_ly, accel_g)
+    }
+
+    /// Cross to a coordinate at a stated time and acceleration.
+    ///
+    /// The reading `fly_to` is written in terms of, and the one a server's acceptance uses —
+    /// both go through `Change::Cross`, so the standoff and the plan are one implementation
+    /// rather than two that have to agree.
+    pub fn cross_to_at(&mut self, at_s: f64, to_ly: DVec3, accel_g: f64) -> Option<&Cruise> {
+        let mut drive = self.ship.motion.drive;
+        drive.accel_g = accel_g;
+        let event = motion::Event {
+            ship: motion::ShipId(0),
+            at_t: at_s,
+            change: motion::Change::Cross { to_ly, drive },
+        };
+        self.ship.apply(&event).ok()?;
         self.cruise()
+    }
+
+    /// A star by the raw id the wire carries.
+    pub fn star_by_raw(&self, id: u64) -> Option<&CatalogueStar> {
+        self.stars.iter().find(|s| s.id.get() == id)
     }
 
     /// Set a course inside the local system, and hold there on arrival.

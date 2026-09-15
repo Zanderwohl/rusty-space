@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -93,6 +93,17 @@ pub enum Order {
     /// The acceleration is asked for, not stated: it is clamped to what the craft's own drive
     /// can do, so a client cannot ask for a better ship than it has.
     SetCourse { course: Course, accel_g: f64 },
+    /// Cross to another star, at this acceleration.
+    ///
+    /// The star is named by **catalogue id**, not by position. A position would let a client
+    /// fly to somewhere it invented; an id can only name a star the server also holds, which
+    /// it does because both ends are given the same packed catalogue — see the shard's
+    /// `--sky` in `lightcone/docs/15-runbook.md`. The server resolves the id and folds a
+    /// coordinate, so the two never plan against different places.
+    ///
+    /// Separate from [`Order::SetCourse`] because a `Course` names somewhere inside the local
+    /// system and this is the one thing a ship does that is not about one.
+    Cross { star: u64, accel_g: f64 },
     /// Cut the engine. Not a stop — whatever velocity it had, it keeps, on whatever conic that
     /// puts it on.
     CutDrive,
@@ -305,7 +316,7 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 pub mod golden {
     /// `Outbound::Welcome { client_id: 7, .., ship_id: 42, now_t: 1e6, ship_at: [4.2, 0, 0] }`
     pub const WELCOME: &[u8] = &[
-        0, 7, 6, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
+        0, 7, 7, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ];
 
@@ -323,11 +334,20 @@ pub mod golden {
     ///
     /// Pinned because it is now the message that decides whether anyone gets in at all. A
     /// field moving here is a server reading someone else's ticket as this one's.
-    pub const HELLO: &[u8] = &[0, 6, 5, 97, 46, 98, 46, 99];
+    pub const HELLO: &[u8] = &[0, 7, 5, 97, 46, 98, 46, 99];
 
     pub const SET_COURSE: &[u8] = &[
         1, 84, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0, 0, 0, 0, 0, 0, 20,
         64, 128, 137, 122,
+    ];
+
+    /// `Inbound::Act(Intent { ship_id: 42, order: Cross { star: 0x0123456789abcdef, 3 g }, .. })`
+    ///
+    /// Pinned because a star id is the one field on this wire whose bytes nobody can eyeball:
+    /// it is a hash, so a shifted field reads as a different star rather than as nonsense.
+    pub const CROSS: &[u8] = &[
+        1, 84, 3, 239, 155, 175, 205, 248, 172, 209, 145, 1, 0, 0, 0, 0, 0, 0, 8, 64, 128, 137,
+        122,
     ];
 
     /// `Outbound::Accepted { ship_id: 42, event_id: 9, at_t: 1e6, order: SetCourse { .. 3 g } }`
@@ -415,6 +435,14 @@ mod tests {
         }
     }
 
+    fn cross() -> Inbound {
+        Inbound::Act(Intent {
+            ship_id: ShipId(42),
+            order: Order::Cross { star: 0x0123_4567_89ab_cdef, accel_g: 3.0 },
+            issued_at_client_t: 1_000_000,
+        })
+    }
+
     #[test]
     fn the_wire_format_for_this_version_has_not_moved() {
         assert_eq!(
@@ -436,6 +464,11 @@ mod tests {
             encode(&set_course()),
             golden::SET_COURSE,
             "Order::SetCourse changed shape at protocol version {PROTOCOL_VERSION}",
+        );
+        assert_eq!(
+            encode(&cross()),
+            golden::CROSS,
+            "Order::Cross changed shape at protocol version {PROTOCOL_VERSION}",
         );
         assert_eq!(
             encode(&accepted()),
@@ -463,6 +496,7 @@ mod tests {
             Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: "a.b.c".into() },
             Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: String::new() },
             act(),
+            cross(),
             Inbound::Act(Intent {
                 ship_id: ShipId(1),
                 order: Order::Burn { beta: [0.1, -0.2, 0.3] },

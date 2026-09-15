@@ -312,14 +312,6 @@ fn aim(ui: &UiState, session: &Session) -> Option<Look> {
 }
 
 fn fly(ui: &mut UiState, session: &mut Session, id: Option<StarId>, effects: &mut Vec<Effect>) {
-    // There is no `Order` for an interstellar crossing yet — `lc_proto::Course` names places
-    // inside a system and `LeaveSystem`, and neither is "go to that star". Flying one locally
-    // against a server would put the client somewhere the server does not have it, silently,
-    // so it is refused out loud instead. See lightcone/docs/08-networking.md.
-    if session.remote {
-        effects.push(Effect::Notify("interstellar crossings are not on the wire yet".into()));
-        return;
-    }
     let Some(id) = id.or(ui.selected) else {
         effects.push(Effect::Notify("no destination selected".into()));
         return;
@@ -329,6 +321,23 @@ fn fly(ui: &mut UiState, session: &mut Session, id: Option<StarId>, effects: &mu
         return;
     };
     let name = star.name.clone().unwrap_or_else(|| "an unnamed star".into());
+
+    if session.remote {
+        // Sent, not flown. The crossing this client would plan and the one the server flies
+        // must be the same, so only one of them plans it — and it is the one with authority.
+        effects.push(Effect::Send(lc_proto::Order::Cross {
+            star: id.get(),
+            accel_g: session.ship.motion.drive.accel_g,
+        }));
+        // Looking at the destination is what anybody wants by default, and it costs nothing
+        // to do before the answer arrives.
+        if let Some(look) = Look::aimed_at(session.offset_to(session.star(id).unwrap())) {
+            ui.look = look;
+        }
+        effects.push(Effect::Notify(format!("{name}: course sent")));
+        return;
+    }
+
     let Some(cruise) = session.fly_to(id) else { return };
     let (years, aboard) = (
         cruise.duration_s() / crate::flight::JULIAN_YEAR_S,
@@ -876,21 +885,37 @@ mod tests {
         );
     }
 
-    /// An interstellar crossing has no `Order`, so against a server it is refused out loud
-    /// rather than flown locally into a position the server does not have.
+    /// A crossing goes over the wire by **star id**, and the client does not fly it. Both ends
+    /// must plan the same crossing, so only the one with authority plans it.
     #[test]
-    fn a_remote_session_will_not_fly_between_stars_yet() {
+    fn a_remote_session_sends_a_crossing_and_does_not_fly_it() {
         let mut ui = UiState::default();
         let mut s = Session::new(&AuthoredStars::sample(), 3);
         s.remote = true;
+        s.ship.motion.drive.accel_g = 4.0;
+        let destination = s.stars[0].id;
         let before = s.ship.motion.position_ly;
 
-        let effects = apply(Action::FlyTo(Some(s.stars[0].id)), &mut ui, &mut s);
+        let effects = apply(Action::FlyTo(Some(destination)), &mut ui, &mut s);
         assert!(
-            effects.iter().any(|e| matches!(e, Effect::Notify(t) if t.contains("not on the wire"))),
+            effects.iter().any(|e| matches!(
+                e,
+                Effect::Send(lc_proto::Order::Cross { star, accel_g })
+                    if *star == destination.get() && *accel_g == 4.0
+            )),
             "{effects:?}",
         );
-        assert!(s.cruise().is_none(), "it started a crossing the server knows nothing about");
+        assert!(s.cruise().is_none(), "it flew a crossing the server has not agreed to");
         assert_eq!(s.ship.motion.position_ly, before);
+    }
+
+    /// And with no server it still flies it itself, which is the single-process game.
+    #[test]
+    fn a_local_session_flies_its_own_crossing() {
+        let mut ui = UiState::default();
+        let mut s = Session::new(&AuthoredStars::sample(), 3);
+        let effects = apply(Action::FlyTo(Some(s.stars[0].id)), &mut ui, &mut s);
+        assert!(!effects.iter().any(|e| matches!(e, Effect::Send(_))), "{effects:?}");
+        assert!(s.cruise().is_some(), "it sent an order to nobody instead of flying");
     }
 }

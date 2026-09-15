@@ -383,6 +383,30 @@ impl<J: Journal> Server<J> {
                     Order::SetCourse { course: course.clone(), accel_g: drive.accel_g },
                 )
             }
+            Order::Cross { star, accel_g } => {
+                if !accel_g.is_finite() || *accel_g <= 0.0 {
+                    return Err(Refusal::Impossible);
+                }
+                // Resolved here, against this shard's own catalogue. A star it does not hold
+                // is not somewhere anyone may fly to, whatever the client believes it has.
+                let to_ly = self.world.star_at(*star).ok_or(Refusal::Impossible)?;
+                let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
+                let mut drive = craft.kind.drive();
+                drive.accel_g = accel_g.min(drive.accel_g);
+                craft
+                    .apply(&Change_ {
+                        ship: motion_id(id),
+                        at_t: at as f64 * 1.0e-6,
+                        change: Change::Cross { to_ly, drive },
+                    })
+                    .map_err(refusal_for)?;
+                (
+                    KIND_BURN,
+                    BURN_POWER_W,
+                    format!("{{\"cross\":{star},\"accel_g\":{}}}", drive.accel_g),
+                    Order::Cross { star: *star, accel_g: drive.accel_g },
+                )
+            }
             Order::CutDrive => {
                 let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
                 craft
