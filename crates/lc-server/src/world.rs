@@ -8,11 +8,58 @@
 //! What stays here is what is the *server's* fact rather than the world's: who owns a craft,
 //! what has happened, and who is due to be told.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use glam::DVec3;
 use lc_proto::ShipId;
 use lc_spacetime::Worldline;
 use lc_world::craft::{Craft, CraftId, Kind};
 use lc_world::motion::LIGHT_US_PER_LY;
+use lc_world::sky::{CatalogueStar, StarId};
+use lc_world::system::{LOCAL_SHELL_LY, LocalSystem};
+
+/// The stars a shard is authoritative over, and the systems loaded around them.
+///
+/// Where the stars come from is the caller's business — a packed sky, an authored galaxy, a
+/// handful in a test. The server's business is which one a craft is inside, and that is
+/// [`LOCAL_SHELL_LY`] from a star and nothing more: the same rule the client uses, so the two
+/// never disagree about whether a ship is in a system.
+#[derive(Default)]
+pub struct World {
+    stars: Vec<CatalogueStar>,
+    /// Loaded on first arrival and shared thereafter. Building one is a couple of hundred
+    /// bodies out of a preset, and every craft in the same system points at the same copy —
+    /// which is only possible because a system is never propagated.
+    loaded: HashMap<StarId, Arc<LocalSystem>>,
+}
+
+impl World {
+    pub fn new(stars: Vec<CatalogueStar>) -> Self {
+        Self { stars, loaded: HashMap::new() }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.stars.is_empty()
+    }
+
+    /// The system containing `position_ly`, loaded if this is the first craft to arrive.
+    ///
+    /// `None` between the stars, which is most of the volume and most of the flying.
+    pub fn system_at(&mut self, position_ly: DVec3) -> Option<Arc<LocalSystem>> {
+        let star = self
+            .stars
+            .iter()
+            .find(|star| star.position_ly.distance(position_ly) < LOCAL_SHELL_LY)?
+            .clone();
+        if let Some(system) = self.loaded.get(&star.id) {
+            return Some(system.clone());
+        }
+        let system = Arc::new(LocalSystem::for_star(&star)?);
+        self.loaded.insert(star.id, system.clone());
+        Some(system)
+    }
+}
 
 /// Microseconds of coordinate time in one second.
 pub const MICROS_PER_SECOND: i64 = 1_000_000;

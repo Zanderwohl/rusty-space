@@ -12,10 +12,12 @@ use lc_store::id::Minter;
 use crate::journal::{Journal, JournalError, PREPARE_AHEAD_US};
 use crate::rate::Budget;
 use crate::transport::Transport;
-use crate::world::{Event, Scheduled, schedule};
+use crate::world::{Event, Scheduled, World, schedule};
 use lc_world::craft::{Craft, CraftId, Fleet};
 use lc_world::motion::{Change, Event as Change_, Rejected};
 use lc_world::navigation::Course;
+use lc_world::system::LocalSystem;
+use std::sync::Arc;
 
 /// Real milliseconds a tick covers.
 pub const TICK_MS: i64 = 50;
@@ -47,6 +49,9 @@ pub struct Server<J: Journal> {
     now_t: i64,
     /// Every craft in the world. The physics is `lc-world`'s and this is the whole of it.
     fleet: Fleet,
+    /// The stars this shard is authoritative over. Empty until one is loaded, which is the
+    /// state every test that is not about systems runs in.
+    world: World,
     /// Who owns what. The server's fact, not the world's: a probe has a worldline and no
     /// client, and a client is a connection rather than a thing in space.
     owners: HashMap<CraftId, ClientId>,
@@ -66,6 +71,7 @@ impl<J: Journal> Server<J> {
         Self {
             now_t: start_t,
             fleet: Fleet::new(),
+            world: World::default(),
             owners: HashMap::new(),
             clients: HashMap::new(),
             journal,
@@ -81,6 +87,15 @@ impl<J: Journal> Server<J> {
 
     pub fn journal(&self) -> &J {
         &self.journal
+    }
+
+    /// Give the server the stars it is authoritative over.
+    ///
+    /// Craft are placed into systems by where they *are*, on the tick after this, rather than
+    /// by being told — so loading a world mid-flight is the same operation as a ship crossing
+    /// into one.
+    pub fn load_world(&mut self, world: World) {
+        self.world = world;
     }
 
     /// The fleet, for a caller putting a craft into a system.
@@ -128,6 +143,15 @@ impl<J: Journal> Server<J> {
     pub async fn tick(&mut self, wire: &mut impl Transport) -> Result<(), JournalError> {
         // 1. Advance.
         self.now_t += TICK_US;
+        let now_s = self.now_t as f64 * 1.0e-6;
+        // Membership before motion, as the client orders it: a station and a conic are both
+        // positions *in* a system, and one resolved against the wrong system is a craft in the
+        // wrong place.
+        self.resync_systems(now_s);
+        // Nothing moved on the server before this. Reading a worldline never needed it — every
+        // motive is a closed form — but the transitions do: a crossing that arrives becomes a
+        // station, and a ballistic arc folds the patch it was solved for.
+        self.fleet.advance(now_s, TICK_US as f64 * 1.0e-6);
         // Room to write into, kept ahead rather than made on demand. Cheap: the journal holds
         // the range it has already made and this is a comparison until the window moves.
         self.journal.prepare(self.now_t, self.now_t + PREPARE_AHEAD_US).await?;
@@ -295,6 +319,33 @@ impl<J: Journal> Server<J> {
         }
         events.push(event);
         Ok(())
+    }
+
+    /// Put every craft in the system it is actually inside.
+    ///
+    /// By position and a shell radius, which is the whole rule and is the client's rule too.
+    /// Nothing is sent about it: both sides hold the same positions and reach the same answer,
+    /// the way both sides solve the same patch.
+    fn resync_systems(&mut self, now_s: f64) {
+        if self.world.is_empty() {
+            return;
+        }
+        // Positions first, then systems, then craft: the world and the fleet cannot both be
+        // borrowed at once, and a craft's system is looked up from where it is.
+        let where_each: Vec<(CraftId, DVec3)> =
+            self.fleet.iter().map(|craft| (craft.id, craft.motion.position_ly)).collect();
+        let placements: Vec<(CraftId, Option<Arc<LocalSystem>>)> = where_each
+            .into_iter()
+            .map(|(id, at)| (id, self.world.system_at(at)))
+            .collect();
+
+        for (id, system) in placements {
+            let Some(craft) = self.fleet.get_mut(id) else { continue };
+            if craft.system.as_ref().map(|s| s.star) == system.as_ref().map(|s| s.star) {
+                continue;
+            }
+            craft.enter(system, now_s);
+        }
     }
 
     /// Release what has arrived. **The only place anything reaches a client.**
@@ -773,7 +824,7 @@ use crate::transport::Loopback;
 }
 
 #[cfg(test)]
-mod course_tests {
+pub(crate) mod course_tests {
     use super::*;
     use crate::journal::Memory;
     use crate::transport::Loopback;
@@ -783,13 +834,15 @@ mod course_tests {
     use lc_world::system::LocalSystem;
     use std::sync::Arc;
 
-    fn a_system() -> Option<Arc<LocalSystem>> {
-        let sky = AuthoredStars::sample();
-        let star = sky.stars().first()?.clone();
-        LocalSystem::for_star(&star).map(Arc::new)
+    pub(crate) fn a_star() -> Option<lc_world::sky::CatalogueStar> {
+        AuthoredStars::sample().stars().first().cloned()
     }
 
-    fn orbitable(system: &LocalSystem) -> Option<String> {
+    pub(crate) fn a_system() -> Option<Arc<LocalSystem>> {
+        LocalSystem::for_star(&a_star()?).map(Arc::new)
+    }
+
+    pub(crate) fn orbitable(system: &LocalSystem) -> Option<String> {
         system.inventory().iter().find_map(|entry| match &entry.target {
             lc_world::navigation::Target::Body(name) => Some(name.clone()),
             _ => None,
@@ -930,5 +983,168 @@ mod course_tests {
                 "{accel_g} g was not refused",
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod world_tests {
+    use super::course_tests::*;
+    use super::*;
+    use crate::journal::Memory;
+    use crate::transport::Loopback;
+    use crate::world::World;
+    use lc_world::craft::Kind;
+    use lc_world::motion::{Change, Event as Change_, Motive};
+
+    /// A craft is in a system because of where it *is*. Nothing is told, and nothing asks:
+    /// the server applies the same shell radius the client does, so the two cannot disagree
+    /// about whether a ship is in a system.
+    #[tokio::test]
+    async fn a_craft_is_placed_by_where_it_is() {
+        let Some(star) = a_star() else { return };
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+
+        // One at the star, one a good way outside its shell.
+        server.admit(ClientId(1), Craft::at(CraftId(1), Kind::Ship, star.position_ly), 0.0);
+        let far = star.position_ly + DVec3::new(50.0, 0.0, 0.0);
+        server.admit(ClientId(2), Craft::at(CraftId(2), Kind::Probe, far), 0.0);
+        server.load_world(World::new(vec![star.clone()]));
+
+        assert!(server.ship(ShipId(1)).unwrap().system.is_none(), "nothing placed before a tick");
+        server.tick(&mut wire).await.unwrap();
+
+        let inside = server.ship(ShipId(1)).expect("the ship");
+        assert_eq!(inside.system.as_ref().map(|s| s.star), Some(star.id), "it is at the star");
+        assert!(
+            server.ship(ShipId(2)).unwrap().system.is_none(),
+            "fifty light-years out is not in anything",
+        );
+    }
+
+    /// The transitions the server never used to reach, because it never advanced anything.
+    /// Reading a worldline needs no stepping — every motive is a closed form — but a crossing
+    /// only *becomes* a station by being stepped past its own arrival.
+    #[tokio::test]
+    async fn a_crossing_the_server_flew_arrives_and_becomes_a_station() {
+        let Some(star) = a_star() else { return };
+        let Some(system) = a_system() else { return };
+        let Some(body) = orbitable(&system) else { return };
+
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let client = ClientId(1);
+        server.admit(client, Craft::at(CraftId(1), Kind::Ship, star.position_ly), 0.0);
+        server.load_world(World::new(vec![star]));
+        server.tick(&mut wire).await.unwrap();
+
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::SetCourse {
+                course: lc_proto::Course::Orbit {
+                    body,
+                    altitude_radii: 2.0,
+                    plane: lc_proto::Plane::Equatorial,
+                },
+                accel_g: 5.0,
+            },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+        let Motive::Crossing(cruise) = &server.ship(ShipId(1)).unwrap().motion.motive else {
+            panic!("the course did not become a crossing")
+        };
+        let duration_s = cruise.duration_s();
+        assert!(duration_s > 0.0);
+
+        // Far enough past the arrival that no rounding leaves it short.
+        let ticks = ((duration_s * 1.0e6 / TICK_US as f64).ceil() as usize + 2).min(20_000);
+        for _ in 0..ticks {
+            server.tick(&mut wire).await.unwrap();
+        }
+        assert!(
+            matches!(server.ship(ShipId(1)).unwrap().motion.motive, Motive::Holding(_)),
+            "after {ticks} ticks it is {:?}",
+            server.ship(ShipId(1)).unwrap().motion.motive,
+        );
+    }
+
+    /// **The property the whole seam exists for.** A client stepping at a frame rate and a
+    /// server stepping at 438 seconds a tick, folding the same order at the same coordinate,
+    /// end up in the same place.
+    ///
+    /// The reference is a bare `Craft` — the same type, run by hand at a different step —
+    /// because that is exactly what a client is. If this ever fails, something in the fold
+    /// depends on how often it is called, which is the one thing it may not do.
+    #[tokio::test]
+    async fn a_client_stepping_finely_agrees_with_the_server() {
+        let Some(star) = a_star() else { return };
+        let Some(system) = a_system() else { return };
+        let Some(body) = orbitable(&system) else { return };
+
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let client = ClientId(1);
+        server.admit(client, Craft::at(CraftId(1), Kind::Ship, star.position_ly), 0.0);
+        server.load_world(World::new(vec![star.clone()]));
+        server.tick(&mut wire).await.unwrap();
+
+        let course = lc_proto::Course::Orbit {
+            body,
+            altitude_radii: 2.0,
+            plane: lc_proto::Plane::Equatorial,
+        };
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::SetCourse { course: course.clone(), accel_g: 5.0 },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+
+        // What the server actually stamped it at. A client is told the coordinate; it does not
+        // guess one.
+        let stamped = server.journal().events[0].t;
+
+        // Entered at zero where the server entered it at its first tick. Deliberately not
+        // aligned: a client that joined a system at a slightly different moment still has to
+        // agree, and entering from nothing leaves the motive alone either way.
+        let mut mirror = Craft::at(CraftId(1), Kind::Ship, star.position_ly);
+        mirror.enter(Some(system.clone()), 0.0);
+        let mut drive = Kind::Ship.drive();
+        drive.accel_g = 5.0_f64.min(drive.accel_g);
+        mirror
+            .apply(&Change_ {
+                ship: lc_world::motion::ShipId(1),
+                at_t: stamped as f64 * 1.0e-6,
+                change: Change::SetCourse { course: course.into(), drive },
+            })
+            .expect("the same order the server took");
+
+        // Run both to the same coordinate, one at 438 seconds a step and one at 61.
+        let target_us = server.now_t() + 400 * TICK_US;
+        while server.now_t() < target_us {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let end_s = server.now_t() as f64 * 1.0e-6;
+
+        let mut now = 0.0;
+        while now < end_s {
+            let next = (now + 61.0).min(end_s);
+            mirror.advance(next, next - now);
+            now = next;
+        }
+        assert!((now - end_s).abs() < 1.0e-9, "the mirror stopped at {now}, not {end_s}");
+
+        let flown = server.ship(ShipId(1)).expect("the ship");
+        // To the bit. Anything less would mean the fold has a term that depends on how often
+        // it is called, and a client predicting for a few seconds would slide off the server's
+        // answer rather than track it.
+        assert_eq!(
+            flown.motion.position_ly, mirror.motion.position_ly,
+            "they disagree by {:e} light-years",
+            (flown.motion.position_ly - mirror.motion.position_ly).length(),
+        );
+        assert_eq!(flown.motion.motive, mirror.motion.motive);
+        assert_eq!(flown.motion.beta, mirror.motion.beta);
     }
 }
