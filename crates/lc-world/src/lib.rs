@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod boost;
 pub mod coast;
 pub mod craft;
 pub mod distribution;

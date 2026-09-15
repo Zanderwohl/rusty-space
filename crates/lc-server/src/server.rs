@@ -1621,6 +1621,73 @@ use crate::transport::Loopback;
         );
     }
 
+
+    /// **A chase at relativistic closing speed, flown by the server.**
+    ///
+    /// The quarry is running at four fifths of `c` and the pursuer starts at rest, so the
+    /// relative velocity is most of `c` and nothing about this can be done by subtracting
+    /// velocities and adding drifts. It closes anyway, and it ends *matched* — which is the
+    /// part that says the plan was solved in a real boosted frame rather than an approximate
+    /// one.
+    #[tokio::test]
+    async fn an_intercept_matches_a_quarry_running_at_four_fifths_of_c() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let hunter = ClientId(1);
+        let mut chaser = crate::world::still(ShipId(1), DVec3::ZERO);
+        // A torch, so the test runs in seconds. Shedding four fifths of `c` at five gravities
+        // is three months of coordinate time and a hundred thousand ticks; the physics is the
+        // same either way, and what is being checked is the match and not the schedule.
+        chaser.motion.drive = lc_world::flight::Drive { accel_g: 1_000.0, max_beta: 0.999 };
+        server.admit(hunter, chaser, 0.0);
+        let running = DVec3::new(0.0, 0.8, 0.0);
+        server.admit(
+            ClientId(2),
+            crate::world::coasting(
+                ShipId(2),
+                DVec3::new(ONE_LIGHT_SECOND * 60.0, 0.0, 0.0),
+                running,
+                0,
+            ),
+            0.0,
+        );
+
+        wire.client_says(hunter, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Intercept { ship_id: ShipId(2) },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+        assert!(plan(&server, ShipId(1)).is_some(), "the order did not put it on an approach");
+
+        // Long enough to shed four fifths of `c`, fly back, and stop.
+        for _ in 0..20_000 {
+            server.tick(&mut wire).await.unwrap();
+            if plan(&server, ShipId(1)).is_none() {
+                break;
+            }
+        }
+
+        let hunter_beta = server.ship(ShipId(1)).unwrap().motion.beta;
+        assert!(
+            (hunter_beta - running).length() < 0.01,
+            "ended at {hunter_beta} rather than matched to {running}",
+        );
+        // And alongside, measured where a standoff means something: the frame they now share.
+        let standoff = lc_world::pursuit::standoff_m(
+            server.ship(ShipId(1)).unwrap().length_m,
+            server.ship(ShipId(2)).unwrap().length_m,
+        );
+        let separation = (at_now(&server, ShipId(1)) - at_now(&server, ShipId(2)))
+            * lc_world::flight::JULIAN_YEAR_S;
+        let gap = lc_world::boost::separation_in_frame(separation, running)
+            * lc_world::flight::C_M_S;
+        assert!(
+            gap < standoff * lc_world::pursuit::DRIFT_ALLOWANCE,
+            "ended {gap} m off, outside the deadband round {standoff} m",
+        );
+    }
+
 }
 
 #[cfg(test)]

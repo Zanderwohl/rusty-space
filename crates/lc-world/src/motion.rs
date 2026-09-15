@@ -464,7 +464,9 @@ pub fn facing(state: &ShipState, system: Option<&LocalSystem>, now_s: f64) -> Op
     // The frame does not rotate, so a thrust direction in it is a thrust direction here.
     let thrusting = match &state.motive {
         Motive::Crossing(cruise) => Some(cruise.thrust_at(now_s)),
-        Motive::Rendezvous(plan) => Some(plan.cruise.thrust_at(now_s)),
+        // The plan and not its cruise: the cruise keeps the quarry frame's own time, and its
+        // thrust direction is in that frame's axes. Both have to come back.
+        Motive::Rendezvous(plan) => Some(plan.thrust_at(now_s)),
         _ => None,
     };
     if let Some(thrust) = thrusting
@@ -518,7 +520,10 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
             }
         }
         Motive::Rendezvous(plan) => {
-            let flight = plan.cruise.at(now_s);
+            // Sampled at a world time through the plan, which is what reconciles it with the
+            // quarry frame's own clock. Reading the cruise directly asked it about a moment it
+            // measures differently, and at speed those are months apart.
+            let flight = plan.flight_at(now_s);
             state.clock_s = state.crossing_clock_base_s + flight.proper_s;
             if flight.phase == Phase::Arrived {
                 // Arriving is not stopping. What is left is the quarry's own velocity, which
@@ -1386,5 +1391,6 @@ mod tests {
         assert!(early.x > 0.99, "not boosting toward the quarry: {early}");
         assert!(late.x < -0.99, "not braking back down the track: {late}");
     }
+
 
 }

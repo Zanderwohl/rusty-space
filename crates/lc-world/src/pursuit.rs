@@ -1,11 +1,17 @@
 //! Closing on another craft, from what can be seen of it.
 //!
 //! The one idea here is the **frame**. Matching velocity with something is arriving at rest in
-//! its frame, so the approach is planned there and not in the world's: feed
-//! [`Cruise::plan_from`] the *relative* position and the *relative* velocity and a destination
-//! a standoff short of zero, and the brachistochrone it already solves comes out as a
-//! rendezvous. Burn, flip, burn and arrive matched, in one plan rather than a crossing
-//! followed by a separate injection.
+//! its frame, so the approach is planned there and not in the world's: boost into the frame the
+//! quarry is at rest in, hand [`Cruise::plan_from`] the pursuer's position and velocity *as
+//! measured there* and a destination a standoff short of the origin, and the brachistochrone it
+//! already solves comes out as a rendezvous. Burn, flip, burn and arrive matched, in one plan
+//! rather than a crossing followed by a separate injection.
+//!
+//! The boost is a real one — see [`crate::boost`] — so this holds at any speed a ship can
+//! reach. Velocities compose rather than subtract, the plan's own coordinates are related to
+//! the world's by a Lorentz transformation and not by adding a drift, and the relativity of
+//! simultaneity is carried rather than ignored. An earlier version did all three the Galilean
+//! way and had to refuse anything past a tenth of `c`.
 //!
 //! **The frame is what was seen, not what is.** A pursuer has only the light that has reached
 //! it, so a plan is anchored at a sighting — where the quarry was, how fast, and when the light
@@ -14,16 +20,11 @@
 //! knowledge into the pursuer's own trajectory, which the player watches. A target that
 //! manoeuvres is therefore chased on stale information until its news arrives, which across a
 //! system is seconds to hours.
-//!
-//! Velocities compose the Galilean way, here and in [`crate::motion::state_at`]'s arm for a
-//! rendezvous. The error is second order in the frame's own speed: a millionth at a hundred
-//! kilometres a second, which is fast for traffic inside a system, and not usable for matching
-//! with something crossing between them at half `c`. [`FRAME_BETA_LIMIT`] is where this
-//! refuses rather than answering wrongly.
 
 use glam::DVec3;
 
-use crate::flight::{Cruise, Drive, JULIAN_YEAR_S};
+use crate::boost::{self, Event};
+use crate::flight::{C_M_S, Cruise, Drive, JULIAN_YEAR_S, MAX_BETA};
 use crate::motion::{Motive, ShipId, ShipState};
 use crate::system::M_PER_LY;
 
@@ -33,6 +34,10 @@ use crate::system::M_PER_LY;
 /// alongside another fifty is a different proposition from fifty alongside five hundred metres.
 /// Five of them is close enough to be formation flying and far enough that neither is
 /// manoeuvring inside the other's hull.
+///
+/// A **proper** distance, measured in the frame the two of them end up sharing. Anything else
+/// would have two ships closing at speed park closer together than two at rest, because the
+/// world frame sees the gap between them contracted.
 pub const STANDOFF_LENGTHS: f64 = 5.0;
 
 /// How far a craft may drift from its station before it closes again, as a multiple of the
@@ -53,13 +58,6 @@ pub const DRIFT_ALLOWANCE: f64 = 2.0;
 /// covers both is one rule that cannot disagree with itself at the boundary.
 pub const REPLAN_FRACTION: f64 = 0.25;
 
-/// The frame speed past which a Galilean treatment of the relative motion stops being honest.
-///
-/// A tenth of `c`, where the second-order error is a per cent. Matching with something faster
-/// wants the relative motion composed properly and a trajectory that can be boosted, which
-/// this is not.
-pub const FRAME_BETA_LIMIT: f64 = 0.1;
-
 /// A craft as its pursuer currently sees it: a sighting, and therefore the past.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sighting {
@@ -79,22 +77,28 @@ impl Sighting {
     /// Dead reckoning, and the only kind of extrapolation a pursuer is entitled to: it uses
     /// what arrived and nothing else. Wrong exactly when the quarry has manoeuvred since, which
     /// is what [`REPLAN_FRACTION`] notices when the news of that finally lands.
+    ///
+    /// World coordinates throughout, so this is a straight line and needs no boost: an inertial
+    /// worldline is inertial in every frame.
     pub fn reckoned_at(&self, now_s: f64) -> DVec3 {
         self.position_ly + self.beta * (now_s - self.emitted_s) / JULIAN_YEAR_S
     }
 }
 
-/// An approach, solved in the frame the quarry appeared to be moving in.
+/// An approach, solved in the frame the quarry appeared to be at rest in.
 ///
 /// A **frozen** frame, which is what makes this safe to hand a client: it is three numbers
 /// taken from one sighting, not a handle on the quarry's live worldline. A client evaluating it
 /// learns where the pursuer goes and nothing whatever about where the quarry went next.
+///
+/// [`Rendezvous::cruise`] is in that frame's own coordinates — its positions and, importantly,
+/// its *times* are not the world's. Reading it back out is [`Rendezvous::state_at`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct Rendezvous {
-    /// The approach itself, in relative coordinates: from the offset to the quarry, to a
-    /// standoff short of it, ending at rest — which in this frame is matched.
+    /// The approach itself, in the quarry's frame: from where the pursuer is to a standoff
+    /// short of the origin, ending at rest — which in this frame is matched.
     pub cruise: Cruise,
-    /// Where the quarry was seen, light-years.
+    /// Where the quarry was seen, light-years. The frame is pinned to this event.
     pub frame_from_ly: DVec3,
     /// How fast it was seen going.
     pub frame_beta: DVec3,
@@ -108,17 +112,18 @@ pub struct Rendezvous {
 ///
 /// The same "recipe, never the trajectory" rule the rest of [`crate::resume`] follows: this is
 /// what crosses a wire and goes on disk, and the far end re-solves it. Every number in it is
-/// either relative or a **sighting** — where the quarry was seen, how fast, and when the light
-/// left — so it says nothing about the quarry that the receiver's own eyes could not have told
-/// it.
+/// either measured in the quarry's frame or a **sighting** — where the quarry was seen, how
+/// fast, and when the light left — so it says nothing about the quarry that the receiver's own
+/// eyes could not have told it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Approach {
-    /// Where the pursuer was when this was solved, relative to the quarry's reckoned position.
+    /// Where the pursuer was when this was solved, in the quarry's frame.
     pub from_ly: DVec3,
-    /// How fast it was going then, relative to the quarry.
+    /// How fast it was going then, in the quarry's frame.
     pub beta0: DVec3,
-    /// Where the approach ends, relative: a standoff short of the quarry.
+    /// Where the approach ends: a standoff short of the quarry, in its frame.
     pub to_ly: DVec3,
+    /// When it begins, in the quarry's frame's own seconds.
     pub start_s: f64,
     pub drive: Drive,
     pub frame_from_ly: DVec3,
@@ -157,24 +162,128 @@ impl Rendezvous {
         }
     }
 
-    /// Where the frame's origin — the quarry, dead-reckoned — is at a coordinate time.
+    /// Where the frame's origin — the quarry, dead-reckoned — is at a **world** time.
     pub fn frame_at(&self, now_s: f64) -> DVec3 {
         self.frame_from_ly + self.frame_beta * (now_s - self.since_t) / JULIAN_YEAR_S
     }
 
-    /// Where the pursuer is, and how fast, in the world frame.
+    /// The frame's own time at which the pursuer is at a given world time.
+    ///
+    /// The inversion that relativity makes necessary. `t = γ(t' + β·x'(t'))`, and `x'` depends
+    /// on `t'`, so this is a root find rather than a division — the frame's clock and the
+    /// world's do not merely run at different rates, they disagree about which events are
+    /// simultaneous, and by an amount that changes as the ship moves through the frame.
+    ///
+    /// Always exactly one root: `dt/dt' = γ(1 + β·β')` and `|β'| < 1`, so it rises at no less
+    /// than `γ(1 − |β|) > 0`. Newton on a bracket, which converges in a handful of steps
+    /// because the profile is smooth inside each phase of the burn.
+    fn frame_time_at(&self, elapsed_s: f64) -> f64 {
+        let beta = self.frame_beta;
+        if beta.length_squared() <= 0.0 {
+            return elapsed_s;
+        }
+        let gamma = boost::gamma_of(beta);
+        // World seconds elapsed, as a function of the frame's own elapsed seconds.
+        let world_at = |t: f64| {
+            let x = self.cruise.at(t).position_ly * JULIAN_YEAR_S;
+            gamma * (t + beta.dot(x))
+        };
+
+        // The cruise holds its endpoints outside its own span, so `β·x'` is bounded and a
+        // bracket is found by doubling out from the answer a drift alone would give.
+        let mut span = (elapsed_s.abs() / gamma).max(1.0);
+        let guess = elapsed_s / gamma;
+        let (mut lo, mut hi) = (guess - span, guess + span);
+        for _ in 0..64 {
+            if world_at(lo) <= elapsed_s && world_at(hi) >= elapsed_s {
+                break;
+            }
+            span *= 2.0;
+            lo = guess - span;
+            hi = guess + span;
+        }
+
+        let mut t = guess.clamp(lo, hi);
+        for _ in 0..48 {
+            let at = self.cruise.at(t);
+            let x = at.position_ly * JULIAN_YEAR_S;
+            let error = gamma * (t + beta.dot(x)) - elapsed_s;
+            if error > 0.0 {
+                hi = t;
+            } else {
+                lo = t;
+            }
+            // `β·β'` cannot reach −1, so this cannot vanish.
+            let slope = gamma * (1.0 + beta.dot(at.beta));
+            let mut next = t - error / slope;
+            if !(next > lo && next < hi) {
+                next = 0.5 * (lo + hi);
+            }
+            let tolerance = 4.0 * f64::EPSILON * t.abs().max(1.0);
+            if (next - t).abs() <= tolerance || (hi - lo) <= tolerance {
+                return next;
+            }
+            t = next;
+        }
+        t
+    }
+
+    /// The approach sampled at a **world** time.
+    ///
+    /// The one place the two clocks are reconciled. Everything that asks a question about a
+    /// rendezvous at a world time goes through here, because a cruise keeps the quarry frame's
+    /// time and handing it a world one is a mistake with no symptom until something arrives
+    /// late — the crew's clock, the arrival transition and the thrust direction all read off
+    /// this, and all three were wrong when `advance` sampled the cruise directly.
+    pub fn flight_at(&self, now_s: f64) -> crate::flight::FlightState {
+        self.cruise.at(self.frame_time_at(now_s - self.since_t))
+    }
+
+    /// Where the pursuer is, and how fast, in world coordinates at a world time.
+    ///
+    /// Built as *the quarry's position plus an offset* rather than transformed straight out of
+    /// the frame, and that is a numerical decision rather than a stylistic one. The two forms
+    /// are the same algebra with the `γt'` term cancelled by hand, and that term is enormous:
+    /// shedding `0.99c` at five gravities takes years and carries the frame's anchor event tens
+    /// of light-years away, so the direct form recovers a five-kilometre standoff by
+    /// subtracting two numbers of order fifty light-years and gets about a hundred bits of
+    /// signal. See [`boost::separation_in_world`].
     pub fn state_at(&self, now_s: f64) -> (DVec3, DVec3) {
-        let flight = self.cruise.at(now_s);
-        (flight.position_ly + self.frame_at(now_s), flight.beta + self.frame_beta)
+        let flight = self.flight_at(now_s);
+        let offset =
+            boost::separation_in_world(flight.position_ly * JULIAN_YEAR_S, self.frame_beta);
+        (
+            self.frame_at(now_s) + offset / JULIAN_YEAR_S,
+            boost::velocity_from_frame(flight.beta, self.frame_beta),
+        )
+    }
+
+    /// Which way the drive points at a world time, in world axes. Zero where it is not lit.
+    ///
+    /// Aberrated into the world frame, which is what happens to a direction under a boost — at
+    /// speed the nose swings forward of where the frame it is thrusting in would put it. What
+    /// is *not* attempted is the rest of relativistic rendering: the hull is not contracted and
+    /// its silhouette is not aberrated, so this is the orientation of a shape that is itself
+    /// drawn unrelativistically.
+    pub fn thrust_at(&self, now_s: f64) -> DVec3 {
+        // The cruise already knows which way its drive points; it only has to be asked in its
+        // own time rather than the world's.
+        let thrust = self.cruise.thrust_at(self.frame_time_at(now_s - self.since_t));
+        if thrust == DVec3::ZERO {
+            return DVec3::ZERO;
+        }
+        boost::velocity_from_frame(thrust, self.frame_beta).normalize_or_zero()
     }
 
     pub fn has_arrived(&self, now_s: f64) -> bool {
-        self.cruise.has_arrived(now_s)
+        self.cruise.has_arrived(self.frame_time_at(now_s - self.since_t))
     }
 
     /// How far off the plan a fresh sighting puts the quarry, light-years.
     ///
     /// Zero for a quarry that has held its course, because the dead reckoning is then exact.
+    /// World coordinates on both sides, so no boost: this is a question about two claims
+    /// concerning the same frame.
     pub fn divergence(&self, seen: &Sighting) -> f64 {
         self.frame_at(seen.emitted_s).distance(seen.position_ly)
     }
@@ -190,15 +299,16 @@ pub fn standoff_m(mine: f64, theirs: f64) -> f64 {
 pub enum Refused {
     /// Already on station. Nothing to fly; hold and watch the deadband.
     AlreadyThere,
-    /// The quarry is moving too fast for the relative motion to be composed this way.
+    /// The quarry is at or past `c`, where there is no frame to match with. Nothing a ship can
+    /// do reaches this; a corrupt or hostile number can.
     TooFast,
 }
 
 /// Solve the approach from where the pursuer is to a standoff off the quarry.
 ///
-/// `now_s` is the coordinate time the plan is made at, which is *later* than the sighting it is
-/// made from — the light took time to arrive. The gap is carried by the dead reckoning rather
-/// than ignored.
+/// `now_s` is the world time the plan is made at, which is *later* than the sighting it is made
+/// from — the light took time to arrive. The gap is carried by the dead reckoning rather than
+/// ignored.
 pub fn approach(
     pursuer: &ShipState,
     pursuer_length_m: f64,
@@ -206,24 +316,31 @@ pub fn approach(
     now_s: f64,
     drive: Drive,
 ) -> Result<Rendezvous, Refused> {
-    if seen.beta.length() > FRAME_BETA_LIMIT {
+    if seen.beta.length() >= MAX_BETA {
         return Err(Refused::TooFast);
     }
-    let standoff_ly = standoff_m(pursuer_length_m, seen.length_m) / M_PER_LY;
-    let offset = pursuer.position_ly - seen.reckoned_at(now_s);
-    let range = offset.length();
-    if range <= standoff_ly {
+    // Into the quarry's frame, pinned to the sighting. Everything from here to the plan is
+    // measured there, including the standoff, which is a proper distance.
+    let here = boost::to_frame(
+        Event {
+            t: now_s - seen.emitted_s,
+            x: (pursuer.position_ly - seen.position_ly) * JULIAN_YEAR_S,
+        },
+        seen.beta,
+    );
+    let standoff_ls = standoff_m(pursuer_length_m, seen.length_m) / C_M_S;
+    let range = here.x.length();
+    if range <= standoff_ls {
         return Err(Refused::AlreadyThere);
     }
     // Stopping short on the side the pursuer is already on. Aiming at the quarry itself is
     // aiming to collide, and aiming at any other side is a plan that crosses through it.
-    let to = offset / range * standoff_ly;
-    let relative_beta = pursuer.beta - seen.beta;
+    let to = here.x / range * standoff_ls;
     Ok(Approach {
-        from_ly: offset,
-        beta0: relative_beta,
-        to_ly: to,
-        start_s: now_s,
+        from_ly: here.x / JULIAN_YEAR_S,
+        beta0: boost::velocity_to_frame(pursuer.beta, seen.beta),
+        to_ly: to / JULIAN_YEAR_S,
+        start_s: here.t,
         drive,
         frame_from_ly: seen.position_ly,
         frame_beta: seen.beta,
@@ -247,10 +364,14 @@ pub fn wants_replan(motive: &Motive, seen: &Sighting, pursuer_length_m: f64, now
 }
 
 /// Whether a craft on station has wandered far enough to be worth closing again.
+///
+/// Measured in the frame the pair share, because the standoff is a proper distance. Two ships
+/// running together at speed are closer in the world's reckoning than in their own, and a
+/// deadband applied to the world's number would let them converge as they accelerated.
 pub fn wants_closing(pursuer: &ShipState, pursuer_length_m: f64, seen: &Sighting, now_s: f64) -> bool {
-    let standoff_ly = standoff_m(pursuer_length_m, seen.length_m) / M_PER_LY;
-    let range = pursuer.position_ly.distance(seen.reckoned_at(now_s));
-    range > standoff_ly * DRIFT_ALLOWANCE
+    let standoff_ls = standoff_m(pursuer_length_m, seen.length_m) / C_M_S;
+    let separation = (pursuer.position_ly - seen.reckoned_at(now_s)) * JULIAN_YEAR_S;
+    boost::separation_in_frame(separation, seen.beta) > standoff_ls * DRIFT_ALLOWANCE
 }
 
 #[cfg(test)]
@@ -267,6 +388,14 @@ mod tests {
             length_m: 500.0,
             emitted_s: 0.0,
         }
+    }
+
+    /// How long a plan takes in **world** seconds, which is not its cruise's duration: that is
+    /// measured on the quarry frame's clock.
+    fn world_duration(plan: &Rendezvous) -> f64 {
+        let end = plan.cruise.start_s + plan.cruise.duration_s();
+        let x = plan.cruise.at(end).position_ly * JULIAN_YEAR_S;
+        boost::gamma_of(plan.frame_beta) * (end + plan.frame_beta.dot(x))
     }
 
     fn pursuer() -> ShipState {
@@ -416,11 +545,93 @@ mod tests {
         assert!(wants_closing(&me, 500.0, &seen, 0.0), "outside it");
     }
 
-    /// Refused rather than answered wrongly. A Galilean composition of the relative motion is
-    /// a per-cent error at a tenth of `c` and nonsense past that.
+    /// **A chase at any speed, and the match still comes out exact.**
+    ///
+    /// The case the Galilean version had to refuse at a tenth of `c`. Everything that makes it
+    /// hard is here at once: the velocities cannot be subtracted, the plan's coordinates are
+    /// related to the world's by a boost rather than a drift, and the frame's clock disagrees
+    /// with the world's about which events are simultaneous.
+    ///
+    /// The top of the range is worth reading twice. At `0.9999c` the Lorentz factor is seventy,
+    /// shedding that much relative velocity at five gravities takes the better part of a
+    /// century, and the frame's anchor event finishes some hundreds of light-years astern — and
+    /// the standoff still comes out to a part in ten thousand of five kilometres. That is the
+    /// algebraic cancellation in [`boost::separation_in_world`] doing its job; without it this
+    /// case has no significant figures left at all.
     #[test]
-    fn matching_with_something_relativistic_is_refused() {
-        let seen = quarry(1_000.0, DVec3::Y * 0.5);
-        assert_eq!(approach(&pursuer(), 500.0, &seen, 0.0, Drive::DEFAULT), Err(Refused::TooFast));
+    fn a_quarry_at_any_speed_is_matched_exactly() {
+        for beta in [0.5, 0.9, 0.99, 0.999, 0.9999] {
+            let running = DVec3::Y * beta;
+            let seen = quarry(1_000.0, running);
+            let plan = approach(&pursuer(), 500.0, &seen, 0.0, Drive::DEFAULT)
+                .unwrap_or_else(|why| panic!("{beta}c was refused: {why:?}"));
+
+            // Flown to the end, in world time.
+            let done = plan.since_t + world_duration(&plan);
+            let (at, ended) = plan.state_at(done);
+
+            // Matched: what is left is the quarry's own velocity, composed rather than added.
+            assert!(
+                (ended - running).length() < 1.0e-6,
+                "{beta}c ended at {ended} rather than {running}",
+            );
+            // Alongside, at the standoff measured where a standoff means something — in the
+            // frame the two of them now share.
+            let standoff_ls = standoff_m(500.0, seen.length_m) / C_M_S;
+            let separation = (at - seen.reckoned_at(done)) * JULIAN_YEAR_S;
+            let gap = boost::separation_in_frame(separation, running);
+            assert!(
+                (gap - standoff_ls).abs() < standoff_ls * 1.0e-4,
+                "{beta}c ended {gap} light-seconds off, wanted {standoff_ls}",
+            );
+        }
     }
+
+    /// Nothing a ship can do is refused. Only a velocity at or past `c`, which is not a frame
+    /// at all and can only arrive from something corrupt.
+    #[test]
+    fn only_a_quarry_at_c_has_no_frame_to_match() {
+        let seen = quarry(1_000.0, DVec3::Y * 0.9999);
+        assert!(approach(&pursuer(), 500.0, &seen, 0.0, Drive::DEFAULT).is_ok());
+        let past = quarry(1_000.0, DVec3::Y * 1.5);
+        assert_eq!(approach(&pursuer(), 500.0, &past, 0.0, Drive::DEFAULT), Err(Refused::TooFast));
+    }
+
+    /// The world clock and the frame's are inverses of each other, which is what everything
+    /// read back out of a plan depends on.
+    #[test]
+    fn the_two_clocks_invert_each_other() {
+        let running = DVec3::new(0.0, 0.8, -0.2);
+        let seen = quarry(1_000.0, running);
+        let plan = approach(&pursuer(), 500.0, &seen, 0.0, Drive::DEFAULT).expect("a plan");
+        let gamma = boost::gamma_of(running);
+        for step in 0..12 {
+            let elapsed = world_duration(&plan) * step as f64 / 11.0;
+            let frame_t = plan.frame_time_at(elapsed);
+            let x = plan.cruise.at(frame_t).position_ly * JULIAN_YEAR_S;
+            let back = gamma * (frame_t + running.dot(x));
+            assert!(
+                (back - elapsed).abs() < 1.0e-6 * elapsed.abs().max(1.0),
+                "{elapsed} went to {frame_t} and came back {back}",
+            );
+        }
+    }
+
+    /// At everyday speeds it has to give what the Galilean arithmetic it replaced gave, or
+    /// every number tuned against that one is now wrong.
+    #[test]
+    fn a_slow_chase_is_the_answer_the_old_arithmetic_gave() {
+        let creeping = DVec3::Y * 1.0e-5;
+        let seen = quarry(1_000.0, creeping);
+        let plan = approach(&pursuer(), 500.0, &seen, 0.0, Drive::DEFAULT).expect("a plan");
+        // The frame's clock and the world's run together to within a part in 1e10.
+        let elapsed = world_duration(&plan);
+        assert!((plan.frame_time_at(elapsed) - elapsed).abs() < elapsed * 1.0e-9);
+        // And the plan starts where the Galilean one did: the pursuer's own offset and its
+        // velocity less the quarry's.
+        let offset = (pursuer().position_ly - seen.reckoned_at(0.0)).length();
+        assert!((plan.cruise.from_ly.length() - offset).abs() < offset * 1.0e-9);
+        assert!((plan.cruise.initial_beta() - (-creeping)).length() < 1.0e-14);
+    }
+
 }
