@@ -115,6 +115,36 @@ jobs:
   # version independent of the game's. It shares no code with either product, so a
   # path dependency reaching back into crates/ is the thing to catch.
   #
+  # The identity broker. Its own workspace for the same reason the site has one, and it must
+  # stay out of both products' dependency trees. See lightcone/docs/16-identity.md.
+  auth:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: auth
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: auth
+
+      - name: The broker is a separate workspace
+        run: |
+          if grep -rn 'path = "\.\./\.\./\(crates\|web\)' */Cargo.toml; then
+            echo "the broker has a path dependency on a product crate" >&2
+            exit 1
+          fi
+
+      - name: Test
+        run: cargo test
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Formatting
+        run: cargo fmt --check
+
   # Images are built on the `rocinante` docker context, not here. See
   # lightcone/docs/14-hosting.md.
   web:

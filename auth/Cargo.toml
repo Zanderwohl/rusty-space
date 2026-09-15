@@ -1,0 +1,11 @@
+# A workspace of its own, like `web/`, and for the same reason: the broker deploys on its own
+# schedule and shares no code with either product. A second lockfile is what makes that true
+# rather than intended. See lightcone/docs/16-identity.md.
+[workspace]
+resolver = "3"
+members = ["lc-identity"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
