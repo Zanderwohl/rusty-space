@@ -37,6 +37,32 @@ dimmed and the player can see they are somewhere.
 The screen node itself is still spawned when its contents are not, because it carries the marker
 that says which page is drawn. Losing that turns a rebuild into a flicker.
 
+## Rebuild on what is drawn, never on what changed
+
+Bevy UI is **retained**. A surface that is despawned and respawned loses everything the engine
+was holding for it — including `Interaction`, which is how a button knows it is being hovered.
+A modal rebuilt every frame has buttons that are destroyed and recreated before the next frame
+can notice a cursor on them, so they simply never light up. Nothing looks broken; the hover is
+just absent.
+
+So the trigger is a comparison against **what is currently drawn**, not a change-detection flag:
+
+```rust
+#[derive(Component, PartialEq)]
+struct Modal(Shown);          // what this surface is showing
+
+if already_drawn == wanted { return; }
+```
+
+`Res::is_changed` is the trap, and it is a good trap because it looks exactly right. The menu's
+backdrop drifts by writing `ResMut<Ui>` every frame, so `Ui::is_changed()` is *always* true —
+measured, 121 frames out of 121 — and a modal keyed on it rebuilt 121 times. Keyed on its
+contents it builds once.
+
+None of this applies to egui, which is immediate-mode and has no retained state to lose. It is a
+rule about the retained toolkit only, which is part of why the line between them is worth
+keeping sharp.
+
 ## Z-order is not implicit
 
 **Bevy UI orders by spawn.** Two systems spawning into the same frame have no order between

@@ -110,6 +110,9 @@ Each of these cost real time. None of them are visible from the code that hits t
 
 - Interface rules live in `lightcone/docs/18-ui-style.md`: which toolkit a surface belongs to,
   one surface at a time, and why anything over another panel is opaque.
+- **Bevy UI is retained**: a surface rebuilt every frame loses `Interaction`, so its buttons
+  never show a hover. Key the rebuild on *what is drawn*, not on `Res::is_changed` — the menu
+  backdrop writes `ResMut<Ui>` every frame, so that flag is always true.
 - **Bevy UI orders by spawn**, so two systems spawning into one frame have no order between
   them — an overlay drawn by one lands *behind* the screen drawn by the other, interleaved with
   it. `em_ui::MenuUi::overlay` sets a `GlobalZIndex` for this reason. And a translucent panel

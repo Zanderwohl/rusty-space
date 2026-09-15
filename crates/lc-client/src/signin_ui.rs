@@ -403,71 +403,108 @@ fn colour(from: bevy::prelude::Color) -> egui::Color32 {
     )
 }
 
-/// The modal.
-fn draw(mut commands: Commands, ui: Res<Ui>, signin: Res<Signin>, drawn: Query<Entity, With<Modal>>) {
-    let wanted = ui.menu_page == MenuPage::SignIn;
-    for entity in &drawn {
-        // Rebuilt whenever anything changed, which is cheap: a panel and four children.
-        if !wanted || signin.is_changed() || ui.is_changed() {
-            commands.entity(entity).despawn();
+/// What the modal is showing.
+///
+/// Compared against what is already drawn, so the modal is rebuilt when its *contents* change
+/// and not when anything else does. Without this it was rebuilt every frame — the menu's
+/// backdrop drift writes `Ui` each frame, `Ui::is_changed` is therefore always true, and a
+/// button that is despawned and respawned before the next frame can never be hovered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Shown {
+    /// The form owns the screen; the modal is a backdrop and nothing else.
+    Backdrop,
+    Choice,
+    Waiting(String),
+    Working,
+    Failed(String),
+    SignedIn(String),
+}
+
+impl Shown {
+    fn of(session: &Session, form_open: bool) -> Self {
+        if form_open {
+            return Shown::Backdrop;
+        }
+        match session {
+            Session::SignedOut => Shown::Choice,
+            Session::Waiting { url, .. } => Shown::Waiting(url.clone()),
+            Session::Working => Shown::Working,
+            Session::Failed(why) => Shown::Failed(why.clone()),
+            Session::SignedIn(identity) => Shown::SignedIn(identity.display_name.clone()),
         }
     }
-    if !wanted || (!drawn.is_empty() && !signin.is_changed() && !ui.is_changed()) {
-        return;
+}
+
+/// The modal.
+fn draw(mut commands: Commands, ui: Res<Ui>, signin: Res<Signin>, drawn: Query<(Entity, &Modal)>) {
+    let wanted = (ui.menu_page == MenuPage::SignIn)
+        .then(|| Shown::of(&signin.session, signin.form.is_some()));
+
+    // Already showing the right thing: leave it alone. Every rebuild resets the hover state of
+    // every button in it.
+    if let Ok((entity, Modal(showing))) = drawn.single() {
+        if Some(showing) == wanted.as_ref() {
+            return;
+        }
+        commands.entity(entity).despawn();
     }
+    let Some(wanted) = wanted else { return };
 
     // Opaque, unlike an ordinary panel. The menu is still there behind it, dimmed, and two
     // translucent panels of the same size at the same place read as one muddled thing rather
     // than as one in front of the other.
     let theme = MenuTheme { panel_bg: MenuTheme::VFD.panel_bg.with_alpha(1.0), ..MenuTheme::VFD };
     let mut menu = MenuUi::new(&mut commands, theme).panel_width(460.0);
-    let screen = menu.overlay(Modal);
+    let screen = menu.overlay(Modal(wanted.clone()));
     // The form owns the screen while it is up, for the reason the menu stands down for this
     // modal: one surface at a time. The backdrop stays, so the sky is still dimmed behind it.
-    if signin.form.is_some() {
+    let Shown::Backdrop = &wanted else {
+        let panel = menu.panel(screen);
+        menu.title(panel, "SIGN IN");
+        match &wanted {
+            Shown::SignedIn(name) => {
+                menu.message(panel, &format!("Signed in as {name}."));
+                menu.button(panel, "Observe", Emit(Action::StartGame));
+                menu.button(panel, "Sign out", Emit(Action::SignOut));
+            }
+            Shown::Waiting(url) => {
+                menu.message(panel, "Finish signing in with your browser.");
+                // The address itself, because a browser that did not open leaves a player with
+                // nothing to act on otherwise.
+                menu.message(panel, url);
+                menu.button(panel, "Cancel", Emit(Action::CancelSignIn));
+            }
+            Shown::Working => {
+                menu.message(panel, "One moment…");
+            }
+            Shown::Failed(why) => {
+                menu.message(panel, why);
+                menu.button(panel, "Try again", Emit(Action::SignIn));
+                menu.button(panel, "Back", Emit(Action::GoToMenuPage(MenuPage::Root)));
+            }
+            Shown::Choice => {
+                menu.message(panel, "Observing needs an account.");
+                menu.button(panel, "Sign in with a browser", Emit(Action::SignIn));
+                // The local one. Offered always and refused with a reason by a deployment that
+                // has no password provider, rather than the client asking what is on offer.
+                menu.button(
+                    panel,
+                    "Use a password",
+                    Emit(Action::SignInWithPassword {
+                        email: String::new(),
+                        password: String::new(),
+                    }),
+                );
+                menu.button(panel, "Back", Emit(Action::GoToMenuPage(MenuPage::Root)));
+            }
+            Shown::Backdrop => unreachable!("handled above"),
+        }
         return;
-    }
-    let panel = menu.panel(screen);
-    menu.title(panel, "SIGN IN");
-
-    match &signin.session {
-        Session::SignedIn(identity) => {
-            menu.message(panel, &format!("Signed in as {}.", identity.display_name));
-            menu.button(panel, "Observe", Emit(Action::StartGame));
-            menu.button(panel, "Sign out", Emit(Action::SignOut));
-        }
-        Session::Waiting { url, .. } => {
-            menu.message(panel, "Finish signing in with your browser.");
-            // The address itself, because a browser that did not open leaves a player with
-            // nothing to act on otherwise.
-            menu.message(panel, url);
-            menu.button(panel, "Cancel", Emit(Action::CancelSignIn));
-        }
-        Session::Working => {
-            menu.message(panel, "One moment…");
-        }
-        Session::Failed(why) => {
-            menu.message(panel, why);
-            menu.button(panel, "Try again", Emit(Action::SignIn));
-            menu.button(panel, "Back", Emit(Action::GoToMenuPage(MenuPage::Root)));
-        }
-        Session::SignedOut => {
-            menu.message(panel, "Observing needs an account.");
-            menu.button(panel, "Sign in with a browser", Emit(Action::SignIn));
-            // The local one. Offered always and refused with a reason by a deployment that has
-            // no password provider, rather than the client asking in advance what is on offer.
-            menu.button(
-                panel,
-                "Use a password",
-                Emit(Action::SignInWithPassword { email: String::new(), password: String::new() }),
-            );
-            menu.button(panel, "Back", Emit(Action::GoToMenuPage(MenuPage::Root)));
-        }
-    }
+    };
 }
 
 #[derive(Component)]
-struct Modal;
+struct Modal(Shown);
 
 /// What a button asks for. The menu's own `Emit`, which is private to it.
 #[derive(Component)]
@@ -524,6 +561,45 @@ mod tests {
             }))
             .may_observe()
         );
+    }
+
+    /// The bug this exists to prevent: a modal rebuilt every frame has buttons that are
+    /// destroyed and respawned before a hover can register, so they never light up.
+    ///
+    /// The menu's backdrop drift writes `Ui` every frame, so `Ui::is_changed` is *always* true
+    /// and cannot be the trigger. What is drawn has to be compared instead.
+    #[test]
+    fn the_modal_is_rebuilt_only_when_its_contents_change() {
+        let signed_out = Shown::of(&Session::SignedOut, false);
+        assert_eq!(signed_out, Shown::of(&Session::SignedOut, false), "the same state differs");
+
+        // Opening the form changes it, and so does every step of signing in.
+        assert_ne!(signed_out, Shown::of(&Session::SignedOut, true));
+        assert_ne!(signed_out, Shown::of(&Session::Working, false));
+        assert_ne!(
+            Shown::of(&Session::Failed("one".into()), false),
+            Shown::of(&Session::Failed("another".into()), false),
+            "a different message must redraw",
+        );
+        assert_ne!(
+            Shown::of(
+                &Session::SignedIn(Identity { account_id: "a".into(), display_name: "Ada".into() }),
+                false,
+            ),
+            Shown::of(
+                &Session::SignedIn(Identity { account_id: "a".into(), display_name: "Grace".into() }),
+                false,
+            ),
+        );
+    }
+
+    /// While the form is up the modal is a backdrop and nothing else, whatever is behind it in
+    /// the session — so it does not redraw as the sign-in progresses underneath.
+    #[test]
+    fn the_form_owns_the_screen_whatever_the_session_says() {
+        for session in [Session::SignedOut, Session::Working, Session::Failed("x".into())] {
+            assert_eq!(Shown::of(&session, true), Shown::Backdrop);
+        }
     }
 
     /// The config directory is somewhere the player owns, and named for this game.
