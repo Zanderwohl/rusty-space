@@ -55,6 +55,24 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
             .id()
     }
 
+    /// A screen with the backdrop drawn behind it, for something in front of what is already
+    /// there.
+    ///
+    /// The same layout as [`MenuUi::screen`] plus a wash, so a modal is a screen that does not
+    /// pretend the thing behind it has gone.
+    ///
+    /// Explicitly above everything. Bevy UI orders by spawn, and two systems spawning into one
+    /// frame have no order between them — which draws an overlay *behind* what it is over,
+    /// interleaved with it.
+    pub fn overlay(&mut self, marker: impl Bundle) -> Entity {
+        let screen = self.screen(marker);
+        self.commands.entity(screen).insert((
+            BackgroundColor(self.theme.overlay_backdrop),
+            GlobalZIndex(OVERLAY_Z),
+        ));
+        screen
+    }
+
     /// The bordered column every screen is built inside.
     pub fn panel(&mut self, parent: Entity) -> Entity {
         let panel = self
@@ -133,6 +151,10 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         btn
     }
 }
+
+/// How far above the ordinary screens an overlay sits. Room underneath for anything that wants
+/// to be between.
+pub const OVERLAY_Z: i32 = 100;
 
 pub fn button_hover_system(
     mut buttons: Query<

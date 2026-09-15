@@ -18,6 +18,12 @@ pub enum Screen {
 pub enum MenuPage {
     #[default]
     Root,
+    /// Signing in. Reached by pressing Observe without an identity, and left by getting one or
+    /// by giving up.
+    ///
+    /// A page rather than a state, like everything else here: the sky keeps drifting behind it
+    /// and nothing is suspended, which is true rather than merely convenient.
+    SignIn,
     NewWorld,
     Load,
     Settings,

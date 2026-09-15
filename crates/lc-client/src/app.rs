@@ -71,6 +71,9 @@ pub struct DevEntry {
     pub after_frames: u32,
     /// How many consecutive frames to photograph. More than one for diagnosing a flicker.
     pub burst: u32,
+    /// A menu page to open on arrival. The only way to photograph one that draws over the
+    /// root, which an action running on entering the sky cannot reach.
+    pub menu_page: Option<crate::ui::MenuPage>,
     /// Run once on reaching the sky. Actions rather than flags, so a development entry can
     /// reach anything the interface can and needs no plumbing of its own.
     pub actions: Vec<Action>,
@@ -147,6 +150,8 @@ impl Plugin for ClientPlugin {
                 (aim_camera, update_sky).chain().run_if(in_state(AppState::MainMenu)),
             )
             .add_plugins(crate::pick::PickPlugin)
+            // Desktop only: a browser build arrives with a session.
+            .add_plugins(SigninPlugins)
             .add_systems(
                 EguiPrimaryContextPass,
                 (
@@ -456,6 +461,13 @@ fn dispatch(
                     let at = game.coordinate_time_s();
                     ui.notify(text, at);
                 }
+                // Handled in `signin_ui`, which has the socket, the browser and the vault.
+                // Nothing here, rather than nothing anywhere: in a browser the page that
+                // launched the game already has a session and these never fire.
+                Effect::SignIn
+                | Effect::CancelSignIn
+                | Effect::SignInWithPassword { .. }
+                | Effect::SignOut => {}
             }
         }
     }
@@ -581,4 +593,20 @@ mod tests {
         }
         assert_eq!(app.world().resource::<Game>().coordinate_time_s(), before);
     }
+}
+
+/// The desktop sign-in, or nothing at all in a browser.
+///
+/// A plugin group of one rather than a `#[cfg]` inside `build`, so the browser build does not
+/// carry a branch about a thing it cannot do.
+struct SigninPlugins;
+
+impl Plugin for SigninPlugins {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn build(&self, app: &mut App) {
+        app.add_plugins(crate::signin_ui::SigninPlugin);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn build(&self, _app: &mut App) {}
 }

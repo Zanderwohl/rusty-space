@@ -14,6 +14,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener};
+use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, channel};
 
 /// Who the broker says we are. What the client keeps and shows.
@@ -156,20 +157,23 @@ impl Bound {
         std::thread::spawn(move || {
             let _ = sender.send(accept_one(&self.listener, &pending));
         });
-        Loopback { port: self.port, answer }
+        Loopback { port: self.port, answer: Mutex::new(answer) }
     }
 }
 
 /// A loopback listener waiting for one answer.
+#[derive(Debug)]
 pub struct Loopback {
     pub port: u16,
-    answer: Receiver<Result<String, CallbackError>>,
+    /// Behind a lock because this is held in a Bevy resource, which must be `Sync`, and an
+    /// `mpsc::Receiver` is `Send` and not. Never contended: one reader, one message.
+    answer: Mutex<Receiver<Result<String, CallbackError>>>,
 }
 
 impl Loopback {
     /// The answer, if it has arrived. Never blocks: this is polled from a frame.
     pub fn poll(&self) -> Option<Result<String, CallbackError>> {
-        self.answer.try_recv().ok()
+        self.answer.lock().ok()?.try_recv().ok()
     }
 }
 
@@ -183,6 +187,70 @@ fn accept_one(listener: &TcpListener, pending: &Pending) -> Result<String, Callb
     let _ = stream.write_all(landing_page(result.is_ok()).as_bytes());
     let _ = stream.flush();
     result
+}
+
+/// What the client is doing about signing in.
+///
+/// One enum, and the modal is a rendering of it. Anything the player can see about their own
+/// sign-in is one of these, so there is no second place for "are we signed in" to be answered.
+#[derive(Debug, Default)]
+pub enum Session {
+    /// No grant, or the one we had was refused.
+    #[default]
+    SignedOut,
+    /// The browser is open and we are listening. The player can cancel.
+    Waiting {
+        loopback: Loopback,
+        /// Shown so the player can paste it if the browser did not open — which happens, and
+        /// leaves them staring at nothing if the address is only in a log.
+        url: String,
+    },
+    /// Talking to the broker: trading a code for a grant, or a grant for a ticket.
+    Working,
+    SignedIn(Identity),
+    /// Something went wrong, in words the player can act on.
+    Failed(String),
+}
+
+impl Session {
+    pub fn identity(&self) -> Option<&Identity> {
+        match self {
+            Session::SignedIn(identity) => Some(identity),
+            _ => None,
+        }
+    }
+
+    /// Whether the player may start observing.
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Session::SignedIn(_))
+    }
+
+    /// Whether a modal should be in the way.
+    ///
+    /// Not while signed in, and not while merely signed out — pressing Observe is what asks.
+    /// This is about whether the sign-in *itself* is on screen.
+    pub fn is_busy(&self) -> bool {
+        matches!(self, Session::Waiting { .. } | Session::Working)
+    }
+}
+
+/// What a broker call came back with.
+#[derive(Debug)]
+pub enum BrokerError {
+    /// The grant or code was refused. Recoverable by signing in again, and the only one worth
+    /// clearing the vault for.
+    Refused,
+    /// Anything else: no network, a 500, a body that would not parse.
+    Unreachable(String),
+}
+
+impl std::fmt::Display for BrokerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BrokerError::Refused => f.write_str("that sign-in is no longer valid"),
+            BrokerError::Unreachable(why) => write!(f, "could not reach the sign-in service: {why}"),
+        }
+    }
 }
 
 /// Percent-encode the few characters a URL query cannot carry raw.

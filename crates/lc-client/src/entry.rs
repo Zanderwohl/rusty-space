@@ -58,9 +58,13 @@ pub fn parse(args: &[String]) -> (DevEntry, Option<String>) {
         actions.push(Action::FlyToNearest);
     }
 
+    // The sign-in modal draws over the main menu, so it cannot be reached by an action that
+    // runs on entering the sky. This is the only way to photograph it.
+    let menu_page = flag("--signin").then_some(crate::ui::MenuPage::SignIn);
+
     // `--menu` holds the entry at the main menu, so `--shot` can photograph it. Without it a
     // screenshot run goes straight to the sky, which is what every other capture wants.
-    let stay_in_menu = flag("--menu");
+    let stay_in_menu = flag("--menu") || menu_page.is_some();
     let dev = DevEntry {
         observe_immediately: !stay_in_menu
             && (flag("--observe") || flag("--shot") || flag("--at") || flag("--station")),
@@ -70,6 +74,7 @@ pub fn parse(args: &[String]) -> (DevEntry, Option<String>) {
         screenshot: after("--shot"),
         after_frames: value(args, "--frames").unwrap_or(120),
         burst: value(args, "--burst").unwrap_or(1),
+        menu_page,
         actions,
     };
     // The first argument only. Scanning for any non-flag token would pick up a flag's own

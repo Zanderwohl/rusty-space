@@ -24,6 +24,14 @@ pub enum Action {
     GoToMenuPage(MenuPage),
     StartGame,
     Quit,
+    /// Begin the desktop sign-in: open the browser and listen for the answer.
+    SignIn,
+    /// Give up on one in progress.
+    CancelSignIn,
+    /// Sign in with the local password provider, from the modal's own form.
+    SignInWithPassword { email: String, password: String },
+    /// Forget the device grant.
+    SignOut,
 
     // --- instruments ------------------------------------------------------------------
     SetBandPreset(usize),
@@ -90,6 +98,12 @@ pub enum Effect {
     StartGame,
     WriteSnapshot,
     Notify(String),
+    /// The desktop sign-in, which needs a browser, a socket and the network — none of which
+    /// belong in the action fold.
+    SignIn,
+    CancelSignIn,
+    SignInWithPassword { email: String, password: String },
+    SignOut,
 }
 
 /// Stops of exposure per keypress.
@@ -122,6 +136,12 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
         Action::GoToMenuPage(page) => ui.menu_page = page,
         Action::StartGame => effects.push(Effect::StartGame),
+        Action::SignIn => effects.push(Effect::SignIn),
+        Action::CancelSignIn => effects.push(Effect::CancelSignIn),
+        Action::SignInWithPassword { email, password } => {
+            effects.push(Effect::SignInWithPassword { email, password })
+        }
+        Action::SignOut => effects.push(Effect::SignOut),
         Action::Quit => effects.push(Effect::Quit),
 
         Action::SetBandPreset(i) => set_preset(ui, session, i, &mut effects),

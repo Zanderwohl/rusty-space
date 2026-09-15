@@ -29,7 +29,7 @@ impl Plugin for MainMenuPlugin {
         app.add_plugins(em_ui::MenuUiPlugin)
             .add_systems(
                 OnEnter(AppState::MainMenu),
-                (install_backdrop, crate::starfield::spawn_sky).chain(),
+                (install_backdrop, open_dev_page, crate::starfield::spawn_sky).chain(),
             )
             .add_systems(OnExit(AppState::MainMenu), cleanup)
             .add_systems(
@@ -52,6 +52,7 @@ fn sync_screen(
     mut commands: Commands,
     ui: Res<Ui>,
     existing: Query<(Entity, &MenuScreen)>,
+    observe: ObserveEmits,
 ) {
     let page = ui.menu_page;
     if let Ok((entity, drawn)) = existing.single() {
@@ -60,10 +61,34 @@ fn sync_screen(
         }
         commands.entity(entity).despawn();
     }
-    build(&mut commands, page);
+    build(&mut commands, page, observe_action(&observe));
 }
 
-fn build(commands: &mut Commands, page: MenuPage) {
+/// What the Observe button asks for.
+///
+/// Signing in is a condition of observing, not a separate menu item: a player who is signed in
+/// never sees the modal, and a player who is not is taken to it by the button they already
+/// meant to press.
+#[cfg(not(target_arch = "wasm32"))]
+type ObserveEmits<'w> = Option<Res<'w, crate::signin_ui::Signin>>;
+#[cfg(target_arch = "wasm32")]
+type ObserveEmits<'w> = std::marker::PhantomData<&'w ()>;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn observe_action(signin: &ObserveEmits) -> Action {
+    match signin {
+        Some(signin) if !signin.may_observe() => Action::GoToMenuPage(MenuPage::SignIn),
+        _ => Action::StartGame,
+    }
+}
+
+/// The browser build arrives with a session already, so there is nothing to ask.
+#[cfg(target_arch = "wasm32")]
+fn observe_action(_: &ObserveEmits) -> Action {
+    Action::StartGame
+}
+
+fn build(commands: &mut Commands, page: MenuPage, observe: Action) {
     let mut ui = MenuUi::new(commands, MenuTheme::VFD).panel_width(520.0);
     let root = ui.screen(MenuScreen(page));
     let panel = ui.panel(root);
@@ -72,7 +97,15 @@ fn build(commands: &mut Commands, page: MenuPage) {
 
     match page {
         MenuPage::Root => {
-            ui.button(panel, "Observe", Emit(Action::StartGame));
+            ui.button(panel, "Observe", Emit(observe.clone()));
+            ui.button(panel, "Settings", Emit(Action::GoToMenuPage(MenuPage::Settings)));
+            ui.button(panel, "Quit", Emit(Action::Quit));
+        }
+        // The root, with the sign-in drawn over it. What the player pressed Observe on stays
+        // where it was, dimmed, which is what makes the modal read as an interruption rather
+        // than as a different screen.
+        MenuPage::SignIn => {
+            ui.button(panel, "Observe", Emit(observe.clone()));
             ui.button(panel, "Settings", Emit(Action::GoToMenuPage(MenuPage::Settings)));
             ui.button(panel, "Quit", Emit(Action::Quit));
         }
@@ -100,6 +133,13 @@ const DRIFT_RATE: f64 = 1.0 / 60.0;
 
 /// Pitch the field sits at, so the drift pans across it rather than around the pole.
 const DRIFT_PITCH: f64 = 0.12;
+
+/// Open the page `--signin` asked for, so it can be photographed.
+fn open_dev_page(dev: Res<crate::app::DevEntry>, mut ui: ResMut<Ui>) {
+    if let Some(page) = dev.menu_page {
+        ui.menu_page = page;
+    }
+}
 
 fn drift(time: Res<Time>, mut ui: ResMut<Ui>) {
     ui.look.pitch = DRIFT_PITCH;

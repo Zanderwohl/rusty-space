@@ -46,6 +46,8 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--at <body>` / `--station <course>` | stand off a body, or start on a station |
 | `--panel <name>` / `--tune` | open a panel |
 | `--menu` | hold at the main menu, so `--shot` photographs that instead of the sky |
+| `--signin` | hold at the sign-in modal, which draws over the menu and no action can reach |
+| `--turn <deg>` / `--pitch <deg>` | turn the view, the only way to put something off screen |
 | `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable |
 
 Most of what has gone wrong in the renderer was found this way and could not have been found
@@ -105,6 +107,10 @@ Each of these cost real time. None of them are visible from the code that hits t
 
 **egui**
 
+- **Bevy UI orders by spawn**, so two systems spawning into one frame have no order between
+  them — an overlay drawn by one lands *behind* the screen drawn by the other, interleaved with
+  it. `em_ui::MenuUi::overlay` sets a `GlobalZIndex` for this reason. And a translucent panel
+  over another of the same size reads as one muddled thing: a modal's panel wants full alpha.
 - An overlay on `Order::Background` is painted *under* every panel and floating area, so the
   interface covers it. `Order::Foreground` is over all of them — keep such an overlay inside
   `ctx.available_rect()` so it does not draw on top of a docked panel.
