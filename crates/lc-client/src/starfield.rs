@@ -80,13 +80,15 @@ pub struct PointStyle {
     /// Brightness between the streamers, and how much they add on top.
     pub corona_floor: f32,
     pub corona_gain: f32,
+    /// How far the corona reaches, in **stellar radii** — a world size, not a screen one.
+    pub corona_radii: f32,
 }
 
 /// Every knob, with the range a slider should offer and whether it is a corona setting.
 ///
 /// A table rather than a hand-written panel: a knob that exists and has no slider is a knob
 /// nobody finds, and the two drift apart the moment one is added.
-pub const KNOBS: [(&str, fn(&mut PointStyle) -> &mut f32, f32, f32); 14] = [
+pub const KNOBS: [(&str, fn(&mut PointStyle) -> &mut f32, f32, f32); 15] = [
     ("min radius px", |s| &mut s.min_px, 0.5, 40.0),
     ("max radius px", |s| &mut s.max_px, 1.0, 120.0),
     ("glare per stop", |s| &mut s.glow_radius_gain, 0.0, 4.0),
@@ -103,6 +105,7 @@ pub const KNOBS: [(&str, fn(&mut PointStyle) -> &mut f32, f32, f32); 14] = [
     ("tip fade", |s| &mut s.corona_fade, 0.02, 0.8),
     ("corona floor", |s| &mut s.corona_floor, 0.0, 1.5),
     ("corona contrast", |s| &mut s.corona_gain, 0.0, 4.0),
+    ("corona radii", |s| &mut s.corona_radii, 1.0, 40.0),
 ];
 
 /// The background. Small, tight, and it must stay readable as a field of thousands.
@@ -122,6 +125,7 @@ pub const DISTANT: PointStyle = PointStyle {
     corona_fade: 0.28,
     corona_floor: 0.22,
     corona_gain: 1.45,
+    corona_radii: em_render::relativistic_starfield_material::DEFAULT_CORONA_RADII,
 };
 
 /// Lit bodies: planets, moons, anything reflecting.
@@ -145,6 +149,7 @@ pub const BODIES: PointStyle = PointStyle {
     corona_fade: 0.28,
     corona_floor: 0.22,
     corona_gain: 1.45,
+    corona_radii: em_render::relativistic_starfield_material::DEFAULT_CORONA_RADII,
 };
 
 /// A star whose system the ship is inside. Allowed to dominate the screen, because it does.
@@ -167,6 +172,7 @@ pub const LOCAL: PointStyle = PointStyle {
     corona_fade: 0.28,
     corona_floor: 0.22,
     corona_gain: 1.45,
+    corona_radii: em_render::relativistic_starfield_material::DEFAULT_CORONA_RADII,
 };
 
 /// Where the local shell is, re-exported so the drawing code reads the same as the world code.
@@ -408,6 +414,7 @@ pub fn uniforms(
         corona_fade: style.corona_fade,
         corona_floor: style.corona_floor,
         corona_gain: style.corona_gain,
+        corona_radii: style.corona_radii,
         log_t_min: LOG_T_MIN,
         log_t_scale: lut_scale,
         lut_samples: LUT_SAMPLES as f32,
