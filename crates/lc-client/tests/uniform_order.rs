@@ -54,3 +54,20 @@ fn the_population_uniform_is_declared_in_one_order() {
         "the shader and the host disagree about the uniform's layout",
     );
 }
+
+/// The body surface uniform grew an emission term, and it is four floats at the end of a struct
+/// the shader reads positionally.
+#[test]
+fn the_body_surface_uniform_is_declared_in_one_order() {
+    let shader = include_str!("../assets/shaders/body_surface.wgsl");
+    let host = include_str!("../../em-render/src/body_surface_material.rs");
+
+    let in_shader = fields(shader, "struct BodySurfaceUniform {");
+    let in_host = fields(host, "pub struct BodySurfaceUniform {");
+
+    assert!(in_shader.len() >= 5, "the parse found almost nothing: {in_shader:?}");
+    assert_eq!(
+        in_shader, in_host,
+        "the shader and the host disagree about the uniform's layout",
+    );
+}

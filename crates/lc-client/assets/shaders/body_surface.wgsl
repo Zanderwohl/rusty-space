@@ -31,11 +31,18 @@ struct BodySurfaceUniform {
     light: vec4<f32>,
     /// World direction to the star. `w` is the ambient floor on the night side.
     to_star: vec4<f32>,
-    /// `(brightness, contrast, seed, banded)`. Brightness is the tone map's own level for this
-    /// surface, computed where the tone map lives, so a body sits in the same exposure as the
-    /// sky around it.
+    /// `(unused, contrast, seed, banded)`.
     params: vec4<f32>,
+    /// Starlight the surface reflects, as linear display light before the tone map.
+    reflected: vec4<f32>,
+    /// Light the body makes itself, in the same units. `w` is how far the pattern inverts in it.
+    emitted: vec4<f32>,
+    /// `(surface_reference, stops, 0, 0)`.
+    exposure: vec4<f32>,
 }
+
+/// Rec. 709, matching crate::tonemap.
+const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: BodySurfaceUniform;
 
@@ -105,7 +112,6 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let brightness = material.params.x;
     let contrast = material.params.y;
     let seed = material.params.z;
     let banded = material.params.w > 0.5;
@@ -119,5 +125,29 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let lit = smoothstep(-0.12, 0.25, lambert);
     let light = max(lit, material.to_star.w);
 
-    return vec4<f32>(albedo * light * brightness, 1.0);
+    // The body's own light, which does not care where the star is. In the optical it is zero
+    // and this is the shader it always was; at ten microns it is the whole picture, and a
+    // giant's night side stops being dark because nothing was lighting it in the first place.
+    //
+    // The pattern inverts: a belt is a gap in the cloud deck, so it reflects less and lets more
+    // of the warm interior out. Mean-preserving about one, so the band the body is seen in
+    // moves its pattern about rather than changing how much light it sends.
+    let inversion = material.emitted.w;
+    let linear = material.reflected.rgb * albedo * light
+        + material.emitted.rgb * mix(1.0 + inversion, 1.0 - inversion, t);
+
+    // The tone map of crate::tonemap, evaluated here rather than per body: the two terms mix
+    // differently across the disc and the curve is logarithmic, so one level for the whole
+    // surface gets the terminator wrong in any band where both terms matter.
+    let reference = material.exposure.x;
+    let stops = material.exposure.y;
+    let luminance = dot(linear, LUMA);
+    let peak = max(linear.r, max(linear.g, linear.b));
+    var value = 0.0;
+    if (luminance > 0.0 && reference > 0.0 && stops > 0.0) {
+        value = clamp(log2(luminance / reference) / stops + 1.0, 0.0, 1.0);
+    }
+    let chroma = select(vec3<f32>(1.0), linear / peak, peak > 0.0);
+
+    return vec4<f32>(chroma * value, 1.0);
 }

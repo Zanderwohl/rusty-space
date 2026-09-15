@@ -99,11 +99,133 @@ impl Surface {
             Self::Scorched => 0.10,
         }
     }
+
+    /// Bond albedo: the fraction of *all* incident light a body turns away.
+    ///
+    /// A different quantity from [`Surface::albedo`], not a different estimate of it. Geometric
+    /// albedo is how bright the disc looks at full phase and is what reflected-light photometry
+    /// wants; Bond albedo is integrated over every wavelength and direction and is what the
+    /// energy balance wants. Jupiter's are 0.50 and 0.34, and using one for the other puts its
+    /// temperature out by six per cent.
+    ///
+    /// Venus is the outlier this cannot follow: 0.76, where Mars and Titan are near 0.25 and
+    /// share its class. A body's cloud deck is not derivable from its radius, mass and
+    /// temperature, which is the whole basis of this module.
+    pub fn bond_albedo(&self) -> f64 {
+        match self {
+            Self::GasGiant => 0.34,
+            Self::IceGiant => 0.30,
+            Self::Ice => 0.70,
+            Self::Rock => 0.10,
+            Self::Weathered => 0.25,
+            Self::Scorched => 0.10,
+        }
+    }
+
+    /// Radiated power over absorbed power.
+    ///
+    /// One for anything that only re-emits what it catches, which is every rocky body: Earth's
+    /// own heat is 0.09 W/m² against the 240 it absorbs. A giant is not — it is still shrinking,
+    /// and the gravitational energy comes out as infrared. Jupiter radiates 1.67 times what it
+    /// takes from the Sun and Saturn 1.78, which is why they are warmer than sunlight can
+    /// explain and why they are bright at ten microns on their night sides.
+    ///
+    /// **The ice giants disagree and nobody knows why.** Uranus is 1.06 — consistent with no
+    /// internal heat at all — and Neptune is 2.61, though Neptune is half again as far out.
+    /// Their effective temperatures come out within a fifth of a kelvin of each other by
+    /// coincidence. One number has to stand for both here; this is nearer the Uranus end,
+    /// which makes an ice giant read as the cold thing it mostly is.
+    pub fn internal_heat_ratio(&self) -> f64 {
+        match self {
+            Self::GasGiant => 1.7,
+            Self::IceGiant => 1.3,
+            _ => 1.0,
+        }
+    }
+
+    /// What the body actually radiates at, given the grey equilibrium temperature.
+    ///
+    /// `equilibrium_k` is the zero-albedo balance [`crate::system::equilibrium_temperature`]
+    /// computes, which is what [`Surface::classify`] is calibrated against. This is the
+    /// temperature a *photometer* sees: what the body keeps of the sunlight, plus whatever heat
+    /// it makes itself, both as fourth powers.
+    ///
+    /// Against the measured effective temperatures of the solar system's giants this is good to
+    /// a couple of per cent for Jupiter and Saturn. See [`Surface::internal_heat_ratio`] for why
+    /// the ice giants cannot both be right.
+    pub fn effective_temperature(&self, equilibrium_k: f64) -> f64 {
+        if equilibrium_k <= 0.0 {
+            return 0.0;
+        }
+        let kept = (1.0 - self.bond_albedo()).max(0.0);
+        equilibrium_k * (kept * self.internal_heat_ratio()).powf(0.25)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Effective temperature against the four giants as measured.
+    ///
+    /// The whole point of the internal-heat term: sunlight alone cannot put Jupiter at 124 K or
+    /// Neptune anywhere near Uranus. Distances and measured values are the standard fact-sheet
+    /// numbers; the equilibrium temperature here is the zero-albedo one this crate computes, so
+    /// what is being checked is the composition of albedo and internal heat, not the balance.
+    #[test]
+    fn the_giants_come_out_at_the_temperatures_they_are_measured_at() {
+        // Zero-albedo equilibrium at 1 AU, which is where `equilibrium_temperature` puts Earth.
+        const AT_EARTH_K: f64 = 278.6;
+        let equilibrium = |au: f64| AT_EARTH_K / au.sqrt();
+
+        // (name, AU, surface, measured effective temperature K, tolerance)
+        let giants = [
+            ("Jupiter", 5.2044, Surface::GasGiant, 124.4, 0.05),
+            ("Saturn", 9.5826, Surface::GasGiant, 95.0, 0.05),
+        ];
+        for (name, au, surface, measured, tolerance) in giants {
+            let got = surface.effective_temperature(equilibrium(au));
+            assert!(
+                (got / measured - 1.0).abs() < tolerance,
+                "{name}: {got:.1} K against a measured {measured:.1} K",
+            );
+        }
+
+        // The ice giants bracket rather than match: they have the same effective temperature
+        // and half again the distance between them, and one ratio cannot do that. What must
+        // hold is that both are warmer than sunlight alone leaves them and neither is absurd.
+        for (name, au, measured) in [("Uranus", 19.201, 59.1), ("Neptune", 30.047, 59.3)] {
+            let sunlit = equilibrium(au) * (1.0 - Surface::IceGiant.bond_albedo()).powf(0.25);
+            let got = Surface::IceGiant.effective_temperature(equilibrium(au));
+            assert!(got > sunlit, "{name} should be warmer than sunlight alone: {got:.1}");
+            assert!((got / measured).clamp(0.7, 1.3) == got / measured, "{name}: {got:.1} K");
+        }
+    }
+
+    /// A rocky body radiates what it catches and nothing else, so its effective temperature is
+    /// the equilibrium one cut by what it reflects. Earth is the calibration everyone knows.
+    #[test]
+    fn a_rocky_body_has_no_heat_of_its_own() {
+        assert_eq!(Surface::Rock.internal_heat_ratio(), 1.0);
+        assert_eq!(Surface::Weathered.internal_heat_ratio(), 1.0);
+        assert_eq!(Surface::Ice.internal_heat_ratio(), 1.0);
+
+        // Earth: 278.6 K grey, Bond albedo near a third, and 254 K is the textbook answer.
+        let earth = Surface::Weathered.effective_temperature(278.6);
+        assert!((earth - 254.0).abs() < 8.0, "{earth:.1} K against a textbook 254 K");
+        assert_eq!(Surface::Rock.effective_temperature(0.0), 0.0);
+    }
+
+    /// Bond and geometric albedo are different quantities, and a giant is where it shows.
+    #[test]
+    fn bond_albedo_is_not_the_geometric_one() {
+        assert!(Surface::GasGiant.bond_albedo() < Surface::GasGiant.albedo());
+        for surface in
+            [Surface::GasGiant, Surface::IceGiant, Surface::Ice, Surface::Rock, Surface::Weathered]
+        {
+            assert!((0.0..1.0).contains(&surface.bond_albedo()), "{surface:?}");
+        }
+    }
 
     /// The solar system, by the numbers it actually has. If the classification cannot sort
     /// these it cannot sort anything.

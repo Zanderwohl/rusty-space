@@ -437,6 +437,37 @@ The exposure meters bodies along with the stars — see [Metering](#metering) �
 large enough to be the picture is what the window is placed on, and the star field behind it
 drops away as it does in any photograph of a planet.
 
+**A giant makes its own light.** Jupiter radiates 1.67 times what it takes from the Sun and
+Saturn 1.78 — they are still shrinking, and the gravitational energy comes out as infrared. So a
+body is shaded as two terms rather than one: starlight it reflects, which is Lambert-shaded and
+has the star's spectrum, and a blackbody at its own effective temperature, which is not shaded
+at all. A surface at `T` has radiance `B(T)` whichever way it is turned, and that is the whole
+reason a gas giant's night side is as bright at ten microns as its day side.
+
+The effective temperature is the grey equilibrium one cut by the **Bond** albedo and raised by
+the internal heat. Bond, not geometric — a different quantity, not a different estimate of one:
+Jupiter's are 0.34 and 0.50, and using the wrong one puts its temperature out by six per cent.
+Against the measured values this is good to a couple of per cent for Jupiter and Saturn. The ice
+giants cannot both be right: Uranus is 1.06 and Neptune 2.61 though Neptune is half again as far
+out, their effective temperatures land within a fifth of a kelvin of each other, and no model
+explains it. One number stands for both, nearer the Uranus end.
+
+**In the infrared the bands invert.** A belt is a gap in the cloud deck, so it reflects less and
+lets more of the warm interior out — the same fact twice, and it is why Jupiter's dark belts are
+its bright ones at five microns. Mean-preserving, so changing band moves the pattern about
+rather than changing how much light the body sends.
+
+**The tone map is evaluated per fragment**, as the star field already evaluates it per star. It
+has to be: the two terms mix differently across the disc and the curve is logarithmic, so one
+level for the whole surface gets the terminator wrong. Mapping them separately and adding the
+results put Jupiter's day side at twice its night side at ten microns, where the true ratio is
+1.14 — the reflected half adds an eighth to a face that is already glowing.
+
+An unresolved body was already summing the same two terms in the point shader; it now radiates
+at the same effective temperature, so nothing changes as a planet crosses the resolution
+threshold. A test compares the two paths directly, because flux is radiance times solid angle
+and there is no excuse for them to disagree.
+
 ### Rings
 
 ![Saturn](../images/rings.png)

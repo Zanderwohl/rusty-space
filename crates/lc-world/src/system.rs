@@ -62,8 +62,18 @@ pub struct Drawable {
     /// The radius a blackbody at the star's temperature would need to deliver this body's
     /// reflected flux. See [`effective_radius`].
     pub effective_radius_m: f64,
-    /// What it re-radiates at, kelvin.
+    /// The grey, zero-albedo balance: what sunlight alone would leave it at, kelvin.
+    ///
+    /// Kept because [`crate::surface::Surface::classify`] is calibrated against it. It is not
+    /// what the body radiates at — see [`Drawable::effective_k`].
     pub equilibrium_k: f64,
+    /// What it actually radiates at, kelvin: sunlight it keeps, plus heat of its own.
+    ///
+    /// The two differ for a giant and barely at all for anything else. Jupiter is 124 K where
+    /// the grey balance says 122 and the sunlight it keeps says 110 — the albedo takes it down
+    /// and its own contraction puts it back, which is a coincidence of the two corrections and
+    /// not a reason to skip either.
+    pub effective_k: f64,
 }
 
 #[derive(Clone)]
@@ -219,6 +229,7 @@ impl LocalSystem {
                         distance_m,
                     ),
                     equilibrium_k,
+                    effective_k: surface.effective_temperature(equilibrium_k),
                 })
             })
             .collect()
