@@ -1072,4 +1072,87 @@ mod tests {
         .unwrap();
         assert_eq!(ship, before);
     }
+
+    /// **Burn, flip and burn, seen from outside.**
+    ///
+    /// The whole of why the nose follows the drive rather than the velocity: for the second
+    /// half of a crossing the ship is pointing back the way it came while still travelling
+    /// forward at a large fraction of `c`. A hull drawn along its velocity would spend that
+    /// half facing the wrong way, and nothing about the picture would say it was braking.
+    #[test]
+    fn a_crossing_flips_the_nose_over_while_the_ship_still_moves_forward() {
+        let to = DVec3::X * 4.0;
+        let cruise = crate::flight::Cruise::plan(DVec3::ZERO, to, 0.0, crate::flight::Drive::DEFAULT);
+        let whole = cruise.duration_s();
+        let mut state = ShipState::at(DVec3::ZERO);
+        state.begin_crossing(cruise.clone(), None);
+
+        let (mut boosted, mut braked, mut coasted) = (false, false, false);
+        for k in 1..200 {
+            let t = whole * k as f64 / 200.0;
+            let nose = facing(&state, None, t).expect("a ship under thrust is pointing somewhere");
+            let beta = state_at(&state, None, t).unwrap().1;
+            // Forward, the whole way. It never turns round; only the ship does.
+            assert!(beta.x > 0.0, "the ship went backwards at {t}: {beta}");
+            match cruise.at(t).phase {
+                crate::flight::Phase::Boost => {
+                    boosted = true;
+                    assert!(nose.x > 0.999, "boosting and not pointing along the line: {nose}");
+                }
+                crate::flight::Phase::Brake => {
+                    braked = true;
+                    assert!(nose.x < -0.999, "braking and not pointing back down it: {nose}");
+                }
+                // Nothing lit, so the nose is left along the velocity.
+                crate::flight::Phase::Coast => {
+                    coasted = true;
+                    assert!(nose.x > 0.999, "coasting and not pointing along the motion: {nose}");
+                }
+                _ => {}
+            }
+        }
+        // A coast is not guaranteed — a crossing short enough never to reach the drive's cap
+        // is boost straight into brake — so it is checked where it happens and not required.
+        let _ = coasted;
+        assert!(boosted, "the crossing never boosted");
+        assert!(braked, "the crossing never braked, which is the half this test is about");
+    }
+
+    /// Falling is not thrust: nothing is lit, so the nose is simply the way the ship is going,
+    /// and it swings as the arc curves.
+    ///
+    /// The contrast is with [`a_crossing_flips_the_nose_over_while_the_ship_still_moves_forward`],
+    /// where the drive is what decides. A `facing` built on the *coordinate* acceleration would
+    /// make these the same case and leave an orbiting ship permanently nose-down.
+    #[test]
+    fn a_ballistic_ship_points_along_its_motion_and_turns_with_it() {
+        let Some(system) = sol() else { return };
+        let mut state = ShipState::at(system.body_position_ly("Earth").unwrap());
+        let event = Event { ship: ShipId(1), at_t: 0.0, change: orbit("Earth") };
+        apply(&mut state, Some(&system), &event).unwrap();
+        // Off the station and onto the conic it was already flying, which is what cutting does.
+        apply(&mut state, Some(&system), &Event { ship: ShipId(1), at_t: 0.0, change: Change::CutDrive })
+            .unwrap();
+
+        let mut noses = Vec::new();
+        for k in 0..6 {
+            let t = 600.0 * k as f64;
+            let nose = facing(&state, Some(&system), t).expect("a moving ship points somewhere");
+            let beta = state_at(&state, Some(&system), t).unwrap().1;
+            assert!((nose - beta.normalize()).length() < 1e-9, "the nose left the velocity at {t}");
+            noses.push(nose);
+        }
+        // And it is following the arc rather than being stuck on whatever it started with.
+        let swing = noses[0].dot(*noses.last().unwrap()).clamp(-1.0, 1.0).acos();
+        assert!(swing > 0.05, "the nose barely moved over an hour of orbit: {swing} rad");
+    }
+
+    /// A craft at rest with the engine off has no attitude this can derive, and says so rather
+    /// than inventing one. What to draw instead is the renderer's problem.
+    #[test]
+    fn nothing_decides_where_a_parked_ship_points() {
+        let state = ShipState::at(DVec3::X);
+        assert_eq!(facing(&state, None, 0.0), None);
+    }
+
 }

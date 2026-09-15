@@ -58,17 +58,24 @@ pub fn parse(args: &[String]) -> Entry {
     {
         actions.push(Action::SetCurveBand(*band));
     }
-    // Turning is the only way to put something off screen, and an edge indicator cannot be
-    // photographed without one.
+    if flag("--fly") {
+        // Index 0 of the sorted sky is the Sun in the full catalogue; 1 is interstellar.
+        actions.push(Action::FlyToNearest);
+    }
+
+    // Last, and after anything that aims: `--turn` exists to put something off screen, and
+    // `--fly` ends by pointing the view at what it is flying to. Pushed first, the aim undid
+    // the turn and the two flags together were the same picture as the one on its own.
     if let Some(degrees) = value::<f64>(args, "--turn") {
         actions.push(Action::Look { yaw: degrees.to_radians(), pitch: 0.0 });
     }
     if let Some(degrees) = value::<f64>(args, "--pitch") {
         actions.push(Action::Look { yaw: 0.0, pitch: degrees.to_radians() });
     }
-    if flag("--fly") {
-        // Index 0 of the sorted sky is the Sun in the full catalogue; 1 is interstellar.
-        actions.push(Action::FlyToNearest);
+    // Both ends of the orbit camera's range are clamps, so the only way to photograph one is
+    // to ask for far more than it will give and let it stop where it stops.
+    if let Some(notches) = value::<f64>(args, "--zoom") {
+        actions.push(Action::Zoom(notches));
     }
 
     // The sign-in modal draws over the main menu, so it cannot be reached by an action that

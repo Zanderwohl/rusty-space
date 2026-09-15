@@ -16,6 +16,7 @@ use lc_server::websocket::WebSocketServer;
 use lc_server::world::World;
 use glam::DVec3;
 use lc_world::craft::{Craft, CraftId, Kind};
+use lc_world::navigation::Waypoint;
 use lc_world::sky::CatalogueStar;
 use lc_world::system::M_PER_LY;
 
@@ -27,15 +28,21 @@ use lc_world::system::M_PER_LY;
 /// `stars` should be the ones the client itself loaded. Both ends place craft into systems by
 /// position against the same shell radius, so a server with a different sky would disagree with
 /// the client about which system a ship is in.
-/// How far apart the craft `--traffic` puts out are spread, metres.
+/// How far the nearest craft `--traffic` puts out stands off, metres.
 ///
-/// A few tens of kilometres: far enough that they are separate contacts with their own marks,
-/// near enough that a five-hundred-metre hull is still several pixels across.
-const TRAFFIC_SPACING_M: f64 = 2.0e4;
+/// Eight kilometres, where a five-hundred-metre hull is some forty pixels across and reads as
+/// a ship. Each one after it is half again as far, so the set spans the range over which a
+/// hull stops being a shape and becomes a mark.
+const TRAFFIC_NEAREST_M: f64 = 8.0e3;
 
-/// How fast they drift, as a fraction of `c`. Thirty metres a second — slow enough to stay put
-/// for a session, fast enough that each one has a velocity and therefore an attitude.
-const TRAFFIC_BETA: f64 = 1.0e-7;
+/// How far off the axis the player starts looking along they are fanned, radians.
+///
+/// Inside the vertical half-field, so they are all on screen at once without being stacked on
+/// one bearing — which is what the first version of this did, and four marks and four labels
+/// on one point is not a picture of four ships.
+const TRAFFIC_SPREAD_RAD: f64 = 0.28;
+
+
 
 pub fn start(stars: Vec<CatalogueStar>, traffic: usize) -> Result<String, String> {
     let (tell, address) = channel::<Result<String, String>>();
@@ -71,16 +78,25 @@ pub fn start(stars: Vec<CatalogueStar>, traffic: usize) -> Result<String, String
 fn company(near_ly: DVec3, count: usize) -> Vec<Craft> {
     (0..count)
         .map(|i| {
-            let along = (i as f64 + 1.0) * TRAFFIC_SPACING_M / M_PER_LY;
-            // Fanned across two axes rather than strung out along one, so they are not all
-            // the same distance away and the nearest is not hiding the rest.
-            let at = near_ly + DVec3::new(along, along * 0.35, along * -0.2);
+            let phase = std::f64::consts::TAU * i as f64 / count.max(1) as f64;
+            // Ahead of where the player starts looking, fanned about that axis and stepped
+            // back in range, so the four are four marks rather than one.
+            let bearing = DVec3::new(
+                1.0,
+                TRAFFIC_SPREAD_RAD * phase.cos(),
+                TRAFFIC_SPREAD_RAD * phase.sin(),
+            )
+            .normalize();
+            let range = TRAFFIC_NEAREST_M * (1.0 + 0.8 * i as f64);
+            let at = near_ly + bearing * (range / M_PER_LY);
             let mut craft = Craft::at(CraftId(1_000 + i as i64), Kind::Ship, at);
-            // Each one heading somewhere different, which is the whole of what makes their
-            // attitudes worth looking at.
-            let heading = DVec3::new((i as f64).cos(), (i as f64).sin(), 0.2).normalize();
-            craft.motion.beta = heading * TRAFFIC_BETA;
-            craft.motion.set_adrift(0.0);
+            // Held rather than drifting. A shard runs at 8766 times real time, so the slowest
+            // speed worth calling a speed carries a craft out of sight in seconds — the first
+            // version of this gave them thirty metres a second apiece and they were three
+            // hundred kilometres away by the time the shutter opened. The cost is that a held
+            // craft has no attitude anything decides, so they all point the same way; what a
+            // nose following a drive looks like is the player's own ship under thrust.
+            craft.motion.begin_holding(Waypoint::Fixed(at));
             craft
         })
         .collect()

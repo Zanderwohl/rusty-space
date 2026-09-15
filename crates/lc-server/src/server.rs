@@ -687,7 +687,10 @@ impl<J: Journal> Server<J> {
                 };
                 let at_ly = worldline.position_at(emitted) / LIGHT_US_PER_LY;
                 let beta = worldline.velocity_at(emitted);
-                let facing = craft.facing_at(emitted * 1.0e-6).unwrap_or(DVec3::X);
+                // Zero where nothing decides it — a craft at rest with the engine off. A
+                // default sent here would be indistinguishable from a nose that really points
+                // that way, and the receiver is the end that knows what it last saw.
+                let facing = craft.facing_at(emitted * 1.0e-6).unwrap_or(DVec3::ZERO);
                 let presence = Presence {
                     ship_id: ShipId(craft.id.0),
                     name: craft.designation(),

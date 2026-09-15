@@ -14,6 +14,7 @@
 //! instead of being an error nobody measured.
 
 use bevy::camera::visibility::NoFrustumCulling;
+use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform};
 use em_render::render_space::sim_to_render;
@@ -75,12 +76,25 @@ pub struct Eye {
 #[derive(Component)]
 pub struct Hull(pub Option<ShipId>);
 
-/// The shared ovoid, and which craft currently have one.
+/// The shared ovoid, which craft currently have one, and which way each was last pointing.
+///
+/// The attitudes are remembered because a craft at rest with the engine off does not have one:
+/// [`lc_world::motion::facing`] says `None` and means it. A ship that was flying and stopped
+/// keeps the nose it stopped with, which is what a ship does.
 #[derive(Resource, Default)]
 pub struct Hulls {
     mesh: Option<Handle<Mesh>>,
     drawn: Vec<Option<ShipId>>,
+    facing: HashMap<Option<ShipId>, DVec3>,
 }
+
+/// Which way a craft points when nothing ever has decided, and nothing is remembered.
+///
+/// The vernal equinox, for want of anything better. Arbitrary, and it has to be *something*
+/// fixed in the world rather than something about the camera — a nose that followed the view
+/// would leave every parked ship permanently end-on, which is the one angle that shows nothing
+/// of a hull's shape.
+const UNDECIDED: DVec3 = DVec3::X;
 
 /// How close and how far the orbit camera may sit, in hull lengths.
 ///
@@ -91,12 +105,21 @@ pub struct Hulls {
 /// The far end holds the hull at [`MIN_HULL_PX`] across. The near end stops it exactly filling
 /// the window — any closer and the ends are off screen, which is not a view of a ship.
 pub fn boom_limits(rad_per_px: f32, fov_x_rad: f32) -> (f64, f64) {
+    // How far back a hull has to be to subtend `angle`, in its own lengths. A body of radius
+    // `a` at distance `d` covers `2 asin(a/d)`, and taking the ovoid's long semi-axis as that
+    // radius is the case where it is broadside and largest.
+    //
+    // The sine matters at the near stop and nowhere else. There the camera is less than a
+    // length away and `a/d` is several per cent short of the angle it stands for — enough to
+    // hang the nose and the tail off the edges of the window, which is what the first version
+    // of this did.
+    let boom_for = |angle: f64| 0.5 / (angle * 0.5).sin().max(f64::MIN_POSITIVE);
     let far = if rad_per_px > 0.0 {
-        1.0 / (MIN_HULL_PX * rad_per_px as f64)
+        boom_for(MIN_HULL_PX * rad_per_px as f64)
     } else {
         f64::from(u16::MAX)
     };
-    let near = if fov_x_rad > 0.0 { 1.0 / fov_x_rad as f64 } else { 1.0 };
+    let near = if fov_x_rad > 0.0 { boom_for(fov_x_rad as f64) } else { 1.0 };
     (near, far.max(near))
 }
 
@@ -216,6 +239,9 @@ fn uniforms(
 }
 
 /// Everything with a hull this frame: the player's ship, then everybody in sight.
+///
+/// `facing` may be zero, meaning nothing decided it; resolving that against what was last seen
+/// is [`update_hulls`]'s job, because it is the thing that remembers.
 fn drawn(game: &Session, uplink: &Uplink, eye: &Eye, look: DVec3) -> Vec<(Option<ShipId>, Placed)> {
     let now = game.coordinate_time_s();
     let mut out = Vec::with_capacity(uplink.contacts.len() + 1);
@@ -226,9 +252,7 @@ fn drawn(game: &Session, uplink: &Uplink, eye: &Eye, look: DVec3) -> Vec<(Option
             // the eye was pulled back by.
             offset_m: look * eye.boom_m,
             length_m: game.ship.length_m(),
-            // A ship sitting still with the engine off has nothing deciding its attitude, so
-            // it keeps pointing where it was aimed rather than snapping to an axis.
-            facing: game.ship.facing_at(now).unwrap_or(look),
+            facing: game.ship.facing_at(now).unwrap_or(DVec3::ZERO),
             at_ly: game.ship.motion.position_ly,
         },
     ));
@@ -251,6 +275,7 @@ struct Placed {
     /// From the eye, in simulation axes, metres.
     offset_m: DVec3,
     length_m: f64,
+    /// Unit, or zero where nothing decides it.
     facing: DVec3,
     /// Where it is in the world, for working out how lit it is.
     at_ly: DVec3,
@@ -294,6 +319,8 @@ pub fn update_hulls(
                 Hull(*id),
             ));
         }
+        // A contact that has gone is a contact whose attitude is no longer about anything.
+        hulls.facing.retain(|id, _| keys.contains(id));
         hulls.drawn = keys;
         // Spawned this frame and placed the next. One frame at the origin is one frame with
         // the hull inside the camera, which is a flash of nothing rather than a wrong picture.
@@ -301,10 +328,18 @@ pub fn update_hulls(
     }
 
     let star = lighting(&game.0);
+    // Split off so the loop can write the remembered attitudes while reading the mesh handle.
+    let remembered = &mut hulls.facing;
     for (mut transform, material, marker) in placed.iter_mut() {
         let Some((_, at)) = want.iter().find(|(id, _)| *id == marker.0) else { continue };
+        let facing = if at.facing != DVec3::ZERO {
+            remembered.insert(marker.0, at.facing);
+            at.facing
+        } else {
+            remembered.get(&marker.0).copied().unwrap_or(UNDECIDED)
+        };
         transform.translation = sim_to_render(at.offset_m / UNIT_M).as_vec3();
-        transform.rotation = attitude(at.facing);
+        transform.rotation = attitude(facing);
         transform.scale = half_extents(at.length_m);
 
         let Some(asset) = materials.get_mut(&material.0) else { continue };
@@ -371,14 +406,17 @@ mod tests {
         let (near, far) = boom_limits(RAD_PER_PX, fov_x);
         assert!(near < far, "{near} to {far}");
 
-        // At the far stop the hull subtends five pixels, whatever it is.
-        for length in [lc_world::craft::LENGTH_RANGE_M.0, lc_world::craft::LENGTH_RANGE_M.1] {
-            let px = (length / (far * length)) as f32 / RAD_PER_PX;
-            assert!((px - MIN_HULL_PX as f32).abs() < 1e-3, "{length} m came out {px} px");
-            // And at the near stop it is exactly the width of the window.
-            let across = (length / (near * length)) as f32;
-            assert!((across - fov_x).abs() < 1e-5, "{length} m spans {across} of {fov_x}");
-        }
+        // The angle a hull covers from `booms` of its own lengths away, stated as the
+        // textbook angular diameter rather than by inverting the function under test.
+        let subtends = |booms: f64| 2.0 * (0.5 / booms).asin();
+
+        // At the far stop it is five pixels across, whatever size it is — the stops are pure
+        // numbers, so one check covers the whole designed range of hulls.
+        let px = subtends(far) / RAD_PER_PX as f64;
+        assert!((px - MIN_HULL_PX).abs() < 1e-6, "the far stop came out {px} px");
+        // And at the near stop, exactly the width of the window.
+        let across = subtends(near);
+        assert!((across - fov_x as f64).abs() < 1e-9, "the near stop spans {across} of {fov_x}");
     }
 
     /// The default framing has to be inside the stops, or a ship is clamped the moment it is
