@@ -106,6 +106,12 @@ pub fn load(row: &Ship, system: Option<&lc_world::system::LocalSystem>) -> Resul
     craft.name = saved.name;
     craft.noise_floor = saved.noise_floor;
     craft.length_m = saved.length_m;
+    // Assigned rather than changed, and it leaves the craft with no history — so the motive it
+    // was saved on extrapolates backwards for any time before the save. That is the best answer
+    // there is: the shard genuinely does not know what this craft was doing before it was
+    // written down, and the saved motive is what it *was* doing at the moment it was. It is not
+    // a leak either way, because nothing after the save is involved. From here on the craft
+    // records its stretches like any other, and `catch_up` fills the gap to now with real ones.
     craft.motion = snapshot.restore(system, row.saved_t as f64 * 1.0e-6);
     Ok(craft)
 }

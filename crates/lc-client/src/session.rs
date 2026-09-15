@@ -353,6 +353,10 @@ impl Session {
         self.ship.motion.position_ly = snapshot.position_ly;
         self.sync_system();
         let now = self.coordinate_time_s();
+        // Taken whole, which drops whatever past this client had recorded for its own ship.
+        // Right: the authority is handing over what the ship *is* doing, and a client's own
+        // history of it was only ever a prediction. Nothing solves a retarded time against
+        // the player's own ship anyway — it is the observer, not a contact.
         self.ship.motion = snapshot.clone().restore(self.system.as_deref(), now);
         // Same system, so nothing is dropped; what this is for is re-solving the patch, which
         // was answered for the arc the craft was on a moment ago and not for this one.

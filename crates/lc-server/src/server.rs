@@ -448,19 +448,11 @@ impl<J: Journal> Server<J> {
                     return Err(Refusal::Impossible);
                 }
                 let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
-                let here = craft.position_at(at as f64);
-                // Everything a burn does not change, carried across the rebuild. It replaces
-                // the craft rather than editing its motive, so anything not named here is
-                // quietly reset to a default — which is how a ship could come out of a burn a
-                // different size and with a different name.
-                let (noise_floor, length_m, name, system, kind) =
-                    (craft.noise_floor, craft.length_m, craft.name.clone(), craft.system.clone(), craft.kind);
-                *craft = crate::world::coasting(intent.ship_id, here, beta, at);
-                craft.noise_floor = noise_floor;
-                craft.length_m = length_m;
-                craft.name = name;
-                craft.kind = kind;
-                craft.enter(system, at as f64 * 1.0e-6);
+                let here = craft.position_at(at as f64) / lc_world::motion::LIGHT_US_PER_LY;
+                // Edited rather than rebuilt. Replacing the craft lost everything about it
+                // that was not motion — its name, its hull size — and, worse, threw away the
+                // record of what it had been doing, so the burn rewrote its whole past.
+                craft.drift_from(here, beta, at as f64 * 1.0e-6);
                 // A burn is not silent -- it is the most visible thing a ship does -- but what
                 // it radiates is the drive's business. Nominal, until there is a drive model.
                 (
@@ -1489,22 +1481,16 @@ use crate::transport::Loopback;
     /// goes on flying the old solution — aimed at a quarry it still sees holding course — until
     /// the news arrives.
     ///
-    /// **This fails, and the guidance is not what is wrong with it.** A [`Craft`]'s worldline is
-    /// its *current* motive evaluated at whatever time is asked for, and a motive has no memory:
-    /// `Motive::Drifting` extrapolates backwards, so a burn retroactively rewrites where the ship
-    /// was an hour ago and how fast. Every retarded solve then reads the new motion at the old
-    /// time — this guidance, and `Outbound::Present` before it.
+    /// Asserted as the arrival inequality rather than as "about two hours", because the
+    /// pursuer is closing all the while and the light's true crossing is shorter than the one
+    /// it was sent over.
     ///
-    /// The fix is a worldline with a past: a craft keeping the motives it has flown, stamped
-    /// with when each stopped being in force, the way `lc_world::observation::Target` already
-    /// keeps a history of emission models for exactly this reason. Until then this stands
-    /// ignored rather than deleted, because it is the assertion that says when the bug is gone.
-    ///
-    /// Verified to fail for that reason and not another: with the retarded solve replaced by
-    /// the quarry's present state it fails identically, and with the history in place both
-    /// should pass.
+    /// Verified to fail when it should: replacing the retarded solve with the quarry's present
+    /// state makes it fail, which is what says it is testing the delay and not merely that
+    /// something eventually happened. It also needed `Craft` to keep a history before it could
+    /// pass at all — a motive evaluated before it was flown answers about a ship that did not
+    /// exist yet, and `Drifting` extrapolating backwards made a burn rewrite its own past.
     #[tokio::test]
-    #[ignore = "blocked: a Craft's worldline has no history, so a burn rewrites its past"]
     async fn a_pursuer_cannot_react_to_a_burn_before_its_light_arrives() {
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
@@ -1573,6 +1559,67 @@ use crate::transport::Loopback;
         assert!(waited_us > 0.0, "it reacted on the tick of the burn itself");
     }
 
+
+
+    /// **The same rule, on the channel a player actually watches.**
+    ///
+    /// A contact's reported velocity may not change until the light of the burn that changed
+    /// it has arrived. This is the one that had been wrong: a craft's worldline was its current
+    /// motive evaluated at any time asked, so a burn rewrote its own past and every client in
+    /// the system saw the manoeuvre on the next tick, at any range.
+    #[tokio::test]
+    async fn a_contact_is_not_seen_to_manoeuvre_before_its_light_arrives() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let watcher = ClientId(1);
+        let mover = ClientId(2);
+        server.admit(watcher, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+        server.admit(
+            mover,
+            crate::world::still(ShipId(2), DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0)),
+            0.0,
+        );
+        server.tick(&mut wire).await.unwrap();
+        wire.take(watcher);
+
+        wire.client_says(mover, Inbound::Act(Intent {
+            ship_id: ShipId(2),
+            order: Order::Burn { beta: [0.0, 1.0e-3, 0.0] },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+        let burn_t = server.now_t();
+        let from = at_now(&server, ShipId(2));
+        assert_ne!(
+            server.ship(ShipId(2)).unwrap().motion.beta,
+            DVec3::ZERO,
+            "premise: the quarry actually burned",
+        );
+
+        let here = at_now(&server, ShipId(1));
+        let mut seen_moving = None;
+        for _ in 0..600 {
+            server.tick(&mut wire).await.unwrap();
+            let said = wire.take(watcher);
+            let Some(beta) = presences(&said).last().map(|c| DVec3::from_array(c.beta)) else {
+                continue;
+            };
+            if beta != DVec3::ZERO {
+                seen_moving = Some(server.now_t());
+                break;
+            }
+        }
+        let seen_moving = seen_moving.expect("the news never arrived at all");
+
+        // The watcher does not move, so the crossing is the one the burn was sent over.
+        let travelled = here.distance(from) * lc_world::system::M_PER_LY;
+        let earliest_us = travelled / lc_world::flight::C_M_S * 1.0e6;
+        let waited_us = (seen_moving - burn_t) as f64;
+        assert!(
+            waited_us + TICK_US as f64 >= earliest_us,
+            "saw the burn {waited_us} after it, to light needing {earliest_us} to arrive",
+        );
+    }
 
 }
 

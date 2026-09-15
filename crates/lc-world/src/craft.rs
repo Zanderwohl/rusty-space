@@ -17,7 +17,7 @@ use std::sync::Arc;
 use glam::DVec3;
 
 use crate::instrument::Instrument;
-use crate::motion::{self, Event, Flight, Motive, Rejected, ShipState};
+use crate::motion::{self, Event, Flight, Motive, Past, Rejected, ShipState};
 use crate::system::LocalSystem;
 
 /// A craft, by the identifier whoever owns it uses. Opaque here.
@@ -32,6 +32,23 @@ pub struct CraftId(pub i64);
 /// the zoom limits cannot drift apart.
 pub const BEAM_PER_LENGTH: f64 = 3.0 / 5.0;
 pub const HEIGHT_PER_LENGTH: f64 = 1.0 / 5.0;
+
+/// How far back a craft remembers what it was doing, coordinate seconds.
+///
+/// The longest light delay anyone can solve across. [`crate::pursuit`] and the contact channel
+/// both only look at craft inside the same shell, so two of them are at most `2 *
+/// LOCAL_SHELL_LY` apart — and a light-year is a year of travel by definition, so that span in
+/// years is that span in seconds of delay.
+pub const HISTORY_S: f64 = 2.0 * crate::system::LOCAL_SHELL_LY * crate::flight::JULIAN_YEAR_S;
+
+/// How many stretches of worldline a craft keeps at once.
+///
+/// A bound on the memory, and the reason [`Flight::defined_over`] has a near end at all. Most
+/// craft have one or two: a ship holding a station has not changed what it is doing since it
+/// arrived. A craft that manoeuvres more often than this inside [`HISTORY_S`] forgets its
+/// oldest stretches, and the observers far enough away to have wanted them stop seeing it —
+/// which is the safe way to be unable to answer.
+pub const HISTORY_STRETCHES: usize = 256;
 
 /// The span of hull lengths the game is designed around, metres. Nothing enforces it; it is
 /// what the camera, the reticle and the point-source crossover are expected to cope with.
@@ -115,6 +132,14 @@ pub struct Craft {
     /// Private because it is derived: the arc is the fact and this is an answer about it, and
     /// an answer that can be set from outside is an answer that can be about a different arc.
     patch: Option<Event>,
+    /// What it was doing before, oldest first. See [`Flight`].
+    ///
+    /// Private for a stronger reason than the patch: it is only right if *every* change to the
+    /// motive appends to it, so the appending lives in [`Craft::remembering`] and there is no
+    /// way to change a motive that goes round it.
+    past: Vec<Past>,
+    /// The earliest coordinate second this craft can answer for.
+    known_from_s: f64,
 }
 
 impl Craft {
@@ -132,7 +157,56 @@ impl Craft {
             sensor: kind.sensor(),
             noise_floor: 0.0,
             patch: None,
+            past: Vec::new(),
+            // Nothing has been forgotten, because nothing has happened. A craft that has never
+            // changed what it is doing has always been doing it, which is as true a statement
+            // about its past as there is.
+            known_from_s: f64::NEG_INFINITY,
         }
+    }
+
+    /// Do something that may change what this craft is doing, and remember what it was.
+    ///
+    /// **Every** change to the motive goes through here. The alternative is recording at each
+    /// call site, and the transitions inside [`motion::advance`] — a crossing arriving, an arc
+    /// losing its system — happen without any call site knowing they did.
+    ///
+    /// The clone is the cost of that, and it is paid once per change rather than once per
+    /// step: the comparison is what decides, and a craft that went on doing what it was doing
+    /// keeps its history exactly as it was.
+    fn remembering<T>(&mut self, at_s: f64, change: impl FnOnce(&mut Self) -> T) -> T {
+        let before = self.motion.clone();
+        let out = change(self);
+        if !before.same_worldline_as(&self.motion) {
+            self.past.push(Past { until_s: at_s, motion: before });
+            self.forget_before(at_s);
+        }
+        out
+    }
+
+    /// Drop what is too old or too much to keep, and record how far back that leaves.
+    fn forget_before(&mut self, now_s: f64) {
+        let horizon = now_s - HISTORY_S;
+        let stale = self.past.iter().take_while(|entry| entry.until_s < horizon).count();
+        let excess = self.past.len().saturating_sub(HISTORY_STRETCHES);
+        let drop = stale.max(excess);
+        if drop == 0 {
+            return;
+        }
+        // The newest one dropped is the boundary: everything before it is a stretch this craft
+        // can no longer name, so it may no longer be asked about.
+        self.known_from_s = self.past[drop - 1].until_s;
+        self.past.drain(..drop);
+    }
+
+    /// How many stretches of its past this craft is holding. For tests and diagnostics.
+    pub fn remembered(&self) -> usize {
+        self.past.len()
+    }
+
+    /// The earliest coordinate second this craft can be asked about.
+    pub fn known_from_s(&self) -> f64 {
+        self.known_from_s
     }
 
     /// What to call it on screen: its name, or its kind and number.
@@ -145,7 +219,7 @@ impl Craft {
 
     /// The craft as something a light-delay solve can evaluate.
     pub fn worldline(&self) -> Flight<'_> {
-        Flight::new(&self.motion, self.system.as_deref())
+        Flight::with_past(&self.motion, self.system.as_deref(), &self.past, self.known_from_s)
     }
 
     /// Which way the nose points at a coordinate second, or `None` when nothing decides it.
@@ -159,21 +233,40 @@ impl Craft {
         self.worldline().position_at(t_us)
     }
 
+    /// Cut to a straight line from a point, at a velocity. What a burn does.
+    ///
+    /// A method rather than something a caller assembles, because the *only* way a worldline
+    /// may change is through [`Craft::remembering`] — the server used to replace the whole
+    /// craft here, which both lost everything that was not motion and left no trace of what it
+    /// had been doing.
+    pub fn drift_from(&mut self, at_ly: DVec3, beta: DVec3, now_s: f64) {
+        self.remembering(now_s, |craft| {
+            craft.motion.position_ly = at_ly;
+            craft.motion.beta = beta;
+            craft.motion.set_adrift(now_s);
+            craft.solve_patch(now_s);
+        });
+    }
+
     /// Put it on an approach, and drop whatever the old motive had predicted.
     ///
     /// Not an [`Event`], because an approach is not an order a client sends: it is what the
     /// authority works out *from* a standing order, once per re-solve, against a sighting only
     /// it can vouch for. The client receives the answer as a motive and folds it.
     pub fn begin_rendezvous(&mut self, plan: crate::pursuit::Rendezvous, now_s: f64) {
-        self.motion.begin_rendezvous(plan);
-        self.solve_patch(now_s);
+        self.remembering(now_s, |craft| {
+            craft.motion.begin_rendezvous(plan);
+            craft.solve_patch(now_s);
+        });
     }
 
     /// Fold an event, and re-solve the patch if the arc changed.
     pub fn apply(&mut self, event: &Event) -> Result<(), Rejected> {
-        motion::apply(&mut self.motion, self.system.as_deref(), event)?;
-        self.solve_patch(event.at_t);
-        Ok(())
+        self.remembering(event.at_t, |craft| {
+            motion::apply(&mut craft.motion, craft.system.as_deref(), event)?;
+            craft.solve_patch(event.at_t);
+            Ok(())
+        })
     }
 
     /// Put it in a system, or take it out of one. Anything defined against the old system's
@@ -187,11 +280,13 @@ impl Craft {
             (Some(old), Some(new)) => !Arc::ptr_eq(old, new),
             (Some(_), None) => true,
         };
-        self.system = system;
-        if left {
-            self.motion.leave_system(now_s);
-        }
-        self.solve_patch(now_s);
+        self.remembering(now_s, |craft| {
+            craft.system = system;
+            if left {
+                craft.motion.leave_system(now_s);
+            }
+            craft.solve_patch(now_s);
+        });
     }
 
     /// Move to a coordinate time, folding the patch its arc was solved for if that time has
@@ -202,13 +297,15 @@ impl Craft {
     /// server at 438 seconds and a client at 61 reach the same arc.
     pub fn advance(&mut self, now_s: f64, elapsed_s: f64) {
         self.patch_if_due(now_s);
-        let was = matches!(self.motion.motive, Motive::Falling(_));
-        motion::advance(&mut self.motion, self.system.as_deref(), now_s, elapsed_s);
-        // A crossing that arrived, or an arc that lost its system: either way the answer the
-        // patch held is about a motive the craft is no longer on.
-        if was != matches!(self.motion.motive, Motive::Falling(_)) {
-            self.solve_patch(now_s);
-        }
+        self.remembering(now_s, |craft| {
+            let was = matches!(craft.motion.motive, Motive::Falling(_));
+            motion::advance(&mut craft.motion, craft.system.as_deref(), now_s, elapsed_s);
+            // A crossing that arrived, or an arc that lost its system: either way the answer
+            // the patch held is about a motive the craft is no longer on.
+            if was != matches!(craft.motion.motive, Motive::Falling(_)) {
+                craft.solve_patch(now_s);
+            }
+        });
     }
 
     /// When the current arc leaves the sphere it was solved in, if it does.
@@ -245,8 +342,13 @@ impl Craft {
             None => motion::repatch_due(&self.motion, &system, now_s),
         };
         if let Some(event) = event {
-            let _ = motion::apply(&mut self.motion, Some(&system), &event);
-            self.solve_patch(event.at_t);
+            // Stamped at the patch's own coordinate and not at `now_s`, so the stretch it ends
+            // is recorded as ending where the conic actually changed primary. A step that ran
+            // past the join would otherwise claim the old arc held until the end of the step.
+            self.remembering(event.at_t, |craft| {
+                let _ = motion::apply(&mut craft.motion, Some(&system), &event);
+                craft.solve_patch(event.at_t);
+            });
         }
     }
 }
@@ -472,5 +574,116 @@ mod tests {
         assert_eq!(craft.designation(), "Probe 7");
         craft.name = Some("Huygens".into());
         assert_eq!(craft.designation(), "Huygens");
+    }
+
+    use lc_spacetime::Worldline;
+
+    const HOUR_AGO_US: f64 = -3_600.0 * 1.0e6;
+
+    fn drifting(beta: DVec3, since_s: f64) -> Craft {
+        let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+        craft.motion.beta = beta;
+        craft.motion.set_adrift(since_s);
+        craft
+    }
+
+    /// **The bug this history exists to kill.**
+    ///
+    /// A motive is a closed form total in `t`, so the *current* one answers about times before
+    /// it was ever flown — and `Drifting` extrapolates backwards, so a burn would move the ship
+    /// in the past and change how fast it was going there. Every retarded solve reads that, so
+    /// an observer a light-hour away would see a manoeuvre the instant it happened.
+    #[test]
+    fn a_burn_does_not_rewrite_where_the_ship_was_an_hour_ago() {
+        let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+        let (was_at, was_going) = {
+            let line = craft.worldline();
+            (line.position_at(HOUR_AGO_US), line.velocity_at(HOUR_AGO_US))
+        };
+        assert_eq!(was_going, DVec3::ZERO, "premise: it was sitting still");
+
+        // It lights the drive, now.
+        craft.apply(&Event {
+            ship: motion::ShipId(1),
+            at_t: 0.0,
+            change: crate::motion::Change::Cross {
+                to_ly: DVec3::X,
+                drive: crate::flight::Drive::DEFAULT,
+            },
+        })
+        .expect("a crossing");
+        assert!(craft.motion.is_under_way(), "premise: it actually burned");
+
+        let line = craft.worldline();
+        assert_eq!(line.velocity_at(HOUR_AGO_US), was_going, "the burn reached back an hour");
+        assert_eq!(line.position_at(HOUR_AGO_US), was_at, "and moved it there too");
+    }
+
+    /// The same, for the motive that gets it worst: a drift read before it began runs the new
+    /// velocity backwards from the point the burn happened at.
+    #[test]
+    fn a_change_of_drift_does_not_reach_back_either() {
+        let mut craft = drifting(DVec3::ZERO, 0.0);
+        let before = craft.worldline().position_at(HOUR_AGO_US);
+
+        craft.remembering(0.0, |craft| {
+            craft.motion.beta = DVec3::new(0.0, 1.0e-3, 0.0);
+            craft.motion.set_adrift(0.0);
+        });
+        assert_eq!(craft.worldline().position_at(HOUR_AGO_US), before);
+        assert_eq!(craft.worldline().velocity_at(HOUR_AGO_US), DVec3::ZERO);
+        // And the present is the new motion, or nothing has happened at all.
+        assert_ne!(craft.worldline().velocity_at(1.0e6), DVec3::ZERO);
+    }
+
+    /// Doing the same thing for a long time costs nothing: a stretch is recorded when the
+    /// motive *changes*, not when it is looked at.
+    #[test]
+    fn a_craft_that_keeps_doing_one_thing_remembers_one_thing() {
+        let mut craft = drifting(DVec3::new(1.0e-6, 0.0, 0.0), 0.0);
+        for k in 1..500 {
+            craft.advance(k as f64 * 10.0, 10.0);
+        }
+        assert_eq!(craft.remembered(), 0, "a steady drift recorded {} stretches", craft.remembered());
+    }
+
+    /// The memory is bounded, and running off the end is answered by refusing rather than by
+    /// guessing — which is what [`Flight::defined_over`] tells the solver.
+    #[test]
+    fn a_craft_that_manoeuvres_forever_forgets_its_oldest_stretches() {
+        let mut craft = drifting(DVec3::ZERO, 0.0);
+        for k in 1..=(HISTORY_STRETCHES + 40) {
+            let at = k as f64;
+            craft.remembering(at, |craft| {
+                craft.motion.beta = DVec3::X * (k as f64 * 1.0e-9);
+                craft.motion.set_adrift(at);
+            });
+        }
+        assert_eq!(craft.remembered(), HISTORY_STRETCHES, "the history is not bounded");
+        assert!(craft.known_from_s() > 0.0, "it forgot without saying how far back it can go");
+
+        // The solver's contract: a root before that is no root at all.
+        let (from, to) = craft.worldline().defined_over();
+        assert_eq!(from, craft.known_from_s() * 1.0e6);
+        assert!(to.is_infinite());
+    }
+
+    /// A stretch is stamped with when it *ended*, so the state in force is the one whose end
+    /// has not been reached.
+    #[test]
+    fn the_stretch_in_force_is_the_one_that_had_not_ended_yet() {
+        let mut craft = drifting(DVec3::ZERO, 0.0);
+        let steps = [(100.0, 1.0e-6), (200.0, 2.0e-6), (300.0, 3.0e-6)];
+        for (at, beta) in steps {
+            craft.remembering(at, |craft| {
+                craft.motion.beta = DVec3::X * beta;
+                craft.motion.set_adrift(at);
+            });
+        }
+        let at = |s: f64| craft.worldline().velocity_at(s * 1.0e6).x;
+        assert_eq!(at(50.0), 0.0, "before the first change it was still at rest");
+        assert_eq!(at(150.0), 1.0e-6);
+        assert_eq!(at(250.0), 2.0e-6);
+        assert_eq!(at(350.0), 3.0e-6, "past the last change it is the current motive");
     }
 }
