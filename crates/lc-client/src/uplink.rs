@@ -12,7 +12,7 @@
 use std::sync::Mutex;
 
 use bevy::prelude::*;
-use lc_proto::{ClientId, Inbound, Outbound, PROTOCOL_VERSION, ShipId, Sighting};
+use lc_proto::{ClientId, Inbound, Order, Outbound, PROTOCOL_VERSION, Refusal, ShipId, Sighting};
 
 use crate::link::{Link, Status};
 
@@ -58,6 +58,9 @@ pub struct Uplink {
     /// What has been seen, newest last. Kept so there is something to show while folding them
     /// into the world is still ahead.
     pub seen: Vec<Sighting>,
+    /// What the server last said about an order, for the interface to show once and drop. The
+    /// client cannot write its own here: an order's outcome is the server's to state.
+    pub applied: Option<String>,
 }
 
 /// How many sightings are remembered. A bound rather than a policy: the fold that replaces
@@ -130,6 +133,7 @@ pub fn pump(
     mut uplink: ResMut<Uplink>,
     ticket: Res<crate::Ticket>,
     mut game: ResMut<crate::app::Game>,
+    mut ui: ResMut<crate::app::Ui>,
 ) {
     let greet_now = {
         let link = uplink.link.get_mut().unwrap();
@@ -146,6 +150,13 @@ pub fn pump(
 
     for message in uplink.take() {
         fold(&mut uplink, &mut game, message);
+    }
+
+    // The server's word on an order, shown once. Written here rather than by the action fold
+    // because until it arrives there is nothing true to say.
+    if let Some(said) = uplink.applied.take() {
+        let at = game.0.coordinate_time_s();
+        ui.0.notify(said, at);
     }
 }
 
@@ -184,8 +195,41 @@ fn fold(uplink: &mut Uplink, game: &mut crate::app::Game, message: Outbound) {
             let excess = uplink.seen.len().saturating_sub(REMEMBERED);
             uplink.seen.drain(..excess);
         }
+        Outbound::Accepted { ship_id, at_t, order, .. } => {
+            // **Applied at the server's time, with the server's numbers.** Both are clamped
+            // and neither is what was sent, so folding what was sent instead is how a client
+            // ends up somewhere the server does not have it.
+            let at_s = at_t as f64 * 1e-6;
+            let said = match &order {
+                Order::SetCourse { course, accel_g } => {
+                    let course: lc_world::navigation::Course = course.clone().into();
+                    match game.0.set_course_at(at_s, &course, *accel_g) {
+                        Some(label) => Some(format!("course: {label} at {accel_g:.0} g")),
+                        None => Some("that course could not be flown".into()),
+                    }
+                }
+                Order::CutDrive => {
+                    let note = match game.0.cut_drive_at(at_s) {
+                        // What it says is where the ship ended up, because cutting does not
+                        // stop it: it keeps its velocity and that velocity is now an orbit.
+                        Some(coast) => format!("drive cut — {}", crate::hud::arc(&coast)),
+                        None => "drive cut".to_string(),
+                    };
+                    Some(note)
+                }
+                // Nothing to fold into the ship's motion. A transmission is an event, and the
+                // client learns of it the same way anyone else does: when its light arrives.
+                Order::Transmit { .. } | Order::Burn { .. } => None,
+            };
+            debug!(?ship_id, at_t, ?order, "accepted");
+            uplink.applied = said;
+        }
         Outbound::Refused { ship_id, reason } => {
             warn!(?ship_id, ?reason, "an order was refused");
+            uplink.applied = Some(match reason {
+                Refusal::Impossible => "the server refused that order".into(),
+                Refusal::NotYours | Refusal::NotYou => "that is not your ship".into(),
+            });
         }
         Outbound::Throttled { retry_after_ticks } => {
             warn!(retry_after_ticks, "throttled");

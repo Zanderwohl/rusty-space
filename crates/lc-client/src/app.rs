@@ -446,6 +446,7 @@ fn dispatch(
     mut requests: MessageReader<Requested>,
     mut ui: ResMut<Ui>,
     mut game: ResMut<Game>,
+    mut uplink: ResMut<crate::uplink::Uplink>,
     mut next: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -466,6 +467,19 @@ fn dispatch(
                 Effect::Notify(text) => {
                     let at = game.coordinate_time_s();
                     ui.notify(text, at);
+                }
+                Effect::Send(order) => {
+                    // A ship the server has not named is a ship this client does not have, so
+                    // there is nothing to send an order for.
+                    if let Some(ship_id) = uplink.joined().map(|joined| joined.ship_id) {
+                        uplink.say(lc_proto::Inbound::Act(lc_proto::Intent {
+                            ship_id,
+                            order,
+                            // Advisory, and clamped on arrival. Saying now is the honest
+                            // claim: the client is acting on all it has been told so far.
+                            issued_at_client_t: (game.coordinate_time_s() * 1e6) as i64,
+                        }));
+                    }
                 }
                 // Handled in `signin_ui`, which has the socket, the browser and the vault.
                 // Nothing here, rather than nothing anywhere: in a browser the page that
@@ -505,6 +519,9 @@ mod tests {
             .add_message::<AppExit>()
             .insert_resource(Ui(UiState::default()))
             .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
+            // The dispatcher routes orders to it. Absent, not connected: these tests are the
+            // single-process game, which is what a session with no server still is.
+            .init_resource::<crate::uplink::Uplink>()
             .add_systems(Update, (dispatch, advance_clock).chain());
         app.insert_state(AppState::InGame);
         app

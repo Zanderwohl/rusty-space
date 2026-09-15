@@ -104,6 +104,9 @@ pub enum Effect {
     CancelSignIn,
     SignInWithPassword { email: String, password: String },
     SignOut,
+    /// An order for the server. Emitted instead of a local change when a server is
+    /// authoritative over the ship: see [`crate::session::Session::remote`].
+    Send(lc_proto::Order),
 }
 
 /// Stops of exposure per keypress.
@@ -212,7 +215,12 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             }
         }
         Action::AbortFlight => {
-            if session.cruise().is_some() || session.station().is_some() {
+            if session.remote {
+                if session.cruise().is_some() || session.station().is_some() {
+                    effects.push(Effect::Send(lc_proto::Order::CutDrive));
+                    effects.push(Effect::Notify("cut sent".into()));
+                }
+            } else if session.cruise().is_some() || session.station().is_some() {
                 let note = match session.cancel() {
                     // What it says is where the ship ended up, because cancelling does not
                     // stop it: it keeps its velocity and that velocity is now an orbit.
@@ -228,13 +236,23 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
         Action::ChooseCourse(course) => ui.course = course,
         Action::SetCourse(course) => {
-            let note = match session.set_course(&course) {
-                Some(label) => format!("course: {label}"),
-                // Not an error dialogue: the interface offers what the system has, so this is
-                // reachable only by a stale panel or a test.
-                None => "nothing there to go to".to_string(),
-            };
-            effects.push(Effect::Notify(note));
+            if session.remote {
+                // Sent, not applied. What the server does with it comes back as `Accepted`,
+                // carrying the acceleration it actually flew and the time it actually used.
+                effects.push(Effect::Send(lc_proto::Order::SetCourse {
+                    course: (&course).into(),
+                    accel_g: session.ship.motion.drive.accel_g,
+                }));
+                effects.push(Effect::Notify("course sent".into()));
+            } else {
+                let note = match session.set_course(&course) {
+                    Some(label) => format!("course: {label}"),
+                    // Not an error dialogue: the interface offers what the system has, so this
+                    // is reachable only by a stale panel or a test.
+                    None => "nothing there to go to".to_string(),
+                };
+                effects.push(Effect::Notify(note));
+            }
         }
 
         Action::SetDriveAccel(g) => {
@@ -294,6 +312,14 @@ fn aim(ui: &UiState, session: &Session) -> Option<Look> {
 }
 
 fn fly(ui: &mut UiState, session: &mut Session, id: Option<StarId>, effects: &mut Vec<Effect>) {
+    // There is no `Order` for an interstellar crossing yet — `lc_proto::Course` names places
+    // inside a system and `LeaveSystem`, and neither is "go to that star". Flying one locally
+    // against a server would put the client somewhere the server does not have it, silently,
+    // so it is refused out loud instead. See lightcone/docs/08-networking.md.
+    if session.remote {
+        effects.push(Effect::Notify("interstellar crossings are not on the wire yet".into()));
+        return;
+    }
     let Some(id) = id.or(ui.selected) else {
         effects.push(Effect::Notify("no destination selected".into()));
         return;

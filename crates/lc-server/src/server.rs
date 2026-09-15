@@ -33,6 +33,13 @@ pub const TICK_US: i64 = TICK_MS * 8766 * 1_000;
 /// Ticks in a real second, for the window the rate counters measure over.
 pub const TICKS_PER_SECOND: u32 = (1_000 / TICK_MS) as u32;
 
+/// What an accepted intent actually became.
+struct Applied {
+    event_id: i64,
+    at_t: i64,
+    order: Order,
+}
+
 /// What the server remembers about one connection.
 #[derive(Clone, Debug)]
 pub struct Connected {
@@ -255,8 +262,14 @@ impl<J: Journal> Server<J> {
             }
             Inbound::Act(intent) => {
                 let ship_id = intent.ship_id;
-                if let Err(reason) = self.act(from, intent, events, deliveries) {
-                    wire.send(from, Outbound::Refused { ship_id, reason });
+                match self.act(from, intent, events, deliveries) {
+                    Ok(applied) => wire.send(from, Outbound::Accepted {
+                        ship_id,
+                        event_id: applied.event_id,
+                        at_t: applied.at_t,
+                        order: applied.order,
+                    }),
+                    Err(reason) => wire.send(from, Outbound::Refused { ship_id, reason }),
                 }
             }
             Inbound::ResumeFrom { arrive_t } => {
@@ -270,13 +283,16 @@ impl<J: Journal> Server<J> {
     }
 
     /// Validate an intent, and if it stands, make it an event.
+    ///
+    /// Returns what was **actually done**, which is not always what was asked: both the
+    /// timestamp and the acceleration are clamped below.
     fn act(
         &mut self,
         from: ClientId,
         intent: Intent,
         events: &mut Vec<Event>,
         deliveries: &mut Vec<Scheduled>,
-    ) -> Result<(), Refusal> {
+    ) -> Result<Applied, Refusal> {
         let state = self.clients.get(&from).ok_or(Refusal::NotYours)?;
         if state.ship != intent.ship_id {
             return Err(Refusal::NotYours);
@@ -298,14 +314,19 @@ impl<J: Journal> Server<J> {
         let floor = state.cursor_t.saturating_add(1);
         let at = intent.issued_at_client_t.clamp(floor.min(self.now_t), self.now_t);
 
-        let (kind, power_w, payload) = match &intent.order {
+        let (kind, power_w, payload, applied) = match &intent.order {
             Order::Transmit { power_w } => {
                 let power_w = *power_w;
                 // `<= 0.0` is false for NaN, so the finite check is not redundant with it.
                 if power_w <= 0.0 || !power_w.is_finite() {
                     return Err(Refusal::Impossible);
                 }
-                (KIND_TRANSMIT, power_w, format!("{{\"power_w\":{power_w}}}"))
+                (
+                    KIND_TRANSMIT,
+                    power_w,
+                    format!("{{\"power_w\":{power_w}}}"),
+                    Order::Transmit { power_w },
+                )
             }
             Order::Burn { beta } => {
                 let beta = DVec3::from_array(*beta);
@@ -319,7 +340,12 @@ impl<J: Journal> Server<J> {
                 craft.noise_floor = noise_floor;
                 // A burn is not silent -- it is the most visible thing a ship does -- but what
                 // it radiates is the drive's business. Nominal, until there is a drive model.
-                (KIND_BURN, BURN_POWER_W, format!("{{\"beta\":{beta:?}}}"))
+                (
+                    KIND_BURN,
+                    BURN_POWER_W,
+                    format!("{{\"beta\":{beta:?}}}"),
+                    Order::Burn { beta: beta.to_array() },
+                )
             }
             Order::SetCourse { course, accel_g } => {
                 if !accel_g.is_finite() || *accel_g <= 0.0 {
@@ -330,14 +356,23 @@ impl<J: Journal> Server<J> {
                 // fly a better ship than it has by sending a larger number.
                 let mut drive = craft.kind.drive();
                 drive.accel_g = accel_g.min(drive.accel_g);
-                let course: Course = course.clone().into();
-                let change = Change::SetCourse { course, drive };
+                // Not shadowed: the proto course is wanted again below, to say back what was
+                // applied. Only the acceleration is clamped, never the course itself.
+                let flown: Course = course.clone().into();
+                let change = Change::SetCourse { course: flown, drive };
                 // **The fold, not a second implementation.** The server works the crossing out
                 // from the order exactly as the client will, because it is the same function.
                 craft
                     .apply(&Change_ { ship: motion_id(id), at_t: at as f64 * 1.0e-6, change })
                     .map_err(refusal_for)?;
-                (KIND_BURN, BURN_POWER_W, format!("{{\"accel_g\":{}}}", drive.accel_g))
+                (
+                    KIND_BURN,
+                    BURN_POWER_W,
+                    format!("{{\"accel_g\":{}}}", drive.accel_g),
+                    // The clamped acceleration, not the one that was asked for. This is the
+                    // whole reason the message exists.
+                    Order::SetCourse { course: course.clone(), accel_g: drive.accel_g },
+                )
             }
             Order::CutDrive => {
                 let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
@@ -350,7 +385,7 @@ impl<J: Journal> Server<J> {
                     .map_err(refusal_for)?;
                 // Silent. Cutting the engine is the one manoeuvre that puts nothing out, which
                 // is exactly why a player might choose it.
-                (KIND_CUT, 0.0, "{}".to_string())
+                (KIND_CUT, 0.0, "{}".to_string(), Order::CutDrive)
             }
         };
 
@@ -369,8 +404,9 @@ impl<J: Journal> Server<J> {
                 deliveries.push(scheduled);
             }
         }
+        let event_id = event.id;
         events.push(event);
-        Ok(())
+        Ok(Applied { event_id, at_t: at, order: applied })
     }
 
     /// Verify a ticket and bind the connection to the account's craft.
@@ -418,6 +454,11 @@ impl<J: Journal> Server<J> {
             last_reception_t: i64::MIN,
             cursor_t: i64::MIN,
         });
+        // Being welcomed is not the same fact as owning the craft, and `act` checks the
+        // second. Without this a signed-in client is welcomed, given a ship, and then refused
+        // `NotYours` on every order it sends — which no in-process test caught, because the
+        // ones about orders call `admit` and the ones about tickets never send an order.
+        self.owners.insert(CraftId(ship.0), from);
         Some((ship, claims.name))
     }
 
@@ -1114,6 +1155,104 @@ mod world_tests {
     /// A craft is in a system because of where it *is*. Nothing is told, and nothing asks:
     /// the server applies the same shell radius the client does, so the two cannot disagree
     /// about whether a ship is in a system.
+    /// The message's whole reason for existing: the client asked for a thousand g and got the
+    /// craft's ceiling, and now it is **told** so rather than left to diverge by the difference.
+    #[tokio::test]
+    async fn an_accepted_order_says_the_acceleration_that_was_actually_applied() {
+        // Not `else { return }`: a test that skips itself silently is a test that passes for
+        // the wrong reason, and this one is the point of the whole message.
+        let system = a_system().expect("the sample star makes a system");
+        let body = orbitable(&system).expect("something to orbit");
+
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let client = ClientId(1);
+        server.admit(client, Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO), 0.0);
+        server.fleet_mut().get_mut(CraftId(1)).expect("the craft").enter(Some(system), 0.0);
+
+        let asked = lc_proto::Course::Orbit {
+            body,
+            altitude_radii: 2.0,
+            plane: lc_proto::Plane::Equatorial,
+        };
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::SetCourse { course: asked.clone(), accel_g: 1000.0 },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+
+        let said = wire.take(client);
+        let Some(Outbound::Accepted { ship_id, event_id, order, .. }) = said
+            .iter()
+            .find(|out| matches!(out, Outbound::Accepted { .. }))
+        else {
+            panic!("no acceptance: {said:?}");
+        };
+        assert_eq!(*ship_id, ShipId(1));
+        assert!(*event_id > 0, "an accepted order names no event");
+        let Order::SetCourse { course, accel_g } = order else { panic!("{order:?}") };
+        assert_eq!(
+            *accel_g,
+            Kind::Ship.drive().accel_g,
+            "it echoed what was asked for instead of what was flown",
+        );
+        // The course itself is not clamped, only the acceleration.
+        assert_eq!(course, &asked);
+    }
+
+    /// The other silent clamp. An intent stamped before the client's cursor is moved forward,
+    /// and the client needs the moved value to know when its own order took effect.
+    #[tokio::test]
+    async fn an_accepted_order_says_the_time_it_actually_took_effect() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let client = ClientId(1);
+        server.admit(client, Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO), 0.0);
+        server.tick(&mut wire).await.unwrap();
+        let _ = wire.take(client);
+
+        // Far in the future, which is the direction that gets clamped to `now`.
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Transmit { power_w: 1000.0 },
+            issued_at_client_t: i64::MAX,
+        }));
+        server.tick(&mut wire).await.unwrap();
+
+        let said = wire.take(client);
+        let Some(Outbound::Accepted { at_t, .. }) =
+            said.iter().find(|out| matches!(out, Outbound::Accepted { .. }))
+        else {
+            panic!("no acceptance: {said:?}");
+        };
+        assert_eq!(*at_t, server.now_t(), "the clamped time was not reported");
+        assert_ne!(*at_t, i64::MAX);
+    }
+
+    /// An order that does not stand is refused and **not** also accepted.
+    #[tokio::test]
+    async fn a_refused_order_is_not_accepted_as_well() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let client = ClientId(1);
+        server.admit(client, Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO), 0.0);
+
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Transmit { power_w: -1.0 },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+
+        let said = wire.take(client);
+        assert!(said.iter().any(|out| matches!(out, Outbound::Refused { .. })), "{said:?}");
+        assert!(
+            !said.iter().any(|out| matches!(out, Outbound::Accepted { .. })),
+            "a refused order was also accepted: {said:?}",
+        );
+    }
+
     #[tokio::test]
     async fn a_craft_is_placed_by_where_it_is() {
         let Some(star) = a_star() else { return };
@@ -1411,6 +1550,71 @@ mod hello_tests {
     }
 
     /// A ticket minted for another shard is not a ticket here, however valid it is there.
+    /// The bug the seam test found. Being welcomed and owning the craft are two facts, and
+    /// `act` checks the second: a client that signed in with a ticket could be given a ship and
+    /// then refused `NotYours` on everything it did with it.
+    #[tokio::test]
+    async fn a_client_that_signed_in_can_act_on_the_ship_it_was_given() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        let mut wire = Loopback::new();
+        let client = ClientId(1);
+
+        says(&mut server, &mut wire, client, broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let ship_id = welcomed(&mut wire, client);
+
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id,
+            order: Order::Transmit { power_w: 1000.0 },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+
+        let said = wire.take(client);
+        assert!(
+            said.iter().any(|out| matches!(out, Outbound::Accepted { .. })),
+            "a signed-in client could not act on its own ship: {said:?}",
+        );
+    }
+
+    /// And a reconnection takes ownership with it, or the new socket inherits the refusal.
+    #[tokio::test]
+    async fn a_reconnection_can_act_on_the_ship_it_took_over() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        let mut wire = Loopback::new();
+
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let ship_id = welcomed(&mut wire, ClientId(1));
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-1", SHARD, 60, "j2")).await;
+        assert_eq!(welcomed(&mut wire, ClientId(2)), ship_id);
+
+        wire.client_says(ClientId(2), Inbound::Act(Intent {
+            ship_id,
+            order: Order::Transmit { power_w: 1000.0 },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+        let said = wire.take(ClientId(2));
+        assert!(
+            said.iter().any(|out| matches!(out, Outbound::Accepted { .. })),
+            "the reconnection could not act: {said:?}",
+        );
+
+        // And the displaced connection cannot act for it any more.
+        wire.client_says(ClientId(1), Inbound::Act(Intent {
+            ship_id,
+            order: Order::Transmit { power_w: 1000.0 },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+        let stale = wire.take(ClientId(1));
+        assert!(
+            stale.iter().any(|out| matches!(out, Outbound::Refused { reason: Refusal::NotYours, .. })),
+            "a displaced connection still commanded the ship: {stale:?}",
+        );
+    }
+
     /// The default, and the one that matters: a server nobody configured lets nobody in.
     #[tokio::test]
     async fn admitting_without_tickets_is_off_unless_asked_for() {

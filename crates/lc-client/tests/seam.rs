@@ -9,7 +9,7 @@
 use std::time::Duration;
 
 use lc_client::link::{Link, Status, WebSocketLink};
-use lc_proto::{Inbound, Outbound, PROTOCOL_VERSION};
+use lc_proto::{Inbound, Intent, Order, Outbound, PROTOCOL_VERSION};
 use lc_server::journal::Memory;
 use lc_server::server::{Server, TICK_MS};
 use lc_server::websocket::WebSocketServer;
@@ -94,6 +94,60 @@ async fn a_client_connects_to_a_server_and_is_welcomed() {
     assert_eq!(protocol, PROTOCOL_VERSION);
     assert!(ship_id.0 > 0, "no ship");
     assert!(!name.is_empty(), "no name");
+}
+
+/// An order goes out and the server's answer comes back, over the socket. The answer carries
+/// the order **as applied** — here the timestamp, clamped from a client claiming to have acted
+/// at the end of time.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_order_is_answered_with_what_was_actually_done() {
+    let address = shard(true).await;
+    let mut link = WebSocketLink::connect(&address);
+
+    greet(&mut link, PROTOCOL_VERSION, "").await;
+    let Outbound::Welcome { ship_id, .. } = hear(&mut link, "a welcome").await else {
+        panic!("no welcome");
+    };
+
+    link.send(Inbound::Act(Intent {
+        ship_id,
+        order: Order::Transmit { power_w: 1500.0 },
+        issued_at_client_t: i64::MAX,
+    }));
+
+    let said = hear(&mut link, "an acceptance").await;
+    let Outbound::Accepted { ship_id: whose, at_t, order, event_id } = said else {
+        panic!("an order was not accepted: {said:?}");
+    };
+    assert_eq!(whose, ship_id);
+    assert_eq!(order, Order::Transmit { power_w: 1500.0 });
+    assert!(event_id > 0, "an accepted order names no event");
+    assert_ne!(at_t, i64::MAX, "the timestamp was taken at face value");
+    assert!(at_t > 0, "clamped to something before the world started: {at_t}");
+}
+
+/// And an order that cannot stand comes back refused rather than silently ignored.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_impossible_order_is_answered_too() {
+    let address = shard(true).await;
+    let mut link = WebSocketLink::connect(&address);
+
+    greet(&mut link, PROTOCOL_VERSION, "").await;
+    let Outbound::Welcome { ship_id, .. } = hear(&mut link, "a welcome").await else {
+        panic!("no welcome");
+    };
+
+    link.send(Inbound::Act(Intent {
+        ship_id,
+        order: Order::Transmit { power_w: -1.0 },
+        issued_at_client_t: 0,
+    }));
+
+    let said = hear(&mut link, "a refusal").await;
+    assert!(
+        matches!(said, Outbound::Refused { .. }),
+        "an impossible order was not refused: {said:?}",
+    );
 }
 
 /// The negotiation that exists so a stale client fails legibly instead of misreading bytes.

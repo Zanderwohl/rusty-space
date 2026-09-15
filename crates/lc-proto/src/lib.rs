@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -206,6 +206,24 @@ pub enum Outbound {
     Welcome { client_id: ClientId, protocol: u32, ship_id: ShipId, now_t: i64, name: String },
     /// The event channel. Cleared, by construction.
     Sightings(Vec<Cleared<Sighting>>),
+    /// An intent that stood, and **what was actually done with it** — which is not always
+    /// what was asked for.
+    ///
+    /// The server silently clamps two things: the intent's timestamp, to the window the client
+    /// can prove it is entitled to, and the acceleration, to the craft's own ceiling. A client
+    /// predicting from what it *sent* would diverge by exactly those amounts with no way to
+    /// see why. Carrying the order back as applied is what makes the difference observable
+    /// rather than mysterious. See `lightcone/docs/17-reconciliation.md`.
+    Accepted {
+        ship_id: ShipId,
+        /// The event this became, so a client can match its own act to the sighting of it that
+        /// arrives later.
+        event_id: i64,
+        /// Coordinate time it took effect: the clamp, applied.
+        at_t: i64,
+        /// The order **as applied**, not as sent.
+        order: Order,
+    },
     /// An intent that did not survive validation, and why. Not an error: a client is allowed
     /// to ask for things it cannot have, and being told no is how it finds out.
     Refused { ship_id: ShipId, reason: Refusal },
@@ -272,7 +290,7 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 /// be confidently wrong rather than refused.
 pub mod golden {
     /// `Outbound::Welcome { client_id: 7, protocol: PROTOCOL_VERSION, ship_id: 42, now_t: 1e6 }`
-    pub const WELCOME: &[u8] = &[0, 7, 4, 84, 128, 137, 122, 3, 65, 100, 97];
+    pub const WELCOME: &[u8] = &[0, 7, 5, 84, 128, 137, 122, 3, 65, 100, 97];
 
     /// `Inbound::Act(Intent { ship_id: 42, order: Transmit { power_w: 1500.0 }, .. })`
     pub const ACT: &[u8] =
@@ -288,11 +306,20 @@ pub mod golden {
     ///
     /// Pinned because it is now the message that decides whether anyone gets in at all. A
     /// field moving here is a server reading someone else's ticket as this one's.
-    pub const HELLO: &[u8] = &[0, 4, 5, 97, 46, 98, 46, 99];
+    pub const HELLO: &[u8] = &[0, 5, 5, 97, 46, 98, 46, 99];
 
     pub const SET_COURSE: &[u8] = &[
         1, 84, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0, 0, 0, 0, 0, 0, 20,
         64, 128, 137, 122,
+    ];
+
+    /// `Outbound::Accepted { ship_id: 42, event_id: 9, at_t: 1e6, order: SetCourse { .. 3 g } }`
+    ///
+    /// Pinned because it is the message a client reconciles against. A field moving here is a
+    /// client folding the wrong number into where it believes its own ship is.
+    pub const ACCEPTED: &[u8] = &[
+        2, 84, 18, 128, 137, 122, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0,
+        0, 0, 0, 0, 0, 8, 64,
     ];
 }
 
@@ -352,6 +379,24 @@ mod tests {
         })
     }
 
+    fn accepted() -> Outbound {
+        Outbound::Accepted {
+            ship_id: ShipId(42),
+            event_id: 9,
+            at_t: 1_000_000,
+            // Not the acceleration that would have been asked for: the point of the message is
+            // that this is the applied value.
+            order: Order::SetCourse {
+                course: Course::Orbit {
+                    body: "Earth".into(),
+                    altitude_radii: 2.0,
+                    plane: Plane::Polar,
+                },
+                accel_g: 3.0,
+            },
+        }
+    }
+
     #[test]
     fn the_wire_format_for_this_version_has_not_moved() {
         assert_eq!(
@@ -374,6 +419,11 @@ mod tests {
             golden::SET_COURSE,
             "Order::SetCourse changed shape at protocol version {PROTOCOL_VERSION}",
         );
+        assert_eq!(
+            encode(&accepted()),
+            golden::ACCEPTED,
+            "Outbound::Accepted changed shape at protocol version {PROTOCOL_VERSION}",
+        );
     }
 
     #[test]
@@ -383,6 +433,7 @@ mod tests {
             Outbound::Sightings(vec![
                 Cleared::clear(sighting(500, 2.5), 1_000, 0.0).unwrap(),
             ]),
+            accepted(),
             Outbound::Refused { ship_id: ShipId(-3), reason: Refusal::NotYours },
             Outbound::WrongProtocol { server: 9 },
         ];

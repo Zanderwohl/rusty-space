@@ -112,6 +112,13 @@ pub struct Session {
     pub fleet: Fleet,
     /// What the renderer is about to draw besides the stars. Metered, never drawn from.
     pub scene: Scene,
+    /// Whether a server is authoritative over this ship.
+    ///
+    /// True from the moment a `Welcome` arrives. While it is, the client does **not** apply
+    /// its own flight orders: it sends them and applies what comes back, which costs one tick
+    /// and is the whole reason there is nothing to reconcile yet. Predicting locally and
+    /// correcting is `lightcone/docs/17-reconciliation.md`, and is a later piece of work.
+    pub remote: bool,
     targets: HashMap<StarId, Target>,
 }
 
@@ -139,6 +146,7 @@ impl Session {
             scene: Scene::default(),
             system: None,
             fleet: Fleet::new(),
+            remote: false,
             targets,
         };
         session.retune();
@@ -238,9 +246,17 @@ impl Session {
     /// whatever conic that velocity puts it on about whichever body holds it. Returns what it
     /// ended up on.
     pub fn cancel(&mut self) -> Option<crate::coast::Coast> {
+        self.cut_drive_at(self.coordinate_time_s())
+    }
+
+    /// Cut the drive at a stated coordinate time.
+    ///
+    /// The reading the one above is written in terms of. A server's acceptance names *when* it
+    /// applied the order, which is not always when the client asked.
+    pub fn cut_drive_at(&mut self, at_s: f64) -> Option<crate::coast::Coast> {
         let event = motion::Event {
             ship: motion::ShipId(0),
-            at_t: self.coordinate_time_s(),
+            at_t: at_s,
             change: motion::Change::CutDrive,
         };
         // `Craft::apply` re-solves the patch: a new arc means the old answer to "when does
@@ -282,10 +298,27 @@ impl Session {
     /// it — a moon that is not there, rings on a body without any, a libration point of the
     /// star itself.
     pub fn set_course(&mut self, course: &crate::navigation::Course) -> Option<String> {
+        self.set_course_at(self.coordinate_time_s(), course, self.ship.motion.drive.accel_g)
+    }
+
+    /// Set a course at a stated time and acceleration.
+    ///
+    /// Both are the server's when a server is answering: it clamps the timestamp to what this
+    /// client can prove it is entitled to, and the acceleration to the craft's own ceiling.
+    /// Applying what was asked for rather than what came back is how a client ends up
+    /// somewhere the server does not have it.
+    pub fn set_course_at(
+        &mut self,
+        at_s: f64,
+        course: &crate::navigation::Course,
+        accel_g: f64,
+    ) -> Option<String> {
+        let mut drive = self.ship.motion.drive;
+        drive.accel_g = accel_g;
         let event = motion::Event {
             ship: motion::ShipId(0),
-            at_t: self.coordinate_time_s(),
-            change: motion::Change::SetCourse { course: course.clone(), drive: self.ship.motion.drive },
+            at_t: at_s,
+            change: motion::Change::SetCourse { course: course.clone(), drive },
         };
         self.ship.apply(&event).ok()?;
         self.ship.motion.bound_for().map(|w| w.label())
