@@ -124,10 +124,24 @@ fn read_jwks(source: &str) -> Result<serde_json::Value, Box<dyn std::error::Erro
 /// A URL matters for the sky in particular: pointing a shard at the CDN path of the promoted
 /// build is what makes "both ends hold the same catalogue" a fact rather than a convention
 /// somebody has to keep.
+///
+/// **Name the service, not the site.** In a container deployment the public name resolves to
+/// the host's own address, and reaching the host's published port from a container hairpins
+/// through the NAT and hangs — so `http://lightcone-cdn:3101/...`, not
+/// `https://cdn.example/...`. It is the same bytes either way, because it is the same
+/// container; only the route differs. The timeouts below are what turn getting this wrong into
+/// a process that fails rather than one that never finishes starting.
 fn read_bytes(source: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     if source.starts_with("http://") || source.starts_with("https://") {
         let mut bytes = Vec::new();
-        ureq::get(source).call()?.into_reader().read_to_end(&mut bytes)?;
+        ureq::builder()
+            .timeout_connect(Duration::from_secs(5))
+            .timeout(Duration::from_secs(30))
+            .build()
+            .get(source)
+            .call()?
+            .into_reader()
+            .read_to_end(&mut bytes)?;
         Ok(bytes)
     } else {
         Ok(std::fs::read(source)?)
