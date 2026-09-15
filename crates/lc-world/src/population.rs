@@ -128,12 +128,20 @@ impl Population {
     /// as it does in a complete shell. Only mutual heating would change that, and a swarm thick
     /// enough for it is one where the inner elements are shadowed anyway.
     pub fn equilibrium_temperature(&self, star: &Star) -> f64 {
+        self.equilibrium_temperature_under(star.luminosity())
+    }
+
+    /// The same, for a caller that has the luminosity but not the star.
+    ///
+    /// The renderer is one: it carries a system's radius and temperature and not its `mu`, and
+    /// a second copy of this formula there is a second chance to have it wrong.
+    pub fn equilibrium_temperature_under(&self, luminosity_w: f64) -> f64 {
         let a = self.thermal_radius();
         if a <= 0.0 || self.radiating_ratio <= 0.0 {
             return 0.0;
         }
         let denominator = self.radiating_ratio * 4.0 * PI * a * a * em_spectra::blackbody::SIGMA;
-        (star.luminosity() / denominator).powf(0.25)
+        (luminosity_w / denominator).powf(0.25)
     }
 
     /// Total radiating area, m^2. Only the illuminated part radiates.

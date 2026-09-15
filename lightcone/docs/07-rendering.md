@@ -343,6 +343,59 @@ cannot change what the population paints, because the shape is what the calibrat
 against — which is what the old area correction was for, and it needed a factor of two in it
 that had to be measured off a screenshot.
 
+### A population is different in every band
+
+**Decided: `band_response` sets the extinction, not just a colour.** A population carries a
+per-band response, and until now it reached the renderer only as a choice between two hard-coded
+tints — so every sensor preset drew the same grey, and "dust penetration" penetrated nothing.
+Measured, the envelope was bit-identical in all six presets while the star field behind it
+changed.
+
+A band changes two separate things about a population, and both of them matter:
+
+- **How much is in the way.** `em_spectra::extinction::RATIO` runs from 1.32 in B to 1e-10 at
+  21 cm, so a dust cloud is thirteen decades more transparent in the radio. That is the whole
+  mechanism the dust-penetration preset is named for, and it is the per-band extinction
+  coefficient the march multiplies its one column integral by.
+- **What the material that is there looks like.** In the optical a belt shines by scattered
+  starlight, so it is the colour of its star; at ten microns it shines by its own two-hundred-
+  kelvin glow, which the star has none of. Both scale with `band_response` — emissivity and
+  absorptivity are the same number, which is why one array serves both.
+
+The march is unchanged and so is its cost: it produces one column of material and every band's
+optical depth is that column times that band's own coefficient, so seven bands cost what one
+did. Only the conversion at the end differs, and it is seven exponentials and a matrix.
+
+**The level is a display decision; only the colour is physics.** A belt's real surface
+brightness is four decades under a star's and renders as nothing at all in every normalised
+preset — true photometrically and useless as a picture, which is the argument the fourth root
+already settles for the opacity. So the source spectrum is normalised to put the brightest
+display channel at a fixed level, and what carries the information is the *balance* between
+the channels and the per-band opacity. A population stays legible in a band its light barely
+reaches while still saying which band it is being seen in.
+
+What that buys, measured on the same frame with the same belt made of rock and of dust:
+
+| preset | rock | dust |
+|---|---|---|
+| natural | (74, 64, 65) | (64, 66, 77) |
+| thermal | (78, 42, 42) | (21, 16, 77) |
+| dust penetration | (78, 1, 1) | (2, 54, 43) |
+
+Rock reads warm in the optical, red in the thermal — it is warm — and bright at 21 cm, where a
+cold body is relatively much brighter than a sun-like reference. Dust reads blue in the optical
+because it interacts more in B, loses the thermal channel where its response is 0.06, and at
+21 cm is simply not there. That last row is the grey-versus-reddening diagnostic of
+[04-stellar-photometry.md](04-stellar-photometry.md), arrived at from the physics rather than
+from an `if`.
+
+**No drawn population is dusty yet.** The generated belts and swarms are `PerBand::splat(1.0)`,
+which is right — a metre of rock is a metre of rock from B to 21 cm — and the one dusty
+population the generator makes is the Oort cloud, which is below the visibility floor. So the
+mechanism is correct, tested, and currently invisible in play. It becomes visible the moment
+anything dusty is drawn, and a debris belt's *dust* component, which is what infrared astronomy
+actually sees, would be the obvious first one.
+
 **Cost: 0.076 ms per march step per frame**, measured on an M3 Pro at 1280x720 with two
 populations each covering the sky. Thirty-two steps is about 2.4 ms and is within a mean of one
 level in 255 of a ninety-six-step render. It scales with pixels and nothing else, so the same

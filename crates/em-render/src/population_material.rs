@@ -16,6 +16,8 @@ use bevy::render::render_resource::{
 use bevy::shader::ShaderRef;
 use bevy_mesh::{MeshVertexAttribute, MeshVertexBufferLayoutRef};
 
+use crate::relativistic_starfield_material::BANDS;
+
 /// Optical depth at this vertex, with the deepest band at one. Rings only: a volume reads its
 /// density from [`PopulationMaterial::profile`] instead.
 pub const ATTRIBUTE_SHELL_DENSITY: MeshVertexAttribute =
@@ -61,15 +63,22 @@ pub struct PopulationUniform {
     /// crossing a thin belt spends its steps in the belt rather than in the empty sphere
     /// around it.
     pub slab: f32,
-    /// Line integral of the density profile along a radial ray in the plane.
-    ///
-    /// The calibration, and the reason the photometry survives the change of shape: that ray is
-    /// the one whose extinction *is* the covering fraction, so the shader solves for the
-    /// extinction coefficient that makes it come out at `opacity`. Every other sightline then
-    /// follows from the geometry rather than from a tuned constant.
-    pub reference: f32,
     /// One for a population, zero for a ring.
     pub volumetric: f32,
+    /// Band `b`'s contribution to display red, green and blue. `w` unused.
+    ///
+    /// The same columns the starfield binds, from the same `BandMapping`, so a population and
+    /// the stars behind it are looking through one instrument rather than two.
+    pub band_to_display: [Vec4; BANDS],
+    /// Per band: `x` the material's source radiance, `y` its extinction coefficient. `zw` unused.
+    ///
+    /// Two numbers because a band changes *both* things about a population and they are not the
+    /// same change. A dust cloud is thirteen decades more transparent at 21 cm than in B —
+    /// `em_spectra::extinction::RATIO` — so at 21 cm the sightline finds almost nothing there;
+    /// that is `y`, and it is what makes the dust-penetration preset do what it is named for.
+    /// What the material that *is* there looks like is `x`, and for a belt it is scattered
+    /// starlight in the optical and its own 200 K glow at ten microns.
+    pub band_material: [Vec4; BANDS],
 }
 
 impl Default for PopulationUniform {
@@ -85,8 +94,9 @@ impl Default for PopulationUniform {
             inside_fade: 1.0,
             inner: 0.0,
             slab: 1.0,
-            reference: 1.0,
             volumetric: 1.0,
+            band_to_display: [Vec4::ZERO; BANDS],
+            band_material: [Vec4::ZERO; BANDS],
         }
     }
 }

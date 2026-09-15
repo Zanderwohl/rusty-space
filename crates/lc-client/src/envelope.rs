@@ -392,6 +392,98 @@ pub fn build_ring(rings: &lc_world::rings::RingSystem) -> Mesh {
     mesh
 }
 
+/// What the material scatters, as a fraction of what falls on it.
+///
+/// A single number where a body gets one per surface type, because a population is a
+/// distribution and has no surface. Dark, which is what a rubble pile is; the exact value only
+/// sets how much of the optical colour is the star's rather than the material's own glow, and
+/// the display level is fixed separately.
+const ALBEDO: f64 = 0.1;
+
+/// What the brightest display channel is drawn at when a sightline is completely full.
+///
+/// The old flat tint, kept as a level so the change is a change of *colour* and not of
+/// brightness. It has to be a display decision: a belt's real surface brightness is four
+/// decades under a star's and renders as nothing at all in every normalised preset, which is
+/// true photometrically and useless as a picture — the same argument [`opacity_of`] settles for
+/// the opacity. An envelope is an orbit line, not a photograph.
+const DISPLAY_LEVEL: f32 = 0.76;
+
+/// The star a population is lit by, and the instrument looking at it.
+#[derive(Clone, Copy)]
+pub struct Lighting<'a> {
+    pub star_teff_k: f64,
+    pub star_radius_m: f64,
+    pub star_luminosity_w: f64,
+    pub mapping: &'a em_spectra::BandMapping,
+}
+
+/// What a fully-filled sightline through the population radiates, per band.
+///
+/// Two terms, and which one wins is the whole of why a belt looks different in different bands.
+/// In the optical it is starlight the material scatters, so a belt is the colour of its star. At
+/// ten microns it is the material's own two-hundred-kelvin glow, which the star has none of, and
+/// a belt goes from a barely-there haze to the brightest thing in the frame. Both scale with
+/// `band_response`, which is emissivity and absorptivity at once — Kirchhoff, and the reason one
+/// array can serve both this and the extinction.
+///
+/// The thermal term has no free constant in it: a full column of material at `T` radiates a
+/// blackbody at `T`. Only the scattered term carries [`ALBEDO`].
+pub fn source_radiance(population: &Population, lighting: Lighting) -> em_spectra::PerBand<f32> {
+    let radius = population.thermal_radius();
+    if radius <= 0.0 {
+        return em_spectra::PerBand::splat(0.0);
+    }
+    // Surface brightness of the starlight arriving here: the star's own, diluted by how small
+    // its disc is from this far out.
+    let dilution = (lighting.star_radius_m / radius).powi(2);
+    let equilibrium = population.equilibrium_temperature_under(lighting.star_luminosity_w);
+    em_spectra::PerBand::new(std::array::from_fn(|i| {
+        let band = em_spectra::Band::ALL[i];
+        let scattered = ALBEDO * dilution * em_spectra::blackbody::band_radiance(band, lighting.star_teff_k);
+        let glow = em_spectra::blackbody::band_radiance(band, equilibrium);
+        (population.band_response[band] as f64 * (scattered + glow)) as f32
+    }))
+}
+
+/// The per-band `(source, extinction)` pairs the shader reads, and the mapping's own columns.
+///
+/// The source is normalised so the brightest display channel lands at [`DISPLAY_LEVEL`]: the
+/// bands set the *colour* and the march sets the amount, and separating them is what keeps a
+/// population legible in a preset its light barely reaches while still saying which preset it
+/// is being seen in.
+fn band_columns(
+    population: &Population,
+    lighting: Lighting,
+    field: Field,
+    opacity: f32,
+    fade: f32,
+) -> ([Vec4; em_spectra::BANDS], [Vec4; em_spectra::BANDS]) {
+    let to_display = crate::starfield::band_columns(lighting.mapping);
+    let source = source_radiance(population, lighting);
+
+    let displayed = lighting.mapping.apply(&source);
+    let peak = displayed.iter().cloned().fold(0.0f32, f32::max);
+    let level = if peak > 0.0 { DISPLAY_LEVEL / peak } else { 0.0 };
+
+    let covering = population.covering_fraction();
+    let material = std::array::from_fn(|i| {
+        let band = em_spectra::Band::ALL[i];
+        // The opacity mapping again, on what this band actually meets. For a population of
+        // solid bodies every band gets the same answer, which is right: a metre of rock is a
+        // metre of rock from B to 21 cm. Dust is where it separates.
+        let response = population.band_response[band].clamp(0.0, 1.0) as f64;
+        let seen = (opacity_of(covering * response) * opacity / opacity_of(covering).max(f32::MIN_POSITIVE))
+            .clamp(0.0, 1.0);
+        // Solve for the coefficient that puts the reference ray at that opacity. Clamped short
+        // of one, or a completed swarm asks for an infinite one.
+        let wanted = (seen * fade).clamp(0.0, 0.98);
+        let sigma = -(1.0 - wanted).ln() / field.reference.max(1e-6);
+        Vec4::new(source[band] * level, sigma, 0.0, 0.0)
+    });
+    (to_display, material)
+}
+
 /// The uniforms for one population: what the photometry says is there.
 pub fn uniforms(
     population: &Population,
@@ -399,28 +491,27 @@ pub fn uniforms(
     gain: f32,
     inside: bool,
     field: Field,
+    lighting: Lighting,
 ) -> PopulationUniform {
-    let covering = population.covering_fraction();
-    // Dust reddens where solid bodies do not, and 04-stellar-photometry.md makes that the
-    // grey-versus-reddening diagnostic. The tint says which one the player is looking at.
-    let response = population.band_response;
-    let reddens = response[em_spectra::Band::B] < response[em_spectra::Band::I] * 0.8;
-    let tint = if reddens {
-        Vec4::new(0.85, 0.60, 0.40, 1.0)
-    } else {
-        Vec4::new(0.74, 0.75, 0.78, 1.0)
-    };
+    // No `tint`: the colour is the per-band source run through the instrument's own mapping.
+    // It used to be one of two hard-coded constants chosen by a reddening test on
+    // `band_response`, which was both blind to the sensor and backwards — `extinction::RATIO`
+    // is *largest* in B for dust, so the test that meant to catch dust never did.
+    let opacity = (opacity_of(population.covering_fraction()) * gain).clamp(0.0, 1.0);
+    let fade = if inside { INSIDE_FADE } else { 1.0 };
+    let (band_to_display, band_material) =
+        band_columns(population, lighting, field, opacity, fade);
     PopulationUniform {
-        tint,
         // Carried rather than assumed by the shader: the pole is +Z in simulation space, and
         // `sim_to_render` is the one place that knows what that is once it is rendered.
         pole: sim_to_render(DVec3::Z).as_vec3().extend(0.0),
-        opacity: (opacity_of(covering) * gain).clamp(0.0, 1.0),
+        opacity,
         seed,
-        inside_fade: if inside { INSIDE_FADE } else { 1.0 },
+        inside_fade: fade,
         inner: field.inner,
         slab: field.slab,
-        reference: field.reference,
+        band_to_display,
+        band_material,
         ..default()
     }
 }
@@ -461,6 +552,7 @@ pub fn spawn(
     images: &mut Assets<Image>,
     populations: &[Population],
     gain: f32,
+    lighting: Lighting,
 ) -> Vec<Shell> {
     // One proxy for all of them: it carries nothing about any population, so there is nothing
     // to build per population.
@@ -472,7 +564,7 @@ pub fn spawn(
         .map(|(i, p)| {
             let profile = profile_of(p);
             let material = materials.add(PopulationMaterial {
-                uniforms: uniforms(p, i as f32 * 7.31 + 1.0, gain, true, profile.field),
+                uniforms: uniforms(p, i as f32 * 7.31 + 1.0, gain, true, profile.field, lighting),
                 profile: images.add(profile_image(&profile)),
             });
             commands.spawn((
@@ -551,6 +643,21 @@ fn spawn_rings(
     }
 }
 
+/// The star and the instrument, as one population's shading needs them.
+fn lighting_of<'a>(
+    system: &lc_world::system::LocalSystem,
+    session: &'a crate::app::Game,
+) -> Lighting<'a> {
+    Lighting {
+        star_teff_k: system.star_teff_k(),
+        star_radius_m: system.star_radius_m(),
+        star_luminosity_w: system.star_luminosity_w(),
+        // The same mapping the starfield binds, so a belt and the stars through it are seen by
+        // one instrument rather than two.
+        mapping: &session.mapping,
+    }
+}
+
 /// The envelopes currently drawn, and which system they belong to.
 #[derive(Resource, Default)]
 pub struct Envelopes {
@@ -595,6 +702,7 @@ pub fn update_envelopes(
                     &mut images,
                     &system.populations,
                     ui.envelope_gain,
+                    lighting_of(system, &session),
                 )
             }
             None => Vec::new(),
@@ -628,8 +736,14 @@ pub fn update_envelopes(
         if let Some(material) = materials.get_mut(&shell.material) {
             let inside = session.ship.motion.position_ly.distance(system.origin_ly) * M_PER_LY
                 < population.thermal_radius();
-            let next =
-                uniforms(population, material.uniforms.seed, ui.envelope_gain, inside, shell.field);
+            let next = uniforms(
+                population,
+                material.uniforms.seed,
+                ui.envelope_gain,
+                inside,
+                shell.field,
+                lighting_of(system, &session),
+            );
             if material.uniforms != next {
                 material.uniforms = next;
             }
@@ -654,6 +768,27 @@ mod tests {
             band_response: em_spectra::PerBand::splat(1.0),
             radiating_ratio: Population::SPHERICAL,
         }
+    }
+
+    /// A sun-like star, and whichever instrument is being asked about.
+    fn sunlike(mapping: &em_spectra::BandMapping) -> Lighting<'_> {
+        let star = lc_world::star::Star::SOL;
+        Lighting {
+            star_teff_k: star.teff_k,
+            star_radius_m: star.radius_m,
+            star_luminosity_w: star.luminosity(),
+            mapping,
+        }
+    }
+
+    /// A dusty population, by the one thing that makes a population dusty: it interacts far
+    /// less at long wavelengths. `extinction::RATIO` is a factor of 1.3e10 from B to 21 cm.
+    fn dusty(base: Population) -> Population {
+        let mut response = em_spectra::PerBand::splat(0.0f32);
+        for b in em_spectra::Band::ALL {
+            response[b] = em_spectra::extinction::RATIO[b] as f32;
+        }
+        Population { band_response: response, ..base }
     }
 
     fn positions(mesh: &Mesh) -> Vec<[f32; 3]> {
@@ -824,6 +959,85 @@ mod tests {
         assert!(row.iter().cloned().fold(0.0f32, f32::max) > 0.99, "peak-normalised");
     }
 
+    /// The thing the sensor presets are named for. A metre of rock is a metre of rock from B to
+    /// 21 cm, so a belt of solid bodies is equally opaque in every band; dust is not, and at
+    /// 21 cm a sightline through it finds almost nothing there.
+    ///
+    /// Before this, `band_response` reached the renderer only as a choice between two hard-coded
+    /// tints, so "dust penetration" penetrated nothing and every preset drew the same grey.
+    #[test]
+    fn a_band_the_material_barely_meets_is_a_band_it_barely_blocks() {
+        let mapping = em_spectra::presets::natural();
+        let field = Field { inner: 0.3, slab: 0.2, reference: 0.3 };
+        let extinction = |p: &Population| {
+            let u = uniforms(p, 0.0, OPACITY_GAIN, false, field, sunlike(&mapping));
+            em_spectra::Band::ALL.map(|b| u.band_material[b.index()].y)
+        };
+
+        let rock = extinction(&population(Inclination::uniform_angle(0.0, 0.2, 12), 1e9));
+        let first = rock[0];
+        assert!(first > 0.0, "a belt blocks something: {first}");
+        assert!(
+            rock.iter().all(|s| (s / first - 1.0).abs() < 1.0e-6),
+            "solid bodies are grey across the bands: {rock:?}",
+        );
+
+        let dust = extinction(&dusty(population(Inclination::uniform_angle(0.0, 0.2, 12), 1e9)));
+        let (blue, radio) = (dust[em_spectra::Band::B.index()], dust[em_spectra::Band::Radio.index()]);
+        assert!(blue > 0.0, "dust is opaque in the blue: {blue}");
+        assert!(radio < blue * 0.05, "and all but transparent at 21 cm: {radio} against {blue}");
+        // Monotonic the whole way out, which is what makes stepping through the sensors read as
+        // one cloud thinning rather than as six unrelated pictures.
+        for pair in dust.windows(2) {
+            assert!(pair[1] <= pair[0] + 1.0e-9, "not monotonic across the bands: {dust:?}");
+        }
+    }
+
+    /// And the colour follows the instrument. A belt shines by scattered starlight in the
+    /// optical and by its own two-hundred-kelvin glow at ten microns, so the preset that looks
+    /// at ten microns finds something the natural one cannot.
+    #[test]
+    fn a_warm_belt_reads_as_heat_only_in_the_band_that_can_see_heat() {
+        let belt = population(Inclination::uniform_angle(0.0, 0.2, 12), 1e9);
+        let field = profile_of(&belt).field;
+        // What the shader adds up for a sightline that is completely full: every band's source
+        // through that band's column of the mapping.
+        let displayed = |mapping: &em_spectra::BandMapping| {
+            let u = uniforms(&belt, 0.0, OPACITY_GAIN, false, field, sunlike(mapping));
+            let channel = |c: usize| {
+                em_spectra::Band::ALL
+                    .iter()
+                    .map(|b| u.band_to_display[b.index()][c] * u.band_material[b.index()].x)
+                    .sum::<f32>()
+            };
+            [channel(0), channel(1), channel(2)]
+        };
+
+        // Natural is scattered starlight across three neighbouring optical bands, so a belt
+        // comes out near the colour of its star rather than any colour of its own.
+        let natural = displayed(&em_spectra::presets::natural());
+        let (hi, lo) = (
+            natural.iter().cloned().fold(0.0f32, f32::max),
+            natural.iter().cloned().fold(f32::MAX, f32::min),
+        );
+        assert!(hi / lo < 2.0, "a sun-lit belt is not strongly coloured in the optical: {natural:?}");
+
+        // Thermal puts ten microns in red, and a two-hundred-kelvin belt against a sun-like
+        // reference has nothing anywhere else.
+        let thermal = displayed(&em_spectra::presets::thermal());
+        assert!(
+            thermal[0] > thermal[1] * 10.0 && thermal[0] > thermal[2] * 10.0,
+            "a warm belt should read as heat: {thermal:?}",
+        );
+
+        // Whatever the preset, the brightest channel lands at the display level, so a belt is
+        // legible in a band its light barely reaches and still says which band that is.
+        for (name, mapping) in em_spectra::presets::all() {
+            let peak = displayed(&mapping).iter().cloned().fold(0.0f32, f32::max);
+            assert!((peak - DISPLAY_LEVEL).abs() < 1.0e-3, "{name} peaks at {peak}");
+        }
+    }
+
     /// The mapping is a fourth root because the quantity spans fourteen decades. A logarithm
     /// overcorrected -- it put the Kuiper belt at 0.46, and since the ship is inside that shell
     /// the sky became a grey wash.
@@ -871,8 +1085,9 @@ mod tests {
     fn a_shell_the_ship_is_inside_is_dimmed() {
         let p = population(Inclination::uniform_angle(0.0, 0.2, 12), 1e9);
         let field = profile_of(&p).field;
-        let out = uniforms(&p, 0.0, OPACITY_GAIN, false, field);
-        let inside = uniforms(&p, 0.0, OPACITY_GAIN, true, field);
+        let mapping = em_spectra::presets::natural();
+        let out = uniforms(&p, 0.0, OPACITY_GAIN, false, field, sunlike(&mapping));
+        let inside = uniforms(&p, 0.0, OPACITY_GAIN, true, field, sunlike(&mapping));
         assert_eq!(out.inside_fade, 1.0);
         assert!(inside.inside_fade < 0.5, "inside, a shell covers the whole sky");
         assert_eq!(out.opacity, inside.opacity, "only the fade differs, not the physics");

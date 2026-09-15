@@ -54,12 +54,16 @@ struct PopulationUniform {
     inside_fade: f32,
     inner: f32,
     slab: f32,
-    reference: f32,
     volumetric: f32,
+    band_to_display: array<vec4<f32>, BANDS>,
+    band_material: array<vec4<f32>, BANDS>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: PopulationUniform;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var profile: texture_2d<f32>;
+
+/// Bands carried from emission to display. Must match `em_spectra::BANDS`.
+const BANDS: u32 = 7u;
 
 /// Samples across a row of `profile`, and the rows. Must match `em_render::population_material`.
 const PROFILE_SAMPLES: i32 = 128;
@@ -83,7 +87,11 @@ const PROFILE_RADIAL: i32 = 1;
 /// twenty-four within one and a half. Eight is within five and a half, which shows.
 const STEPS: i32 = 32;
 
-/// Transmittance below which the rest of the sightline cannot change the pixel.
+/// Column past which no band's transmittance can still change the pixel.
+///
+/// In column rather than in optical depth, because the depths are per band now. Generous: the
+/// largest extinction coefficient any population carries is of order one over the reference
+/// ray, so a column of six is already several e-foldings in the deepest band.
 const OPAQUE: f32 = 6.0;
 
 fn hash31(p: vec3<f32>) -> f32 {
@@ -211,25 +219,31 @@ fn volume(in: VertexOutput) -> vec4<f32> {
         discard;
     }
 
-    // Solve for the extinction coefficient that makes the reference ray come out at `opacity`.
-    // Clamped short of one, or a completed swarm asks for an infinite one.
-    let wanted = clamp(material.opacity * material.inside_fade, 0.0, 0.98);
-    let sigma = -log(1.0 - wanted) / max(material.reference, 1e-6);
-
+    // The column of material along the sightline, in the field's own units. One number, and
+    // every band's optical depth is it times that band's own extinction coefficient -- so the
+    // march does not care how many bands there are and costs the same for all seven.
     let step = span / f32(STEPS);
     let offset = dither(in.clip_position.xy);
-    var depth = 0.0;
+    var column = 0.0;
     for (var i = 0; i < STEPS; i = i + 1) {
         let at = origin + direction * (enter + (f32(i) + offset) * step);
-        depth = depth + sigma * density_at(at) * step;
-        if (depth > OPAQUE) {
+        column = column + density_at(at) * step;
+        if (column > OPAQUE) {
             break;
         }
     }
 
-    let alpha = 1.0 - exp(-depth);
+    // What the instrument makes of it. A band contributes what the material radiates there
+    // times how much of this sightline is filled *there*, and the two are different functions
+    // of the band: at 21 cm a dust cloud has almost nothing in the way, so it contributes
+    // almost nothing however brightly it would glow.
+    var rgb = vec3<f32>(0.0);
+    for (var b = 0u; b < BANDS; b = b + 1u) {
+        let band = material.band_material[b];
+        rgb = rgb + material.band_to_display[b].rgb * band.x * (1.0 - exp(-band.y * column));
+    }
     // Premultiplied: the blend is additive, so alpha leaves as zero and the colour carries it.
-    return vec4<f32>(material.tint.rgb * alpha, 0.0);
+    return vec4<f32>(rgb, 0.0);
 }
 
 /// Rings. A sheet has no thickness to march, so its opacity is what one crossing covers, with

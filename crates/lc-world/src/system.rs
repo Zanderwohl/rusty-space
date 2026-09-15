@@ -329,6 +329,10 @@ impl LocalSystem {
         (bodies.max(populations) / M_PER_LY).max(LOCAL_SHELL_LY)
     }
 
+    pub fn star_luminosity_w(&self) -> f64 {
+        self.star_luminosity_w
+    }
+
     pub fn star_teff_k(&self) -> f64 {
         self.star_teff_k
     }

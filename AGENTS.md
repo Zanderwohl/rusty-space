@@ -91,6 +91,10 @@ Each of these cost real time. None of them are visible from the code that hits t
   gave two frames at pitch zero and one pitched. Two runs of the same command are not
   byte-identical either, so a hash tells you nothing. Check that the shot is the view you asked
   for before you measure it, or compare against something in the frame that cannot move.
+- The window is **not always the same size**. A screenshot taken on one display and one taken
+  after the laptop moved to another are 1280x720 and 2560x1440, and a patch measured at fixed
+  pixel coordinates then samples two different parts of the picture. It reads exactly like a
+  regression and is not one. Measure in fractions of the frame.
 - WGSL reserves more words than you expect. `from` and `target` are both reserved and both are
   natural names in a ray marcher; the error arrives from the pipeline cache at run time, not
   from `cargo build`.
