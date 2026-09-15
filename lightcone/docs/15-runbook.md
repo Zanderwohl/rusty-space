@@ -459,10 +459,39 @@ ssh zandy@rocinante.local '
       --env-file ~/.config/lightcone/identity.env lightcone-identity:<tag>'
 
 docker --context rocinante run -d --name lightcone-shard --restart unless-stopped \
-    --network lightcone lightcone-shard:<tag> \
+    --network lightcone --env-file ~/.config/lightcone/shard.env lightcone-shard:<tag> \
     --bind 0.0.0.0:8080 --audience shard-1 \
     --jwks http://lightcone-identity:3200/.well-known/jwks.json
 ```
+
+### The shard's own database
+
+**A shard without `--db` is a sandcastle.** It runs, and every craft in it — and every
+account's claim on one — is gone when it stops. Give it a role and a database like the
+others:
+
+```sql
+CREATE ROLE lc_store LOGIN PASSWORD '...';
+CREATE DATABASE lc_store OWNER lc_store;
+```
+
+The URL goes in `~/.config/lightcone/shard.env` as `LC_SHARD_DB`, and the container turns it
+into `--db`; it is a password, so it is set on the host the way every other secret is. The
+schema is applied at boot, so there is no migration step to remember.
+
+What is kept is a **checkpoint**, not a history: every craft as of an instant, plus the shard's
+clock and its identifier counter. Written every twenty real seconds and again on the way out,
+`docker stop` included — the shard traps `SIGTERM`. A crash loses at most twenty seconds, and
+what it loses is *orders*, not flight: every motive is stamped in absolute coordinate time, so
+a checkpoint replayed forward puts a ship exactly where it would have been anyway.
+
+The clock is the part that is easy to leave out and impossible to do without. Every motive
+carries an absolute coordinate time, so a shard that came back at zero would read every saved
+craft as one whose crossing has not begun, and fly them all again from decades in the past.
+
+A restart resumes the clock where it stopped rather than advancing it by however long the
+process was down. The alternative asserts that things happened in the missing time, when
+nothing was journalled and nobody was told.
 
 **Point `--sky` at the promoted build's own chunk**, by the CDN's *container* name —
 `http://lightcone-cdn:3101/game/<build>/assets/sky/hyg-v42.lcsky`. Not the public

@@ -142,8 +142,15 @@ server-*initiated* one: nothing can hand a client a replacement outside a sign-i
 that decides the two have diverged has no way to say so. That is what `Resync` is still for, and
 it carries the same `Motion` when it arrives.
 
-Nor is any of it durable. The fleet lives in the shard's memory, so a restart forgets every ship
-and every account it belonged to: this resumes a *connection*, not a world.
+Craft are durable. A shard given `--db` checkpoints its whole fleet every twenty real seconds
+and on the way out, and reads it back at boot — the clock included, without which every saved
+motive, stamped in absolute coordinate time, would read as one that has not happened yet.
+
+The stored form is [`lc_proto::Motion`] in **postcard, not JSON**, and that is not a taste.
+`serde_json` does not round-trip every f64: `-1.8149592025296526e-22` comes back
+`-1.8149592025296529e-22`, and that value is a real coordinate of a real crossing. A checkpoint
+that moved a ship by one place every restart would be a slow leak in the exact property this
+whole document is about.
 
 Within one shard's life, though, a signed-out ship keeps flying. The tick advances the whole
 fleet and `disconnected` drops only the connection, so a course set before signing out is flown

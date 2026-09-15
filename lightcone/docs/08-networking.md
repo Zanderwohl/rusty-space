@@ -155,6 +155,13 @@ to disagree with the one the receiver would have reached. `lc_world::resume` is 
 and its matches are exhaustive in both directions so a motive the world gains and the wire has
 not learned is a compile error.
 
+### The universe exists outside the player
+
+The tick advances the whole fleet and `disconnected` drops only the connection, so a course set
+before signing out is flown while signed out. Nothing is gated on somebody watching, and a test
+asserts the two runs end identically — because that is the kind of invariant an optimisation
+breaks, and the test is what says what the optimisation would cost.
+
 ### A crossing names a star
 
 `Order::Cross` carries a **catalogue id**, not a position. A position would let a client fly to

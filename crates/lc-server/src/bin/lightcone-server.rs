@@ -7,6 +7,7 @@ use std::io::Read;
 use std::time::Duration;
 
 use lc_proto::ClientId;
+use tokio::signal::unix::{SignalKind, signal};
 use lc_server::journal::Memory;
 use lc_server::server::{Server, TICK_MS};
 use lc_server::ticket::Trusted;
@@ -21,7 +22,14 @@ lightcone-server — one shard
   --audience <name>   the audience tickets must name (default shard-1)
   --jwks <url|path>   the broker's published keys, fetched at boot
   --sky <url|path>    the packed catalogue this shard is authoritative over
+  --shard <n>         this shard's number, which keys its saved state (default 1)
+  --db <url>          where craft are kept, so the world outlives this process
   --open              admit connections with no valid ticket — DEVELOPMENT ONLY
+
+Without --db a shard is a sandcastle: it runs, and everything in it is gone when it stops.
+With one, craft are written every few seconds and on the way out, and read back at boot —
+including the world's clock, without which every saved craft reads as one whose crossing has
+not begun.
 
 Point --sky at the **same chunk the promoted client downloads**, which is
 <cdn>/game/<build>/assets/sky/hyg-v42.lcsky. Both ends place craft into systems by position
@@ -46,7 +54,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let bind = after("--bind").unwrap_or_else(|| "127.0.0.1:8080".into());
     let audience = after("--audience").unwrap_or_else(|| "shard-1".into());
-    let mut server = Server::new(Memory::default(), 0, 1);
+    let shard_id: i64 = after("--shard").and_then(|s| s.parse().ok()).unwrap_or(1);
+    let mut server = Server::new(Memory::default(), 0, shard_id as u64);
 
     match after("--jwks") {
         Some(source) => {
@@ -90,6 +99,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     server.load_world(World::new(stars));
 
+    // After the world, because a ballistic arc is re-solved against the system it is in and a
+    // shard with no stars would bring every coasting craft back as a straight line.
+    let store = match after("--db") {
+        Some(url) => {
+            let client = connect(&url).await?;
+            lc_store::migrate::apply(&client).await?;
+            match lc_store::ships::load_shard(&client, shard_id).await? {
+                Some(shard) => {
+                    let rows = lc_store::ships::load_ships(&client).await?;
+                    let count = rows.len();
+                    let refused = server.adopt(lc_server::persist::Checkpoint {
+                        now_t: shard.now_t,
+                        next_ship: shard.next_ship,
+                        ships: rows,
+                    });
+                    for craft in &refused {
+                        eprintln!(
+                            "ERROR: ship {} ({}) will not load: {} — its account is refused \
+                             rather than given a second ship",
+                            craft.ship_id,
+                            craft.account.as_deref().unwrap_or("no account"),
+                            craft.why,
+                        );
+                    }
+                    eprintln!(
+                        "resumed shard {shard_id} at t={} with {} of {count} craft",
+                        shard.now_t,
+                        count - refused.len(),
+                    );
+                }
+                None => eprintln!("shard {shard_id} has no saved state; starting a new world"),
+            }
+            Some(client)
+        }
+        None => {
+            eprintln!("WARNING: no --db, so nothing here survives this process. Every craft and");
+            eprintln!("         every account's claim on one is gone when it stops.");
+            None
+        }
+    };
+
     let mut wire = WebSocketServer::bind(&bind).await?;
     eprintln!("listening on {}", wire.local_addr);
 
@@ -97,8 +147,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The tick is the clock. Falling behind must not make the server sprint to catch up,
     // because every skipped tick is a slice of coordinate time nothing was read in.
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Interrupt and terminate both, because one is a keyboard and the other is `docker stop`,
+    // and a world should survive being asked to stop politely by either.
+    let mut interrupt = signal(SignalKind::interrupt())?;
+    let mut terminate = signal(SignalKind::terminate())?;
+    let mut since_save = 0u32;
+
     loop {
-        ticker.tick().await;
+        tokio::select! {
+            _ = ticker.tick() => {}
+            _ = interrupt.recv() => break,
+            _ = terminate.recv() => break,
+        }
         for ClientId(id) in wire.accepted() {
             eprintln!("connection {id} opened");
         }
@@ -107,7 +167,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             server.disconnected(client);
         }
         server.tick(&mut wire).await?;
+
+        since_save += 1;
+        if since_save >= SAVE_EVERY_TICKS
+            && let Some(client) = &store
+        {
+            since_save = 0;
+            // A failed checkpoint is not a reason to stop the world. It is a reason to say so
+            // every time, because a shard that has quietly stopped saving looks exactly like one
+            // that is fine.
+            if let Err(why) = checkpoint(client, shard_id, &server).await {
+                eprintln!("ERROR: checkpoint failed: {why}");
+            }
+        }
     }
+
+    if let Some(client) = &store {
+        eprintln!("stopping; writing a last checkpoint");
+        checkpoint(client, shard_id, &server).await?;
+    }
+    Ok(())
+}
+
+/// Ticks between checkpoints. Twenty seconds of real time at the design rate.
+///
+/// A crash loses at most this much, and what it loses is **orders**, not flight: every motive
+/// is stamped in absolute coordinate time, so a stale checkpoint replayed forward puts a ship
+/// exactly where it would have been. What does not survive is an order given in the gap.
+const SAVE_EVERY_TICKS: u32 = 400;
+
+async fn checkpoint(
+    client: &tokio_postgres::Client,
+    shard_id: i64,
+    server: &Server<Memory>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let taken = server.checkpoint();
+    lc_store::ships::save_ships(client, &taken.ships).await?;
+    lc_store::ships::save_shard(client, shard_id, lc_store::ships::Shard {
+        now_t: taken.now_t,
+        next_ship: taken.next_ship,
+    })
+    .await?;
+    Ok(())
+}
+
+/// Connect, and drive the connection in the background.
+///
+/// Not `lc_store::connect`, which reads the environment: a shard is told its database on the
+/// command line beside everything else it is told.
+async fn connect(url: &str) -> Result<tokio_postgres::Client, tokio_postgres::Error> {
+    let (client, connection) = tokio_postgres::connect(url, tokio_postgres::NoTls).await?;
+    tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    Ok(client)
 }
 
 /// The broker's key set, from a URL or a file.

@@ -82,6 +82,8 @@ pub struct Server<J: Journal> {
     /// Whether a connection whose ticket does not verify is admitted anyway. See
     /// [`Server::admit_without_tickets`].
     open: bool,
+    /// Accounts whose saved craft could not be read. See [`crate::persist::Unreadable`].
+    blocked: HashMap<String, String>,
 }
 
 impl<J: Journal> Server<J> {
@@ -102,6 +104,7 @@ impl<J: Journal> Server<J> {
             pending: Vec::new(),
             budgets: HashMap::new(),
             open: false,
+            blocked: HashMap::new(),
         }
     }
 
@@ -165,6 +168,78 @@ impl<J: Journal> Server<J> {
 
     pub fn ship(&self, id: ShipId) -> Option<&Craft> {
         self.fleet.get(CraftId(id.0))
+    }
+
+    /// The whole shard as of now, for whoever is going to write it down.
+    ///
+    /// Every craft, not the connected ones: a ship exists whether or not anyone is flying it,
+    /// which is the same reason the tick advances the whole fleet.
+    pub fn checkpoint(&self) -> crate::persist::Checkpoint {
+        let account_of: HashMap<ShipId, &str> =
+            self.by_account.iter().map(|(account, ship)| (*ship, account.as_str())).collect();
+        crate::persist::Checkpoint {
+            now_t: self.now_t,
+            next_ship: self.next_ship,
+            ships: self
+                .fleet
+                .iter()
+                .map(|craft| {
+                    let account = account_of.get(&ShipId(craft.id.0)).copied();
+                    crate::persist::save(craft, account, self.now_t)
+                })
+                .collect(),
+        }
+    }
+
+    /// Take a checkpoint as this shard's world. **Load the world first**, or a ballistic arc
+    /// has no system to be re-solved against and comes back as a straight line.
+    ///
+    /// Each craft is read at the time it was saved and then advanced to the checkpoint's clock,
+    /// in tick-sized steps. The steps matter for exactly one motive: a ballistic arc crosses
+    /// spheres of influence, and each crossing is an event that has to be folded as it comes.
+    /// Everything else is a closed form and would not notice a single leap.
+    ///
+    /// The clock resumes where it stopped rather than jumping forward by however long the
+    /// process was down. A shard that fabricated the missing years would be asserting that
+    /// things happened in them, when nothing was journalled and nobody was told.
+    pub fn adopt(
+        &mut self,
+        checkpoint: crate::persist::Checkpoint,
+    ) -> Vec<crate::persist::Unreadable> {
+        self.now_t = checkpoint.now_t;
+        self.next_ship = self.next_ship.max(checkpoint.next_ship);
+        let mut unreadable = Vec::new();
+        for row in &checkpoint.ships {
+            let system = self.position_of(row).and_then(|at| self.world.system_at(at));
+            match crate::persist::load(row, system.as_deref()) {
+                Ok(mut craft) => {
+                    craft.enter(system, row.saved_t as f64 * 1.0e-6);
+                    catch_up(&mut craft, row.saved_t, checkpoint.now_t);
+                    if let Some(account) = &row.account {
+                        self.by_account.insert(account.clone(), ShipId(craft.id.0));
+                    }
+                    self.next_ship = self.next_ship.max(craft.id.0 + 1);
+                    self.fleet.insert(craft);
+                }
+                Err(why) => {
+                    if let Some(account) = &row.account {
+                        self.blocked.insert(account.clone(), why.clone());
+                    }
+                    unreadable.push(crate::persist::Unreadable {
+                        ship_id: row.ship_id,
+                        account: row.account.clone(),
+                        why,
+                    });
+                }
+            }
+        }
+        unreadable
+    }
+
+    /// Where a saved craft is, without committing to being able to read the rest of it.
+    fn position_of(&mut self, row: &lc_store::ships::Ship) -> Option<DVec3> {
+        let saved: crate::persist::Saved = lc_proto::decode(&row.state).ok()?;
+        Some(DVec3::from_array(saved.motion.at_ly))
     }
 
     /// What a client has actually sent. The measurement that will one day replace the guess in
@@ -467,6 +542,15 @@ impl<J: Journal> Server<J> {
             Err(_) => return None,
         };
 
+        // A craft this shard could not read is still a craft this shard *has*. Minting a second
+        // one for the account would put two rows on one account, and every checkpoint after
+        // that would fail on the unique constraint -- so the shard would stop saving anything,
+        // for everyone, quietly. Refusing one player loudly is the better failure.
+        if let Some(why) = self.blocked.get(&claims.sub) {
+            eprintln!("refusing {}: its saved craft will not load: {why}", claims.sub);
+            return None;
+        }
+
         let ship = match self.by_account.get(&claims.sub) {
             Some(ship) => *ship,
             None => {
@@ -613,6 +697,33 @@ impl<J: Journal> Server<J> {
 fn adrift_at_the_origin() -> lc_proto::Motion {
     (&lc_world::motion::ShipState::at(DVec3::ZERO).snapshot()).into()
 }
+
+/// Fly a restored craft from when it was saved to when the shard is now.
+///
+/// Tick-sized steps rather than one leap, because a ballistic arc folds a patch when it reaches
+/// one and a single step past several would fold at most one of them. Capped, because the cost
+/// is linear in the downtime and a shard that has been off for a month must still come back:
+/// past the cap the remainder is taken in one step, which is exact for everything but a conic
+/// that changes primary in it.
+fn catch_up(craft: &mut Craft, from_t: i64, to_t: i64) {
+    let mut at = from_t;
+    let mut steps = 0;
+    while at < to_t && steps < MAX_CATCHUP_TICKS {
+        let next = (at + TICK_US).min(to_t);
+        craft.advance(next as f64 * 1.0e-6, (next - at) as f64 * 1.0e-6);
+        at = next;
+        steps += 1;
+    }
+    if at < to_t {
+        craft.advance(to_t as f64 * 1.0e-6, (to_t - at) as f64 * 1.0e-6);
+    }
+}
+
+/// How many tick-sized steps a restored craft is flown in before the rest is taken at once.
+///
+/// Twenty thousand is about two and a half hours of downtime at the design rate, which covers a
+/// restart, a deploy and an outage somebody slept through.
+pub const MAX_CATCHUP_TICKS: usize = 20_000;
 
 fn motion_id(id: CraftId) -> lc_world::motion::ShipId {
     lc_world::motion::ShipId(id.0)
@@ -1982,6 +2093,220 @@ mod hello_tests {
             Some(there.id),
             "it should at least be in the system it crossed to",
         );
+    }
+
+    /// **A ship outlives the process flying it.** Set a course, checkpoint, throw the whole
+    /// server away, build a new one from the checkpoint, and the crossing goes on from where it
+    /// was — and finishes.
+    ///
+    /// The clock is the part that is easy to get wrong. Every motive is stamped in absolute
+    /// coordinate time, so a shard that came back at zero would read a crossing that began at
+    /// t = 876 as one that has not begun, and fly it again.
+    #[tokio::test]
+    async fn a_ship_survives_the_process_and_its_crossing_goes_on() {
+        let Some(star) = a_star() else { return };
+        let Some(system) = a_system() else { return };
+        let Some(body) = orbitable(&system) else { return };
+
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        server.load_world(World::new(vec![star.clone()]));
+        let mut wire = Loopback::new();
+
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let ship = welcomed(&mut wire, ClientId(1));
+        server.fleet_mut().get_mut(CraftId(ship.0)).unwrap().motion.position_ly = star.position_ly;
+        server.tick(&mut wire).await.unwrap();
+
+        wire.client_says(ClientId(1), Inbound::Act(Intent {
+            ship_id: ship,
+            order: Order::SetCourse {
+                course: lc_proto::Course::Orbit {
+                    body,
+                    altitude_radii: 2.0,
+                    plane: lc_proto::Plane::Equatorial,
+                },
+                accel_g: 5.0,
+            },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+        let Motive::Crossing(cruise) = &server.ship(ship).unwrap().motion.motive else {
+            panic!("the course did not become a crossing")
+        };
+        let ticks = ((cruise.duration_s() * 1.0e6 / TICK_US as f64).ceil() as usize + 2).min(20_000);
+        for _ in 0..(ticks / 8) {
+            server.tick(&mut wire).await.unwrap();
+        }
+        assert!(
+            matches!(server.ship(ship).unwrap().motion.motive, Motive::Crossing(_)),
+            "the premise is a ship in transit when the process ends",
+        );
+
+        // The process ends here. Nothing of it survives but the checkpoint.
+        let checkpoint = server.checkpoint();
+        let was = server.ship(ship).unwrap().motion.clone();
+        drop(server);
+        drop(wire);
+
+        let mut server = trusting(&broker);
+        server.load_world(World::new(vec![star]));
+        assert!(server.adopt(checkpoint).is_empty(), "a row would not read");
+        let now = server.ship(ship).expect("the ship came back").motion.clone();
+        assert_eq!(now.motive, was.motive, "it came back on a different flight");
+        assert_eq!(now.position_ly, was.position_ly, "it came back somewhere else");
+        assert_eq!(now.clock_s, was.clock_s, "the crew aged across a restart");
+
+        let mut wire = Loopback::new();
+        for _ in 0..ticks {
+            server.tick(&mut wire).await.unwrap();
+        }
+        assert!(
+            matches!(server.ship(ship).unwrap().motion.motive, Motive::Holding(_)),
+            "the crossing did not finish after the restart: {:?}",
+            server.ship(ship).unwrap().motion.motive,
+        );
+
+        // And the account still finds it, rather than being handed a second ship.
+        says(&mut server, &mut wire, ClientId(9), broker.mint("acct-1", SHARD, 60, "j9")).await;
+        let came_back = wire
+            .take(ClientId(9))
+            .into_iter()
+            .find_map(|m| match m {
+                Outbound::Welcome { ship_id, .. } => Some(ship_id),
+                _ => None,
+            })
+            .expect("a welcome");
+        assert_eq!(came_back, ship, "the account got a new ship");
+    }
+
+    /// A row that will not read refuses its account rather than minting a second ship for it.
+    ///
+    /// Two rows on one account is a unique-constraint failure on every checkpoint from then on:
+    /// the shard stops saving, for everyone, and says nothing.
+    #[tokio::test]
+    async fn an_account_whose_saved_ship_will_not_read_is_refused() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        let mut wire = Loopback::new();
+
+        let bad = lc_store::ships::Ship {
+            ship_id: 3,
+            account: Some("acct-1".into()),
+            saved_t: 0,
+            state: b"not postcard, and too short for this shape".to_vec(),
+            format: crate::persist::SAVE_FORMAT,
+        };
+        let refused = server.adopt(crate::persist::Checkpoint {
+            now_t: 5_000,
+            next_ship: 4,
+            ships: vec![bad],
+        });
+        assert_eq!(refused.len(), 1);
+        assert_eq!(refused[0].account.as_deref(), Some("acct-1"));
+
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        assert!(
+            matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Unauthenticated]),
+            "it was given a ship anyway",
+        );
+        // A different account is unaffected: one bad row is one player's problem.
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-2", SHARD, 60, "j2")).await;
+        welcomed(&mut wire, ClientId(2));
+    }
+
+    /// The clock comes back with the world. Without it every saved motive, stamped absolutely,
+    /// reads as one that has not happened yet.
+    #[tokio::test]
+    async fn adopting_a_checkpoint_restores_the_worlds_clock() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        assert_eq!(server.now_t(), 0, "premise");
+        server.adopt(crate::persist::Checkpoint {
+            now_t: 8_766_000_000,
+            next_ship: 17,
+            ships: Vec::new(),
+        });
+        assert_eq!(server.now_t(), 8_766_000_000);
+
+        // And the counter, or the next sign-in reissues an identifier that is already taken.
+        let broker = Broker::new([1u8; 32]);
+        let mut trusted = Trusted::new(SHARD);
+        assert_eq!(trusted.learn(&broker.jwks()), 1);
+        server.trust(trusted);
+        let mut wire = Loopback::new();
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        assert_eq!(welcomed(&mut wire, ClientId(1)), ShipId(17));
+    }
+
+    /// **The universe exists outside the player.** The same order, at the same coordinate, ends
+    /// in the same state whether or not anyone stayed to watch it.
+    ///
+    /// Not a property of anything written for it — the fold is the fold, and a connection is a
+    /// socket rather than a thing in space. It is asserted because it is the kind of invariant
+    /// that gets broken by an optimisation: gate any of the tick on who is connected and this is
+    /// the test that says what that cost.
+    #[tokio::test]
+    async fn watching_a_flight_does_not_change_it() {
+        let Some(star) = a_star() else { return };
+        let Some(system) = a_system() else { return };
+        let Some(body) = orbitable(&system) else { return };
+
+        let course = |ship| {
+            Inbound::Act(Intent {
+                ship_id: ship,
+                order: Order::SetCourse {
+                    course: lc_proto::Course::Orbit {
+                        body: body.clone(),
+                        altitude_radii: 2.0,
+                        plane: lc_proto::Plane::Equatorial,
+                    },
+                    accel_g: 5.0,
+                },
+                issued_at_client_t: 0,
+            })
+        };
+
+        // `watched` keeps its connection for the whole flight; `alone` drops it the moment the
+        // order is in. Everything else about the two runs is identical.
+        let mut ends = Vec::new();
+        for watched in [true, false] {
+            let broker = Broker::new([1u8; 32]);
+            let mut server = trusting(&broker);
+            server.load_world(World::new(vec![star.clone()]));
+            let mut wire = Loopback::new();
+
+            says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+            let ship = welcomed(&mut wire, ClientId(1));
+            server.fleet_mut().get_mut(CraftId(ship.0)).unwrap().motion.position_ly =
+                star.position_ly;
+            server.tick(&mut wire).await.unwrap();
+
+            wire.client_says(ClientId(1), course(ship));
+            server.tick(&mut wire).await.unwrap();
+            let Motive::Crossing(cruise) = &server.ship(ship).unwrap().motion.motive else {
+                panic!("the course did not become a crossing")
+            };
+            let ticks =
+                ((cruise.duration_s() * 1.0e6 / TICK_US as f64).ceil() as usize + 2).min(20_000);
+
+            if !watched {
+                server.disconnected(ClientId(1));
+            }
+            for _ in 0..ticks {
+                server.tick(&mut wire).await.unwrap();
+                // A watched run drains its socket, which an unwatched one has nothing to drain.
+                // Dropping the messages rather than keeping them is the point: what a client is
+                // told changes nothing about what is true.
+                wire.take(ClientId(1));
+            }
+            ends.push(server.ship(ship).unwrap().motion.clone());
+        }
+
+        let (watched, alone) = (&ends[0], &ends[1]);
+        assert_eq!(watched.motive, alone.motive, "the flights ended differently");
+        assert_eq!(watched.position_ly, alone.position_ly, "they ended in different places");
+        assert_eq!(watched.beta, alone.beta);
+        assert_eq!(watched.clock_s, alone.clock_s, "the crews aged differently");
     }
 
     fn welcomed(wire: &mut Loopback, client: ClientId) -> ShipId {
