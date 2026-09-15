@@ -9,27 +9,99 @@ slots in.
 ## The service is a broker, not a login page
 
 It is an OAuth2 **client** facing upstream and an OAuth2 **issuer** facing downstream. Those are
-different jobs and conflating them is how an auth service ends up owning passwords.
+different jobs, and keeping them apart is what leaves the products holding a token and a name
+rather than a credential.
 
 ```
-Google / Discord / itch.io        the site        the game client
-        (upstream IdPs)           (confidential)    (public)
-              |                        |                 |
-              |  authorization code    |  code + PKCE    |  ticket
-              v                        v                 v
-        +---------------------------------------------------+
-        |                   lc-identity                     |
-        |  accounts | links | sessions | signing keys        |
-        +---------------------------------------------------+
+Google / Discord / itch.io   password           the site        the game client
+        (upstream IdPs)      (local, opt-in)    (confidential)    (public)
+              |                    |                  |                 |
+              |  authorization code|  argon2id        |  code + PKCE    |  ticket
+              v                    v                  v                 v
+        +------------------------------------------------------------------+
+        |                            lc-identity                           |
+        |      accounts | links | secrets | sessions | signing keys        |
+        +------------------------------------------------------------------+
 ```
 
-**It never stores a password.** Every account arrives through an upstream provider, and the
-`links` table is the "where did this account come from" the broker exists to answer: one row per
-`(account, provider, provider_subject)`. A player who signs in with Discord today and Google
+The `links` table is the "where did this account come from" the broker exists to answer: one row
+per `(account, provider, provider_subject)`. A player who signs in with Discord today and Google
 tomorrow gets one account and two links, and the game never learns that either happened.
 
-Email is a link like any other, and a magic link is a provider. That keeps "sign in with an
-email" from being a special case with its own credential handling.
+**A password is a provider.** It is tempting to say the broker never stores one, and the design
+is cleaner if it does not — but a development environment that can only make accounts by talking
+to Google is a development environment where nobody makes a hundred accounts. So `password` is a
+provider like the others, its credential lives in a `secrets` table keyed by link, and every
+path above it is identical to Google's. Whether it survives into production is not decided here;
+what is decided is that it costs one provider row and no special case.
+
+## Which providers exist is configuration
+
+```
+LC_IDENTITY_PROVIDERS = password,google,discord
+```
+
+One list, not a flag per provider. A misspelling in a list of names fails to boot; a
+`GOOGLE_ACCOUNTS=ture` is silently off, and an auth service that is silently missing a provider
+is an auth service that locks out everyone who used it.
+
+Two rules that make the list honest:
+
+- **A provider in the list must be configured, or the process refuses to start.** Google needs a
+  client id and secret; `password` needs nothing, which is exactly why it needs to be named
+  explicitly rather than inferred from configuration being present.
+- **`password` is off unless listed.** Off by default means shipping without having thought
+  about it leaves it off, which is the right direction for the failure to point.
+
+The startup banner names every live provider. "Which providers does production have" should be
+answerable from a log line, not from someone's memory.
+
+## Storing a password, given everything that is deferred
+
+Argon2id, a 16-byte random salt per password, and the whole PHC string stored — algorithm,
+parameters and salt together — so the cost parameters can be raised later and an old hash
+upgraded on the next successful sign-in. A bare digest column cannot be re-tuned without a
+password reset for everyone.
+
+Verification is constant-time, and a sign-in for an account that does not exist performs a dummy
+verify anyway. Otherwise "no such account" and "wrong password" are distinguishable by a
+stopwatch, which turns the login form into an account enumerator.
+
+Deferred, deliberately, and each with a consequence worth stating rather than discovering:
+
+| deferred | consequence |
+|---|---|
+| email delivery | **no password reset.** A forgotten development password is a deleted row. This alone is why password accounts are not a product feature yet. |
+| email verification | a password account's email is **never verified**, which is load-bearing below |
+| captcha | registration is an open endpoint when `password` is enabled, which is why it is off by default |
+| breach-list checks | a weak password is accepted |
+
+Not deferred, because deferring it would be a hole rather than a gap: **attempts are budgeted**,
+per account and per address. Without captcha and without email, an attempt budget is the only
+thing standing between a password provider and credential stuffing.
+
+## Aligning accounts by email, and the trap in it
+
+Email is the one thing two providers can agree about, so it is what lets a player who used
+Discord in March and Google in April end up with one account instead of two.
+
+**Only a verified email may align anything.** OIDC providers say whether they have verified an
+address — Google's `email_verified`, Discord's `verified` — and an address without that claim is
+a string someone typed.
+
+The trap is specific and it is created by the two decisions above taken together. Password
+accounts are enabled; their emails are never verified because delivery is deferred. If an
+unverified address could align, then registering with a password against *your* Google address
+would hand me *your* account. The rule closes it:
+
+- two **verified** addresses that match: one account, aligned automatically
+- anything involving an **unverified** address: separate accounts, always
+- linking them anyway is a deliberate action taken from account settings **while already signed
+  in to the account being linked to**, which needs no email delivery to be safe
+
+So a password account and a Google account with the same address stay separate until someone
+signs in to one and links the other. That is the correct amount of friction for a provider whose
+addresses nobody has checked.
 
 ## Three databases, one opaque id
 
@@ -144,6 +216,10 @@ Named so they are decisions rather than omissions:
 - **Account deletion.** Deleting the broker row orphans the game's rows rather than cascading,
   because a cascade across three databases is the coupling this design spent its whole budget
   avoiding. The game reaps orphans on its own schedule.
+- **Whether `password` ships.** It exists so a development environment can make a hundred
+  accounts without talking to Google. Everything a public password provider needs on top —
+  delivery, reset, captcha, breach lists — is listed above as deferred, and that list *is* the
+  decision: `password` goes to production when the list is empty, and not before.
 
 ## Where it lives
 

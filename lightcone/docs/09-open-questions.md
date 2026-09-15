@@ -139,6 +139,7 @@ advance. Each is local to one component.
 | Where the light-cone cursor lives | `lc-store` needs a database; the client wants the traversal logic. Likely splits into `lc-spacetime`. |
 | Rate limiting | A scripted client can emit intents at any rate. **Decided:** an integer token bucket per client, measured rather than guessed. |
 | Identity on a socket | **Designed:** [16-identity.md](16-identity.md). A broker neither product owns, a sixty-second single-use ticket, verified locally against JWKS. |
+| Does the password provider ship? | Open. It exists so development can make accounts without an upstream. Its deferred list — delivery, reset, captcha, breach lists — is the condition: empty, or it stays a development provider. |
 | Reconciliation | **Designed:** [17-reconciliation.md](17-reconciliation.md). Three tiers chosen by cause, not size. |
 
 ## Blocking the client/server seam
