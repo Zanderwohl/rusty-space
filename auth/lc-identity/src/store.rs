@@ -62,6 +62,7 @@ struct Tables {
     secrets: HashMap<(Provider, String), String>,
     codes: HashMap<Vec<u8>, (Uuid, String, chrono::DateTime<chrono::Utc>)>,
     grants: HashMap<Vec<u8>, (Uuid, chrono::DateTime<chrono::Utc>)>,
+    flows: HashMap<Vec<u8>, Flow>,
 }
 
 /// Accounts in memory, for tests. Every rule the schema enforces is enforced here too, or a
@@ -443,6 +444,85 @@ fn taken_or_backend(error: sqlx::Error) -> StoreError {
         StoreError::EmailTaken
     } else {
         StoreError::Backend(error.to_string())
+    }
+}
+
+/// A dance with an upstream provider, waiting for the browser to come back.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Flow {
+    pub provider: Provider,
+    pub verifier: String,
+    pub return_to: String,
+    pub downstream_state: String,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl Store {
+    pub async fn put_flow(&self, digest: &[u8], flow: &Flow) -> Result<(), StoreError> {
+        match self {
+            Store::Memory(m) => {
+                m.0.lock()
+                    .unwrap()
+                    .flows
+                    .insert(digest.to_vec(), flow.clone());
+                Ok(())
+            }
+            Store::Postgres(pool) => sqlx::query(
+                "insert into upstream_flows \
+                 (digest, provider, verifier, return_to, downstream_state, expires_at) \
+                 values ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(digest)
+            .bind(flow.provider.name())
+            .bind(&flow.verifier)
+            .bind(&flow.return_to)
+            .bind(&flow.downstream_state)
+            .bind(flow.expires_at)
+            .execute(pool)
+            .await
+            .map(|_| ())
+            .map_err(|e| StoreError::Backend(e.to_string())),
+        }
+    }
+
+    /// Spend a dance. Deleted on read whether or not it was still valid, like a sign-in code:
+    /// one `state` is worth one callback, so a replayed callback finds nothing.
+    pub async fn take_flow(
+        &self,
+        digest: &[u8],
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<Flow>, StoreError> {
+        let taken = match self {
+            Store::Memory(m) => m.0.lock().unwrap().flows.remove(digest),
+            Store::Postgres(pool) => {
+                let row: Option<(
+                    String,
+                    String,
+                    String,
+                    String,
+                    chrono::DateTime<chrono::Utc>,
+                )> = sqlx::query_as(
+                    "delete from upstream_flows where digest = $1 returning \
+                         provider, verifier, return_to, downstream_state, expires_at",
+                )
+                .bind(digest)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+                row.and_then(
+                    |(provider, verifier, return_to, downstream_state, expires_at)| {
+                        Some(Flow {
+                            provider: Provider::parse(&provider)?,
+                            verifier,
+                            return_to,
+                            downstream_state,
+                            expires_at,
+                        })
+                    },
+                )
+            }
+        };
+        Ok(taken.filter(|flow| flow.expires_at > now))
     }
 }
 

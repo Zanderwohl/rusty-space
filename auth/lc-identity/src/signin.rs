@@ -36,6 +36,13 @@ pub enum Refused {
     BadCredentials,
     Unacceptable(password::Unacceptable),
     Taken,
+    /// The player said no at the provider's consent screen. Not a failure — the one refusal
+    /// here that is somebody exercising a choice.
+    Declined,
+    /// The `state` matched no dance in flight: expired, already spent, or never issued.
+    NoFlow,
+    /// The provider could not be reached, or would not answer usefully.
+    Upstream(String),
     Backend(String),
 }
 

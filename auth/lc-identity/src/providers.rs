@@ -29,6 +29,15 @@ impl Provider {
         }
     }
 
+    /// What a person is offered on a button.
+    pub fn label(self) -> &'static str {
+        match self {
+            Provider::Password => "a password",
+            Provider::Google => "Google",
+            Provider::Discord => "Discord",
+        }
+    }
+
     pub fn parse(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|p| p.name() == name)
     }
@@ -45,6 +54,41 @@ impl Provider {
     pub fn env_prefix(self) -> String {
         self.name().to_uppercase()
     }
+
+    /// Where its OAuth2 dance happens, for the providers that have one written.
+    ///
+    /// `None` means upstream but unbuilt, which [`resolve`] treats as a failure to start. A
+    /// provider that appears on the sign-in page and cannot complete is worse than one that
+    /// is absent, and the absent one is at least noticed.
+    pub fn endpoints(self) -> Option<Endpoints> {
+        match self {
+            Provider::Google => Some(Endpoints {
+                // Hardcoded rather than read from the discovery document. Discovery is a
+                // network dependency at boot for three strings that have not changed in a
+                // decade, and a boot that needs Google up is a boot that fails when it is not.
+                authorize: "https://accounts.google.com/o/oauth2/v2/auth".into(),
+                token: "https://oauth2.googleapis.com/token".into(),
+                // Google issues under both spellings and has always done so.
+                issuers: vec![
+                    "https://accounts.google.com".into(),
+                    "accounts.google.com".into(),
+                ],
+                scope: "openid email profile".into(),
+            }),
+            Provider::Password | Provider::Discord => None,
+        }
+    }
+}
+
+/// The three URLs and one scope string an OAuth2 dance needs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Endpoints {
+    pub authorize: String,
+    pub token: String,
+    /// What the `iss` claim must say. A list because a provider may spell itself more than one
+    /// way, and Google does.
+    pub issuers: Vec<String>,
+    pub scope: String,
 }
 
 impl fmt::Display for Provider {
@@ -58,6 +102,7 @@ impl fmt::Display for Provider {
 pub struct Upstream {
     pub client_id: String,
     pub client_secret: String,
+    pub endpoints: Endpoints,
 }
 
 impl fmt::Debug for Upstream {
@@ -66,6 +111,7 @@ impl fmt::Debug for Upstream {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Upstream")
             .field("client_id", &self.client_id)
+            .field("endpoints", &self.endpoints)
             .finish_non_exhaustive()
     }
 }
@@ -113,6 +159,8 @@ pub enum Misconfigured {
     Unknown(String),
     /// Named, but its client id or secret is absent.
     Unconfigured(Provider),
+    /// Named, credentials and all, but nobody has written its dance yet.
+    Unimplemented(Provider),
     /// No providers at all. Nobody could sign in, which is not a state worth serving.
     Nothing,
 }
@@ -132,6 +180,10 @@ impl fmt::Display for Misconfigured {
                     "{provider} is enabled but {prefix}_CLIENT_ID or {prefix}_CLIENT_SECRET is missing"
                 )
             }
+            Misconfigured::Unimplemented(provider) => write!(
+                f,
+                "{provider} is enabled but signing in with it is not implemented"
+            ),
             Misconfigured::Nothing => {
                 f.write_str("LC_IDENTITY_PROVIDERS is empty; nobody could sign in")
             }
@@ -156,7 +208,22 @@ pub fn resolve(
             enabled.password = true;
             continue;
         }
+        let mut endpoints = provider
+            .endpoints()
+            .ok_or(Misconfigured::Unimplemented(provider))?;
         let prefix = provider.env_prefix();
+        // Overridable so a test can point the dance at a stub on loopback and exercise the
+        // same code path a deployment does, configuration reading included. Anyone able to set
+        // these already owns the process.
+        if let Some(url) = lookup(&format!("{prefix}_AUTH_URL")) {
+            endpoints.authorize = url;
+        }
+        if let Some(url) = lookup(&format!("{prefix}_TOKEN_URL")) {
+            endpoints.token = url;
+        }
+        if let Some(issuer) = lookup(&format!("{prefix}_ISSUER")) {
+            endpoints.issuers = vec![issuer];
+        }
         let client_id = lookup(&format!("{prefix}_CLIENT_ID"));
         let client_secret = lookup(&format!("{prefix}_CLIENT_SECRET"));
         match (client_id, client_secret) {
@@ -166,6 +233,7 @@ pub fn resolve(
                     Upstream {
                         client_id,
                         client_secret,
+                        endpoints,
                     },
                 );
             }
@@ -260,18 +328,47 @@ mod tests {
 
     #[test]
     fn whitespace_and_order_do_not_matter() {
-        let creds = [
-            ("GOOGLE_CLIENT_ID", "a"),
-            ("GOOGLE_CLIENT_SECRET", "b"),
-            ("DISCORD_CLIENT_ID", "c"),
-            ("DISCORD_CLIENT_SECRET", "d"),
-        ];
-        let one = resolve(" discord , password,google ", configured(&creds)).unwrap();
-        let two = resolve("google,discord,password", configured(&creds)).unwrap();
+        let creds = [("GOOGLE_CLIENT_ID", "a"), ("GOOGLE_CLIENT_SECRET", "b")];
+        let one = resolve(" google , password ", configured(&creds)).unwrap();
+        let two = resolve("password,google", configured(&creds)).unwrap();
         assert_eq!(one.live(), two.live());
+        assert_eq!(one.live(), vec![Provider::Password, Provider::Google]);
+    }
+
+    /// Credentials are not the only thing a provider needs. Discord has a client id shape and
+    /// no dance written, and the failure for that belongs at boot rather than on a button.
+    #[test]
+    fn a_provider_with_no_dance_written_refuses_to_start() {
         assert_eq!(
-            one.live(),
-            vec![Provider::Password, Provider::Google, Provider::Discord]
+            resolve(
+                "discord",
+                configured(&[("DISCORD_CLIENT_ID", "c"), ("DISCORD_CLIENT_SECRET", "d")]),
+            ),
+            Err(Misconfigured::Unimplemented(Provider::Discord)),
+        );
+    }
+
+    /// The hook the end-to-end test hangs on: the dance can be pointed somewhere else without
+    /// a second code path for tests.
+    #[test]
+    fn endpoints_can_be_pointed_elsewhere() {
+        let enabled = resolve(
+            "google",
+            configured(&[
+                ("GOOGLE_CLIENT_ID", "a"),
+                ("GOOGLE_CLIENT_SECRET", "b"),
+                ("GOOGLE_TOKEN_URL", "http://127.0.0.1:9/token"),
+            ]),
+        )
+        .unwrap();
+        let upstream = enabled.upstream(Provider::Google).unwrap();
+        assert_eq!(upstream.endpoints.token, "http://127.0.0.1:9/token");
+        // Only what was overridden.
+        assert!(
+            upstream
+                .endpoints
+                .authorize
+                .starts_with("https://accounts.google.com/")
         );
     }
 

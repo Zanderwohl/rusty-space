@@ -65,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
         store: Store::Postgres(pool),
         attempts: Arc::new(Attempts::default()),
         keys: Arc::new(keys),
+        http: lc_identity::upstream::http_client(),
     };
 
     let listener = tokio::net::TcpListener::bind(bind).await?;

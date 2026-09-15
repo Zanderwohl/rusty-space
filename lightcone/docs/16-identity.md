@@ -46,13 +46,21 @@ One list, not a flag per provider. A misspelling in a list of names fails to boo
 `GOOGLE_ACCOUNTS=ture` is silently off, and an auth service that is silently missing a provider
 is an auth service that locks out everyone who used it.
 
-Two rules that make the list honest:
+Three rules that make the list honest:
 
 - **A provider in the list must be configured, or the process refuses to start.** Google needs a
   client id and secret; `password` needs nothing, which is exactly why it needs to be named
   explicitly rather than inferred from configuration being present.
+- **A provider in the list must be *implemented*, or the process refuses to start.** Credentials
+  are not the only thing a provider needs. `discord` has a place in the enum and no dance
+  written, and a deployment that names it should fail at boot rather than render a button that
+  cannot work.
 - **`password` is off unless listed.** Off by default means shipping without having thought
   about it leaves it off, which is the right direction for the failure to point.
+
+An upstream provider also needs `LC_IDENTITY_PUBLIC_URL`, because the redirect URI it registers
+with the provider has to be built from somewhere. Not from the request: `Host` is whatever the
+client sent, and an authorization code is delivered to whatever that builds.
 
 The startup banner names every live provider. "Which providers does production have" should be
 answerable from a log line, not from someone's memory.
@@ -80,6 +88,43 @@ Deferred, deliberately, and each with a consequence worth stating rather than di
 Not deferred, because deferring it would be a hole rather than a gap: **attempts are budgeted**,
 per account and per address. Without captcha and without email, an attempt budget is the only
 thing standing between a password provider and credential stuffing.
+
+## The upstream dance
+
+Authorization code with PKCE, and nothing else. The broker is a confidential client — it holds a
+secret and runs on a host we control — so PKCE is not load-bearing here the way it is for a
+public client. It is included because OAuth 2.1 requires it of everyone, it costs a column and
+fifteen lines, and it closes authorization-code injection, which a fixed redirect URI does not.
+
+A dance in flight is a **row**, not a cookie and not process memory. A cookie would be a second
+thing to get `SameSite` right about across a cross-site redirect; process memory would mean a
+dance only completes if it lands on the replica that started it. The row holds the verifier and
+where the sign-in was headed, keyed by the **digest** of the `state` — knowing a pending state is
+enough to complete somebody else's dance, so it is stored like every other credential here.
+
+`return_to` is checked when the dance starts **and again** when it finishes. Ten minutes pass in
+between, the allowlist can change inside them, and the second redirect is the one that actually
+carries a credential.
+
+### The ID token's signature is not checked
+
+This looks wrong and is not. The token arrives in the body of a response to a request *the broker
+made*, over a TLS connection it opened to the provider's token endpoint, authenticated with its
+client secret. There is no path by which anyone else could have put a token there, so a signature
+proves nothing the transport has not already proven. [OIDC Core §3.1.3.7] rule 6 says exactly
+this, for exactly this case.
+
+What it buys is not laziness. Verifying would mean a JWKS fetch, a key cache, a rotation story,
+and a new outage mode where nobody can sign in because a key server is unreachable — and it would
+put this code within reach of **algorithm confusion**, which is *the* JWT bug and one this
+repository has already been bitten by once.
+
+The claims are still checked, because "it came from the right socket" is not "it says what it
+should": `iss` against the provider's configured issuers, `aud` against our own client id, `exp`
+against the clock. Each of those is a real attack if it is missing, and each has a test that
+names the error it expects rather than asserting merely that something failed.
+
+[OIDC Core §3.1.3.7]: https://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation
 
 ## Aligning accounts by email, and the trap in it
 
@@ -273,6 +318,12 @@ Named so they are decisions rather than omissions:
   a player ever inhabits more than one ship. `Welcome` returning a single `ship_id` assumes not;
   if that changes it becomes a list and the client picks, which is a protocol change and a
   version bump.
+- **Reaping expired rows.** `signin_codes` and `upstream_flows` are deleted when spent and
+  filtered by expiry when read, so a stale row is never honoured — but an abandoned one is never
+  swept either. Both tables carry an expiry index for the job; nothing runs it yet.
+- **A broker session.** Each `/signin` is a fresh one, so a player who signs in to the site and
+  then launches the desktop client authenticates twice. The upstream providers paper over this
+  with their own sessions; `password` does not.
 - **Account deletion.** Deleting the broker row orphans the game's rows rather than cascading,
   because a cascade across three databases is the coupling this design spent its whole budget
   avoiding. The game reaps orphans on its own schedule.

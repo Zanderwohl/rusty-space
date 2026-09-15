@@ -29,6 +29,12 @@ pub struct Config {
     pub audiences: Vec<String>,
     /// What the tickets say issued them.
     pub issuer: String,
+    /// Where this broker is reachable from a browser, with no trailing slash.
+    ///
+    /// Only an upstream provider needs it, and only to build the redirect URI that provider
+    /// must have registered. It cannot be derived from a request: `Host` is whatever the
+    /// client sent, and deriving a redirect URI from it is how one gets pointed elsewhere.
+    pub public_url: Option<String>,
     /// The Ed25519 seed, base64url. Absent generates one, which is a development convenience
     /// and is logged as such: a generated key means every restart publishes a different one.
     pub signing_seed: Option<String>,
@@ -69,6 +75,19 @@ impl Config {
             anyhow::bail!("LC_IDENTITY_AUDIENCES is empty; no ticket could be minted");
         }
 
+        // Required exactly when something needs it. A deployment with only `password` has no
+        // redirect URI to build, and demanding one would be configuration for nothing.
+        let public_url =
+            var("LC_IDENTITY_PUBLIC_URL").map(|url| url.trim_end_matches('/').to_owned());
+        if public_url.is_none()
+            && let Some(provider) = providers.live().into_iter().find(|p| p.is_upstream())
+        {
+            anyhow::bail!(
+                "LC_IDENTITY_PUBLIC_URL is required when {provider} is enabled: it is how the \
+                 redirect URI is built"
+            );
+        }
+
         Ok(Config {
             bind: var("BIND_ADDR")
                 .unwrap_or_else(|| "0.0.0.0:3200".into())
@@ -91,6 +110,7 @@ impl Config {
             audiences,
             issuer: var("LC_IDENTITY_ISSUER")
                 .unwrap_or_else(|| "https://accounts.lightcone.example".into()),
+            public_url,
             signing_seed: var("LC_IDENTITY_SIGNING_SEED"),
         })
     }

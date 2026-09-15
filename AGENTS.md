@@ -111,6 +111,22 @@ Each of these cost real time. None of them are visible from the code that hits t
 - An array of header pairs in a response **inserts**, which replaces any header of the same
   name. Two `Set-Cookie` entries therefore leave one — the last — and a sign-in that sets a
   session and clears a nonce silently drops the session. Use `AppendHeaders`.
+- A static path beats `{param}` in the router, so `/signin/password` and `/signin/{provider}`
+  coexist. They are only reached by different methods here, which is worth keeping true.
+
+**OAuth2, upstream**
+
+- The ID token from a token-endpoint exchange is **not** signature-checked, deliberately: it
+  arrived over a TLS connection we opened, authenticated with our client secret, so a signature
+  proves nothing the transport has not. OIDC Core §3.1.3.7 rule 6. `iss`, `aud` and `exp` are
+  still checked, and `lightcone/docs/16-identity.md` has the reasoning. Do not "fix" this by
+  adding a JWKS fetch.
+- A test that only asserts "the hostile token was refused" passes just as well when every case
+  fails for some unrelated fourth reason. Assert the **error kind** per case.
+- A stub provider that agrees with whatever it is sent proves nothing about PKCE. Make it store
+  the challenge at `/authorize` and compare `S256(verifier)` at `/token` — then check the test
+  actually fails when the verifier is wrong, because a stub asserting nothing looks identical
+  to a stub asserting everything until you break the code on purpose.
 
 **egui**
 

@@ -26,6 +26,9 @@ pub struct Broker {
     pub store: Store,
     pub attempts: Arc<Attempts>,
     pub keys: Arc<Keys>,
+    /// For the upstream half only. Shared so the connection pool is, and carrying the timeout
+    /// that keeps a slow provider from becoming a slow broker.
+    pub http: reqwest::Client,
 }
 
 pub fn router(broker: Broker) -> Router {
@@ -38,6 +41,10 @@ pub fn router(broker: Broker) -> Router {
         // a code exists to survive a browser round trip and there is not one here.
         .route("/signin/password/native", post(native_signin))
         .route("/signin/register/native", post(native_register))
+        // The upstream pair. A static path wins over `{provider}` in the router, so the
+        // password routes above are unaffected by it.
+        .route("/signin/{provider}", get(crate::upstream::start))
+        .route("/signin/{provider}/callback", get(crate::upstream::finish))
         .route("/exchange", post(exchange))
         .route("/ticket", post(ticket))
         .route("/grant", post(grant))
@@ -55,7 +62,7 @@ pub struct Destination {
 }
 
 impl Destination {
-    fn check(&self, config: &Config) -> Result<(), Refused> {
+    pub(crate) fn check(&self, config: &Config) -> Result<(), Refused> {
         // Either an exact allowlist entry, or a loopback on any port — which is the native
         // client, whose port the operating system picks. See `config::is_allowed_loopback`.
         let allowed = is_allowed_return(&config.return_to, &self.return_to)
@@ -496,10 +503,21 @@ fn presented_secret(headers: &HeaderMap, expected: &str) -> bool {
     offered.as_bytes().ct_eq(expected.as_bytes()).into()
 }
 
-fn refusal(refused: Refused) -> impl IntoResponse {
+pub(crate) fn refusal(refused: Refused) -> impl IntoResponse {
     let (status, said): (StatusCode, &str) = match refused {
         // Never name what *would* be allowed: that is a list of targets.
         Refused::BadReturn | Refused::BadState => (StatusCode::BAD_REQUEST, "Bad sign-in request."),
+        // The caller's fault, not ours, and specifically not a 500: an expired or replayed
+        // state is an ordinary thing that happens to people who leave a tab open, and paging
+        // somebody every time one does is how alarms get ignored.
+        Refused::NoFlow => (
+            StatusCode::BAD_REQUEST,
+            "That sign-in expired or was already used. Start again.",
+        ),
+        Refused::Upstream(_) => (
+            StatusCode::BAD_GATEWAY,
+            "That provider could not be reached. Try again shortly.",
+        ),
         Refused::NoSuchProvider => (
             StatusCode::NOT_FOUND,
             "That way of signing in is not enabled here.",
@@ -509,7 +527,7 @@ fn refusal(refused: Refused) -> impl IntoResponse {
     (status, shell("Sign in", html! { p { (said) } }))
 }
 
-fn sign_in_page(broker: &Broker, to: &Destination, refused: Option<&Refused>) -> Markup {
+pub(crate) fn sign_in_page(broker: &Broker, to: &Destination, refused: Option<&Refused>) -> Markup {
     let complaint = refused.map(|refused| match refused {
         // One message for both, the same as the refusal itself.
         Refused::BadCredentials => "That address and password do not match.".to_string(),
@@ -519,6 +537,12 @@ fn sign_in_page(broker: &Broker, to: &Destination, refused: Option<&Refused>) ->
                 "A password needs at least {} characters.",
                 crate::password::MIN_LENGTH
             )
+        }
+        // Not an error. Somebody pressed Cancel, and saying "something went wrong" to that is
+        // telling a person they made a mistake by changing their mind.
+        Refused::Declined => "You did not finish signing in with that provider.".to_string(),
+        Refused::Upstream(_) => {
+            "That provider could not be reached. Try again, or use another way in.".to_string()
         }
         _ => "Something went wrong.".to_string(),
     });
@@ -544,8 +568,10 @@ fn sign_in_page(broker: &Broker, to: &Destination, refused: Option<&Refused>) ->
             }
             @for provider in broker.config.providers.live() {
                 @if provider.is_upstream() {
-                    p class="provider-pending" {
-                        "Signing in with " (provider.name()) " is configured but not yet built."
+                    // A link and not a form: starting a dance writes a row and redirects, and
+                    // neither is a state change this page is responsible for.
+                    a class="provider-link" href=(crate::upstream::start_url(provider, to)) {
+                        "Continue with " (provider.label())
                     }
                 }
             }
@@ -589,6 +615,7 @@ mod tests {
             exchange_secret: "shared".into(),
             audiences: vec!["shard-1".into()],
             issuer: "https://accounts.lightcone.example".into(),
+            public_url: Some("https://accounts.lightcone.example".into()),
             signing_seed: None,
         }
     }
@@ -598,6 +625,7 @@ mod tests {
             config: Arc::new(config),
             store: Store::memory(),
             attempts: Arc::new(Attempts::default()),
+            http: reqwest::Client::new(),
             keys: Arc::new(
                 Keys::from_seed(&[4u8; 32], "https://accounts.lightcone.example").unwrap(),
             ),
@@ -682,22 +710,37 @@ mod tests {
         assert!(page.contains("nonce1"));
     }
 
-    /// A configured provider with no route is said so rather than rendered as a dead button.
+    /// An enabled upstream provider is a link that carries the destination with it. Without
+    /// that, the dance starts and has nowhere to finish.
     #[test]
-    fn a_provider_that_is_not_built_yet_is_not_a_button() {
+    fn an_upstream_provider_is_a_link_that_keeps_the_destination() {
         let mut config = config();
         config.providers = crate::providers::resolve("password,google", |name| {
             matches!(name, "GOOGLE_CLIENT_ID" | "GOOGLE_CLIENT_SECRET").then(|| "x".to_string())
         })
         .unwrap();
         let broker = broker(config);
-        let to = destination("https://lightcone.example/auth/return", "n");
+        let to = destination("https://lightcone.example/auth/return", "nonce1");
         let page = sign_in_page(&broker, &to, None).into_string();
-        assert!(page.contains("not yet built"));
+
+        assert!(page.contains("Continue with Google"), "{page}");
+        // Percent-encoded, because it is a URL inside a query string.
         assert!(
-            !page.contains("action=\"/signin/google\""),
-            "a dead button was rendered"
+            page.contains("/signin/google?return_to=https%3A%2F%2Flightcone.example%2Fauth%2Freturn&amp;state=nonce1"),
+            "{page}"
         );
+    }
+
+    /// Off unless enabled, like everything else here.
+    #[test]
+    fn a_provider_this_deployment_does_not_have_is_not_offered() {
+        let page = sign_in_page(
+            &broker(config()),
+            &destination("https://lightcone.example/auth/return", "n"),
+            None,
+        )
+        .into_string();
+        assert!(!page.contains("Google"), "{page}");
     }
 }
 
@@ -722,10 +765,12 @@ mod endpoint_tests {
                 exchange_secret: "shared".into(),
                 audiences: vec![SHARD.into()],
                 issuer: "https://accounts.lightcone.example".into(),
+                public_url: Some("https://accounts.lightcone.example".into()),
                 signing_seed: None,
             }),
             store: Store::memory(),
             attempts: Arc::new(Attempts::default()),
+            http: reqwest::Client::new(),
             keys: Arc::new(
                 Keys::from_seed(&[4u8; 32], "https://accounts.lightcone.example").unwrap(),
             ),
@@ -1004,6 +1049,7 @@ mod endpoint_tests {
             exchange_secret: "shared".into(),
             audiences: vec![SHARD.into()],
             issuer: "https://accounts.lightcone.example".into(),
+            public_url: Some("https://accounts.lightcone.example".into()),
             signing_seed: None,
         };
         config.providers = crate::providers::resolve("google", |name| {
