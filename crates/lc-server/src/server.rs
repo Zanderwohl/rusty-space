@@ -612,7 +612,9 @@ fn motion_id(id: CraftId) -> lc_world::motion::ShipId {
 
 fn refusal_for(rejected: Rejected) -> Refusal {
     match rejected {
-        Rejected::NotInASystem | Rejected::NoSuchPlace => Refusal::Impossible,
+        Rejected::NotInASystem | Rejected::NoSuchPlace | Rejected::AlreadyThere => {
+            Refusal::Impossible
+        }
     }
 }
 

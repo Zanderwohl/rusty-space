@@ -203,3 +203,80 @@ fn a_hard_sideways_re_aim_sheds_across_the_line_rather_than_losing_it() {
         "the heading wandered mid-flight: {one:?} then {two:?}",
     );
 }
+
+/// Reported from play: inside a system, "go to the star" carried the ship **outward**.
+///
+/// A crossing stops about sixty astronomical units short of a star, so a ship six AU out is
+/// already ten times nearer than the crossing would leave it. Flying it would be going away
+/// from the thing you asked to go to.
+#[test]
+fn a_crossing_to_a_star_you_are_already_inside_does_not_fly_you_outward() {
+    const AU_LY: f64 = 1.495_978_707e11 / 9.460_730_472_580_8e15;
+    let star = DVec3::ZERO;
+    let mut craft = Craft::at(CraftId(1), Kind::Ship, star + DVec3::X * 6.0 * AU_LY);
+    let was = craft.motion.position_ly;
+
+    let outcome = motion::apply(
+        &mut craft.motion,
+        craft.system.as_deref(),
+        &Event {
+            ship: ShipId(0),
+            at_t: 0.0,
+            change: Change::Cross { to_ly: star, drive: Kind::Ship.drive() },
+        },
+    );
+
+    assert!(outcome.is_err(), "it accepted a crossing to a star it was already inside");
+    craft.advance(60.0, 60.0);
+    let moved = (craft.motion.position_ly - was).length();
+    assert!(moved < 1.0e-9, "the ship moved {moved} light-years anyway");
+}
+
+/// And a crossing to somewhere genuinely far is still a crossing.
+#[test]
+fn a_crossing_to_a_star_further_than_the_standoff_still_flies() {
+    let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+    motion::apply(
+        &mut craft.motion,
+        craft.system.as_deref(),
+        &Event {
+            ship: ShipId(0),
+            at_t: 0.0,
+            change: Change::Cross { to_ly: DVec3::new(4.0, 0.0, 0.0), drive: Kind::Ship.drive() },
+        },
+    )
+    .expect("four light-years is a crossing");
+    assert!(matches!(craft.motion.motive, Motive::Crossing(_)));
+}
+
+/// The audit's other half: an in-system course keeps the speed the ship already has, rather
+/// than planning from rest and dropping it to nothing.
+#[test]
+fn an_in_system_course_keeps_the_speed_the_ship_has() {
+    use lc_world::navigation::Course;
+    use lc_world::sky::{AuthoredStars, StarProvider};
+    use lc_world::system::LocalSystem;
+
+    let star = AuthoredStars::sample().stars().first().cloned().expect("a star");
+    let system = std::sync::Arc::new(LocalSystem::for_star(&star).expect("a system"));
+    let mut craft = Craft::at(CraftId(1), Kind::Ship, star.position_ly);
+    craft.enter(Some(system), 0.0);
+    craft.motion.beta = DVec3::new(0.0, 0.0006, 0.0);
+    craft.motion.set_adrift(0.0);
+    let moving = craft.motion.beta.length();
+
+    motion::apply(
+        &mut craft.motion,
+        craft.system.as_deref(),
+        &Event {
+            ship: ShipId(0),
+            at_t: 0.0,
+            change: Change::SetCourse { course: Course::LeaveSystem, drive: Kind::Ship.drive() },
+        },
+    )
+    .expect("leaving a system is a course");
+
+    craft.advance(1.0, 1.0);
+    let after = craft.motion.beta.length();
+    assert!(after > moving * 0.5, "a course from {moving}c left the ship at {after}c");
+}

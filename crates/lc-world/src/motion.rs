@@ -182,6 +182,12 @@ pub enum Rejected {
     NotInASystem,
     /// The system has nothing answering to it.
     NoSuchPlace,
+    /// A crossing to somewhere the ship is already at least as close to as it would end up.
+    ///
+    /// A crossing stops [`crate::flight::STANDOFF_LY`] short of a star, which is about sixty
+    /// astronomical units — so a ship already inside a system is nearer than the crossing would
+    /// leave it, and flying it would carry the ship *outward* to arrive at its own star.
+    AlreadyThere,
 }
 
 /// Fold one event into a ship.
@@ -231,10 +237,16 @@ pub fn apply(
             // was chosen. See `Cruise::plan_from`.
             let (at, beta) =
                 state_at(state, system, event.at_t).unwrap_or((state.position_ly, state.beta));
-            let approach = (*to_ly - at).normalize_or_zero();
+            let reach = *to_ly - at;
+            let approach = reach.normalize_or_zero();
             // Already there, or asked to cross to where it stands. Neither is a crossing.
             if approach == DVec3::ZERO {
                 return Err(Rejected::NoSuchPlace);
+            }
+            // Inside the standoff already: the crossing would end further out than the ship
+            // began, so "go to that star" would carry it away from the star.
+            if reach.length() <= crate::flight::STANDOFF_LY {
+                return Err(Rejected::AlreadyThere);
             }
             // Stopping short, because arriving *at* a star is arriving inside it.
             let stop = *to_ly - approach * crate::flight::STANDOFF_LY;
@@ -249,12 +261,18 @@ pub fn apply(
         }
         Change::SetCourse { course, drive } => {
             let system = system.ok_or(Rejected::NotInASystem)?;
-            let waypoint = course
-                .resolve(system, state.position_ly, event.at_t)
-                .ok_or(Rejected::NoSuchPlace)?;
+            // Where and how fast it actually is at the stamped time, like every other arm: an
+            // event may be folded later than it happened, and a course planned from last
+            // frame's position — or from rest, when the ship is not at rest — is a course to
+            // somewhere the ship is not.
+            let (at, beta) = state_at(state, Some(system), event.at_t)
+                .unwrap_or((state.position_ly, state.beta));
+            let waypoint = course.resolve(system, at, event.at_t).ok_or(Rejected::NoSuchPlace)?;
             let (cruise, aimed) =
-                crate::navigation::plan(system, &waypoint, state.position_ly, event.at_t, *drive)
+                crate::navigation::plan(system, &waypoint, at, beta, event.at_t, *drive)
                     .ok_or(Rejected::NoSuchPlace)?;
+            state.position_ly = at;
+            state.beta = beta;
             state.drive = *drive;
             state.crossing_clock_base_s = state.clock_s;
             state.motive = Motive::Crossing(cruise);

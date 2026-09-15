@@ -706,12 +706,15 @@ pub fn plan(
     system: &LocalSystem,
     waypoint: &Waypoint,
     from_ly: DVec3,
+    beta0: DVec3,
     start_s: f64,
     drive: Drive,
 ) -> Option<(Cruise, Waypoint)> {
     let mut aimed = waypoint.clone();
     let mut target = aimed.place_at(system, start_s)?;
-    let mut cruise = Cruise::plan(from_ly, target, start_s, drive);
+    // From whatever the ship is already doing. A course set from an orbit, or from a coast, or
+    // in place of one already under way, keeps the speed it has — see `Cruise::plan_from`.
+    let mut cruise = Cruise::plan_from(from_ly, beta0, target, start_s, drive);
     if matches!(waypoint, Waypoint::Fixed(_)) {
         return Some((cruise, aimed));
     }
@@ -723,7 +726,7 @@ pub fn plan(
             break;
         }
         target = next;
-        cruise = Cruise::plan(from_ly, target, start_s, drive);
+        cruise = Cruise::plan_from(from_ly, beta0, target, start_s, drive);
     }
     Some((cruise, aimed))
 }
@@ -905,7 +908,8 @@ mod tests {
             Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
         let waypoint = course.resolve(&system, DVec3::ZERO, 0.0).unwrap();
         let from = system.body_position_ly("Mars").expect("Mars");
-        let (cruise, waypoint) = plan(&system, &waypoint, from, 0.0, Drive::DEFAULT).expect("a crossing");
+        let (cruise, waypoint) =
+            plan(&system, &waypoint, from, DVec3::ZERO, 0.0, Drive::DEFAULT).expect("a crossing");
 
         let wanted = waypoint.place_at(&system, cruise.duration_s()).unwrap();
         let landed = cruise.at(cruise.duration_s()).position_ly;
@@ -959,7 +963,8 @@ mod tests {
             Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
         let waypoint = course.resolve(&system, DVec3::ZERO, 0.0).unwrap();
         let from = system.body_position_ly("Mars").expect("Mars");
-        let (cruise, aimed) = plan(&system, &waypoint, from, 0.0, Drive::DEFAULT).expect("a plan");
+        let (cruise, aimed) =
+            plan(&system, &waypoint, from, DVec3::ZERO, 0.0, Drive::DEFAULT).expect("a plan");
 
         let arrival_s = cruise.duration_s();
         let landed = aimed.place_at(&system, arrival_s).unwrap();

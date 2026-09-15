@@ -331,6 +331,15 @@ fn fly(ui: &mut UiState, session: &mut Session, id: Option<StarId>, effects: &mu
     };
     let name = star.name.clone().unwrap_or_else(|| "an unnamed star".into());
 
+    // A crossing stops short of a star, so a ship already inside a system is nearer than one
+    // would leave it. Said here rather than sent, because the answer would come back as a bare
+    // refusal and "the server refused that order" explains nothing about being already there.
+    let reach = star.position_ly - session.ship.motion.position_ly;
+    if reach.length() <= crate::flight::STANDOFF_LY {
+        effects.push(Effect::Notify(format!("already at {name}")));
+        return;
+    }
+
     if session.remote {
         // Sent, not flown. The crossing this client would plan and the one the server flies
         // must be the same, so only one of them plans it — and it is the one with authority.
