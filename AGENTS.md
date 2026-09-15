@@ -81,6 +81,13 @@ Each of these cost real time. None of them are visible from the code that hits t
   camera swings wildly from frame to frame.
 - Two runs stopped at frame `n` and frame `n+1` are **not** consecutive frames. They have
   accumulated different wall time. Use `--burst`.
+- `--turn` and `--pitch` **do not always land**. Three runs of one `--pitch 60 --frames 200`
+  gave two frames at pitch zero and one pitched. Two runs of the same command are not
+  byte-identical either, so a hash tells you nothing. Check that the shot is the view you asked
+  for before you measure it, or compare against something in the frame that cannot move.
+- WGSL reserves more words than you expect. `from` and `target` are both reserved and both are
+  natural names in a ray marcher; the error arrives from the pipeline cache at run time, not
+  from `cargo build`.
 
 **`em-sim` and `em-foundations`**
 

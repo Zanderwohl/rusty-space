@@ -318,11 +318,35 @@ bottleneck.
 
 ![A belt from outside](../images/belt.png)
 
-**Decided: a shell of proxy geometry whose opacity at each latitude is the population's own sky
-density.** One shape covers every case: a belt's inclinations are narrow, so the density is a
-band near the plane and it reads as a ring; an isotropic swarm's is flat and it reads as a
-sphere. Nothing special-cases either, and the mesh is built from the inclination distribution
-alone, so it is static — what changes as the ship moves is the transform.
+**Decided: a convex proxy whose fragments march the population's own density field.** One shape
+covers every case, because the shape is not geometry: it is two rows of a profile texture, and a
+belt and an isotropic swarm differ only in what those rows say. The radius row comes from the
+semi-major axis and eccentricity distributions, the latitude row from the inclination
+distribution, nothing depends on longitude, and those three distributions are everything a
+population carries. The proxy is one sphere shared by every population in the system.
+
+This replaced a torus of proxy geometry with the density painted on its surface, and the reason
+is that a surface cannot say how much material a sightline crossed. All it has is the crossing
+count and the incidence angle, and from inside a belt — where the ship spends its time — every
+sightline meets the far wall exactly once and nearly face-on. Looking along the belt and looking
+at the pole came out within four per cent of each other, measured, where the material along them
+differs by a factor of seven. The same two quantities failed the other way at a grazing edge:
+four crossings each at the clamped incidence, all adding, painted a rim eight times brighter
+than the material under it.
+
+Marched, those follow from the geometry rather than from a constant. **The calibration is one
+ray**: radially outward from the star in the population's plane, which is the sightline whose
+extinction *is* the covering fraction. The host integrates the profile along it and the shader
+solves for the extinction coefficient that puts it at the mapped opacity. Every other sightline
+is then whatever the field says. Nothing is left to find by looking, and a change to the shape
+cannot change what the population paints, because the shape is what the calibration is solved
+against — which is what the old area correction was for, and it needed a factor of two in it
+that had to be measured off a screenshot.
+
+**Cost: 0.076 ms per march step per frame**, measured on an M3 Pro at 1280x720 with two
+populations each covering the sky. Thirty-two steps is about 2.4 ms and is within a mean of one
+level in 255 of a ninety-six-step render. It scales with pixels and nothing else, so the same
+view at 4K wants a half-resolution pass rather than a smaller step count.
 
 ### Resolved bodies
 
@@ -408,29 +432,43 @@ since the ship is *inside* that shell the result was a grey wash over the whole 
 root gives 0.001, 0.013 and 0.80 — a trace, a haze and a structure, which is the right reading
 of all three.
 
-**A shell the ship is inside is dimmed to about a fifth.** From outside a belt is a ring and the
+**A shell the ship is inside is dimmed to about a tenth.** From outside a belt is a ring and the
 eye reads it as structure; from inside it covers the entire sky, and the opacity that made the
 ring legible buries the star field. The same number cannot serve both. Dimmed, the inside case
 is what it should be: a faint band along the plane, the way the zodiacal light is.
+
+It is a weaker knob than it looks, and that is worth knowing before reaching for it. The
+exposure meters the whole frame, so inside a shell that fills the sky the meter follows this
+number and the displayed brightness barely moves — halving it, measured, changed the view from
+inside the Kuiper belt by nothing at all and the view from inside the asteroid belt by an
+eighth. What it still sets is the band against the *stars*, which is the comparison that
+matters.
 
 An envelope is a visualisation either way — an orbit line, not a photograph. What it carries
 honestly is the ordering.
 
 ### The rest
 
-**Decided: a layered-swarm surface shader.** A population has no
-members to draw — that is the entire point of
-[04-stellar-photometry.md](04-stellar-photometry.md) — so the renderer cannot instance from
-world state and should not invent world state to instance from.
+**Decided: march the density field.** A population has no members to draw — that is the entire
+point of [04-stellar-photometry.md](04-stellar-photometry.md) — so the renderer cannot instance
+from world state and should not invent world state to instance from. It draws the distribution
+instead, as above: one draw call per population regardless of element count, and it cannot drift
+out of agreement with the physics because it is reading the physics.
 
-Instead, draw the population's envelope: a torus for a belt, a shell for a swarm, sized from
-the distribution's `a` and inclination spread. Shade it with a procedural texture that reads
-as many small bodies, with two or three parallaxing layers to give it depth and a density that
-tracks the population's actual `Sigma`. Where the baked emission shell exists, sample its `m`
-channel so the visible density and the photometric deficit are the same number.
+**The grain moves the band's edge rather than dimming what is inside it.** Scaling the density
+is what the surface shader did, and in a volume it disappears: a sightline crosses several
+grains and averages them, so eighty-five per cent of contrast per sample came out as eighteen
+on screen and read as nothing at all. An edge does not average — there is only one of it along
+any sightline — so that is where the texture goes, and a band with a ragged edge reads as made
+of things where a soft gradient does not. The reference ray lies in the plane, where the warp
+cannot reach it, so the calibration is untouched by whatever the grain does.
 
-This is good enough, it costs one draw call per population regardless of element count, and it
-cannot drift out of agreement with the physics because it is reading the physics.
+Still wanting: the fine structure is one octave of value noise evaluated per step, which is most
+of the shader's ALU. A tiling 3D noise texture would be one trilinear fetch instead of forty
+operations and would pay for a second octave. Where the baked emission shell exists, sampling
+its `m` channel would make the visible density and the photometric deficit the same number.
+Single scattering — `exp(-tau)` to the star and a Henyey-Greenstein phase — is what would make a
+belt read as lit rather than as glowing, and the star's position is already known.
 
 Individual elements are drawn only when they have been promoted out of the population — when a
 player selects specific members for a manoeuvre — at which point there are a handful of them

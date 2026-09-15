@@ -1,17 +1,26 @@
-//! Population envelopes: the shells that stand in for swarms, belts and clouds.
+//! Population envelopes: the volumes that stand in for swarms, belts and clouds.
 //!
 //! A population has no members, so nothing is instanced from it and nothing invents members to
-//! instance. The shell *is* the distribution: its radius is the population's orbital radius and
-//! its opacity at each latitude is the population's own sky density there. A belt's inclinations
-//! are narrow so the density is a band near the plane and it reads as a ring; an isotropic
-//! swarm's is flat and it reads as a sphere. One shape, no special cases.
+//! instance. The *distribution* is drawn instead: a convex proxy whose fragments march the
+//! population's own density field. The three distributions a population carries say where the
+//! material is — semi-major axis and eccentricity radially, inclination in latitude — and the
+//! field is those two profiles and nothing else, which is why one shape covers a belt and an
+//! isotropic swarm with no special case anywhere.
+//!
+//! This replaced a torus of proxy geometry with the density painted on its surface. That could
+//! not say how much material a sightline crossed: from inside a belt every sightline meets the
+//! far wall exactly once and nearly face-on, so looking along the belt and looking at the pole
+//! came out within four per cent of each other where the material differs by a factor of seven.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
+use bevy::image::ImageSampler;
 use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_mesh::{Indices, PrimitiveTopology};
 use em_render::population_material::{
-    ATTRIBUTE_SHELL_DENSITY, PopulationMaterial, PopulationUniform,
+    ATTRIBUTE_SHELL_DENSITY, PROFILE_LATITUDE, PROFILE_RADIAL, PROFILE_SAMPLES,
+    PopulationMaterial, PopulationUniform,
 };
 use em_render::render_space::sim_to_render;
 use glam::DVec3;
@@ -19,8 +28,7 @@ use lc_world::population::Population;
 
 use crate::system::{M_PER_LY, UNIT_M};
 
-/// Latitude and longitude divisions of a shell. Enough that a narrow belt is not a polygon.
-pub const RINGS: usize = 48;
+/// Longitude divisions of a ring.
 pub const SEGMENTS: usize = 96;
 
 /// Overall gain on the mapped opacity.
@@ -35,6 +43,11 @@ pub const OPACITY_GAIN: f32 = 8.0;
 /// forty times further out than the ship and reads as an even wash; at Uranus it is barely
 /// twice as far, lines of sight through it are oblique, and at a fade that suited the first
 /// case it became a grey barrel filling the frame.
+///
+/// It is a weaker knob than it looks. The exposure meters the whole frame, so inside a shell
+/// that fills the sky the meter follows this number and the displayed brightness barely moves:
+/// halving it, measured, changed the Kuiper station by nothing at all and the belt by an eighth.
+/// What it still does is set the band against the *stars*, which is the comparison that matters.
 pub const INSIDE_FADE: f32 = 0.09;
 
 /// Below this covering fraction a population is not drawn at all.
@@ -83,82 +96,236 @@ pub struct Shell {
     /// Radius in render units, and the rotation taking `+Z` to the population's pole.
     pub radius: f32,
     pub orientation: Quat,
+    /// Kept because the display gain reaches the material every frame and this does not change.
+    pub field: Field,
 }
 
-/// Segments around the tube's own cross-section.
+/// Divisions of the proxy sphere.
 ///
-/// Fewer than around the pole: the tube is short compared with the circumference it is swept
-/// along, and a belt's is a tenth of it.
-pub const TUBE_SEGMENTS: usize = 24;
+/// Coarse on purpose. It is not the shape — the shape is [`Profile`] — and all it has to do is
+/// cover the pixels the material projects to and be convex, so that dropping the face the ray
+/// leaves through leaves exactly one fragment per pixel.
+pub const PROXY_RINGS: usize = 16;
+pub const PROXY_SEGMENTS: usize = 32;
 
-/// The population's torus, normalised so its outer edge is one.
+/// Radius of the proxy, so its flat facets stay outside the sphere of material they bound.
 ///
-/// A belt is a donut and the model says so — a spread of semi-major axes, a spread of
-/// eccentricities, a spread of inclinations, and no node or periapsis angle anywhere, which is
-/// what leaves it symmetric about its pole. It used to be drawn as a sphere at one radius with
-/// the inclinations painted on as a band, which reads correctly from inside and as a ball from
-/// outside.
+/// `sec(pi / 2 RINGS)` would be exact; this is comfortably past it, and the excess is free
+/// because the march clips analytically to a radius of one before it takes a single step.
+const PROXY_MARGIN: f32 = 1.05;
+
+/// The scalars the shader needs to read [`Profile`] — everything about the field that is not
+/// the two rows themselves.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Field {
+    /// Inner edge of the material, with the outer edge at one.
+    pub inner: f32,
+    /// Sine of the widest inclination: the slab the material lies inside.
+    pub slab: f32,
+    /// Line integral of the density along a radial ray in the plane. See [`Profile`].
+    pub reference: f32,
+}
+
+impl Default for Field {
+    fn default() -> Self {
+        Self { inner: 0.0, slab: 1.0, reference: 1.0 }
+    }
+}
+
+/// A population's density field, as the shader reads it.
 ///
-/// Normalised rather than scaled per axis, because the transform's scale has to stay uniform:
-/// the shader takes the limb brightening from the surface normal, and a non-uniform scale does
-/// not carry normals.
+/// Two rows and three numbers. The field is separable — radius from the semi-major axis and
+/// eccentricity distributions, latitude from the inclination distribution, and nothing depends
+/// on longitude — so a row apiece is not a compression of it but the whole of it.
 ///
-/// Static, like the sphere it replaces — every dimension comes from the distributions, and what
-/// changes as the ship moves is the transform.
-pub fn build_envelope(population: &Population) -> Mesh {
+/// `reference` is the calibration. A radial ray outward from the star in the population's plane
+/// is the sightline whose extinction *is* the covering fraction, which is what the photometry
+/// in [`opacity_of`] measures; the shader solves for the extinction coefficient that puts that
+/// one ray at `opacity` and every other sightline then follows from the geometry. This is what
+/// replaces the old surface shader's area correction, and unlike it there is no factor left to
+/// find by looking — a change to the shape cannot change what the population paints, because
+/// the shape is what the calibration is solved against.
+pub struct Profile {
+    /// Density against latitude, sampled at `sin(phi) = slab * i / (N - 1)`, peak at one.
+    pub latitude: Vec<f32>,
+    /// Density against radius, sampled at `r = inner + (1 - inner) * i / (N - 1)`, peak at one.
+    pub radial: Vec<f32>,
+    pub field: Field,
+}
+
+/// Samples in the eccentric anomaly when one orbit's radial distribution is integrated.
+///
+/// In `E` rather than in `r`: a Kepler ellipse spends time `(1 - e cos E) dE` uniformly in `E`,
+/// and the same distribution written in `r` has an inverse-square-root singularity at each apsis
+/// that no amount of sampling in `r` handles.
+const ANOMALY_STEPS: usize = 256;
+
+/// Sub-samples across the cell each quadrature node stands for.
+///
+/// The distributions are quadrature, not a catalogue. Nine semi-major axes and five
+/// eccentricities are forty-five sharp annuli, and summed straight they read as concentric
+/// rings that no belt has. Each node stands for a cell of the distribution it was drawn from,
+/// so the profile is integrated across that cell. Twelve is where the residual ripple falls
+/// under a per cent, measured on the generated system.
+const CELL_SUBDIVISIONS: usize = 12;
+
+/// The population's density field.
+pub fn profile_of(population: &Population) -> Profile {
     let Some(extent) = population.extent() else {
-        return Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+        return Profile {
+            latitude: vec![1.0; PROFILE_SAMPLES],
+            radial: vec![1.0; PROFILE_SAMPLES],
+            field: Field::default(),
+        };
     };
-    let scale = extent.outer_m;
-    let core = extent.core_m() / scale;
-    // Floored, or a population with one semi-major axis or no inclination collapses the tube
-    // into a line and takes its normals with it.
-    let half_width = (extent.half_width_m() / scale).max(MIN_TUBE);
-    let half_height = (extent.half_height_m() / scale).max(MIN_TUBE);
+    let inner = (extent.inner_m / extent.outer_m).clamp(0.0, 0.999) as f32;
+    let slab = extent.half_angle_rad.sin().clamp(1.0e-4, 1.0) as f32;
 
-    let peak = (0..=RINGS)
-        .map(|r| population.inclination.sky_density(latitude(r)))
-        .fold(0.0f64, f64::max)
-        .max(f64::MIN_POSITIVE);
+    // Latitude, in units of the widest inclination, so a belt spends the whole row on the
+    // twelve degrees it occupies rather than on the eighty-eight it does not.
+    let latitude: Vec<f64> = (0..PROFILE_SAMPLES)
+        .map(|i| {
+            let sin_phi = slab as f64 * i as f64 / (PROFILE_SAMPLES - 1) as f64;
+            population.inclination.sky_density(sin_phi.clamp(-1.0, 1.0).asin())
+        })
+        .collect();
+    let latitude = peak_normalised(&latitude);
 
-    // See [`conserving_level`]. Without it a belt comes out some two and a half times brighter
-    // than it was, because the density field used to be doing two jobs and now does one.
-    let level = conserving_level(population, core, half_width, half_height, peak);
+    let radial = radial_profile(population, extent.outer_m, inner as f64);
+    let radial = peak_normalised(&radial);
 
-    let count = (SEGMENTS + 1) * (TUBE_SEGMENTS + 1);
+    // The reference ray: outward from the star in the plane, where the latitude factor is its
+    // own peak of one, so this integral is the radial row alone.
+    let step = (1.0 - inner) / (PROFILE_SAMPLES - 1) as f32;
+    let reference = radial.iter().sum::<f32>() * step;
+
+    Profile { latitude, radial, field: Field { inner, slab, reference } }
+}
+
+fn peak_normalised(values: &[f64]) -> Vec<f32> {
+    let peak = values.iter().cloned().fold(0.0f64, f64::max).max(f64::MIN_POSITIVE);
+    values.iter().map(|v| (v / peak) as f32).collect()
+}
+
+/// Time-averaged number density against radius, as a histogram over the profile's samples.
+///
+/// The mass each orbit deposits, not the density it has at a sample point: an ellipse's radial
+/// distribution is singular at both apsides, and a histogram in `E` integrates straight through
+/// that where point sampling in `r` would spike on whichever bin the apsis landed in.
+fn radial_profile(population: &Population, outer_m: f64, inner: f64) -> Vec<f64> {
+    let axes = population.semi_major.nodes();
+    let eccentricities = population.eccentricity.nodes();
+    let (d_axis, d_ecc) = (node_spacing(axes), node_spacing(eccentricities));
+
+    let width = (1.0 - inner) / PROFILE_SAMPLES as f64;
+    let mut mass = vec![0.0f64; PROFILE_SAMPLES];
+    let sub = (CELL_SUBDIVISIONS * CELL_SUBDIVISIONS * ANOMALY_STEPS) as f64;
+    for &(axis, w_axis) in axes {
+        for a in cell(axis, d_axis) {
+            if a <= 0.0 {
+                continue;
+            }
+            for &(ecc, w_ecc) in eccentricities {
+                for e in cell(ecc, d_ecc) {
+                    let e = e.clamp(0.0, 0.95);
+                    for k in 0..ANOMALY_STEPS {
+                        let anomaly =
+                            std::f64::consts::TAU * (k as f64 + 0.5) / ANOMALY_STEPS as f64;
+                        let spent = 1.0 - e * anomaly.cos();
+                        let radius = a * spent / outer_m;
+                        let bin = ((radius - inner) / width) as isize;
+                        if bin >= 0 && (bin as usize) < PROFILE_SAMPLES {
+                            mass[bin as usize] += w_axis * w_ecc * spent / sub;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    mass.iter().map(|m| m / width).collect()
+}
+
+/// Spacing of a distribution's nodes, which is the width of the cell each one stands for.
+/// Zero for a single node, which is a delta and stands for nothing wider than itself.
+fn node_spacing(nodes: &[(f64, f64)]) -> f64 {
+    if nodes.len() < 2 {
+        return 0.0;
+    }
+    let lo = nodes.iter().map(|(v, _)| *v).fold(f64::INFINITY, f64::min);
+    let hi = nodes.iter().map(|(v, _)| *v).fold(f64::NEG_INFINITY, f64::max);
+    (hi - lo) / (nodes.len() - 1) as f64
+}
+
+fn cell(centre: f64, width: f64) -> Vec<f64> {
+    if width <= 0.0 {
+        return vec![centre];
+    }
+    (0..CELL_SUBDIVISIONS)
+        .map(|k| centre - width * 0.5 + width * (k as f64 + 0.5) / CELL_SUBDIVISIONS as f64)
+        .collect()
+}
+
+/// The profile as the texture the shader binds: latitude on row zero, radius on row one.
+///
+/// `R32Float` and unfilterable, like the starfield's band table and for the same reason — a
+/// 32-bit float texture cannot be sampled with a filtering sampler under WebGPU, so the shader
+/// interpolates it itself.
+pub fn profile_image(profile: &Profile) -> Image {
+    // Placed by the row constants rather than in the order they are written, so the one thing
+    // the host and the shader have to agree about is stated once on each side.
+    let mut rows = [[0.0f32; PROFILE_SAMPLES]; 2];
+    rows[PROFILE_LATITUDE].copy_from_slice(&profile.latitude);
+    rows[PROFILE_RADIAL].copy_from_slice(&profile.radial);
+    let mut data = Vec::with_capacity(PROFILE_SAMPLES * rows.len() * 4);
+    for row in rows {
+        for value in row {
+            data.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    let mut image = Image::new(
+        Extent3d { width: PROFILE_SAMPLES as u32, height: rows.len() as u32, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        data,
+        TextureFormat::R32Float,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    image.sampler = ImageSampler::nearest();
+    image
+}
+
+/// The proxy every population is drawn with: a sphere, coarse, slightly oversized.
+///
+/// One mesh for every population in the system, because it carries nothing about any of them.
+/// What used to be a per-population torus — its cross-section from the eccentricity spread, its
+/// normals hand-derived because the axes of an ellipse divide, a floor under its half-axes so a
+/// degenerate spread did not collapse it into a line — is now three floats and two rows of a
+/// texture, and none of those can be a polygon that misses.
+pub fn build_proxy() -> Mesh {
+    let count = (PROXY_RINGS + 1) * (PROXY_SEGMENTS + 1);
     let mut positions = Vec::with_capacity(count);
     let mut normals = Vec::with_capacity(count);
     let mut density = Vec::with_capacity(count);
-    let mut indices = Vec::with_capacity(SEGMENTS * TUBE_SEGMENTS * 6);
+    let mut indices = Vec::with_capacity(PROXY_RINGS * PROXY_SEGMENTS * 6);
 
-    for major in 0..=SEGMENTS {
-        let theta = std::f64::consts::TAU * major as f64 / SEGMENTS as f64;
-        let (st, ct) = theta.sin_cos();
-        // The population's own frame: its pole is +Z, and the transform turns it.
-        let outward = DVec3::new(ct, st, 0.0);
-        for minor in 0..=TUBE_SEGMENTS {
-            let psi = std::f64::consts::TAU * minor as f64 / TUBE_SEGMENTS as f64;
-            let (sp, cp) = psi.sin_cos();
-            let at = outward * (core + half_width * cp) + DVec3::Z * (half_height * sp);
-            // The outward normal of an ellipse is not its radius: the axes divide, so a wide
-            // flat tube faces the plane over most of its surface rather than facing out.
-            let normal =
-                (outward * (cp / half_width) + DVec3::Z * (sp / half_height)).normalize_or_zero();
-
-            positions.push(sim_to_render(at).as_vec3().to_array());
-            normals.push(sim_to_render(normal).as_vec3().to_array());
-            // The same sky density the sphere carried, read at this point's own latitude. The
-            // shape now says where the population reaches; this still says how much is there.
-            let radius = at.length().max(f64::MIN_POSITIVE);
-            let phi = (at.z / radius).clamp(-1.0, 1.0).asin();
-            density.push(((population.inclination.sky_density(phi) / peak) * level) as f32);
+    for ring in 0..=PROXY_RINGS {
+        let polar = std::f32::consts::PI * ring as f32 / PROXY_RINGS as f32;
+        let (sp, cp) = polar.sin_cos();
+        for segment in 0..=PROXY_SEGMENTS {
+            let theta = std::f32::consts::TAU * segment as f32 / PROXY_SEGMENTS as f32;
+            let (st, ct) = theta.sin_cos();
+            let out = Vec3::new(sp * ct, cp, sp * st);
+            positions.push((out * PROXY_MARGIN).to_array());
+            normals.push(out.to_array());
+            // Rings only; a volume reads its density from the profile.
+            density.push(1.0);
         }
     }
 
-    for major in 0..SEGMENTS {
-        for minor in 0..TUBE_SEGMENTS {
-            let a = (major * (TUBE_SEGMENTS + 1) + minor) as u32;
-            let b = a + (TUBE_SEGMENTS + 1) as u32;
+    let row = PROXY_SEGMENTS + 1;
+    for ring in 0..PROXY_RINGS {
+        for segment in 0..PROXY_SEGMENTS {
+            let a = (ring * row + segment) as u32;
+            let b = a + row as u32;
             indices.extend_from_slice(&[a, b, a + 1, a + 1, b, b + 1]);
         }
     }
@@ -169,67 +336,6 @@ pub fn build_envelope(population: &Population) -> Mesh {
     mesh.insert_attribute(ATTRIBUTE_SHELL_DENSITY, density);
     mesh.insert_indices(Indices::U32(indices));
     mesh
-}
-
-/// Smallest half-axis a tube may have, as a fraction of its outer radius.
-const MIN_TUBE: f64 = 1.0e-4;
-
-/// Quadrature steps for the two surface integrals in [`conserving_level`]. Both integrands are
-/// smooth and this is far more than either needs.
-const QUADRATURE: usize = 256;
-
-/// How much to scale the tube's density by, so the population paints what it used to.
-///
-/// The density field used to do two jobs. On a sphere it said *how much* and *where*: a belt's
-/// band was near zero over most of the surface, and that near-zero was the only thing saying
-/// the belt was flat. The shape says that now, so the density is near its peak over almost the
-/// whole tube — and the same population paints far more light than it did. Measured on the
-/// generated system, the sky from Jupiter came out three-quarters brighter.
-///
-/// The invariant is that the total scattered light cannot depend on what shape the population
-/// is drawn as. So this is the ratio of the two surface integrals of density: what the unit
-/// sphere carried, over what the tube carries. It comes out below one for a belt, because a
-/// tube has *more* area than the band it replaces once both its walls are counted.
-///
-/// [`opacity_of`] is untouched: it is the photometry, it is a fourth root, and a factor of two
-/// in it is a factor of 1.19 on screen. This is a factor on the geometry, where it belongs.
-fn conserving_level(
-    population: &Population,
-    core: f64,
-    half_width: f64,
-    half_height: f64,
-    peak: f64,
-) -> f64 {
-    // The sphere: `dA = cos(phi) dphi dtheta`, and the `2 pi` cancels against the tube's.
-    let mut on_sphere = 0.0;
-    let step = std::f64::consts::PI / QUADRATURE as f64;
-    for k in 0..QUADRATURE {
-        let phi = -std::f64::consts::FRAC_PI_2 + (k as f64 + 0.5) * step;
-        on_sphere += population.inclination.sky_density(phi) / peak * phi.cos() * step;
-    }
-
-    // The tube. Its two parameters are orthogonal, so the area element is the product of the
-    // two arc lengths: the sweep around the pole, and the ellipse's own.
-    let mut on_tube = 0.0;
-    let tube_step = std::f64::consts::TAU / QUADRATURE as f64;
-    for k in 0..QUADRATURE {
-        let psi = (k as f64 + 0.5) * tube_step;
-        let (sp, cp) = psi.sin_cos();
-        let radial = core + half_width * cp;
-        let height = half_height * sp;
-        let arc = (half_width * half_width * sp * sp + half_height * half_height * cp * cp).sqrt();
-        let radius = (radial * radial + height * height).sqrt().max(f64::MIN_POSITIVE);
-        let phi = (height / radius).clamp(-1.0, 1.0).asin();
-        on_tube += population.inclination.sky_density(phi) / peak * radial * arc * tube_step;
-    }
-
-    // And a tube is crossed twice where a shell is crossed once: a sightline through a belt
-    // enters and leaves the near side and then the far side, four surface crossings for two
-    // passes through material, where the shell gave one crossing for one pass. Each wall is
-    // therefore worth half a pass. Without this the sky from Jupiter stays three-quarters
-    // brighter than it was, and the factor is exactly two.
-    const WALLS: f64 = 2.0;
-    if on_tube > 0.0 { (on_sphere / (on_tube * WALLS)).min(1.0) } else { 1.0 }
 }
 
 /// Radial divisions of a ring. Enough that the Cassini Division is a gap rather than a hint.
@@ -286,12 +392,14 @@ pub fn build_ring(rings: &lc_world::rings::RingSystem) -> Mesh {
     mesh
 }
 
-fn latitude(ring: usize) -> f64 {
-    -std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * ring as f64 / RINGS as f64
-}
-
 /// The uniforms for one population: what the photometry says is there.
-pub fn uniforms(population: &Population, seed: f32, gain: f32, inside: bool) -> PopulationUniform {
+pub fn uniforms(
+    population: &Population,
+    seed: f32,
+    gain: f32,
+    inside: bool,
+    field: Field,
+) -> PopulationUniform {
     let covering = population.covering_fraction();
     // Dust reddens where solid bodies do not, and 04-stellar-photometry.md makes that the
     // grey-versus-reddening diagnostic. The tint says which one the player is looking at.
@@ -304,9 +412,15 @@ pub fn uniforms(population: &Population, seed: f32, gain: f32, inside: bool) -> 
     };
     PopulationUniform {
         tint,
+        // Carried rather than assumed by the shader: the pole is +Z in simulation space, and
+        // `sim_to_render` is the one place that knows what that is once it is rendered.
+        pole: sim_to_render(DVec3::Z).as_vec3().extend(0.0),
         opacity: (opacity_of(covering) * gain).clamp(0.0, 1.0),
         seed,
         inside_fade: if inside { INSIDE_FADE } else { 1.0 },
+        inner: field.inner,
+        slab: field.slab,
+        reference: field.reference,
         ..default()
     }
 }
@@ -344,17 +458,22 @@ pub fn spawn(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<PopulationMaterial>,
+    images: &mut Assets<Image>,
     populations: &[Population],
     gain: f32,
 ) -> Vec<Shell> {
+    // One proxy for all of them: it carries nothing about any population, so there is nothing
+    // to build per population.
+    let mesh = meshes.add(build_proxy());
     populations
         .iter()
         .enumerate()
         .filter(|(_, p)| visible(p))
         .map(|(i, p)| {
-            let mesh = meshes.add(build_envelope(p));
+            let profile = profile_of(p);
             let material = materials.add(PopulationMaterial {
-                uniforms: uniforms(p, i as f32 * 7.31 + 1.0, gain, true),
+                uniforms: uniforms(p, i as f32 * 7.31 + 1.0, gain, true, profile.field),
+                profile: images.add(profile_image(&profile)),
             });
             commands.spawn((
                 Mesh3d(mesh.clone()),
@@ -366,13 +485,14 @@ pub fn spawn(
                 EnvelopeMesh,
             ));
             Shell {
-                mesh,
+                mesh: mesh.clone(),
                 material,
-                // The mesh is normalised to its outer edge, so that is what scales it. The
+                // The field is normalised to the outer edge, so that is what scales it. The
                 // thermal radius is where the light comes from, which is a different number
                 // and is what the interface names the band by.
                 radius: (p.extent().map(|e| e.outer_m).unwrap_or(0.0) / UNIT_M) as f32,
                 orientation: orientation(p.pole),
+                field: profile.field,
             }
         })
         .collect()
@@ -383,9 +503,17 @@ fn spawn_rings(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<PopulationMaterial>,
+    images: &mut Assets<Image>,
     drawn: &[crate::system::Drawable],
     gain: f32,
 ) {
+    // A ring takes the surface path and never reads the profile, but the bind group still
+    // wants one. Flat, and shared by every ring in the system.
+    let unread = images.add(profile_image(&Profile {
+        latitude: vec![1.0; PROFILE_SAMPLES],
+        radial: vec![1.0; PROFILE_SAMPLES],
+        field: Field::default(),
+    }));
     for (i, body) in drawn.iter().enumerate() {
         let Some(rings) = body.rings else { continue };
         // Rings are solid and reflective rather than a shadow, so their opacity is what they
@@ -404,11 +532,15 @@ fn spawn_rings(
             // A ring is not a cloud: its texture is banding, not speckle.
             grain_frequency: 12.0,
             grain_strength: 0.35,
+            // A sheet has no inside to march.
+            volumetric: 0.0,
             ..default()
         };
         commands.spawn((
             Mesh3d(meshes.add(build_ring(rings.system))),
-            MeshMaterial3d(materials.add(PopulationMaterial { uniforms: uniform })),
+            MeshMaterial3d(
+                materials.add(PopulationMaterial { uniforms: uniform, profile: unread.clone() }),
+            ),
             Transform::default(),
             NoFrustumCulling,
             RingMesh {
@@ -435,6 +567,7 @@ pub fn update_envelopes(
     mut envelopes: ResMut<Envelopes>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<PopulationMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     existing: Query<Entity, Or<(With<EnvelopeMesh>, With<RingMesh>)>>,
     mut placed: Query<&mut Transform, (With<EnvelopeMesh>, Without<RingMesh>)>,
     mut ringed: Query<(&mut Transform, &RingMesh), Without<EnvelopeMesh>>,
@@ -447,11 +580,19 @@ pub fn update_envelopes(
         envelopes.star = here;
         envelopes.shells = match session.system.as_ref() {
             Some(system) => {
-                spawn_rings(&mut commands, &mut meshes, &mut materials, &bodies.drawn, ui.envelope_gain);
+                spawn_rings(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &mut images,
+                    &bodies.drawn,
+                    ui.envelope_gain,
+                );
                 spawn(
                     &mut commands,
                     &mut meshes,
                     &mut materials,
+                    &mut images,
                     &system.populations,
                     ui.envelope_gain,
                 )
@@ -487,7 +628,8 @@ pub fn update_envelopes(
         if let Some(material) = materials.get_mut(&shell.material) {
             let inside = session.ship.motion.position_ly.distance(system.origin_ly) * M_PER_LY
                 < population.thermal_radius();
-            let next = uniforms(population, material.uniforms.seed, ui.envelope_gain, inside);
+            let next =
+                uniforms(population, material.uniforms.seed, ui.envelope_gain, inside, shell.field);
             if material.uniforms != next {
                 material.uniforms = next;
             }
@@ -535,136 +677,151 @@ mod tests {
         }
     }
 
-    /// One shape for both, and now it is the *shape* that says which. A narrow inclination
-    /// spread gives a flat tube and an isotropic one gives a tube as tall as it is wide, which
-    /// is a filled ball. Nothing special-cases either.
-    ///
-    /// The sphere this replaces said the same thing with a painted band and could not say the
-    /// other half of it: a belt has a radial extent and drawing it at one radius left that out
-    /// entirely.
-    #[test]
-    fn a_belt_is_flat_and_a_swarm_is_round() {
-        let flat = population(Inclination::uniform_angle(0.0, 0.2, 12), 1e6);
-        let round = population(Inclination::isotropic(), 1e6);
-
-        let aspect = |p: &Population| {
-            let e = p.extent().expect("an extent");
-            e.half_height_m() / e.core_m()
-        };
-        assert!(aspect(&flat) < 0.25, "a belt is thin: {}", aspect(&flat));
-        assert!((aspect(&round) - 1.0).abs() < 1.0e-9, "a cloud is not: {}", aspect(&round));
-
-        // And the mesh follows: the flat one stays near its plane, the round one does not.
-        let height = |p: &Population| {
-            positions(&build_envelope(p)).iter().map(|v| v[1].abs()).fold(0.0f32, f32::max)
-        };
-        assert!(height(&flat) < 0.25, "{}", height(&flat));
-        assert!(height(&round) > 0.4, "{}", height(&round));
-
-        let belt = densities(&build_envelope(&flat));
-        assert!(belt.iter().all(|d| (0.0..=1.0).contains(d)), "densities are normalised");
-        // The peak is the conserving level rather than one now; see
-        // `the_correction_dims_a_belt_rather_than_brightening_it`.
-        assert!(belt.iter().any(|d| *d > 0.0), "and something is drawn");
+    /// Walk a ray through the field the shader marches, and return its optical depth in units
+    /// of the extinction coefficient. The shader does this on the GPU; this is the same
+    /// integral, so what it measures is the field rather than the rendering.
+    fn depth_along(profile: &Profile, from: DVec3, direction: DVec3, steps: usize) -> f64 {
+        let direction = direction.normalize();
+        // Far enough to leave the unit sphere from anywhere inside it.
+        let span = 4.0;
+        let step = span / steps as f64;
+        let mut total = 0.0;
+        for k in 0..steps {
+            let at = from + direction * ((k as f64 + 0.5) * step);
+            total += sample(profile, at) * step;
+        }
+        total
     }
 
-    /// The invariant a change of shape has to keep: the same population paints the same total
-    /// light whatever it is drawn as. The photometry is in `covering_fraction`, and that did
-    /// not change; this is only about the geometry the opacity is spread over.
+    /// The field at a point, without the grain: radius times latitude, peak at one.
+    fn sample(profile: &Profile, at: DVec3) -> f64 {
+        let radius = at.length();
+        let field = profile.field;
+        if radius > 1.0 || radius < field.inner as f64 {
+            return 0.0;
+        }
+        let read = |row: &[f32], u: f64| -> f64 {
+            let x = u.clamp(0.0, 1.0) * (PROFILE_SAMPLES - 1) as f64;
+            let i = x.floor() as usize;
+            let j = (i + 1).min(PROFILE_SAMPLES - 1);
+            let f = x - i as f64;
+            row[i] as f64 * (1.0 - f) + row[j] as f64 * f
+        };
+        let radial = read(&profile.radial, (radius - field.inner as f64) / (1.0 - field.inner as f64));
+        // The pole is +Z in simulation space, and the field is built in those terms.
+        let sin_phi = (at.z / radius).abs();
+        let latitude = read(&profile.latitude, sin_phi / field.slab as f64);
+        radial * latitude
+    }
+
+    /// The thing a painted surface could not say, and the reason for the change.
     ///
-    /// Measured off the built mesh rather than by re-running the quadrature that built it, so
-    /// it is a check and not a restatement. Without the correction a belt came out twice as
-    /// bright, which is what `--at Jupiter` measured: a background of 29 against 14.
+    /// From inside a belt, looking along it passes through far more material than looking at
+    /// the pole. The tube shader put those within four per cent of each other — every sightline
+    /// met the far wall exactly once and nearly face-on, so the crossing count and the
+    /// incidence angle, which were the only two things it had, were the same for both.
     #[test]
-    fn a_tube_paints_what_the_shell_it_replaces_did() {
-        for inclination in [Inclination::uniform_angle(0.0, 0.2, 12), Inclination::isotropic()] {
-            let population = population(inclination, 1e6);
-            let mesh = build_envelope(&population);
-            let at = positions(&mesh);
-            let density = densities(&mesh);
-            let indices = match mesh.indices().unwrap() {
-                Indices::U32(v) => v.clone(),
-                _ => panic!("u32 indices"),
-            };
+    fn a_long_way_through_a_belt_is_a_long_way_through_a_belt() {
+        let belt = population(Inclination::uniform_angle(0.0, 0.2, 12), 1e6);
+        let profile = profile_of(&belt);
+        let mid = ((profile.field.inner as f64) + 1.0) * 0.5;
+        let from = DVec3::new(mid, 0.0, 0.0);
 
-            // Every triangle's area times its mean density, which is the surface integral.
-            let mut on_mesh = 0.0f64;
-            for tri in indices.chunks(3) {
-                let p = |k: usize| {
-                    let v = at[tri[k] as usize];
-                    DVec3::new(v[0] as f64, v[1] as f64, v[2] as f64)
-                };
-                let area = (p(1) - p(0)).cross(p(2) - p(0)).length() * 0.5;
-                let mean = tri.iter().map(|i| density[*i as usize] as f64).sum::<f64>() / 3.0;
-                on_mesh += area * mean;
-            }
+        let along = depth_along(&profile, from, DVec3::Y, 4000);
+        let pole = depth_along(&profile, from, DVec3::Z, 4000);
+        assert!(
+            along > pole * 5.0,
+            "along the belt against out of its plane: {along:.4} and {pole:.4}",
+        );
 
-            // The unit sphere it replaces, over the same peak-normalised density.
-            let peak = (0..=RINGS)
-                .map(|r| population.inclination.sky_density(latitude(r)))
-                .fold(0.0f64, f64::max);
-            let mut on_sphere = 0.0;
-            let step = std::f64::consts::PI / 2048.0;
-            for k in 0..2048 {
-                let phi = -std::f64::consts::FRAC_PI_2 + (k as f64 + 0.5) * step;
-                on_sphere += population.inclination.sky_density(phi) / peak * phi.cos() * step;
-            }
-            on_sphere *= std::f64::consts::TAU;
-
-            // Twice over, because a tube has two walls where a shell has one surface.
-            //
-            // Within a few per cent, not exactly: this sums flat triangles and averaged vertex
-            // densities, where the correction integrates the curve and the continuous density.
-            // The point is that it is not a factor of two out.
-            let painted = on_mesh * 2.0;
-            assert!(
-                (painted / on_sphere - 1.0).abs() < 0.05,
-                "{painted:.4} against {on_sphere:.4}",
-            );
+        // And it is graded rather than a step: tipping the sightline out of the plane takes it
+        // down monotonically.
+        let mut last = f64::INFINITY;
+        for tenths in 0..=6 {
+            let angle = 0.06 * tenths as f64;
+            let at = depth_along(&profile, from, DVec3::new(0.0, angle.cos(), angle.sin()), 4000);
+            assert!(at <= last + 1e-9, "not monotonic at {angle}: {at} after {last}");
+            last = at;
         }
     }
 
-    /// A belt's tube has *more* area than the band it replaces, once both walls are counted,
-    /// so the correction takes the density down rather than up.
+    /// One field for both, and it is the *profile* that says which. A narrow inclination spread
+    /// leaves the material in a band near the plane; an isotropic one fills the sphere.
+    ///
+    /// The torus this replaces could not say the second one. Its tube was as tall as it was
+    /// wide for an isotropic population, which sounds right and is not: swept about the pole
+    /// that is an apple core, and a swarm the model calls isotropic had nothing at all above
+    /// forty-five degrees of latitude.
     #[test]
-    fn the_correction_dims_a_belt_rather_than_brightening_it() {
-        let belt = population(Inclination::uniform_angle(0.0, 0.2, 12), 1e6);
-        let peak = (0..=RINGS)
-            .map(|r| belt.inclination.sky_density(latitude(r)))
-            .fold(0.0f64, f64::max);
-        let extent = belt.extent().unwrap();
-        let scale = extent.outer_m;
-        let level = conserving_level(
-            &belt,
-            extent.core_m() / scale,
-            extent.half_width_m() / scale,
-            extent.half_height_m() / scale,
-            peak,
-        );
-        assert!(level < 1.0 && level > 0.0, "{level}");
-        // And the mesh carries it: nothing reaches the bare peak of one any more.
-        let brightest = densities(&build_envelope(&belt)).iter().cloned().fold(0.0f32, f32::max);
-        assert!((brightest as f64 - level).abs() < 1.0e-3, "{brightest} against {level}");
+    fn a_belt_is_flat_and_a_swarm_is_round() {
+        let flat = profile_of(&population(Inclination::uniform_angle(0.0, 0.2, 12), 1e6));
+        let round = profile_of(&population(Inclination::isotropic(), 1e6));
+
+        assert!(flat.field.slab < 0.25, "a belt is thin: {}", flat.field.slab);
+        assert!((round.field.slab - 1.0).abs() < 1e-6, "a cloud is not: {}", round.field.slab);
+
+        // The belt's density has run out well before the pole; the cloud's never does.
+        assert!(flat.latitude.last().unwrap() < &0.05, "{:?}", flat.latitude.last());
+        assert!(round.latitude.iter().all(|v| (*v - 1.0).abs() < 1e-6), "isotropic is flat");
+
+        // Which the field then delivers: from the centre, every direction out of a cloud meets
+        // the same material, and that is exactly what the apple core could not do.
+        let centre = DVec3::ZERO;
+        let plane = depth_along(&round, centre, DVec3::X, 4000);
+        let pole = depth_along(&round, centre, DVec3::Z, 4000);
+        assert!(plane > 0.0 && (plane / pole - 1.0).abs() < 0.02, "{plane:.4} and {pole:.4}");
+    }
+
+    /// The invariant a change of shape has to keep: the same population paints the same light.
+    ///
+    /// The photometry is in `covering_fraction` and did not change. What the shader solves for
+    /// is the extinction coefficient that puts the reference ray — radially outward, in the
+    /// plane — at exactly the mapped opacity, so this checks that the reference integral the
+    /// host computes is the one that ray actually has. Measured by walking the field rather
+    /// than by re-running the sum that built it, so it is a check and not a restatement.
+    #[test]
+    fn the_reference_ray_is_the_one_the_calibration_names() {
+        for inclination in [Inclination::uniform_angle(0.0, 0.2, 12), Inclination::isotropic()] {
+            let profile = profile_of(&population(inclination, 1e6));
+            let walked = depth_along(&profile, DVec3::ZERO, DVec3::X, 20000);
+            let claimed = profile.field.reference as f64;
+            assert!(
+                (walked / claimed - 1.0).abs() < 0.02,
+                "walked {walked:.5} against a claimed {claimed:.5}",
+            );
+            assert!(claimed > 0.0, "a population with anything in it has a reference ray");
+        }
     }
 
     /// The thing the sphere could not say at all: a belt reaches from an inner radius to an
-    /// outer one, and every vertex lands between them.
+    /// outer one, and the field is empty either side of them.
     #[test]
-    fn the_envelope_spans_the_radii_the_population_occupies() {
+    fn the_field_spans_the_radii_the_population_occupies() {
         let belt = population(Inclination::uniform_angle(0.0, 0.2, 12), 1e6);
         let extent = belt.extent().expect("an extent");
         let inner = (extent.inner_m / extent.outer_m) as f32;
+        let profile = profile_of(&belt);
+        assert!((profile.field.inner - inner).abs() < 1e-4, "{} against {inner}", profile.field.inner);
 
-        // Render axes are Y-up, so the plane is x-z and the pole is y.
-        let radii: Vec<f32> = positions(&build_envelope(&belt))
-            .iter()
-            .map(|v| (v[0] * v[0] + v[2] * v[2]).sqrt())
-            .collect();
-        let widest = radii.iter().cloned().fold(0.0f32, f32::max);
-        let closest = radii.iter().cloned().fold(f32::MAX, f32::min);
-        assert!((widest - 1.0).abs() < 1.0e-3, "normalised to the outer edge: {widest}");
-        assert!((closest - inner).abs() < 0.01, "{closest} against an inner edge of {inner}");
-        assert!(inner > 0.5, "this belt is narrow; a wide one would be a different test");
+        assert_eq!(sample(&profile, DVec3::X * 1.01), 0.0, "nothing past the outer edge");
+        assert_eq!(sample(&profile, DVec3::X * (inner as f64 * 0.99)), 0.0, "nor inside the hole");
+        let mid = ((inner as f64) + 1.0) * 0.5;
+        assert!(sample(&profile, DVec3::X * mid) > 0.1, "and something in between");
+    }
+
+    /// The nodes are quadrature, not a catalogue. Nine semi-major axes summed straight paint
+    /// nine annuli, and a belt made of concentric rings is a rendering of the integration
+    /// scheme rather than of a belt.
+    #[test]
+    fn the_radial_profile_is_smooth_enough_not_to_read_as_rings() {
+        let profile = profile_of(&population(Inclination::uniform_angle(0.0, 0.2, 12), 1e6));
+        let row = &profile.radial;
+        let ripple: f32 = (1..row.len() - 1)
+            .map(|i| (row[i - 1] - 2.0 * row[i] + row[i + 1]).abs())
+            .sum::<f32>()
+            / (row.len() - 2) as f32;
+        assert!(ripple < 0.01, "the radial profile is lumpy: {ripple}");
+        assert!(row.iter().cloned().fold(0.0f32, f32::max) > 0.99, "peak-normalised");
     }
 
     /// The mapping is a fourth root because the quantity spans fourteen decades. A logarithm
@@ -713,8 +870,9 @@ mod tests {
     #[test]
     fn a_shell_the_ship_is_inside_is_dimmed() {
         let p = population(Inclination::uniform_angle(0.0, 0.2, 12), 1e9);
-        let out = uniforms(&p, 0.0, OPACITY_GAIN, false);
-        let inside = uniforms(&p, 0.0, OPACITY_GAIN, true);
+        let field = profile_of(&p).field;
+        let out = uniforms(&p, 0.0, OPACITY_GAIN, false, field);
+        let inside = uniforms(&p, 0.0, OPACITY_GAIN, true, field);
         assert_eq!(out.inside_fade, 1.0);
         assert!(inside.inside_fade < 0.5, "inside, a shell covers the whole sky");
         assert_eq!(out.opacity, inside.opacity, "only the fade differs, not the physics");
@@ -740,13 +898,24 @@ mod tests {
     }
 
     #[test]
-    fn a_ring_is_flat_and_a_shell_is_not() {
+    fn a_ring_is_flat_and_the_proxy_is_not() {
         let saturn = lc_world::rings::for_body("Saturn").unwrap();
         let ring = normals(&build_ring(saturn));
-        let shell = normals(&build_envelope(&population(Inclination::isotropic(), 1e6)));
+        let proxy = normals(&build_proxy());
         let first = ring[0];
         assert!(ring.iter().all(|n| *n == first), "every ring normal is the pole");
-        assert!(shell.iter().any(|n| *n != shell[0]), "a shell's normals point everywhere");
+        assert!(proxy.iter().any(|n| *n != proxy[0]), "a sphere's normals point everywhere");
+    }
+
+    /// The proxy has to contain the material it stands for, or the march starts inside the
+    /// field and the near edge of a population is a polygon.
+    #[test]
+    fn the_proxy_encloses_the_unit_sphere() {
+        let closest = positions(&build_proxy())
+            .iter()
+            .map(|v| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt())
+            .fold(f32::MAX, f32::min);
+        assert!(closest > 1.0, "a facet cuts inside the material: {closest}");
     }
 
     /// The four ring systems, in the order a person would rank them by eye.

@@ -36,3 +36,21 @@ fn the_starfield_uniform_is_declared_in_one_order() {
         "the shader and the host disagree about the uniform's layout",
     );
 }
+
+/// The population material grew from six fields to eleven when the envelope became a volume,
+/// and three of the new ones are geometry the march cannot do without. A shift here would
+/// render a belt with a cloud's slab and no error anywhere.
+#[test]
+fn the_population_uniform_is_declared_in_one_order() {
+    let shader = include_str!("../assets/shaders/population.wgsl");
+    let host = include_str!("../../em-render/src/population_material.rs");
+
+    let in_shader = fields(shader, "struct PopulationUniform {");
+    let in_host = fields(host, "pub struct PopulationUniform {");
+
+    assert!(in_shader.len() > 8, "the parse found almost nothing: {in_shader:?}");
+    assert_eq!(
+        in_shader, in_host,
+        "the shader and the host disagree about the uniform's layout",
+    );
+}
