@@ -454,6 +454,7 @@ fn dispatch(
     mut ui: ResMut<Ui>,
     mut game: ResMut<Game>,
     mut uplink: ResMut<crate::uplink::Uplink>,
+    time: Res<Time>,
     mut next: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -486,6 +487,7 @@ fn dispatch(
                             // claim: the client is acting on all it has been told so far.
                             issued_at_client_t: (game.coordinate_time_s() * 1e6) as i64,
                         }));
+                        uplink.asked(time.elapsed_secs_f64());
                     }
                 }
                 // Handled in `signin_ui`, which has the socket, the browser and the vault.

@@ -59,7 +59,9 @@ pub fn hud(
                 ui.separator();
                 ui.colored_label(egui::Color32::from_rgb(240, 170, 60), warning);
             }
-            if let Some((note, words)) = crate::uplink::note(&uplink.state) {
+            if let Some((note, words)) =
+                crate::uplink::note(&uplink.state, uplink.round_trip_s)
+            {
                 ui.separator();
                 ui.colored_label(connection_colour(note), words);
             }

@@ -107,6 +107,14 @@ pub struct Uplink {
     pub applied: Option<String>,
     /// The last placement the server gave, for [`Uplink::place`] to re-apply.
     placement: Option<Placement>,
+    /// When the last order went out, in seconds since the app started.
+    ///
+    /// The client does not predict, so the delay between asking and seeing is the round trip
+    /// and nothing else. That makes it the one number worth showing: without it, "this feels
+    /// slow" and "this is slow" are the same report.
+    asked_at: Option<f64>,
+    /// How long the last order took to come back.
+    pub round_trip_s: Option<f64>,
 }
 
 /// The rate multiplier at which the client's clock runs at the server's.
@@ -160,6 +168,11 @@ impl Uplink {
             State::Joined(joined) => Some(joined),
             _ => None,
         }
+    }
+
+    /// Note that an order has just gone out, so its answer can be timed.
+    pub fn asked(&mut self, at_s: f64) {
+        self.asked_at = Some(at_s);
     }
 
     /// Say something to the server. Silently does nothing with no link, which is the offline
@@ -227,6 +240,7 @@ pub fn connect(mut uplink: ResMut<Uplink>, address: Res<ServerAddress>) {
 pub fn pump(
     mut uplink: ResMut<Uplink>,
     ticket: Res<crate::Ticket>,
+    time: Res<bevy::prelude::Time>,
     mut game: ResMut<crate::app::Game>,
     mut ui: ResMut<crate::app::Ui>,
 ) {
@@ -243,7 +257,14 @@ pub fn pump(
         });
     }
 
+    let now_s = time.elapsed_secs_f64();
     for message in uplink.take() {
+        // An answer to an order stops the clock on it, whether the answer was yes or no.
+        if matches!(message, Outbound::Accepted { .. } | Outbound::Refused { .. })
+            && let Some(asked_at) = uplink.asked_at.take()
+        {
+            uplink.round_trip_s = Some((now_s - asked_at).max(0.0));
+        }
         fold(&mut uplink, &mut game, &mut ui, message);
     }
 
@@ -358,7 +379,7 @@ fn fold(
                 // client learns of it the same way anyone else does: when its light arrives.
                 Order::Transmit { .. } | Order::Burn { .. } => None,
             };
-            debug!(?ship_id, at_t, ?order, "accepted");
+            info!(?ship_id, at_t, ?order, "accepted");
             uplink.applied = said;
         }
         Outbound::Clock { now_t } => {
@@ -402,11 +423,20 @@ pub enum Note {
 ///
 /// `None` offline, because no server was asked for. Saying "OFFLINE" there would imply
 /// something had gone wrong with a thing nobody wanted.
-pub fn note(state: &State) -> Option<(Note, String)> {
+pub fn note(state: &State, round_trip_s: Option<f64>) -> Option<(Note, String)> {
     match state {
         State::Offline => None,
         State::Connecting => Some((Note::Working, "CONNECTING".into())),
-        State::Joined(joined) => Some((Note::Quiet, format!("LINKED {}", joined.name))),
+        State::Joined(joined) => {
+            // The round trip, once there is one to show. Nothing here is predicted, so this is
+            // exactly the delay between asking for something and seeing it — which makes it
+            // the difference between "this feels slow" and "this is slow".
+            let last = match round_trip_s {
+                Some(seconds) => format!(" · {:.0} ms", seconds * 1e3),
+                None => String::new(),
+            };
+            Some((Note::Quiet, format!("LINKED {}{last}", joined.name)))
+        }
         State::Refused(why) => Some((Note::Wrong, format!("REFUSED — {why}"))),
         State::Lost(why) => Some((Note::Wrong, format!("LINK LOST — {why}"))),
     }
@@ -691,10 +721,27 @@ mod tests {
         );
     }
 
+    /// The readout that turns "this feels slow" into a number. Absent until there is an order
+    /// to have timed, because a zero would be a claim nobody measured.
+    #[test]
+    fn a_linked_note_shows_the_round_trip_once_there_is_one() {
+        let joined = State::Joined(Joined {
+            client_id: ClientId(1),
+            ship_id: ShipId(1),
+            name: "Ada".into(),
+        });
+        let (_, quiet) = note(&joined, None).unwrap();
+        assert_eq!(quiet, "LINKED Ada", "it invented a measurement");
+
+        let (_, timed) = note(&joined, Some(0.087)).unwrap();
+        assert!(timed.contains("87 ms"), "{timed}");
+        assert!(timed.contains("Ada"), "{timed}");
+    }
+
     /// Offline is the single-process game, not a fault, and must not be dressed as one.
     #[test]
     fn nothing_is_said_about_a_connection_nobody_asked_for() {
-        assert_eq!(note(&State::Offline), None);
+        assert_eq!(note(&State::Offline, None), None);
     }
 
     #[test]
@@ -710,7 +757,7 @@ mod tests {
             State::Lost("connection reset".into()),
         ];
         for state in states {
-            let (_, words) = note(&state).expect("something to show");
+            let (_, words) = note(&state, None).expect("something to show");
             assert!(!words.is_empty());
             // Colour is never the only signal, so the words have to carry it alone.
             assert!(
@@ -719,7 +766,7 @@ mod tests {
             );
         }
         // And a refusal shows the reason rather than only that there was one.
-        let (severity, words) = note(&State::Refused("no ticket".into())).unwrap();
+        let (severity, words) = note(&State::Refused("no ticket".into()), None).unwrap();
         assert_eq!(severity, Note::Wrong);
         assert!(words.contains("no ticket"), "{words}");
     }

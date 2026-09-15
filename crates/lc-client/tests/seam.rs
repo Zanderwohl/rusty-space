@@ -240,6 +240,49 @@ async fn the_server_says_what_time_it_is_without_being_asked() {
     }
 }
 
+/// How long an order takes to come back, which is what a player feels when the interface waits
+/// for the server rather than predicting.
+///
+/// The bound is deliberately loose — this runs on whatever a test machine is doing — but it is
+/// far under the *seconds* a person would notice. A tick is 50 ms and the answer is sent on the
+/// tick that reads the order, so anything in this range is the tick and not a stall.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_order_is_answered_within_a_few_ticks() {
+    let address = shard(true).await;
+    let mut link = WebSocketLink::connect(&address);
+
+    greet(&mut link, PROTOCOL_VERSION, "").await;
+    let Outbound::Welcome { ship_id, .. } = hear(&mut link, "a welcome").await else {
+        panic!("no welcome");
+    };
+    // Clear the welcome's trailing traffic so the measurement times the order alone.
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    let _ = link.poll();
+
+    let sent = std::time::Instant::now();
+    link.send(Inbound::Act(Intent {
+        ship_id,
+        order: Order::Transmit { power_w: 1000.0 },
+        issued_at_client_t: 0,
+    }));
+
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    let waited = loop {
+        if link.poll().into_iter().any(|m| matches!(m, Outbound::Accepted { .. })) {
+            break sent.elapsed();
+        }
+        assert!(tokio::time::Instant::now() < deadline, "no answer at all");
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    };
+
+    println!("order answered in {:.0} ms ({} ms ticks)", waited.as_secs_f64() * 1e3, TICK_MS);
+    assert!(
+        waited < Duration::from_millis(TICK_MS as u64 * 8),
+        "an order took {:.0} ms, which is a stall and not a tick",
+        waited.as_secs_f64() * 1e3,
+    );
+}
+
 /// The negotiation that exists so a stale client fails legibly instead of misreading bytes.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_client_on_the_wrong_protocol_is_told_the_number() {
