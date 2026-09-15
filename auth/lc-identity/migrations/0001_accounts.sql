@@ -50,3 +50,19 @@ create table secrets (
     primary key (provider, subject),
     foreign key (provider, subject) references links (provider, subject) on delete cascade
 );
+
+-- A sign-in in flight: handed to a browser as a redirect parameter, spent by the site over a
+-- server-to-server call moments later.
+--
+-- What is stored is the **digest**. A dump of this table contains nothing that can be
+-- exchanged, which matters because a code is a bearer credential for an account.
+create table signin_codes (
+    digest     bytea       primary key,
+    account_id uuid        not null references accounts (id) on delete cascade,
+    -- Bound to the destination it was issued for, so a code leaked from one site cannot be
+    -- redeemed by another that happens to be on the allowlist.
+    return_to  text        not null,
+    expires_at timestamptz not null
+);
+
+create index signin_codes_expiry on signin_codes (expires_at);

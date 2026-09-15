@@ -9,8 +9,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod attempts;
 pub mod config;
 pub mod password;
 pub mod providers;
+pub mod routes;
 pub mod signin;
 pub mod store;

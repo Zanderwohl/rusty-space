@@ -60,6 +60,7 @@ struct Tables {
     accounts: HashMap<Uuid, Account>,
     links: HashMap<(Provider, String), Link>,
     secrets: HashMap<(Provider, String), String>,
+    codes: HashMap<Vec<u8>, (Uuid, String, chrono::DateTime<chrono::Utc>)>,
 }
 
 /// Accounts in memory, for tests. Every rule the schema enforces is enforced here too, or a
@@ -286,6 +287,67 @@ impl Store {
     }
 }
 
+impl Store {
+    /// Write down a sign-in in flight. `digest` is the hash of the code, never the code.
+    pub async fn put_code(
+        &self,
+        digest: &[u8],
+        account_id: Uuid,
+        return_to: &str,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), StoreError> {
+        match self {
+            Store::Memory(m) => {
+                m.0.lock().unwrap().codes.insert(
+                    digest.to_vec(),
+                    (account_id, return_to.to_owned(), expires_at),
+                );
+                Ok(())
+            }
+            Store::Postgres(pool) => sqlx::query(
+                "insert into signin_codes (digest, account_id, return_to, expires_at) \
+                 values ($1, $2, $3, $4)",
+            )
+            .bind(digest)
+            .bind(account_id)
+            .bind(return_to)
+            .bind(expires_at)
+            .execute(pool)
+            .await
+            .map(|_| ())
+            .map_err(|e| StoreError::Backend(e.to_string())),
+        }
+    }
+
+    /// Spend a code. **Deleted on read, whether or not it was still valid**, so a code is worth
+    /// one attempt however that attempt goes.
+    ///
+    /// `None` for a code that never existed, has already been spent, has expired, or was issued
+    /// for somewhere other than `return_to`. The caller cannot tell those apart, and does not
+    /// need to: every one of them is "no".
+    pub async fn take_code(
+        &self,
+        digest: &[u8],
+        return_to: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<Uuid>, StoreError> {
+        let taken = match self {
+            Store::Memory(m) => m.0.lock().unwrap().codes.remove(digest),
+            Store::Postgres(pool) => sqlx::query_as(
+                "delete from signin_codes where digest = $1 \
+                 returning account_id, return_to, expires_at",
+            )
+            .bind(digest)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| StoreError::Backend(e.to_string()))?,
+        };
+        Ok(taken
+            .filter(|(_, issued_for, expires_at)| issued_for == return_to && *expires_at > now)
+            .map(|(account_id, _, _)| account_id))
+    }
+}
+
 /// The unique index on verified addresses, surfacing as the refusal it is rather than as a
 /// generic database error.
 fn taken_or_backend(error: sqlx::Error) -> StoreError {
@@ -481,6 +543,132 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some("$argon2id$second"),
+        );
+    }
+}
+
+#[cfg(test)]
+mod code_tests {
+    use super::*;
+    use chrono::{Duration, Utc};
+
+    async fn an_account(store: &Store) -> Uuid {
+        store
+            .add_link(
+                None,
+                "Ada",
+                Link {
+                    provider: Provider::Password,
+                    subject: "ada@example.test".into(),
+                    account_id: Uuid::nil(),
+                    email: None,
+                    email_verified: false,
+                },
+            )
+            .await
+            .unwrap()
+            .id
+    }
+
+    #[tokio::test]
+    async fn a_code_is_worth_exactly_one_exchange() {
+        let store = Store::memory();
+        let id = an_account(&store).await;
+        let now = Utc::now();
+        let here = "https://lightcone.example/auth/return";
+        store
+            .put_code(b"digest", id, here, now + Duration::seconds(60))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store.take_code(b"digest", here, now).await.unwrap(),
+            Some(id)
+        );
+        assert_eq!(
+            store.take_code(b"digest", here, now).await.unwrap(),
+            None,
+            "replayed"
+        );
+    }
+
+    /// Bound to the destination it was issued for, so a code leaked from one allowlisted site
+    /// cannot be redeemed by another.
+    #[tokio::test]
+    async fn a_code_may_only_be_spent_where_it_was_issued() {
+        let store = Store::memory();
+        let id = an_account(&store).await;
+        let now = Utc::now();
+        store
+            .put_code(
+                b"d",
+                id,
+                "https://lightcone.example/auth/return",
+                now + Duration::seconds(60),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .take_code(b"d", "https://other.example/return", now)
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    /// And spent anyway. A wrong destination burns the code rather than leaving it for a
+    /// second guess.
+    #[tokio::test]
+    async fn a_refused_code_is_still_spent() {
+        let store = Store::memory();
+        let id = an_account(&store).await;
+        let now = Utc::now();
+        let here = "https://lightcone.example/auth/return";
+        store
+            .put_code(b"d", id, here, now + Duration::seconds(60))
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .take_code(b"d", "https://other.example/return", now)
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            store.take_code(b"d", here, now).await.unwrap(),
+            None,
+            "it survived a miss"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_expired_code_is_no_code() {
+        let store = Store::memory();
+        let id = an_account(&store).await;
+        let now = Utc::now();
+        let here = "https://lightcone.example/auth/return";
+        store
+            .put_code(b"d", id, here, now - Duration::seconds(1))
+            .await
+            .unwrap();
+        assert_eq!(store.take_code(b"d", here, now).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_code_nobody_issued_is_nothing() {
+        let store = Store::memory();
+        assert_eq!(
+            store
+                .take_code(
+                    b"invented",
+                    "https://lightcone.example/auth/return",
+                    Utc::now()
+                )
+                .await
+                .unwrap(),
+            None,
         );
     }
 }
