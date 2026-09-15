@@ -34,6 +34,14 @@ pub const LATITUDES: u32 = 48;
 /// unlit half into a bite taken out of the star field.
 pub const NIGHT: f32 = 0.012;
 
+/// How far a banded surface's pattern inverts in its own infrared light.
+///
+/// Jupiter's belts are dark in the optical and *bright* at five microns, and it is the same
+/// fact twice: a belt is a gap in the cloud deck, so it reflects less and lets more of the warm
+/// interior out. Mean-preserving, so switching bands moves the pattern about rather than
+/// changing how much light the body sends.
+const INVERSION: f32 = 0.3;
+
 #[derive(Component)]
 pub struct ResolvedBody {
     pub name: String,
@@ -94,7 +102,7 @@ fn point_flux(body: &Drawable, star_teff_k: f64, observer_ly: DVec3) -> PerBand<
         return PerBand::splat(0.0);
     }
     let reflected = crate::session::bare(star_teff_k, body.effective_radius_m, distance_m);
-    let thermal = crate::session::bare(body.equilibrium_k, body.radius_m, distance_m);
+    let thermal = crate::session::bare(body.effective_k, body.radius_m, distance_m);
     PerBand::new(std::array::from_fn(|i| reflected[Band::ALL[i]] + thermal[Band::ALL[i]]))
 }
 
@@ -113,7 +121,7 @@ fn point_power(body: &Drawable, star_teff_k: f64, observer_ly: DVec3) -> f64 {
         return 0.0;
     }
     let reflected = star_teff_k.powi(4) * (body.effective_radius_m / distance_m).powi(2);
-    let thermal = body.equilibrium_k.powi(4) * (body.radius_m / distance_m).powi(2);
+    let thermal = body.effective_k.powi(4) * (body.radius_m / distance_m).powi(2);
     reflected + thermal
 }
 
@@ -206,6 +214,18 @@ pub fn surface_radiance(
     star_teff_k: f64,
     star_distance_m: f64,
 ) -> PerBand<f32> {
+    let reflected = reflected_radiance(body, star_radius_m, star_teff_k, star_distance_m);
+    let emitted = emitted_radiance(body);
+    PerBand::new(std::array::from_fn(|i| reflected[Band::ALL[i]] + emitted[Band::ALL[i]]))
+}
+
+/// The starlight half: `p (R_star / d)^2 B(T_star)`, which has the star's spectrum.
+pub fn reflected_radiance(
+    body: &Drawable,
+    star_radius_m: f64,
+    star_teff_k: f64,
+    star_distance_m: f64,
+) -> PerBand<f32> {
     if star_distance_m <= 0.0 {
         return PerBand::splat(0.0);
     }
@@ -215,7 +235,50 @@ pub fn surface_radiance(
     }))
 }
 
-fn uniforms(body: &Drawable, star_ly: DVec3, level: f32) -> BodySurfaceUniform {
+/// The half a body emits itself: a blackbody at whatever it radiates at.
+///
+/// No geometry in it at all. A surface at `T` has radiance `B(T)` whichever way it is turned and
+/// however far away it is, which is why this is the term that does not care about the star — and
+/// why a giant's night side is as bright at ten microns as its day side.
+///
+/// `effective_k`, not `equilibrium_k`: a giant makes heat of its own. Jupiter radiates 1.67
+/// times what it takes from the Sun, and at ten microns that is the difference between a body
+/// you can see and one you cannot.
+pub fn emitted_radiance(body: &Drawable) -> PerBand<f32> {
+    if body.effective_k <= 0.0 {
+        return PerBand::splat(0.0);
+    }
+    PerBand::new(std::array::from_fn(|i| {
+        blackbody::band_radiance(Band::ALL[i], body.effective_k) as f32
+    }))
+}
+
+/// What the surface reflects and what it emits, each as linear display light.
+///
+/// Through the band mapping but *not* through the tone map: the two mix differently across the
+/// disc, so the curve has to be evaluated per fragment. Tone-mapping them separately and adding
+/// the results put Jupiter's day side at twice its night side at ten microns, where the true
+/// ratio is 1.14 — the reflected half adds an eighth to a face that is already glowing.
+pub fn surface_shading(
+    session: &Session,
+    body: &Drawable,
+    star_radius_m: f64,
+    star_teff_k: f64,
+    star_distance_m: f64,
+) -> (glam::Vec3, glam::Vec3) {
+    let reflected = reflected_radiance(body, star_radius_m, star_teff_k, star_distance_m);
+    let emitted = emitted_radiance(body);
+    let through = |r| glam::Vec3::from_array(session.mapping.apply(&r));
+    (through(reflected), through(emitted))
+}
+
+fn uniforms(
+    body: &Drawable,
+    star_ly: DVec3,
+    tone: &crate::tonemap::ToneMap,
+    reflected: glam::Vec3,
+    emitted: glam::Vec3,
+) -> BodySurfaceUniform {
     let (dark, light, contrast) = body.surface.palette();
     let to_star = sim_to_render((star_ly - body.position_ly).normalize_or_zero()).as_vec3();
     // Stable per body and independent of everything else, so a world looks the same every time
@@ -225,7 +288,11 @@ fn uniforms(body: &Drawable, star_ly: DVec3, level: f32) -> BodySurfaceUniform {
         dark: Vec4::new(dark[0], dark[1], dark[2], 1.0),
         light: Vec4::new(light[0], light[1], light[2], 1.0),
         to_star: to_star.extend(NIGHT),
-        params: Vec4::new(level, contrast, seed, if body.surface.is_banded() { 1.0 } else { 0.0 }),
+        params: Vec4::new(0.0, contrast, seed, if body.surface.is_banded() { 1.0 } else { 0.0 }),
+        reflected: reflected.extend(0.0),
+        // `w` is how far the pattern inverts in the body's own light. See [`INVERSION`].
+        emitted: emitted.extend(if body.surface.is_banded() { INVERSION } else { 0.0 }),
+        exposure: Vec4::new(tone.surface_reference, tone.stops, 0.0, 0.0),
     }
 }
 
@@ -269,11 +336,12 @@ pub fn update_resolved(
             .clone();
         for body in &want {
             let star_distance = star_ly.distance(body.position_ly) * M_PER_LY;
-            let level = surface_level(&session.0, body, star_radius, star_teff, star_distance);
+            let (reflected, emitted) =
+                surface_shading(&session.0, body, star_radius, star_teff, star_distance);
             commands.spawn((
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(materials.add(BodySurfaceMaterial {
-                    uniforms: uniforms(body, star_ly, level),
+                    uniforms: uniforms(body, star_ly, &session.tone, reflected, emitted),
                 })),
                 Transform::default(),
                 NoFrustumCulling,
@@ -294,8 +362,9 @@ pub fn update_resolved(
 
         if let Some(asset) = materials.get_mut(&material.0) {
             let star_distance = star_ly.distance(body.position_ly) * M_PER_LY;
-            let level = surface_level(&session.0, body, star_radius, star_teff, star_distance);
-            let next = uniforms(body, star_ly, level);
+            let (reflected, emitted) =
+                surface_shading(&session.0, body, star_radius, star_teff, star_distance);
+            let next = uniforms(body, star_ly, &session.tone, reflected, emitted);
             if asset.uniforms != next {
                 asset.uniforms = next;
             }
@@ -324,6 +393,92 @@ mod tests {
             radius_m,
             effective_radius_m: 1.0,
             equilibrium_k: 250.0,
+            effective_k: Surface::Rock.effective_temperature(250.0),
+        }
+    }
+
+    /// A Jupiter-like body at Jupiter's distance, so the numbers mean something.
+    fn giant() -> Drawable {
+        let mut b = body(6.99e7, DVec3::X * 1.0e-9);
+        b.surface = Surface::GasGiant;
+        // The grey balance at 5.2 AU, which is what `equilibrium_temperature` would give.
+        b.equilibrium_k = 122.0;
+        b.effective_k = Surface::GasGiant.effective_temperature(122.0);
+        b
+    }
+
+    /// The whole point: a giant is a reflector in the optical and a source in the infrared.
+    ///
+    /// Jupiter radiates 1.67 times what it takes from the Sun, and at ten microns its own light
+    /// is orders above the sunlight it bounces. In V the reverse holds by a far wider margin,
+    /// which is why adding this changes nothing about a planet seen in natural light.
+    #[test]
+    fn a_giant_is_a_source_in_the_infrared_and_a_mirror_in_the_optical() {
+        let jupiter = giant();
+        let sun_distance = 5.2044 * AU;
+        let reflected = reflected_radiance(&jupiter, 6.957e8, 5772.0, sun_distance);
+        let emitted = emitted_radiance(&jupiter);
+
+        // Seven or so, not the hundreds an intuition about "thermal infrared" suggests: ten
+        // microns is on a 125 K body's Wien side, and the Sun still has a Rayleigh-Jeans tail
+        // there. It is the band where the two are closest to comparable, and the giant wins.
+        assert!(
+            emitted[Band::ThermalIr] > reflected[Band::ThermalIr] * 5.0,
+            "at ten microns a giant is its own light: {} against {}",
+            emitted[Band::ThermalIr],
+            reflected[Band::ThermalIr],
+        );
+        assert!(
+            reflected[Band::V] > emitted[Band::V] * 1.0e6,
+            "in the visible it is a mirror: {} against {}",
+            reflected[Band::V],
+            emitted[Band::V],
+        );
+    }
+
+    /// Internal heat is what makes it work, not the albedo correction alone.
+    ///
+    /// A giant with no heat of its own would sit at the temperature the sunlight it keeps
+    /// leaves it at, and at ten microns the difference between that and 124 K is most of a
+    /// factor of two.
+    #[test]
+    fn a_giants_own_heat_reaches_the_screen() {
+        let jupiter = giant();
+        let mut inert = jupiter.clone();
+        // The same body, absorbing and re-emitting and nothing else.
+        inert.effective_k =
+            jupiter.equilibrium_k * (1.0 - Surface::GasGiant.bond_albedo()).powf(0.25);
+
+        let warm = emitted_radiance(&jupiter)[Band::ThermalIr];
+        let cold = emitted_radiance(&inert)[Band::ThermalIr];
+        assert!(jupiter.effective_k > inert.effective_k, "internal heat should warm it");
+        assert!(warm > cold * 1.5, "and show: {warm} against {cold}");
+    }
+
+    /// The two ways a body can be drawn have to radiate at the same temperature, or a planet
+    /// changes brightness as it crosses the resolution threshold.
+    ///
+    /// Flux is radiance times solid angle, so the resolved surface's own emission scaled by the
+    /// disc it covers must be the unresolved point's thermal term. Only the thermal halves are
+    /// compared: the reflected half goes through `effective_radius`, which is a different
+    /// fiction on purpose.
+    #[test]
+    fn the_resolved_and_unresolved_paths_glow_alike() {
+        let jupiter = giant();
+        let observer = DVec3::X * 3.0e-5;
+        let distance_m = observer.distance(jupiter.position_ly) * M_PER_LY;
+
+        let surface = emitted_radiance(&jupiter);
+        let disc = std::f64::consts::PI * (jupiter.radius_m / distance_m).powi(2);
+        let point = crate::session::bare(jupiter.effective_k, jupiter.radius_m, distance_m);
+
+        for band in [Band::ThermalIr, Band::K, Band::Radio] {
+            let from_surface = surface[band] as f64 * disc;
+            let from_point = point[band] as f64;
+            assert!(
+                (from_surface / from_point - 1.0).abs() < 0.02,
+                "{band:?}: {from_surface:e} resolved against {from_point:e} unresolved",
+            );
         }
     }
 
@@ -352,13 +507,21 @@ mod tests {
         r[em_spectra::Band::V] as f64
     }
 
+    /// `reflected_radiance`, not `surface_radiance`: only the half that comes from the star
+    /// obeys the star's inverse square. A body's own emission does not move when it does, which
+    /// is the point of separating them.
     #[test]
     fn a_lit_surface_dims_as_the_inverse_square_of_its_distance_from_the_star() {
         let b = body(6.0e7, DVec3::ZERO);
-        let near = v(surface_radiance(&b, 6.957e8, 5772.0, AU));
-        let far = v(surface_radiance(&b, 6.957e8, 5772.0, 30.0 * AU));
+        let near = v(reflected_radiance(&b, 6.957e8, 5772.0, AU));
+        let far = v(reflected_radiance(&b, 6.957e8, 5772.0, 30.0 * AU));
         assert!((near / far - 900.0).abs() / 900.0 < 1e-6, "{near} against {far}");
-        assert_eq!(v(surface_radiance(&b, 6.957e8, 5772.0, 0.0)), 0.0);
+        assert_eq!(v(reflected_radiance(&b, 6.957e8, 5772.0, 0.0)), 0.0);
+
+        // And the emission does not move at all.
+        let own = v(emitted_radiance(&b));
+        assert_eq!(own, v(emitted_radiance(&b)));
+        assert!(own > 0.0, "a warm body is never perfectly dark");
     }
 
     /// Ice reflects six times what bare rock does, and the surface class is what knows it.
@@ -387,6 +550,7 @@ mod tests {
             let mut b = body(radius, DVec3::X * 1.0e-5);
             b.effective_radius_m = effective;
             b.equilibrium_k = temperature;
+            b.effective_k = temperature;
             candidates.push(b);
         }
         let luminance = |b: &Drawable| {

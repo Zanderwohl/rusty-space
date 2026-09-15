@@ -363,14 +363,16 @@ fn swarm_name(population: &lc_world::population::Population) -> String {
     )
 }
 
-/// The population as a torus, in curves: its inner and outer edges, and cross-sections round
-/// it.
+/// The population in curves: its inner and outer edges, and cross-sections round it.
 ///
-/// The same torus [`crate::envelope::build_envelope`] draws, from the same
-/// [`Extent`](lc_world::population::Extent). One circle was the core of it and not the torus.
+/// The same shape [`crate::envelope::profile_of`] builds the density field over, from the same
+/// [`Extent`](lc_world::population::Extent) — a shell between two radii, cut off at the widest
+/// inclination. The skeleton and the thing it is drawn over cannot be allowed to drift apart,
+/// and they did: this traced the elliptical tube the old surface shader used, whose corners are
+/// several degrees of latitude away from where the material actually stops.
 ///
-/// It degenerates correctly: an isotropic cloud has a half-thickness of a right angle, its
-/// cross-sections close into meridians and the whole thing reads as the shell it is.
+/// It degenerates correctly: an isotropic cloud reaches a right angle, its cross-sections close
+/// into full meridians and the whole thing reads as the shell it is.
 fn swarm_outlines(
     star_ly: DVec3,
     ship_ly: DVec3,
@@ -392,24 +394,31 @@ fn swarm_outlines(
 
     let mut out = vec![ring(extent.inner_m, 0.0), ring(extent.outer_m, 0.0)];
 
-    // The tube, as seen in a plane containing the pole. The same numbers the envelope mesh is
-    // built from, so the skeleton and the thing it is drawn over cannot drift apart.
-    let core = extent.core_m();
-    let half_width = extent.half_width_m();
-    let half_height = extent.half_height_m();
+    // The cross-section, in a plane containing the pole: out along the far edge, in across the
+    // top, back along the near edge, out across the bottom. Four legs of a closed loop, and
+    // `SWARM_SAMPLES` is divisible by four.
+    let arc = SWARM_SAMPLES / 4;
+    let half_angle = extent.half_angle_rad;
     for k in 0..SWARM_CROSS_SECTIONS {
         let phi = std::f64::consts::TAU * k as f64 / SWARM_CROSS_SECTIONS as f64;
         let outward = u * phi.cos() + v * phi.sin();
-        out.push(
-            (0..=SWARM_SAMPLES)
-                .map(|i| {
-                    let theta = std::f64::consts::TAU * i as f64 / SWARM_SAMPLES as f64;
-                    centre
-                        + outward * (core + half_width * theta.cos())
-                        + pole * (half_height * theta.sin())
-                })
-                .collect(),
-        );
+        let at = |radius: f64, latitude: f64| {
+            centre + (outward * latitude.cos() + pole * latitude.sin()) * radius
+        };
+        let leg = |steps: usize, f: &dyn Fn(f64) -> DVec3| {
+            (0..steps).map(|i| f(i as f64 / steps as f64)).collect::<Vec<_>>()
+        };
+        let mut curve = Vec::with_capacity(SWARM_SAMPLES + 1);
+        curve.extend(leg(arc, &|t| at(extent.outer_m, -half_angle + 2.0 * half_angle * t)));
+        curve.extend(leg(arc, &|t| {
+            at(extent.outer_m + (extent.inner_m - extent.outer_m) * t, half_angle)
+        }));
+        curve.extend(leg(arc, &|t| at(extent.inner_m, half_angle - 2.0 * half_angle * t)));
+        curve.extend(leg(arc, &|t| {
+            at(extent.inner_m + (extent.outer_m - extent.inner_m) * t, -half_angle)
+        }));
+        curve.push(curve[0]);
+        out.push(curve);
     }
     out
 }
@@ -682,7 +691,7 @@ mod tests {
     /// The curves are the two edges of the plane and cross-sections round the tube, and every
     /// one of them stays inside the extent it came from.
     #[test]
-    fn the_outline_is_a_torus_about_the_star() {
+    fn the_outline_is_the_shell_the_shader_fills() {
         let belt = belt();
         let e = belt.extent().unwrap();
         let (inner, outer, half_angle) = (e.inner_m, e.outer_m, e.half_angle_rad);
@@ -702,14 +711,19 @@ mod tests {
             );
             for at in curve {
                 let local = *at - centre;
-                let radius = (local - belt.pole * local.dot(belt.pole)).length();
+                // Distance from the *star*, not from the pole: the material is a shell between
+                // two radii, so that is the quantity that is bounded. A point at the inner edge
+                // and a high latitude is legitimately closer to the axis than `inner`.
+                let radius = local.length();
                 assert!(
                     radius >= inner - 1.0e3 && radius <= outer + 1.0e3,
                     "curve {which} reaches {radius:e}, outside [{inner:e}, {outer:e}]",
                 );
-                // And it is no taller than the inclination allows.
+                // And it is no taller than the inclination allows. The outer edge at the
+                // widest inclination is the highest the material goes, which is what the
+                // shader's own slab is set from.
                 let height = local.dot(belt.pole).abs();
-                let ceiling = (inner + outer) * 0.5 * half_angle.sin();
+                let ceiling = outer * half_angle.sin();
                 assert!(height <= ceiling + 1.0e3, "curve {which} is {height:e} above the plane");
             }
         }
@@ -738,8 +752,10 @@ mod tests {
             .flatten()
             .map(|at| at.dot(cloud.pole).abs())
             .fold(0.0f64, f64::max);
-        // As tall as the tube's own centre radius: a sphere, not a donut.
-        assert!((tallest / ((inner + outer) * 0.5) - 1.0).abs() < 0.01, "{tallest:e}");
+        // Right up to the outer radius on the pole: a shell, not a donut, and not the apple
+        // core the tube degenerated into — that stopped at forty-five degrees of latitude.
+        assert!((tallest / outer - 1.0).abs() < 0.01, "{tallest:e} against an outer {outer:e}");
+        let _ = inner;
     }
 
     /// A population with nothing in it has no outline, rather than a degenerate one.

@@ -82,6 +82,7 @@ pub fn parse(args: &[String]) -> Entry {
         target_swarm: flag("--swarm"),
         at_body: after("--at"),
         station: after("--station"),
+        lift_deg: value(args, "--lift"),
         screenshot: after("--shot"),
         after_frames: value(args, "--frames").unwrap_or(120),
         burst: value(args, "--burst").unwrap_or(1),

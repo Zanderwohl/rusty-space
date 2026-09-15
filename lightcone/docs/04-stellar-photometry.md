@@ -568,6 +568,11 @@ None of them blocks a first version.
   precisely the regime a completed Dyson swarm occupies. Use `1 - exp(-tau)` with
   `tau = sum d_i` rather than the linear sum once any population exceeds a few percent.
 - Non-spherical stars and gravity darkening for rapid rotators. Deferred.
+- Bodies as emitters rather than only occluders. A giant radiates more than it absorbs — see
+  [A giant does the same thing](#a-giant-does-the-same-thing-and-less-of-it) — and the renderer
+  already models it while `EmissionModel` does not. Adding it turns every system with a giant
+  into a small steady infrared excess and gives the swarm search a natural false positive worth
+  ruling out, which is a feature rather than a cost.
 
 
 ## Re-emission
@@ -605,6 +610,43 @@ test.
 `a` is the flux-weighted radius, `1/sqrt(E[1/r^2])`, not the mean semi-major axis. What sets an
 element's temperature is the flux it receives, and `E[1/r^2]` is already the correct average of
 that.
+
+### A giant does the same thing, and less of it
+
+A population is not the only thing in a system that radiates more than sunlight accounts for.
+**A gas giant is still shrinking, and the gravitational energy comes out as infrared.** Jupiter
+radiates 1.67 times what it absorbs and Saturn 1.78, so both sit above the temperature sunlight
+alone would leave them at and both are bright at ten microns on their night sides. The shape is
+the same one a swarm has — an excess over the equilibrium blackbody, steady, no flicker — and it
+is the reason this is worth writing down rather than leaving in the renderer.
+
+The temperature is the grey equilibrium one cut by the **Bond** albedo and raised by the
+internal heat, both as fourth powers. Bond, not geometric: a different quantity and not a
+different estimate of one. Jupiter's are 0.34 and 0.50, and using the wrong one moves its
+temperature by six per cent.
+
+**The ice giants disagree and nobody knows why.** Uranus radiates 1.06 times what it absorbs —
+consistent with no internal heat at all — and Neptune 2.61, though Neptune is half again as far
+from the Sun. Their effective temperatures come out within a fifth of a kelvin of each other, at
+59.1 K and 59.3 K, which is a coincidence of two numbers that ought to be related and are not.
+The usual explanation offered for Uranus is the impact that tipped it, and it is a story rather
+than a model.
+
+Nothing in this model derives an internal heat ratio from anything, because nothing can: it is
+not a function of mass, radius or temperature, and those three are what a body carries. One
+number therefore stands for both ice giants, nearer the Uranus end, and a generated ice giant is
+the cold thing Uranus is rather than the warm one Neptune is. `lc_world::surface` holds the
+numbers and its tests assert bracketing rather than agreement for the pair, so the compromise is
+recorded where it is made.
+
+**The instrument does not see any of this yet.** `EmissionModel` carries bodies as occluders and
+only populations re-emit, so a distant star's ten-micron excess is its swarm's alone. The
+renderer models a giant's emission and the photometry does not, which is a disagreement of
+exactly the kind this project otherwise refuses. It is safe only because it is one-directional:
+the search cannot currently produce a false positive it has no term for. Giving bodies an
+emission term in `EmissionModel` would make every system with a giant carry a small steady
+infrared excess, which is a *good* thing for the game — a natural confounder the player has to
+rule out — and a real piece of work. See the Open list above.
 
 ### It is also the diagnostic, not only the signature
 

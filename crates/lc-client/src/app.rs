@@ -92,6 +92,14 @@ pub struct DevEntry {
     /// Put the ship straight onto a station, by [`crate::navigation::Course::parse`] spelling.
     /// The same courses the interface offers, without the crossing in between.
     pub station: Option<String>,
+    /// Degrees to lift the ship out of the ecliptic, about the star, keeping its distance.
+    ///
+    /// Every station the interface offers is in the plane, and every population's pole is the
+    /// ecliptic pole, so from any of them a belt is edge-on and a shell is a band. This is the
+    /// only way to photograph one as the ring it is. It leaves the ship ballistic rather than
+    /// holding the station it was placed from — the waypoint would put it straight back in the
+    /// plane — so use it with `--rate 0`.
+    pub lift_deg: Option<f64>,
     pub screenshot: Option<String>,
     /// Frames to let the sky settle before the shutter. Pipelines compile lazily.
     pub after_frames: u32,
@@ -295,6 +303,19 @@ fn place_on_station(
     let Some(at) = waypoint.place_at(&system, now) else { return };
     let label = waypoint.label();
     ui.focus = course.target();
+
+    if let Some(degrees) = dev.lift_deg.filter(|d| d.abs() > 0.0) {
+        let at = lifted(at, system.origin_ly, degrees);
+        // Back at the star, which is the centre of whatever the lift was for looking down at.
+        if let Some(look) = crate::ui::Look::aimed_at(system.origin_ly - at) {
+            ui.look = look;
+        }
+        game.0.place_at(at);
+        ui.notify(format!("{label}, lifted {degrees:.0} degrees"), game.coordinate_time_s());
+        *done = true;
+        return;
+    }
+
     if let Some(look) =
         waypoint.focus(&system, now).and_then(|f| crate::ui::Look::aimed_at(f - at))
     {
@@ -304,6 +325,23 @@ fn place_on_station(
     game.0.ship.motion.begin_holding(waypoint);
     ui.notify(format!("on station: {label}"), game.coordinate_time_s());
     *done = true;
+}
+
+/// The same distance from the star, at `degrees` of latitude above the plane.
+///
+/// A rotation rather than a displacement, so a belt station stays in its belt and only the
+/// latitude changes — which is the one thing being varied.
+fn lifted(at: DVec3, star: DVec3, degrees: f64) -> DVec3 {
+    let out = at - star;
+    let radius = out.length();
+    if radius <= 0.0 {
+        return at;
+    }
+    // The simulation's pole is +Z; the in-plane part of the offset is what gets tipped.
+    let flat = DVec3::new(out.x, out.y, 0.0);
+    let Some(along) = flat.try_normalize() else { return at };
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    star + (along * cos + DVec3::Z * sin) * radius
 }
 
 /// One frame of boot, so the window is up before anything slow happens.
@@ -629,6 +667,29 @@ mod tests {
         assert!(game.distance_to(game.star(id).unwrap()) < before, "the ship did not move");
         assert!(game.ship.motion.beta.length() > 0.0, "and it is not under way");
         assert!(game.ship.motion.clock_s < game.coordinate_time_s(), "the ship clock should lag");
+    }
+
+    /// `--lift` is a rotation about the star, not a displacement: the ship keeps its distance
+    /// and only its latitude changes. A belt station that moved radially as well would stop
+    /// being a station in that belt, which is the whole point of lifting from one.
+    #[test]
+    fn a_lift_keeps_the_ship_at_its_own_radius() {
+        let star = DVec3::new(3.0, -1.0, 0.5);
+        let at = star + DVec3::new(2.0, 1.0, 0.0);
+        let radius = (at - star).length();
+        for degrees in [0.0, 15.0, 45.0, 90.0, -30.0] {
+            let moved = lifted(at, star, degrees);
+            assert!(
+                ((moved - star).length() - radius).abs() < 1.0e-12,
+                "{degrees} degrees changed the radius",
+            );
+            let latitude = ((moved - star).z / radius).asin().to_degrees();
+            assert!((latitude - degrees).abs() < 1.0e-9, "{latitude} for {degrees}");
+        }
+        // A ship already on the pole has no plane direction to tip, and is left where it is.
+        let polar = star + DVec3::Z;
+        assert_eq!(lifted(polar, star, 30.0), polar);
+        assert_eq!(lifted(star, star, 30.0), star);
     }
 
     /// The camera turns; it does not travel. Everything drawn is at a fixed radius around it.

@@ -14,8 +14,24 @@ pub struct BodySurfaceUniform {
     pub light: Vec4,
     /// World direction to the star; `w` is the ambient floor on the night side.
     pub to_star: Vec4,
-    /// `(brightness, contrast, seed, banded)`.
+    /// `(unused, contrast, seed, banded)`.
     pub params: Vec4,
+    /// Starlight the surface reflects, as linear display light before the tone map. `w` unused.
+    pub reflected: Vec4,
+    /// Light the body makes itself, in the same units; `w` is how far the pattern inverts in it.
+    ///
+    /// Separate from the reflected term rather than summed into it, because only the reflected
+    /// half is Lambert-shaded. A body radiates at its own temperature whichever way it is
+    /// turned, which is why a gas giant's night side is as bright at ten microns as its day
+    /// side. In the optical this is simply zero, so nothing about a sunlit planet changes.
+    pub emitted: Vec4,
+    /// `(surface_reference, stops, 0, 0)`: the tone map, for the shader to evaluate itself.
+    ///
+    /// Per fragment rather than per body, because the mix of reflected and emitted light
+    /// changes across the disc and the tone map is logarithmic — mapping the two separately and
+    /// adding the results put Jupiter's day side twice its night side at ten microns where the
+    /// true ratio is 1.14. The star field already evaluates the same curve per star.
+    pub exposure: Vec4,
 }
 
 impl Default for BodySurfaceUniform {
@@ -24,7 +40,10 @@ impl Default for BodySurfaceUniform {
             dark: Vec4::new(0.13, 0.12, 0.11, 1.0),
             light: Vec4::new(0.34, 0.32, 0.29, 1.0),
             to_star: Vec4::new(0.0, 0.0, 1.0, 0.015),
-            params: Vec4::new(1.0, 0.9, 0.0, 0.0),
+            params: Vec4::new(0.0, 0.9, 0.0, 0.0),
+            reflected: Vec4::ONE,
+            emitted: Vec4::ZERO,
+            exposure: Vec4::new(1.0, 2.5, 0.0, 0.0),
         }
     }
 }

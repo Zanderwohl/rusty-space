@@ -44,6 +44,7 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--shot <path> --frames <n>` | photograph and quit |
 | `--burst <n>` | photograph `n` **consecutive** frames — the only way to see a flicker |
 | `--at <body>` / `--station <course>` | stand off a body, or start on a station |
+| `--lift <deg>` | raise the ship out of the ecliptic about the star, keeping its distance |
 | `--panel <name>` / `--tune` | open a panel |
 | `--menu` | hold at the main menu, so `--shot` photographs that instead of the sky |
 | `--signin` | hold at the sign-in modal, which draws over the menu and no action can reach |
@@ -53,6 +54,11 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 
 Most of what has gone wrong in the renderer was found this way and could not have been found
 any other way.
+
+`--lift` is there because every station is in the ecliptic and every population's pole is the
+ecliptic pole, so without it a belt is edge-on in every photograph that can be taken and a
+shell is a band. It leaves the ship ballistic rather than holding — the waypoint would put it
+straight back in the plane — so pair it with `--rate 0`.
 
 The store's tests need PostgreSQL (`createdb lc_store`; `LC_STORE_URL` overrides). They
 **skip** when they cannot reach one — keep it that way, so the suite passes without it.
@@ -81,6 +87,17 @@ Each of these cost real time. None of them are visible from the code that hits t
   camera swings wildly from frame to frame.
 - Two runs stopped at frame `n` and frame `n+1` are **not** consecutive frames. They have
   accumulated different wall time. Use `--burst`.
+- `--turn` and `--pitch` **do not always land**. Three runs of one `--pitch 60 --frames 200`
+  gave two frames at pitch zero and one pitched. Two runs of the same command are not
+  byte-identical either, so a hash tells you nothing. Check that the shot is the view you asked
+  for before you measure it, or compare against something in the frame that cannot move.
+- The window is **not always the same size**. A screenshot taken on one display and one taken
+  after the laptop moved to another are 1280x720 and 2560x1440, and a patch measured at fixed
+  pixel coordinates then samples two different parts of the picture. It reads exactly like a
+  regression and is not one. Measure in fractions of the frame.
+- WGSL reserves more words than you expect. `from` and `target` are both reserved and both are
+  natural names in a ray marcher; the error arrives from the pipeline cache at run time, not
+  from `cargo build`.
 
 **`em-sim` and `em-foundations`**
 

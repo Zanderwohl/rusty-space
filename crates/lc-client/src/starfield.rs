@@ -326,7 +326,7 @@ impl Point {
             teff_k: star_teff_k as f32,
             radius_m: d.effective_radius_m as f32,
             seed: 0.0,
-            warm: [d.equilibrium_k as f32, thermal_scale as f32, 0.0, 0.0],
+            warm: [d.effective_k as f32, thermal_scale as f32, 0.0, 0.0],
         }
     }
 }
@@ -426,7 +426,7 @@ pub fn uniforms(
 ///
 /// Unavailable bands are zeroed here rather than in the shader, matching `BandMapping::apply`:
 /// an instrument that cannot sense a band contributes nothing through it.
-fn band_columns(mapping: &BandMapping) -> [Vec4; BANDS] {
+pub fn band_columns(mapping: &BandMapping) -> [Vec4; BANDS] {
     std::array::from_fn(|b| {
         let band = Band::ALL[b];
         if !mapping.available.contains(band) {

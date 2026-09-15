@@ -318,11 +318,88 @@ bottleneck.
 
 ![A belt from outside](../images/belt.png)
 
-**Decided: a shell of proxy geometry whose opacity at each latitude is the population's own sky
-density.** One shape covers every case: a belt's inclinations are narrow, so the density is a
-band near the plane and it reads as a ring; an isotropic swarm's is flat and it reads as a
-sphere. Nothing special-cases either, and the mesh is built from the inclination distribution
-alone, so it is static — what changes as the ship moves is the transform.
+**Decided: a convex proxy whose fragments march the population's own density field.** One shape
+covers every case, because the shape is not geometry: it is two rows of a profile texture, and a
+belt and an isotropic swarm differ only in what those rows say. The radius row comes from the
+semi-major axis and eccentricity distributions, the latitude row from the inclination
+distribution, nothing depends on longitude, and those three distributions are everything a
+population carries. The proxy is one sphere shared by every population in the system.
+
+This replaced a torus of proxy geometry with the density painted on its surface, and the reason
+is that a surface cannot say how much material a sightline crossed. All it has is the crossing
+count and the incidence angle, and from inside a belt — where the ship spends its time — every
+sightline meets the far wall exactly once and nearly face-on. Looking along the belt and looking
+at the pole came out within four per cent of each other, measured, where the material along them
+differs by a factor of seven. The same two quantities failed the other way at a grazing edge:
+four crossings each at the clamped incidence, all adding, painted a rim eight times brighter
+than the material under it.
+
+Marched, those follow from the geometry rather than from a constant. **The calibration is one
+ray**: radially outward from the star in the population's plane, which is the sightline whose
+extinction *is* the covering fraction. The host integrates the profile along it and the shader
+solves for the extinction coefficient that puts it at the mapped opacity. Every other sightline
+is then whatever the field says. Nothing is left to find by looking, and a change to the shape
+cannot change what the population paints, because the shape is what the calibration is solved
+against — which is what the old area correction was for, and it needed a factor of two in it
+that had to be measured off a screenshot.
+
+### A population is different in every band
+
+**Decided: `band_response` sets the extinction, not just a colour.** A population carries a
+per-band response, and until now it reached the renderer only as a choice between two hard-coded
+tints — so every sensor preset drew the same grey, and "dust penetration" penetrated nothing.
+Measured, the envelope was bit-identical in all six presets while the star field behind it
+changed.
+
+A band changes two separate things about a population, and both of them matter:
+
+- **How much is in the way.** `em_spectra::extinction::RATIO` runs from 1.32 in B to 1e-10 at
+  21 cm, so a dust cloud is thirteen decades more transparent in the radio. That is the whole
+  mechanism the dust-penetration preset is named for, and it is the per-band extinction
+  coefficient the march multiplies its one column integral by.
+- **What the material that is there looks like.** In the optical a belt shines by scattered
+  starlight, so it is the colour of its star; at ten microns it shines by its own two-hundred-
+  kelvin glow, which the star has none of. Both scale with `band_response` — emissivity and
+  absorptivity are the same number, which is why one array serves both.
+
+The march is unchanged and so is its cost: it produces one column of material and every band's
+optical depth is that column times that band's own coefficient, so seven bands cost what one
+did. Only the conversion at the end differs, and it is seven exponentials and a matrix.
+
+**The level is a display decision; only the colour is physics.** A belt's real surface
+brightness is four decades under a star's and renders as nothing at all in every normalised
+preset — true photometrically and useless as a picture, which is the argument the fourth root
+already settles for the opacity. So the source spectrum is normalised to put the brightest
+display channel at a fixed level, and what carries the information is the *balance* between
+the channels and the per-band opacity. A population stays legible in a band its light barely
+reaches while still saying which band it is being seen in.
+
+What that buys, measured on the same frame with the same belt made of rock and of dust:
+
+| preset | rock | dust |
+|---|---|---|
+| natural | (74, 64, 65) | (64, 66, 77) |
+| thermal | (78, 42, 42) | (21, 16, 77) |
+| dust penetration | (78, 1, 1) | (2, 54, 43) |
+
+Rock reads warm in the optical, red in the thermal — it is warm — and bright at 21 cm, where a
+cold body is relatively much brighter than a sun-like reference. Dust reads blue in the optical
+because it interacts more in B, loses the thermal channel where its response is 0.06, and at
+21 cm is simply not there. That last row is the grey-versus-reddening diagnostic of
+[04-stellar-photometry.md](04-stellar-photometry.md), arrived at from the physics rather than
+from an `if`.
+
+**No drawn population is dusty yet.** The generated belts and swarms are `PerBand::splat(1.0)`,
+which is right — a metre of rock is a metre of rock from B to 21 cm — and the one dusty
+population the generator makes is the Oort cloud, which is below the visibility floor. So the
+mechanism is correct, tested, and currently invisible in play. It becomes visible the moment
+anything dusty is drawn, and a debris belt's *dust* component, which is what infrared astronomy
+actually sees, would be the obvious first one.
+
+**Cost: 0.076 ms per march step per frame**, measured on an M3 Pro at 1280x720 with two
+populations each covering the sky. Thirty-two steps is about 2.4 ms and is within a mean of one
+level in 255 of a ninety-six-step render. It scales with pixels and nothing else, so the same
+view at 4K wants a half-resolution pass rather than a smaller step count.
 
 ### Resolved bodies
 
@@ -359,6 +436,37 @@ had been using. Ice reflects six times what bare rock does.
 The exposure meters bodies along with the stars — see [Metering](#metering) — so a planet
 large enough to be the picture is what the window is placed on, and the star field behind it
 drops away as it does in any photograph of a planet.
+
+**A giant makes its own light.** Jupiter radiates 1.67 times what it takes from the Sun and
+Saturn 1.78 — they are still shrinking, and the gravitational energy comes out as infrared. So a
+body is shaded as two terms rather than one: starlight it reflects, which is Lambert-shaded and
+has the star's spectrum, and a blackbody at its own effective temperature, which is not shaded
+at all. A surface at `T` has radiance `B(T)` whichever way it is turned, and that is the whole
+reason a gas giant's night side is as bright at ten microns as its day side.
+
+The effective temperature is the grey equilibrium one cut by the **Bond** albedo and raised by
+the internal heat. Bond, not geometric — a different quantity, not a different estimate of one:
+Jupiter's are 0.34 and 0.50, and using the wrong one puts its temperature out by six per cent.
+Against the measured values this is good to a couple of per cent for Jupiter and Saturn. The ice
+giants cannot both be right: Uranus is 1.06 and Neptune 2.61 though Neptune is half again as far
+out, their effective temperatures land within a fifth of a kelvin of each other, and no model
+explains it. One number stands for both, nearer the Uranus end.
+
+**In the infrared the bands invert.** A belt is a gap in the cloud deck, so it reflects less and
+lets more of the warm interior out — the same fact twice, and it is why Jupiter's dark belts are
+its bright ones at five microns. Mean-preserving, so changing band moves the pattern about
+rather than changing how much light the body sends.
+
+**The tone map is evaluated per fragment**, as the star field already evaluates it per star. It
+has to be: the two terms mix differently across the disc and the curve is logarithmic, so one
+level for the whole surface gets the terminator wrong. Mapping them separately and adding the
+results put Jupiter's day side at twice its night side at ten microns, where the true ratio is
+1.14 — the reflected half adds an eighth to a face that is already glowing.
+
+An unresolved body was already summing the same two terms in the point shader; it now radiates
+at the same effective temperature, so nothing changes as a planet crosses the resolution
+threshold. A test compares the two paths directly, because flux is radiance times solid angle
+and there is no excuse for them to disagree.
 
 ### Rings
 
@@ -408,29 +516,43 @@ since the ship is *inside* that shell the result was a grey wash over the whole 
 root gives 0.001, 0.013 and 0.80 — a trace, a haze and a structure, which is the right reading
 of all three.
 
-**A shell the ship is inside is dimmed to about a fifth.** From outside a belt is a ring and the
+**A shell the ship is inside is dimmed to about a tenth.** From outside a belt is a ring and the
 eye reads it as structure; from inside it covers the entire sky, and the opacity that made the
 ring legible buries the star field. The same number cannot serve both. Dimmed, the inside case
 is what it should be: a faint band along the plane, the way the zodiacal light is.
+
+It is a weaker knob than it looks, and that is worth knowing before reaching for it. The
+exposure meters the whole frame, so inside a shell that fills the sky the meter follows this
+number and the displayed brightness barely moves — halving it, measured, changed the view from
+inside the Kuiper belt by nothing at all and the view from inside the asteroid belt by an
+eighth. What it still sets is the band against the *stars*, which is the comparison that
+matters.
 
 An envelope is a visualisation either way — an orbit line, not a photograph. What it carries
 honestly is the ordering.
 
 ### The rest
 
-**Decided: a layered-swarm surface shader.** A population has no
-members to draw — that is the entire point of
-[04-stellar-photometry.md](04-stellar-photometry.md) — so the renderer cannot instance from
-world state and should not invent world state to instance from.
+**Decided: march the density field.** A population has no members to draw — that is the entire
+point of [04-stellar-photometry.md](04-stellar-photometry.md) — so the renderer cannot instance
+from world state and should not invent world state to instance from. It draws the distribution
+instead, as above: one draw call per population regardless of element count, and it cannot drift
+out of agreement with the physics because it is reading the physics.
 
-Instead, draw the population's envelope: a torus for a belt, a shell for a swarm, sized from
-the distribution's `a` and inclination spread. Shade it with a procedural texture that reads
-as many small bodies, with two or three parallaxing layers to give it depth and a density that
-tracks the population's actual `Sigma`. Where the baked emission shell exists, sample its `m`
-channel so the visible density and the photometric deficit are the same number.
+**The grain moves the band's edge rather than dimming what is inside it.** Scaling the density
+is what the surface shader did, and in a volume it disappears: a sightline crosses several
+grains and averages them, so eighty-five per cent of contrast per sample came out as eighteen
+on screen and read as nothing at all. An edge does not average — there is only one of it along
+any sightline — so that is where the texture goes, and a band with a ragged edge reads as made
+of things where a soft gradient does not. The reference ray lies in the plane, where the warp
+cannot reach it, so the calibration is untouched by whatever the grain does.
 
-This is good enough, it costs one draw call per population regardless of element count, and it
-cannot drift out of agreement with the physics because it is reading the physics.
+Still wanting: the fine structure is one octave of value noise evaluated per step, which is most
+of the shader's ALU. A tiling 3D noise texture would be one trilinear fetch instead of forty
+operations and would pay for a second octave. Where the baked emission shell exists, sampling
+its `m` channel would make the visible density and the photometric deficit the same number.
+Single scattering — `exp(-tau)` to the star and a Henyey-Greenstein phase — is what would make a
+belt read as lit rather than as glowing, and the star's position is already known.
 
 Individual elements are drawn only when they have been promoted out of the population — when a
 player selects specific members for a manoeuvre — at which point there are a handful of them
