@@ -80,3 +80,106 @@ fn the_frames_after_a_cut_in_flight_are_cheap() {
     println!("a frame after a cut in flight costs {each:?}");
     assert!(each < std::time::Duration::from_millis(4), "{each:?} is most of a frame");
 }
+
+/// Ordering a crossing while one is already under way, to somewhere further along.
+///
+/// `Cruise::plan` was a **rest-to-rest** brachistochrone: it took a start, an end, a time and a
+/// drive, and no velocity at all. So replacing a crossing in flight planned a fresh profile from
+/// standstill and the speed already built up was silently discarded — which read in the
+/// interface as the velocity dropping to 0.00c the instant a new destination was chosen.
+#[test]
+fn a_crossing_ordered_in_flight_keeps_the_speed_already_built() {
+    let mut craft = crossing_craft();
+    let Motive::Crossing(cruise) = &craft.motion.motive else { panic!("premise") };
+    let at = cruise.duration_s() * 0.10;
+    craft.advance(at, at);
+
+    let moving = craft.motion.beta.length();
+    assert!(moving > 0.01, "premise: actually under way at {moving}c");
+
+    // Further along the way it is already going, which is what re-aiming usually is.
+    let further = DVec3::new(9.0, 0.0, 0.0);
+    motion::apply(
+        &mut craft.motion,
+        craft.system.as_deref(),
+        &Event {
+            ship: ShipId(0),
+            at_t: at,
+            change: Change::Cross { to_ly: further, drive: Kind::Ship.drive() },
+        },
+    )
+    .expect("a crossing from a moving start");
+
+    // A frame later, not immediately: the fold leaves `beta` stale until something advances.
+    craft.advance(at + 1.0, 1.0);
+    let after = craft.motion.beta.length();
+    assert!(
+        after >= moving,
+        "the ship was at {moving}c and the new crossing left it at {after}c",
+    );
+}
+
+/// From an orbit, which is the other case: a small velocity in whatever direction it happens to
+/// be. It is carried rather than discarded, and the sideways part of it is far too small to
+/// matter.
+#[test]
+fn a_crossing_ordered_from_an_orbit_keeps_its_speed() {
+    let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+    // Thirty kilometres a second, mostly across the line rather than along it.
+    craft.motion.beta = DVec3::new(0.00002, 0.00009, 0.0);
+    craft.motion.set_adrift(0.0);
+    let moving = craft.motion.beta.length();
+
+    motion::apply(
+        &mut craft.motion,
+        craft.system.as_deref(),
+        &Event {
+            ship: ShipId(0),
+            at_t: 0.0,
+            change: Change::Cross { to_ly: DVec3::new(4.0, 0.0, 0.0), drive: Kind::Ship.drive() },
+        },
+    )
+    .expect("a crossing from an orbit");
+
+    craft.advance(1.0, 1.0);
+    assert!(
+        craft.motion.beta.length() > moving * 0.1,
+        "an orbit's speed was thrown away: {moving}c became {}c",
+        craft.motion.beta.length(),
+    );
+}
+
+/// **The limit of a straight-line plan, pinned so it is a known shape rather than a surprise.**
+///
+/// Re-aiming ninety degrees at relativistic speed: the component along the new line is carried
+/// exactly, and the component across it is not, because shedding it curves the path and a
+/// `Cruise` is a straight line between two points. Fixing that means giving the plan a matching
+/// segment of its own.
+#[test]
+fn a_hard_sideways_re_aim_still_loses_what_is_across_the_line() {
+    let mut craft = crossing_craft();
+    let Motive::Crossing(cruise) = &craft.motion.motive else { panic!("premise") };
+    let at = cruise.duration_s() * 0.10;
+    craft.advance(at, at);
+    let moving = craft.motion.beta.length();
+
+    // Ninety degrees off: almost all of the velocity is across the new line.
+    motion::apply(
+        &mut craft.motion,
+        craft.system.as_deref(),
+        &Event {
+            ship: ShipId(0),
+            at_t: at,
+            change: Change::Cross { to_ly: DVec3::new(0.0, 3.0, 0.0), drive: Kind::Ship.drive() },
+        },
+    )
+    .expect("accepted");
+
+    craft.advance(at + 1.0, 1.0);
+    let after = craft.motion.beta.length();
+    assert!(after < moving, "premise: the across-the-line part is what is lost");
+    assert!(
+        after > 0.0,
+        "even a sideways re-aim keeps what little is along the new line: {after}c",
+    );
+}

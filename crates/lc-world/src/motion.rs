@@ -225,7 +225,11 @@ pub fn apply(
             // From where it actually is at the stamped time, like every other arm: an event
             // may be folded later than it happened, and planning from the ship's last advanced
             // position would aim from somewhere it was not.
-            let (at, _) =
+            // The velocity matters: a crossing ordered from an orbit, or from a coast, starts
+            // with whatever the ship already has. Discarding it put the ship back at rest and
+            // read in the interface as the speed dropping to 0.00c the moment a destination
+            // was chosen. See `Cruise::plan_from`.
+            let (at, beta) =
                 state_at(state, system, event.at_t).unwrap_or((state.position_ly, state.beta));
             let approach = (*to_ly - at).normalize_or_zero();
             // Already there, or asked to cross to where it stands. Neither is a crossing.
@@ -235,9 +239,10 @@ pub fn apply(
             // Stopping short, because arriving *at* a star is arriving inside it.
             let stop = *to_ly - approach * crate::flight::STANDOFF_LY;
             state.position_ly = at;
+            state.beta = beta;
             state.drive = *drive;
             state.begin_crossing(
-                crate::flight::Cruise::plan(at, stop, event.at_t, *drive),
+                crate::flight::Cruise::plan_from(at, beta, stop, event.at_t, *drive),
                 None,
             );
             Ok(())
