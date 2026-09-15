@@ -86,6 +86,10 @@ pub struct DevEntry {
     pub observe_immediately: bool,
     /// Point at the nearest star carrying a swarm, for showing the thing off.
     pub target_swarm: bool,
+    /// Close on the nearest contact as soon as there is one. Closing on somebody cannot be
+    /// photographed without ordering it, and ordering it is a click on a list that does not
+    /// exist until a shard has said who is there.
+    pub chase: bool,
     /// Put the ship beside a body of the local system, by name. There is no action for this and
     /// there never will be; it exists so a thing too small to fly to can be looked at.
     pub at_body: Option<String>,
@@ -157,6 +161,7 @@ impl Plugin for ClientPlugin {
                     photograph,
                     place_at_body.run_if(in_state(AppState::InGame)),
                     place_on_station.run_if(in_state(AppState::InGame)),
+                    chase_nearest.run_if(in_state(AppState::InGame)),
                     (read_keys, grab_cursor, look_around, crate::input::read_wheel)
                         .chain()
                         .run_if(in_state(AppState::InGame)),
@@ -412,6 +417,30 @@ fn place_at_body(
         ui.look = look;
     }
     ui.notify(format!("standing off {want}"), game.coordinate_time_s());
+    *done = true;
+}
+
+/// Development entry: close on the nearest contact, once there is one to close on.
+///
+/// Polled rather than run on entering the world, like `--at`: a contact arrives from a shard
+/// that has to connect first, and there is nobody in the list on the frame the sky appears.
+fn chase_nearest(
+    dev: Res<DevEntry>,
+    game: Res<Game>,
+    uplink: Res<crate::uplink::Uplink>,
+    mut out: MessageWriter<Requested>,
+    mut done: Local<bool>,
+) {
+    if *done || !dev.chase {
+        return;
+    }
+    let here = game.ship.motion.position_ly;
+    let Some(nearest) = uplink.contacts.iter().min_by(|a, b| {
+        here.distance_squared(a.position_ly).total_cmp(&here.distance_squared(b.position_ly))
+    }) else {
+        return;
+    };
+    out.write(Requested(Action::Intercept(nearest.ship_id)));
     *done = true;
 }
 

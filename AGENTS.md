@@ -52,6 +52,7 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--turn <deg>` / `--pitch <deg>` | turn the view, the only way to put something off screen |
 | `--zoom <notches>` | move the orbit camera; both its stops are clamps, so ask for far too much |
 | `--traffic <n>` | put `n` craft near the start, so there is another ship to photograph |
+| `--chase` | close on the nearest of them, the only way to photograph an intercept |
 | `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable |
 
 `--turn`, `--pitch` and `--zoom` are applied **last**, after anything that aims — `--fly` ends

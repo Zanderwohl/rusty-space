@@ -519,17 +519,16 @@ fn ships(
             ui.horizontal(|ui| {
                 ui.label(&contact.name);
                 ui.weak(span(range));
-                // Right-aligned, because the name and the range are what a list is read down
-                // and a button in the middle of that column breaks the scan.
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if chasing {
-                        if ui.button("break off").clicked() {
-                            ask(out, Action::BreakOff);
-                        }
-                    } else if ui.button("intercept").clicked() {
-                        ask(out, Action::Intercept(contact.ship_id));
+                // Inline rather than right-aligned: a right-to-left layout claims the whole
+                // available width, and the panel grew to a third of the screen to hold one
+                // button.
+                if chasing {
+                    if ui.button("break off").clicked() {
+                        ask(out, Action::BreakOff);
                     }
-                });
+                } else if ui.button("intercept").clicked() {
+                    ask(out, Action::Intercept(contact.ship_id));
+                }
             });
             ui.horizontal(|ui| {
                 ui.add_space(12.0);

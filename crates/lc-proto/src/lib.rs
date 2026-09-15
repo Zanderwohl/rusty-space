@@ -462,6 +462,22 @@ pub enum Outbound {
     /// It says nothing about *why*. A client that learned whether its ticket was expired, or
     /// spent, or for another server, would have learned how close it got.
     Unauthenticated,
+    /// **Your ship is now doing this.** What the authority did to a craft that its owner did
+    /// not order.
+    ///
+    /// Every other change to a ship is an order the client sent and can fold for itself. A
+    /// standing [`Order::Intercept`] is the exception and the reason this exists: the authority
+    /// re-solves it against sightings the client cannot reproduce, whenever it likes, and
+    /// without this the two ends would quietly fly different ships — the server closing on a
+    /// quarry while the client's copy drifted where it was left.
+    ///
+    /// The same [`Motion`] a welcome carries, and applied the same way, because a re-acquire
+    /// and "here is what you are doing now" are one question asked by two things. See
+    /// `lightcone/docs/17-reconciliation.md`.
+    ///
+    /// It says nothing a client is not entitled to: a `Motive::Rendezvous` is relative
+    /// offsets and one sighting, which is what its own eyes gave it.
+    Flying { ship_id: ShipId, ship: Motion },
     /// This client is sending faster than the server will take, and the message was dropped
     /// unread. Not a disconnection: a client that hits this has a bug, and is told so it can be
     /// fixed. Nothing about the world leaks through it — it is a fact about the client's own

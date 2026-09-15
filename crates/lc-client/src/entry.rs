@@ -63,6 +63,7 @@ pub fn parse(args: &[String]) -> Entry {
         actions.push(Action::FlyToNearest);
     }
 
+
     // Last, and after anything that aims: `--turn` exists to put something off screen, and
     // `--fly` ends by pointing the view at what it is flying to. Pushed first, the aim undid
     // the turn and the two flags together were the same picture as the one on its own.
@@ -89,6 +90,7 @@ pub fn parse(args: &[String]) -> Entry {
         observe_immediately: !stay_in_menu
             && (flag("--observe") || flag("--shot") || flag("--at") || flag("--station")),
         target_swarm: flag("--swarm"),
+        chase: flag("--chase"),
         at_body: after("--at"),
         station: after("--station"),
         lift_deg: value(args, "--lift"),

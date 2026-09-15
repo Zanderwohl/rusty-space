@@ -324,7 +324,7 @@ impl<J: Journal> Server<J> {
         }
         // After the intents, so an intercept ordered this tick is not immediately re-solved
         // against the plan it just made.
-        self.steer_pursuits(&mut events, &mut deliveries);
+        self.steer_pursuits(wire, &mut events, &mut deliveries);
         self.journal.write(&events, &deliveries).await?;
         self.pending = events;
         self.state_the_clock(wire);
@@ -370,12 +370,19 @@ impl<J: Journal> Server<J> {
             Inbound::Act(intent) => {
                 let ship_id = intent.ship_id;
                 match self.act(from, intent, events, deliveries) {
-                    Ok(applied) => wire.send(from, Outbound::Accepted {
-                        ship_id,
-                        event_id: applied.event_id,
-                        at_t: applied.at_t,
-                        order: applied.order,
-                    }),
+                    Ok(applied) => {
+                        // An intercept is a policy, so what it *did* — the first approach —
+                        // is not something the client can work out from the order coming back.
+                        if matches!(applied.order, Order::Intercept { .. }) {
+                            self.tell_flying(wire, CraftId(ship_id.0));
+                        }
+                        wire.send(from, Outbound::Accepted {
+                            ship_id,
+                            event_id: applied.event_id,
+                            at_t: applied.at_t,
+                            order: applied.order,
+                        })
+                    }
                     Err(reason) => wire.send(from, Outbound::Refused { ship_id, reason }),
                 }
             }
@@ -691,6 +698,19 @@ impl<J: Journal> Server<J> {
     }
 
 
+    /// Tell a craft's owner what it is now flying.
+    ///
+    /// Only for changes the owner did not ask for — everything else it folded itself when its
+    /// order came back accepted, and saying it twice would be a second copy of an answer.
+    fn tell_flying(&self, wire: &mut impl Transport, id: CraftId) {
+        let Some(craft) = self.fleet.get(id) else { return };
+        let Some(owner) = self.owners.get(&id).copied() else { return };
+        wire.send(owner, Outbound::Flying {
+            ship_id: ShipId(id.0),
+            ship: (&craft.motion.snapshot()).into(),
+        });
+    }
+
     /// Fly every standing intercept one tick.
     ///
     /// Each craft steers by what **it** can see, which is the same sighting its owner is sent
@@ -699,7 +719,12 @@ impl<J: Journal> Server<J> {
     /// than a shortcoming of the guidance.
     ///
     /// What to do is [`chase::decide`]'s; this is the half that may touch the fleet.
-    fn steer_pursuits(&mut self, events: &mut Vec<Event>, deliveries: &mut Vec<Scheduled>) {
+    fn steer_pursuits(
+        &mut self,
+        wire: &mut impl Transport,
+        events: &mut Vec<Event>,
+        deliveries: &mut Vec<Scheduled>,
+    ) {
         let now = self.now_t;
         let now_s = now as f64 * 1.0e-6;
         for (id, plan) in chase::decide(&self.fleet, &self.pursuits, now) {
@@ -715,6 +740,9 @@ impl<J: Journal> Server<J> {
             // A burn, and burns are the loudest thing a ship does. Everyone in range learns
             // that this craft manoeuvred, at light delay, exactly as they would for any other.
             self.emit(id, KIND_BURN, BURN_POWER_W, "{}".into(), now, events, deliveries);
+            // Its owner learns *what* it is flying, at once and directly. Nobody else does:
+            // this is a ship being told about itself.
+            self.tell_flying(wire, id);
         }
     }
 

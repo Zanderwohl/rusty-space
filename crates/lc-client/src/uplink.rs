@@ -376,6 +376,14 @@ fn fold(
         Outbound::Unauthenticated => {
             uplink.state = State::Refused("the server did not accept this ticket".into());
         }
+        Outbound::Flying { ship_id, ship } => {
+            // Taken, not reconciled. This is the authority saying what this ship is doing,
+            // about a solve the client has no way to reproduce — it cannot see the quarry the
+            // way the server can, which is the whole reason the server flies the policy.
+            if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
+                game.0.restore(&(&ship).into());
+            }
+        }
         Outbound::Present(cleared) => {
             uplink.contacts =
                 cleared.into_iter().map(|c| Contact::from(c.into_inner())).collect();
