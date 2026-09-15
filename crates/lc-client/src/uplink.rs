@@ -12,7 +12,10 @@
 use std::sync::Mutex;
 
 use bevy::prelude::*;
-use lc_proto::{ClientId, Inbound, Order, Outbound, PROTOCOL_VERSION, Refusal, ShipId, Sighting};
+use glam::DVec3;
+use lc_proto::{
+    ClientId, Inbound, Order, Outbound, PROTOCOL_VERSION, Presence, Refusal, ShipId, Sighting,
+};
 
 use crate::link::{Link, Status};
 
@@ -56,6 +59,43 @@ pub struct Joined {
     /// The account's display name, as the broker knows it. A cache and not a fact: the broker
     /// owns it and a rename appears next session.
     pub name: String,
+}
+
+/// Another craft, as this ship currently sees it.
+///
+/// Everything here is **retarded**. The position is where the light arriving now left from, so
+/// a contact under way is drawn behind where it actually is, and the faster it is going the
+/// further behind. That is the game rather than a lag.
+///
+/// Held still between statements rather than extrapolated. The server states these every tick
+/// it has any to state, and a client that ran `beta` forward between them would be predicting
+/// a worldline it was deliberately not given — see [`Presence`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Contact {
+    pub ship_id: ShipId,
+    pub name: String,
+    pub length_m: f64,
+    /// Light-years from the world origin, where the light left.
+    pub position_ly: DVec3,
+    pub beta: DVec3,
+    /// Unit vector the nose pointed along.
+    pub facing: DVec3,
+    /// Coordinate seconds the light left.
+    pub emitted_s: f64,
+}
+
+impl From<Presence> for Contact {
+    fn from(p: Presence) -> Self {
+        Self {
+            ship_id: p.ship_id,
+            name: p.name,
+            length_m: p.length_m,
+            position_ly: DVec3::from_array(p.at_ly),
+            beta: DVec3::from_array(p.beta),
+            facing: DVec3::from_array(p.facing).normalize_or_zero(),
+            emitted_s: p.emitted_t as f64 * 1.0e-6,
+        }
+    }
 }
 
 /// Where the server is, if there is one.
@@ -103,6 +143,10 @@ pub struct Uplink {
     /// What has been seen, newest last. Kept so there is something to show while folding them
     /// into the world is still ahead.
     pub seen: Vec<Sighting>,
+    /// Everybody else in sight, as of the last statement. Replaced wholesale rather than
+    /// merged: the list is what the server can see of this ship's surroundings, and a contact
+    /// missing from it is a contact that is no longer there.
+    pub contacts: Vec<Contact>,
     /// What the server last said about an order, for the interface to show once and drop. The
     /// client cannot write its own here: an order's outcome is the server's to state.
     pub applied: Option<String>,
@@ -318,6 +362,10 @@ fn fold(
         }
         Outbound::Unauthenticated => {
             uplink.state = State::Refused("the server did not accept this ticket".into());
+        }
+        Outbound::Present(cleared) => {
+            uplink.contacts =
+                cleared.into_iter().map(|c| Contact::from(c.into_inner())).collect();
         }
         Outbound::Sightings(cleared) => {
             uplink

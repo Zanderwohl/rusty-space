@@ -139,6 +139,8 @@ impl Plugin for ClientPlugin {
             .init_resource::<Looking>()
             .init_resource::<Bodies>()
             .init_resource::<crate::envelope::Envelopes>()
+            .init_resource::<crate::hull::Eye>()
+            .init_resource::<crate::hull::Hulls>()
             .init_resource::<crate::resolved::Resolved>()
             .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
             .add_systems(Startup, spawn_camera)
@@ -155,7 +157,9 @@ impl Plugin for ClientPlugin {
                     photograph,
                     place_at_body.run_if(in_state(AppState::InGame)),
                     place_on_station.run_if(in_state(AppState::InGame)),
-                    (read_keys, grab_cursor, look_around).chain().run_if(in_state(AppState::InGame)),
+                    (read_keys, grab_cursor, look_around, crate::input::read_wheel)
+                        .chain()
+                        .run_if(in_state(AppState::InGame)),
                     dispatch,
                     // The clock is deliberately not gated on any panel or overlay. See
                     // lightcone/docs/13-client-shell.md: the game does not pause.
@@ -169,6 +173,10 @@ impl Plugin for ClientPlugin {
             .add_systems(
                 Update,
                 (
+                    // First of the stage. Everything below is drawn relative to the eye, and
+                    // one placed against last frame's would shear the whole scene against the
+                    // ship every time the view turned.
+                    crate::hull::place_eye,
                     aim_camera,
                     update_sky,
                     update_bodies,
@@ -177,6 +185,9 @@ impl Plugin for ClientPlugin {
                     crate::resolved::sample_scene,
                     crate::resolved::update_resolved,
                     crate::envelope::update_envelopes,
+                    // Last, because a hull is metered as part of the scene the exposure was
+                    // just placed for.
+                    crate::hull::update_hulls,
                 )
                     .chain()
                     .in_set(Stage::Scene)
@@ -186,7 +197,7 @@ impl Plugin for ClientPlugin {
             // systems. Nothing else: there are no bodies and nothing to resolve.
             .add_systems(
                 Update,
-                (aim_camera, update_sky)
+                (crate::hull::place_eye, aim_camera, update_sky)
                     .chain()
                     .in_set(Stage::Scene)
                     .run_if(in_state(AppState::MainMenu)),

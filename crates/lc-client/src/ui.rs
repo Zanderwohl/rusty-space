@@ -182,6 +182,12 @@ pub struct UiState {
     pub focus: Option<crate::navigation::Target>,
     pub course: Option<crate::navigation::Course>,
     pub look: Look,
+    /// How far the orbit camera stands off, in hull lengths.
+    ///
+    /// A multiple rather than a distance, so it means the same framing whatever the player is
+    /// flying. Clamped every frame against what the viewport can show — see
+    /// [`crate::hull::boom_limits`] — because both ends of the range are angles.
+    pub boom_lengths: f64,
     /// How the two starfield passes are drawn. State rather than constants so they can be
     /// turned while the thing they affect is on screen, which is the only way to tune a look.
     pub distant: crate::starfield::PointStyle,
@@ -210,6 +216,7 @@ impl Default for UiState {
             focus: None,
             course: None,
             look: Look::default(),
+            boom_lengths: crate::hull::DEFAULT_BOOM_LENGTHS,
             distant: crate::starfield::DISTANT,
             local: crate::starfield::LOCAL,
             bodies: crate::starfield::BODIES,

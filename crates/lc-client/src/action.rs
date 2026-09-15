@@ -52,6 +52,8 @@ pub enum Action {
     // --- looking ----------------------------------------------------------------------
     /// Turn by a relative amount, radians.
     Look { yaw: f64, pitch: f64 },
+    /// Move the orbit camera in or out, in notches. Positive is closer.
+    Zoom(f64),
     LookAtSelected,
     /// Face whatever the station is about: the body below, or the star.
     LookAtStation,
@@ -189,6 +191,14 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
 
         Action::Look { yaw, pitch } => ui.look.turn(yaw, pitch),
+        // Multiplicative, because the range is two and a half decades: a fixed step is either
+        // imperceptible at the far end or the whole range in one notch at the near one. Left
+        // unclamped here and clamped against the viewport by `hull::place_eye`, which is the
+        // only thing that knows how wide a pixel is.
+        Action::Zoom(notches) => {
+            ui.boom_lengths = (ui.boom_lengths * crate::hull::ZOOM_STEP.powf(-notches))
+                .clamp(f64::MIN_POSITIVE, 1.0e9);
+        }
         Action::LookAtSelected => match aim(ui, session) {
             Some(look) => ui.look = look,
             None => effects.push(Effect::Notify("nothing is selected to look at".into())),

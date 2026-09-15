@@ -386,6 +386,7 @@ pub fn warm_params(star: &CatalogueStar) -> [f32; 4] {
 /// The uniforms that change: where the ship is, how fast, and how it is looking.
 pub fn uniforms(
     session: &Session,
+    eye_ly: DVec3,
     origin_ly: DVec3,
     lut_scale: f32,
     rad_per_px: f32,
@@ -397,7 +398,7 @@ pub fn uniforms(
     RelativisticStarfieldUniform {
         band_to_display: band_columns(mapping),
         beta: sim_to_render(session.ship.motion.beta).as_vec3().extend(0.0),
-        ship_offset_ly: sim_to_render(session.ship.motion.position_ly - origin_ly).as_vec3().extend(0.0),
+        ship_offset_ly: sim_to_render(eye_ly - origin_ly).as_vec3().extend(0.0),
         reference: session.tone.reference,
         point_stops: POINT_STOPS,
         min_radius_rad: radius(style.min_px, defaults.min_radius_rad),
@@ -470,7 +471,9 @@ pub fn spawn_sky(
 
     let mut pass = |stars: &[Point], which: Which| {
         let style = style_for(&ui.0, which);
-        let uniform = uniforms(&session.0, origin_ly, lut_scale(), rad_per_px, style);
+        // The ship's own position, not the eye's: this runs on entering the world, before
+        // anything has placed one, and the boom is corrected on the very next frame anyway.
+        let uniform = uniforms(&session.0, origin_ly, origin_ly, lut_scale(), rad_per_px, style);
         let mesh = meshes.add(build_mesh(stars, origin_ly));
         let material = materials.add(RelativisticStarfieldMaterial {
             uniforms: uniform.clone(),
@@ -510,6 +513,7 @@ pub struct Bodies {
 /// A few hundred bodies is a thousand vertices, which is nothing.
 pub fn update_bodies(
     mut session: ResMut<crate::app::Game>,
+    eye: Res<crate::hull::Eye>,
     mut bodies: ResMut<Bodies>,
     mut sky: ResMut<Starfield>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -519,7 +523,9 @@ pub fn update_bodies(
     session.0.sync_system();
 
     let origin = sky.origin_ly;
-    let at = session.ship.motion.position_ly;
+    // Where the picture is taken from, which is a boom's length behind the ship. A body is
+    // solved for and drawn against the same point, so the two cannot disagree.
+    let at = eye.at_ly;
     let now = session.0.coordinate_time_s();
     let (drawn, teff) = match session.0.system.as_ref() {
         Some(system) => (system.drawables_at(at, now), system.star_teff_k()),
@@ -541,6 +547,7 @@ pub fn update_bodies(
 pub fn update_sky(
     session: Res<crate::app::Game>,
     ui: Res<crate::app::Ui>,
+    eye: Res<crate::hull::Eye>,
     mut sky: ResMut<Starfield>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<RelativisticStarfieldMaterial>>,
@@ -567,7 +574,7 @@ pub fn update_sky(
     let origin = sky.origin_ly;
     for pass in sky.passes() {
         let style = style_for(&ui.0, pass.which);
-        let next = uniforms(&session.0, origin, lut_scale(), rad_per_px, style);
+        let next = uniforms(&session.0, eye.at_ly, origin, lut_scale(), rad_per_px, style);
         if next == pass.sent {
             continue;
         }
@@ -720,10 +727,11 @@ mod tests {
     fn the_uniforms_follow_the_ship() {
         let mut s = sky();
         let origin = s.ship.motion.position_ly;
-        assert_eq!(uniforms(&s, origin, lut_scale(), 0.0, DISTANT).ship_offset_ly, Vec4::ZERO);
+        let eye = |s: &Session| s.ship.motion.position_ly;
+        assert_eq!(uniforms(&s, eye(&s), origin, lut_scale(), 0.0, DISTANT).ship_offset_ly, Vec4::ZERO);
         s.fly_to(s.stars[0].id);
         s.advance(8_000.0);
-        let u = uniforms(&s, origin, lut_scale(), 0.0, DISTANT);
+        let u = uniforms(&s, eye(&s), origin, lut_scale(), 0.0, DISTANT);
         assert!(u.ship_offset_ly.truncate().length() > 0.0, "the ship moved and the uniform did not");
         assert!(u.beta.truncate().length() > 0.5, "and it is moving fast");
         assert!(u.beta.truncate().length() < 1.0, "but not at or above c");
@@ -832,8 +840,8 @@ mod tests {
     fn the_two_passes_are_drawn_with_different_uniforms() {
         let s = sky();
         let rad = radians_per_pixel(std::f32::consts::FRAC_PI_2, 720.0);
-        let far = uniforms(&s, DVec3::ZERO, lut_scale(), rad, DISTANT);
-        let near = uniforms(&s, DVec3::ZERO, lut_scale(), rad, LOCAL);
+        let far = uniforms(&s, DVec3::ZERO, DVec3::ZERO, lut_scale(), rad, DISTANT);
+        let near = uniforms(&s, DVec3::ZERO, DVec3::ZERO, lut_scale(), rad, LOCAL);
         assert!(near.max_radius_rad > far.max_radius_rad * 5.0);
         // But they read the same sky: same exposure, same velocity, same table.
         assert_eq!(near.reference, far.reference);
@@ -851,7 +859,7 @@ mod tests {
     #[test]
     fn a_camera_that_is_not_there_falls_back_to_the_defaults() {
         let s = sky();
-        let u = uniforms(&s, DVec3::ZERO, lut_scale(), 0.0, DISTANT);
+        let u = uniforms(&s, DVec3::ZERO, DVec3::ZERO, lut_scale(), 0.0, DISTANT);
         let d = RelativisticStarfieldUniform::default();
         assert_eq!(u.min_radius_rad, d.min_radius_rad);
         assert_eq!(u.max_radius_rad, d.max_radius_rad);
