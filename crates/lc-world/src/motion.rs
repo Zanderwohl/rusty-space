@@ -385,6 +385,28 @@ pub fn state_at(
     }
 }
 
+/// Which way the hull's nose points at a coordinate time, if anything decides it.
+///
+/// Thrust first, velocity second. A ship under way points along its drive — which is *back*
+/// down its own track through a brake — and a ship with the engine off points along its
+/// motion. A craft at rest with nothing burning has no attitude this can derive, and `None`
+/// says so rather than inventing one; the renderer holds whatever it last had.
+///
+/// Proper acceleration, so a ballistic arc counts as unpowered. Falling is not thrust, and a
+/// nose that followed the coordinate acceleration would point at the primary all the way round
+/// an orbit.
+pub fn facing(state: &ShipState, system: Option<&LocalSystem>, now_s: f64) -> Option<DVec3> {
+    if let Motive::Crossing(cruise) = &state.motive {
+        let thrust = cruise.thrust_at(now_s);
+        if thrust != DVec3::ZERO {
+            return Some(thrust.normalize());
+        }
+    }
+    let beta = state_at(state, system, now_s).map(|(_, beta)| beta).unwrap_or(state.beta);
+    let along = beta.normalize_or_zero();
+    (along != DVec3::ZERO).then_some(along)
+}
+
 /// Move a ship to a coordinate time.
 ///
 /// Read at the new time rather than integrated from the old one, in every branch — that is

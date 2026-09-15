@@ -24,6 +24,19 @@ use crate::system::LocalSystem;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CraftId(pub i64);
 
+/// A hull's beam and height, as fractions of its length.
+///
+/// Every craft is the same ovoid at a different size: five long by three across by one deep.
+/// Shape is not yet a thing a craft can differ in, so it is a constant rather than a field —
+/// one that anything drawing or picking a hull reads, so the silhouette, the bounding size and
+/// the zoom limits cannot drift apart.
+pub const BEAM_PER_LENGTH: f64 = 3.0 / 5.0;
+pub const HEIGHT_PER_LENGTH: f64 = 1.0 / 5.0;
+
+/// The span of hull lengths the game is designed around, metres. Nothing enforces it; it is
+/// what the camera, the reticle and the point-source crossover are expected to cope with.
+pub const LENGTH_RANGE_M: (f64, f64) = (500.0, 50_000.0);
+
 /// What a craft is for.
 ///
 /// It decides the defaults and what the interface offers, never the physics: a probe on a
@@ -53,6 +66,21 @@ impl Kind {
             Kind::Probe => crate::flight::Drive { accel_g: 30.0, max_beta: 0.999 },
             // Neither of these is going anywhere in a hurry once it is placed.
             Kind::Relay | Kind::Beacon => crate::flight::Drive { accel_g: 1.0, max_beta: 0.9 },
+        }
+    }
+
+    /// How long a hull of this kind is, metres.
+    ///
+    /// One number per kind, because nothing yet gives an individual craft a size of its own.
+    /// The wire carries the length rather than the kind for exactly that reason — see
+    /// `lc_proto::Presence` — so ships varying within [`LENGTH_RANGE_M`] needs no protocol
+    /// change, only somewhere for the number to come from.
+    pub fn length_m(self) -> f64 {
+        match self {
+            Kind::Ship => 500.0,
+            Kind::Probe => 40.0,
+            Kind::Relay => 120.0,
+            Kind::Beacon => 20.0,
         }
     }
 
@@ -118,6 +146,16 @@ impl Craft {
     /// The craft as something a light-delay solve can evaluate.
     pub fn worldline(&self) -> Flight<'_> {
         Flight::new(&self.motion, self.system.as_deref())
+    }
+
+    /// How long the hull is, metres.
+    pub fn length_m(&self) -> f64 {
+        self.kind.length_m()
+    }
+
+    /// Which way the nose points at a coordinate second, or `None` when nothing decides it.
+    pub fn facing_at(&self, now_s: f64) -> Option<DVec3> {
+        motion::facing(&self.motion, self.system.as_deref(), now_s)
     }
 
     /// Where it is at a coordinate microsecond, light-microseconds from the world origin.

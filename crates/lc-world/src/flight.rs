@@ -280,6 +280,20 @@ impl Cruise {
         }
     }
 
+    /// Which way the drive is pointing, or zero where it is not lit.
+    ///
+    /// Not the velocity: a crossing is burn, flip and burn, so the ship spends the whole second
+    /// half of it pointing back the way it came while still moving forward.
+    pub fn thrust_at(&self, now_s: f64) -> DVec3 {
+        match self.at(now_s).phase {
+            // Shedding the velocity across the line, so the drive points against it.
+            Phase::Match => -self.match_dir,
+            Phase::Boost => self.direction,
+            Phase::Brake => -self.direction,
+            Phase::Coast | Phase::Arrived => DVec3::ZERO,
+        }
+    }
+
     pub fn has_arrived(&self, now_s: f64) -> bool {
         now_s - self.start_s >= self.duration_s()
     }
