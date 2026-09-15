@@ -96,7 +96,6 @@ fn company(near_ly: DVec3, count: usize) -> Vec<Craft> {
             let at = near_ly + bearing * (range / M_PER_LY);
             let mut craft = Craft::at(CraftId(1_000 + i as i64), Kind::Ship, at);
             craft.length_m = length_m;
-            craft.name = Some(format!("{length_m:.0} m"));
             // Held rather than drifting. A shard runs at 8766 times real time, so the slowest
             // speed worth calling a speed carries a craft out of sight in seconds — the first
             // version of this gave them thirty metres a second apiece and they were three

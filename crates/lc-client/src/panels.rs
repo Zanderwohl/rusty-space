@@ -103,15 +103,30 @@ pub fn hud(
     }
 }
 
+/// Which half of the System window is showing.
+///
+/// The two lists answer different questions — what is here, and who is here — and they are
+/// different lengths and change at different rates. One scrolling list holding both would put
+/// a ship that arrived a second ago below two hundred moons.
+#[derive(Clone, Copy, Default, PartialEq)]
+pub enum SystemTab {
+    #[default]
+    Bodies,
+    Ships,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn open_panels(
     mut contexts: EguiContexts,
     ui_state: Res<Ui>,
     mut game: ResMut<Game>,
+    uplink: Res<crate::uplink::Uplink>,
     mut out: MessageWriter<Requested>,
     mut curve: Local<CurvePlot>,
     sky: Option<Res<crate::starfield::Starfield>>,
     mut show_all: Local<bool>,
     mut revealed: Local<Option<Target>>,
+    mut tab: Local<SystemTab>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
     for panel in ui_state.open_panels().to_vec() {
@@ -121,7 +136,16 @@ pub fn open_panels(
             Panel::Settings => settings(ui, &ui_state),
             Panel::Debug => debug(ui, &ui_state, &game, sky.as_deref(), &mut out),
             Panel::Telescope => telescope(ui, &ui_state, &mut game, &mut out, &mut curve),
-            Panel::System => system(ui, &ui_state, &game, &mut show_all, &mut revealed, &mut out),
+            Panel::System => system(
+                ui,
+                &ui_state,
+                &game,
+                &uplink,
+                &mut tab,
+                &mut show_all,
+                &mut revealed,
+                &mut out,
+            ),
             Panel::Flight => flight(ui, &ui_state, &game, &mut out),
             Panel::Tuning => tuning(ui, &ui_state, &mut out),
         });
@@ -371,10 +395,13 @@ fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Re
 /// Two sections. The inventory runs outward from the star with each body's satellites behind
 /// it; picking one opens its courses. Nothing is flown until Go, so a player can read the
 /// options without committing to one.
+#[allow(clippy::too_many_arguments)]
 fn system(
     ui: &mut egui::Ui,
     state: &Ui,
     game: &Game,
+    uplink: &crate::uplink::Uplink,
+    tab: &mut SystemTab,
     show_all: &mut bool,
     revealed: &mut Option<Target>,
     out: &mut MessageWriter<Requested>,
@@ -384,11 +411,25 @@ fn system(
         return;
     };
     ui.horizontal(|ui| {
-        ui.label(format!("{} — {} bodies", system.star_name, system.len()));
-        ui.checkbox(show_all, "all");
+        ui.selectable_value(tab, SystemTab::Bodies, format!("{} bodies", system.len()));
+        // Counted in the tab, because whether anyone is here at all is the first thing worth
+        // knowing and opening the other list to find out would be one click too many.
+        ui.selectable_value(tab, SystemTab::Ships, match uplink.contacts.len() {
+            0 => "no ships".to_string(),
+            1 => "1 ship".to_string(),
+            n => format!("{n} ships"),
+        });
     });
     station(ui, state, game, out);
     ui.separator();
+    if *tab == SystemTab::Ships {
+        ships(ui, game, uplink);
+        return;
+    }
+    ui.horizontal(|ui| {
+        ui.label(&system.star_name);
+        ui.checkbox(show_all, "all");
+    });
 
     egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
         for entry in system.inventory().iter().filter(|e| *show_all || e.major) {
@@ -443,6 +484,52 @@ fn system(
             }
         }
         ui.weak(format!("brachistochrone at {:.0} g", game.ship.motion.drive.accel_g));
+    });
+}
+
+/// Who else is here, and how old the news of them is.
+///
+/// Every row is a *sighting*, and the age of the light is a column rather than a footnote:
+/// across a system it runs from seconds to hours, and a range read as though it were current
+/// is the one mistake this list exists to stop a player making.
+fn ships(ui: &mut egui::Ui, game: &Game, uplink: &crate::uplink::Uplink) {
+    if uplink.contacts.is_empty() {
+        ui.weak(match game.remote {
+            true => "Nobody else is in this system.",
+            // Not the same statement at all, and saying the first would be a lie.
+            false => "No server, so nobody to see.",
+        });
+        return;
+    }
+    let here = game.ship.motion.position_ly;
+    let mut rows: Vec<&crate::uplink::Contact> = uplink.contacts.iter().collect();
+    rows.sort_by(|a, b| {
+        here.distance_squared(a.position_ly).total_cmp(&here.distance_squared(b.position_ly))
+    });
+
+    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+        for contact in rows {
+            let range = here.distance(contact.position_ly);
+            ui.horizontal(|ui| {
+                ui.label(&contact.name);
+                ui.weak(span(range));
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.weak(format!(
+                    "{} hull — {:.4}c — light is {} old",
+                    span_m(contact.length_m),
+                    contact.beta.length(),
+                    // From the range, not from the clock. A light-year is a year of travel by
+                    // definition, so the distance to where the light left *is* its age — and
+                    // taking it that way needs no agreement with the server about what time it
+                    // is. Differencing the timestamps instead measured the clock skew, which
+                    // at a frozen client rate put a ship eight kilometres away five minutes in
+                    // the past.
+                    duration(range * lc_world::flight::JULIAN_YEAR_S),
+                ));
+            });
+        }
     });
 }
 
@@ -521,6 +608,9 @@ fn span_m(metres: f64) -> String {
     match metres {
         // The primary orbits nothing, and "0 thousand km" reads as a measurement.
         m if m <= 0.0 => "the centre".to_string(),
+        // Metres below a kilometre, because a hull is measured in them and "0 km" is not a
+        // size. Nothing that reads as an orbit radius is ever this small.
+        m if m < 1.0e3 => format!("{m:.0} m"),
         m if m < 1.0e6 => format!("{:.0} km", m / 1.0e3),
         m if m < 1.0e9 => format!("{:.0} thousand km", m / 1.0e6),
         m if m < 1.0e11 => format!("{:.2} million km", m / 1.0e9),
