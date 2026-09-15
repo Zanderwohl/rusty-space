@@ -306,6 +306,38 @@ Rules that matter more than they look:
 a cap: a reconnecting client asking to be replayed from the beginning of time is a resource
 attack whether or not it means to be.
 
+## The pages look like the site, without sharing a line with it
+
+A sign-in page that does not look like where it came from is the exact thing a person is told to
+be suspicious of, so these pages carry the site's palette, its typefaces and its wordmark. They
+cannot carry its stylesheet: two workspaces, two docker build contexts, and a second copy of
+`web/`'s source tree in this image would be the coupling the separation exists to avoid.
+
+So `_tokens.scss` is **copied**, and a test compares the two files byte for byte
+(`assets::tests::the_tokens_are_the_sites_tokens`). A copy with nothing watching it drifts; that
+test is what watches it. Anything genuinely broker-only — there is one thing, a colour for a
+refusal, which the site has never needed because nothing there fails — goes in `_status.scss`
+instead, so the copied file stays a copy.
+
+The sheet is compiled by `build.rs` rather than at boot, which is the one place this differs from
+the site on purpose:
+
+- a SCSS error is a failed **build**, not a failed deploy;
+- the image ships no `static/` tree, so nothing at runtime reads a file;
+- the cache-busting URL segment is a digest of the CSS itself rather than a git revision, which
+  is what makes `Cache-Control: immutable` unconditionally true. The site's build id does not
+  change when a stylesheet does, which is why it only sends that header in production.
+
+Three smaller decisions, each of which is a thing not to undo:
+
+- **The wordmark is text, not a link.** Every other destination a browser can reach from these
+  pages is on the `return_to` allowlist. A masthead would be one that is not.
+- **`referrer: no-referrer` and `robots: noindex`.** Every URL here carries a `return_to` and a
+  `state`; a `Referer` hands both to whatever is linked, and an indexed sign-in page is one
+  reached without the query that makes it work.
+- **No JavaScript**, the same rule the site keeps and for a stronger reason: a page that collects
+  a password should be a document.
+
 ## What this does not do yet
 
 Named so they are decisions rather than omissions:
