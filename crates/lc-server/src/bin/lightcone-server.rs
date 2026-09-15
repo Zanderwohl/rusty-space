@@ -24,6 +24,8 @@ lightcone-server — one shard
   --sky <url|path>    the packed catalogue this shard is authoritative over
   --shard <n>         this shard's number, which keys its saved state (default 1)
   --db <url>          where craft are kept, so the world outlives this process
+                      (or LC_SHARD_DB, which is where it belongs: it is a password,
+                       and an argument is visible to anything that can list processes)
   --open              admit connections with no valid ticket — DEVELOPMENT ONLY
 
 Without --db a shard is a sandcastle: it runs, and everything in it is gone when it stops.
@@ -101,7 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // After the world, because a ballistic arc is re-solved against the system it is in and a
     // shard with no stars would bring every coasting craft back as a straight line.
-    let store = match after("--db") {
+    let store = match after("--db").or_else(|| std::env::var("LC_SHARD_DB").ok()) {
         Some(url) => {
             let client = connect(&url).await?;
             lc_store::migrate::apply(&client).await?;

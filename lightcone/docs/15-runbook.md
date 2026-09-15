@@ -475,9 +475,10 @@ CREATE ROLE lc_store LOGIN PASSWORD '...';
 CREATE DATABASE lc_store OWNER lc_store;
 ```
 
-The URL goes in `~/.config/lightcone/shard.env` as `LC_SHARD_DB`, and the container turns it
-into `--db`; it is a password, so it is set on the host the way every other secret is. The
-schema is applied at boot, so there is no migration step to remember.
+The URL goes in `~/.config/lightcone/shard.env` as `LC_SHARD_DB`, which the shard reads when no
+`--db` is given. The environment and not the command line because it carries a password, and an
+argument is visible to anything that can list processes. The schema is applied at boot, so there
+is no migration step to remember.
 
 What is kept is a **checkpoint**, not a history: every craft as of an instant, plus the shard's
 clock and its identifier counter. Written every twenty real seconds and again on the way out,
