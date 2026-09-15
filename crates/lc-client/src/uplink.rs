@@ -32,6 +32,21 @@ pub enum State {
     Lost(String),
 }
 
+/// Where and when the server put us.
+///
+/// Kept so it can be applied **again**. The client rebuilds its `Session` wholesale when the
+/// sky finishes loading, and the connection is opened before that — deliberately, because a
+/// ticket is worth sixty seconds and a sky is worth megabytes. So the rebuild lands after the
+/// welcome and would otherwise drop all of it: the ship back at the origin, the clock back at
+/// this process's own epoch, and `remote` back to false. The client then flies locally while
+/// the interface still says LINKED, which is the worst of both — it looks connected and
+/// nothing it does reaches the server.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Placement {
+    pub now_t: i64,
+    pub ship_at: [f64; 3],
+}
+
 /// What a `Welcome` said.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Joined {
@@ -90,6 +105,8 @@ pub struct Uplink {
     /// What the server last said about an order, for the interface to show once and drop. The
     /// client cannot write its own here: an order's outcome is the server's to state.
     pub applied: Option<String>,
+    /// The last placement the server gave, for [`Uplink::place`] to re-apply.
+    placement: Option<Placement>,
 }
 
 /// How many sightings are remembered. A bound rather than a policy: the fold that replaces
@@ -103,6 +120,17 @@ impl Uplink {
         self.greeted = false;
         self.seen.clear();
         self.state = State::Connecting;
+    }
+
+    /// Put a session where the server has it, if the server has said.
+    ///
+    /// Idempotent, and called both when the welcome arrives and again whenever the session is
+    /// rebuilt. Does nothing offline, which is the single-process game.
+    pub fn place(&self, session: &mut crate::session::Session) {
+        let Some(placement) = self.placement else { return };
+        session.set_coordinate_time_us(placement.now_t);
+        session.place_at(glam::DVec3::from_array(placement.ship_at));
+        session.remote = true;
     }
 
     pub fn joined(&self) -> Option<&Joined> {
@@ -219,14 +247,10 @@ fn fold(uplink: &mut Uplink, game: &mut crate::app::Game, message: Outbound) {
             // The server's clock, adopted whole. Both ends propagate analytically from a
             // coordinate time, so agreeing on it is the whole of agreeing about where anything
             // is — and the client's own clock started whenever this process did.
-            game.0.set_coordinate_time_us(now_t);
-            // And then the place. Without this the client flies a ship the server has
-            // somewhere else: it would keep its own starting position, which is the origin —
-            // empty interstellar space, and not where any account's craft is.
-            game.0.place_at(glam::DVec3::from_array(ship_at));
-            // From here the client stops applying its own flight orders and starts sending
-            // them. See `Session::remote`.
-            game.0.remote = true;
+            // Remembered, then applied — and applied again every time the session is rebuilt.
+            // See `Placement` for what goes wrong when it is only applied once.
+            uplink.placement = Some(Placement { now_t, ship_at });
+            uplink.place(&mut game.0);
             uplink.state = State::Joined(Joined {
                 client_id,
                 ship_id,
@@ -398,6 +422,40 @@ mod tests {
         assert_eq!([at.x, at.y, at.z], out_there, "the client kept its own position");
         // And the observer follows the ship, or the sky is drawn from the old place.
         assert!(game.0.observer.x != 0, "the observer was left behind");
+    }
+
+    /// **The bug manual QA found.** The connection opens before the sky finishes loading — on
+    /// purpose, because a ticket is worth sixty seconds — so the welcome lands first and the
+    /// sky load then replaces the whole session. Without re-applying, the ship goes back to the
+    /// origin with `remote` false: flying locally, in the wrong system, while the interface
+    /// still says LINKED.
+    #[test]
+    fn a_session_rebuilt_after_a_welcome_is_still_the_servers() {
+        let (mut uplink, mut game) = app();
+        fold(&mut uplink, &mut game, welcome_at(9_000_000, [4.2, 0.0, 0.0]));
+
+        // What `enter_game` does when the sky arrives.
+        game.0 = crate::session::Session::new(&lc_world::sky::AuthoredStars::sample(), 3);
+        assert_eq!(game.0.ship.motion.position_ly, glam::DVec3::ZERO, "premise");
+        assert!(!game.0.remote, "premise");
+
+        uplink.place(&mut game.0);
+
+        let at = game.0.ship.motion.position_ly;
+        assert_eq!([at.x, at.y, at.z], [4.2, 0.0, 0.0], "the rebuild kept the origin");
+        assert_eq!(game.0.coordinate_time_s(), 9.0, "the rebuild kept its own clock");
+        assert!(game.0.remote, "it went back to flying locally while saying LINKED");
+    }
+
+    /// Offline, a rebuild is left alone — that is the single-process game and nobody has said
+    /// where the ship is.
+    #[test]
+    fn a_session_rebuilt_with_no_server_is_not_touched() {
+        let (uplink, mut game) = app();
+        game.0.place_at(glam::DVec3::new(1.0, 2.0, 3.0));
+        uplink.place(&mut game.0);
+        assert_eq!(game.0.ship.motion.position_ly, glam::DVec3::new(1.0, 2.0, 3.0));
+        assert!(!game.0.remote);
     }
 
     #[test]

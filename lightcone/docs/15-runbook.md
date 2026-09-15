@@ -464,6 +464,14 @@ docker --context rocinante run -d --name lightcone-shard --restart unless-stoppe
     --jwks http://lightcone-identity:3200/.well-known/jwks.json
 ```
 
+**Point `--sky` at the promoted build's own chunk**, which is
+`<cdn>/game/<build>/assets/sky/hyg-v42.lcsky`. Both ends place craft into systems by position
+against the same shell radius, so two catalogues is two answers to which system a ship is in —
+and nothing anywhere reports the disagreement. Reading the same bytes the client downloads is
+what makes them agreeing a fact rather than a convention somebody has to keep. A shard started
+without it says so loudly and falls back to three hand-written stars, which is right only for a
+shard no real client connects to.
+
 The shard reads the broker's keys **at boot**, so the broker has to be up first. It then
 verifies locally and never asks again, which is the point — a broker outage does not stop
 anyone reconnecting. A shard that restarts while the broker is down will not start, and

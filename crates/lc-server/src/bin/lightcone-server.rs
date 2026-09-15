@@ -3,6 +3,7 @@
 //! Thin on purpose. Everything worth testing is in the library, which is why the tick loop
 //! here is six lines and has no logic of its own.
 
+use std::io::Read;
 use std::time::Duration;
 
 use lc_proto::ClientId;
@@ -19,7 +20,13 @@ lightcone-server — one shard
   --bind <addr>       where to listen (default 127.0.0.1:8080)
   --audience <name>   the audience tickets must name (default shard-1)
   --jwks <url|path>   the broker's published keys, fetched at boot
+  --sky <url|path>    the packed catalogue this shard is authoritative over
   --open              admit connections with no valid ticket — DEVELOPMENT ONLY
+
+Point --sky at the **same chunk the promoted client downloads**, which is
+<cdn>/game/<build>/assets/sky/hyg-v42.lcsky. Both ends place craft into systems by position
+against the same shell radius, so two different catalogues is two different answers to which
+system a ship is in — and nothing reports the disagreement.
 ";
 
 #[tokio::main]
@@ -65,9 +72,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // The authored sample, so a client started with no arguments is looking at the same three
-    // stars the server is. A real catalogue is a later argument.
-    server.load_world(World::new(AuthoredStars::sample().stars().to_vec()));
+    let stars = match after("--sky") {
+        Some(source) => {
+            let provider = lc_world::sky::chunk::ChunkProvider::decode(&read_bytes(&source)?)
+                .map_err(|why| format!("{source}: {why:?}"))?;
+            eprintln!("sky: {} stars from {source}", provider.stars().len());
+            provider.stars().to_vec()
+        }
+        // Three hand-written stars. Fine for a shard nobody connects a real client to, and
+        // wrong for every other case: a client loading the real catalogue will disagree with
+        // this about which system it is in, and neither end will say so.
+        None => {
+            eprintln!("WARNING: no --sky, so this shard's world is the authored sample. A client");
+            eprintln!("         with a real catalogue will not agree with it about anything.");
+            AuthoredStars::sample().stars().to_vec()
+        }
+    };
+    server.load_world(World::new(stars));
 
     let mut wire = WebSocketServer::bind(&bind).await?;
     eprintln!("listening on {}", wire.local_addr);
@@ -95,9 +116,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// state the game server is supposed to survive — it verifies locally and never asks per
 /// connection. See `lightcone/docs/16-identity.md`.
 fn read_jwks(source: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    Ok(serde_json::from_slice(&read_bytes(source)?)?)
+}
+
+/// Bytes from a URL or a file, which is how every input this takes is named.
+///
+/// A URL matters for the sky in particular: pointing a shard at the CDN path of the promoted
+/// build is what makes "both ends hold the same catalogue" a fact rather than a convention
+/// somebody has to keep.
+fn read_bytes(source: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     if source.starts_with("http://") || source.starts_with("https://") {
-        Ok(ureq::get(source).call()?.into_json()?)
+        let mut bytes = Vec::new();
+        ureq::get(source).call()?.into_reader().read_to_end(&mut bytes)?;
+        Ok(bytes)
     } else {
-        Ok(serde_json::from_str(&std::fs::read_to_string(source)?)?)
+        Ok(std::fs::read(source)?)
     }
 }

@@ -375,6 +375,7 @@ fn begin_load(
     mut commands: Commands,
     mut game: ResMut<Game>,
     mut ui: ResMut<Ui>,
+    uplink: Res<crate::uplink::Uplink>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     match catalogue.0.as_deref() {
@@ -383,17 +384,17 @@ fn begin_load(
         #[cfg(feature = "hyg")]
         Some(path) if path.ends_with(".csv") => {
             match lc_world::sky::hyg::HygProvider::load(path) {
-                Ok(p) => enter_game(&mut game, &mut ui, &mut next, &p),
+                Ok(p) => enter_game(&mut game, &mut ui, &mut next, &p, &uplink),
                 Err(e) => {
                     ui.notify(format!("catalogue: {e}"), 0.0);
-                    enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample());
+                    enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink);
                 }
             }
         }
         Some(path) => {
             commands.insert_resource(LoadingSky(assets.load(path.to_owned())));
         }
-        None => enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample()),
+        None => enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink),
     }
 }
 
@@ -408,6 +409,7 @@ fn finish_load(
     mut commands: Commands,
     mut game: ResMut<Game>,
     mut ui: ResMut<Ui>,
+    uplink: Res<crate::uplink::Uplink>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     let Some(loading) = loading else { return };
@@ -415,7 +417,7 @@ fn finish_load(
         if sky.skipped > 0 {
             ui.notify(format!("{} sky records were unusable", sky.skipped), 0.0);
         }
-        enter_game(&mut game, &mut ui, &mut next, sky);
+        enter_game(&mut game, &mut ui, &mut next, sky, &uplink);
         commands.remove_resource::<LoadingSky>();
     } else if let Some(state) = assets.get_load_state(&loading.0)
         && state.is_failed()
@@ -423,7 +425,7 @@ fn finish_load(
         // A sky that will not load is worth saying out loud rather than silently becoming
         // three hand-written stars.
         ui.notify("sky failed to load; using the sample", 0.0);
-        enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample());
+        enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink);
         commands.remove_resource::<LoadingSky>();
     }
 }
@@ -433,9 +435,14 @@ fn enter_game(
     ui: &mut Ui,
     next: &mut NextState<AppState>,
     provider: &dyn StarProvider,
+    uplink: &crate::uplink::Uplink,
 ) {
     let count = provider.len();
     game.0 = Session::new(provider, SKY_LIMIT);
+    // The session was just replaced, and with it everything the server had said about where
+    // and when this ship is. Put it back, or the client flies locally from the origin while
+    // the interface still says LINKED. See `uplink::Placement`.
+    uplink.place(&mut game.0);
     ui.notify(format!("{count} stars loaded"), 0.0);
     ui.screen = Screen::InGame;
     next.set(AppState::InGame);
