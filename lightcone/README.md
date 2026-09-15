@@ -44,6 +44,8 @@ cross-reference except where a shared crate is the subject.
 | [13-client-shell.md](docs/13-client-shell.md) | states, menus, windows, and why the game never pauses |
 | [14-hosting.md](docs/14-hosting.md) | the website, the blog, and how the WASM build and its assets reach a browser |
 | [15-runbook.md](docs/15-runbook.md) | the commands: build, publish, deploy, promote, roll back, and TLS |
+| [16-identity.md](docs/16-identity.md) | accounts as a broker neither product owns, and how a socket proves who it is |
+| [17-reconciliation.md](docs/17-reconciliation.md) | the four ways a client can differ from the server, and which of them is a mechanic |
 
 ## Status
 

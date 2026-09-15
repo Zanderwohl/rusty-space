@@ -3,8 +3,11 @@
 The public face of the game: a website, a blog, and the browser build with its assets. Three
 things that ship on three schedules and must not be able to break each other.
 
-Auth is out of scope. Nothing here needs it yet, and everything here is shaped so that when an
-auth service exists it slots in at two places, both named below.
+Auth is out of scope here. Nothing on this page needs it, and everything on it is shaped so that
+the auth service slots in at two places, both named below. That service is designed in
+[16-identity.md](16-identity.md), which adds a third integration point this page did not
+anticipate: `/play` mints the game ticket, because the player's website session is the only
+place a browser client can get an identity without running an OAuth dance from the CDN origin.
 
 ## Three deploy units
 
