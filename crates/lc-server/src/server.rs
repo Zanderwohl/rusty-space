@@ -252,19 +252,20 @@ impl<J: Journal> Server<J> {
                 }
                 match self.sign_in(from, &ticket) {
                     Some((ship_id, name)) => {
-                        // Where it is, not where it started: an account coming back finds its
-                        // craft wherever it left it.
-                        let ship_at = self
+                        // What it is doing, not merely where it is: an account coming back
+                        // finds its craft mid-orbit or mid-burn, and a welcome that said only
+                        // the position put it back at rest there. See `lc_world::resume`.
+                        let ship = self
                             .ship(ship_id)
-                            .map(|craft| craft.motion.position_ly.to_array())
-                            .unwrap_or_default();
+                            .map(|craft| (&craft.motion.snapshot()).into())
+                            .unwrap_or_else(adrift_at_the_origin);
                         wire.send(from, Outbound::Welcome {
                             client_id: from,
                             protocol: PROTOCOL_VERSION,
                             ship_id,
                             now_t: self.now_t,
                             name,
-                            ship_at,
+                            ship,
                         })
                     }
                     None => wire.send(from, Outbound::Unauthenticated),
@@ -606,6 +607,13 @@ impl<J: Journal> Server<J> {
 /// answer. It is told which, and corrects.
 /// A craft's identifier as [`lc_world::motion`] names it. The two are the same number: a craft
 /// is the thing a worldline belongs to, and `motion` predates the fleet that owns them.
+/// A welcome for a ship the fleet does not have, which is a state that should not arise: the
+/// sign-in that reached here either found a craft or made one. Still at rest at the origin
+/// rather than a panic, because losing a connection is better than losing the shard.
+fn adrift_at_the_origin() -> lc_proto::Motion {
+    (&lc_world::motion::ShipState::at(DVec3::ZERO).snapshot()).into()
+}
+
 fn motion_id(id: CraftId) -> lc_world::motion::ShipId {
     lc_world::motion::ShipId(id.0)
 }
@@ -1461,8 +1469,11 @@ mod world_tests {
 
 #[cfg(test)]
 mod hello_tests {
+    use super::course_tests::{a_star, a_system, orbitable};
     use super::*;
     use crate::journal::Memory;
+    use crate::world::World;
+    use lc_world::motion::Motive;
     use crate::testing::Broker;
     use crate::ticket::Trusted;
     use crate::transport::Loopback;
@@ -1772,6 +1783,75 @@ mod hello_tests {
 
         says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", "shard-2", 60, "j1")).await;
         assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Unauthenticated]));
+    }
+
+    /// **What a reconnect is for.** A player who signs out of an orbit signs back into one.
+    ///
+    /// The welcome used to carry a position and nothing else, so this ship came back at rest at
+    /// the point it had reached — adrift, at a station it was no longer holding. A day later
+    /// the two were two and a half million kilometres apart, which is seven times the distance
+    /// to the Moon.
+    #[tokio::test]
+    async fn signing_back_in_finds_the_ship_still_holding_its_orbit() {
+        let Some(star) = a_star() else { return };
+        let Some(system) = a_system() else { return };
+        let Some(body) = orbitable(&system) else { return };
+
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        server.load_world(World::new(vec![star.clone()]));
+        let mut wire = Loopback::new();
+
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let ship = welcomed(&mut wire, ClientId(1));
+        // Put it where the system is, since a new craft starts a few au out along one axis.
+        server.fleet_mut().get_mut(CraftId(ship.0)).unwrap().motion.position_ly = star.position_ly;
+        server.tick(&mut wire).await.unwrap();
+
+        wire.client_says(ClientId(1), Inbound::Act(Intent {
+            ship_id: ship,
+            order: Order::SetCourse {
+                course: lc_proto::Course::Orbit {
+                    body,
+                    altitude_radii: 2.0,
+                    plane: lc_proto::Plane::Equatorial,
+                },
+                accel_g: 5.0,
+            },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+        let Motive::Crossing(cruise) = &server.ship(ship).unwrap().motion.motive else {
+            panic!("the course did not become a crossing")
+        };
+        let ticks = ((cruise.duration_s() * 1.0e6 / TICK_US as f64).ceil() as usize + 2).min(20_000);
+        for _ in 0..ticks {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let Motive::Holding(station) = server.ship(ship).unwrap().motion.motive.clone() else {
+            panic!("it never arrived")
+        };
+
+        // The socket drops, and the same account comes back on a new one.
+        server.disconnected(ClientId(1));
+        wire.take(ClientId(1));
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-1", SHARD, 60, "j2")).await;
+        let welcome = wire
+            .take(ClientId(2))
+            .into_iter()
+            .find_map(|m| match m {
+                Outbound::Welcome { ship, .. } => Some(ship),
+                _ => None,
+            })
+            .expect("a welcome");
+
+        let restored = lc_world::resume::Snapshot::from(&welcome)
+            .restore(Some(&system), server.now_t() as f64 / 1.0e6);
+        assert_eq!(
+            restored.motive,
+            Motive::Holding(station),
+            "the welcome put the ship back doing something else",
+        );
     }
 
     fn welcomed(wire: &mut Loopback, client: ClientId) -> ShipId {

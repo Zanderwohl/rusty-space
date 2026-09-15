@@ -136,6 +136,15 @@ where it is, which is a fact about the fiction and not about their router.
 | a drift meter | offset per unit coordinate time, reported; the alarm for tier 3 |
 | `Outbound::Resync { state }` | the explicit replacement, so a re-acquire has a cause and is never inferred |
 
+`Welcome` now carries that state — a `lc_proto::Motion`, which is the whole ship rather than a
+point — so the **reconnect** half of the re-acquire exists. What does not yet exist is the
+server-*initiated* one: nothing can hand a client a replacement outside a sign-in, so a server
+that decides the two have diverged has no way to say so. That is what `Resync` is still for, and
+it carries the same `Motion` when it arrives.
+
+Nor is any of it durable. The fleet lives in the shard's memory, so a restart forgets every ship
+and every account it belonged to: this resumes a *connection*, not a world.
+
 A protocol version bump, since `Accepted` and `Resync` change the shape of what a client reads.
 
 ## Open

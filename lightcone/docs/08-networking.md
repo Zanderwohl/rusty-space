@@ -136,10 +136,24 @@ The one cost of having no async runtime in the client is that the reading thread
 read timeout and looks at the outgoing queue when it expires. That puts an upper bound of ten
 milliseconds on how long a message waits to be written, which is well under a tick.
 
-`Welcome` carries `now_t` **and** `ship_at`. Both are needed and for the same reason: the client
-propagates from a coordinate time and an initial position, so a client given only the clock flies
-a ship the server has somewhere else. A craft found mid-flight needs its motive as well, which is
-the resume problem rather than this one.
+`Welcome` carries `now_t` **and** the whole ship. Both are needed and for the same reason: the
+client propagates from a coordinate time and an initial state, so a client given only the clock
+flies a ship the server has somewhere else.
+
+A position alone was the same failure one step in. A ship is not a point, it is *doing*
+something — holding a low polar orbit of Titan, braking into Proxima, falling round a moon — and
+a welcome that carried only the point put the craft back at rest there. A player who signed out
+of an orbit signed back into a drift, and a day later the two ends were two and a half million
+kilometres apart with the interface saying LINKED the whole time.
+
+So `Welcome` carries a `Motion`: position, velocity, the crew's own clock, the drive, and the
+motive. The motive travels as the **recipe and never the trajectory**, the same rule an order
+follows — a crossing goes as the five arguments its planner takes and is re-planned at the far
+end, and a conic goes as nothing at all, because it is re-solved from the state beside it.
+Sending the solved path would put a second copy of an answer both ends compute on the wire, free
+to disagree with the one the receiver would have reached. `lc_world::resume` is the conversion,
+and its matches are exhaustive in both directions so a motive the world gains and the wire has
+not learned is a compile error.
 
 ### A crossing names a star
 

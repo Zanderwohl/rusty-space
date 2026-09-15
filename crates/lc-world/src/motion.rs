@@ -98,6 +98,66 @@ impl ShipState {
         self.beta = DVec3::ZERO;
     }
 
+    /// Everything needed to put this ship back, as parameters. See [`crate::resume`].
+    pub fn snapshot(&self) -> crate::resume::Snapshot {
+        use crate::resume::{Recipe, Snapshot};
+        Snapshot {
+            position_ly: self.position_ly,
+            beta: self.beta,
+            clock_s: self.clock_s,
+            drive: self.drive,
+            motive: match &self.motive {
+                Motive::Crossing(cruise) => Recipe::Crossing {
+                    from_ly: cruise.from_ly,
+                    beta0: cruise.initial_beta(),
+                    to_ly: cruise.to_ly,
+                    start_s: cruise.start_s,
+                    drive: cruise.drive,
+                    arrive_at: self.arrive_at.clone(),
+                    clock_base_s: self.crossing_clock_base_s,
+                },
+                Motive::Holding(waypoint) => Recipe::Holding(waypoint.clone()),
+                Motive::Falling(_) => Recipe::Falling,
+                Motive::Drifting { from_ly, since_t } => {
+                    Recipe::Drifting { from_ly: *from_ly, since_t: *since_t }
+                }
+            },
+        }
+    }
+
+    /// Put a crossing back **part-way through**, which is what [`Self::begin_crossing`] cannot do.
+    ///
+    /// The difference is the clock: beginning a crossing bases the crew's time on the clock as
+    /// it stands, and resuming one has to restore the base it was given when it actually began,
+    /// or the ship's own time jumps on the next step.
+    pub fn resume_crossing(
+        &mut self,
+        cruise: Cruise,
+        arrive_at: Option<Waypoint>,
+        clock_base_s: f64,
+    ) {
+        self.motive = Motive::Crossing(cruise);
+        self.arrive_at = arrive_at;
+        self.crossing_clock_base_s = clock_base_s;
+    }
+
+    /// Put a ship back on a conic that was solved for it. See [`crate::resume`].
+    pub fn resume_falling(&mut self, coast: Coast) {
+        self.motive = Motive::Falling(coast);
+        self.arrive_at = None;
+    }
+
+    /// Put a ship back on the line it was already on, rather than starting a new one here.
+    ///
+    /// [`Self::set_adrift`] begins a line at the ship's present position; this restores one
+    /// that began elsewhere. Reading a drift from its own origin rather than integrating is
+    /// what makes two sides stepping differently agree, so a restore that started the line
+    /// afresh would be a small, permanent disagreement.
+    pub fn resume_drifting(&mut self, from_ly: DVec3, since_t: f64) {
+        self.motive = Motive::Drifting { from_ly, since_t };
+        self.arrive_at = None;
+    }
+
     /// Stop holding and stop falling: whatever it has, in a straight line from here.
     pub fn set_adrift(&mut self, now_s: f64) {
         self.motive = Motive::Drifting { from_ly: self.position_ly, since_t: now_s };

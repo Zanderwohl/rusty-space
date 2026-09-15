@@ -84,6 +84,13 @@ pub struct FlightState {
 pub struct Cruise {
     pub from_ly: DVec3,
     pub to_ly: DVec3,
+    /// The velocity the ship had when this was planned.
+    ///
+    /// Kept because it is a *parameter* of the plan and everything below is derived from it:
+    /// a crossing is put back on the wire as the five values [`Cruise::plan_from`] takes, and
+    /// re-planned at the far end rather than shipped as a solved trajectory. See
+    /// [`crate::resume`].
+    beta0: DVec3,
     /// Coordinate seconds at which the burn began.
     pub start_s: f64,
     pub drive: Drive,
@@ -227,6 +234,7 @@ impl Cruise {
         Self {
             from_ly: ordered_from,
             to_ly,
+            beta0,
             start_s,
             drive,
             direction,
@@ -246,6 +254,11 @@ impl Cruise {
             boost_proper_s,
             proper_s: 2.0 * boost_proper_s + coast_proper_s,
         }
+    }
+
+    /// The velocity this was planned from. With the other four public fields, the whole recipe.
+    pub fn initial_beta(&self) -> DVec3 {
+        self.beta0
     }
 
     /// Coordinate seconds the whole crossing takes, the match included.

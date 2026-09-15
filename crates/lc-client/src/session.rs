@@ -342,6 +342,24 @@ impl Session {
     }
 
 
+    /// Put the ship back as the server has it — where, how fast, how old, and **what it is
+    /// doing**.
+    ///
+    /// The order is the whole of it. Position first, because which system holds the ship is a
+    /// question about where it is; the system next, because entering one drops any motive
+    /// defined against the last; and the motive last, or the step that placed the ship would
+    /// throw away the orbit that was just restored.
+    pub fn restore(&mut self, snapshot: &lc_world::resume::Snapshot) {
+        self.ship.motion.position_ly = snapshot.position_ly;
+        self.sync_system();
+        let now = self.coordinate_time_s();
+        self.ship.motion = snapshot.clone().restore(self.system.as_deref(), now);
+        // Same system, so nothing is dropped; what this is for is re-solving the patch, which
+        // was answered for the arc the craft was on a moment ago and not for this one.
+        self.ship.enter(self.system.clone(), now);
+        self.sync_observer();
+    }
+
     /// Put the ship somewhere, cutting any crossing. Development only: there is no action for
     /// it and the server would never accept one.
     pub fn place_at(&mut self, position_ly: DVec3) {

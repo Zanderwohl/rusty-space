@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -71,6 +71,96 @@ pub enum Plane {
 pub enum LagrangePoint {
     L1,
     L2,
+}
+
+/// What a ship's engine can do. Mirrors `lc_world::flight::Drive`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Drive {
+    /// Proper acceleration, in g.
+    pub accel_g: f64,
+    /// Speed cap as a fraction of `c`.
+    pub max_beta: f64,
+}
+
+/// What an orbit is about.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Anchor {
+    Star,
+    Body(String),
+}
+
+/// A place a ship can be held, evaluated at any coordinate time.
+///
+/// Unlike [`Course`] this is a *resolved* place, not a request: the body has been looked up,
+/// the altitude has become a radius and the plane has become a pole. A course is what a player
+/// asks for and this is where the ship actually is.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Waypoint {
+    /// Light-years from the world origin.
+    Fixed([f64; 3]),
+    Orbit { about: Anchor, radius_m: f64, pole: [f64; 3], phase_rad: f64 },
+    Lagrange { body: String, point: LagrangePoint },
+    /// The orbit *about* a collinear point, which is what a craft there actually flies.
+    Libration {
+        body: String,
+        point: LagrangePoint,
+        standoff_m: f64,
+        radial_m: f64,
+        vertical_m: f64,
+        planar_rate: f64,
+        vertical_rate: f64,
+        amplitude_ratio: f64,
+        phase_rad: f64,
+        vertical_phase_rad: f64,
+        epoch_s: f64,
+    },
+}
+
+/// How a ship is moving, as the parameters it was set from.
+///
+/// The recipe and never the trajectory, for the same reason [`Order`] carries a course rather
+/// than the crossing it implies: a solved path on the wire is a second copy of an answer both
+/// ends can compute, free to disagree with the one the receiver would have reached. So a
+/// crossing travels as the arguments its planner takes, and a conic travels as nothing at all —
+/// it is re-solved from the state beside it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Motive {
+    Crossing {
+        from_ly: [f64; 3],
+        /// The velocity the crossing was planned from. A burn does not begin from rest.
+        beta0: [f64; 3],
+        to_ly: [f64; 3],
+        start_s: f64,
+        drive: Drive,
+        /// Where the crossing is *for*. Arriving becomes holding this.
+        arrive_at: Option<Waypoint>,
+        /// The ship's own clock when the crossing began, which is what its proper time is
+        /// measured from.
+        clock_base_s: f64,
+    },
+    /// Held on a station by thrust.
+    Holding(Waypoint),
+    /// Ballistic. Re-solved at the far end from the position and velocity in [`Motion`].
+    Falling,
+    /// A straight line, read from where and when it began rather than integrated.
+    Drifting { from_ly: [f64; 3], since_t: f64 },
+}
+
+/// A ship's whole state of motion.
+///
+/// What a reconnect is handed. Position alone was not enough and the way that showed was a
+/// player signing out of an orbit and signing back into a drift: the client placed its ship at
+/// the point it was given, at rest, and then predicted a future the server did not share.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Motion {
+    /// Light-years from the world origin.
+    pub at_ly: [f64; 3],
+    /// Velocity as a fraction of `c`.
+    pub beta: [f64; 3],
+    /// Seconds on the ship's own clock, which no resynchronising may change.
+    pub clock_s: f64,
+    pub drive: Drive,
+    pub motive: Motive,
 }
 
 /// What a client asks its ship to do.
@@ -220,14 +310,17 @@ pub enum Outbound {
         ship_id: ShipId,
         now_t: i64,
         name: String,
-        /// Where the ship is, in light-years. Without it the client has no idea: it knows the
-        /// clock and its own identity and would place its ship wherever it happened to start,
-        /// which is the origin — empty space, and not where the server has it.
+        /// The ship, whole: where it is, how fast, how old, and **what it is doing**.
         ///
-        /// Enough for a ship at rest, which is what a new one is. A ship found **mid-flight**
-        /// needs its motive as well, and that is the resume problem rather than this one: see
-        /// `Inbound::ResumeFrom` and `lightcone/docs/17-reconciliation.md`.
-        ship_at: [f64; 3],
+        /// Without it the client knows only the clock and its own identity, and would place its
+        /// ship wherever it happened to start — the origin, which is empty space. Carrying only
+        /// the position was the same failure one step in: a ship found mid-flight came back at
+        /// rest, so signing out of an orbit signed you back into a drift, and the two ends then
+        /// predicted different futures for the same craft.
+        ///
+        /// This is the re-acquire of `lightcone/docs/17-reconciliation.md`: a state the client
+        /// cannot reach by folding anything, so it is handed one and takes it.
+        ship: Motion,
     },
     /// The event channel. Cleared, by construction.
     Sightings(Vec<Cleared<Sighting>>),
@@ -327,10 +420,16 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 /// test on these fails. A deployed client would otherwise read the new shape as the old one and
 /// be confidently wrong rather than refused.
 pub mod golden {
-    /// `Outbound::Welcome { client_id: 7, .., ship_id: 42, now_t: 1e6, ship_at: [4.2, 0, 0] }`
+    /// `Outbound::Welcome { .., ship: Motion { at [4.2, 0, 0], holding a 12 Mm orbit of Earth } }`
     pub const WELCOME: &[u8] = &[
-        0, 7, 8, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 7, 9, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16,
+        64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0,
+        0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 1, 1, 1, 5, 69, 97, 114,
+        116, 104, 0, 0, 0, 0, 96, 227, 102, 65, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0,
+        0, 0, 0, 0, 224, 63,
     ];
 
     /// `Inbound::Act(Intent { ship_id: 42, order: Transmit { power_w: 1500.0 }, .. })`
@@ -347,7 +446,7 @@ pub mod golden {
     ///
     /// Pinned because it is now the message that decides whether anyone gets in at all. A
     /// field moving here is a server reading someone else's ticket as this one's.
-    pub const HELLO: &[u8] = &[0, 8, 5, 97, 46, 98, 46, 99];
+    pub const HELLO: &[u8] = &[0, 9, 5, 97, 46, 98, 46, 99];
 
     pub const SET_COURSE: &[u8] = &[
         1, 84, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0, 0, 0, 0, 0, 0, 20,
@@ -397,7 +496,21 @@ mod tests {
             ship_id: ShipId(42),
             now_t: 1_000_000,
             name: "Ada".into(),
-            ship_at: [4.2, 0.0, 0.0],
+            // Holding an orbit rather than at rest at a point. A ship doing something is the
+            // shape worth pinning: it reaches through `Motion` into `Motive`, `Waypoint` and
+            // `Anchor` at once, and those nested enums are where a field moves unnoticed.
+            ship: Motion {
+                at_ly: [4.2, 0.0, 0.0],
+                beta: [0.0, 0.001, 0.0],
+                clock_s: 86_400.0,
+                drive: Drive { accel_g: 5.0, max_beta: 0.999 },
+                motive: Motive::Holding(Waypoint::Orbit {
+                    about: Anchor::Body("Earth".into()),
+                    radius_m: 1.2e7,
+                    pole: [0.0, 0.0, 1.0],
+                    phase_rad: 0.5,
+                }),
+            },
         }
     }
 

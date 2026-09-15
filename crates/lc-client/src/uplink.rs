@@ -41,10 +41,11 @@ pub enum State {
 /// this process's own epoch, and `remote` back to false. The client then flies locally while
 /// the interface still says LINKED, which is the worst of both — it looks connected and
 /// nothing it does reaches the server.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Placement {
     pub now_t: i64,
-    pub ship_at: [f64; 3],
+    /// The whole ship, including what it is doing. See [`lc_world::resume`].
+    pub ship: lc_proto::Motion,
 }
 
 /// What a `Welcome` said.
@@ -157,9 +158,9 @@ impl Uplink {
     /// Idempotent, and called both when the welcome arrives and again whenever the session is
     /// rebuilt. Does nothing offline, which is the single-process game.
     pub fn place(&self, session: &mut crate::session::Session) {
-        let Some(placement) = self.placement else { return };
+        let Some(placement) = self.placement.as_ref() else { return };
         session.set_coordinate_time_us(placement.now_t);
-        session.place_at(glam::DVec3::from_array(placement.ship_at));
+        session.restore(&(&placement.ship).into());
         session.remote = true;
     }
 
@@ -288,16 +289,16 @@ fn fold(
             ship_id,
             now_t,
             name,
-            ship_at,
+            ship,
             ..
         } => {
-            info!(?ship_id, %name, ?ship_at, "welcomed");
+            info!(?ship_id, %name, at = ?ship.at_ly, doing = ?ship.motive, "welcomed");
             // The server's clock, adopted whole. Both ends propagate analytically from a
             // coordinate time, so agreeing on it is the whole of agreeing about where anything
             // is — and the client's own clock started whenever this process did.
             // Remembered, then applied — and applied again every time the session is rebuilt.
             // See `Placement` for what goes wrong when it is only applied once.
-            uplink.placement = Some(Placement { now_t, ship_at });
+            uplink.placement = Some(Placement { now_t, ship });
             uplink.place(&mut game.0);
             // **The server's rate, adopted.** Refusing to *change* the rate was not enough:
             // the client's own default is sixty times the server's, so a joined client ran
@@ -469,13 +470,24 @@ mod tests {
     }
 
     fn welcome_at(now_t: i64, ship_at: [f64; 3]) -> Outbound {
+        welcome_doing(now_t, ship_at, lc_proto::Motive::Drifting { from_ly: ship_at, since_t: 0.0 })
+    }
+
+    /// A welcome for a ship that is *doing* something, which is what a reconnect finds.
+    fn welcome_doing(now_t: i64, ship_at: [f64; 3], motive: lc_proto::Motive) -> Outbound {
         Outbound::Welcome {
             client_id: ClientId(3),
             protocol: PROTOCOL_VERSION,
             ship_id: ShipId(7),
             now_t,
             name: "Ada".into(),
-            ship_at,
+            ship: lc_proto::Motion {
+                at_ly: ship_at,
+                beta: [0.0; 3],
+                clock_s: 0.0,
+                drive: lc_proto::Drive { accel_g: 5.0, max_beta: 0.999 },
+                motive,
+            },
         }
     }
 
@@ -525,6 +537,64 @@ mod tests {
         assert_eq!([at.x, at.y, at.z], out_there, "the client kept its own position");
         // And the observer follows the ship, or the sky is drawn from the old place.
         assert!(game.0.observer.x != 0, "the observer was left behind");
+    }
+
+    /// A ship that was *doing* something comes back doing it.
+    ///
+    /// The welcome used to carry a point, so a player who signed out of an orbit signed back
+    /// into a drift — and drifted two and a half million kilometres off it in a day while the
+    /// interface said LINKED.
+    #[test]
+    fn a_welcome_puts_the_ship_back_on_the_station_it_was_holding() {
+        let (mut uplink, mut game, mut ui) = app();
+        let station = lc_proto::Waypoint::Orbit {
+            about: lc_proto::Anchor::Body("Earth".into()),
+            radius_m: 1.2e7,
+            pole: [0.0, 0.0, 1.0],
+            phase_rad: 0.5,
+        };
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            welcome_doing(0, [4.2, 0.0, 0.0], lc_proto::Motive::Holding(station.clone())),
+        );
+
+        let expected = lc_world::resume::Snapshot::from(&lc_proto::Motion {
+            at_ly: [4.2, 0.0, 0.0],
+            beta: [0.0; 3],
+            clock_s: 0.0,
+            drive: lc_proto::Drive { accel_g: 5.0, max_beta: 0.999 },
+            motive: lc_proto::Motive::Holding(station),
+        });
+        let lc_world::resume::Recipe::Holding(waypoint) = expected.motive else {
+            unreachable!("a station")
+        };
+        assert_eq!(
+            game.0.ship.motion.motive,
+            lc_world::motion::Motive::Holding(waypoint),
+            "the client came back adrift",
+        );
+    }
+
+    /// And the survivor of a rebuild is the whole state, not just the position: the sky load
+    /// replaces the session after the welcome has already landed.
+    #[test]
+    fn a_rebuild_keeps_the_motive_and_not_only_the_position() {
+        let (mut uplink, mut game, mut ui) = app();
+        let doing = lc_proto::Motive::Drifting { from_ly: [1.0, 0.0, 0.0], since_t: 12.0 };
+        fold(&mut uplink, &mut game, &mut ui, welcome_doing(0, [4.2, 0.0, 0.0], doing));
+
+        game.0 = crate::session::Session::new(&lc_world::sky::AuthoredStars::sample(), 3);
+        uplink.place(&mut game.0);
+
+        match game.0.ship.motion.motive {
+            lc_world::motion::Motive::Drifting { from_ly, since_t } => {
+                assert_eq!(from_ly, glam::DVec3::new(1.0, 0.0, 0.0), "the line was redrawn");
+                assert_eq!(since_t, 12.0);
+            }
+            other => unreachable!("{other:?}"),
+        }
     }
 
     /// **The bug manual QA found.** The connection opens before the sky finishes loading — on
