@@ -65,3 +65,42 @@ fn a_frame_after_a_cut_is_not_a_search() {
         "a frame after a cut costs {each:?}, which is most of a frame",
     );
 }
+
+/// The state the report actually describes: a cut part-way through a crossing **toward a star
+/// you are already near**, which leaves the craft falling through a system at a large fraction
+/// of `c`.
+///
+/// A craft that fast leaves one sphere of influence and enters another every frame, and each
+/// of those is a repatch, and each repatch solves for the next crossing over a horizon of
+/// several revolutions. That is a search per frame rather than a step per frame.
+#[test]
+fn a_frame_after_a_cut_at_speed_is_not_a_search() {
+    let mut craft = a_craft_in_a_system();
+
+    const AU_LY: f64 = 1.495_978_707e11 / 9.460_730_472_580_8e15;
+    let origin = craft.motion.position_ly;
+    craft.motion.position_ly = origin + DVec3::X * 5.0 * AU_LY;
+    // Two tenths of `c`, inbound. Two percent into a four light-year crossing is around here.
+    craft.motion.beta = DVec3::new(-0.2, 0.0, 0.0);
+    craft.motion.set_adrift(0.0);
+    let _ = motion::apply(
+        &mut craft.motion,
+        craft.system.as_deref(),
+        &Event { ship: ShipId(0), at_t: 0.0, change: Change::CutDrive },
+    );
+
+    let started = Clock::now();
+    let mut now = 0.0;
+    for _ in 0..FRAMES {
+        now += STEP_S;
+        craft.advance(now, STEP_S);
+    }
+    let each = started.elapsed() / FRAMES as u32;
+
+    println!("a frame after a cut at 0.2c costs {each:?}  (motive {:?})", 
+        std::mem::discriminant(&craft.motion.motive));
+    assert!(
+        each < std::time::Duration::from_millis(4),
+        "a frame after a cut at speed costs {each:?}, which is most of a frame",
+    );
+}

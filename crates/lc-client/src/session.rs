@@ -586,10 +586,54 @@ fn geometry(radius_m: f64, distance_m: f64) -> f64 {
 /// The whole of an unmodelled star's brightness, and — at the star's own temperature and a
 /// body's effective radius — the whole of a body's reflected brightness.
 pub fn bare(teff_k: f64, radius_m: f64, distance_m: f64) -> PerBand<f32> {
+    let spectrum = spectrum_at(teff_k);
     let g = geometry(radius_m, distance_m);
-    PerBand::new(std::array::from_fn(|i| {
-        (blackbody::band_radiance(Band::ALL[i], teff_k) * g) as f32
-    }))
+    let spectrum = spectrum.as_array();
+    PerBand::new(std::array::from_fn(|i| (spectrum[i] as f64 * g) as f32))
+}
+
+/// How finely temperatures are distinguished before the spectrum is reused, as a fraction.
+///
+/// A thousandth. Planck's law is smooth in temperature, and a tenth of a percent is far below
+/// anything a tone map turns into a different pixel — while being coarse enough that a sky full
+/// of stars collapses onto a few hundred distinct spectra rather than eight thousand.
+const TEFF_RESOLUTION: f64 = 1.0e-3;
+
+/// Enough distinct temperatures for a full sky several times over. A bound rather than a
+/// policy: without one this grows for as long as the ship keeps accelerating.
+const SPECTRA_KEPT: usize = 4096;
+
+/// The spectral half of a star's radiance, which depends on **temperature alone**.
+///
+/// The other half is geometry — one multiply by the solid angle — and it is the half that
+/// changes every frame as the ship moves. Separating them is what makes the expensive half
+/// cacheable at all: integrating Planck's law per band for every star in the sky, every frame,
+/// was most of a frame on its own and the largest thing in a profile of a frozen browser.
+///
+/// Doppler shifts the temperature, so this is not constant while under way — but it moves
+/// slowly, and quantising it means a ship at rest computes each spectrum once ever.
+fn spectrum_at(teff_k: f64) -> PerBand<f32> {
+    thread_local! {
+        static SPECTRA: std::cell::RefCell<HashMap<u64, PerBand<f32>>> =
+            std::cell::RefCell::new(HashMap::new());
+    }
+    // The key is the temperature in units of its own resolution, so neighbouring temperatures
+    // share an entry and a sweeping Doppler factor does not mint one per frame.
+    let key = (teff_k / (teff_k * TEFF_RESOLUTION).max(1.0)).round() as u64;
+    SPECTRA.with(|spectra| {
+        let mut spectra = spectra.borrow_mut();
+        if let Some(found) = spectra.get(&key) {
+            return *found;
+        }
+        if spectra.len() >= SPECTRA_KEPT {
+            spectra.clear();
+        }
+        let computed = PerBand::new(std::array::from_fn(|i| {
+            blackbody::band_radiance(Band::ALL[i], teff_k) as f32
+        }));
+        spectra.insert(key, computed);
+        computed
+    })
 }
 
 /// The deficit is applied in the band it was measured in, which is only right at rest: under
