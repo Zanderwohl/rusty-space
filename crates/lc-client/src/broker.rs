@@ -43,6 +43,39 @@ impl Broker {
         })
     }
 
+    /// Sign in with the local password provider, without a browser.
+    ///
+    /// Straight to a grant: a code exists to survive a browser redirect and there is not one
+    /// here. `NoPasswordProvider` is distinct from a refusal so the client can stop offering a
+    /// form that can never work on this server.
+    pub fn with_password(
+        &self,
+        email: &str,
+        password: &str,
+        label: &str,
+        register_as: Option<&str>,
+    ) -> Result<Granted, BrokerError> {
+        let path = if register_as.is_some() {
+            "/signin/register/native"
+        } else {
+            "/signin/password/native"
+        };
+        let body = ureq::json!({
+            "email": email,
+            "password": password,
+            "label": label,
+            "display_name": register_as,
+        });
+        let answer = self.post(path, body)?;
+        Ok(Granted {
+            grant: field(&answer, "grant")?,
+            identity: Identity {
+                account_id: field(&answer, "account_id")?,
+                display_name: field(&answer, "display_name")?,
+            },
+        })
+    }
+
     /// Trade a device grant for a game ticket.
     ///
     /// Done on every connection rather than once, which is what lets a ticket be worth sixty
@@ -60,7 +93,15 @@ impl Broker {
             // 401 and 404 both mean "this credential is no good", and both are recoverable by
             // signing in again. Everything else is a fault, not a refusal, and must *not*
             // clear the vault: a broker that is down would otherwise sign everyone out.
+            // A path that does not exist means this server has no such provider, which is a
+            // thing the client should stop offering rather than retry.
+            Err(ureq::Error::Status(404, _)) if path.ends_with("/native") => {
+                Err(BrokerError::NoPasswordProvider)
+            }
             Err(ureq::Error::Status(401 | 404, _)) => Err(BrokerError::Refused),
+            Err(ureq::Error::Status(409, _)) => Err(BrokerError::AlreadyRegistered),
+            Err(ureq::Error::Status(422, _)) => Err(BrokerError::WeakPassword),
+            Err(ureq::Error::Status(429, _)) => Err(BrokerError::TooManyAttempts),
             Err(why) => Err(BrokerError::Unreachable(why.to_string())),
         }
     }

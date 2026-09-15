@@ -60,7 +60,7 @@ pub fn parse(args: &[String]) -> (DevEntry, Option<String>) {
 
     // The sign-in modal draws over the main menu, so it cannot be reached by an action that
     // runs on entering the sky. This is the only way to photograph it.
-    let menu_page = flag("--signin").then_some(crate::ui::MenuPage::SignIn);
+    let menu_page = (flag("--signin") || flag("--password")).then_some(crate::ui::MenuPage::SignIn);
 
     // `--menu` holds the entry at the main menu, so `--shot` can photograph it. Without it a
     // screenshot run goes straight to the sky, which is what every other capture wants.
@@ -75,6 +75,9 @@ pub fn parse(args: &[String]) -> (DevEntry, Option<String>) {
         after_frames: value(args, "--frames").unwrap_or(120),
         burst: value(args, "--burst").unwrap_or(1),
         menu_page,
+        // The password form is the one egui surface in the menu, and it is opened by a button
+        // rather than by a page, so it needs its own way in to be photographed.
+        open_password_form: flag("--password"),
         actions,
     };
     // The first argument only. Scanning for any non-flag token would pick up a flag's own

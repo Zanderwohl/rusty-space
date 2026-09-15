@@ -47,6 +47,7 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--panel <name>` / `--tune` | open a panel |
 | `--menu` | hold at the main menu, so `--shot` photographs that instead of the sky |
 | `--signin` | hold at the sign-in modal, which draws over the menu and no action can reach |
+| `--password` | hold at the password form, the one egui surface inside the menu |
 | `--turn <deg>` / `--pitch <deg>` | turn the view, the only way to put something off screen |
 | `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable |
 
@@ -107,6 +108,8 @@ Each of these cost real time. None of them are visible from the code that hits t
 
 **egui**
 
+- Interface rules live in `lightcone/docs/18-ui-style.md`: which toolkit a surface belongs to,
+  one surface at a time, and why anything over another panel is opaque.
 - **Bevy UI orders by spawn**, so two systems spawning into one frame have no order between
   them — an overlay drawn by one lands *behind* the screen drawn by the other, interleaved with
   it. `em_ui::MenuUi::overlay` sets a `GlobalZIndex` for this reason. And a translucent panel

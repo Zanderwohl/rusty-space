@@ -123,8 +123,13 @@ pub fn is_allowed_return(allowed: &[String], candidate: &str) -> bool {
 /// loopback address and not a name that resolves to one, an allowlisted path, no query, no
 /// fragment, and no credentials.
 pub fn is_allowed_loopback(paths: &[String], candidate: &str) -> bool {
-    let Ok(url) = url::Url::parse(candidate) else { return false };
-    let loopback = matches!(url.host_str(), Some("127.0.0.1") | Some("[::1]") | Some("::1"));
+    let Ok(url) = url::Url::parse(candidate) else {
+        return false;
+    };
+    let loopback = matches!(
+        url.host_str(),
+        Some("127.0.0.1") | Some("[::1]") | Some("::1")
+    );
     url.scheme() == "http"
         && loopback
         && url.username().is_empty()
@@ -168,7 +173,10 @@ mod tests {
     fn a_loopback_redirect_may_use_any_port_and_nothing_else() {
         let paths = vec!["/return".to_string()];
         for port in ["1024", "49152", "65535"] {
-            assert!(is_allowed_loopback(&paths, &format!("http://127.0.0.1:{port}/return")));
+            assert!(is_allowed_loopback(
+                &paths,
+                &format!("http://127.0.0.1:{port}/return")
+            ));
         }
         assert!(is_allowed_loopback(&paths, "http://[::1]:7635/return"));
 
@@ -189,7 +197,10 @@ mod tests {
             "file:///return",
             "",
         ] {
-            assert!(!is_allowed_loopback(&paths, hostile), "{hostile} was allowed");
+            assert!(
+                !is_allowed_loopback(&paths, hostile),
+                "{hostile} was allowed"
+            );
         }
     }
 

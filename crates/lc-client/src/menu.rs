@@ -91,24 +91,24 @@ fn observe_action(_: &ObserveEmits) -> Action {
 fn build(commands: &mut Commands, page: MenuPage, observe: Action) {
     let mut ui = MenuUi::new(commands, MenuTheme::VFD).panel_width(520.0);
     let root = ui.screen(MenuScreen(page));
+    // **One surface at a time.** The sign-in draws its own, and a menu behind it is a second
+    // thing to read and a second set of buttons to try. The screen is still spawned, because
+    // it carries the marker that says which page is drawn.
+    if page == MenuPage::SignIn {
+        return;
+    }
     let panel = ui.panel(root);
     ui.title(panel, "LIGHTCONE");
     ui.message(panel, "Everything you see has already happened.");
 
     match page {
         MenuPage::Root => {
-            ui.button(panel, "Observe", Emit(observe.clone()));
+            ui.button(panel, "Observe", Emit(observe));
             ui.button(panel, "Settings", Emit(Action::GoToMenuPage(MenuPage::Settings)));
             ui.button(panel, "Quit", Emit(Action::Quit));
         }
-        // The root, with the sign-in drawn over it. What the player pressed Observe on stays
-        // where it was, dimmed, which is what makes the modal read as an interruption rather
-        // than as a different screen.
-        MenuPage::SignIn => {
-            ui.button(panel, "Observe", Emit(observe.clone()));
-            ui.button(panel, "Settings", Emit(Action::GoToMenuPage(MenuPage::Settings)));
-            ui.button(panel, "Quit", Emit(Action::Quit));
-        }
+        // Returned above; the sign-in owns the screen while it is up.
+        MenuPage::SignIn => {}
         other => {
             ui.message(panel, &format!("{other:?}"));
             ui.button(panel, "Back", Emit(Action::GoToMenuPage(MenuPage::Root)));

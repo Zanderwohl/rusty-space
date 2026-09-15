@@ -74,6 +74,8 @@ pub struct DevEntry {
     /// A menu page to open on arrival. The only way to photograph one that draws over the
     /// root, which an action running on entering the sky cannot reach.
     pub menu_page: Option<crate::ui::MenuPage>,
+    /// Open the password form on arrival, for the same reason.
+    pub open_password_form: bool,
     /// Run once on reaching the sky. Actions rather than flags, so a development entry can
     /// reach anything the interface can and needs no plumbing of its own.
     pub actions: Vec<Action>,

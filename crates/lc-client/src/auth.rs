@@ -240,6 +240,12 @@ pub enum BrokerError {
     /// The grant or code was refused. Recoverable by signing in again, and the only one worth
     /// clearing the vault for.
     Refused,
+    /// This deployment has no password provider. Not a refusal: the form should go away rather
+    /// than be tried again.
+    NoPasswordProvider,
+    AlreadyRegistered,
+    WeakPassword,
+    TooManyAttempts,
     /// Anything else: no network, a 500, a body that would not parse.
     Unreachable(String),
 }
@@ -248,6 +254,14 @@ impl std::fmt::Display for BrokerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BrokerError::Refused => f.write_str("that sign-in is no longer valid"),
+            BrokerError::NoPasswordProvider => {
+                f.write_str("this server has no password sign-in; use a browser")
+            }
+            BrokerError::AlreadyRegistered => f.write_str("that address already has an account"),
+            BrokerError::WeakPassword => f.write_str("that password is too short"),
+            BrokerError::TooManyAttempts => {
+                f.write_str("too many attempts; wait a while and try again")
+            }
             BrokerError::Unreachable(why) => write!(f, "could not reach the sign-in service: {why}"),
         }
     }

@@ -34,6 +34,10 @@ pub fn router(broker: Broker) -> Router {
         .route("/signin", get(page))
         .route("/signin/password", post(sign_in))
         .route("/signin/register", post(register))
+        // The native pair. Same credentials, same budgets, no redirect — so no code either:
+        // a code exists to survive a browser round trip and there is not one here.
+        .route("/signin/password/native", post(native_signin))
+        .route("/signin/register/native", post(native_register))
         .route("/exchange", post(exchange))
         .route("/ticket", post(ticket))
         .route("/grant", post(grant))
@@ -172,6 +176,114 @@ async fn complete(
         &code,
         &form.to.state,
     ))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+struct NativeCredentials {
+    email: String,
+    password: String,
+    /// What a revocation list shows a person. The machine, not an identifier.
+    label: String,
+    /// Only read when registering.
+    display_name: Option<String>,
+}
+
+async fn native_signin(
+    State(broker): State<Broker>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    axum::Json(form): axum::Json<NativeCredentials>,
+) -> Response {
+    native(&broker, from, &form, false).await
+}
+
+async fn native_register(
+    State(broker): State<Broker>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    axum::Json(form): axum::Json<NativeCredentials>,
+) -> Response {
+    native(&broker, from, &form, true).await
+}
+
+/// The desktop password path: credentials in, a device grant out.
+///
+/// It exists because the desktop client cannot use the form above — that one redirects a
+/// browser, and there is no browser here. `lightcone/docs/16-identity.md` records that putting
+/// a password form in a game window is an argument *against* shipping this provider rather than
+/// for embedding the others, and this endpoint is the shape that argument is about.
+async fn native(
+    broker: &Broker,
+    from: SocketAddr,
+    form: &NativeCredentials,
+    new_account: bool,
+) -> Response {
+    // Not enabled is **404**, so a client can tell "this server has no password sign-in" from
+    // "your password is wrong" and stop offering it.
+    if !broker.config.providers.allows(Provider::Password) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    // The same two budgets the form path gets. A JSON endpoint is a better target for stuffing
+    // than a form, not a worse one.
+    let by_account = format!("account:{}", crate::store::normalise_email(&form.email));
+    let by_address = format!("addr:{}", from.ip());
+    if !broker.attempts.allows(&by_account, PER_ACCOUNT)
+        || !broker.attempts.allows(&by_address, PER_ADDRESS)
+    {
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    }
+
+    let outcome = if new_account {
+        signin::register_password(
+            &broker.store,
+            &form.email,
+            &form.password,
+            form.display_name.as_deref().unwrap_or("Traveller"),
+        )
+        .await
+    } else {
+        signin::with_password(&broker.store, &form.email, &form.password).await
+    };
+    let account_id = match outcome {
+        Ok(id) => id,
+        Err(refused) => {
+            broker.attempts.failed(&by_account);
+            broker.attempts.failed(&by_address);
+            // One status for every refusal, as the form gives one message. A client that could
+            // tell "no such account" from "wrong password" is an account enumerator.
+            let status = match refused {
+                Refused::Taken => StatusCode::CONFLICT,
+                Refused::Unacceptable(_) => StatusCode::UNPROCESSABLE_ENTITY,
+                _ => StatusCode::UNAUTHORIZED,
+            };
+            return status.into_response();
+        }
+    };
+    broker.attempts.cleared(&by_account);
+
+    let Ok(Some(account)) = broker.store.account(account_id).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let (grant, digest) = signin::mint_code();
+    let label: String = form.label.chars().take(120).collect();
+    if let Err(why) = broker
+        .store
+        .put_grant(
+            &digest,
+            account_id,
+            &label,
+            Utc::now() + Duration::days(GRANT_DAYS),
+        )
+        .await
+    {
+        tracing::error!(%why, "could not record a device grant");
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    axum::Json(Granted {
+        grant,
+        account_id: account.id.to_string(),
+        display_name: account.display_name,
+    })
     .into_response()
 }
 
@@ -606,7 +718,7 @@ mod endpoint_tests {
                 database_url: String::new(),
                 providers: crate::providers::resolve("password", |_| None).unwrap(),
                 return_to: vec!["https://lightcone.example/auth/return".into()],
-            loopback_paths: vec!["/return".into()],
+                loopback_paths: vec!["/return".into()],
                 exchange_secret: "shared".into(),
                 audiences: vec![SHARD.into()],
                 issuer: "https://accounts.lightcone.example".into(),
@@ -646,7 +758,14 @@ mod endpoint_tests {
         if let Some(secret) = secret {
             builder = builder.header("authorization", format!("Bearer {secret}"));
         }
-        builder.body(Body::from(body.to_string())).unwrap()
+        let mut request = builder.body(Body::from(body.to_string())).unwrap();
+        // Driving the router directly leaves no peer address, and the routes that meter by
+        // address extract one. Without this they answer 500 and a test reads it as the
+        // endpoint being broken.
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 40000))));
+        request
     }
 
     /// The site speaks for a player because it holds the secret, not because it says so.
@@ -793,6 +912,119 @@ mod endpoint_tests {
                 .0,
             StatusCode::NOT_FOUND,
         );
+    }
+
+    /// The desktop password path, end to end: credentials in, a grant out, and that grant
+    /// mints tickets like any other.
+    #[tokio::test]
+    async fn the_native_path_registers_and_then_signs_in() {
+        let broker = a_broker();
+        let make = serde_json::json!({
+            "email": "ada@example.test", "password": "a good password",
+            "label": "Ada's laptop", "display_name": "Ada",
+        });
+        let (status, granted) = call(&broker, post("/signin/register/native", make, None)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(granted["display_name"], "Ada");
+
+        // The grant it handed back is a real one.
+        let (status, minted) = call(
+            &broker,
+            post(
+                "/ticket",
+                serde_json::json!({"grant": granted["grant"], "audience": SHARD}),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            minted["ticket"]
+                .as_str()
+                .is_some_and(|t| t.split('.').count() == 3)
+        );
+
+        // And signing in again works without registering again.
+        let again = serde_json::json!({
+            "email": "Ada@Example.TEST", "password": "a good password", "label": "the same laptop",
+        });
+        let (status, second) = call(&broker, post("/signin/password/native", again, None)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            second["account_id"], granted["account_id"],
+            "it made a second account"
+        );
+        assert_ne!(
+            second["grant"], granted["grant"],
+            "two devices shared a grant"
+        );
+    }
+
+    /// One status for every refusal. A client that could tell "no such account" from "wrong
+    /// password" is an account enumerator with a nicer interface.
+    #[tokio::test]
+    async fn the_native_path_does_not_say_which_half_was_wrong() {
+        let broker = a_broker();
+        let make = serde_json::json!({
+            "email": "ada@example.test", "password": "a good password", "label": "laptop",
+            "display_name": "Ada",
+        });
+        assert_eq!(
+            call(&broker, post("/signin/register/native", make, None))
+                .await
+                .0,
+            StatusCode::OK
+        );
+
+        for attempt in [
+            serde_json::json!({"email": "ada@example.test", "password": "wrong", "label": "l"}),
+            serde_json::json!({"email": "nobody@example.test", "password": "a good password", "label": "l"}),
+        ] {
+            let (status, body) =
+                call(&broker, post("/signin/password/native", attempt, None)).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED);
+            assert_eq!(
+                body,
+                serde_json::Value::Null,
+                "the refusal explained itself"
+            );
+        }
+    }
+
+    /// Not enabled is **404**, distinct from a refusal, so a client can stop offering it rather
+    /// than showing a form that can never work.
+    #[tokio::test]
+    async fn a_server_without_the_password_provider_says_so() {
+        let mut config = Config {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            database_url: String::new(),
+            providers: crate::providers::resolve("password", |_| None).unwrap(),
+            return_to: vec!["https://lightcone.example/auth/return".into()],
+            loopback_paths: vec!["/return".into()],
+            exchange_secret: "shared".into(),
+            audiences: vec![SHARD.into()],
+            issuer: "https://accounts.lightcone.example".into(),
+            signing_seed: None,
+        };
+        config.providers = crate::providers::resolve("google", |name| {
+            matches!(name, "GOOGLE_CLIENT_ID" | "GOOGLE_CLIENT_SECRET").then(|| "x".to_string())
+        })
+        .unwrap();
+        let broker = Broker {
+            config: Arc::new(config),
+            ..a_broker()
+        };
+
+        let (status, _) = call(
+            &broker,
+            post(
+                "/signin/password/native",
+                serde_json::json!({"email": "a@b.test", "password": "whatever", "label": "l"}),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     /// The key set is public, and it is what a game server verifies against.

@@ -4,6 +4,9 @@ The application around the simulation: states, menus, windows and the rules they
 `bevy_egui` for everything dense with text. The exception is the main menu, which composites
 over a rendered background and is Bevy UI — see [The main menu](#the-main-menu).
 
+[18-ui-style.md](18-ui-style.md) is the companion: this page is what the interface *is*, that
+one is how to draw a surface without it fighting what is already there.
+
 ## States
 
 ```

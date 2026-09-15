@@ -14,6 +14,8 @@ use bevy::prelude::*;
 use bevy::tasks::IoTaskPool;
 use em_ui::{MenuTheme, MenuUi};
 
+use bevy_egui::{EguiContexts, egui};
+
 use crate::action::Action;
 use crate::app::{AppState, Ui};
 use crate::auth::{BrokerError, Identity, Session};
@@ -34,9 +36,26 @@ pub struct Signin {
     pub session: Session,
     /// What the client holds between launches, once it has one.
     pub grant: Option<String>,
+    /// The password form, when it is open. See [`Form`].
+    pub form: Option<Form>,
     /// Behind a lock for the reason `Loopback`'s is: a resource must be `Sync`.
     from_tasks: Mutex<Receiver<Report>>,
     to_main: Sender<Report>,
+}
+
+/// What the player has typed.
+///
+/// egui rather than Bevy UI, unlike the rest of the menu. Doc 13's rule is that anything dense
+/// with text is egui and the menu is the exception; two text fields and their labels are dense
+/// with text, and Bevy UI has no text input to build them out of.
+#[derive(Default)]
+pub struct Form {
+    pub email: String,
+    pub password: String,
+    pub display_name: String,
+    /// Making an account rather than using one. The reason the password provider exists is
+    /// that a development environment needs a hundred of them.
+    pub registering: bool,
 }
 
 /// What a background task has to say.
@@ -59,6 +78,7 @@ impl Signin {
             vault: Vault::best(config_dir),
             session: Session::default(),
             grant: None,
+            form: None,
             from_tasks: Mutex::new(from_tasks),
             to_main,
         }
@@ -80,6 +100,7 @@ impl Plugin for SigninPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Signin::new(config_dir()))
             .add_systems(Startup, resume)
+            .add_systems(OnEnter(AppState::MainMenu), open_dev_form)
             .add_systems(
                 Update,
                 (handle, collect, listen, press).chain().run_if(in_state(AppState::MainMenu)),
@@ -87,6 +108,10 @@ impl Plugin for SigninPlugin {
             .add_systems(
                 Update,
                 draw.run_if(in_state(AppState::MainMenu)).after(collect),
+            )
+            .add_systems(
+                bevy_egui::EguiPrimaryContextPass,
+                form.run_if(in_state(AppState::MainMenu)),
             );
     }
 }
@@ -152,14 +177,18 @@ fn handle(
                 signin.grant = None;
                 signin.session = Session::SignedOut;
             }
-            Action::SignInWithPassword { .. } => {
-                // The in-modal form. Doc 16 records why it exists and why it is an argument
-                // against the password provider reaching production.
-                signin.session =
-                    Session::Failed("the in-modal password form is not built yet".into());
-            }
+            // Opening the form is all this does; submitting it is `password_submit`, which
+            // the egui panel calls directly because it owns the typed text.
+            Action::SignInWithPassword { .. } => signin.form = Some(Form::default()),
             _ => {}
         }
+    }
+}
+
+/// Open the form `--password` asked for, so it can be photographed.
+fn open_dev_form(dev: Res<crate::app::DevEntry>, mut signin: ResMut<Signin>) {
+    if dev.open_password_form {
+        signin.form = Some(Form::default());
     }
 }
 
@@ -265,6 +294,115 @@ pub fn begin(signin: &mut Signin) {
     signin.session = Session::Waiting { loopback: bound.listen(pending), url };
 }
 
+/// Send what was typed.
+///
+/// Doc 16 records why this form exists and why it is an argument against the password provider
+/// reaching production: it teaches a player to type a credential into a game window.
+fn password_submit(signin: &mut Signin) {
+    let Some(broker) = signin.broker.clone() else { return };
+    let Some(form) = signin.form.take() else { return };
+    let register_as = form.registering.then(|| {
+        let typed = form.display_name.trim();
+        if typed.is_empty() { "Traveller".to_string() } else { typed.to_string() }
+    });
+    let label = machine_name();
+    let to_main = signin.to_main.clone();
+    signin.session = Session::Working;
+    IoTaskPool::get()
+        .spawn(async move {
+            let asked =
+                broker.with_password(&form.email, &form.password, &label, register_as.as_deref());
+            let _ = match asked {
+                Ok(granted) => to_main
+                    .send(Report::Granted { grant: granted.grant, identity: granted.identity }),
+                Err(why) => to_main.send(Report::Failed(why.to_string())),
+            };
+        })
+        .detach();
+}
+
+/// The password form, which is the one egui surface in the menu.
+fn form(mut contexts: EguiContexts, mut signin: ResMut<Signin>, ui_state: Res<Ui>) {
+    if ui_state.menu_page != MenuPage::SignIn || signin.form.is_none() {
+        return;
+    }
+    let Ok(context) = contexts.ctx_mut() else { return };
+
+    let mut submit = false;
+    let mut cancel = false;
+    // Dressed in the menu's palette. The game's other egui panels are default dark and that is
+    // fine where they sit, over a rendered sky; this one is inside the menu, and a grey box in
+    // the middle of it reads as a different application rather than as part of this one.
+    egui::Window::new("Password")
+        .collapsible(false)
+        .resizable(false)
+        .title_bar(false)
+        .frame(egui::Frame {
+            // Opaque. The Bevy modal is behind it and a 92% panel lets its buttons read
+            // straight through the form, which is the same muddle the modal itself had.
+            fill: colour(em_ui::vfd::PANEL_BG.with_alpha(1.0_f32)),
+            stroke: egui::Stroke::new(1.0_f32, colour(em_ui::vfd::BUTTON_BORDER)),
+            inner_margin: egui::Margin::same(14),
+            ..egui::Frame::NONE
+        })
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(context, |ui| {
+            let text = colour(em_ui::vfd::TEXT);
+            ui.visuals_mut().override_text_color = Some(text);
+            ui.visuals_mut().widgets.inactive.bg_fill = colour(em_ui::vfd::BUTTON_BG);
+            ui.visuals_mut().widgets.hovered.bg_fill = colour(em_ui::vfd::BUTTON_HOVER);
+            ui.visuals_mut().widgets.active.bg_fill = colour(em_ui::vfd::BUTTON_HOVER);
+            // What a text field is filled with. Darker than the panel, or a field with nothing
+            // in it is invisible and the form looks like labels with no inputs.
+            ui.visuals_mut().extreme_bg_color = egui::Color32::from_rgb(4, 14, 8);
+            ui.visuals_mut().widgets.inactive.bg_stroke =
+                egui::Stroke::new(1.0_f32, colour(em_ui::vfd::TEXT_DIM));
+            let Some(form) = signin.form.as_mut() else { return };
+            ui.set_min_width(320.0);
+            ui.heading("Password");
+            ui.add_space(6.0);
+            egui::Grid::new("credentials").num_columns(2).show(ui, |ui| {
+                ui.label("Email");
+                ui.text_edit_singleline(&mut form.email);
+                ui.end_row();
+                ui.label("Password");
+                // `password(true)` is not decoration: this is on screen in a game, which is
+                // more likely to be streamed or screenshotted than a browser is.
+                ui.add(egui::TextEdit::singleline(&mut form.password).password(true));
+                ui.end_row();
+                if form.registering {
+                    ui.label("Name");
+                    ui.text_edit_singleline(&mut form.display_name);
+                    ui.end_row();
+                }
+            });
+            ui.checkbox(&mut form.registering, "Create an account");
+            ui.separator();
+            ui.horizontal(|ui| {
+                let ready = !form.email.trim().is_empty() && !form.password.is_empty();
+                submit = ui.add_enabled(ready, egui::Button::new("Sign in")).clicked();
+                cancel = ui.button("Cancel").clicked();
+            });
+        });
+
+    if submit {
+        password_submit(&mut signin);
+    } else if cancel {
+        signin.form = None;
+    }
+}
+
+/// A Bevy colour as an egui one, so the two surfaces share a palette rather than a guess.
+fn colour(from: bevy::prelude::Color) -> egui::Color32 {
+    let rgba = from.to_srgba();
+    egui::Color32::from_rgba_unmultiplied(
+        (rgba.red * 255.0) as u8,
+        (rgba.green * 255.0) as u8,
+        (rgba.blue * 255.0) as u8,
+        (rgba.alpha * 255.0) as u8,
+    )
+}
+
 /// The modal.
 fn draw(mut commands: Commands, ui: Res<Ui>, signin: Res<Signin>, drawn: Query<Entity, With<Modal>>) {
     let wanted = ui.menu_page == MenuPage::SignIn;
@@ -284,6 +422,11 @@ fn draw(mut commands: Commands, ui: Res<Ui>, signin: Res<Signin>, drawn: Query<E
     let theme = MenuTheme { panel_bg: MenuTheme::VFD.panel_bg.with_alpha(1.0), ..MenuTheme::VFD };
     let mut menu = MenuUi::new(&mut commands, theme).panel_width(460.0);
     let screen = menu.overlay(Modal);
+    // The form owns the screen while it is up, for the reason the menu stands down for this
+    // modal: one surface at a time. The backdrop stays, so the sky is still dimmed behind it.
+    if signin.form.is_some() {
+        return;
+    }
     let panel = menu.panel(screen);
     menu.title(panel, "SIGN IN");
 
@@ -311,6 +454,13 @@ fn draw(mut commands: Commands, ui: Res<Ui>, signin: Res<Signin>, drawn: Query<E
         Session::SignedOut => {
             menu.message(panel, "Observing needs an account.");
             menu.button(panel, "Sign in with a browser", Emit(Action::SignIn));
+            // The local one. Offered always and refused with a reason by a deployment that has
+            // no password provider, rather than the client asking in advance what is on offer.
+            menu.button(
+                panel,
+                "Use a password",
+                Emit(Action::SignInWithPassword { email: String::new(), password: String::new() }),
+            );
             menu.button(panel, "Back", Emit(Action::GoToMenuPage(MenuPage::Root)));
         }
     }
@@ -345,6 +495,7 @@ mod tests {
             vault: Vault::memory(),
             session: Session::SignedOut,
             grant: None,
+            form: None,
             from_tasks: Mutex::new(channel().1),
             to_main: channel().0,
         };
@@ -359,6 +510,7 @@ mod tests {
             vault: Vault::memory(),
             session,
             grant: None,
+            form: None,
             from_tasks: Mutex::new(channel().1),
             to_main: channel().0,
         };
