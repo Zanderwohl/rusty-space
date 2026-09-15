@@ -21,6 +21,7 @@ pub mod navigation;
 pub mod observation;
 pub mod occluder;
 pub mod population;
+pub mod pursuit;
 pub mod resume;
 pub mod rings;
 pub mod rng;

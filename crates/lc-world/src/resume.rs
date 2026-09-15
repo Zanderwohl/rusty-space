@@ -51,6 +51,15 @@ pub enum Recipe {
         /// would make the crew's clock jump on the next step.
         clock_base_s: f64,
     },
+    /// The arguments an approach was solved from, and re-solved at the far end.
+    ///
+    /// Every one of them is relative or a sighting — see [`crate::pursuit::Approach`] — so this
+    /// tells its receiver nothing about the quarry that the receiver's own eyes could not.
+    Rendezvous {
+        approach: crate::pursuit::Approach,
+        /// The ship's clock when the approach began; see [`Recipe::Crossing`].
+        clock_base_s: f64,
+    },
     /// The station itself, which is already the parameter.
     Holding(Waypoint),
     /// Carries nothing: the conic is re-solved from the position and velocity above, against
@@ -78,6 +87,9 @@ impl Snapshot {
             Recipe::Crossing { from_ly, beta0, to_ly, start_s, drive, arrive_at, clock_base_s } => {
                 let cruise = Cruise::plan_from(from_ly, beta0, to_ly, start_s, drive);
                 state.resume_crossing(cruise, arrive_at, clock_base_s);
+            }
+            Recipe::Rendezvous { approach, clock_base_s } => {
+                state.resume_rendezvous(approach.solve(), clock_base_s);
             }
             Recipe::Holding(waypoint) => state.begin_holding(waypoint),
             Recipe::Falling => {
@@ -131,6 +143,18 @@ impl From<&Snapshot> for lc_proto::Motion {
                     arrive_at: arrive_at.as_ref().map(waypoint_out),
                     clock_base_s: *clock_base_s,
                 },
+                Recipe::Rendezvous { approach, clock_base_s } => lc_proto::Motive::Rendezvous {
+                    from_ly: approach.from_ly.to_array(),
+                    beta0: approach.beta0.to_array(),
+                    to_ly: approach.to_ly.to_array(),
+                    start_s: approach.start_s,
+                    drive: drive_out(approach.drive),
+                    frame_from_ly: approach.frame_from_ly.to_array(),
+                    frame_beta: approach.frame_beta.to_array(),
+                    since_t: approach.since_t,
+                    target: lc_proto::ShipId(approach.target.0),
+                    clock_base_s: *clock_base_s,
+                },
                 Recipe::Holding(waypoint) => lc_proto::Motive::Holding(waypoint_out(waypoint)),
                 Recipe::Falling => lc_proto::Motive::Falling,
                 Recipe::Drifting { from_ly, since_t } => lc_proto::Motive::Drifting {
@@ -165,6 +189,31 @@ impl From<&lc_proto::Motion> for Snapshot {
                     start_s: *start_s,
                     drive: drive_in(*drive),
                     arrive_at: arrive_at.as_ref().map(waypoint_in),
+                    clock_base_s: *clock_base_s,
+                },
+                lc_proto::Motive::Rendezvous {
+                    from_ly,
+                    beta0,
+                    to_ly,
+                    start_s,
+                    drive,
+                    frame_from_ly,
+                    frame_beta,
+                    since_t,
+                    target,
+                    clock_base_s,
+                } => Recipe::Rendezvous {
+                    approach: crate::pursuit::Approach {
+                        from_ly: DVec3::from_array(*from_ly),
+                        beta0: DVec3::from_array(*beta0),
+                        to_ly: DVec3::from_array(*to_ly),
+                        start_s: *start_s,
+                        drive: drive_in(*drive),
+                        frame_from_ly: DVec3::from_array(*frame_from_ly),
+                        frame_beta: DVec3::from_array(*frame_beta),
+                        since_t: *since_t,
+                        target: crate::motion::ShipId(target.0),
+                    },
                     clock_base_s: *clock_base_s,
                 },
                 lc_proto::Motive::Holding(waypoint) => Recipe::Holding(waypoint_in(waypoint)),

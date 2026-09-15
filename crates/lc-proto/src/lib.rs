@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 10;
+pub const PROTOCOL_VERSION: u32 = 11;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -139,6 +139,30 @@ pub enum Motive {
         /// measured from.
         clock_base_s: f64,
     },
+    /// Closing on another craft and matching its velocity.
+    ///
+    /// The arguments of the approach, like [`Motive::Crossing`], and re-solved at the far end
+    /// by the same planner. Every number is either *relative* to the quarry or a **sighting**
+    /// of it — where it was seen, how fast, and when the light left — so a receiver learns
+    /// nothing here it could not have seen for itself. That is what makes it safe to hand a
+    /// client whose own ship is the pursuer.
+    Rendezvous {
+        /// Relative to the quarry's reckoned position, at `start_s`.
+        from_ly: [f64; 3],
+        /// Relative to the quarry's velocity, at `start_s`.
+        beta0: [f64; 3],
+        /// Where the approach ends, relative: a standoff short of the quarry.
+        to_ly: [f64; 3],
+        start_s: f64,
+        drive: Drive,
+        /// The sighting the frame is anchored at.
+        frame_from_ly: [f64; 3],
+        frame_beta: [f64; 3],
+        since_t: f64,
+        /// Who is being closed on.
+        target: ShipId,
+        clock_base_s: f64,
+    },
     /// Held on a station by thrust.
     Holding(Waypoint),
     /// Ballistic. Re-solved at the far end from the position and velocity in [`Motion`].
@@ -198,6 +222,22 @@ pub enum Order {
     /// Cut the engine. Not a stop — whatever velocity it had, it keeps, on whatever conic that
     /// puts it on.
     CutDrive,
+    /// Close on another craft, match its velocity, and hold station alongside it.
+    ///
+    /// A **standing** order, unlike every other one here, and that is the interesting thing
+    /// about it. The rest are events: they happen at an instant and a trajectory follows. This
+    /// one is a policy — the authority re-solves it whenever what the pursuer can see of its
+    /// quarry stops agreeing with the plan it is flying — and each of those re-solutions is an
+    /// ordinary event both ends fold the usual way. The standing part lives only on the
+    /// authority, so nothing about how a trajectory is agreed on has changed.
+    ///
+    /// The quarry is named by its identifier, which a client can only have because it was told
+    /// about it — see [`Presence`]. There is no way to spell an intercept of a craft whose
+    /// light has not arrived.
+    Intercept { ship_id: ShipId },
+    /// Give up a standing [`Order::Intercept`]. What the ship is doing afterwards is whatever
+    /// it was doing a moment before: breaking off cancels the policy, not the trajectory.
+    BreakOff,
 }
 
 /// A client's request. Never authoritative about anything.
@@ -434,6 +474,13 @@ pub enum Outbound {
 pub enum Refusal {
     /// No such ship, or it is not this client's.
     NotYours,
+    /// There is no such craft in sight. Deliberately the same answer for a ship that does not
+    /// exist, one in another system, and one whose light has not arrived — a client that could
+    /// tell those apart could probe for craft it has not been told about.
+    NotInSight,
+    /// The quarry is moving too fast for an approach to be solved the way this one is. See
+    /// `lc_world::pursuit`.
+    TooFast,
     /// The ticket did not verify: wrong audience, expired, already spent, or not signed by a
     /// key this server publishes trust in. **Deliberately one variant** — a client learning
     /// *which* is a client learning how close it got.
@@ -478,10 +525,10 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 pub mod golden {
     /// `Outbound::Welcome { .., ship: Motion { at [4.2, 0, 0], holding a 12 Mm orbit of Earth } }`
     pub const WELCOME: &[u8] = &[
-        0, 7, 10, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
+        0, 7, 11, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210,
         77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0, 0,
-        20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 1, 1, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0,
+        20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 2, 1, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0,
         0, 96, 227, 102, 65, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         240, 63, 0, 0, 0, 0, 0, 0, 224, 63,
     ];
@@ -502,7 +549,7 @@ pub mod golden {
     /// Pinned because it is now the message that decides whether anyone gets in at all. A
     /// field moving here is a server reading someone else's ticket as this one's.
     pub const HELLO: &[u8] = &[
-        0, 10, 5, 97, 46, 98, 46, 99,
+        0, 11, 5, 97, 46, 98, 46, 99,
     ];
 
     pub const SET_COURSE: &[u8] = &[
@@ -536,6 +583,32 @@ pub mod golden {
         64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169,
         241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 192, 132, 61, 128, 137, 122,
+    ];
+
+    /// `Outbound::Welcome { .., ship: Motion { .., motive: Rendezvous { target: 7, .. } } }`
+    ///
+    /// Pinned because it is the one motive whose numbers are all about somebody else — a
+    /// relative offset, a relative velocity, and a sighting. A field moving in it is a pursuer
+    /// flying at a point its quarry was never at.
+    pub const RENDEZVOUS: &[u8] = &[
+        0, 7, 11, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210,
+        77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0, 0,
+        20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 1, 149, 214, 38, 232, 11, 46, 17, 62, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210,
+        77, 98, 80, 191, 0, 0, 0, 0, 0, 0, 0, 0, 17, 234, 45, 129, 153, 151, 113, 61, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 119, 43, 65, 0, 0, 0, 0, 0, 0,
+        20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 205, 204, 204, 204, 204, 204, 16, 64, 149,
+        214, 38, 232, 11, 46, 17, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169,
+        241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 112, 111, 43, 65, 14, 0,
+        0, 0, 0, 0, 255, 244, 64,
+    ];
+    /// `Inbound::Act(Intent { ship_id: 42, order: Intercept { ship_id: 7 }, .. })`
+    ///
+    /// Pinned because it names a *ship*, and a shifted field is an intercept of whoever the
+    /// bytes happen to spell.
+    pub const INTERCEPT: &[u8] = &[
+        1, 84, 5, 14, 128, 137, 122,
     ];
 
 }
@@ -656,6 +729,45 @@ mod tests {
         ])
     }
 
+    /// A ship closing on another, which is the one motive whose numbers are all about
+    /// somebody else. Pinned because a field moving in it is a pursuer flying at a point its
+    /// quarry was never at.
+    fn rendezvous() -> Outbound {
+        Outbound::Welcome {
+            client_id: ClientId(7),
+            protocol: PROTOCOL_VERSION,
+            ship_id: ShipId(42),
+            now_t: 1_000_000,
+            name: "Ada".into(),
+            ship: Motion {
+                at_ly: [4.2, 0.0, 0.0],
+                beta: [0.0, 0.001, 0.0],
+                clock_s: 86_400.0,
+                drive: Drive { accel_g: 5.0, max_beta: 0.999 },
+                motive: Motive::Rendezvous {
+                    from_ly: [1.0e-9, 0.0, 0.0],
+                    beta0: [0.0, -0.001, 0.0],
+                    to_ly: [1.0e-12, 0.0, 0.0],
+                    start_s: 900_000.0,
+                    drive: Drive { accel_g: 5.0, max_beta: 0.999 },
+                    frame_from_ly: [4.2, 1.0e-9, 0.0],
+                    frame_beta: [0.0, 0.001, 0.0],
+                    since_t: 899_000.0,
+                    target: ShipId(7),
+                    clock_base_s: 86_000.0,
+                },
+            },
+        }
+    }
+
+    fn intercept() -> Inbound {
+        Inbound::Act(Intent {
+            ship_id: ShipId(42),
+            order: Order::Intercept { ship_id: ShipId(7) },
+            issued_at_client_t: 1_000_000,
+        })
+    }
+
     #[test]
     fn the_wire_format_for_this_version_has_not_moved() {
         assert_eq!(
@@ -693,6 +805,16 @@ mod tests {
             golden::PRESENT,
             "Outbound::Present changed shape at protocol version {PROTOCOL_VERSION}",
         );
+        assert_eq!(
+            encode(&rendezvous()),
+            golden::RENDEZVOUS,
+            "Motive::Rendezvous changed shape at protocol version {PROTOCOL_VERSION}",
+        );
+        assert_eq!(
+            encode(&intercept()),
+            golden::INTERCEPT,
+            "Order::Intercept changed shape at protocol version {PROTOCOL_VERSION}",
+        );
     }
 
     #[test]
@@ -703,6 +825,7 @@ mod tests {
                 Cleared::<Sighting>::clear(sighting(500, 2.5), 1_000, 0.0).unwrap(),
             ]),
             present(),
+            rendezvous(),
             accepted(),
             Outbound::Clock { now_t: 1_000_000 },
             Outbound::Refused { ship_id: ShipId(-3), reason: Refusal::NotYours },
@@ -717,6 +840,12 @@ mod tests {
             Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: String::new() },
             act(),
             cross(),
+            intercept(),
+            Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: Order::BreakOff,
+                issued_at_client_t: 0,
+            }),
             Inbound::Act(Intent {
                 ship_id: ShipId(1),
                 order: Order::Burn { beta: [0.1, -0.2, 0.3] },

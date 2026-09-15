@@ -21,11 +21,19 @@ use lc_spacetime::Worldline;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ShipId(pub i64);
 
-/// How a ship is moving. The four are exclusive, and that exclusivity is the model.
+/// How a ship is moving. The five are exclusive, and that exclusivity is the model.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Motive {
     /// Under thrust, on a planned crossing.
     Crossing(Cruise),
+    /// Under thrust, closing on another craft and matching its velocity.
+    ///
+    /// A crossing in a moving frame, and it is a motive of its own rather than a `Crossing`
+    /// because the frame is part of the answer: the plan ends at rest in the *quarry's* frame,
+    /// which is what "matched" means, and reading it in the world's needs the frame back. See
+    /// [`crate::pursuit`], which also says why the frame is a frozen sighting and not a handle
+    /// on the quarry's live worldline.
+    Rendezvous(crate::pursuit::Rendezvous),
     /// Held on a place by thrust. A station is a position, not a trajectory.
     Holding(Waypoint),
     /// Ballistic on a conic, about whichever body's influence it is in.
@@ -72,7 +80,30 @@ impl ShipState {
     }
 
     pub fn is_under_way(&self) -> bool {
-        matches!(self.motive, Motive::Crossing(_))
+        matches!(self.motive, Motive::Crossing(_) | Motive::Rendezvous(_))
+    }
+
+    /// Put a ship on an approach solved for it. The counterpart of [`Self::begin_crossing`],
+    /// and it bases the crew's clock the same way.
+    pub fn begin_rendezvous(&mut self, plan: crate::pursuit::Rendezvous) {
+        self.crossing_clock_base_s = self.clock_s;
+        self.motive = Motive::Rendezvous(plan);
+        self.arrive_at = None;
+    }
+
+    /// Put one back part-way through, keeping the clock base it began with.
+    pub fn resume_rendezvous(&mut self, plan: crate::pursuit::Rendezvous, clock_base_s: f64) {
+        self.motive = Motive::Rendezvous(plan);
+        self.arrive_at = None;
+        self.crossing_clock_base_s = clock_base_s;
+    }
+
+    /// Who this ship is closing on, if it is closing on anybody.
+    pub fn pursuing(&self) -> Option<ShipId> {
+        match &self.motive {
+            Motive::Rendezvous(plan) => Some(plan.target),
+            _ => None,
+        }
     }
 
     /// Where the crossing under way is for, if it is for anywhere.
@@ -114,6 +145,10 @@ impl ShipState {
                     start_s: cruise.start_s,
                     drive: cruise.drive,
                     arrive_at: self.arrive_at.clone(),
+                    clock_base_s: self.crossing_clock_base_s,
+                },
+                Motive::Rendezvous(plan) => Recipe::Rendezvous {
+                    approach: plan.recipe(),
                     clock_base_s: self.crossing_clock_base_s,
                 },
                 Motive::Holding(waypoint) => Recipe::Holding(waypoint.clone()),
@@ -177,6 +212,10 @@ impl ShipState {
                 // The place it was flying to is gone even though the flight is not.
                 self.arrive_at = None;
             }
+            // An approach is defined against another craft and not against the system, so
+            // leaving one takes nothing from it. Whether the quarry is still in sight is the
+            // pursuit's business, not the system's.
+            Motive::Rendezvous(_) => {}
             _ => self.set_adrift(now_s),
         }
     }
@@ -366,6 +405,9 @@ pub fn state_at(
             let flight = cruise.at(now_s);
             Some((flight.position_ly, flight.beta))
         }
+        // The plan is relative, so the frame has to be added back. Galilean, and
+        // [`crate::pursuit`] carries the bound on that.
+        Motive::Rendezvous(plan) => Some(plan.state_at(now_s)),
         Motive::Holding(waypoint) => {
             let system = system?;
             let at = waypoint.place_at(system, now_s)?;
@@ -396,11 +438,16 @@ pub fn state_at(
 /// nose that followed the coordinate acceleration would point at the primary all the way round
 /// an orbit.
 pub fn facing(state: &ShipState, system: Option<&LocalSystem>, now_s: f64) -> Option<DVec3> {
-    if let Motive::Crossing(cruise) = &state.motive {
-        let thrust = cruise.thrust_at(now_s);
-        if thrust != DVec3::ZERO {
-            return Some(thrust.normalize());
-        }
+    // The frame does not rotate, so a thrust direction in it is a thrust direction here.
+    let thrusting = match &state.motive {
+        Motive::Crossing(cruise) => Some(cruise.thrust_at(now_s)),
+        Motive::Rendezvous(plan) => Some(plan.cruise.thrust_at(now_s)),
+        _ => None,
+    };
+    if let Some(thrust) = thrusting
+        && thrust != DVec3::ZERO
+    {
+        return Some(thrust.normalize());
     }
     let beta = state_at(state, system, now_s).map(|(_, beta)| beta).unwrap_or(state.beta);
     let along = beta.normalize_or_zero();
@@ -444,6 +491,26 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
                         Motive::Holding(waypoint)
                     }
                     None => Motive::Drifting { from_ly: state.position_ly, since_t: now_s },
+                };
+            }
+        }
+        Motive::Rendezvous(plan) => {
+            let flight = plan.cruise.at(now_s);
+            state.clock_s = state.crossing_clock_base_s + flight.proper_s;
+            if flight.phase == Phase::Arrived {
+                // Arriving is not stopping. What is left is the quarry's own velocity, which
+                // is the whole point of having planned in its frame — so the ship comes off
+                // the approach *already* alongside and moving with it, and goes ballistic from
+                // there by the same route cutting the drive takes.
+                let (at, beta) = plan.state_at(now_s);
+                state.position_ly = at;
+                state.beta = beta;
+                let velocity = beta * crate::flight::C_M_S;
+                state.motive = match system
+                    .and_then(|s| Coast::from_state(s, at, velocity, now_s))
+                {
+                    Some(arc) => Motive::Falling(arc),
+                    None => Motive::Drifting { from_ly: at, since_t: now_s },
                 };
             }
         }
@@ -1153,6 +1220,88 @@ mod tests {
     fn nothing_decides_where_a_parked_ship_points() {
         let state = ShipState::at(DVec3::X);
         assert_eq!(facing(&state, None, 0.0), None);
+    }
+
+
+    /// **An intercept, flown.** Not merely planned: stepped through `advance`, which is what a
+    /// server and a client both actually do, and asked where it ended up.
+    ///
+    /// The claim is the one a separate injection burn would exist to make — that the ship ends
+    /// alongside *and* moving with the quarry — and it comes out of one plan because the plan
+    /// was made in the quarry's frame.
+    #[test]
+    fn a_rendezvous_ends_alongside_a_moving_quarry_and_matched_to_it() {
+        use crate::pursuit::{Sighting, approach, standoff_m};
+
+        let km = 1.0e3 / crate::system::M_PER_LY;
+        let drifting = DVec3::new(0.0, 4.0e-5, 1.0e-5);
+        let seen = Sighting {
+            target: ShipId(2),
+            position_ly: DVec3::X * 2_000.0 * km,
+            beta: drifting,
+            length_m: 500.0,
+            emitted_s: 0.0,
+        };
+        let mut state = ShipState::at(DVec3::ZERO);
+        let plan = approach(&state, 500.0, &seen, 0.0, crate::flight::Drive::DEFAULT).unwrap();
+        let whole = plan.cruise.duration_s();
+        state.begin_rendezvous(plan);
+
+        // Stepped, so the arrival transition runs where it really would.
+        let steps = 400;
+        for k in 1..=steps {
+            let t = whole * 1.05 * k as f64 / steps as f64;
+            advance(&mut state, None, t, whole * 1.05 / steps as f64);
+        }
+        let end = whole * 1.05;
+
+        let standoff = standoff_m(500.0, seen.length_m) / crate::system::M_PER_LY;
+        let gap = state.position_ly.distance(seen.reckoned_at(end));
+        assert!(
+            (gap - standoff).abs() < standoff * 0.01,
+            "ended {gap} from the quarry, wanted {standoff}",
+        );
+        assert!(
+            (state.beta - drifting).length() < drifting.length() * 0.01,
+            "ended at {} rather than matched to {drifting}",
+            state.beta,
+        );
+        // And it is off the approach: arriving is not a state a ship stays in.
+        assert!(
+            matches!(state.motive, Motive::Drifting { .. }),
+            "still flying the approach: {:?}",
+            state.motive,
+        );
+        // Having matched, it stays matched — the pair coast together rather than separating.
+        let before = state.position_ly.distance(seen.reckoned_at(end));
+        advance(&mut state, None, end + 3_600.0, 3_600.0);
+        let after = state.position_ly.distance(seen.reckoned_at(end + 3_600.0));
+        assert!((after - before).abs() < standoff * 0.01, "drifted apart: {before} to {after}");
+    }
+
+    /// The nose follows the drive on an approach exactly as it does on a crossing, and the
+    /// frame does not tilt it: the flip happens in the middle and points back down the track.
+    #[test]
+    fn an_approach_flips_its_nose_over_like_any_other_burn() {
+        use crate::pursuit::{Sighting, approach};
+
+        let km = 1.0e3 / crate::system::M_PER_LY;
+        let seen = Sighting {
+            target: ShipId(2),
+            position_ly: DVec3::X * 2_000.0 * km,
+            beta: DVec3::ZERO,
+            length_m: 500.0,
+            emitted_s: 0.0,
+        };
+        let mut state = ShipState::at(DVec3::ZERO);
+        let plan = approach(&state, 500.0, &seen, 0.0, crate::flight::Drive::DEFAULT).unwrap();
+        let whole = plan.cruise.duration_s();
+        state.begin_rendezvous(plan);
+
+        let early = facing(&state, None, whole * 0.1).expect("under thrust");
+        let late = facing(&state, None, whole * 0.9).expect("still under thrust");
+        assert!(early.x > 0.99, "not boosting toward the quarry: {early}");
+        assert!(late.x < -0.99, "not braking back down the track: {late}");
     }
 
 }
