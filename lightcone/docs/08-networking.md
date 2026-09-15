@@ -99,6 +99,14 @@ and a rule drawn there would leave a player unable to find traffic they are sitt
 middle of. A client hears nothing at all about craft outside it, so a system with nobody in it
 and a system whose traffic is all elsewhere look the same from inside.
 
+**The cost is quadratic and is not yet paid for.** One retarded solve per observer per craft
+per tick is fine for the handful a shard carries today and is not fine for a busy system: a
+hundred craft in one place is ten thousand solves twenty times a second. The shape of the fix
+is the one the event store already uses — bound the work before solving it, with the craft
+indexed by position so an observer visits its own neighbourhood rather than the whole fleet,
+and a statement rate that falls off with range. Neither is built, and the visibility rule above
+is deliberately a single readable predicate so that replacing it is replacing one function.
+
 Two details the gate turns on:
 
 - **The causality test comes first.** Below the noise floor and still in flight are both
