@@ -257,7 +257,6 @@ seven hours twenty times a second having never drifted at all.
 | `--burst <n>` | photograph `n` consecutive frames, numbered. For flicker: two runs stopped at frame `n` and frame `n+1` have accumulated different wall time and are not consecutive at all |
 | `--demo <name>` | stage a scene, and bring a shard to run it in |
 | `--demo-cam <yaw:pitch:booms>` | pin the camera for the run |
-| `--demo-pov <n>` | watch from cast member `n` rather than from one's own ship |
 
 These emit [`Action`]s rather than opening a second path into the client, so they can only do
 what the interface can do. `--shot` exists because WGSL cannot be asserted from a test and a
@@ -282,6 +281,11 @@ Which craft the camera is behind is a `CameraPerspective`, and it has one varian
 anyway, because what the camera does is going to grow — a chase view along the velocity, a fixed
 point a scene is composed from, a free fly-around — and each of those is a different answer to
 "where is the eye" rather than a flag on top of this one.
+
+**A scene says where to stand, and how fast to run.** Both are fields on it rather than things
+to pass in: it knows what it is about, and a rendezvous is two different events seen from its
+two ends. `approach` and `closing` are the same two ships doing the same manoeuvre, watched from
+one end and then the other.
 
 **The eye moves and the observer does not**, which is the boundary to know about. Everything the
 client works out about light — retarded times, aberration, what a contact looked like when it

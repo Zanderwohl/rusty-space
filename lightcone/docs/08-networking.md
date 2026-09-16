@@ -313,8 +313,15 @@ at a coordinate time, so a faster tick buys coarser event timestamps and nothing
 step never enters an integrator so it cannot accumulate. Sixty slow ticks and one fast one put
 the same craft in the same place, which is pinned by a test.
 
-What does depend on it is the clock the client runs between statements, and the deadband that
-clock is corrected against. A fixed one-hour slack is comfortably more than a statement's own
+A standing intercept re-solves on a fraction of the approach it is flying rather than on a
+fixed interval, and the reason is the same shape as this one: a floor that suits the first long
+run at a quarry is far too coarse for the short correction at the end of it. Ten coordinate
+minutes — chosen against the light delay across a system, which it is indeed much finer than —
+is fourteen thousand kilometres of travel for a craft in high orbit of Jupiter, and an orbital
+rendezvous spent the whole approach flying at a ten-minute-old position.
+
+What does depend on the rate is the clock the client runs between statements, and the deadband
+that clock is corrected against. A fixed one-hour slack is comfortably more than a statement's own
 age at the design rate and is less than a single tick at sixty, so it has to scale or the
 correction fires on every statement for ever without the clock ever having drifted.
 

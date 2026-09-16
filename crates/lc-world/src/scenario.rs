@@ -130,6 +130,12 @@ pub struct Scenario {
     /// How fast the world runs while this is staged, as a multiple of the design rate of one
     /// Julian year an hour. Sixty is a year a minute.
     pub rate: f64,
+    /// Which craft to watch from.
+    ///
+    /// A scene knows what it is about, so it says where to stand as well as how fast to run;
+    /// neither is a thing anybody should have to pass in. A rendezvous is two different events
+    /// from its two ends, and this is which of them the scene is for.
+    pub watch: Slot,
     /// What the player's own craft does. Its hull stays whatever the session gave it: a
     /// welcome carries a motion, not a shipyard.
     pub pov: Member,
@@ -153,6 +159,18 @@ impl Scenario {
         found.next().is_none().then_some(first)
     }
 
+    /// The identifier a slot has once the scene is staged, or `None` for the player's own —
+    /// which only the shard that minted it knows, and which nothing here needs to.
+    ///
+    /// Here rather than in the director because both ends work it out: the server places the
+    /// cast under these identifiers and the client names one of them to watch from.
+    pub fn craft_for(slot: Slot) -> Option<i64> {
+        match slot {
+            Slot::Pov => None,
+            Slot::Cast(at) => Some(BASE_ID + at as i64),
+        }
+    }
+
     /// The craft in a slot, or `None` for a cast member that is not in this scene.
     pub fn member(&self, slot: Slot) -> Option<&Member> {
         match slot {
@@ -173,6 +191,7 @@ pub const TRAFFIC: Scenario = Scenario {
     blurb: "Four hulls to stand beside, from five hundred metres to fifty kilometres.",
     star: "Sol",
     rate: 1.0,
+    watch: Slot::Pov,
     pov: Member {
         name: "Kestrel",
         kind: Kind::Ship,
@@ -222,6 +241,7 @@ pub const MEETING: Scenario = Scenario {
     blurb: "A five-kilometre ship holds station off your bow, in low orbit of Jupiter.",
     star: "Sol",
     rate: 1.0,
+    watch: Slot::Pov,
     pov: Member {
         name: "Kestrel",
         kind: Kind::Ship,
@@ -251,6 +271,9 @@ pub const APPROACH: Scenario = Scenario {
     blurb: "You hold a polar orbit of Saturn. Something much larger closes on you.",
     star: "Sol",
     rate: 1.0,
+    // From the craft being approached, which is the whole of what makes this different
+    // from `closing`: the same two ships and the same manoeuvre, seen from the other end.
+    watch: Slot::Pov,
     pov: Member {
         name: "Kestrel",
         kind: Kind::Ship,
@@ -290,9 +313,14 @@ pub const CLOSING: Scenario = Scenario {
     name: "closing",
     blurb: "You climb out of low orbit of Jupiter to meet a five-kilometre ship.",
     star: "Sol",
-    // The same twentieth the other two orbital scenes run at, and for the same reason: an orbit
-    // that comes round in seconds is a strobe rather than a view.
-    rate: 0.05,
+    // A tenth rather than the twentieth the other two orbital scenes run at. The approach
+    // itself is seven seconds of it; what takes the time is the pursuit settling onto the
+    // station afterwards, and at a twentieth that was a minute and a quarter of watching a mark
+    // get slowly closer. The upper orbit still comes round in about a minute, which is a view.
+    rate: 0.1,
+    // From the big ship, watching the small one arrive. The other end of this is
+    // `approach`, and a scene that can only be seen from one of them is half a scene.
+    watch: Slot::Cast(0),
     pov: Member {
         name: "Kestrel",
         kind: Kind::Ship,
@@ -322,9 +350,13 @@ pub const CLOSING: Scenario = Scenario {
 /// over it is a hundred and fifty days.
 pub const CHASE: Scenario = Scenario {
     name: "chase",
-    blurb: "A quarry runs for the Oort cloud. You pull twice as hard. Three months, watched at a year a minute.",
+    blurb: "A quarry runs for the Oort cloud. You pull twice as hard. Three months in about a minute.",
     star: "Sol",
-    rate: 60.0,
+    // Three months in about a minute and a quarter. It was a year a minute, which put the
+    // whole chase inside fifteen seconds — too quick to look around in, and looking around
+    // is the point of a camera that is not on rails.
+    rate: 20.0,
+    watch: Slot::Pov,
     pov: Member {
         name: "Kestrel",
         kind: Kind::Ship,
@@ -422,6 +454,28 @@ mod tests {
             );
             assert!(times.iter().all(|t| *t >= 0.0), "{}: a beat before the scene", scene.name);
         }
+    }
+
+    /// A scene watched from a craft that is not in it is a scene watched from nowhere.
+    #[test]
+    fn every_scene_is_watched_from_somebody_who_is_there() {
+        for scene in Scenario::ALL {
+            assert!(
+                scene.member(scene.watch).is_some(),
+                "{}: watched from {:?}, who is not in it",
+                scene.name,
+                scene.watch,
+            );
+        }
+    }
+
+    /// The identifiers both ends work out have to be the same ones, or the client would ask to
+    /// watch from a craft the server never placed — and would silently get its own ship.
+    #[test]
+    fn a_slot_names_the_craft_the_director_places() {
+        assert_eq!(Scenario::craft_for(Slot::Pov), None, "the player's own is the shard's to know");
+        assert_eq!(Scenario::craft_for(Slot::Cast(0)), Some(BASE_ID));
+        assert_eq!(Scenario::craft_for(Slot::Cast(3)), Some(BASE_ID + 3));
     }
 
     /// Hulls stay inside the range the camera and the reticle are built for, and nothing flies

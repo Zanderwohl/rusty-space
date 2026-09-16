@@ -211,10 +211,10 @@ impl<J: Journal> Server<J> {
                 let Some(quarry) = director.craft_in(*on) else { return };
                 self.pursuits.insert(id, crate::chase::Pursuit {
                     quarry: ShipId(quarry.0),
-                    // Due now, so the guidance loop takes it this tick and solves the first
-                    // approach itself. A second solve here would be a second implementation of
-                    // the only standing order there is.
-                    last_plan_t: at_t.saturating_sub(crate::chase::STEER_INTERVAL_US),
+                    // Never planned, so the guidance loop takes it this tick and solves the
+                    // first approach itself. A second solve here would be a second
+                    // implementation of the only standing order there is.
+                    last_plan_t: i64::MIN,
                 });
                 None
             }
@@ -497,23 +497,34 @@ mod tests {
         };
         server.tick(&mut wire).await.unwrap();
         let opening = apart(&server);
-        // A twentieth of the design rate, so a billion metres at five g is a few hundred ticks.
-        for _ in 0..1200 {
+        for _ in 0..1500 {
             server.tick(&mut wire).await.unwrap();
         }
         let closed = apart(&server);
-        assert!(closed < opening / 4.0, "it barely closed: {opening:.0} to {closed:.0} m");
+        assert!(closed < opening / 20.0, "it barely closed: {opening:.0} to {closed:.0} m");
+
+        // **And then it stops closing, because it cannot turn fast enough to do better.** A
+        // five-kilometre hull takes six hundred seconds to come about, and a correction of a
+        // thousand kilometres at five g is barely three hundred seconds of burn — so every fine
+        // correction costs more time to turn round than to fly, and the standoff it can hold is
+        // set by the flip rather than by the guidance. The five-hundred-metre ship in `closing`
+        // flips in sixty and holds fifty kilometres. Big ships stand further off; that is the
+        // shape of the thing, not a number wanting tuning.
+        let mut nearest = f64::INFINITY;
+        for _ in 0..1000 {
+            server.tick(&mut wire).await.unwrap();
+            nearest = nearest.min(apart(&server));
+        }
+        assert!(nearest > 100_000.0, "it held {nearest:.0} m, closer than a flip allows");
     }
     /// The reciprocal of the approach, and the direction that was missing: the small ship is
     /// the one doing the closing.
     ///
-    /// **It closes and then rides, rather than closing and stopping.** A standing intercept
-    /// re-solves every ten coordinate minutes, which is far finer than the light delay across a
-    /// system and is what the interval was chosen against — but a craft in high orbit of
-    /// Jupiter covers fourteen thousand kilometres in that time, so the pursuer is always
-    /// flying at a ten-minute-old position. What comes out is a relative orbit a hundred to
-    /// four hundred kilometres across rather than the standoff two still craft settle into.
-    /// That is the honest behaviour of the guidance this scene uses, so it is what is asserted.
+    /// **It reaches the standoff and stays on it**, which it could not do while the guidance
+    /// was gated on a flat ten coordinate minutes — it rode a relative orbit a hundred to four
+    /// hundred kilometres across instead. A five-hundred-metre hull comes about in sixty
+    /// seconds, so its fine corrections cost about as much time to turn as to fly and it can
+    /// hold a real station. Compare `the_approach_closes`, where a five-kilometre hull cannot.
     #[tokio::test]
     async fn the_small_ship_closes_on_the_large_one() {
         let Some((mut server, mut wire, _, pov)) = staged(&lc_world::scenario::CLOSING) else {
@@ -527,24 +538,30 @@ mod tests {
         server.tick(&mut wire).await.unwrap();
         let opening = apart(&server);
 
-        for _ in 0..400 {
+        for _ in 0..1500 {
             server.tick(&mut wire).await.unwrap();
         }
-        let closed = apart(&server);
-        assert!(closed < opening / 100.0, "it barely closed: {opening:.0} to {closed:.0} m");
+        let standoff = lc_world::pursuit::standoff_m(
+            server.fleet.get(pov).unwrap().length_m,
+            server.fleet.get(cast).unwrap().length_m,
+        );
+        let deadband = standoff * lc_world::pursuit::DRIFT_ALLOWANCE;
 
-        // And it stays closed. A pursuit that overshot would be leaving, and the numbers either
-        // side of this are a factor of four hundred apart, so the bound is loose on purpose:
-        // what it is pinning is "in company", not a distance.
-        let mut furthest: f64 = 0.0;
+        // Two separate things, because they are two separate claims. It gets *onto* the
+        // station: somewhere in here it is inside the deadband. And it then *stays in company*:
+        // the deadband is where a craft decides to correct rather than where it sits, so it
+        // wanders a little past before the next correction pulls it back, and the bound on that
+        // is the one worth pinning — a five-kilometre hull at this range is sixty pixels of
+        // ship rather than a mark.
+        let (mut nearest, mut furthest) = (f64::INFINITY, 0.0f64);
         for _ in 0..500 {
             server.tick(&mut wire).await.unwrap();
+            nearest = nearest.min(apart(&server));
             furthest = furthest.max(apart(&server));
         }
-        assert!(
-            furthest < opening / 100.0,
-            "it drifted back out to {furthest:.0} m of an opening {opening:.0} m",
-        );
+        assert!(nearest < deadband, "it never reached the station: {nearest:.0} m");
+        assert!(furthest < 100_000.0, "it did not stay in company: {furthest:.0} m");
+        assert!(opening > 100.0 * deadband, "premise: it had a long way to come");
     }
 
 }

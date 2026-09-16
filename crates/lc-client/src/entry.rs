@@ -5,6 +5,7 @@
 //! and a second copy of this parsing would be a second set of flag names.
 
 use crate::action::Action;
+use lc_world::scenario;
 use crate::app::DevEntry;
 
 /// What a request to start the client asked for.
@@ -35,11 +36,13 @@ pub fn parse(args: &[String]) -> Entry {
     }
 
     let mut actions = Vec::new();
-    // Which of a scene's cast to watch from, by its place in the cast list. The identifiers are
-    // the scene's own, so this needs no shard to have answered first.
-    if let Some(slot) = value::<i64>(args, "--demo-pov") {
-        let ship_id = lc_proto::ShipId(lc_world::scenario::BASE_ID + slot.max(0));
-        actions.push(Action::WatchFrom(Some(ship_id)));
+    // A scene says where to stand, so there is nothing to pass in. The identifiers are the
+    // scene's own, which is why this needs no shard to have answered first.
+    if let Some(scene) = after("--demo").as_deref().and_then(scenario::Scenario::named) {
+        if let Some(watch) = crate::action::watching(scene) {
+            let crate::ui::CameraPerspective::Pov(ship_id) = watch;
+            actions.push(Action::WatchFrom(Some(ship_id)));
+        }
     }
     if let Some(preset) = value::<usize>(args, "--band") {
         actions.push(Action::SetBandPreset(preset));
@@ -127,7 +130,7 @@ pub fn parse(args: &[String]) -> Entry {
     let catalogue = args.first().filter(|a| !a.starts_with("--")).cloned();
     // Asking for a scene is asking for a shard to run it in, so it implies `--local` rather
     // than silently doing nothing without one.
-    let demo = after("--demo").filter(|name| lc_world::scenario::Scenario::named(name).is_some());
+    let demo = after("--demo").filter(|name| scenario::Scenario::named(name).is_some());
     Entry {
         dev,
         catalogue,

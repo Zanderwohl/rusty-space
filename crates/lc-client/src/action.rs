@@ -122,6 +122,15 @@ pub enum Effect {
     Stage(String),
 }
 
+/// Where a scene says to stand, as the interface's own state.
+///
+/// `None` for a scene watched from the player's ship, which is what the camera has always done
+/// and is what every scene but one asks for.
+pub fn watching(scene: &lc_world::scenario::Scenario) -> Option<crate::ui::CameraPerspective> {
+    let id = lc_world::scenario::Scenario::craft_for(scene.watch)?;
+    Some(crate::ui::CameraPerspective::Pov(lc_proto::ShipId(id)))
+}
+
 /// Stops of exposure per keypress.
 pub const EXPOSURE_STEP: f32 = 0.5;
 
@@ -341,7 +350,15 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             let _ = name;
             effects.push(Effect::Notify("no server, so nowhere to stage a scene".into()));
         }
-        Action::StageDemo(name) => effects.push(Effect::Stage(name)),
+        Action::StageDemo(name) => {
+            // The scene says where to stand, so staging one moves the camera to wherever it is
+            // about. Set here rather than waiting for the shard to answer: the perspective is
+            // the interface's own state and there is nothing to ask anybody.
+            if let Some(scene) = lc_world::scenario::Scenario::named(&name) {
+                ui.perspective = watching(scene);
+            }
+            effects.push(Effect::Stage(name));
+        }
         // The eye only. What the client works out about light is still solved from the ship
         // the session owns — see [`crate::ui::CameraPerspective::Pov`], which says what that
         // costs and where it would start to show.
@@ -1060,6 +1077,28 @@ mod tests {
         s.remote = true;
         let said = apply(Action::StageDemo("chase".into()), &mut ui, &mut s);
         assert_eq!(said, vec![Effect::Stage("chase".into())]);
+    }
+
+    /// A scene carries where to stand, so staging one moves the camera there and nothing has to
+    /// be passed in. `closing` is the one that is watched from its cast; the rest are watched
+    /// from the player, which is what the camera has always done.
+    #[test]
+    fn staging_a_scene_stands_where_the_scene_says() {
+        let (mut ui, mut s) = fixture();
+        s.remote = true;
+
+        apply(Action::StageDemo("closing".into()), &mut ui, &mut s);
+        let want = lc_world::scenario::Scenario::craft_for(lc_world::scenario::CLOSING.watch);
+        assert_eq!(
+            ui.perspective,
+            want.map(|id| crate::ui::CameraPerspective::Pov(lc_proto::ShipId(id))),
+        );
+        assert!(ui.perspective.is_some(), "premise: closing is watched from its cast");
+
+        // And one watched from the player puts the camera back, rather than leaving it on
+        // whoever the last scene was about.
+        apply(Action::StageDemo("approach".into()), &mut ui, &mut s);
+        assert_eq!(ui.perspective, None);
     }
 
 }

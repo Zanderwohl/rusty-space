@@ -699,6 +699,20 @@ fn dispatch(
 }
 
 /// Advance coordinate time. Runs whatever is on screen.
+/// Buy coordinate time with the real seconds that have passed.
+///
+/// The *virtual* clock, which Bevy clamps to a quarter of a second a frame, and the clamp is
+/// load-bearing for a reason that is not the usual one. Nothing here is integrated, so a slow
+/// frame does not threaten the physics — but the shard this client talks to is a thread on a
+/// twenty-hertz timer that does not make up ticks it misses, so when the machine is busy the
+/// *world* falls behind real time too. Losing the same quarter-second the server lost keeps the
+/// two roughly together.
+///
+/// Measured, because the obvious change is the wrong one: taking `Time<Real>` here made the
+/// client track real time perfectly and pull away from a server that could not, turning three
+/// corrections of half a day into one of ninety-one days. What would actually fix it is slewing
+/// this rate to the server's observed progress rather than trusting a nominal one — the first
+/// tier of `lightcone/docs/17-reconciliation.md`, which does not exist yet.
 fn advance_clock(time: Res<Time>, ui: Res<Ui>, mut game: ResMut<Game>) {
     game.advance(time.delta_secs_f64() * ui.time_rate.max(0.0));
 }

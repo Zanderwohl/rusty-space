@@ -29,13 +29,45 @@ pub struct Pursuit {
     pub last_plan_t: i64,
 }
 
-/// How often a standing intercept may re-solve, in coordinate microseconds.
+/// The shortest gap between two plans for one chase, as a fraction of the approach being flown.
 ///
-/// A guidance loop runs at a finite rate, and this is that rate. Without it a quarry under
-/// thrust would have its pursuer re-plan on every tick of the chase, and every one of those is
-/// an event written to the journal and scheduled to every observer. Ten coordinate minutes is
-/// far finer than the light delay across a system, so it costs nothing a player can see.
-pub const STEER_INTERVAL_US: i64 = 600 * crate::world::MICROS_PER_SECOND;
+/// **A cost bound and nothing else.** Whether a plan is still worth flying is already decided,
+/// and decided properly, by [`pursuit::wants_replan`]: it extrapolates the frozen sighting the
+/// plan was built on to the newest sighting's emission time and throws the plan away when the
+/// quarry is not where that said it would be. That test is a *distance*, so it already scales
+/// with how the quarry is moving. All this does is stop a quarry under continuous thrust from
+/// buying a fresh plan every tick, each of which is an event written to the journal and
+/// scheduled to every observer.
+///
+/// It was a flat ten coordinate minutes, which conflated the two jobs and suppressed the good
+/// signal. Ten minutes is far finer than the light delay across a system, which is what it was
+/// chosen against — and a craft in high orbit of Jupiter covers **fourteen thousand
+/// kilometres** in it. An orbital rendezvous spent the whole approach flying at a ten-minute-old
+/// position and settled into a relative orbit a hundred to four hundred kilometres across
+/// instead of onto the standoff.
+///
+/// A fraction of the plan rather than a time, because what a guidance loop owes is a number of
+/// corrections across the manoeuvre, not a cadence in seconds — and because the approach
+/// *shrinks*. A fixed floor that is reasonable for the first three-thousand-second run at a
+/// quarry is hopeless for the sixty-second correction at the end of it, which is exactly how
+/// ten minutes came to be too coarse without ever looking wrong.
+///
+/// **Ten of them, and more is worse.** That is not what you would guess, and it was measured:
+/// at a fiftieth of the plan a rendezvous thrashed between three and four hundred million
+/// metres before capturing, and at a two-hundredth it did not capture inside two thousand
+/// ticks. Each plan is a whole manoeuvre — a burn, a flip and a burn — rather than a
+/// controller's output, so re-solving faster than the manoeuvre can run keeps resetting the
+/// flip and the pursuer never reaches its brake. Anything from a tenth to a third behaves the
+/// same; a tenth is the middle of the plateau.
+pub const STEER_FRACTION: f64 = 0.1;
+
+/// The shortest gap before this pursuer may be given another plan, coordinate microseconds.
+///
+/// Zero with no plan in hand: the first solve of a chase is the one nothing is waiting for.
+fn steer_floor_us(pursuer: &Craft) -> i64 {
+    let Motive::Rendezvous(plan) = &pursuer.motion.motive else { return 0 };
+    (plan.cruise.duration_s() * STEER_FRACTION * crate::world::MICROS_PER_SECOND as f64) as i64
+}
 
 /// Whether an observer is entitled to know a craft exists at all.
 ///
@@ -171,8 +203,10 @@ pub fn decide(
             decided.push((*id, None));
             continue;
         };
-        if now_t - pursuit.last_plan_t < STEER_INTERVAL_US || !should_close(pursuer, &seen, now_s)
-        {
+        // Saturating, because "never planned" is a legitimate thing for a caller to say and
+        // the obvious way to say it overflows the subtraction.
+        let since = now_t.saturating_sub(pursuit.last_plan_t);
+        if since < steer_floor_us(pursuer) || !should_close(pursuer, &seen, now_s) {
             continue;
         }
         match pursuit::approach(

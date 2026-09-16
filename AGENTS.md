@@ -53,7 +53,6 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--zoom <notches>` | move the orbit camera; both its stops are clamps, so ask for far too much |
 | `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `chase`. Brings its own shard |
 | `--demo-cam <yaw:pitch:booms>` | pin the camera for the run, so two shots of a scene are the same shot |
-| `--demo-pov <n>` | watch from cast member `n` of the scene instead of from your own ship |
 | `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable. Offline only — a shard states its own |
 
 `--turn`, `--pitch` and `--zoom` are applied **last**, after anything that aims — `--fly` ends
