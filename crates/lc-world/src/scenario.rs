@@ -213,13 +213,13 @@ pub const TRAFFIC: Scenario = Scenario {
     beats: &[],
 };
 
-/// A big ship comes down to a small one, in low orbit of the biggest thing there is.
+/// A big ship beside a small one, in low orbit of the biggest thing there is.
 ///
 /// The scale demonstration. Ten hull lengths apart, a five-kilometre ship from a
 /// five-hundred-metre one is a building seen from a car, and Jupiter behind it is neither.
 pub const MEETING: Scenario = Scenario {
     name: "meeting",
-    blurb: "A five-kilometre ship comes down to meet you, in low orbit of Jupiter.",
+    blurb: "A five-kilometre ship holds station off your bow, in low orbit of Jupiter.",
     star: "Sol",
     rate: 1.0,
     pov: Member {

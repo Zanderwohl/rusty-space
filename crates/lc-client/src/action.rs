@@ -1030,4 +1030,20 @@ mod tests {
         apply(Action::SetTimeRate(60.0), &mut ui, &mut s);
         assert_eq!(ui.time_rate, 60.0);
     }
+    /// Only an authority can put a craft somewhere, so offline the button says so rather than
+    /// appearing to work.
+    #[test]
+    fn a_scene_is_asked_for_of_the_server_and_nobody_else() {
+        let (mut ui, mut s) = fixture();
+        let said = apply(Action::StageDemo("chase".into()), &mut ui, &mut s);
+        assert!(
+            matches!(said.as_slice(), [Effect::Notify(m)] if m.contains("no server")),
+            "{said:?}",
+        );
+
+        s.remote = true;
+        let said = apply(Action::StageDemo("chase".into()), &mut ui, &mut s);
+        assert_eq!(said, vec![Effect::Stage("chase".into())]);
+    }
+
 }

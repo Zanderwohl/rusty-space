@@ -137,10 +137,17 @@ where it is, which is a fact about the fiction and not about their router.
 | `Outbound::Resync { state }` | the explicit replacement, so a re-acquire has a cause and is never inferred |
 
 `Welcome` now carries that state — a `lc_proto::Motion`, which is the whole ship rather than a
-point — so the **reconnect** half of the re-acquire exists. What does not yet exist is the
-server-*initiated* one: nothing can hand a client a replacement outside a sign-in, so a server
-that decides the two have diverged has no way to say so. That is what `Resync` is still for, and
-it carries the same `Motion` when it arrives.
+point — so the **reconnect** half of the re-acquire exists. So, it turns out, does the
+server-initiated half: `Outbound::Flying` carries the same `Motion` and says "your ship is now
+doing this", which is the same question a welcome answers asked by something else. It was built
+for the one standing order — an intercept, re-solved by the authority against sightings the
+client cannot reproduce — and it is a general replacement, which is what a director staging a
+scene uses to put a player's craft somewhere it did not ask to be. A teleport needed no new
+message; it needed the one that already existed for "you did not ask for this".
+
+What is still missing is the *cause*. `Flying` says what the ship is doing and not why, so a
+client cannot tell a re-solved chase from a correction from a scene being staged — and the
+re-acquire above is a mechanic that has to know which. That is what `Resync` is still for.
 
 Craft are durable. A shard given `--db` checkpoints its whole fleet every twenty real seconds
 and on the way out, and reads it back at boot — the clock included, without which every saved

@@ -280,6 +280,15 @@ from the same coordinate time, so the client computes where everything is and th
 authoritative only where they disagree. This is why `Welcome` carries `now_t`: adopting the
 server's clock is the whole of agreeing about where anything is.
 
+It carries the **rate** as well, and `Clock` restates it. Agreeing about what time it is is
+only half of agreeing about time — the client draws frames far faster than a statement arrives
+and has to run its own clock between them, so it also has to know how fast to run it. That used
+to be a constant in the client that happened to equal the server's, which is not the same as
+being told: a shard running at any other rate would have been joined by a client confidently
+running at this one. Restated rather than said once, because a rate does not have to hold still
+— a development shard staging a scene changes how fast the world runs, and a client still
+ticking at the old one runs away from it exactly as an unstated rate did.
+
 Channels:
 
 | channel | delivery | contents |
@@ -297,6 +306,17 @@ The server advances coordinate time continuously at 8766x and processes in fixed
 real tick     = 50 ms  (20 Hz)
 coordinate dt = 50 ms * 8766 = 438 s of in-game time
 ```
+
+Times the server's rate, which is one for a shard and is one for anything a deployment has any
+business at. Nothing about the *world* depends on it: every motive is a closed form evaluated
+at a coordinate time, so a faster tick buys coarser event timestamps and nothing else, and the
+step never enters an integrator so it cannot accumulate. Sixty slow ticks and one fast one put
+the same craft in the same place, which is pinned by a test.
+
+What does depend on it is the clock the client runs between statements, and the deadband that
+clock is corrected against. A fixed one-hour slack is comfortably more than a statement's own
+age at the design rate and is less than a single tick at sixty, so it has to scale or the
+correction fires on every statement for ever without the clock ever having drifted.
 
 A client's cursor starts *before* everything rather than at the current time. "Told everything
 up to now" would swallow an event stamped at exactly now — a ship's own act, on the tick it
