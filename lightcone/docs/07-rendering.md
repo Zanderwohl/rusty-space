@@ -652,6 +652,14 @@ nose is visibly neither straight back down the track nor across it, but between.
 Newtonian and only offered below `flight::INJECTION_MAX_BETA`; an interstellar crossing brakes
 to rest the exact way, as it always did.
 
+**And a transfer about one body is flown in that body's frame.** Going from one orbit of Earth to
+another is not a straight line in the world: Earth covers a whole orbit radius while the ship
+flies it, so in world coordinates the destination is running away and there is no arrival time to
+find. `lc_world::transfer` plans it relative to the body instead — the frame tracked rather than
+anchored, since both ends hold the same system and can place the body analytically — which turns
+a forty-five-thousand-kilometre miss into a millimetre. What the flight readout shows for one is
+in that frame, so it says which body the speed is *past*.
+
 ### The camera still does not translate
 
 What moves is the origin everything is drawn relative to. `hull::Eye` is a boom's length behind

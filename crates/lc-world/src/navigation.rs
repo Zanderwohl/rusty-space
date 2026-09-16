@@ -719,9 +719,10 @@ pub fn options_for(system: &LocalSystem, target: &Target) -> Vec<(String, Course
 /// step size — it is that [`Waypoint::nearest_to`] is asked which side of a circle is nearest to
 /// a point the circle is fleeing, and the answer swings from one side to the other.
 ///
-/// A transfer about one primary wants planning in *that body's* frame and mapping back, the way
-/// [`crate::pursuit`] plans in a quarry's. Until then the arrival puts the ship on its station,
-/// which is what hides this — and now hides only this, the velocity having stopped being free.
+/// So a ship already inside the destination body's sphere of influence does not come here at
+/// all: [`crate::transfer`] plans it in that body's frame, where nothing is running away, and
+/// lands it within millimetres. This is what is left — everything flown between one place in a
+/// system and another, where the world frame is the right one.
 pub fn plan(
     system: &LocalSystem,
     waypoint: &Waypoint,

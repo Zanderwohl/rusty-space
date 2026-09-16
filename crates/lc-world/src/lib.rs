@@ -32,6 +32,7 @@ pub mod sky;
 pub mod star;
 pub mod surface;
 pub mod system;
+pub mod transfer;
 
 pub use distribution::{Distribution, Inclination};
 pub use emission::{Body, EmissionModel, invert_moments};

@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 15;
+pub const PROTOCOL_VERSION: u32 = 16;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -151,6 +151,22 @@ pub enum Motive {
         arrive_at: Option<Waypoint>,
         /// The ship's own clock when the crossing began, which is what its proper time is
         /// measured from.
+        clock_base_s: f64,
+    },
+    /// A crossing flown in a *body's* frame: one orbit of it to another.
+    ///
+    /// Every coordinate here is relative to that body, so the name is not a label — without it
+    /// the numbers mean nothing. Both ends place the body from their own copy of the system,
+    /// which is why the frame does not have to be sent.
+    Transfer {
+        about: String,
+        from_ly: [f64; 3],
+        beta0: [f64; 3],
+        to_ly: [f64; 3],
+        arrive_beta: [f64; 3],
+        start_s: f64,
+        drive: Drive,
+        arrive_at: Option<Waypoint>,
         clock_base_s: f64,
     },
     /// Closing on another craft and matching its velocity.
@@ -567,12 +583,12 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 pub mod golden {
     /// `Outbound::Welcome { .., ship: Motion { at [4.2, 0, 0], holding a 12 Mm orbit of Earth } }`
     pub const WELCOME: &[u8] = &[
-        0, 7, 15, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64,
+        0, 7, 16, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169,
         241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0,
         0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56, 156, 108, 65, 154,
-        153, 153, 153, 153, 153, 169, 63, 2, 1, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 96,
+        153, 153, 153, 153, 153, 169, 63, 3, 1, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 96,
         227, 102, 65, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240,
         63, 0, 0, 0, 0, 0, 0, 224, 63,
     ];
@@ -593,7 +609,7 @@ pub mod golden {
     /// Pinned because it is now the message that decides whether anyone gets in at all. A
     /// field moving here is a server reading someone else's ticket as this one's.
     pub const HELLO: &[u8] = &[
-        0, 15, 5, 97, 46, 98, 46, 99,
+        0, 16, 5, 97, 46, 98, 46, 99,
     ];
 
     pub const SET_COURSE: &[u8] = &[
@@ -636,12 +652,12 @@ pub mod golden {
     /// relative offset, a relative velocity, and a sighting. A field moving in it is a pursuer
     /// flying at a point its quarry was never at.
     pub const RENDEZVOUS: &[u8] = &[
-        0, 7, 15, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64,
+        0, 7, 16, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169,
         241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0,
         0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56, 156, 108, 65, 154,
-        153, 153, 153, 153, 153, 169, 63, 1, 149, 214, 38, 232, 11, 46, 17, 62, 0, 0, 0, 0,
+        153, 153, 153, 153, 153, 169, 63, 2, 149, 214, 38, 232, 11, 46, 17, 62, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210, 77,
         98, 80, 191, 0, 0, 0, 0, 0, 0, 0, 0, 17, 234, 45, 129, 153, 151, 113, 61, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 119, 43, 65, 0, 0, 0, 0, 0,

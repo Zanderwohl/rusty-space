@@ -57,6 +57,19 @@ pub enum Recipe {
         /// would make the crew's clock jump on the next step.
         clock_base_s: f64,
     },
+    /// [`Recipe::Crossing`] in a body's frame, plus which body. Its coordinates mean nothing
+    /// without that name, and everything with it — see [`crate::transfer`].
+    Transfer {
+        about: String,
+        from_ly: DVec3,
+        beta0: DVec3,
+        to_ly: DVec3,
+        arrive_beta: DVec3,
+        start_s: f64,
+        drive: Drive,
+        arrive_at: Option<Waypoint>,
+        clock_base_s: f64,
+    },
     /// The arguments an approach was solved from, and re-solved at the far end.
     ///
     /// Every one of them is relative or a sighting — see [`crate::pursuit::Approach`] — so this
@@ -104,6 +117,25 @@ impl Snapshot {
                 let cruise =
                     Cruise::plan_onto(from_ly, beta0, to_ly, arrive_beta, start_s, drive);
                 state.resume_crossing(cruise, arrive_at, clock_base_s);
+            }
+            Recipe::Transfer {
+                about,
+                from_ly,
+                beta0,
+                to_ly,
+                arrive_beta,
+                start_s,
+                drive,
+                arrive_at,
+                clock_base_s,
+            } => {
+                let cruise =
+                    Cruise::plan_onto(from_ly, beta0, to_ly, arrive_beta, start_s, drive);
+                state.resume_transfer(
+                    crate::transfer::Transfer { cruise, about },
+                    arrive_at,
+                    clock_base_s,
+                );
             }
             Recipe::Rendezvous { approach, clock_base_s } => {
                 state.resume_rendezvous(approach.solve(), clock_base_s);
@@ -163,6 +195,27 @@ impl From<&Snapshot> for lc_proto::Motion {
                     arrive_at: arrive_at.as_ref().map(waypoint_out),
                     clock_base_s: *clock_base_s,
                 },
+                Recipe::Transfer {
+                    about,
+                    from_ly,
+                    beta0,
+                    to_ly,
+                    arrive_beta,
+                    start_s,
+                    drive,
+                    arrive_at,
+                    clock_base_s,
+                } => lc_proto::Motive::Transfer {
+                    about: about.clone(),
+                    from_ly: from_ly.to_array(),
+                    beta0: beta0.to_array(),
+                    to_ly: to_ly.to_array(),
+                    arrive_beta: arrive_beta.to_array(),
+                    start_s: *start_s,
+                    drive: drive_out(*drive),
+                    arrive_at: arrive_at.as_ref().map(waypoint_out),
+                    clock_base_s: *clock_base_s,
+                },
                 Recipe::Rendezvous { approach, clock_base_s } => lc_proto::Motive::Rendezvous {
                     from_ly: approach.from_ly.to_array(),
                     beta0: approach.beta0.to_array(),
@@ -205,6 +258,27 @@ impl From<&lc_proto::Motion> for Snapshot {
                     arrive_at,
                     clock_base_s,
                 } => Recipe::Crossing {
+                    from_ly: DVec3::from_array(*from_ly),
+                    beta0: DVec3::from_array(*beta0),
+                    to_ly: DVec3::from_array(*to_ly),
+                    arrive_beta: DVec3::from_array(*arrive_beta),
+                    start_s: *start_s,
+                    drive: drive_in(*drive),
+                    arrive_at: arrive_at.as_ref().map(waypoint_in),
+                    clock_base_s: *clock_base_s,
+                },
+                lc_proto::Motive::Transfer {
+                    about,
+                    from_ly,
+                    beta0,
+                    to_ly,
+                    arrive_beta,
+                    start_s,
+                    drive,
+                    arrive_at,
+                    clock_base_s,
+                } => Recipe::Transfer {
+                    about: about.clone(),
                     from_ly: DVec3::from_array(*from_ly),
                     beta0: DVec3::from_array(*beta0),
                     to_ly: DVec3::from_array(*to_ly),

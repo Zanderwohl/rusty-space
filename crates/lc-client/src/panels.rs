@@ -358,8 +358,14 @@ fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Re
             let state = cruise.at(now);
             ui.add(egui::ProgressBar::new(cruise.progress(now) as f32).show_percentage());
             ui.label(format!("{:?}", state.phase));
-            ui.label(format!("speed: {:.6}c", state.beta.length()));
-            ui.label(format!("peak: {:.6}c", cruise.peak_beta()));
+            // A transfer's numbers are in its body's frame, and saying which is the difference
+            // between "ten kilometres a second" and "ten kilometres a second *past Earth*".
+            let frame = match game.flown_about() {
+                Some(body) => format!(" past {body}"),
+                None => String::new(),
+            };
+            ui.label(format!("speed: {:.6}c{frame}", state.beta.length()));
+            ui.label(format!("peak: {:.6}c{frame}", cruise.peak_beta()));
             ui.label(format!(
                 "crossing: {:.2} years, {:.2} aboard",
                 cruise.duration_s() / JULIAN_YEAR_S,

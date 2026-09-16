@@ -217,9 +217,23 @@ impl Session {
     }
 
     /// The crossing under way, if there is one.
+    ///
+    /// A transfer's too. It is the same plan read in a body's frame rather than the world's, so
+    /// its phase, its progress and both its clocks mean what they always did — but the *speeds*
+    /// on it are relative to that body. See [`Session::flown_about`], which is how a caller
+    /// knows to say so.
     pub fn cruise(&self) -> Option<&Cruise> {
         match &self.ship.motion.motive {
             Motive::Crossing(cruise) => Some(cruise),
+            Motive::Transfer(transfer) => Some(&transfer.cruise),
+            _ => None,
+        }
+    }
+
+    /// The body [`Session::cruise`] is being flown about, when it is being flown about one.
+    pub fn flown_about(&self) -> Option<&str> {
+        match &self.ship.motion.motive {
+            Motive::Transfer(transfer) => Some(&transfer.about),
             _ => None,
         }
     }

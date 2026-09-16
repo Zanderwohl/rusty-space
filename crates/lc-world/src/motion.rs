@@ -21,11 +21,18 @@ use lc_spacetime::Worldline;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ShipId(pub i64);
 
-/// How a ship is moving. The five are exclusive, and that exclusivity is the model.
+/// How a ship is moving. The six are exclusive, and that exclusivity is the model.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Motive {
     /// Under thrust, on a planned crossing.
     Crossing(Cruise),
+    /// Under thrust, on a crossing flown in a *body's* frame rather than the world's.
+    ///
+    /// What going from one orbit of Earth to another actually is. A motive of its own for the
+    /// same reason [`Motive::Rendezvous`] is: the frame is part of the answer, and reading the
+    /// plan in the world's needs the body back. See [`crate::transfer`], which also says why the
+    /// world frame cannot fly this at all.
+    Transfer(crate::transfer::Transfer),
     /// Under thrust, closing on another craft and matching its velocity.
     ///
     /// A crossing in a moving frame, and it is a motive of its own rather than a `Crossing`
@@ -90,7 +97,10 @@ impl ShipState {
     }
 
     pub fn is_under_way(&self) -> bool {
-        matches!(self.motive, Motive::Crossing(_) | Motive::Rendezvous(_))
+        matches!(
+            self.motive,
+            Motive::Crossing(_) | Motive::Transfer(_) | Motive::Rendezvous(_)
+        )
     }
 
     /// Put a ship on an approach solved for it. The counterpart of [`Self::begin_crossing`],
@@ -149,6 +159,25 @@ impl ShipState {
     /// [`apply`] is the way in for anything a client and a server both have to agree about.
     /// This is for the crossing between stars, which has no course to resolve and no system to
     /// resolve it against.
+    /// Put a ship on a transfer solved for it, basing the crew's clock as a crossing does.
+    pub fn begin_transfer(&mut self, transfer: crate::transfer::Transfer, arrive_at: Waypoint) {
+        self.crossing_clock_base_s = self.clock_s;
+        self.motive = Motive::Transfer(transfer);
+        self.arrive_at = Some(arrive_at);
+    }
+
+    /// Put one back part-way through, keeping the clock base it began with.
+    pub fn resume_transfer(
+        &mut self,
+        transfer: crate::transfer::Transfer,
+        arrive_at: Option<Waypoint>,
+        clock_base_s: f64,
+    ) {
+        self.motive = Motive::Transfer(transfer);
+        self.arrive_at = arrive_at;
+        self.crossing_clock_base_s = clock_base_s;
+    }
+
     pub fn begin_crossing(&mut self, cruise: Cruise, arrive_at: Option<Waypoint>) {
         self.crossing_clock_base_s = self.clock_s;
         self.motive = Motive::Crossing(cruise);
@@ -179,6 +208,17 @@ impl ShipState {
                     arrive_beta: cruise.arrive_beta(),
                     start_s: cruise.start_s,
                     drive: cruise.drive,
+                    arrive_at: self.arrive_at.clone(),
+                    clock_base_s: self.crossing_clock_base_s,
+                },
+                Motive::Transfer(transfer) => Recipe::Transfer {
+                    about: transfer.about.clone(),
+                    from_ly: transfer.cruise.from_ly,
+                    beta0: transfer.cruise.initial_beta(),
+                    to_ly: transfer.cruise.to_ly,
+                    arrive_beta: transfer.cruise.arrive_beta(),
+                    start_s: transfer.cruise.start_s,
+                    drive: transfer.cruise.drive,
                     arrive_at: self.arrive_at.clone(),
                     clock_base_s: self.crossing_clock_base_s,
                 },
@@ -402,12 +442,25 @@ pub fn apply(
             let (at, beta) = state_at(state, Some(system), event.at_t)
                 .unwrap_or((state.position_ly, state.beta));
             let waypoint = course.resolve(system, at, event.at_t).ok_or(Rejected::NoSuchPlace)?;
-            let (cruise, aimed) =
-                crate::navigation::plan(system, &waypoint, at, beta, event.at_t, *drive)
-                    .ok_or(Rejected::NoSuchPlace)?;
             state.position_ly = at;
             state.beta = beta;
             state.drive = *drive;
+            // **A station about the body the ship is already falling with is flown in that
+            // body's frame.** In the world's, the destination runs away at the body's own speed
+            // and the arrival time has no fixed point — see `crate::transfer`. Decided here
+            // rather than inside the planner because it is a choice of *motive*, and both sides
+            // have to make the same one from the same event.
+            let about = crate::transfer::primary_for(system, &waypoint, at, event.at_t);
+            let planned = about.as_deref().and_then(|about| {
+                crate::transfer::plan(system, about, &waypoint, at, beta, event.at_t, *drive)
+            });
+            if let Some((transfer, aimed)) = planned {
+                state.begin_transfer(transfer, aimed);
+                return Ok(());
+            }
+            let (cruise, aimed) =
+                crate::navigation::plan(system, &waypoint, at, beta, event.at_t, *drive)
+                    .ok_or(Rejected::NoSuchPlace)?;
             state.crossing_clock_base_s = state.clock_s;
             state.motive = Motive::Crossing(cruise);
             // Remembered so that arriving becomes holding rather than drifting away from the
@@ -440,6 +493,9 @@ pub fn state_at(
             let flight = cruise.at(now_s);
             Some((flight.position_ly, flight.beta))
         }
+        // The plan is in the body's frame, so the body has to be added back. Without a system
+        // there is no body to add and no answer to give.
+        Motive::Transfer(transfer) => transfer.state_at(system?, now_s),
         // The plan is relative, so the frame has to be added back. Galilean, and
         // [`crate::pursuit`] carries the bound on that.
         Motive::Rendezvous(plan) => Some(plan.state_at(now_s)),
@@ -504,6 +560,7 @@ pub fn facing_at(state: &ShipState, hull_m: f64, now_s: f64) -> DVec3 {
 fn aim_at(state: &ShipState, now_s: f64) -> Option<crate::flight::Aim> {
     match &state.motive {
         Motive::Crossing(cruise) => Some(cruise.aim_at(now_s)),
+        Motive::Transfer(transfer) => Some(transfer.aim_at(now_s)),
         Motive::Rendezvous(plan) => Some(plan.aim_at(now_s)),
         // Nothing is asking. A station is held by thrust too small to turn for, and a conic
         // and a drift ask for nothing at all.
@@ -522,6 +579,7 @@ fn aim_at(state: &ShipState, now_s: f64) -> Option<crate::flight::Aim> {
 pub fn thrust_g(state: &ShipState, now_s: f64) -> f64 {
     let lit = match &state.motive {
         Motive::Crossing(cruise) => cruise.thrust_at(now_s) != DVec3::ZERO,
+        Motive::Transfer(transfer) => transfer.thrust_at(now_s) != DVec3::ZERO,
         Motive::Rendezvous(plan) => plan.thrust_at(now_s) != DVec3::ZERO,
         Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => false,
     };
@@ -563,6 +621,28 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
                         // station *was* when the plan was made, and a step that overshoots the
                         // arrival by a little leaves the body a little further round its year:
                         // holding from the following step would show as a jump.
+                        if let Some(at) = system.and_then(|s| waypoint.place_at(s, now_s)) {
+                            state.position_ly = at;
+                        }
+                        Motive::Holding(waypoint)
+                    }
+                    None => Motive::Drifting { from_ly: state.position_ly, since_t: now_s },
+                };
+            }
+        }
+        Motive::Transfer(transfer) => {
+            let flight = transfer.flight_at(now_s);
+            state.clock_s = state.crossing_clock_base_s + flight.proper_s;
+            if flight.phase == Phase::Arrived {
+                // The station's velocity, in the world, which is the body's plus the plan's. The
+                // transfer ends *on* it — see `Cruise::plan_onto` — so there is nothing left to
+                // find here.
+                if let Some((at, beta)) = state_at(state, system, now_s) {
+                    state.position_ly = at;
+                    state.beta = beta;
+                }
+                state.motive = match state.arrive_at.take() {
+                    Some(waypoint) => {
                         if let Some(at) = system.and_then(|s| waypoint.place_at(s, now_s)) {
                             state.position_ly = at;
                         }
@@ -1157,6 +1237,71 @@ mod tests {
         .expect("the engine cuts");
         assert!(matches!(ship.motive, Motive::Falling(_)));
         assert!(repatch_at(&ship, &system, arrival).is_none(), "a circular orbit stays put");
+    }
+
+    /// **A course set from an orbit of a body to another orbit of the same body is a transfer**,
+    /// and both sides pick that from the event rather than being told.
+    ///
+    /// The whole round trip through the fold: a ship on a low orbit of Earth asks for a high one,
+    /// flies it, and finishes holding the station — in the right place and at the right speed.
+    /// The world frame cannot do this at all; see [`crate::transfer`].
+    #[test]
+    fn a_course_between_two_orbits_of_one_body_is_flown_in_that_bodys_frame() {
+        let Some(mut system) = sol() else { return };
+        let low = Course::Orbit {
+            body: "Earth".into(),
+            altitude_radii: 0.5,
+            plane: Plane::Equatorial,
+        }
+        .resolve(&system, DVec3::ZERO, 0.0)
+        .expect("a low orbit of Earth");
+
+        // Start on it, moving with it, which is what being in an orbit means.
+        let mut ship = ShipState::at(low.place_at(&system, 0.0).unwrap());
+        ship.beta = crate::coast::beta_of(low.velocity_at(&system, 0.0).unwrap());
+        ship.begin_holding(low.clone());
+        ship.beta = crate::coast::beta_of(low.velocity_at(&system, 0.0).unwrap());
+
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: 0.0,
+            change: orbit("Earth"),
+        })
+        .unwrap();
+        let Motive::Transfer(transfer) = ship.motive.clone() else {
+            panic!("a course about the body the ship is falling with is a transfer, not {:?}", ship.motive)
+        };
+        assert_eq!(transfer.about, "Earth");
+
+        let arrival = transfer.duration_s();
+        let mut now = 0.0;
+        while now < arrival + 1.0 {
+            now = (now + 60.0).min(arrival + 1.0);
+            system.advance_to(now);
+            advance(&mut ship, Some(&system), now, 60.0);
+        }
+
+        let Motive::Holding(station) = ship.motive.clone() else { panic!("{:?}", ship.motive) };
+        let earth = system.body_position_ly("Earth").unwrap();
+        let radii = ship.position_ly.distance(earth) * crate::system::M_PER_LY / 6.371e6;
+        assert!((radii - 3.0).abs() < 0.1, "ended {radii} radii out, not the three asked for");
+
+        // And it met the station: at the instant the transfer ends, in the same place and at the
+        // same velocity. Asked of the transfer at *its* arrival rather than of the ship a step
+        // later, because the station is going round a corner the whole time and a second of that
+        // is a metre a second.
+        let (met_at, met_beta) = transfer.state_at(&system, arrival).expect("a place");
+        let joining = crate::coast::beta_of(station.velocity_at(&system, arrival).unwrap());
+        let miss_m = met_at.distance(station.place_at(&system, arrival).unwrap())
+            * crate::system::M_PER_LY;
+        let short_m_s = (met_beta - joining).length() * crate::flight::C_M_S;
+        assert!(miss_m < 1.0, "arrived {miss_m:e} m off the station");
+        assert!(short_m_s < 1.0e-3, "arrived {short_m_s} m/s off the station");
+
+        // Earth ran further than the orbit is wide while this was flown, which is the premise:
+        // planned in the world frame the destination is simply running away.
+        let ran_m = joining.length() * crate::flight::C_M_S * arrival;
+        assert!(ran_m > 3.0 * 6.371e6, "premise: Earth ran only {ran_m:e} m");
     }
 
     /// A crossing that arrives becomes a station, not a drift. The place was the point of it.
