@@ -191,12 +191,10 @@ pub fn sample_scene(
             (c.length_m, c.position_ly.distance(observer) * M_PER_LY, c.position_ly)
         }));
     for (length_m, distance_m, at_ly) in hulls {
-        if let Some(radiance) = crate::hull::radiance_at(&game.0, at_ly) {
-            scene.discs.push(Disc {
-                radiance,
-                solid_angle_sr: crate::hull::solid_angle_sr(length_m, distance_m),
-            });
-        }
+        scene.discs.push(Disc {
+            radiance: crate::hull::radiance_at(&game.0, at_ly),
+            solid_angle_sr: crate::hull::solid_angle_sr(length_m, distance_m),
+        });
     }
 
     // The summary is the power the bodies contribute, which moves with both their brightness

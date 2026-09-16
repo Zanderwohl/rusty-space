@@ -50,6 +50,19 @@ pub const HISTORY_S: f64 = 2.0 * crate::system::LOCAL_SHELL_LY * crate::flight::
 /// which is the safe way to be unable to answer.
 pub const HISTORY_STRETCHES: usize = 256;
 
+/// What a hull sits at, kelvin.
+///
+/// One temperature for every craft, and a deliberate simplification: a real hull has a sunward
+/// face and a shadowed one and a radiator problem that dominates its design. These are assumed
+/// to be advanced enough to hold an even skin and dump exactly what they make, so a craft is a
+/// blackbody at a single temperature and nothing about where it is or what it is doing changes
+/// that.
+///
+/// Four hundred kelvin puts a ship well below anything visible and squarely in the thermal
+/// infrared, which is the point: a craft running dark in the optical is a bright object at ten
+/// microns, and which band a player is looking through decides whether they can see it.
+pub const HULL_K: f64 = 400.0;
+
 /// The span of hull lengths the game is designed around, metres. Nothing enforces it; it is
 /// what the camera, the reticle and the point-source crossover are expected to cope with.
 pub const LENGTH_RANGE_M: (f64, f64) = (500.0, 50_000.0);
@@ -93,6 +106,25 @@ impl Kind {
             Kind::Probe => 40.0,
             Kind::Relay => 120.0,
             Kind::Beacon => 20.0,
+        }
+    }
+
+    /// What a hull of this kind averages over its whole volume, kilograms per cubic metre.
+    ///
+    /// An average and not a material: most of a craft is empty, and what fills the rest differs
+    /// by what the craft is for. A crewed ship carries decks, tankage and shielding; a probe is
+    /// dense instrument and no room to stand up in; a relay and a beacon are mostly a shape
+    /// holding an antenna apart from itself.
+    ///
+    /// Water is a thousand and a modern warship is about two hundred, which is the number to
+    /// argue with. It is here rather than as a mass because mass has to follow size — see
+    /// [`Craft::mass_kg`] — and two ships of a kind are allowed to be different sizes.
+    pub fn density_kg_m3(self) -> f64 {
+        match self {
+            Kind::Ship => 250.0,
+            Kind::Probe => 400.0,
+            Kind::Relay => 150.0,
+            Kind::Beacon => 100.0,
         }
     }
 
@@ -220,6 +252,30 @@ impl Craft {
     /// The craft as something a light-delay solve can evaluate.
     pub fn worldline(&self) -> Flight<'_> {
         Flight::with_past(&self.motion, self.system.as_deref(), &self.past, self.known_from_s)
+    }
+
+    /// How much hull there is, cubic metres.
+    ///
+    /// The ovoid [`BEAM_PER_LENGTH`] and its neighbour describe, so a craft's volume follows
+    /// from the one number that says how big it is. Cubic in the length: a fifty-kilometre ship
+    /// is a million times the ship a five-hundred-metre one is, which is worth knowing before
+    /// being surprised by what it weighs.
+    pub fn volume_m3(&self) -> f64 {
+        let half = self.length_m * 0.5;
+        4.0 / 3.0
+            * std::f64::consts::PI
+            * half
+            * (half * BEAM_PER_LENGTH)
+            * (half * HEIGHT_PER_LENGTH)
+    }
+
+    /// What it weighs, kilograms.
+    ///
+    /// Size times what that size is made of. Nothing stores a mass, because a stored one could
+    /// disagree with the hull it belongs to — and everything that wants a mass wants it to
+    /// follow the ship being talked about.
+    pub fn mass_kg(&self) -> f64 {
+        self.kind.density_kg_m3() * self.volume_m3()
     }
 
     /// Which way the nose points at a coordinate second, or `None` when nothing decides it.
@@ -686,4 +742,56 @@ mod tests {
         assert_eq!(at(250.0), 2.0e-6);
         assert_eq!(at(350.0), 3.0e-6, "past the last change it is the current motive");
     }
+
+    /// Mass follows size, and size is cubic — which is the fact to have in mind before being
+    /// surprised by what the big end of the range weighs.
+    #[test]
+    fn mass_follows_the_cube_of_the_length() {
+        let mut small = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+        small.length_m = LENGTH_RANGE_M.0;
+        let mut large = Craft::at(CraftId(2), Kind::Ship, DVec3::ZERO);
+        large.length_m = LENGTH_RANGE_M.1;
+
+        let ratio = large.mass_kg() / small.mass_kg();
+        let lengths = LENGTH_RANGE_M.1 / LENGTH_RANGE_M.0;
+        assert!(
+            (ratio - lengths.powi(3)).abs() < ratio * 1.0e-9,
+            "{ratio} against {}",
+            lengths.powi(3),
+        );
+        // And the small end is a number a person can hold: a few million tonnes.
+        assert!(small.mass_kg() > 1.0e9 && small.mass_kg() < 1.0e10, "{}", small.mass_kg());
+    }
+
+    /// The ovoid's own volume, not a box or a sphere: five long by three across by one deep.
+    #[test]
+    fn volume_is_the_ovoid_the_hull_is_drawn_as() {
+        let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+        craft.length_m = 1_000.0;
+        let half = 500.0;
+        let want = 4.0 / 3.0
+            * std::f64::consts::PI
+            * half
+            * (half * BEAM_PER_LENGTH)
+            * (half * HEIGHT_PER_LENGTH);
+        assert!((craft.volume_m3() - want).abs() < want * 1.0e-12);
+        // A box of the same extents would be a long way out, which is what makes this worth
+        // checking rather than assuming.
+        let box_volume = 1_000.0 * 1_000.0 * BEAM_PER_LENGTH * 1_000.0 * HEIGHT_PER_LENGTH;
+        assert!(craft.volume_m3() < box_volume * 0.6);
+    }
+
+    /// Two craft of a size are not two craft of a mass: what fills a hull is what it is for.
+    #[test]
+    fn what_a_hull_is_for_changes_what_it_weighs() {
+        let at = |kind| {
+            let mut craft = Craft::at(CraftId(1), kind, DVec3::ZERO);
+            craft.length_m = 1_000.0;
+            craft.mass_kg()
+        };
+        assert!(at(Kind::Probe) > at(Kind::Ship));
+        assert!(at(Kind::Ship) > at(Kind::Relay));
+        assert!(at(Kind::Relay) > at(Kind::Beacon));
+    }
+
 }

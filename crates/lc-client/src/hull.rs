@@ -21,7 +21,8 @@ use em_render::render_space::sim_to_render;
 use em_spectra::PerBand;
 use glam::DVec3;
 use lc_proto::ShipId;
-use lc_world::craft::{BEAM_PER_LENGTH, HEIGHT_PER_LENGTH};
+use em_spectra::blackbody;
+use lc_world::craft::{BEAM_PER_LENGTH, HEIGHT_PER_LENGTH, HULL_K};
 
 use crate::session::Session;
 use crate::system::{M_PER_LY, UNIT_M};
@@ -217,9 +218,28 @@ fn lighting(session: &Session) -> Option<(DVec3, f64, f64)> {
     Some((nearest.position_ly, nearest.star.radius_m, nearest.star.teff_k))
 }
 
+/// What a hull radiates on its own account, as linear display light.
+///
+/// A blackbody at [`HULL_K`], and nothing else about the craft enters it: a surface at `T` has
+/// radiance `B(T)` whichever way it is turned and however far from a star it is. So this is the
+/// term that makes a ship visible between the stars, and the term that makes one impossible to
+/// hide in the thermal bands.
+fn emitted(session: &Session) -> Vec3 {
+    Vec3::from_array(session.mapping.apply(&hull_radiance()))
+}
+
+/// The same, before the band mapping. Split out because the exposure meters against radiance
+/// and the shader wants display light.
+fn hull_radiance() -> PerBand<f32> {
+    PerBand::new(std::array::from_fn(|i| {
+        blackbody::band_radiance(em_spectra::Band::ALL[i], HULL_K) as f32
+    }))
+}
+
 fn uniforms(
     to_star: DVec3,
     reflected: Vec3,
+    emitted: Vec3,
     tone: &crate::tonemap::ToneMap,
 ) -> BodySurfaceUniform {
     BodySurfaceUniform {
@@ -230,10 +250,9 @@ fn uniforms(
         // palette at a half whatever the noise says, and the two ends are the same grey.
         params: Vec4::new(0.0, 0.0, 0.0, 0.0),
         reflected: reflected.extend(0.0),
-        // A hull makes no light of its own here. Not because a ship is cold — it is not, and in
-        // the thermal bands it would show — but because a craft has no temperature to radiate
-        // at the way a `Drawable` does. See `resolved::lit_radiance`.
-        emitted: Vec4::ZERO,
+        // `w` is how far the pattern inverts in the body's own light, and a hull has no
+        // pattern: its two palette ends are the same grey.
+        emitted: emitted.extend(0.0),
         exposure: Vec4::new(tone.surface_reference, tone.stops, 0.0, 0.0),
     }
 }
@@ -349,11 +368,13 @@ pub fn update_hulls(
                 uniforms(
                     star_ly - at.at_ly,
                     shading(&game.0, radius, teff, distance),
+                    emitted(&game.0),
                     &game.0.tone,
                 )
             }
-            // No star anywhere, which is only a sky with nothing in it.
-            None => uniforms(DVec3::Z, Vec3::ZERO, &game.0.tone),
+            // No star to reflect. The hull still glows with its own heat, which is the whole
+            // reason a ship between the stars is a thing you can see at all.
+            None => uniforms(DVec3::Z, Vec3::ZERO, emitted(&game.0), &game.0.tone),
         };
         if asset.uniforms != next {
             asset.uniforms = next;
@@ -361,11 +382,20 @@ pub fn update_hulls(
     }
 }
 
-/// What a hull at `at_ly` sends the eye, per band, for metering. `None` where there is no star
-/// to light it, which is a sky with nothing in it.
-pub fn radiance_at(session: &Session, at_ly: DVec3) -> Option<PerBand<f32>> {
-    let (star_ly, radius, teff) = lighting(session)?;
-    Some(crate::resolved::lit_radiance(ALBEDO, radius, teff, star_ly.distance(at_ly) * M_PER_LY))
+/// What a hull at `at_ly` sends the eye, per band, for metering.
+///
+/// Both halves, because the exposure has to account for both: a ship is reflected starlight in
+/// the optical and its own heat in the infrared, and which one dominates is a question about
+/// the band mapping rather than about the ship.
+pub fn radiance_at(session: &Session, at_ly: DVec3) -> PerBand<f32> {
+    let own = hull_radiance();
+    let Some((star_ly, radius, teff)) = lighting(session) else { return own };
+    let lit =
+        crate::resolved::lit_radiance(ALBEDO, radius, teff, star_ly.distance(at_ly) * M_PER_LY);
+    PerBand::new(std::array::from_fn(|i| {
+        let band = em_spectra::Band::ALL[i];
+        lit[band] + own[band]
+    }))
 }
 
 /// How much sky a hull of `length_m` covers from `distance_m`, steradians.
