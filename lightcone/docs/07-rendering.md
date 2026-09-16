@@ -624,13 +624,25 @@ and metered into the same exposure as everything else. Shape is a constant rathe
 because nothing yet lets one craft differ from another in it; the *length* is on the wire, so
 ships varying in size costs no protocol version.
 
-**The nose follows the drive, not the velocity.** `lc_world::motion::facing` reads the thrust
-where there is thrust and the motion where there is not — *proper* acceleration, so a ballistic
-arc counts as unpowered rather than pointing at whatever it is falling towards. The visible
-consequence is the right one: a crossing is burn, flip and burn, so for its whole second half
-the ship points back the way it came while still travelling forward at a large fraction of `c`.
-A craft at rest with the engine off has no attitude anything decides, and `facing` says so
-rather than inventing one; the renderer keeps the last it saw.
+**The nose follows the drive, not the velocity.** `lc_world::motion::facing` reads what the
+current motive is *aiming* at — see `lc_world::attitude` — which is the thrust where there is
+thrust. Proper acceleration, so a ballistic arc counts as unpowered rather than pointing at
+whatever it is falling towards. The visible consequence is the right one: a crossing is burn,
+flip and burn, so for its whole second half the ship points back the way it came while still
+travelling forward at a large fraction of `c`.
+
+**The turn is not instant, and it is not free.** A hull swings its nose at
+`attitude::rate_rad_s`, which goes as `1/L` — a five-hundred-metre ship flips in a minute and a
+fifty-kilometre one takes nearly two hours. So `flight::Cruise` holds the drive out between the
+boost and the brake for at least `Drive::flip_s`, and the ship covers that ground at its peak
+speed. On an interstellar crossing it is a minute inside a journey of years and nobody will
+notice; on a hop of a few light-seconds it is most of the trip, and a big hull has to arrive
+slower because it spends the journey coming about. The brake never lights on a nose still
+turning, which is the property the coast exists to buy.
+
+A craft never has *no* attitude: where nothing is deciding one it keeps the one it has, so a
+ship that has just braked to a halt goes on pointing where it finished rather than snapping to
+whichever way its last millimetre a second happened to go.
 
 ### The camera still does not translate
 

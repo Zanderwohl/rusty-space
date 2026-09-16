@@ -4,6 +4,12 @@
 //! fraction and `alpha` is an inverse time. The ship boosts at a fixed proper acceleration,
 //! flips at the midpoint and brakes symmetrically; if it would pass the drive's speed cap on
 //! the way it levels off and coasts instead.
+//!
+//! **Every crossing coasts.** The flip is a turn and a turn takes time — see [`crate::attitude`]
+//! — so the plan holds the drive off for at least [`Drive::flip_s`] between the boost and the
+//! brake, and the ship covers that ground at its peak speed. For a five-hundred-metre hull it is
+//! a minute in the middle of a journey of years; for a fifty-kilometre one it is nearly two
+//! hours, and for a short hop it is most of the trip.
 
 use glam::DVec3;
 
@@ -22,7 +28,14 @@ pub const JULIAN_YEAR_S: f64 = 31_557_600.0;
 /// put the ship inside the star.
 pub const STANDOFF_LY: f64 = 1.0e-3;
 
-/// A ship's engine: what it can do, and what that costs in light.
+/// What a craft can do under power: how hard it pushes, how fast it will go, how fast it turns,
+/// and what any of that costs in light.
+///
+/// More than an engine, and deliberately: this is the bundle a crossing is planned from, so
+/// anything the plan depends on belongs in it. The slew rate is here for that reason rather
+/// than because attitude control is part of the drive — a plan that turns round has to make
+/// room for the turn, and a plan put back together at the far end has to make room for the same
+/// one. See [`crate::resume`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Drive {
     /// Proper acceleration, in g. What the crew feels; constant for the whole burn.
@@ -40,11 +53,28 @@ pub struct Drive {
     /// Five per cent of `c` for the default, which is a torch rather than anything anyone has
     /// built.
     pub exhaust_v_m_s: f64,
+    /// How fast the hull can swing its nose, radians a second. See [`crate::attitude`].
+    ///
+    /// A property of the ship rather than of this struct's namesake, and a *plan* parameter:
+    /// [`Cruise::plan_from`] holds the coast open for [`Drive::flip_s`] so the ship has finished
+    /// turning before the brake lights. Stamp it on from the hull that is flying — see
+    /// [`crate::craft::Craft::turning`] — rather than trusting a copy the hull may have
+    /// outgrown since.
+    pub slew_rate_rad_s: f64,
 }
 
 impl Drive {
-    pub const DEFAULT: Self =
-        Self { accel_g: 5.0, max_beta: 0.999, exhaust_v_m_s: 0.05 * C_M_S };
+    pub const DEFAULT: Self = Self {
+        accel_g: 5.0,
+        max_beta: 0.999,
+        exhaust_v_m_s: 0.05 * C_M_S,
+        slew_rate_rad_s: crate::attitude::RATE_RAD_S,
+    };
+
+    /// How long this craft takes to turn end for end, seconds.
+    pub fn flip_s(&self) -> f64 {
+        crate::attitude::flip_time_s(self.slew_rate_rad_s)
+    }
 
     /// What the drive puts into its exhaust to push `mass_kg` at `accel_g`, watts.
     ///
@@ -150,6 +180,11 @@ pub struct Cruise {
     /// from the target and the burn first brings it back through zero. See [`Cruise::plan_from`].
     t0_s: f64,
     /// Seconds from start: end of boost, start of brake, arrival.
+    ///
+    /// The gap between the first two is the coast, and it is never nothing — the flip lives in
+    /// it. The brake is not the boost's length back again: it runs the rest profile down from
+    /// the peak to zero, which takes as long as that profile took to reach the peak in the first
+    /// place, and only a ship that set out from rest boosted for exactly that long.
     boost_s: f64,
     brake_s: f64,
     arrive_s: f64,
@@ -172,8 +207,13 @@ impl Cruise {
     /// A burn at constant proper acceleration starting at speed `b0` is the same burn started
     /// from rest, entered part-way through: if a ship boosting from rest reaches `b0` at time
     /// `t0`, then this ship's trajectory is that one's from `t0` onward. So the whole profile
-    /// generalises by an offset and the closed forms below are unchanged — including the brake,
-    /// which still ends at rest and so is not touched at all.
+    /// generalises by an offset and the closed forms below are unchanged.
+    ///
+    /// The offset is on the **boost only**. The brake ends at rest, so it is the rest profile run
+    /// backwards from the peak whatever the ship was doing when the crossing began — which makes
+    /// it the longer of the two halves for a ship that set out already moving. Giving it the
+    /// boost's length instead used to teleport such a ship forward at the flip, by a tenth of a
+    /// light-year for a crossing entered at half `c`.
     ///
     /// `t0` is **signed**. Negative means the ship is moving away from the target, and the burn
     /// first brings it back through zero — which is the same trajectory, entered before the
@@ -237,36 +277,56 @@ impl Cruise {
         let cap_ls = (gamma_cap - 1.0) / alpha;
         let t_cap = gamma_cap * cap / alpha;
 
-        // Too fast to stop in what is left: the shortest flight from here is to brake the whole
-        // way, and it ends past the target. Saying so is better than pretending a drive can do
-        // what it cannot — the ship stops where it actually stops.
+        // How long the ship spends pointing neither way. The brake cannot light until the flip
+        // is over, so this is a floor on the coast and a term in the distance the crossing
+        // covers — not an adjustment made afterwards.
+        let flip_s = drive.flip_s();
+
+        // Too fast to stop in what is left: the shortest flight from here is to turn round and
+        // brake the whole way, and it ends past the target. Saying so is better than pretending
+        // a drive can do what it cannot — the ship stops where it actually stops. The flip is
+        // part of "what it cannot": a ship still coming about is a ship still closing.
+        let least_ls = x0 + along.max(0.0) * flip_s;
         let mut to_ly = to_ly;
-        if t0_s > 0.0 && distance_ls < x0 {
-            distance_ls = x0;
-            to_ly = from_ly + direction * (x0 / JULIAN_YEAR_S);
+        if t0_s > 0.0 && distance_ls < least_ls {
+            distance_ls = least_ls;
+            to_ly = from_ly + direction * (least_ls / JULIAN_YEAR_S);
         }
 
-        // Boost and brake together cover the distance: `2 x(peak) - x(t0) = D`.
-        let x_peak = (distance_ls + x0) / 2.0;
-        let (boost_s, boost_ls, coast_s, coast_beta) = if distance_ls <= 0.0 {
-            (0.0, 0.0, 0.0, 0.0)
-        } else if x_peak <= cap_ls {
-            // Flip and burn: the cap is never reached.
-            let k = alpha * x_peak;
-            // From x = (sqrt(1 + (at)^2) - 1)/a, so (at)^2 = k^2 + 2k.
-            let t_peak = (k * k + 2.0 * k).sqrt() / alpha;
-            ((t_peak - t0_s).max(0.0), x_peak - x0, 0.0, 0.0)
+        // Boost, coast and brake together cover the distance:
+        //
+        //     x(peak) - x(t0)  +  beta(peak) * coast  +  x(peak)  =  D
+        //
+        // `peak` being where the ship is on the rest profile when the drive goes out. The brake
+        // is that profile run backwards to rest, so it takes `peak` seconds and covers `x(peak)`
+        // however fast the ship was going when the crossing began.
+        let (peak_s, boost_s, boost_ls, coast_s, coast_beta) = if distance_ls <= 0.0 {
+            (0.0, 0.0, 0.0, 0.0, 0.0)
         } else {
-            let coast_ls = distance_ls - (cap_ls - x0) - cap_ls;
-            ((t_cap - t0_s).max(0.0), cap_ls - x0, (coast_ls / cap).max(0.0), cap)
+            // What would be left to cover at the cap, once boost and brake have taken their
+            // share. More than the flip can use means the cap really is the binding constraint.
+            let at_cap_ls = distance_ls - (2.0 * cap_ls - x0);
+            let (peak_s, coast_s, coast_beta) = if at_cap_ls >= cap * flip_s {
+                (t_cap, at_cap_ls / cap, cap)
+            } else {
+                let peak_s = peak_time(alpha, distance_ls + x0, flip_s, t_cap);
+                (peak_s, flip_s, beta_of(alpha, peak_s))
+            };
+            (
+                peak_s,
+                (peak_s - t0_s).max(0.0),
+                distance_of(alpha, peak_s) - x0,
+                coast_s,
+                coast_beta,
+            )
         };
 
         let boost_proper_s = proper_of(alpha, t0_s + boost_s) - proper_of(alpha, t0_s);
-        let coast_proper_s = if coast_beta > 0.0 {
-            coast_s * (1.0 - coast_beta * coast_beta).sqrt()
-        } else {
-            0.0
-        };
+        let coast_proper_s = coast_s * (1.0 - coast_beta * coast_beta).sqrt();
+        // The brake starts at the peak and ends at rest, so it ages the crew by the whole of the
+        // rest profile up to the peak — which is *not* the boost's share back again unless the
+        // ship began at rest.
+        let brake_proper_s = proper_of(alpha, peak_s);
 
         Self {
             from_ly: ordered_from,
@@ -285,11 +345,11 @@ impl Cruise {
             t0_s,
             boost_s,
             brake_s: boost_s + coast_s,
-            arrive_s: 2.0 * boost_s + coast_s,
+            arrive_s: boost_s + coast_s + peak_s,
             boost_ls,
             coast_beta,
             boost_proper_s,
-            proper_s: 2.0 * boost_proper_s + coast_proper_s,
+            proper_s: boost_proper_s + coast_proper_s + brake_proper_s,
         }
     }
 
@@ -308,13 +368,17 @@ impl Cruise {
         self.proper_s
     }
 
-    /// The fastest the ship goes, as a fraction of `c`.
+    /// How long the drive is out between the boost and the brake, seconds.
+    ///
+    /// Never less than [`Drive::flip_s`], and equal to it whenever the crossing is short enough
+    /// that the speed cap never comes into it. See [`Cruise::plan_from`].
+    pub fn coast_s(&self) -> f64 {
+        self.brake_s - self.boost_s
+    }
+
+    /// The fastest the ship goes, as a fraction of `c`. Reached at the flip and held through it.
     pub fn peak_beta(&self) -> f64 {
-        if self.coast_beta > 0.0 {
-            self.coast_beta
-        } else {
-            beta_of(self.alpha, self.t0_s + self.boost_s)
-        }
+        self.coast_beta
     }
 
     /// Which way the ship is being told to point, and when it was told.
@@ -322,7 +386,9 @@ impl Cruise {
     /// Not the same question as [`Cruise::thrust_at`], and the difference is the flip. A ship
     /// coasting between the boost and the brake has nothing lit, so its *thrust* is zero — but
     /// it is not idling, it is turning around, and it was told to the moment the boost ended.
-    /// Putting the flip in the coast is what makes it free: the drive is off anyway.
+    /// Putting the flip in the coast is what makes it free of *thrust* — the drive is off
+    /// anyway — and [`Cruise::plan_from`] holds the coast open long enough for the turn to
+    /// finish, so the brake never lights on a nose that is still coming about.
     ///
     /// `from` is where the previous order left the nose, or `None` when this is the first order
     /// of the crossing and the answer is whatever the ship was already doing.
@@ -423,7 +489,8 @@ impl Cruise {
                 Phase::Coast,
             )
         } else {
-            // The brake is the boost run backwards, which keeps the two exactly symmetric.
+            // The rest profile run backwards from the peak. Symmetric with the boost only for
+            // a ship that started at rest; for any other it is the longer half.
             let s = self.arrive_s - t;
             let phase = if t >= self.arrive_s { Phase::Arrived } else { Phase::Brake };
             (
@@ -467,6 +534,45 @@ fn proper_of(alpha: f64, t: f64) -> f64 {
     (alpha * t).asinh() / alpha
 }
 
+/// Where on the rest profile the drive goes out, given that the coast must last `flip_s`.
+///
+/// Solves `2 x(t) + beta(t) * flip_s = k`, where `k` is the crossing's distance plus the ground
+/// the ship had already made on that profile. Both terms rise with `t` and neither ever falls,
+/// so the left side is strictly increasing: there is exactly one root, bisection cannot land on
+/// the wrong one, and no starting guess can send it somewhere else. Newton would converge faster
+/// and would also have to be nursed through the cap, where `beta` flattens out.
+///
+/// Without the coast term this inverts in closed form — `(at)^2 = k^2 + 2k` for `k = a x` —
+/// which is what the solver did before turning cost anything. With it the equation is a quartic
+/// in `at`, and a quartic's radicals are a worse numerical object than fifty bisections.
+///
+/// A fixed iteration count, not a tolerance. Both ends of the wire plan the same crossing from
+/// the same recipe, and a loop that stops when it is close enough is a loop that can stop one
+/// step later somewhere else.
+fn peak_time(alpha: f64, k: f64, flip_s: f64, upper_s: f64) -> f64 {
+    let reach = |t: f64| 2.0 * distance_of(alpha, t) + beta_of(alpha, t) * flip_s;
+    let (mut lo, mut hi) = (0.0, upper_s.max(1.0));
+    // The caller's bound is the time at the speed cap, which brackets the root whenever this is
+    // reached at all. Widening is for the callers that have not checked.
+    for _ in 0..64 {
+        if reach(hi) >= k {
+            break;
+        }
+        hi *= 2.0;
+    }
+    // Enough halvings to exhaust an f64 over any bracket this can be handed; the last few are
+    // no-ops once `lo` and `hi` are neighbours.
+    for _ in 0..80 {
+        let mid = 0.5 * (lo + hi);
+        if reach(mid) < k {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,18 +605,135 @@ mod tests {
             assert!(x >= last - 1e-9, "went backwards at {k}: {last} -> {x}");
             last = x;
         }
+        // Boost and brake are the same length from rest and the flip sits between them, so the
+        // halfway moment is somewhere in the turn.
         let middle = c.at(c.duration_s() / 2.0);
-        assert!((middle.position_ly.x - 2.0).abs() < 1e-6, "{:?}", middle.position_ly);
+        assert_eq!(middle.phase, Phase::Coast);
+        assert!((middle.position_ly.x - 2.0).abs() < 1e-5, "{:?}", middle.position_ly);
     }
 
-    /// Five g never reaches the cap inside four light-years, so there is no coast.
+    /// Five g never reaches the cap inside four light-years, so the only coast is the flip.
     #[test]
-    fn a_short_crossing_is_pure_flip_and_burn() {
+    fn a_short_crossing_is_flip_and_burn_and_the_flip_is_all_the_coast_there_is() {
         let c = to(4.0);
-        let phases: Vec<Phase> = (0..50).map(|k| c.at(c.duration_s() * k as f64 / 50.0).phase).collect();
-        assert!(!phases.contains(&Phase::Coast), "{phases:?}");
-        assert!(phases.contains(&Phase::Boost) && phases.contains(&Phase::Brake));
+        assert_eq!(c.coast_s(), Drive::DEFAULT.flip_s(), "the coast is the flip and nothing more");
         assert!(c.peak_beta() > 0.99 && c.peak_beta() < Drive::DEFAULT.max_beta, "{}", c.peak_beta());
+        let phases: Vec<Phase> = (0..50).map(|k| c.at(c.duration_s() * k as f64 / 50.0).phase).collect();
+        assert!(phases.contains(&Phase::Boost) && phases.contains(&Phase::Brake));
+    }
+
+    /// The flip is a turn, and a turn takes time — so the drive goes out for at least as long as
+    /// the turn takes, whatever else the crossing is doing.
+    #[test]
+    fn every_crossing_holds_the_coast_open_for_the_flip() {
+        for ly in [1.0e-6, 1.0e-3, 0.1, 1.0, 4.0, 100.0, 1000.0] {
+            let c = to(ly);
+            assert!(
+                c.coast_s() >= Drive::DEFAULT.flip_s() - 1.0e-6,
+                "{ly} ly coasted {} s, short of the {} s flip",
+                c.coast_s(),
+                Drive::DEFAULT.flip_s(),
+            );
+            assert_eq!(c.at(c.start_s + c.match_s + c.boost_s + c.coast_s() * 0.5).phase, Phase::Coast);
+        }
+    }
+
+    /// And the turn has actually finished by the time the brake lights. This is the whole point:
+    /// the order goes out when the boost ends, and nothing thrusts on a nose still coming about.
+    #[test]
+    fn the_nose_has_come_round_before_the_brake_lights() {
+        for length_m in [500.0, 5_000.0, 50_000.0] {
+            let drive = Drive {
+                slew_rate_rad_s: crate::attitude::rate_rad_s(length_m),
+                ..Drive::DEFAULT
+            };
+            let c = Cruise::plan(DVec3::ZERO, DVec3::X * 0.02, 0.0, drive);
+            let lit = c.start_s + c.brake_s;
+            let aim = c.aim_at(lit);
+            assert_eq!(aim.to, -c.direction, "the brake is a turn round, not a nudge");
+            let nose = crate::attitude::turned(
+                aim.from.expect("the boost pointed it somewhere"),
+                aim.to,
+                drive.slew_rate_rad_s,
+                lit - aim.since_s,
+            );
+            assert!(
+                (nose - c.thrust_at(lit + 1.0)).length() < 1.0e-9,
+                "a {length_m} m hull was still at {nose} when the brake lit",
+            );
+        }
+    }
+
+    /// A hull a hundred times longer turns a hundred times more slowly, and over a hop of a few
+    /// light-seconds that turn is most of the journey — so the ponderous one takes far longer
+    /// over the same trip, and is still coming about while the nimble one has arrived.
+    #[test]
+    fn a_ponderous_hull_takes_longer_over_the_same_hop() {
+        // Three light-seconds: an in-system errand, and short enough that the flip dominates.
+        let hop = DVec3::X * 1.0e-7;
+        let plan = |length_m: f64| {
+            Cruise::plan(DVec3::ZERO, hop, 0.0, Drive {
+                slew_rate_rad_s: crate::attitude::rate_rad_s(length_m),
+                ..Drive::DEFAULT
+            })
+        };
+        let (nimble, ponderous) = (plan(500.0), plan(50_000.0));
+        assert!(ponderous.duration_s() > nimble.duration_s());
+        // The big hull spends most of the trip turning rather than burning, so it has to be
+        // going slower at the flip — it covers the distance during the turn instead.
+        assert!(ponderous.peak_beta() < nimble.peak_beta(), "{ponderous:?}");
+        assert!(
+            ponderous.coast_s() > 0.5 * ponderous.duration_s(),
+            "a fifty-kilometre hull's hop is more than half flip: {} s of {} s",
+            ponderous.coast_s(),
+            ponderous.duration_s(),
+        );
+    }
+
+    /// Past the cap the coast is longer than the flip, and then the cap is what sets it.
+    #[test]
+    fn a_long_crossing_coasts_for_the_distance_rather_than_for_the_turn() {
+        let c = to(100.0);
+        assert!(c.coast_s() > Drive::DEFAULT.flip_s() * 1000.0, "{} s", c.coast_s());
+        assert_eq!(c.peak_beta(), Drive::DEFAULT.max_beta);
+    }
+
+    /// The trajectory must not jump where the phases meet. It used to: the brake was given the
+    /// boost's length, which is only right for a ship that set out from rest — one already
+    /// moving teleported forward at the flip by as much as a tenth of a light-year.
+    #[test]
+    fn the_phases_join_up_even_from_a_moving_start() {
+        for along in [-0.5, -0.01, 0.0, 0.3, 0.9] {
+            let c = Cruise::plan_from(DVec3::ZERO, DVec3::X * along, DVec3::X * 4.0, 0.0, Drive::DEFAULT);
+            let eps = 1.0e-3;
+            for (name, t) in [("flip", c.boost_s), ("brake", c.brake_s)] {
+                let (before, after) = (c.at(t - eps), c.at(t + eps));
+                let jump = (after.position_ly - before.position_ly).length();
+                // Two milliseconds of coasting, generously: a light-second is 3e-8 ly.
+                assert!(jump < 1.0e-9, "at beta {along} the {name} jumped {jump} ly");
+                let shear = (after.beta - before.beta).length();
+                assert!(shear < 1.0e-6, "at beta {along} the {name} sheared {shear}");
+            }
+            let end = c.at(c.duration_s());
+            assert!((end.position_ly - DVec3::X * 4.0).length() < 1e-6, "{:?}", end.position_ly);
+            assert!(end.beta.length() < 1e-9, "{:?}", end.beta);
+        }
+    }
+
+    /// A ship already going too fast to stop overruns, and the flip is part of why: it closes
+    /// the whole time it is coming about, before the brake can do anything at all.
+    #[test]
+    fn a_ship_too_fast_to_stop_overruns_by_the_flip_as_well() {
+        let beta0 = DVec3::X * 0.9;
+        let near = DVec3::X * 1.0e-6;
+        let c = Cruise::plan_from(DVec3::ZERO, beta0, near, 0.0, Drive::DEFAULT);
+        let end = c.at(c.duration_s());
+        assert!(end.position_ly.x > near.x, "it must overshoot, not stop short");
+        assert!(end.beta.length() < 1e-9, "but it does stop: {:?}", end.beta);
+        // It cannot brake until it has turned, and it is still doing 0.9 c while it turns.
+        let drifted = 0.9 * Drive::DEFAULT.flip_s() / JULIAN_YEAR_S;
+        assert!(end.position_ly.x > drifted, "{} ly is less than the {drifted} ly of the flip", end.position_ly.x);
+        assert_eq!(c.boost_s, 0.0, "there is nothing to boost: it is already past the cap it needs");
     }
 
     #[test]
@@ -626,3 +849,4 @@ mod tests {
         }
     }
 }
+

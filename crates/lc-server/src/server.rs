@@ -469,7 +469,7 @@ impl<J: Journal> Server<J> {
                 let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
                 // Asked for, not stated. The ceiling is the craft's own, so a client cannot
                 // fly a better ship than it has by sending a larger number.
-                let mut drive = craft.kind.drive();
+                let mut drive = craft.turning(craft.kind.drive());
                 drive.accel_g = accel_g.min(drive.accel_g);
                 // Not shadowed: the proto course is wanted again below, to say back what was
                 // applied. Only the acceleration is clamped, never the course itself.
@@ -497,7 +497,7 @@ impl<J: Journal> Server<J> {
                 // is not somewhere anyone may fly to, whatever the client believes it has.
                 let to_ly = self.world.star_at(*star).ok_or(Refusal::Impossible)?;
                 let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
-                let mut drive = craft.kind.drive();
+                let mut drive = craft.turning(craft.kind.drive());
                 drive.accel_g = accel_g.min(drive.accel_g);
                 craft
                     .apply(&Change_ {
@@ -535,7 +535,8 @@ impl<J: Journal> Server<J> {
                 let seen = chase::sighting(&self.fleet, id, quarry, at)
                     .ok_or(Refusal::NotInSight)?;
                 let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
-                match pursuit::approach(&craft.motion, craft.length_m, &seen, now_s, craft.motion.drive) {
+                let drive = craft.turning(craft.motion.drive);
+                match pursuit::approach(&craft.motion, craft.length_m, &seen, now_s, drive) {
                     Ok(plan) => craft.begin_rendezvous(plan, now_s),
                     // Already alongside. The order still stands — it is a policy, and the
                     // policy's job from here is to keep it there.

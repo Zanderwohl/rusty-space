@@ -90,8 +90,11 @@ impl Kind {
     ///
     /// A crew caps acceleration and nothing else does; an uncrewed craft is limited by its
     /// structure, which is a long way above anything a person survives.
+    ///
+    /// The slew rate is the *default* hull's, because that is all a kind knows. A craft built to
+    /// another size turns at another rate, and [`Craft::turning`] is where that is put right.
     pub fn drive(self) -> crate::flight::Drive {
-        match self {
+        let base = match self {
             Kind::Ship => crate::flight::Drive::DEFAULT,
             Kind::Probe => {
                 crate::flight::Drive { accel_g: 30.0, ..crate::flight::Drive::DEFAULT }
@@ -104,7 +107,12 @@ impl Kind {
                 accel_g: 1.0,
                 max_beta: 0.9,
                 exhaust_v_m_s: 0.002 * crate::flight::C_M_S,
+                ..crate::flight::Drive::DEFAULT
             },
+        };
+        crate::flight::Drive {
+            slew_rate_rad_s: crate::attitude::rate_rad_s(self.length_m()),
+            ..base
         }
     }
 
@@ -272,6 +280,21 @@ impl Craft {
     /// How fast it can turn, radians a second. See [`crate::attitude`].
     pub fn slew_rate_rad_s(&self) -> f64 {
         crate::attitude::rate_rad_s(self.length_m)
+    }
+
+    /// `drive`, turning at *this hull's* rate rather than at whatever was stamped on it.
+    ///
+    /// Every manoeuvre is planned through here, because the slew rate is a plan parameter — a
+    /// crossing holds its coast open for the flip — and the only honest source for it is the
+    /// hull that is flying. Stamped on rather than stored, for the reason [`Craft::mass_kg`]
+    /// gives: a kept copy is a copy that can disagree with the ship it belongs to, and
+    /// [`Craft::length_m`] is a field anyone may set.
+    ///
+    /// Which engine to hand it is the caller's business and the two answers differ. `kind.drive()`
+    /// is the *ceiling*, which is what a new order is clamped against; `motion.drive` is what the
+    /// ship is flying with now, which is what a standing policy should go on flying with.
+    pub fn turning(&self, drive: crate::flight::Drive) -> crate::flight::Drive {
+        crate::flight::Drive { slew_rate_rad_s: self.slew_rate_rad_s(), ..drive }
     }
 
     /// How much hull there is, cubic metres.

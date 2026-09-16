@@ -180,7 +180,7 @@ pub fn decide(
             pursuer.length_m,
             &seen,
             now_s,
-            pursuer.motion.drive,
+            pursuer.turning(pursuer.motion.drive),
         ) {
             Ok(plan) => decided.push((*id, Some(plan))),
             // On station. Nothing to fly, and the policy stays: it is what will notice the

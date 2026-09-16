@@ -582,7 +582,12 @@ mod tests {
                 beta: [0.0; 3],
                 attitude: [1.0, 0.0, 0.0],
                 clock_s: 0.0,
-                drive: lc_proto::Drive { accel_g: 5.0, max_beta: 0.999, exhaust_v_m_s: 1.5e7 },
+                drive: lc_proto::Drive {
+                    accel_g: 5.0,
+                    max_beta: 0.999,
+                    exhaust_v_m_s: 1.5e7,
+                    slew_rate_rad_s: 0.05,
+                },
                 motive,
             },
         }
@@ -662,7 +667,12 @@ mod tests {
             beta: [0.0; 3],
             attitude: [1.0, 0.0, 0.0],
             clock_s: 0.0,
-            drive: lc_proto::Drive { accel_g: 5.0, max_beta: 0.999, exhaust_v_m_s: 1.5e7 },
+            drive: lc_proto::Drive {
+                accel_g: 5.0,
+                max_beta: 0.999,
+                exhaust_v_m_s: 1.5e7,
+                slew_rate_rad_s: 0.05,
+            },
             motive: lc_proto::Motive::Holding(station),
         });
         let lc_world::resume::Recipe::Holding(waypoint) = expected.motive else {

@@ -41,6 +41,18 @@ pub fn rate_rad_s(length_m: f64) -> f64 {
     RATE_RAD_S * REFERENCE_LENGTH_M / length_m
 }
 
+/// How long a hull turning at `rate_rad_s` takes to swing end for end, seconds.
+///
+/// The half-turn is the expensive one and the one a crossing has to make room for, so it has a
+/// name of its own: [`crate::flight::Cruise`] coasts for at least this long between the boost
+/// and the brake, because a ship that has not finished turning cannot brake.
+pub fn flip_time_s(rate_rad_s: f64) -> f64 {
+    if rate_rad_s <= 0.0 || !rate_rad_s.is_finite() {
+        return 0.0;
+    }
+    std::f64::consts::PI / rate_rad_s
+}
+
 /// The angle between two directions, radians. Zero if either is nothing.
 pub fn angle_between(from: DVec3, to: DVec3) -> f64 {
     let (a, b) = (from.normalize_or_zero(), to.normalize_or_zero());
@@ -155,6 +167,19 @@ mod tests {
         // And the big one's flip is the better part of two hours.
         let flip = turn_time_s(DVec3::X, -DVec3::X, large);
         assert!(flip > 5_000.0 && flip < 7_200.0, "{flip} s");
+    }
+
+    /// The named half-turn and the general one are the same turn.
+    #[test]
+    fn a_flip_is_a_half_turn_by_another_name() {
+        for length_m in [500.0, 5_000.0, 50_000.0] {
+            let rate = rate_rad_s(length_m);
+            let named = flip_time_s(rate);
+            assert!((named - turn_time_s(DVec3::X, -DVec3::X, rate)).abs() < 1.0e-9, "{named} s");
+        }
+        // A hull that cannot turn is not one that turns instantly, but nothing may divide by it.
+        assert_eq!(flip_time_s(0.0), 0.0);
+        assert_eq!(flip_time_s(f64::INFINITY), 0.0);
     }
 
     /// Nothing is not a direction, and asking about one must not produce a broken vector.
