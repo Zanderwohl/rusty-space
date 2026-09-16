@@ -163,13 +163,14 @@ impl<J: Journal> Server<J> {
             // Entered before a motive is set: a course resolved against no system is refused,
             // and waiting for `resync_systems` would leave the craft a tick with nothing to do.
             craft.enter(Some(system.clone()), now_s);
-            place(craft, &system, &pov_member, DVec3::ZERO, now_s);
+            place(craft, &system, &pov_member, None, now_s);
         }
-        let shoulder = self.fleet.get(pov).map(|c| c.motion.position_ly).unwrap_or_default();
+        let shoulder = self.fleet.get(pov).cloned();
 
         for (at_slot, member) in director.scenario.cast.iter().enumerate() {
             let id = CraftId(lc_world::scenario::BASE_ID + at_slot as i64);
-            let mut craft = Craft::at(id, member.kind, shoulder);
+            let at = shoulder.as_ref().map(|c| c.motion.position_ly).unwrap_or_default();
+            let mut craft = Craft::at(id, member.kind, at);
             craft.name = Some(member.name.to_string());
             craft.length_m = member.length_m;
             craft.motion.drive = craft.kind.drive();
@@ -177,7 +178,7 @@ impl<J: Journal> Server<J> {
             // Entered before a motive is set: a course resolved against no system is refused,
             // and waiting for `resync_systems` would leave the craft a tick with nothing to do.
             craft.enter(Some(system.clone()), now_s);
-            place(&mut craft, &system, member, shoulder, now_s);
+            place(&mut craft, &system, member, shoulder.as_ref(), now_s);
             self.fleet.insert(craft);
         }
 
@@ -204,12 +205,6 @@ impl<J: Journal> Server<J> {
                 let Some(course) = Course::parse(spelling) else { return };
                 let Some(craft) = self.fleet.get(id) else { return };
                 Some(Change::SetCourse { course, drive: craft.turning(craft.motion.drive) })
-            }
-            Act::Close { on, lengths } => {
-                let Some(target) = director.craft_in(*on) else { return };
-                let Some(waypoint) = self.alongside(target, *lengths) else { return };
-                let Some(craft) = self.fleet.get(id) else { return };
-                Some(Change::FlyTo { waypoint, drive: craft.turning(craft.motion.drive) })
             }
             Act::Cut => Some(Change::CutDrive),
             Act::Chase(on) => {
@@ -241,29 +236,35 @@ impl<J: Journal> Server<J> {
         self.tell_flying(wire, id);
     }
 
-    /// The point on the orbit a craft is holding, that many of its own hull lengths round it.
-    ///
-    /// Meeting somebody is going where they are. Two craft sent to `orbit:Jupiter:low` from
-    /// different places each arrive at whatever point of the circle was nearest them, which can
-    /// be opposite sides of the planet — a hundred and seventy thousand kilometres apart, with
-    /// a five-hundred-metre hull somewhere in the middle of it.
-    fn alongside(&self, target: CraftId, lengths: f64) -> Option<Waypoint> {
-        let craft = self.fleet.get(target)?;
-        let Motive::Holding(Waypoint::Orbit(orbit)) = &craft.motion.motive else { return None };
-        if orbit.radius_m <= 0.0 {
-            return None;
-        }
-        let mut beside = orbit.clone();
-        // Arc length into angle. A standoff quoted in hull lengths is the same picture at any
-        // radius, which a standoff in metres is not.
-        beside.phase_rad += lengths * craft.length_m / orbit.radius_m;
-        Some(Waypoint::Orbit(beside))
-    }
 }
 
 /// Put one craft where its scene says it starts.
-fn place(craft: &mut Craft, system: &Arc<LocalSystem>, member: &Member, shoulder: DVec3, now_s: f64) {
+fn place(
+    craft: &mut Craft,
+    system: &Arc<LocalSystem>,
+    member: &Member,
+    beside: Option<&Craft>,
+    now_s: f64,
+) {
+    let shoulder = beside.map(|c| c.motion.position_ly).unwrap_or_default();
     match member.start {
+        // Nothing to do, which is the point: whatever put it there knew better than this does.
+        Start::AsFound => {}
+        Start::Alongside { lengths, .. } => {
+            let Some(other) = beside else { return };
+            let Motive::Holding(Waypoint::Orbit(orbit)) = &other.motion.motive else { return };
+            if orbit.radius_m <= 0.0 {
+                return;
+            }
+            let mut here = orbit.clone();
+            // Arc length into angle. A standoff quoted in hull lengths is the same picture at
+            // any radius, which one quoted in metres is not.
+            here.phase_rad += lengths * other.length_m / orbit.radius_m;
+            let here = Waypoint::Orbit(here);
+            let Some(at) = here.place_at(system, now_s) else { return };
+            craft.motion.position_ly = at;
+            craft.motion.begin_holding(here);
+        }
         Start::Holding(spelling) => {
             let Some(course) = Course::parse(spelling) else { return };
             let from = craft.motion.position_ly;
@@ -449,5 +450,58 @@ mod tests {
         let running = server.director.as_ref().map(|d| d.scenario.name);
         assert_eq!(running, Some("meeting"), "the running scene was lost");
         assert!(wire.take(client).iter().any(|m| matches!(m, Outbound::Refused { .. })));
+    }
+    /// **The scene works or it does not.** Meeting somebody is ending up beside them, and the
+    /// measure of that is a distance that stays: twelve hull lengths of the craft being met,
+    /// held there while both of them go round Jupiter at forty kilometres a second.
+    #[tokio::test]
+    async fn the_meeting_holds_beside_the_player() {
+        let Some((mut server, mut wire, _, pov)) = staged(&lc_world::scenario::MEETING) else {
+            return;
+        };
+        let cast = CraftId(lc_world::scenario::BASE_ID);
+        let apart = |s: &Server<Memory>| {
+            let (a, b) = (s.fleet.get(pov).unwrap(), s.fleet.get(cast).unwrap());
+            a.motion.position_ly.distance(b.motion.position_ly) * lc_world::system::M_PER_LY
+        };
+        server.tick(&mut wire).await.unwrap();
+
+        // Twelve lengths of a five-hundred-metre hull, and the arc is short enough that the
+        // chord across it is the same number to well inside a per cent.
+        let want = 12.0 * 500.0;
+        assert!((apart(&server) - want).abs() < want * 0.05, "opened {:.0} m apart", apart(&server));
+
+        // And it is a co-orbit rather than a coincidence: a fixed point would be left behind
+        // within a tick at this speed. Four hundred ticks is a couple of days and many orbits.
+        for _ in 0..400 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        assert!(
+            (apart(&server) - want).abs() < want * 0.05,
+            "it drifted to {:.0} m",
+            apart(&server),
+        );
+    }
+
+    /// Being approached is a distance that shrinks. It does not have to arrive to be the
+    /// picture — a hull growing in the window is the whole of it — but it must plainly close.
+    #[tokio::test]
+    async fn the_approach_closes() {
+        let Some((mut server, mut wire, _, pov)) = staged(&lc_world::scenario::APPROACH) else {
+            return;
+        };
+        let cast = CraftId(lc_world::scenario::BASE_ID);
+        let apart = |s: &Server<Memory>| {
+            let (a, b) = (s.fleet.get(pov).unwrap(), s.fleet.get(cast).unwrap());
+            a.motion.position_ly.distance(b.motion.position_ly) * lc_world::system::M_PER_LY
+        };
+        server.tick(&mut wire).await.unwrap();
+        let opening = apart(&server);
+        // A twentieth of the design rate, so a billion metres at five g is a few hundred ticks.
+        for _ in 0..1200 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let closed = apart(&server);
+        assert!(closed < opening / 4.0, "it barely closed: {opening:.0} to {closed:.0} m");
     }
 }

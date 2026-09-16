@@ -41,10 +41,12 @@ pub enum Panel {
     System,
     Flight,
     Tuning,
+    /// Scenes to stage. Development only, and it does nothing without a shard started for it.
+    Scenarios,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 7] = [
+    pub const ALL: [Panel; 8] = [
         Panel::Escape,
         Panel::Settings,
         Panel::Debug,
@@ -52,6 +54,7 @@ impl Panel {
         Panel::System,
         Panel::Flight,
         Panel::Tuning,
+        Panel::Scenarios,
     ];
 
     /// A panel by the name a development flag would use.
@@ -68,6 +71,7 @@ impl Panel {
             Panel::System => "System",
             Panel::Flight => "Flight",
             Panel::Tuning => "Starfield tuning",
+            Panel::Scenarios => "Scenarios",
         }
     }
 }

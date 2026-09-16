@@ -320,16 +320,6 @@ pub enum Change {
     /// Put out a pulse. Changes nothing about the motion, and is here because the fold is what
     /// both sides run over everything that happened.
     Transmit { power_w: f64 },
-    /// Fly to a place already chosen, rather than to one named.
-    ///
-    /// [`Change::SetCourse`] names a place and lets the system say where it is. This one
-    /// carries the answer, because some places have no name: "ten hull lengths round the orbit
-    /// that ship is holding" is a point on a circle, and a course can spell an orbit but not a
-    /// point on one.
-    ///
-    /// Not on the wire, and it will not be. A client asks for places it can name; who is
-    /// entitled to say "be exactly there" is the authority, and this is how it says it.
-    FlyTo { waypoint: crate::navigation::Waypoint, drive: Drive },
     /// The ballistic arc crosses a sphere of influence and is re-solved about `about`.
     ///
     /// An event rather than something each side notices for itself. Patched conics done by
@@ -459,66 +449,50 @@ pub fn apply(
             let (at, beta) = state_at(state, Some(system), event.at_t)
                 .unwrap_or((state.position_ly, state.beta));
             let waypoint = course.resolve(system, at, event.at_t).ok_or(Rejected::NoSuchPlace)?;
-            fly_to(state, system, &waypoint, *drive, at, beta, event.at_t)
-        }
-        Change::FlyTo { waypoint, drive } => {
-            let system = system.ok_or(Rejected::NotInASystem)?;
-            let (at, beta) = state_at(state, Some(system), event.at_t)
-                .unwrap_or((state.position_ly, state.beta));
-            fly_to(state, system, waypoint, *drive, at, beta, event.at_t)
+            state.position_ly = at;
+            state.beta = beta;
+            state.drive = *drive;
+            // **A station about the body the ship is already falling with is flown in that
+            // body's frame.** In the world's, the destination runs away at the body's own speed
+            // and the arrival time has no fixed point — see `crate::transfer`. Decided here
+            // rather than inside the planner because it is a choice of *motive*, and both sides
+            // have to make the same one from the same event.
+            let about = crate::transfer::primary_for(system, &waypoint, at, event.at_t);
+            let planned = about.as_deref().and_then(|about| {
+                crate::transfer::plan(
+                    system,
+                    about,
+                    &waypoint,
+                    at,
+                    beta,
+                    state.attitude,
+                    event.at_t,
+                    *drive,
+                )
+            });
+            if let Some((transfer, aimed)) = planned {
+                state.begin_transfer(transfer, aimed);
+                return Ok(());
+            }
+            let (cruise, aimed) =
+                crate::navigation::plan(
+                    system,
+                    &waypoint,
+                    at,
+                    beta,
+                    state.attitude,
+                    event.at_t,
+                    *drive,
+                )
+                .ok_or(Rejected::NoSuchPlace)?;
+            state.crossing_clock_base_s = state.clock_s;
+            state.motive = Motive::Crossing(cruise);
+            // Remembered so that arriving becomes holding rather than drifting away from the
+            // place the crossing was for.
+            state.arrive_at = Some(aimed);
+            Ok(())
         }
     }
-}
-
-/// Set off for a waypoint, from a state already read at the event's time.
-///
-/// The tail both course-setting arms share. Whether the place was named or handed over makes
-/// no difference once it is a position, and the choice below — a transfer in a body's frame
-/// against a crossing in the world's — has to come out the same either way or two ships given
-/// the same destination by different routes would fly it differently.
-fn fly_to(
-    state: &mut ShipState,
-    system: &LocalSystem,
-    waypoint: &crate::navigation::Waypoint,
-    drive: Drive,
-    at: DVec3,
-    beta: DVec3,
-    at_t: f64,
-) -> Result<(), Rejected> {
-    state.position_ly = at;
-    state.beta = beta;
-    state.drive = drive;
-    // **A station about the body the ship is already falling with is flown in that
-    // body's frame.** In the world's, the destination runs away at the body's own speed
-    // and the arrival time has no fixed point — see `crate::transfer`. Decided here
-    // rather than inside the planner because it is a choice of *motive*, and both sides
-    // have to make the same one from the same event.
-    let about = crate::transfer::primary_for(system, waypoint, at, at_t);
-    let planned = about.as_deref().and_then(|about| {
-        crate::transfer::plan(
-            system,
-            about,
-            waypoint,
-            at,
-            beta,
-            state.attitude,
-            at_t,
-            drive,
-        )
-    });
-    if let Some((transfer, aimed)) = planned {
-        state.begin_transfer(transfer, aimed);
-        return Ok(());
-    }
-    let (cruise, aimed) =
-        crate::navigation::plan(system, waypoint, at, beta, state.attitude, at_t, drive)
-            .ok_or(Rejected::NoSuchPlace)?;
-    state.crossing_clock_base_s = state.clock_s;
-    state.motive = Motive::Crossing(cruise);
-    // Remembered so that arriving becomes holding rather than drifting away from the
-    // place the crossing was for.
-    state.arrive_at = Some(aimed);
-    Ok(())
 }
 
 /// Where a ship is and how fast, at any coordinate time, without changing anything.

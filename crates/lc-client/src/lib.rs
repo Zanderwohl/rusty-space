@@ -17,6 +17,7 @@ pub mod auth;
 pub mod broker;
 pub mod app;
 pub mod curve;
+pub mod demos;
 pub mod entry;
 pub mod envelope;
 pub mod hud;

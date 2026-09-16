@@ -35,12 +35,27 @@ pub enum Slot {
 /// Where a craft is when the scene opens.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Start {
+    /// Left exactly where it already is.
+    ///
+    /// For the player, that is wherever signing in put them, which is open space a few AU out
+    /// from the star. A scene that is only about hulls wants nothing else in frame — a planet
+    /// behind them is a planet they are all silhouetted against.
+    AsFound,
     /// Resolved against the system and then held — the sequence `--station` already uses to
     /// put the player on a station without flying them there.
     ///
     /// Spelled the way [`crate::navigation::Course::parse`] reads: `orbit:Jupiter:low`,
     /// `polar:Saturn:distant`, `belt:2`, `leave`.
     Holding(&'static str),
+    /// On the same orbit as another craft, that many of its own hull lengths round it.
+    ///
+    /// A real co-orbit rather than a point in space, so it holds for ever: both craft are on
+    /// the same circle at the same rate, a fixed arc apart. **Placed there rather than flown
+    /// there**, and the difference matters — a planner asks a circle which side of it is
+    /// nearest the ship coming in and rewrites the phase to suit, so a course can name an orbit
+    /// but not a point on one. Standing somebody up beside somebody else is the authority's
+    /// job, and it is the reason there is a director at all.
+    Alongside { of: Slot, lengths: f64 },
     /// Off the player's shoulder, that many of *its own* hull lengths along a bearing in
     /// simulation axes.
     ///
@@ -87,15 +102,14 @@ pub struct Beat {
 pub enum Act {
     /// Fly a course, in [`crate::navigation::Course::parse`]'s spelling.
     Fly(&'static str),
-    /// Take station alongside another craft, that many of *its* hull lengths round the orbit
-    /// it is holding.
+    /// Close on another craft and hold station off it.
     ///
-    /// Not the same as being sent to the same orbit: two craft sent to `orbit:Jupiter:low`
-    /// from different places arrive at whatever point of the circle was nearest each of them,
-    /// which can be opposite sides of the planet. Meeting somebody means going where they are.
-    Close { on: Slot, lengths: f64 },
-    /// Close on another craft and keep closing — the standing order, re-solved by the
-    /// authority against sightings, exactly as a player's would be.
+    /// The standing order, re-solved by the authority against sightings, exactly as a player's
+    /// would be — and the only way to *meet* somebody. Being sent to the same orbit is not
+    /// meeting them: two craft sent to `orbit:Jupiter:low` from different places each arrive at
+    /// whatever point of the circle was nearest them, which can be opposite sides of the
+    /// planet. The standoff it settles at is worked out from both hulls, so a five-kilometre
+    /// ship stands further off than a five-hundred-metre one and the picture is the same.
     Chase(Slot),
     BreakOff,
     /// Cut the drive. Not a stop: whatever the ship was doing at the time, it keeps doing
@@ -164,7 +178,7 @@ pub const TRAFFIC: Scenario = Scenario {
         kind: Kind::Ship,
         length_m: 500.0,
         accel_g: 5.0,
-        start: Start::Holding("orbit:Earth:high"),
+        start: Start::AsFound,
     },
     cast: &[
         Member {
@@ -220,13 +234,12 @@ pub const MEETING: Scenario = Scenario {
         kind: Kind::Ship,
         length_m: 5_000.0,
         accel_g: 5.0,
-        start: Start::Holding("orbit:Jupiter:high"),
+        start: Start::Alongside { of: Slot::Pov, lengths: 12.0 },
     }],
-    beats: &[Beat {
-        after_s: 0.0,
-        actor: Slot::Cast(0),
-        act: Act::Close { on: Slot::Pov, lengths: 10.0 },
-    }],
+    // Nothing happens, and that is the scene. Two ships holding the same orbit a fixed arc
+    // apart, with a planet filling the window behind them: what a chase *ends* at, without the
+    // quarter of an orbit a pursuit curve spends getting there.
+    beats: &[],
 };
 
 /// Being approached, which is not the same picture as approaching.
@@ -249,8 +262,11 @@ pub const APPROACH: Scenario = Scenario {
         name: "Anvil",
         kind: Kind::Ship,
         length_m: 5_000.0,
+        // A pursuit curve against a craft in orbit spends the approach chasing where the
+        // quarry was, so the approach has to be short against the period it is chasing round:
+        // a hundred thousand kilometres at five g is a sixth of an orbit, which converges.
         accel_g: 5.0,
-        start: Start::Holding("polar:Saturn:distant"),
+        start: Start::Holding("polar:Saturn:high"),
     }],
     beats: &[Beat {
         after_s: 0.0,
@@ -311,7 +327,9 @@ mod tests {
                 .chain(scene.cast)
                 .filter_map(|m| match m.start {
                     Start::Holding(spelling) => Some(spelling),
-                    Start::Beside { .. } => None,
+                    Start::AsFound
+                    | Start::Alongside { .. }
+                    | Start::Beside { .. } => None,
                 });
             let flown = scene.beats.iter().filter_map(|b| match b.act {
                 Act::Fly(spelling) => Some(spelling),
@@ -332,16 +350,27 @@ mod tests {
     fn every_beat_is_about_somebody_who_is_there() {
         for scene in Scenario::ALL {
             let slots = scene.beats.iter().flat_map(|beat| match beat.act {
-                Act::Close { on, .. } | Act::Chase(on) => vec![beat.actor, on],
+                Act::Chase(on) => vec![beat.actor, on],
                 _ => vec![beat.actor],
             });
             for slot in slots {
                 assert!(scene.member(slot).is_some(), "{}: nobody in {slot:?}", scene.name);
             }
         }
-        // And the same for a start that is measured against the player.
+        // And the same for a start measured against somebody else. A craft placed alongside
+        // nobody is a craft left at the origin, which is empty interstellar space.
         for scene in Scenario::ALL {
-            assert!(scene.cast.len() < 64, "{}: more cast than ids to give them", scene.name);
+            for member in std::iter::once(&scene.pov).chain(scene.cast) {
+                let Start::Alongside { of, .. } = member.start else { continue };
+                assert!(
+                    scene.member(of).is_some(),
+                    "{}: {} stands beside nobody",
+                    scene.name,
+                    member.name,
+                );
+                assert!(of != Slot::Pov || !std::ptr::eq(member, &scene.pov),
+                    "{}: {} stands beside itself", scene.name, member.name);
+            }
         }
     }
 
@@ -423,7 +452,9 @@ mod tests {
             let starts = std::iter::once(&scene.pov).chain(scene.cast).filter_map(|m| {
                 match m.start {
                     Start::Holding(spelling) => Some(spelling),
-                    Start::Beside { .. } => None,
+                    Start::AsFound
+                    | Start::Alongside { .. }
+                    | Start::Beside { .. } => None,
                 }
             });
             let flown = scene.beats.iter().filter_map(|b| match b.act {

@@ -95,6 +95,8 @@ pub enum Action {
     TimeRateUp,
     TimeRateDown,
     WriteSnapshot,
+    /// Ask the shard to put a scene in the world, by name. See `lc_world::scenario`.
+    StageDemo(String),
 }
 
 /// What an action needs from outside: the few things the core cannot do itself.
@@ -113,6 +115,9 @@ pub enum Effect {
     /// An order for the server. Emitted instead of a local change when a server is
     /// authoritative over the ship: see [`crate::session::Session::remote`].
     Send(lc_proto::Order),
+    /// Ask for a scene. Not an [`Effect::Send`], because an order is something a *ship* does
+    /// and this is not: it is a request to the thing that owns the world.
+    Stage(String),
 }
 
 /// Stops of exposure per keypress.
@@ -328,6 +333,13 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             effects.push(Effect::Notify(format!("clock: {}", crate::ui::rate_label(ui.time_rate))));
         }
         Action::WriteSnapshot => effects.push(Effect::WriteSnapshot),
+        // Only a shard can do this, and only one started for it will. Offline there is no
+        // authority to ask and nothing that could honour the answer.
+        Action::StageDemo(name) if !session.remote => {
+            let _ = name;
+            effects.push(Effect::Notify("no server, so nowhere to stage a scene".into()));
+        }
+        Action::StageDemo(name) => effects.push(Effect::Stage(name)),
     }
     effects
 }
