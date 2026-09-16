@@ -702,6 +702,26 @@ pub fn options_for(system: &LocalSystem, target: &Target) -> Vec<(String, Course
 /// The waypoint comes back aimed — an orbit's phase set so the ship meets it at the point
 /// nearest where it started. That is part of the same fixed point: the nearest point depends
 /// on the arrival time as much as the body's position does.
+///
+/// **And on its velocity, not only its place.** A station is an orbit and an orbit moves, so the
+/// crossing is planned to end *on* the velocity the station will have — see
+/// [`Cruise::plan_onto`]. The last burn is then one burn at one angle that kills the speed the
+/// ship came in with and imparts the one it is joining, rather than a brake to a dead stop and a
+/// few kilometres a second appearing out of nothing on the next step. That velocity is a third
+/// thing the arrival time decides, so it iterates here with the other two.
+///
+/// **This plans in the world frame, and that is the limit of it.** A station about a moving body
+/// runs away at the body's own speed, so the fixed point above only settles while the primary
+/// covers less than the orbit's own radius during the transfer. Neptune covers a third of one
+/// and a transfer between two of its orbits lands within half a kilometre; Jupiter covers half
+/// and lands within a hundred and fifty; Earth covers the whole of one and does not converge at
+/// all, and Luna is worse. Damping the iteration does not help, because the trouble is not the
+/// step size — it is that [`Waypoint::nearest_to`] is asked which side of a circle is nearest to
+/// a point the circle is fleeing, and the answer swings from one side to the other.
+///
+/// A transfer about one primary wants planning in *that body's* frame and mapping back, the way
+/// [`crate::pursuit`] plans in a quarry's. Until then the arrival puts the ship on its station,
+/// which is what hides this — and now hides only this, the velocity having stopped being free.
 pub fn plan(
     system: &LocalSystem,
     waypoint: &Waypoint,
@@ -718,6 +738,11 @@ pub fn plan(
     if matches!(waypoint, Waypoint::Fixed(_)) {
         return Some((cruise, aimed));
     }
+    // Asking the waypoint how fast it is going costs two more propagations of it, so it is asked
+    // once the arrival time has settled rather than once a round.
+    let joining = |aimed: &Waypoint, arrival_s: f64| {
+        aimed.velocity_at(system, arrival_s).map(crate::coast::beta_of).unwrap_or(DVec3::ZERO)
+    };
     for _ in 0..ARRIVAL_ROUNDS {
         let arrival_s = start_s + cruise.duration_s();
         aimed = waypoint.nearest_to(from_ly, system, arrival_s);
@@ -726,7 +751,21 @@ pub fn plan(
             break;
         }
         target = next;
-        cruise = Cruise::plan_from(from_ly, beta0, target, start_s, drive);
+        cruise = Cruise::plan_onto(
+            from_ly,
+            beta0,
+            target,
+            joining(&aimed, arrival_s),
+            start_s,
+            drive,
+        );
+    }
+    // One last round on the velocity alone: the arrival time has moved since the plan above was
+    // made from it, and the injection is the part of the crossing most sensitive to it.
+    let arrival_s = start_s + cruise.duration_s();
+    let onto = joining(&aimed, arrival_s);
+    if onto != DVec3::ZERO {
+        cruise = Cruise::plan_onto(from_ly, beta0, target, onto, start_s, drive);
     }
     Some((cruise, aimed))
 }
@@ -920,6 +959,70 @@ mod tests {
         let naive = Cruise::plan(from, waypoint.place_at(&system, 0.0).unwrap(), 0.0, Drive::DEFAULT);
         let naive_miss = naive.at(naive.duration_s()).position_ly.distance(wanted) * M_PER_LY;
         assert!(naive_miss > miss * 100.0, "{naive_miss:e} against {miss:e}");
+    }
+
+    /// **One orbit of a body to another orbit of the same body**, which is the transfer the
+    /// injection exists for: the ship leaves a station that is moving and joins one that is
+    /// moving, and the crossing has to account for both ends rather than stopping dead between
+    /// them.
+    ///
+    /// Neptune, because the planner works in the world frame — see [`plan`] — and Neptune runs
+    /// only a third of one of these orbits during the transfer. Earth runs a whole one, and the
+    /// same transfer about Earth lands tens of thousands of kilometres out.
+    #[test]
+    fn a_transfer_between_two_orbits_of_one_body_arrives_moving_with_the_second() {
+        let system = sol();
+        let station = |altitude_radii: f64, plane: Plane| {
+            Course::Orbit { body: "Neptune".into(), altitude_radii, plane }
+                .resolve(&system, DVec3::ZERO, 0.0)
+                .expect("an orbit of Neptune")
+        };
+        let low = station(0.5, Plane::Equatorial);
+        let high = station(4.0, Plane::Equatorial);
+
+        let from = low.place_at(&system, 0.0).unwrap();
+        let beta0 = crate::coast::beta_of(low.velocity_at(&system, 0.0).unwrap());
+        let (cruise, aimed) =
+            plan(&system, &high, from, beta0, 0.0, Drive::DEFAULT).expect("a transfer");
+
+        // A local transfer, so the injection is the honest form rather than the fallback.
+        assert!(
+            cruise.peak_beta() < crate::flight::INJECTION_MAX_BETA,
+            "premise: {} is not a local hop",
+            cruise.peak_beta(),
+        );
+        let arrival_s = cruise.duration_s();
+        let end = cruise.at(arrival_s);
+
+        // It ends *on* the station, and *on* what the station is doing.
+        let wanted = aimed.place_at(&system, arrival_s).unwrap();
+        let miss = end.position_ly.distance(wanted) * M_PER_LY;
+        assert!(miss < 2.4764e7, "missed by {miss:e} m, more than a planetary radius");
+
+        let joining = crate::coast::beta_of(aimed.velocity_at(&system, arrival_s).unwrap());
+        let short_m_s = (end.beta - joining).length() * crate::flight::C_M_S;
+        assert!(short_m_s < 1.0, "arrived {short_m_s} m/s away from the station's velocity");
+
+        // Which is a real amount of velocity, not a rounding: Neptune's own five kilometres a
+        // second round the sun and the station's round Neptune. It used to appear out of nothing
+        // on the step after arrival.
+        assert!(
+            joining.length() * crate::flight::C_M_S > 5.0e3,
+            "premise: the station is going somewhere, at {joining:?}",
+        );
+        // And the last burn is one angle that brakes *and* injects. Most of its work is still
+        // killing the speed the ship came in with, so it points back down the track — but it is
+        // tilted toward what the ship is joining, which braking to a dead stop never is.
+        let aim = cruise.last_aim();
+        let heading = cruise
+            .aim_at(cruise.start_s + arrival_s)
+            .from
+            .expect("the boost pointed it somewhere");
+        assert!(aim.dot(heading) < 0.0, "it has to be braking: {aim} against {heading}");
+        assert!(
+            aim.dot(joining) > (-heading).dot(joining),
+            "{aim} is no more aimed at {joining} than a plain brake would be",
+        );
     }
 
     /// Leaving goes straight out from the star along the radius the ship is already on, and
@@ -1211,3 +1314,4 @@ mod tests {
         }
     }
 }
+

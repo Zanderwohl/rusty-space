@@ -42,11 +42,13 @@ pub struct Snapshot {
 /// How to rebuild a [`Motive`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum Recipe {
-    /// The arguments of [`Cruise::plan_from`], plus where the crossing is *for*.
+    /// The arguments of [`Cruise::plan_onto`], plus where the crossing is *for*.
     Crossing {
         from_ly: DVec3,
         beta0: DVec3,
         to_ly: DVec3,
+        /// The velocity to arrive on. Zero is [`Cruise::plan_from`], which is most crossings.
+        arrive_beta: DVec3,
         start_s: f64,
         drive: Drive,
         arrive_at: Option<Waypoint>,
@@ -89,8 +91,18 @@ impl Snapshot {
         state.drive = self.drive;
         state.clock_s = self.clock_s;
         match self.motive {
-            Recipe::Crossing { from_ly, beta0, to_ly, start_s, drive, arrive_at, clock_base_s } => {
-                let cruise = Cruise::plan_from(from_ly, beta0, to_ly, start_s, drive);
+            Recipe::Crossing {
+                from_ly,
+                beta0,
+                to_ly,
+                arrive_beta,
+                start_s,
+                drive,
+                arrive_at,
+                clock_base_s,
+            } => {
+                let cruise =
+                    Cruise::plan_onto(from_ly, beta0, to_ly, arrive_beta, start_s, drive);
                 state.resume_crossing(cruise, arrive_at, clock_base_s);
             }
             Recipe::Rendezvous { approach, clock_base_s } => {
@@ -136,6 +148,7 @@ impl From<&Snapshot> for lc_proto::Motion {
                     from_ly,
                     beta0,
                     to_ly,
+                    arrive_beta,
                     start_s,
                     drive,
                     arrive_at,
@@ -144,6 +157,7 @@ impl From<&Snapshot> for lc_proto::Motion {
                     from_ly: from_ly.to_array(),
                     beta0: beta0.to_array(),
                     to_ly: to_ly.to_array(),
+                    arrive_beta: arrive_beta.to_array(),
                     start_s: *start_s,
                     drive: drive_out(*drive),
                     arrive_at: arrive_at.as_ref().map(waypoint_out),
@@ -185,6 +199,7 @@ impl From<&lc_proto::Motion> for Snapshot {
                     from_ly,
                     beta0,
                     to_ly,
+                    arrive_beta,
                     start_s,
                     drive,
                     arrive_at,
@@ -193,6 +208,7 @@ impl From<&lc_proto::Motion> for Snapshot {
                     from_ly: DVec3::from_array(*from_ly),
                     beta0: DVec3::from_array(*beta0),
                     to_ly: DVec3::from_array(*to_ly),
+                    arrive_beta: DVec3::from_array(*arrive_beta),
                     start_s: *start_s,
                     drive: drive_in(*drive),
                     arrive_at: arrive_at.as_ref().map(waypoint_in),

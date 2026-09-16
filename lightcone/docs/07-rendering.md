@@ -644,6 +644,14 @@ A craft never has *no* attitude: where nothing is deciding one it keeps the one 
 ship that has just braked to a halt goes on pointing where it finished rather than snapping to
 whichever way its last millimetre a second happened to go.
 
+**Arriving is not stopping.** A station is an orbit and an orbit moves, so a crossing planned
+onto one ends *on* its velocity: the last burn is held at one angle — `flight::Injection` — that
+kills the speed the ship came in with and imparts the speed it is joining, both at once, rather
+than braking to a dead halt and finding kilometres a second out of nowhere on the next step. The
+nose is visibly neither straight back down the track nor across it, but between. The form is
+Newtonian and only offered below `flight::INJECTION_MAX_BETA`; an interstellar crossing brakes
+to rest the exact way, as it always did.
+
 ### The camera still does not translate
 
 What moves is the origin everything is drawn relative to. `hull::Eye` is a boom's length behind

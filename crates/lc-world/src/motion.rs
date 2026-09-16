@@ -176,6 +176,7 @@ impl ShipState {
                     from_ly: cruise.from_ly,
                     beta0: cruise.initial_beta(),
                     to_ly: cruise.to_ly,
+                    arrive_beta: cruise.arrive_beta(),
                     start_s: cruise.start_s,
                     drive: cruise.drive,
                     arrive_at: self.arrive_at.clone(),
@@ -551,7 +552,11 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
             // already stopped. The crossing carries the closed form; use it.
             state.clock_s = state.crossing_clock_base_s + flight.proper_s;
             if flight.phase == Phase::Arrived {
-                state.beta = DVec3::ZERO;
+                // Whatever the crossing ended on, which is the station's velocity when there was
+                // one to join and rest otherwise. Not zero: a crossing planned onto an orbit
+                // finishes *moving*, and forcing it to a stop here would throw away the burn
+                // that got it there. See `Cruise::plan_onto`.
+                state.beta = flight.beta;
                 state.motive = match state.arrive_at.take() {
                     Some(waypoint) => {
                         // Placed on it at once, not next step. The crossing ends where the
@@ -1175,8 +1180,18 @@ mod tests {
             system.advance_to(now);
             advance(&mut ship, Some(&system), now, 500.0);
         }
-        assert!(matches!(ship.motive, Motive::Holding(_)), "{:?}", ship.motive);
-        assert_eq!(ship.beta, DVec3::ZERO, "a ship on station is not still burning");
+        let Motive::Holding(station) = ship.motive.clone() else { panic!("{:?}", ship.motive) };
+        // **Arriving is not stopping.** The crossing ends *on* the station's velocity, which for
+        // an orbit of Earth is most of Earth's twenty-nine kilometres a second round the sun. A
+        // ship that braked to a dead halt here would have to find all of that from nowhere
+        // between two samples, which is what the free injection used to be.
+        let joining = crate::coast::beta_of(station.velocity_at(&system, now).unwrap());
+        assert!(joining.length() > 1.0e-5, "premise: the station is moving, at {joining:?}");
+        assert!(
+            (ship.beta - joining).length() < 1.0e-6,
+            "arrived at {:?} rather than on the station's {joining:?}",
+            ship.beta,
+        );
 
         // And it stays on it: the body moves and the ship goes with it.
         let before = ship.position_ly;
