@@ -28,6 +28,7 @@ pub mod pursuit;
 pub mod resume;
 pub mod rings;
 pub mod rng;
+pub mod scenario;
 pub mod shell;
 pub mod sky;
 pub mod star;
