@@ -428,7 +428,14 @@ pub fn apply(
             state.beta = beta;
             state.drive = *drive;
             state.begin_crossing(
-                crate::flight::Cruise::plan_from(at, beta, stop, event.at_t, *drive),
+                crate::flight::Cruise::plan_from(
+                    at,
+                    beta,
+                    stop,
+                    state.attitude,
+                    event.at_t,
+                    *drive,
+                ),
                 None,
             );
             Ok(())
@@ -452,15 +459,32 @@ pub fn apply(
             // have to make the same one from the same event.
             let about = crate::transfer::primary_for(system, &waypoint, at, event.at_t);
             let planned = about.as_deref().and_then(|about| {
-                crate::transfer::plan(system, about, &waypoint, at, beta, event.at_t, *drive)
+                crate::transfer::plan(
+                    system,
+                    about,
+                    &waypoint,
+                    at,
+                    beta,
+                    state.attitude,
+                    event.at_t,
+                    *drive,
+                )
             });
             if let Some((transfer, aimed)) = planned {
                 state.begin_transfer(transfer, aimed);
                 return Ok(());
             }
             let (cruise, aimed) =
-                crate::navigation::plan(system, &waypoint, at, beta, event.at_t, *drive)
-                    .ok_or(Rejected::NoSuchPlace)?;
+                crate::navigation::plan(
+                    system,
+                    &waypoint,
+                    at,
+                    beta,
+                    state.attitude,
+                    event.at_t,
+                    *drive,
+                )
+                .ok_or(Rejected::NoSuchPlace)?;
             state.crossing_clock_base_s = state.clock_s;
             state.motive = Motive::Crossing(cruise);
             // Remembered so that arriving becomes holding rather than drifting away from the
@@ -1237,6 +1261,63 @@ mod tests {
         .expect("the engine cuts");
         assert!(matches!(ship.motive, Motive::Falling(_)));
         assert!(repatch_at(&ship, &system, arrival).is_none(), "a circular orbit stays put");
+    }
+
+    /// **A ship pointing the wrong way pays for turning round before it can go anywhere.**
+    ///
+    /// Through the fold, which is what both sides run: the attitude the ship is carrying is what
+    /// the planner is handed, so the crossing the client predicts and the one the server flies
+    /// have the same turn in them.
+    #[test]
+    fn a_course_set_facing_the_wrong_way_turns_before_it_burns() {
+        let Some(system) = sol() else { return };
+        let plan_facing = |attitude: DVec3| {
+            let mut ship = ShipState::at(DVec3::ZERO);
+            ship.attitude = attitude;
+            apply(&mut ship, Some(&system), &Event {
+                ship: ShipId(1),
+                at_t: 0.0,
+                change: orbit("Earth"),
+            })
+            .unwrap();
+            let Motive::Crossing(cruise) = ship.motive.clone() else { panic!("a crossing") };
+            cruise
+        };
+
+        // Which way the crossing wants to be pointed, asked of a plan that was not told where the
+        // nose was and so charged for no turn. Not simply the direction of Earth: a crossing
+        // stops short of a body and aims at the near point of the orbit, which is degrees off.
+        let heading = plan_facing(DVec3::ZERO).aim_at(0.0).to;
+
+        // Nose already down the line: nothing to turn, and the first burn is lit at once.
+        let ready = plan_facing(heading);
+        assert_eq!(ready.turn_s(), 0.0);
+        assert_ne!(ready.thrust_at(0.0), DVec3::ZERO);
+
+        // Nose the other way: a full flip first, with the drive off the whole time. The ship is
+        // at rest, so it does not drift while it turns and the line is the same one.
+        let backwards = plan_facing(-heading);
+        // Not to the bit: turning first makes the crossing a minute longer, so Earth has moved
+        // and the heading is a hair off the one the ship was facing away from.
+        assert!(
+            (backwards.turn_s() - Drive::DEFAULT.flip_s()).abs() < 1.0e-2,
+            "turned for {} s, not the {} s a flip takes",
+            backwards.turn_s(),
+            Drive::DEFAULT.flip_s(),
+        );
+        assert_eq!(backwards.thrust_at(backwards.turn_s() * 0.5), DVec3::ZERO);
+        assert_eq!(
+            backwards.at(backwards.turn_s() * 0.5).phase,
+            crate::flight::Phase::Turn,
+        );
+
+        // And the whole crossing is longer by exactly what the turn cost.
+        let extra = backwards.duration_s() - ready.duration_s();
+        assert!(
+            (extra - backwards.turn_s()).abs() < 1.0,
+            "the turn cost {extra} s but took {} s",
+            backwards.turn_s(),
+        );
     }
 
     /// **A course set from an orbit of a body to another orbit of the same body is a transfer**,

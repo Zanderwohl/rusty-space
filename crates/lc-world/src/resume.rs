@@ -98,6 +98,12 @@ impl Snapshot {
     /// drifting — the same degradation [`ShipState::leave_system`] makes, and for the same
     /// reason.
     pub fn restore(self, system: Option<&LocalSystem>, now_s: f64) -> ShipState {
+        // **Where the nose was when the motive began**, which every plan below needs and none of
+        // them carries: a crossing has to leave time to come about before its first burn, and
+        // how long that takes depends on where the ship was pointing. It lives on the snapshot
+        // rather than in each recipe because it is a fact about the ship, and all three recipes
+        // would otherwise carry the same copy of it.
+        let attitude0 = self.attitude;
         let mut state = ShipState::at(self.position_ly);
         state.beta = self.beta;
         state.attitude = self.attitude;
@@ -114,8 +120,9 @@ impl Snapshot {
                 arrive_at,
                 clock_base_s,
             } => {
-                let cruise =
-                    Cruise::plan_onto(from_ly, beta0, to_ly, arrive_beta, start_s, drive);
+                let cruise = Cruise::plan_onto(
+                    from_ly, beta0, to_ly, arrive_beta, attitude0, start_s, drive,
+                );
                 state.resume_crossing(cruise, arrive_at, clock_base_s);
             }
             Recipe::Transfer {
@@ -129,8 +136,9 @@ impl Snapshot {
                 arrive_at,
                 clock_base_s,
             } => {
-                let cruise =
-                    Cruise::plan_onto(from_ly, beta0, to_ly, arrive_beta, start_s, drive);
+                let cruise = Cruise::plan_onto(
+                    from_ly, beta0, to_ly, arrive_beta, attitude0, start_s, drive,
+                );
                 state.resume_transfer(
                     crate::transfer::Transfer { cruise, about },
                     arrive_at,
@@ -138,7 +146,7 @@ impl Snapshot {
                 );
             }
             Recipe::Rendezvous { approach, clock_base_s } => {
-                state.resume_rendezvous(approach.solve(), clock_base_s);
+                state.resume_rendezvous(approach.solve(attitude0), clock_base_s);
             }
             Recipe::Holding(waypoint) => state.begin_holding(waypoint),
             Recipe::Falling => {
@@ -642,9 +650,16 @@ mod tests {
     fn re_planning_a_crossing_from_its_own_recipe_is_the_same_crossing() {
         let drive = crate::flight::Drive::DEFAULT;
         for beta0 in [DVec3::ZERO, DVec3::new(0.0, 0.4, 0.0), DVec3::new(-0.9, 0.0, 0.0)] {
-            let first = Cruise::plan_from(DVec3::ZERO, beta0, DVec3::new(0.1, 0.0, 0.0), 7.0, drive);
+            let first = Cruise::plan_from(DVec3::ZERO, beta0, DVec3::new(0.1, 0.0, 0.0), DVec3::ZERO, 7.0, drive);
             let again =
-                Cruise::plan_from(first.from_ly, first.initial_beta(), first.to_ly, first.start_s, drive);
+                Cruise::plan_from(
+                    first.from_ly,
+                    first.initial_beta(),
+                    first.to_ly,
+                    first.initial_attitude(),
+                    first.start_s,
+                    drive,
+                );
             assert_eq!(first, again, "re-planning changed the crossing, from {beta0}");
         }
     }

@@ -635,7 +635,11 @@ travelling forward at a large fraction of `c`.
 `attitude::rate_rad_s`, which goes as `1/L` — a five-hundred-metre ship flips in a minute and a
 fifty-kilometre one takes nearly two hours. So `flight::Cruise` holds the drive out between the
 boost and the brake for at least `Drive::flip_s`, and the ship covers that ground at its peak
-speed. On an interstellar crossing it is a minute inside a journey of years and nobody will
+speed. It also comes about *before* it lights anything: a crossing begins with a `Phase::Turn`
+in which the ship drifts at whatever it had, facing round to its first burn. A ship told to go
+somewhere behind it spends a minute turning before the drive comes on, and the drift during that
+minute is part of the plan rather than an error in it — which is why the turn has to be timed and
+the crossing solved together, not one after the other. On an interstellar crossing it is a minute inside a journey of years and nobody will
 notice; on a hop of a few light-seconds it is most of the trip, and a big hull has to arrive
 slower because it spends the journey coming about. The brake never lights on a nose still
 turning, which is the property the coast exists to buy.

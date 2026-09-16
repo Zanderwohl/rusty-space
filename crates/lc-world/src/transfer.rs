@@ -126,12 +126,14 @@ pub fn primary_for(
 /// The same fixed point [`crate::navigation::plan`] solves, and it converges here because the
 /// target is no longer running away: in the frame the station only goes round its orbit, a few
 /// per cent of a circle over the time the transfer takes.
+#[allow(clippy::too_many_arguments)]
 pub fn plan(
     system: &LocalSystem,
     about: &str,
     waypoint: &Waypoint,
     from_ly: DVec3,
     beta0: DVec3,
+    attitude0: DVec3,
     start_s: f64,
     drive: Drive,
 ) -> Option<(Transfer, Waypoint)> {
@@ -158,7 +160,8 @@ pub fn plan(
         let to_rel = aimed.place_at(system, arrival_s)? - body_ly;
         let onto_rel =
             crate::coast::beta_of(aimed.velocity_at(system, arrival_s)?) - body_beta;
-        let next = Cruise::plan_onto(from_rel, beta_rel, to_rel, onto_rel, start_s, drive);
+        let next =
+            Cruise::plan_onto(from_rel, beta_rel, to_rel, onto_rel, attitude0, start_s, drive);
         arrival_s = start_s + next.duration_s();
         cruise = Some(next);
     }
@@ -208,7 +211,7 @@ mod tests {
         let (low, high) = (station(&system, "Earth", 0.5), station(&system, "Earth", 4.0));
         let (from, beta0) = departing(&system, &low);
         let (transfer, aimed) =
-            plan(&system, "Earth", &high, from, beta0, 0.0, Drive::DEFAULT).expect("a transfer");
+            plan(&system, "Earth", &high, from, beta0, DVec3::ZERO, 0.0, Drive::DEFAULT).expect("a transfer");
 
         let arrival_s = transfer.duration_s();
         let (at, beta) = transfer.state_at(&system, arrival_s).expect("a place");
@@ -240,7 +243,7 @@ mod tests {
         let (low, high) = (station(&system, "Earth", 0.5), station(&system, "Earth", 4.0));
         let (from, beta0) = departing(&system, &low);
         let (transfer, _) =
-            plan(&system, "Earth", &high, from, beta0, 0.0, Drive::DEFAULT).expect("a transfer");
+            plan(&system, "Earth", &high, from, beta0, DVec3::ZERO, 0.0, Drive::DEFAULT).expect("a transfer");
 
         let radius_m = match &high {
             Waypoint::Orbit(orbit) => orbit.radius_m,

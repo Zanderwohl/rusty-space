@@ -723,11 +723,13 @@ pub fn options_for(system: &LocalSystem, target: &Target) -> Vec<(String, Course
 /// all: [`crate::transfer`] plans it in that body's frame, where nothing is running away, and
 /// lands it within millimetres. This is what is left — everything flown between one place in a
 /// system and another, where the world frame is the right one.
+#[allow(clippy::too_many_arguments)]
 pub fn plan(
     system: &LocalSystem,
     waypoint: &Waypoint,
     from_ly: DVec3,
     beta0: DVec3,
+    attitude0: DVec3,
     start_s: f64,
     drive: Drive,
 ) -> Option<(Cruise, Waypoint)> {
@@ -735,7 +737,7 @@ pub fn plan(
     let mut target = aimed.place_at(system, start_s)?;
     // From whatever the ship is already doing. A course set from an orbit, or from a coast, or
     // in place of one already under way, keeps the speed it has — see `Cruise::plan_from`.
-    let mut cruise = Cruise::plan_from(from_ly, beta0, target, start_s, drive);
+    let mut cruise = Cruise::plan_from(from_ly, beta0, target, attitude0, start_s, drive);
     if matches!(waypoint, Waypoint::Fixed(_)) {
         return Some((cruise, aimed));
     }
@@ -757,6 +759,7 @@ pub fn plan(
             beta0,
             target,
             joining(&aimed, arrival_s),
+            attitude0,
             start_s,
             drive,
         );
@@ -766,7 +769,7 @@ pub fn plan(
     let arrival_s = start_s + cruise.duration_s();
     let onto = joining(&aimed, arrival_s);
     if onto != DVec3::ZERO {
-        cruise = Cruise::plan_onto(from_ly, beta0, target, onto, start_s, drive);
+        cruise = Cruise::plan_onto(from_ly, beta0, target, onto, attitude0, start_s, drive);
     }
     Some((cruise, aimed))
 }
@@ -949,7 +952,7 @@ mod tests {
         let waypoint = course.resolve(&system, DVec3::ZERO, 0.0).unwrap();
         let from = system.body_position_ly("Mars").expect("Mars");
         let (cruise, waypoint) =
-            plan(&system, &waypoint, from, DVec3::ZERO, 0.0, Drive::DEFAULT).expect("a crossing");
+            plan(&system, &waypoint, from, DVec3::ZERO, DVec3::ZERO, 0.0, Drive::DEFAULT).expect("a crossing");
 
         let wanted = waypoint.place_at(&system, cruise.duration_s()).unwrap();
         let landed = cruise.at(cruise.duration_s()).position_ly;
@@ -984,7 +987,7 @@ mod tests {
         let from = low.place_at(&system, 0.0).unwrap();
         let beta0 = crate::coast::beta_of(low.velocity_at(&system, 0.0).unwrap());
         let (cruise, aimed) =
-            plan(&system, &high, from, beta0, 0.0, Drive::DEFAULT).expect("a transfer");
+            plan(&system, &high, from, beta0, DVec3::ZERO, 0.0, Drive::DEFAULT).expect("a transfer");
 
         // A local transfer, so the injection is the honest form rather than the fallback.
         assert!(
@@ -1068,7 +1071,7 @@ mod tests {
         let waypoint = course.resolve(&system, DVec3::ZERO, 0.0).unwrap();
         let from = system.body_position_ly("Mars").expect("Mars");
         let (cruise, aimed) =
-            plan(&system, &waypoint, from, DVec3::ZERO, 0.0, Drive::DEFAULT).expect("a plan");
+            plan(&system, &waypoint, from, DVec3::ZERO, DVec3::ZERO, 0.0, Drive::DEFAULT).expect("a plan");
 
         let arrival_s = cruise.duration_s();
         let landed = aimed.place_at(&system, arrival_s).unwrap();

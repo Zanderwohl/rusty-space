@@ -39,6 +39,7 @@ fn under_way(id: i64) -> Craft {
         craft.motion.position_ly,
         DVec3::new(0.0, 0.002, 0.0),
         target,
+        craft.motion.attitude,
         876.6000009999999,
         Drive::DEFAULT,
     );

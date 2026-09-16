@@ -135,9 +135,24 @@ pub struct Approach {
 impl Approach {
     /// Solve it. The same call [`approach`] makes, so a restored plan and the original are the
     /// same trajectory rather than two that agree to a tolerance.
-    pub fn solve(&self) -> Rendezvous {
+    ///
+    /// `attitude` is where the pursuer's nose was in **world** axes when this was ordered; the
+    /// approach has to leave it time to come about before the first burn, and the plan is in the
+    /// quarry's frame, so it is aberrated in the way [`Rendezvous::aim_at`] aberrates back out.
+    /// It is not a field of this struct because it is a fact about the *ship* rather than about
+    /// the approach, and [`crate::resume::Snapshot`] already carries the one every recipe wants.
+    pub fn solve(&self, attitude: DVec3) -> Rendezvous {
+        let attitude0 =
+            boost::velocity_to_frame(attitude, self.frame_beta).normalize_or_zero();
         Rendezvous {
-            cruise: Cruise::plan_from(self.from_ly, self.beta0, self.to_ly, self.start_s, self.drive),
+            cruise: Cruise::plan_from(
+                self.from_ly,
+                self.beta0,
+                self.to_ly,
+                attitude0,
+                self.start_s,
+                self.drive,
+            ),
             frame_from_ly: self.frame_from_ly,
             frame_beta: self.frame_beta,
             since_t: self.since_t,
@@ -370,7 +385,7 @@ pub fn approach(
         since_t: seen.emitted_s,
         target: seen.target,
     }
-    .solve())
+    .solve(pursuer.attitude))
 }
 
 /// Whether a standing plan is still worth flying, given the newest sighting.
@@ -515,11 +530,16 @@ mod tests {
     /// A plan put back from its arguments is the same plan, not one that agrees to a
     /// tolerance. Everything downstream — where the ship is, when it arrives — reads off the
     /// solved cruise, so a restore that re-solved differently would move a ship on reconnect.
+    ///
+    /// The attitude is one of those arguments and is not in the recipe: it rides on the snapshot,
+    /// because it is a fact about the ship rather than about the approach. Handing back the one
+    /// the pursuer had is what a restore does, so that is what this hands back.
     #[test]
     fn a_plan_survives_being_reduced_to_its_arguments() {
         let seen = quarry(1_000.0, DVec3::Y * 1.0e-4);
-        let plan = approach(&pursuer(), 500.0, &seen, 120.0, Drive::DEFAULT).expect("a plan");
-        assert_eq!(plan.recipe().solve(), plan);
+        let chaser = pursuer();
+        let plan = approach(&chaser, 500.0, &seen, 120.0, Drive::DEFAULT).expect("a plan");
+        assert_eq!(plan.recipe().solve(chaser.attitude), plan);
     }
 
     /// A plan for somebody else, or one that has run out, is not a plan for this.

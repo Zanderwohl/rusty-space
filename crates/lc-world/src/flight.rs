@@ -13,6 +13,8 @@
 
 use glam::DVec3;
 
+pub use crate::injection::{INJECTION_MAX_BETA, Injection};
+
 /// Standard gravity, m/s^2.
 pub const G0: f64 = 9.80665;
 
@@ -111,103 +113,10 @@ impl Default for Drive {
 /// being numbers.
 pub const MAX_BETA: f64 = 1.0 - 1e-9;
 
-/// The fastest a crossing may be going when its last burn begins, for that burn to be an
-/// [`Injection`].
-///
-/// The linear ramp below is what constant proper acceleration does while `gamma` is near one:
-/// the coordinate rate is `alpha / gamma^3`, so at this speed the burn runs about four parts in
-/// a thousand slow and everything downstream of it by the same. Above it the crossing brakes to
-/// rest the exact way instead, and picks the station's velocity up on arrival as it always did.
-///
-/// A transfer about one primary cannot reach this. Falling the length of Jupiter's Hill sphere
-/// at five gravities peaks at half a per cent of `c`, and crossing thirty astronomical units
-/// peaks at five — which is the whole solar system, and the edge of what this is offered for.
-pub const INJECTION_MAX_BETA: f64 = 0.05;
-
-/// The last burn of a crossing: one burn, held at one angle, that kills the speed the ship came
-/// in with and gives it the speed it is joining.
-///
-/// A station is an orbit and an orbit moves, so arriving at one is not arriving at rest. The
-/// crossing used to stop dead at the injection point and pick the orbit's velocity up for
-/// nothing — kilometres a second, appearing between two samples. This is that velocity being
-/// paid for, and paid for in *one* burn aimed at the difference of the two rather than in a
-/// brake followed by a second burn across it. The ship turns once, to the angle that does both
-/// jobs at once.
-///
-/// **Newtonian, and only offered where that is true.** The velocity is taken to ramp linearly
-/// from one end to the other, which is what a constant proper acceleration does only near
-/// `gamma = 1`. See [`INJECTION_MAX_BETA`], and [`Cruise::plan_onto`], which refuses the form
-/// above it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Injection {
-    from_beta: DVec3,
-    to_beta: DVec3,
-    aim: DVec3,
-    duration_s: f64,
-}
-
-impl Injection {
-    /// The burn that takes a ship from one velocity to another at `alpha`.
-    pub fn new(alpha: f64, from_beta: DVec3, to_beta: DVec3) -> Self {
-        let change = to_beta - from_beta;
-        Self {
-            from_beta,
-            to_beta,
-            aim: change.normalize_or_zero(),
-            duration_s: change.length() / alpha,
-        }
-    }
-
-    pub fn duration_s(&self) -> f64 {
-        self.duration_s
-    }
-
-    /// The one angle the whole burn is held at: what kills the incoming velocity and imparts
-    /// the one being joined, added together.
-    pub fn aim(&self) -> DVec3 {
-        self.aim
-    }
-
-    pub fn arrive_beta(&self) -> DVec3 {
-        self.to_beta
-    }
-
-    /// Ground the whole burn covers, light-seconds. The mean of the two velocities times the
-    /// time it takes, which is exact for a velocity that ramps linearly and is why the line
-    /// above has to be aimed short of the target by this much.
-    pub fn displacement_ls(&self) -> DVec3 {
-        (self.from_beta + self.to_beta) * 0.5 * self.duration_s
-    }
-
-    /// How far into the burn it has got at `t`: ground covered since it began, and how fast.
-    pub fn at(&self, t: f64) -> (DVec3, DVec3) {
-        let t = t.clamp(0.0, self.duration_s);
-        let beta = self.beta_at(t);
-        ((self.from_beta + beta) * 0.5 * t, beta)
-    }
-
-    fn beta_at(&self, t: f64) -> DVec3 {
-        if self.duration_s <= 0.0 {
-            return self.to_beta;
-        }
-        self.from_beta.lerp(self.to_beta, t / self.duration_s)
-    }
-
-    /// Ship seconds over the first `t` of the burn.
-    ///
-    /// The midpoint rule rather than the integral. `sqrt(1 - beta^2)` over a linear ramp does
-    /// have a closed form and it is not worth writing: at the speeds this form is allowed at
-    /// the whole dilation is parts in a thousand, and the midpoint's error is parts in a
-    /// million of that.
-    pub fn proper_s(&self, t: f64) -> f64 {
-        let t = t.clamp(0.0, self.duration_s);
-        let middle = self.beta_at(t * 0.5).length_squared().min(1.0);
-        t * (1.0 - middle).sqrt()
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
+    /// Coming about to face the first burn, before anything is lit. See [`Cruise::turn_s`].
+    Turn,
     /// Shedding the velocity that is across the line, before the crossing proper.
     Match,
     Boost,
@@ -252,6 +161,34 @@ pub struct FlightState {
 /// holds a planet to.
 const AIM_ROUNDS: usize = 4;
 
+/// How finely the turn-in is timed against the line it is turning onto.
+///
+/// A ship drifts while it comes about, so where the crossing starts depends on how long the turn
+/// takes — and which way it has to turn depends on where the crossing starts. Iterating that
+/// converges only while the drift is small next to the distance: a fifty-kilometre hull flipping
+/// for two hours over a three-light-second hop moves a fifth of the way there while it turns,
+/// and the iteration walks away instead of settling.
+///
+/// So it is bisected instead. The turn cannot last longer than a flip and cannot take less than
+/// no time, and the answer is a turn time somewhere between — so the bracket is
+/// `[0, flip]` whatever the geometry, the sign change is guaranteed, and no case diverges.
+/// Cheap: deciding which way the first burn points needs the line and the ship's velocity, not
+/// the profile, so all of this runs before the expensive part runs once.
+const TURN_STEPS: usize = 48;
+
+/// How many times the timed turn is re-checked against the heading the crossing is actually
+/// flown along. See [`Cruise::solve`].
+const TURN_CORRECTIONS: usize = 3;
+
+/// How far a correction may move the turn, as a fraction of a flip.
+///
+/// The correction exists for the *tilt*: a crossing that ends on a station flies a line aimed off
+/// the target, by a couple of degrees at the most, and the bisection above times the turn against
+/// the straight one. A couple of degrees is a few per cent of a flip, so a correction larger than
+/// this is not the tilt — it is the drift, in the geometry where iterating the drift walks away
+/// instead of settling, and there the bisected answer is the one to trust.
+const TURN_CORRECTION_LIMIT: f64 = 0.1;
+
 /// What one aiming round works out about a line. See [`Cruise::along`].
 #[derive(Clone, Copy, Debug, Default)]
 struct Solved {
@@ -292,12 +229,23 @@ pub struct Cruise {
     /// re-planned at the far end rather than shipped as a solved trajectory. See
     /// [`crate::resume`].
     beta0: DVec3,
-    /// Coordinate seconds at which the burn began.
+    /// Which way the nose was pointing when this was ordered.
+    ///
+    /// A plan parameter, because the crossing has to leave time for the ship to come about
+    /// before it lights anything — see [`Cruise::turn_s`]. Zero means *unknown*, and buys no
+    /// turn at all: a caller that cannot say where the nose was does not get to have the answer
+    /// invented for it.
+    attitude0: DVec3,
+    /// Coordinate seconds at which the order was given. The first burn lights `turn_s` later.
     pub start_s: f64,
     pub drive: Drive,
     direction: DVec3,
     distance_ls: f64,
     alpha: f64,
+    /// Coming about to face the first burn. Nothing is lit and the ship drifts at `beta0`.
+    turn_s: f64,
+    /// Where the turn leaves the ship, which is where the crossing proper begins.
+    turned_ly: DVec3,
     /// Shedding whatever velocity is across the line, before the crossing proper. Zero for a
     /// ship already on the line — which includes every ship starting from rest.
     match_s: f64,
@@ -338,7 +286,7 @@ pub struct Cruise {
 impl Cruise {
     /// Plan a crossing. A zero-length one is already arrived.
     pub fn plan(from_ly: DVec3, to_ly: DVec3, start_s: f64, drive: Drive) -> Self {
-        Self::plan_from(from_ly, DVec3::ZERO, to_ly, start_s, drive)
+        Self::plan_from(from_ly, DVec3::ZERO, to_ly, DVec3::ZERO, start_s, drive)
     }
 
     /// Plan a crossing that ends **on a station's velocity** rather than at rest.
@@ -357,10 +305,11 @@ impl Cruise {
         beta0: DVec3,
         to_ly: DVec3,
         arrive_beta: DVec3,
+        attitude0: DVec3,
         start_s: f64,
         drive: Drive,
     ) -> Self {
-        Self::solve(from_ly, beta0, to_ly, arrive_beta, start_s, drive)
+        Self::solve(from_ly, beta0, to_ly, arrive_beta, attitude0, start_s, drive)
     }
 
     /// Plan a crossing **from whatever velocity the ship already has**.
@@ -389,17 +338,97 @@ impl Cruise {
         from_ly: DVec3,
         beta0: DVec3,
         to_ly: DVec3,
+        attitude0: DVec3,
         start_s: f64,
         drive: Drive,
     ) -> Self {
-        Self::solve(from_ly, beta0, to_ly, DVec3::ZERO, start_s, drive)
+        Self::solve(from_ly, beta0, to_ly, DVec3::ZERO, attitude0, start_s, drive)
     }
 
+    /// Time the turn-in, then fly the crossing that follows it.
+    ///
+    /// **A ship cannot thrust in a direction it is not facing**, so before any of what
+    /// [`Cruise::with_turn`] does, it swings to face its first burn — drifting, with nothing lit.
+    /// That moves where the crossing starts, which moves the line, which moves the heading the
+    /// nose has to reach. Two passes, and they are not the same kind of pass:
+    ///
+    /// The first bisects. Iterating the drift converges only while the drift is small next to
+    /// the distance, and a fifty-kilometre hull flipping for two hours over a three-light-second
+    /// hop covers a fifth of the way there while it turns — the iteration walks away instead of
+    /// settling. Bisection cannot: the turn lasts somewhere between no time and a flip, so
+    /// `[0, flip]` brackets it whatever the geometry.
+    ///
+    /// The rest correct, because the line the crossing is actually flown along is not the
+    /// straight one to the target — an injection tilts it, by a couple of degrees at the most.
+    /// Settling on the heading really flown is what makes "nothing is lit until the nose is
+    /// round" true rather than nearly true, and it is also what lets a nose already pointed the
+    /// right way cost nothing at all. [`TURN_CORRECTION_LIMIT`] is what keeps it from wandering
+    /// off into the geometry the bisection was for.
     fn solve(
         from_ly: DVec3,
         beta0: DVec3,
         to_ly: DVec3,
         arrive_beta: DVec3,
+        attitude0: DVec3,
+        start_s: f64,
+        drive: Drive,
+    ) -> Self {
+        // Where the nose has to end up if the ship drifts for `t` first, and how long that swing
+        // takes. Only the line and `beta0` decide which way the first burn points, so this is
+        // arithmetic rather than a profile solve — which is what makes bisecting it cheap.
+        let turn_for = |t: f64| {
+            let drifted = from_ly + beta0 * (t / JULIAN_YEAR_S);
+            let line = (to_ly - drifted).normalize_or_zero();
+            let across = beta0 - line * beta0.dot(line);
+            // The match is the first thing lit when there is drift to shed, and it points against
+            // that drift; otherwise the boost is, and it points down the line.
+            let first = if across.length() > 1.0e-12 { -across.normalize_or_zero() } else { line };
+            crate::attitude::turn_time_s(attitude0, first, drive.slew_rate_rad_s)
+        };
+        // No turn to make — the nose is already round, or the caller did not say where it was —
+        // is answered exactly rather than bisected to a picosecond of one. It is the common case,
+        // and a crossing that turns for no time should be the crossing it was before this existed.
+        if turn_for(0.0) <= 0.0 {
+            return Self::with_turn(
+                from_ly, beta0, to_ly, arrive_beta, attitude0, 0.0, start_s, drive,
+            );
+        }
+        let (mut lo, mut hi) = (0.0, drive.flip_s());
+        for _ in 0..TURN_STEPS {
+            let mid = 0.5 * (lo + hi);
+            if turn_for(mid) > mid {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let mut turn_s = 0.5 * (lo + hi);
+        let mut out =
+            Self::with_turn(from_ly, beta0, to_ly, arrive_beta, attitude0, turn_s, start_s, drive);
+        for _ in 0..TURN_CORRECTIONS {
+            let heading = out.aim_at(start_s).to;
+            let needed = crate::attitude::turn_time_s(attitude0, heading, drive.slew_rate_rad_s);
+            if needed == turn_s
+                || (needed - turn_s).abs() > TURN_CORRECTION_LIMIT * drive.flip_s()
+            {
+                break;
+            }
+            turn_s = needed;
+            out = Self::with_turn(
+                from_ly, beta0, to_ly, arrive_beta, attitude0, turn_s, start_s, drive,
+            );
+        }
+        out
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn with_turn(
+        from_ly: DVec3,
+        beta0: DVec3,
+        to_ly: DVec3,
+        arrive_beta: DVec3,
+        attitude0: DVec3,
+        turn_s: f64,
         start_s: f64,
         drive: Drive,
     ) -> Self {
@@ -407,6 +436,9 @@ impl Cruise {
         let cap = drive.cap();
         let ordered_from = from_ly;
         let ordered_to = to_ly;
+
+        let from_ly = ordered_from + beta0 * (turn_s / JULIAN_YEAR_S);
+        let turned_ly = from_ly;
 
         // **The match.** A crossing is a straight line, and a ship cannot fly a line it is
         // moving across — so before the crossing proper it sheds whatever velocity is not along
@@ -513,11 +545,14 @@ impl Cruise {
             // exact brake ends at rest, and a recipe saying otherwise would re-plan into a
             // crossing its own sampler disagreed with — see `Cruise::along`.
             arrive_beta: inject.map(|inject| inject.arrive_beta()).unwrap_or(DVec3::ZERO),
+            attitude0,
             start_s,
             drive,
             direction,
             distance_ls,
             alpha,
+            turn_s,
+            turned_ly,
             match_s,
             match_dir,
             match_ls,
@@ -643,14 +678,32 @@ impl Cruise {
         self.beta0
     }
 
-    /// Coordinate seconds the whole crossing takes, the match included.
+    /// Coordinate seconds the whole crossing takes, the turn-in and the match included.
     pub fn duration_s(&self) -> f64 {
-        self.match_s + self.arrive_s
+        self.turn_s + self.match_s + self.arrive_s
     }
 
     /// Ship seconds the whole crossing takes. Never more than [`Cruise::duration_s`].
+    ///
+    /// Read off the end of the trajectory rather than summed from the parts, so it cannot
+    /// disagree with what [`Cruise::at`] says the crew's clock reads on arrival. Summing them was
+    /// how the match's share went missing.
     pub fn proper_duration_s(&self) -> f64 {
-        self.proper_s
+        self.at(self.start_s + self.duration_s()).proper_s
+    }
+
+    /// How long the ship spends coming about before its first burn, seconds.
+    ///
+    /// Nothing is lit and the ship drifts at the velocity it began with. Zero when the nose was
+    /// already where the burn needs it, and zero when the planner was not told where the nose
+    /// was — see the `attitude0` this was planned from.
+    pub fn turn_s(&self) -> f64 {
+        self.turn_s
+    }
+
+    /// Which way the nose was pointing when this was ordered. With the others, the whole recipe.
+    pub fn initial_attitude(&self) -> DVec3 {
+        self.attitude0
     }
 
     /// Which way the last burn points.
@@ -696,17 +749,26 @@ impl Cruise {
     /// of the crossing and the answer is whatever the ship was already doing.
     pub fn aim_at(&self, now_s: f64) -> Aim {
         let since = now_s - self.start_s;
-        // Shedding the velocity across the line: the drive points against it, and this is the
-        // first thing the crossing asks for.
-        if since < self.match_s {
-            return Aim { to: -self.match_dir, from: None, since_s: self.start_s };
+        // **The turn-in and the burn it is for are one order.** The ship was told where to point
+        // the moment the crossing began, and the burn lights when it gets there — so the aim is
+        // the same through both, and `from: None` hands the turn its start: whatever the ship was
+        // already doing, which only the ship knows.
+        if self.match_s > 0.0 {
+            // Shedding the velocity across the line: the drive points against it, and this is
+            // the first thing the crossing asks for.
+            if since < self.turn_s + self.match_s {
+                return Aim { to: -self.match_dir, from: None, since_s: self.start_s };
+            }
         }
-        let after_match = self.start_s + self.match_s;
-        // A ship that had no match to fly was never told anything before the boost.
+        let after_match = self.start_s + self.turn_s + self.match_s;
+        // A ship that had no match to fly was never told anything before the boost — so the
+        // boost *is* its first order, given when the crossing began rather than when the drive
+        // lit, and the turn-in is the time it took to obey it.
         let before_boost = (self.match_s > 0.0).then_some(-self.match_dir);
-        let t = since - self.match_s;
+        let t = since - self.turn_s - self.match_s;
         if t < self.boost_s {
-            return Aim { to: self.direction, from: before_boost, since_s: after_match };
+            let since_s = if self.match_s > 0.0 { after_match } else { self.start_s };
+            return Aim { to: self.direction, from: before_boost, since_s };
         }
         // Everything from the end of the boost onward is one order — turn around and brake —
         // so the turn is not restarted at the moment the drive relights.
@@ -727,7 +789,7 @@ impl Cruise {
             Phase::Match => -self.match_dir,
             Phase::Boost => self.direction,
             Phase::Brake => self.last_aim(),
-            Phase::Coast | Phase::Arrived => DVec3::ZERO,
+            Phase::Turn | Phase::Coast | Phase::Arrived => DVec3::ZERO,
         }
     }
 
@@ -746,21 +808,36 @@ impl Cruise {
 
     /// Sample the trajectory. Outside the burn it holds the endpoints, at rest.
     pub fn at(&self, now_s: f64) -> FlightState {
-        let since = now_s - self.start_s;
-        // The match comes first, in its own direction. See `plan_from`.
+        let ordered = now_s - self.start_s;
+        // **Coming about**, with nothing lit: a straight drift at whatever the ship had.
+        let inv_gamma0 = (1.0 - self.beta0.length_squared()).max(0.0).sqrt();
+        if ordered < self.turn_s {
+            let t = ordered.max(0.0);
+            return FlightState {
+                position_ly: self.from_ly + self.beta0 * (t / JULIAN_YEAR_S),
+                beta: self.beta0,
+                proper_s: t * inv_gamma0,
+                phase: Phase::Turn,
+            };
+        }
+        // The crew aged through the turn, and everything below is measured from its end.
+        let turned_proper = self.turn_s * inv_gamma0;
+        let since = ordered - self.turn_s;
+        // The match comes next, in its own direction. See `plan_from`.
         if since < self.match_s {
             let left = self.match_s - since.max(0.0);
             let across_ls = self.match_ls - distance_of(self.alpha, left);
             let along_ls = self.match_along * since.max(0.0);
             return FlightState {
-                position_ly: self.from_ly
+                position_ly: self.turned_ly
                     + (self.match_dir * across_ls + self.direction * along_ls) / JULIAN_YEAR_S,
                 beta: self.match_dir * beta_of(self.alpha, left) + self.direction * self.match_along,
-                proper_s: proper_of(self.alpha, self.match_s) - proper_of(self.alpha, left),
+                proper_s: turned_proper + proper_of(self.alpha, self.match_s)
+                    - proper_of(self.alpha, left),
                 phase: Phase::Match,
             };
         }
-        let matched_proper = proper_of(self.alpha, self.match_s);
+        let matched_proper = turned_proper + proper_of(self.alpha, self.match_s);
         let t = (since - self.match_s).clamp(0.0, self.arrive_s);
         if self.arrive_s <= 0.0 {
             return FlightState {
@@ -1026,7 +1103,7 @@ mod tests {
     #[test]
     fn the_phases_join_up_even_from_a_moving_start() {
         for along in [-0.5, -0.01, 0.0, 0.3, 0.9] {
-            let c = Cruise::plan_from(DVec3::ZERO, DVec3::X * along, DVec3::X * 4.0, 0.0, Drive::DEFAULT);
+            let c = Cruise::plan_from(DVec3::ZERO, DVec3::X * along, DVec3::X * 4.0, DVec3::ZERO, 0.0, Drive::DEFAULT);
             let eps = 1.0e-3;
             for (name, t) in [("flip", c.boost_s), ("brake", c.brake_s)] {
                 let (before, after) = (c.at(t - eps), c.at(t + eps));
@@ -1048,7 +1125,7 @@ mod tests {
     fn a_ship_too_fast_to_stop_overruns_by_the_flip_as_well() {
         let beta0 = DVec3::X * 0.9;
         let near = DVec3::X * 1.0e-6;
-        let c = Cruise::plan_from(DVec3::ZERO, beta0, near, 0.0, Drive::DEFAULT);
+        let c = Cruise::plan_from(DVec3::ZERO, beta0, near, DVec3::ZERO, 0.0, Drive::DEFAULT);
         let end = c.at(c.duration_s());
         assert!(end.position_ly.x > near.x, "it must overshoot, not stop short");
         assert!(end.beta.length() < 1e-9, "but it does stop: {:?}", end.beta);
@@ -1162,12 +1239,174 @@ mod tests {
 
     const M_PER_LY: f64 = 9.4607304725808e15;
 
+    const RATE: f64 = crate::attitude::RATE_RAD_S;
+
+    /// Nothing is lit until the nose is round. A crossing that has to turn end for end spends a
+    /// minute doing it, drifting, with the drive off.
+    #[test]
+    fn a_crossing_comes_about_before_it_lights_anything() {
+        let c = Cruise::plan_from(
+            DVec3::ZERO,
+            DVec3::ZERO,
+            -DVec3::X * 4.0,
+            DVec3::X,
+            0.0,
+            Drive::DEFAULT,
+        );
+        assert!((c.turn_s() - 60.0).abs() < 1.0e-9, "a flip in {} s", c.turn_s());
+        for t in [0.0, 15.0, 30.0, 59.9] {
+            assert_eq!(c.at(t).phase, Phase::Turn, "at {t} s");
+            assert_eq!(c.thrust_at(t), DVec3::ZERO, "the drive was lit at {t} s");
+        }
+        assert_eq!(c.at(60.1).phase, Phase::Boost);
+        assert_ne!(c.thrust_at(60.1), DVec3::ZERO);
+    }
+
+    /// And the turn is over exactly when the burn starts — the whole point of paying for it.
+    /// Whatever the hull, whatever it was pointing at, and whether the first burn is the match
+    /// or the boost.
+    #[test]
+    fn the_nose_has_arrived_when_the_first_burn_lights() {
+        let cases = [
+            ("flip, at rest", DVec3::ZERO, DVec3::X, -DVec3::X * 4.0),
+            ("square on, at rest", DVec3::ZERO, DVec3::Y, DVec3::X * 4.0),
+            ("skew, at rest", DVec3::ZERO, DVec3::new(1.0, 1.0, 1.0).normalize(), DVec3::X * 4.0),
+            ("into a match", DVec3::Y * 1.0e-4, -DVec3::X, DVec3::X * 1.0e-7),
+        ];
+        for length_m in [500.0, 5_000.0, 50_000.0] {
+            let drive = Drive {
+                slew_rate_rad_s: crate::attitude::rate_rad_s(length_m),
+                ..Drive::DEFAULT
+            };
+            for (what, beta0, attitude0, to) in cases {
+                let c = Cruise::plan_from(DVec3::ZERO, beta0, to, attitude0, 0.0, drive);
+                let lit = c.turn_s();
+                let aim = c.aim_at(lit);
+                let nose = crate::attitude::turned(
+                    aim.from.unwrap_or(attitude0),
+                    aim.to,
+                    drive.slew_rate_rad_s,
+                    lit - aim.since_s,
+                );
+                let thrust = c.thrust_at(lit + 1.0e-6);
+                assert!(
+                    (nose - thrust).length() < 1.0e-9,
+                    "{what} at {length_m} m: thrusting {thrust} with the nose at {nose}",
+                );
+            }
+        }
+    }
+
+    /// Coming about is not stopping. The ship keeps what it had and covers ground doing it,
+    /// which is why the turn has to be inside the plan and not bolted on before it.
+    #[test]
+    fn a_ship_drifts_while_it_comes_about() {
+        let beta0 = DVec3::Y * 1.0e-4;
+        let c = Cruise::plan_from(
+            DVec3::ZERO,
+            beta0,
+            DVec3::X * 1.0e-7,
+            -DVec3::X,
+            0.0,
+            Drive::DEFAULT,
+        );
+        assert!(c.turn_s() > 1.0, "premise: there is a turn to make");
+        // Up to but not including the end of it, which is already the first burn.
+        for k in 0..10 {
+            let t = c.turn_s() * k as f64 / 10.0;
+            let s = c.at(t);
+            assert_eq!(s.beta, beta0, "it changed speed while coasting round");
+            let want = beta0 * (t / JULIAN_YEAR_S);
+            assert!((s.position_ly - want).length() < 1.0e-18, "at {t} s it was at {:?}", s.position_ly);
+        }
+        // And the crew aged through it, a shade slower than the clock.
+        let aboard = c.at(c.turn_s()).proper_s;
+        assert!(aboard < c.turn_s() && aboard > c.turn_s() * 0.999);
+    }
+
+    /// The drift is paid for: the crossing still ends where it was asked to, having started from
+    /// somewhere else than where the order was given.
+    #[test]
+    fn the_crossing_still_lands_though_it_drifted_while_turning() {
+        let to = DVec3::X * 1.0e-7;
+        let beta0 = DVec3::Y * 1.0e-4;
+        let c = Cruise::plan_from(DVec3::ZERO, beta0, to, -DVec3::X, 0.0, Drive::DEFAULT);
+        let moved = c.at(c.turn_s()).position_ly.length() * 9.4607304725808e15;
+        assert!(moved > 1.0e5, "premise: it drifted {moved:e} m while turning");
+        let miss = (c.at(c.duration_s()).position_ly - to).length() * 9.4607304725808e15;
+        assert!(miss < 1.0, "landed {miss:e} m out");
+    }
+
+    /// A nose already where the burn needs it turns for no time at all — and neither does one
+    /// the planner was never told about, because an invented answer is worse than none.
+    #[test]
+    fn a_nose_already_round_costs_nothing_and_an_unknown_one_buys_nothing() {
+        let to = DVec3::X * 4.0;
+        let ready = Cruise::plan_from(DVec3::ZERO, DVec3::ZERO, to, DVec3::X, 0.0, Drive::DEFAULT);
+        assert_eq!(ready.turn_s(), 0.0);
+        let unknown =
+            Cruise::plan_from(DVec3::ZERO, DVec3::ZERO, to, DVec3::ZERO, 0.0, Drive::DEFAULT);
+        assert_eq!(unknown.turn_s(), 0.0);
+        // Neither turned, so they fly the same trajectory — they differ only in remembering
+        // which way the nose was, which is a parameter rather than a part of the path.
+        assert_eq!(ready.duration_s(), unknown.duration_s());
+        assert_eq!(ready.at(ready.duration_s()).position_ly, unknown.at(unknown.duration_s()).position_ly);
+        assert_eq!(unknown, Cruise::plan(DVec3::ZERO, to, 0.0, Drive::DEFAULT));
+    }
+
+    /// When there is a match to fly, the turn is onto *that* — the first thing lit, not the
+    /// boost that follows it.
+    #[test]
+    fn the_turn_in_is_onto_the_match_when_there_is_one() {
+        let beta0 = DVec3::Y * 1.0e-4;
+        let c = Cruise::plan_from(
+            DVec3::ZERO,
+            beta0,
+            DVec3::X * 1.0e-7,
+            DVec3::X,
+            0.0,
+            Drive::DEFAULT,
+        );
+        assert_eq!(c.at(c.turn_s() + 1.0e-6).phase, Phase::Match);
+        let onto = c.aim_at(0.0).to;
+        assert!(onto.dot(beta0) < 0.0, "the match burns against the drift, not {onto}");
+        // A right angle from the nose, so half a flip.
+        // The turn it charged for is the turn onto the heading it actually flies, not onto an
+        // earlier guess at it. See `TURN_ROUNDS`.
+        let want = crate::attitude::turn_time_s(DVec3::X, onto, RATE);
+        assert!((c.turn_s() - want).abs() < 1.0e-12, "{} s against {want} s", c.turn_s());
+    }
+
+    /// The crew's clock covers the whole thing, turn and match included. Summing the parts is
+    /// how the match's share went missing from this before.
+    #[test]
+    fn the_ship_clock_covers_the_turn_and_the_match_too() {
+        let c = Cruise::plan_from(
+            DVec3::ZERO,
+            DVec3::Y * 1.0e-4,
+            DVec3::X * 1.0e-7,
+            -DVec3::X,
+            0.0,
+            Drive::DEFAULT,
+        );
+        assert!(c.turn_s() > 1.0 && c.at(c.turn_s() + 1.0e-6).phase == Phase::Match);
+        let end = c.at(c.duration_s());
+        assert!(
+            (c.proper_duration_s() - end.proper_s).abs() < 1.0e-9,
+            "{} s against the {} s the crew actually read",
+            c.proper_duration_s(),
+            end.proper_s,
+        );
+        assert!(c.proper_duration_s() > c.turn_s(), "the turn alone is not the whole crossing");
+        assert!(c.proper_duration_s() < c.duration_s());
+    }
+
     /// A transfer between two orbits of one body, as the numbers actually are: thirty-five
     /// thousand kilometres, and a station going a few kilometres a second across the line.
     fn transfer(span_m: f64, station_m_s: DVec3) -> (Cruise, DVec3, DVec3) {
         let to = DVec3::X * (span_m / M_PER_LY);
         let onto = station_m_s / C_M_S;
-        (Cruise::plan_onto(DVec3::ZERO, DVec3::ZERO, to, onto, 0.0, Drive::DEFAULT), to, onto)
+        (Cruise::plan_onto(DVec3::ZERO, DVec3::ZERO, to, onto, DVec3::ZERO, 0.0, Drive::DEFAULT), to, onto)
     }
 
     /// **The thing this is for.** A crossing planned onto a station ends alongside it *and
@@ -1257,8 +1496,11 @@ mod tests {
     #[test]
     fn arriving_on_nothing_is_the_crossing_it_always_was() {
         let to = DVec3::X * 4.0;
-        let onto = Cruise::plan_onto(DVec3::ZERO, DVec3::ZERO, to, DVec3::ZERO, 0.0, Drive::DEFAULT);
-        assert_eq!(onto, Cruise::plan_from(DVec3::ZERO, DVec3::ZERO, to, 0.0, Drive::DEFAULT));
+        let onto = Cruise::plan_onto(DVec3::ZERO, DVec3::ZERO, to, DVec3::ZERO, DVec3::ZERO, 0.0, Drive::DEFAULT);
+        assert_eq!(
+            onto,
+            Cruise::plan_from(DVec3::ZERO, DVec3::ZERO, to, DVec3::ZERO, 0.0, Drive::DEFAULT)
+        );
     }
 
     /// The path through the injection is a path: no jump where it lights, and the crew's clock
@@ -1297,30 +1539,6 @@ mod tests {
         );
     }
 
-    /// The burn's own closed form: a velocity that ramps linearly covers the mean of its two
-    /// ends times the time it takes, and arrives on the second of them.
-    #[test]
-    fn an_injection_covers_the_mean_of_its_two_velocities() {
-        let alpha = Drive::DEFAULT.alpha();
-        let (from, to) = (DVec3::X * 1.0e-4, DVec3::Y * 1.0e-5);
-        let burn = Injection::new(alpha, from, to);
-        assert!((burn.duration_s() - (to - from).length() / alpha).abs() < 1.0e-9);
-        let (ran, beta) = burn.at(burn.duration_s());
-        assert!((beta - to).length() < 1.0e-18, "{beta:?}");
-        assert!((ran - burn.displacement_ls()).length() < 1.0e-18);
-        assert!(
-            (burn.displacement_ls() - (from + to) * 0.5 * burn.duration_s()).length() < 1.0e-18
-        );
-        // Halfway through is halfway between, and half the ground is not covered by then —
-        // the ship is slowing, so the first half of the burn covers more than the second.
-        let (half_ran, half_beta) = burn.at(burn.duration_s() * 0.5);
-        assert!((half_beta - (from + to) * 0.5).length() < 1.0e-18);
-        assert!(half_ran.length() > burn.displacement_ls().length() * 0.5);
-        // And the crew ages a shade less than the clock, never more.
-        let aboard = burn.proper_s(burn.duration_s());
-        assert!(aboard < burn.duration_s() && aboard > burn.duration_s() * 0.999);
-    }
-
     #[test]
     fn velocity_points_at_the_destination_throughout() {
         let target = DVec3::new(1.0, -2.0, 0.5);
@@ -1332,5 +1550,6 @@ mod tests {
         }
     }
 }
+
 
 

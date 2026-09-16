@@ -16,6 +16,7 @@ pub mod distribution;
 pub mod emission;
 pub mod flicker;
 pub mod flight;
+pub mod injection;
 pub mod instrument;
 pub mod motion;
 pub mod libration;
