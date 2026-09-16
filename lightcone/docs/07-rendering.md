@@ -717,9 +717,22 @@ and a fifty-kilometre one is hotter still. Nobody picks that.
 The one thing that is neither is the **brightness**. The gas is optically thin by an amount
 nothing here models, so what reaches the eye is some fraction of the blackbody radiance, and
 that fraction is a fudge: the core is placed a fixed number of stops above the exposure's
-reference so it clips and blooms while the falloff carries the edges back down through the
-window. Scale it from the colour instead and a plume is a white rectangle — fifty thousand
-kelvin is ten decades over a planet and no window holds both.
+reference so it overflows the window while the falloff carries the edges back down through it.
+Scale it from the colour instead and a plume is a white rectangle — fifty thousand kelvin is ten
+decades over a planet and no window holds both.
+
+That overflow **leaves as an HDR value** rather than clipping, the same bargain the starfield
+makes with a star twenty stops over. It has to, and the reason is the tone curve's own shape:
+hue and saturation are held constant and only the value is scaled, so a clipped plume returns
+one flat colour for every ray that is over the top — measured, a saturation of 0.33 through the
+deep middle against 0.33 through the near-nozzle throat, which is the same pixel. The column
+depth through a plume varies by decades between a ray down the axis and one grazing the flank,
+and none of that was reaching the screen. Carried past one it does: the display transform
+desaturates the middle toward white, bloom haloes it, and the thin parts stay inside the window
+with their colour. The same measurement after is 0.16 through the middle against 0.37 at the
+edge — a white-hot core in a coloured cone, with the sooty lanes reading against it instead of
+vanishing into it. A plume's gain is an order above the sky's, because it is a near object
+filling a good part of the frame rather than a point a few pixels across.
 
 The mesh is a **proxy**, not the cone: a closed cylinder that merely has to contain the gas,
 with back faces drawn so each pixel gets one fragment and the camera may be inside it. Each

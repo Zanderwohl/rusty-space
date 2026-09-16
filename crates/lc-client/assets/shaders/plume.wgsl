@@ -33,7 +33,7 @@ struct PlumeUniform {
     /// `(throat, mouth, edge, taper)`.
     shape: vec4<f32>,
     eye_local: vec4<f32>,
-    /// `(surface_reference, stops, brightness, unused)`.
+    /// `(surface_reference, stops, brightness, overflow)`.
     exposure: vec4<f32>,
     soot: vec4<f32>,
     /// `(phase, across, along, bite)`. The phase is in lattice cells of the first octave.
@@ -238,13 +238,26 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let stops = material.exposure.y;
     let luminance = dot(linear, LUMA);
     let peak = max(linear.r, max(linear.g, linear.b));
-    var value = 0.0;
+    var above = -1e9;
     if (luminance > 0.0 && reference > 0.0 && stops > 0.0) {
-        value = clamp(log2(luminance / reference) / stops + 1.0, 0.0, 1.0);
+        above = log2(luminance / reference);
     }
     let chroma = select(vec3<f32>(1.0), linear / peak, peak > 0.0);
+    let level = clamp(above / max(stops, 1e-6) + 1.0, 0.0, 1.0);
+
+    // Overflow leaves as an HDR value rather than clipping, exactly as a star's does in
+    // `starfield.wgsl`. It is what makes the column *read* as a column: the depth through a
+    // plume varies by decades between a ray down the axis and one grazing the flank, and
+    // clipped at one the whole of that range came back as the same pale lavender — hue and
+    // saturation are held constant by the curve, so a brighter part of the plume was only a
+    // brighter lavender and the deep middle looked like the thin edge. Carried past one, the
+    // display transform desaturates the core toward white and bloom haloes it, while the
+    // edges stay inside the window with their colour intact. The tone curve does not throw
+    // the overflow away; it hands it to the halo. Capped, because a degenerate exposure
+    // should give a bright plume and not an infinite one.
+    let glow = clamp(above, 0.0, 12.0);
 
     // **Alpha zero.** `AlphaMode::Add` is premultiplied — `src + dst * (1 - alpha)` — so
     // anything else here would rub out what is behind the plume instead of adding to it.
-    return vec4<f32>(chroma * value, 0.0);
+    return vec4<f32>(chroma * (level + glow * material.exposure.w), 0.0);
 }

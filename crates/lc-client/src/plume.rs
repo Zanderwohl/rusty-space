@@ -68,13 +68,36 @@ pub const SIDES: u32 = 24;
 /// [`temperature_k`] — but its *brightness* is not, because the gas is optically thin by an
 /// amount nothing here models: what reaches the eye is a fraction of the blackbody radiance,
 /// and that fraction is the fudge. Four stops over the reference puts the core past the top of
-/// a two-and-a-half stop window, so the middle clips and blooms like something that hot should,
-/// while the falloff carries the edges back down through the window and the cone has a shape.
+/// a two-and-a-half stop window, so the middle overflows and blooms like something that hot
+/// should — see [`OVERFLOW_GAIN`] for where the overflow goes — while the falloff carries the
+/// edges back down through the window and the cone has a shape.
 ///
 /// Left as a multiple of the reference rather than an absolute, so it holds when the exposure
 /// moves. Set it from the colour instead and a hot plume is a white rectangle: a blackbody at
 /// fifty thousand kelvin is ten decades over a planet, and there is no window that holds both.
 pub const CORE_STOPS: f64 = 4.0;
+
+/// What a stop past the top of the exposure window is worth as HDR value.
+///
+/// The core sits [`CORE_STOPS`] over the reference and the window is two and a half stops wide,
+/// so most of the cone has nowhere left to go inside it. Clipped there, the whole column came
+/// back as one flat lavender: the tone curve holds hue and saturation constant and scales only
+/// the value, so a ray through the deep middle and a ray grazing the flank — which differ by
+/// decades of column depth — drew the same colour, and the plume read as a cut-out rather than
+/// as a volume.
+///
+/// Letting the overflow out as HDR is what the starfield already does with a star twenty stops
+/// over, and for the same reason: the excess becomes a halo rather than a whiter white. The
+/// display transform desaturates the middle toward white, bloom spreads it, and the thin edges
+/// stay inside the window with their colour.
+///
+/// The sky uses a quarter. A plume wants an order more, and the measurement says why: at a
+/// quarter the deep middle came back at a saturation of 0.29 against the flank's 0.38, which is
+/// a gradient one has to be told about. At three it is 0.16 against 0.37 — a white-hot core in a
+/// coloured cone, and the sooty lanes read against it instead of vanishing into it. The
+/// difference between the two is that a plume is a near object filling a good part of the frame
+/// rather than a point a few pixels across, so its overflow has somewhere to go.
+pub const OVERFLOW_GAIN: f32 = 3.0;
 
 /// Lattice cells across the cone's own radius, and along its whole length.
 ///
@@ -314,7 +337,7 @@ fn uniforms(lit: &Burning, session: &Session, eye_local: Vec3, phase: f64) -> Pl
             session.tone.surface_reference,
             session.tone.stops,
             scale as f32,
-            0.0,
+            OVERFLOW_GAIN,
         ),
     }
 }

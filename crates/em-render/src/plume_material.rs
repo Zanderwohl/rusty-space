@@ -58,10 +58,13 @@ pub struct PlumeUniform {
     /// the model matrix in the shader to get there is both fiddly and wasteful when the answer
     /// is one vector the host already has.
     pub eye_local: Vec4,
-    /// `(surface_reference, stops, brightness, unused)`.
+    /// `(surface_reference, stops, brightness, overflow)`.
     ///
     /// The same tone map the lit surfaces evaluate, for the same reason: a plume beside a
-    /// planet has to sit in one exposure rather than two that agree.
+    /// planet has to sit in one exposure rather than two that agree. `overflow` is what a stop
+    /// past the top of the window is worth as HDR value, so the deep middle of the cone leaves
+    /// above one and becomes a halo instead of clipping flat — the same bargain the starfield
+    /// makes with a star that is twenty stops over.
     pub exposure: Vec4,
     /// What the fuel-rich streaks radiate, on the same scale as [`Self::glow`]. `w` unused.
     ///
@@ -84,7 +87,7 @@ impl Default for PlumeUniform {
             glow: Vec4::ONE,
             shape: Vec4::new(0.12, 0.85, 2.5, 1.5),
             eye_local: Vec4::new(0.0, 0.0, -10.0, 0.0),
-            exposure: Vec4::new(1.0, 2.5, 1.0, 0.0),
+            exposure: Vec4::new(1.0, 2.5, 1.0, 0.5),
             soot: Vec4::ZERO,
             churn: Vec4::new(0.0, 5.0, 1.5, 1.0),
         }
