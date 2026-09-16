@@ -93,9 +93,18 @@ impl Kind {
     pub fn drive(self) -> crate::flight::Drive {
         match self {
             Kind::Ship => crate::flight::Drive::DEFAULT,
-            Kind::Probe => crate::flight::Drive { accel_g: 30.0, max_beta: 0.999 },
-            // Neither of these is going anywhere in a hurry once it is placed.
-            Kind::Relay | Kind::Beacon => crate::flight::Drive { accel_g: 1.0, max_beta: 0.9 },
+            Kind::Probe => {
+                crate::flight::Drive { accel_g: 30.0, ..crate::flight::Drive::DEFAULT }
+            }
+            // Neither of these is going anywhere in a hurry once it is placed, and neither
+            // carries a torch to do it with — a station-keeping thruster throws mass at a
+            // few hundred kilometres a second, so a beacon correcting itself is a thing you
+            // would have to be close to see.
+            Kind::Relay | Kind::Beacon => crate::flight::Drive {
+                accel_g: 1.0,
+                max_beta: 0.9,
+                exhaust_v_m_s: 0.002 * crate::flight::C_M_S,
+            },
         }
     }
 
@@ -276,6 +285,18 @@ impl Craft {
     /// follow the ship being talked about.
     pub fn mass_kg(&self) -> f64 {
         self.kind.density_kg_m3() * self.volume_m3()
+    }
+
+    /// What the drive is putting into its exhaust at a coordinate second, watts.
+    ///
+    /// Zero whenever nothing is lit, which is most of the time: a ship coasts far more than it
+    /// burns. Everything visible about a burn is this number — see [`crate::flight::Drive`].
+    pub fn jet_power_w(&self, now_s: f64) -> f64 {
+        let accel_g = motion::thrust_g(&self.motion, now_s);
+        if accel_g <= 0.0 {
+            return 0.0;
+        }
+        self.motion.drive.jet_power_w(self.mass_kg(), accel_g)
     }
 
     /// Which way the nose points at a coordinate second, or `None` when nothing decides it.
@@ -792,6 +813,55 @@ mod tests {
         assert!(at(Kind::Probe) > at(Kind::Ship));
         assert!(at(Kind::Ship) > at(Kind::Relay));
         assert!(at(Kind::Relay) > at(Kind::Beacon));
+    }
+
+
+    /// What a burn costs in light, and the shape of the dependence: everything about it scales
+    /// with what is being pushed and how hard.
+    #[test]
+    fn a_burn_radiates_with_the_mass_and_the_acceleration() {
+        use crate::flight::Drive;
+        let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+        craft.length_m = 500.0;
+        let at = |accel_g: f64| craft.motion.drive.jet_power_w(craft.mass_kg(), accel_g);
+
+        // Linear in both, because the thrust is and the exhaust speed is fixed.
+        assert!((at(10.0) / at(5.0) - 2.0).abs() < 1.0e-9);
+        let mut bigger = craft.clone();
+        bigger.length_m = 1_000.0;
+        let ratio = bigger.motion.drive.jet_power_w(bigger.mass_kg(), 5.0) / at(5.0);
+        assert!((ratio - 8.0).abs() < 1.0e-9, "twice the ship is eight times the mass: {ratio}");
+
+        // And the number itself is the one worth having seen: a fair fraction of a star.
+        let full = at(Drive::DEFAULT.accel_g);
+        assert!(full > 1.0e17 && full < 1.0e19, "{full} W");
+    }
+
+    /// Nothing is lit unless something is thrusting, and a ballistic arc is not thrusting
+    /// however hard it is falling.
+    #[test]
+    fn a_coasting_ship_puts_nothing_out() {
+        let craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+        assert_eq!(craft.jet_power_w(0.0), 0.0, "a drifting ship has its engine off");
+
+        let mut under_way = craft.clone();
+        under_way.motion.begin_crossing(
+            crate::flight::Cruise::plan(DVec3::ZERO, DVec3::X, 0.0, crate::flight::Drive::DEFAULT),
+            None,
+        );
+        assert!(under_way.jet_power_w(1.0) > 0.0, "a ship on a crossing is burning");
+    }
+
+    /// A station-keeping thruster is not a torch, so a beacon correcting itself is not the
+    /// same event as a ship getting under way.
+    #[test]
+    fn a_beacon_is_far_quieter_than_a_ship() {
+        let ship = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+        let mut beacon = Craft::at(CraftId(2), Kind::Beacon, DVec3::ZERO);
+        // The same size, so only what it is for is different.
+        beacon.length_m = ship.length_m;
+        let power = |c: &Craft| c.motion.drive.jet_power_w(c.mass_kg(), c.motion.drive.accel_g);
+        assert!(power(&beacon) < power(&ship) / 100.0, "{} against {}", power(&beacon), power(&ship));
     }
 
 }

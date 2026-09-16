@@ -1638,7 +1638,8 @@ use crate::transport::Loopback;
         // A torch, so the test runs in seconds. Shedding four fifths of `c` at five gravities
         // is three months of coordinate time and a hundred thousand ticks; the physics is the
         // same either way, and what is being checked is the match and not the schedule.
-        chaser.motion.drive = lc_world::flight::Drive { accel_g: 1_000.0, max_beta: 0.999 };
+        chaser.motion.drive =
+            lc_world::flight::Drive { accel_g: 1_000.0, ..Default::default() };
         server.admit(hunter, chaser, 0.0);
         let running = DVec3::new(0.0, 0.8, 0.0);
         server.admit(

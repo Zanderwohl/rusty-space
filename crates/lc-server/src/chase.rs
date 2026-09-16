@@ -115,6 +115,9 @@ pub fn contacts(
                     .facing_at(sighted.emitted_s)
                     .unwrap_or(glam::DVec3::ZERO)
                     .to_array(),
+                // At the moment the light left, not now. A burn that has since stopped is
+                // still burning as far as this observer is concerned.
+                jet_power_w: craft.jet_power_w(sighted.emitted_s),
                 emitted_t: (sighted.emitted_s * 1.0e6) as i64,
                 // The solve *is* the arrival: `emitted + |x_o - w(emitted)|` equals `now` by
                 // construction, so this is the light landing at this instant.

@@ -22,17 +22,43 @@ pub const JULIAN_YEAR_S: f64 = 31_557_600.0;
 /// put the ship inside the star.
 pub const STANDOFF_LY: f64 = 1.0e-3;
 
-/// A ship's engine, as the two numbers a crossing needs.
+/// A ship's engine: what it can do, and what that costs in light.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Drive {
     /// Proper acceleration, in g. What the crew feels; constant for the whole burn.
     pub accel_g: f64,
     /// Speed cap as a fraction of `c`, strictly below 1.
     pub max_beta: f64,
+    /// How fast it throws its reaction mass, metres a second.
+    ///
+    /// Nothing about a *trajectory* depends on this — a crossing is planned from the
+    /// acceleration alone and would be the same at any exhaust speed. What it decides is the
+    /// price: the jet power of a given thrust is `½ F v`, so a drive that throws mass slowly
+    /// must throw a great deal of it, and one that throws it fast lights up the sky. See
+    /// [`Drive::jet_power_w`].
+    ///
+    /// Five per cent of `c` for the default, which is a torch rather than anything anyone has
+    /// built.
+    pub exhaust_v_m_s: f64,
 }
 
 impl Drive {
-    pub const DEFAULT: Self = Self { accel_g: 5.0, max_beta: 0.999 };
+    pub const DEFAULT: Self =
+        Self { accel_g: 5.0, max_beta: 0.999, exhaust_v_m_s: 0.05 * C_M_S };
+
+    /// What the drive puts into its exhaust to push `mass_kg` at `accel_g`, watts.
+    ///
+    /// `½ F v` with `F = m a`, which is exact for a rocket: the thrust is the momentum carried
+    /// off per second and the power is the kinetic energy in it. Everything visible about a
+    /// burn comes from this one number — how long the plume is, how hot, and how far away
+    /// somebody can see it happen.
+    ///
+    /// It is a large number. Two million tonnes at five gravities with a torch for an engine is
+    /// a few times ten to the seventeenth watts, which is a fair fraction of what a small star
+    /// puts out, and that is the honest answer for a ship that crosses between them.
+    pub fn jet_power_w(&self, mass_kg: f64, accel_g: f64) -> f64 {
+        0.5 * mass_kg * accel_g * G0 * self.exhaust_v_m_s
+    }
 
     /// Proper acceleration as an inverse time, which is what it is when `c = 1`.
     pub fn alpha(&self) -> f64 {

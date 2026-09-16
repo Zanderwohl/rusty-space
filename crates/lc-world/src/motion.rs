@@ -479,6 +479,23 @@ pub fn facing(state: &ShipState, system: Option<&LocalSystem>, now_s: f64) -> Op
     (along != DVec3::ZERO).then_some(along)
 }
 
+/// How hard a ship is burning at a coordinate time, in g. Zero when nothing is lit.
+///
+/// The magnitude of what [`facing`] gives the direction of, and it has the same rule: *proper*
+/// acceleration, so a ballistic arc is zero however hard it is falling.
+///
+/// Holding a station is zero too, and that one is a simplification rather than a definition. A
+/// station is held by thrust, but the thrust is whatever cancels the local gravity — milligravities
+/// against the whole-g burns everything else here is about, and a plume nobody would see.
+pub fn thrust_g(state: &ShipState, now_s: f64) -> f64 {
+    let lit = match &state.motive {
+        Motive::Crossing(cruise) => cruise.thrust_at(now_s) != DVec3::ZERO,
+        Motive::Rendezvous(plan) => plan.thrust_at(now_s) != DVec3::ZERO,
+        Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => false,
+    };
+    if lit { state.drive.accel_g } else { 0.0 }
+}
+
 /// Move a ship to a coordinate time.
 ///
 /// Read at the new time rather than integrated from the old one, in every branch — that is

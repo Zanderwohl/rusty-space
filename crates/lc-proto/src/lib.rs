@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -81,6 +81,11 @@ pub struct Drive {
     pub accel_g: f64,
     /// Speed cap as a fraction of `c`.
     pub max_beta: f64,
+    /// How fast it throws its reaction mass, metres a second.
+    ///
+    /// On the wire because a client draws its own ship's plume, and what a burn looks like is
+    /// `½ F v` — the one number a trajectory does not depend on and an exhaust does.
+    pub exhaust_v_m_s: f64,
 }
 
 /// What an orbit is about.
@@ -294,6 +299,15 @@ pub struct Presence {
     pub beta: [f64; 3],
     /// Unit vector the nose pointed along then.
     pub facing: [f64; 3],
+    /// What its drive was putting into its exhaust then, watts. Zero when it was coasting.
+    ///
+    /// Sent rather than derived, and it is worth saying why this is not the "second copy of an
+    /// answer" the rest of this file refuses. A receiver *cannot* work it out: the power of a
+    /// burn is the craft's mass times its acceleration times its exhaust speed, and a client
+    /// knows none of the three about somebody else's ship. What it is, is the one thing about a
+    /// burn that is plainly observable — a plume's brightness is exactly this — so a receiver
+    /// is being told what it can see rather than what it could have computed.
+    pub jet_power_w: f64,
     /// Coordinate microseconds the light left. Always earlier than [`Presence::arrive_t`].
     pub emitted_t: i64,
     /// Coordinate microseconds it arrives. Never later than the server's `t` when it is sent.
@@ -541,12 +555,12 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 pub mod golden {
     /// `Outbound::Welcome { .., ship: Motion { at [4.2, 0, 0], holding a 12 Mm orbit of Earth } }`
     pub const WELCOME: &[u8] = &[
-        0, 7, 11, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
+        0, 7, 12, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210,
         77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0, 0,
-        20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 2, 1, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0,
-        0, 96, 227, 102, 65, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        240, 63, 0, 0, 0, 0, 0, 0, 224, 63,
+        20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56, 156, 108, 65, 2, 1, 1, 5,
+        69, 97, 114, 116, 104, 0, 0, 0, 0, 96, 227, 102, 65, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 224, 63,
     ];
 
     /// `Inbound::Act(Intent { ship_id: 42, order: Transmit { power_w: 1500.0 }, .. })`
@@ -565,7 +579,7 @@ pub mod golden {
     /// Pinned because it is now the message that decides whether anyone gets in at all. A
     /// field moving here is a server reading someone else's ticket as this one's.
     pub const HELLO: &[u8] = &[
-        0, 11, 5, 97, 46, 98, 46, 99,
+        0, 12, 5, 97, 46, 98, 46, 99,
     ];
 
     pub const SET_COURSE: &[u8] = &[
@@ -598,7 +612,8 @@ pub mod golden {
         2, 1, 84, 3, 65, 100, 97, 0, 0, 0, 0, 0, 64, 127, 64, 205, 204, 204, 204, 204, 204, 16,
         64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169,
         241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 192, 132, 61, 128, 137, 122,
+        0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 144, 220, 94, 232, 251, 163, 67, 192, 132, 61,
+        128, 137, 122,
     ];
 
     /// `Outbound::Welcome { .., ship: Motion { .., motive: Rendezvous { target: 7, .. } } }`
@@ -607,17 +622,17 @@ pub mod golden {
     /// relative offset, a relative velocity, and a sighting. A field moving in it is a pursuer
     /// flying at a point its quarry was never at.
     pub const RENDEZVOUS: &[u8] = &[
-        0, 7, 11, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
+        0, 7, 12, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210,
         77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0, 0,
-        20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 1, 149, 214, 38, 232, 11, 46, 17, 62, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210,
-        77, 98, 80, 191, 0, 0, 0, 0, 0, 0, 0, 0, 17, 234, 45, 129, 153, 151, 113, 61, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 119, 43, 65, 0, 0, 0, 0, 0, 0,
-        20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 205, 204, 204, 204, 204, 204, 16, 64, 149,
-        214, 38, 232, 11, 46, 17, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169,
-        241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 112, 111, 43, 65, 14, 0,
-        0, 0, 0, 0, 255, 244, 64,
+        20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56, 156, 108, 65, 1, 149, 214,
+        38, 232, 11, 46, 17, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 191, 0, 0, 0, 0, 0, 0, 0, 0, 17, 234, 45, 129,
+        153, 151, 113, 61, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 119,
+        43, 65, 0, 0, 0, 0, 0, 0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56,
+        156, 108, 65, 205, 204, 204, 204, 204, 204, 16, 64, 149, 214, 38, 232, 11, 46, 17, 62,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 112, 111, 43, 65, 14, 0, 0, 0, 0, 0, 255, 244, 64,
     ];
     /// `Inbound::Act(Intent { ship_id: 42, order: Intercept { ship_id: 7 }, .. })`
     ///
@@ -660,7 +675,7 @@ mod tests {
                 at_ly: [4.2, 0.0, 0.0],
                 beta: [0.0, 0.001, 0.0],
                 clock_s: 86_400.0,
-                drive: Drive { accel_g: 5.0, max_beta: 0.999 },
+                drive: Drive { accel_g: 5.0, max_beta: 0.999, exhaust_v_m_s: 1.5e7 },
                 motive: Motive::Holding(Waypoint::Orbit {
                     about: Anchor::Body("Earth".into()),
                     radius_m: 1.2e7,
@@ -736,6 +751,7 @@ mod tests {
                     at_ly: [4.2, 0.0, 0.0],
                     beta: [0.0, 0.001, 0.0],
                     facing: [0.0, 1.0, 0.0],
+                    jet_power_w: 7.2e17,
                     emitted_t: 500_000,
                     arrive_t: 1_000_000,
                 },
@@ -759,13 +775,13 @@ mod tests {
                 at_ly: [4.2, 0.0, 0.0],
                 beta: [0.0, 0.001, 0.0],
                 clock_s: 86_400.0,
-                drive: Drive { accel_g: 5.0, max_beta: 0.999 },
+                drive: Drive { accel_g: 5.0, max_beta: 0.999, exhaust_v_m_s: 1.5e7 },
                 motive: Motive::Rendezvous {
                     from_ly: [1.0e-9, 0.0, 0.0],
                     beta0: [0.0, -0.001, 0.0],
                     to_ly: [1.0e-12, 0.0, 0.0],
                     start_s: 900_000.0,
-                    drive: Drive { accel_g: 5.0, max_beta: 0.999 },
+                    drive: Drive { accel_g: 5.0, max_beta: 0.999, exhaust_v_m_s: 1.5e7 },
                     frame_from_ly: [4.2, 1.0e-9, 0.0],
                     frame_beta: [0.0, 0.001, 0.0],
                     since_t: 899_000.0,
@@ -889,6 +905,7 @@ mod tests {
             at_ly: [1.0, 0.0, 0.0],
             beta: [0.0; 3],
             facing: [1.0, 0.0, 0.0],
+            jet_power_w: 0.0,
             emitted_t: arrive_t - 1_000,
             arrive_t,
         };

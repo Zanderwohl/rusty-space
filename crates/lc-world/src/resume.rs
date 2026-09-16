@@ -228,11 +228,19 @@ impl From<&lc_proto::Motion> for Snapshot {
 }
 
 fn drive_out(drive: Drive) -> lc_proto::Drive {
-    lc_proto::Drive { accel_g: drive.accel_g, max_beta: drive.max_beta }
+    lc_proto::Drive {
+        accel_g: drive.accel_g,
+        max_beta: drive.max_beta,
+        exhaust_v_m_s: drive.exhaust_v_m_s,
+    }
 }
 
 fn drive_in(drive: lc_proto::Drive) -> Drive {
-    Drive { accel_g: drive.accel_g, max_beta: drive.max_beta }
+    Drive {
+        accel_g: drive.accel_g,
+        max_beta: drive.max_beta,
+        exhaust_v_m_s: drive.exhaust_v_m_s,
+    }
 }
 
 fn waypoint_out(waypoint: &Waypoint) -> lc_proto::Waypoint {

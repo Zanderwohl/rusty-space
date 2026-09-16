@@ -80,6 +80,8 @@ pub struct Contact {
     pub beta: DVec3,
     /// Unit vector the nose pointed along.
     pub facing: DVec3,
+    /// What its drive was putting into its exhaust, watts. Zero when it was coasting.
+    pub jet_power_w: f64,
     /// Coordinate seconds the light left.
     pub emitted_s: f64,
 }
@@ -93,6 +95,7 @@ impl From<Presence> for Contact {
             position_ly: DVec3::from_array(p.at_ly),
             beta: DVec3::from_array(p.beta),
             facing: DVec3::from_array(p.facing).normalize_or_zero(),
+            jet_power_w: p.jet_power_w,
             emitted_s: p.emitted_t as f64 * 1.0e-6,
         }
     }
@@ -578,7 +581,7 @@ mod tests {
                 at_ly: ship_at,
                 beta: [0.0; 3],
                 clock_s: 0.0,
-                drive: lc_proto::Drive { accel_g: 5.0, max_beta: 0.999 },
+                drive: lc_proto::Drive { accel_g: 5.0, max_beta: 0.999, exhaust_v_m_s: 1.5e7 },
                 motive,
             },
         }
@@ -657,7 +660,7 @@ mod tests {
             at_ly: [4.2, 0.0, 0.0],
             beta: [0.0; 3],
             clock_s: 0.0,
-            drive: lc_proto::Drive { accel_g: 5.0, max_beta: 0.999 },
+            drive: lc_proto::Drive { accel_g: 5.0, max_beta: 0.999, exhaust_v_m_s: 1.5e7 },
             motive: lc_proto::Motive::Holding(station),
         });
         let lc_world::resume::Recipe::Holding(waypoint) = expected.motive else {
@@ -817,6 +820,7 @@ mod tests {
             at_ly: [1.0, 2.0, 3.0],
             beta: [0.0, 0.1, 0.0],
             facing: [0.0, 0.0, 2.0],
+            jet_power_w: 4.2e17,
             emitted_t: 500_000,
             arrive_t: 1_000_000,
         };
@@ -830,6 +834,7 @@ mod tests {
         // Normalised on the way in, so nothing downstream has to wonder.
         assert_eq!(contact.facing, glam::DVec3::Z);
         assert_eq!(contact.emitted_s, 0.5);
+        assert_eq!(contact.jet_power_w, 4.2e17, "it was seen burning");
 
         // Replaced wholesale, not merged: a contact missing from a statement is gone.
         fold(&mut uplink, &mut game, &mut ui, Outbound::Present(Vec::new()));
