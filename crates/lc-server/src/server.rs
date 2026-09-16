@@ -62,12 +62,12 @@ pub struct Connected {
 }
 
 pub struct Server<J: Journal> {
-    now_t: i64,
+    pub(crate) now_t: i64,
     /// Every craft in the world. The physics is `lc-world`'s and this is the whole of it.
-    fleet: Fleet,
+    pub(crate) fleet: Fleet,
     /// The stars this shard is authoritative over. Empty until one is loaded, which is the
     /// state every test that is not about systems runs in.
-    world: World,
+    pub(crate) world: World,
     /// Whose word this server takes about who someone is. **Empty means nobody's**: with no
     /// published key learned, every ticket is refused and only [`Server::admit`] can put a
     /// craft in play, which is the state a test runs in.
@@ -78,7 +78,7 @@ pub struct Server<J: Journal> {
     next_ship: i64,
     /// Who owns what. The server's fact, not the world's: a probe has a worldline and no
     /// client, and a client is a connection rather than a thing in space.
-    owners: HashMap<CraftId, ClientId>,
+    pub(crate) owners: HashMap<CraftId, ClientId>,
     clients: HashMap<ClientId, Connected>,
     journal: J,
     minter: Minter,
@@ -99,11 +99,13 @@ pub struct Server<J: Journal> {
     /// only ever holds the approach a policy most recently produced, which is an ordinary
     /// motive both ends evaluate. Dropped when the quarry goes out of sight, so it cannot keep
     /// a client informed about somewhere it can no longer see.
-    pursuits: HashMap<CraftId, Pursuit>,
+    pub(crate) pursuits: HashMap<CraftId, Pursuit>,
     /// How fast this world runs, as a multiple of the design rate. See [`Server::set_rate`].
     rate: f64,
     /// Whether a client may stage a scene. See [`Server::directing`].
-    directs: bool,
+    pub(crate) directs: bool,
+    /// The scene being run, if one was staged. See [`crate::director`].
+    pub(crate) director: Option<crate::director::Director>,
     /// Ticks since this server started.
     ///
     /// Counted rather than derived from `now_t / TICK_US`, which stopped meaning anything once
@@ -134,6 +136,7 @@ impl<J: Journal> Server<J> {
             pursuits: HashMap::new(),
             rate: 1.0,
             directs: false,
+            director: None,
             ticks: 0,
         }
     }
@@ -369,6 +372,10 @@ impl<J: Journal> Server<J> {
         for budget in self.budgets.values_mut() {
             budget.advance(TICKS_PER_SECOND);
         }
+        // 3. A staged scene, if one is running. Before the pursuits and after the intents for
+        // the same reason they are after the intents: a chase a beat ordered is not re-solved
+        // against the plan it has only just made.
+        self.direct(wire, &mut events, &mut deliveries);
         // After the intents, so an intercept ordered this tick is not immediately re-solved
         // against the plan it just made.
         self.steer_pursuits(wire, &mut events, &mut deliveries);
@@ -434,16 +441,7 @@ impl<J: Journal> Server<J> {
                     Err(reason) => wire.send(from, Outbound::Refused { ship_id, reason }),
                 }
             }
-            // Nothing to stage yet: the catalogue and the director arrive with
-            // `crate::director`. Refused rather than ignored, so a client that asks learns it
-            // asked a shard that does not do this.
-            Inbound::Stage { .. } if !self.directs => {
-                wire.send(from, Outbound::Refused {
-                    ship_id: ShipId(0),
-                    reason: Refusal::Impossible,
-                })
-            }
-            Inbound::Stage { .. } => {}
+            Inbound::Stage { scenario } => self.staged(from, &scenario, wire),
             Inbound::ResumeFrom { arrive_t } => {
                 // A client that missed an hour missed eight thousand in-game hours. Winding its
                 // cursor back is the whole of catch-up; the next flush replays from there.
@@ -753,7 +751,7 @@ impl<J: Journal> Server<J> {
     ///
     /// Only for changes the owner did not ask for — everything else it folded itself when its
     /// order came back accepted, and saying it twice would be a second copy of an answer.
-    fn tell_flying(&self, wire: &mut impl Transport, id: CraftId) {
+    pub(crate) fn tell_flying(&self, wire: &mut impl Transport, id: CraftId) {
         let Some(craft) = self.fleet.get(id) else { return };
         let Some(owner) = self.owners.get(&id).copied() else { return };
         wire.send(owner, Outbound::Flying {
@@ -798,7 +796,7 @@ impl<J: Journal> Server<J> {
     }
 
     /// Write an event for something a craft did, and schedule it to everyone who will see it.
-    fn emit(
+    pub(crate) fn emit(
         &mut self,
         id: CraftId,
         kind: i16,

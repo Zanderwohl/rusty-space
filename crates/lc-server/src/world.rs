@@ -52,6 +52,17 @@ impl World {
         self.stars.iter().find(|s| s.id.get() == id).map(|s| s.position_ly)
     }
 
+    /// Where a star is, by the name the catalogue knows it under.
+    ///
+    /// The other half of [`World::star_at`], and here for the same reason: a scene names the
+    /// system it is staged in, and only this side may turn a name into a place.
+    pub fn star_named(&self, name: &str) -> Option<DVec3> {
+        self.stars
+            .iter()
+            .find(|s| s.name.as_deref() == Some(name))
+            .map(|s| s.position_ly)
+    }
+
     /// Where a craft with nowhere else to be is put.
     ///
     /// Inside the first star's system rather than at the origin, which is empty interstellar
