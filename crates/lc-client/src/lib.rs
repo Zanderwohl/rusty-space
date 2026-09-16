@@ -28,6 +28,7 @@ pub mod local;
 pub mod menu;
 pub mod panels;
 pub mod pick;
+pub mod plume;
 pub mod plot;
 pub mod resolved;
 pub mod session;

@@ -669,6 +669,41 @@ a name that only appeared on hover would be a name nobody found. Clicking one as
 yet — every `Target` is somewhere a course can be plotted to, and a course to a ship is a
 rendezvous with something moving that this client only knows the past of.
 
+### The exhaust
+
+A burn is drawn as a volume of gas, and one number sizes all of it: the jet power `½ F v`,
+which follows from what is being pushed and how hard. So a heavier ship or a harder burn is a
+longer, hotter plume without that being a rule anybody wrote — it is what more power through the
+same nozzle means.
+
+**The shape is a display model and the light is not.** How many hull lengths the cone runs and
+how far it flares are choices; the temperature is then *forced*, because the power has to go
+somewhere and a blackbody of that area radiating it has exactly one temperature. A
+five-hundred-metre ship at five gravities comes out around fifty thousand kelvin, blue-white,
+and a fifty-kilometre one is hotter still. Nobody picks that.
+
+The one thing that is neither is the **brightness**. The gas is optically thin by an amount
+nothing here models, so what reaches the eye is some fraction of the blackbody radiance, and
+that fraction is a fudge: the core is placed a fixed number of stops above the exposure's
+reference so it clips and blooms while the falloff carries the edges back down through the
+window. Scale it from the colour instead and a plume is a white rectangle — fifty thousand
+kelvin is ten decades over a planet and no window holds both.
+
+The mesh is a **proxy**, not the cone: a closed cylinder that merely has to contain the gas,
+with back faces drawn so each pixel gets one fragment and the camera may be inside it. Each
+fragment integrates the density along its own ray, which is where the feathered edge comes
+from — a ray grazing the side crosses almost nothing. Two traps, both paid for:
+
+- The march runs **from the fragment back toward the eye**, not forward from the eye. A plume is
+  metres long an astronomical unit from the render origin, so the eye is of order `1e8` in the
+  proxy's own units and `eye + direction * t` asks `f32` for a point near the origin as the
+  difference of two numbers near `1e8`, where its spacing is about eight. Every sample comes out
+  quantised to nothing and the plume does not appear at all.
+- The density is bounded by one. An earlier version had both a taper along the length *and* a
+  `1/r²`, which between them made the column a hundred times deeper at the nozzle than at the
+  mouth — every part of the cone landed above the top of the window and the whole thing was one
+  flat saturated shape.
+
 ### Ships in the interface
 
 The System window has two lists, because "what is here" and "who is here" are different
