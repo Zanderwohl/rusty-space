@@ -599,7 +599,7 @@ impl<J: Journal> Server<J> {
                     Err(pursuit::Refused::AlreadyThere) => {}
                     Err(pursuit::Refused::TooFast) => return Err(Refusal::TooFast),
                 }
-                self.pursuits.insert(id, Pursuit { quarry, last_plan_t: at });
+                self.pursuits.insert(id, Pursuit { quarry, last_plan_t: at, last_seen: None });
                 (
                     KIND_BURN,
                     BURN_POWER_W,
@@ -776,13 +776,16 @@ impl<J: Journal> Server<J> {
     ) {
         let now = self.now_t;
         let now_s = now as f64 * 1.0e-6;
-        for (id, plan) in chase::decide(&self.fleet, &self.pursuits, now) {
+        for (id, plan) in chase::decide(&self.fleet, &mut self.pursuits, now) {
             let Some(plan) = plan else {
                 self.pursuits.remove(&id);
                 continue;
             };
             let Some(craft) = self.fleet.get_mut(id) else { continue };
-            craft.begin_rendezvous(plan, now_s);
+            match plan {
+                chase::Plan::Rendezvous(plan) => craft.begin_rendezvous(plan, now_s),
+                chase::Plan::Escort(plan) => craft.begin_escort(plan, now_s),
+            }
             if let Some(entry) = self.pursuits.get_mut(&id) {
                 entry.last_plan_t = now;
             }

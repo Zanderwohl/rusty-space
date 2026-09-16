@@ -364,6 +364,13 @@ impl Craft {
     /// Not an [`Event`], because an approach is not an order a client sends: it is what the
     /// authority works out *from* a standing order, once per re-solve, against a sighting only
     /// it can vouch for. The client receives the answer as a motive and folds it.
+    pub fn begin_escort(&mut self, plan: crate::escort::Escort, now_s: f64) {
+        self.remembering(now_s, |craft| {
+            craft.motion.begin_escort(plan);
+            craft.solve_patch(now_s);
+        });
+    }
+
     pub fn begin_rendezvous(&mut self, plan: crate::pursuit::Rendezvous, now_s: f64) {
         self.remembering(now_s, |craft| {
             craft.motion.begin_rendezvous(plan);

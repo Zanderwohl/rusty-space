@@ -113,11 +113,12 @@ would be two answers, and the one the player watched would not be the one the au
 So a quarry that manoeuvres is chased on stale information until the news arrives, which across
 a system is seconds to hours, and that delay is the game rather than a shortcoming.
 
-There is no separate "match its acceleration" mode. A quarry holding course never diverges from
-the plan and it runs to completion; one under thrust diverges at once and is re-solved against,
-which from outside *is* a pursuer tracking a burn. One rule cannot disagree with itself at the
-boundary. Hanging about falls out of the same rule with a deadband: once alongside, close again
-only after a real drift.
+A quarry holding course never diverges from the plan and it runs to completion. There used to
+be no separate mode for one under thrust, on the argument that re-solving against it every tick
+*is* a pursuer tracking a burn and that one rule cannot disagree with itself at a boundary. That
+argument was right about where the pursuer went and wrong about what it looked like doing it —
+see below. Hanging about still falls out of a deadband: once alongside, close again only after a
+real drift.
 
 **Matching velocity is arriving at rest in the quarry's frame**, so the approach is planned
 there: boost in, hand the brachistochrone planner the pursuer's state as measured in that frame
@@ -135,10 +136,37 @@ measured in the frame the pair end up sharing: in the world's reckoning two ship
 together are closer than they are, so a deadband on the world's number would let them converge
 as they accelerated.
 
+**A quarry under thrust is escorted, not met.** "Re-solve against a burn" was right about
+position and wrong about everything a player watches. Each re-solve was a fresh plan to arrive at
+rest where the quarry had been, and against a burning quarry every one of them was about a tick
+long — so the client replayed a whole turn, burn, flip and brake between each pair of sightings,
+and a pursuer plainly leaving the system drew its drive reversing twenty times a second. It never
+gained either: measured, it held two million kilometres off for the whole chase, spending the
+second half of every plan shedding the speed the first half built.
+
+So a quarry whose plume was lit at the sighting is escorted (`Motive::Escort`,
+`lc_world::escort`). Its acceleration is read from two sightings as the change in `γβ` over the
+world time between them, which is exact under constant thrust at any speed — the obvious
+version, coordinate acceleration scaled by `γ³`, is a few parts in a hundred thousand high at a
+hundredth of `c` and put the modelled quarry forty kilometres wrong in ten ticks. The approach is
+planned in the frame that accelerates with the quarry, where it holds still and the pursuer's
+spare thrust is its drive less the quarry's. Back in the world the two add: full thrust to catch
+up, easing through the relative brake, and exactly the quarry's acceleration once alongside —
+five g, three, then four, for a five-g pursuer on a four-g quarry, and never a reversed plume.
+Across a whole Oort chase the drive reverses eleven times, where it reversed eighteen thousand.
+
+Only a *lit* quarry, because a pursuer can see a plume. A quarry holding an orbit accelerates too,
+by gravity, and so does the pursuer; escorting it would chase where the planet takes it while
+ignoring what the planet does to the ship chasing. An escort that sees its quarry cut the drive
+stays an escort at zero acceleration rather than falling back to a rendezvous, because a
+rendezvous that arrives goes ballistic — and a ship coasting outward at a good fraction of `c` is
+the most expensive thing there is to keep patching into spheres of influence.
+
 `Outbound::Flying` exists because of this and nothing else. A client folds its own orders, but
 it cannot fold a re-solve it did not ask for and could not reproduce, so the authority states
 what the ship is now flying — the same `Motion` a welcome carries. It leaks nothing: a
-`Motive::Rendezvous` is relative offsets and one sighting.
+`Motive::Rendezvous` is relative offsets and one sighting, and a `Motive::Escort` adds only the
+acceleration the pursuer measured from two of them.
 
 **The cost is quadratic and is not yet paid for.** One retarded solve per observer per craft
 per tick is fine for the handful a shard carries today and is not fine for a busy system: a

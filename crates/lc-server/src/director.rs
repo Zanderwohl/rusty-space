@@ -215,6 +215,7 @@ impl<J: Journal> Server<J> {
                     // first approach itself. A second solve here would be a second
                     // implementation of the only standing order there is.
                     last_plan_t: i64::MIN,
+                    last_seen: None,
                 });
                 None
             }
@@ -562,6 +563,64 @@ mod tests {
         assert!(nearest < deadband, "it never reached the station: {nearest:.0} m");
         assert!(furthest < 100_000.0, "it did not stay in company: {furthest:.0} m");
         assert!(opening > 100.0 * deadband, "premise: it had a long way to come");
+    }
+
+    /// **The plume that flickered.** A pursuer chasing a quarry under thrust was handed a fresh
+    /// "close the gap and stop" every tick, each short enough to be flown whole — turn, burn,
+    /// flip, brake — so the drive reversed about once a tick while the ship plainly left the
+    /// system. Measured, it reversed eighteen thousand times across a chase and never closed
+    /// from two million kilometres. An escort matches the quarry's acceleration instead.
+    ///
+    /// Sampled *inside* each tick, because that is what a client draws: the plan is replayed
+    /// between sightings, and sampling only at the tick saw each fresh plan's first instant.
+    #[tokio::test]
+    async fn chasing_a_burning_quarry_does_not_flicker() {
+        use lc_world::motion::Motive;
+        let Some((mut server, mut wire, _, pov)) = staged(&lc_world::scenario::CHASE) else {
+            return;
+        };
+        let cast = CraftId(lc_world::scenario::BASE_ID);
+        let tick_s = 50.0 * 8_766.0 * 1.0e-3 * server.rate();
+        let (mut reversals, mut last) = (0, 0i32);
+        for n in 0..240 {
+            server.tick(&mut wire).await.unwrap();
+            let now_s = server.now_t() as f64 * 1.0e-6;
+            let chaser = server.fleet.get(pov).unwrap();
+            // Whatever the chaser is flying, asked the same question, so this pins the plume
+            // rather than which motive happens to draw it.
+            let sample = |t: f64| match &chaser.motion.motive {
+                Motive::Escort(plan) => Some((plan.thrust_at(t), plan.state_at(t).1)),
+                Motive::Rendezvous(plan) => Some((plan.thrust_at(t), plan.state_at(t).1)),
+                _ => None,
+            };
+            if n < 8 {
+                continue;
+            }
+            for k in 0..8 {
+                let t = now_s + tick_s * k as f64 / 8.0;
+                let Some((thrust, beta)) = sample(t) else { continue };
+                let sign = match thrust.dot(beta) {
+                    _ if thrust == DVec3::ZERO => 0,
+                    along if along >= 0.0 => 1,
+                    _ => -1,
+                };
+                if sign != 0 && last != 0 && sign != last {
+                    reversals += 1;
+                }
+                if sign != 0 {
+                    last = sign;
+                }
+            }
+        }
+        // Before the quarry turns round to brake there is nothing to reverse for.
+        assert_eq!(reversals, 0, "the drive reversed {reversals} times while both were burning outward");
+
+        // And it caught up and stayed, rather than holding two million kilometres off.
+        let standoff = lc_world::pursuit::standoff_m(500.0, 500.0);
+        let (chaser, quarry) = (server.fleet.get(pov).unwrap(), server.fleet.get(cast).unwrap());
+        let gap = chaser.motion.position_ly.distance(quarry.motion.position_ly)
+            * lc_world::system::M_PER_LY;
+        assert!(gap < 2.0 * standoff, "it is {gap:.0} m off a {standoff:.0} m standoff");
     }
 
 }

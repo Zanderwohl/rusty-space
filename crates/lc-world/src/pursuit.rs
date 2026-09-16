@@ -20,6 +20,9 @@
 //! knowledge into the pursuer's own trajectory, which the player watches. A target that
 //! manoeuvres is therefore chased on stale information until its news arrives, which across a
 //! system is seconds to hours.
+//!
+//! **Only for a quarry that is coasting.** One under thrust has left the frame a plan arrives at
+//! rest in before the next sighting lands, and is escorted instead — see [`crate::escort`].
 
 use glam::DVec3;
 
@@ -51,11 +54,12 @@ pub const DRIFT_ALLOWANCE: f64 = 2.0;
 /// How far the quarry may be from where the standing plan predicted before the plan is thrown
 /// away, as a multiple of the standoff.
 ///
-/// This is the whole of the manoeuvre response. A quarry holding its course stays inside it
-/// forever and the plan runs to completion; one under thrust leaves it almost at once and is
-/// re-solved against, which from outside is a pursuer tracking a burn. Deliberately not a
-/// separate "match acceleration" mode: torch ships have thrust to spare, and one rule that
-/// covers both is one rule that cannot disagree with itself at the boundary.
+/// A quarry holding its course stays inside it forever and the plan runs to completion. One
+/// that manoeuvres leaves it and is re-solved against. One under *sustained* thrust is not a
+/// rendezvous's business at all: re-solving a plan that ends at rest against it every tick
+/// tracked the burn's position and drew the pursuer braking twenty times a second, so it is
+/// escorted instead — see [`crate::escort`], which uses this same fraction on its own model of
+/// the quarry.
 pub const REPLAN_FRACTION: f64 = 0.25;
 
 /// A craft as its pursuer currently sees it: a sighting, and therefore the past.
@@ -393,11 +397,16 @@ pub fn approach(
 /// Three ways it stops being: the quarry is not where the plan said it would be, the plan has
 /// run out, or there is no plan.
 pub fn wants_replan(motive: &Motive, seen: &Sighting, pursuer_length_m: f64, now_s: f64) -> bool {
+    let standoff_ly = standoff_m(pursuer_length_m, seen.length_m) / M_PER_LY;
+    // An escort does not run out: being alongside a burning quarry is somewhere to stay. Only
+    // the quarry leaving the burn it was assumed to hold is a reason to plan again.
+    if let Motive::Escort(plan) = motive {
+        return plan.target != seen.target || plan.divergence(seen) > standoff_ly * REPLAN_FRACTION;
+    }
     let Motive::Rendezvous(plan) = motive else { return true };
     if plan.target != seen.target || plan.has_arrived(now_s) {
         return true;
     }
-    let standoff_ly = standoff_m(pursuer_length_m, seen.length_m) / M_PER_LY;
     plan.divergence(seen) > standoff_ly * REPLAN_FRACTION
 }
 

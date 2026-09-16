@@ -41,6 +41,9 @@ pub enum Motive {
     /// [`crate::pursuit`], which also says why the frame is a frozen sighting and not a handle
     /// on the quarry's live worldline.
     Rendezvous(crate::pursuit::Rendezvous),
+    /// Under thrust beside a craft that is itself under thrust, having closed on it or while
+    /// closing. A rendezvous with a quarry that will not hold still: see [`crate::escort`].
+    Escort(crate::escort::Escort),
     /// Held on a place by thrust. A station is a position, not a trajectory.
     Holding(Waypoint),
     /// Ballistic on a conic, about whichever body's influence it is in.
@@ -99,7 +102,7 @@ impl ShipState {
     pub fn is_under_way(&self) -> bool {
         matches!(
             self.motive,
-            Motive::Crossing(_) | Motive::Transfer(_) | Motive::Rendezvous(_)
+            Motive::Crossing(_) | Motive::Transfer(_) | Motive::Rendezvous(_) | Motive::Escort(_)
         )
     }
 
@@ -109,6 +112,20 @@ impl ShipState {
         self.crossing_clock_base_s = self.clock_s;
         self.motive = Motive::Rendezvous(plan);
         self.arrive_at = None;
+    }
+
+    /// Take up station on a quarry under thrust. Bases the crew's clock as a crossing does.
+    pub fn begin_escort(&mut self, plan: crate::escort::Escort) {
+        self.crossing_clock_base_s = self.clock_s;
+        self.motive = Motive::Escort(plan);
+        self.arrive_at = None;
+    }
+
+    /// Put one back part-way through, keeping the clock base it began with.
+    pub fn resume_escort(&mut self, plan: crate::escort::Escort, clock_base_s: f64) {
+        self.motive = Motive::Escort(plan);
+        self.arrive_at = None;
+        self.crossing_clock_base_s = clock_base_s;
     }
 
     /// Put one back part-way through, keeping the clock base it began with.
@@ -145,6 +162,7 @@ impl ShipState {
     pub fn pursuing(&self) -> Option<ShipId> {
         match &self.motive {
             Motive::Rendezvous(plan) => Some(plan.target),
+            Motive::Escort(plan) => Some(plan.target),
             _ => None,
         }
     }
@@ -226,6 +244,10 @@ impl ShipState {
                     approach: plan.recipe(),
                     clock_base_s: self.crossing_clock_base_s,
                 },
+                Motive::Escort(plan) => Recipe::Escort {
+                    station: plan.recipe(),
+                    clock_base_s: self.crossing_clock_base_s,
+                },
                 Motive::Holding(waypoint) => Recipe::Holding(waypoint.clone()),
                 Motive::Falling(_) => Recipe::Falling,
                 Motive::Drifting { from_ly, since_t } => {
@@ -290,7 +312,7 @@ impl ShipState {
             // An approach is defined against another craft and not against the system, so
             // leaving one takes nothing from it. Whether the quarry is still in sight is the
             // pursuit's business, not the system's.
-            Motive::Rendezvous(_) => {}
+            Motive::Rendezvous(_) | Motive::Escort(_) => {}
             _ => self.set_adrift(now_s),
         }
     }
@@ -523,6 +545,7 @@ pub fn state_at(
         // The plan is relative, so the frame has to be added back. Galilean, and
         // [`crate::pursuit`] carries the bound on that.
         Motive::Rendezvous(plan) => Some(plan.state_at(now_s)),
+        Motive::Escort(plan) => Some(plan.state_at(now_s)),
         Motive::Holding(waypoint) => {
             let system = system?;
             let at = waypoint.place_at(system, now_s)?;
@@ -586,6 +609,7 @@ fn aim_at(state: &ShipState, now_s: f64) -> Option<crate::flight::Aim> {
         Motive::Crossing(cruise) => Some(cruise.aim_at(now_s)),
         Motive::Transfer(transfer) => Some(transfer.aim_at(now_s)),
         Motive::Rendezvous(plan) => Some(plan.aim_at(now_s)),
+        Motive::Escort(plan) => Some(plan.aim_at(now_s)),
         // Nothing is asking. A station is held by thrust too small to turn for, and a conic
         // and a drift ask for nothing at all.
         Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => None,
@@ -605,6 +629,9 @@ pub fn thrust_g(state: &ShipState, now_s: f64) -> f64 {
         Motive::Crossing(cruise) => cruise.thrust_at(now_s) != DVec3::ZERO,
         Motive::Transfer(transfer) => transfer.thrust_at(now_s) != DVec3::ZERO,
         Motive::Rendezvous(plan) => plan.thrust_at(now_s) != DVec3::ZERO,
+        // The one motive whose burn is not the drive's rating: beside a quarry, it is the
+        // quarry's acceleration, and that is what a plume should show.
+        Motive::Escort(plan) => return plan.thrust_g(now_s),
         Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => false,
     };
     if lit { state.drive.accel_g } else { 0.0 }
@@ -675,6 +702,11 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
                     None => Motive::Drifting { from_ly: state.position_ly, since_t: now_s },
                 };
             }
+        }
+        // Never ends by itself. Alongside a quarry that keeps burning is a place to *stay*, and
+        // going ballistic on arrival — as a rendezvous does — would drop straight behind it.
+        Motive::Escort(plan) => {
+            state.clock_s = state.crossing_clock_base_s + plan.proper_s_at(now_s);
         }
         Motive::Rendezvous(plan) => {
             // Sampled at a world time through the plan, which is what reconciles it with the
