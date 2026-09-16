@@ -11,9 +11,14 @@
 //! surface that radiates it. So a plume's colour is a consequence rather than a setting, and a
 //! fifty-kilometre ship's drive comes out blue-white next to a tug's orange without anyone
 //! choosing that.
+//!
+//! The streaks follow the same division. *That* the gas is uneven is physics — a drive burns
+//! fuel-rich and the flow combs what leaves the injector unmixed into lanes — and so is what
+//! those lanes radiate, which is a cooler greybody worked out here and handed over as a second
+//! colour. How fast they travel is not: see [`CHURN_EXPONENT`].
 
 use bevy::prelude::*;
-use em_render::plume_material::{PlumeMaterial, PlumeUniform};
+use em_render::plume_material::{CHURN_PERIOD, PlumeMaterial, PlumeUniform};
 use em_render::render_space::sim_to_render;
 use em_spectra::{Band, PerBand, blackbody};
 use glam::DVec3;
@@ -63,23 +68,97 @@ pub const SIDES: u32 = 24;
 /// [`temperature_k`] — but its *brightness* is not, because the gas is optically thin by an
 /// amount nothing here models: what reaches the eye is a fraction of the blackbody radiance,
 /// and that fraction is the fudge. Four stops over the reference puts the core past the top of
-/// a two-and-a-half stop window, so the middle clips and blooms like something that hot should,
-/// while the falloff carries the edges back down through the window and the cone has a shape.
+/// a two-and-a-half stop window, so the middle overflows and blooms like something that hot
+/// should — see [`OVERFLOW_GAIN`] for where the overflow goes — while the falloff carries the
+/// edges back down through the window and the cone has a shape.
 ///
 /// Left as a multiple of the reference rather than an absolute, so it holds when the exposure
 /// moves. Set it from the colour instead and a hot plume is a white rectangle: a blackbody at
 /// fifty thousand kelvin is ten decades over a planet, and there is no window that holds both.
 pub const CORE_STOPS: f64 = 4.0;
 
+/// What a stop past the top of the exposure window is worth as HDR value.
+///
+/// The core sits [`CORE_STOPS`] over the reference and the window is two and a half stops wide,
+/// so most of the cone has nowhere left to go inside it. Clipped there, the whole column came
+/// back as one flat lavender: the tone curve holds hue and saturation constant and scales only
+/// the value, so a ray through the deep middle and a ray grazing the flank — which differ by
+/// decades of column depth — drew the same colour, and the plume read as a cut-out rather than
+/// as a volume.
+///
+/// Letting the overflow out as HDR is what the starfield already does with a star twenty stops
+/// over, and for the same reason: the excess becomes a halo rather than a whiter white. The
+/// display transform desaturates the middle toward white, bloom spreads it, and the thin edges
+/// stay inside the window with their colour.
+///
+/// The sky uses a quarter. A plume wants an order more, and the case that decides it is
+/// `thermal`: clipped, its core sat at a saturation of 0.37, and one stop of gain only brings
+/// that to 0.33 — still a flat blue shape. Three brings it to 0.16 against a flank of 0.89,
+/// which is a white-hot core in a coloured cone with the sooty lanes reading against it. Six
+/// buys 0.09 and nothing else, every channel's peak already being at 255. A plume wants more
+/// than the sky does because it is a near object filling a good part of the frame rather than a
+/// point a few pixels across, so its overflow has somewhere to go.
+pub const OVERFLOW_GAIN: f32 = 3.0;
+
+/// Lattice cells across the cone's own radius, and along its whole length.
+///
+/// Their ratio is the aspect of a filament, and it wants to be lopsided: at anything near one
+/// the noise reads as a dirty cloud hanging in the exhaust rather than as gas being drawn out.
+/// Seven to one and a half puts about fourteen filaments across the plume, each running most of
+/// its length. Fewer and the plume is draped rather than striated; many more and a ray crosses
+/// enough of them to average them flat again, which is the failure this whole coordinate choice
+/// exists to avoid.
+pub const CHURN_ACROSS: f32 = 7.0;
+pub const CHURN_ALONG: f32 = 1.5;
+
+/// How much of the gas the streaks may claim.
+pub const CHURN_BITE: f32 = 1.0;
+
+/// How cool the fuel-rich gas runs, as a fraction of the core's temperature.
+pub const SOOT_FRACTION: f64 = 0.6;
+
+/// How much of a blackbody's output the soot actually manages.
+///
+/// The only place in this file something is *not* a blackbody, and it is the honest correction
+/// rather than a fudge: soot is the one constituent of a plume that is optically thick, so it
+/// radiates as a greybody. It also guarantees the streaks read. A temperature ratio alone does
+/// not: at fifty thousand kelvin the visible band is on the Rayleigh-Jeans side, where radiance
+/// goes as `T` and not as `T^4`, so a plume that hot would have shown streaks six per cent
+/// darker than the gas around them and looked exactly as smooth as before.
+pub const SOOT_EMISSIVITY: f32 = 0.25;
+
+/// How far the churn travels in a second of real time while the clock runs at real time, in
+/// plume lengths.
+pub const TRAVERSES_AT_REAL_TIME: f64 = 0.12;
+
+/// The root by which the clock's speed is compressed into the churn's.
+///
+/// The ladder in [`crate::ui::RATE_LADDER`] spans seven decades, from real time to a Julian year
+/// a second. The band in which a moving pattern reads as *moving* — rather than as a still
+/// picture at one end or as static at the other — spans well under one. An eighth root is what
+/// maps the one onto the other: every rung is a visibly different churn, the top of the ladder
+/// is about eight times the bottom, and no rung is a strobe.
+///
+/// **What it must not do is decouple.** The gas itself crosses the plume in milliseconds, so
+/// there is no rung at which the true rate is anything but a blur, and drawing the churn at all
+/// is already a display model. The one thing that has to be exact is the end of the range: a
+/// stopped clock is a still plume, which is what every `--rate 0` photograph depends on.
+pub const CHURN_EXPONENT: f64 = 0.125;
+
 /// One craft's exhaust. `None` is the player's own ship, matching [`crate::hull::Hull`].
 #[derive(Component)]
 pub struct Plume(pub Option<ShipId>);
 
-/// The shared proxy, and which craft currently have a plume.
+/// The shared proxy, which craft currently have a plume, and where the churn has got to.
 #[derive(Resource, Default)]
 pub struct Plumes {
     proxy: Option<Handle<Mesh>>,
     drawn: Vec<Option<ShipId>>,
+    /// How far aft the streaks have travelled, in lattice cells, wrapped at [`CHURN_PERIOD`].
+    phase: f64,
+    /// The coordinate clock last frame. `None` until the first, which therefore advances by
+    /// nothing rather than by however long the client spent loading.
+    clock_s: Option<f64>,
 }
 
 /// How long the exhaust runs and how wide it is at each end, metres.
@@ -113,6 +192,37 @@ pub fn temperature_k(power_w: f64, area_m2: f64) -> f64 {
         return 0.0;
     }
     (power_w / (SIGMA * area_m2)).powf(0.25)
+}
+
+/// How far the churn travels this frame, in plume lengths.
+///
+/// Measured in plume *lengths* rather than metres, so a fifty-kilometre ship's exhaust and a
+/// tug's churn at the same rate on the screen. The camera frames on the hull, so that is the
+/// comparison that matters; in metres per second the big one is a hundred times the faster,
+/// which is also true.
+pub fn churn_step(real_s: f64, simulated_s: f64) -> f64 {
+    if real_s <= 0.0 || simulated_s <= 0.0 {
+        return 0.0;
+    }
+    TRAVERSES_AT_REAL_TIME * (simulated_s / real_s).powf(CHURN_EXPONENT) * real_s
+}
+
+/// Where in the pattern a craft's plume starts, in lattice cells.
+///
+/// The noise repeats at [`CHURN_PERIOD`], so offsetting the phase is the whole of giving every
+/// ship its own streaks — no second uniform, and two craft burning alongside each other do not
+/// flicker in step.
+pub fn seed(of: Option<ShipId>) -> f64 {
+    // The player's own ship has no id of its own, so it takes one no id can collide with.
+    let key = match of {
+        None => u64::MAX,
+        Some(ShipId(n)) => n as u64,
+    };
+    let mut h = key ^ 0x2545_f491_4f6c_dd1d;
+    h = (h ^ (h >> 33)).wrapping_mul(0xff51_afd7_ed55_8ccd);
+    h = (h ^ (h >> 33)).wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    h ^= h >> 33;
+    (h >> 40) as f64 / (1u64 << 24) as f64 * CHURN_PERIOD as f64
 }
 
 /// A craft with its drive lit, reduced to what the proxy needs.
@@ -186,14 +296,24 @@ fn along_exhaust(facing: DVec3) -> Quat {
     Quat::from_rotation_arc(Vec3::Y, aft)
 }
 
-fn uniforms(lit: &Burning, session: &Session, eye_local: Vec3) -> PlumeUniform {
-    let area = radiating_area_m2(lit.long_m, lit.throat_m, lit.mouth_m);
-    let kelvin = temperature_k(lit.power_w, area);
+/// What a blackbody at `kelvin` looks like through this observer's bands, linear display RGB.
+fn shine(session: &Session, kelvin: f64) -> Vec3 {
     let radiance = PerBand::new(std::array::from_fn(|i| {
         blackbody::band_radiance(Band::ALL[i], kelvin) as f32
     }));
-    let glow = Vec3::from_array(session.mapping.apply(&radiance));
+    Vec3::from_array(session.mapping.apply(&radiance))
+}
+
+fn uniforms(lit: &Burning, session: &Session, eye_local: Vec3, phase: f64) -> PlumeUniform {
+    let area = radiating_area_m2(lit.long_m, lit.throat_m, lit.mouth_m);
+    let kelvin = temperature_k(lit.power_w, area);
+    let glow = shine(session, kelvin);
+    // The same mapping at a lower temperature, so the streaks' colour is as forced as the
+    // core's and the ratio between them is the physics rather than a tint.
+    let soot = shine(session, kelvin * SOOT_FRACTION) * SOOT_EMISSIVITY;
     // Scaled so the core lands where [`CORE_STOPS`] says, whatever the colour came out as.
+    // Against the clean gas, which is what the core is made of: the streaks are faded out
+    // toward the axis, so calibrating against a mixture would move the exposure with the churn.
     let luminance = glow.dot(Vec3::new(0.2126, 0.7152, 0.0722)) as f64;
     let scale = if luminance > 0.0 {
         session.tone.surface_reference as f64 * 2f64.powf(CORE_STOPS) / luminance
@@ -210,13 +330,15 @@ fn uniforms(lit: &Burning, session: &Session, eye_local: Vec3) -> PlumeUniform {
             TAPER,
         ),
         eye_local: eye_local.extend(0.0),
+        soot: soot.extend(0.0),
+        churn: Vec4::new(phase as f32, CHURN_ACROSS, CHURN_ALONG, CHURN_BITE),
         // The march sums a density with no units, so the brightness is a scale rather than a
         // measurement — the *colour* is the physics and this only says how much of it there is.
         exposure: Vec4::new(
             session.tone.surface_reference,
             session.tone.stops,
             scale as f32,
-            0.0,
+            OVERFLOW_GAIN,
         ),
     }
 }
@@ -224,6 +346,7 @@ fn uniforms(lit: &Burning, session: &Session, eye_local: Vec3) -> PlumeUniform {
 /// Keep a proxy for every craft with its drive lit, and take it away when the drive goes out.
 pub fn update_plumes(
     mut commands: Commands,
+    time: Res<Time>,
     game: Res<crate::app::Game>,
     ui: Res<crate::app::Ui>,
     uplink: Res<crate::uplink::Uplink>,
@@ -237,6 +360,15 @@ pub fn update_plumes(
     let look = ui.look.forward();
     let want = burning(&game.0, &uplink, &eye, look);
     let keys: Vec<Option<ShipId>> = want.iter().map(|(id, _)| *id).collect();
+
+    // Taken from the clock itself rather than from the rate knob, so a correction from the
+    // server moves the churn with everything else and the churn does not need to know who owns
+    // the rate. Ahead of the early return below: a frame that respawns is still a frame.
+    let now = game.0.coordinate_time_s();
+    let simulated = plumes.clock_s.map_or(0.0, |was| now - was);
+    plumes.clock_s = Some(now);
+    let travelled = churn_step(time.delta_secs_f64(), simulated) * CHURN_ALONG as f64;
+    plumes.phase = (plumes.phase + travelled).rem_euclid(CHURN_PERIOD as f64);
 
     if keys != plumes.drawn {
         for (entity, _) in &existing {
@@ -280,7 +412,8 @@ pub fn update_plumes(
         // The eye is at the render origin, so where it sits in the proxy's own space is the
         // transform undone. The march needs it there and nowhere else.
         let eye_local = transform.to_matrix().inverse().transform_point3(Vec3::ZERO);
-        let next = uniforms(lit, &game.0, eye_local);
+        let phase = (plumes.phase + seed(marker.0)).rem_euclid(CHURN_PERIOD as f64);
+        let next = uniforms(lit, &game.0, eye_local, phase);
         if asset.uniforms != next {
             asset.uniforms = next;
         }
@@ -342,6 +475,109 @@ mod tests {
         };
         assert!(at(20.0) > at(5.0));
         assert_eq!(at(0.0), 0.0, "an unlit drive is not a cold plume, it is no plume");
+    }
+
+    /// The property every `--rate 0` photograph rests on. Two frames of a stopped clock are the
+    /// same picture, and an hour of them is the same picture.
+    #[test]
+    fn a_stopped_clock_is_a_still_plume() {
+        assert_eq!(churn_step(1.0 / 60.0, 0.0), 0.0);
+        assert_eq!(churn_step(3600.0, 0.0), 0.0);
+        // And a clock corrected *backwards* holds rather than running the plume in reverse.
+        assert_eq!(churn_step(1.0 / 60.0, -5.0), 0.0);
+    }
+
+    /// Every rung of the ladder is a different churn, and the whole ladder is a small factor.
+    ///
+    /// Both halves matter. Without the first the clock is decoration; without the second the top
+    /// of the ladder moves the pattern further than a streak between one frame and the next,
+    /// which is not a fast plume, it is static.
+    #[test]
+    fn a_faster_clock_is_a_faster_churn_but_not_by_much() {
+        let frame = 1.0 / 60.0;
+        let at = |rung: f64| churn_step(frame, frame * rung * crate::session::TIME_RATE);
+        let rungs: Vec<f64> = crate::ui::RATE_LADDER
+            .iter()
+            .map(|(r, _)| *r)
+            .filter(|r| *r > 0.0)
+            .collect();
+        let steps: Vec<f64> = rungs.iter().map(|r| at(*r)).collect();
+        assert!(steps.windows(2).all(|w| w[1] > w[0] * 1.05), "{steps:?}");
+        let span = steps[steps.len() - 1] / steps[0];
+        assert!(span > 4.0 && span < 20.0, "the ladder spans {span} in churn");
+        // A streak is about `1 / CHURN_ALONG` of a lattice cell; crossing half of one in a frame
+        // is where a moving pattern turns into a hissing one.
+        let worst = steps[steps.len() - 1] * CHURN_ALONG as f64;
+        assert!(worst < 0.5, "{worst} lattice cells in a frame");
+    }
+
+    /// Two ships burning side by side do not flicker in step.
+    ///
+    /// Consecutive ids are the case that matters, because that is what a shard hands out, and
+    /// `ShipId(0)` is the one that catches a multiply with nothing mixed into it.
+    #[test]
+    fn every_craft_gets_its_own_streaks() {
+        let period = CHURN_PERIOD as f64;
+        let seeds: Vec<f64> =
+            (0..64).map(|n| seed(Some(ShipId(n)))).chain([seed(None)]).collect();
+        assert!(seeds.iter().all(|s| (0.0..period).contains(s)), "{seeds:?}");
+        let mut sorted = seeds.clone();
+        sorted.sort_by(f64::total_cmp);
+        assert!(sorted.windows(2).all(|w| w[0] != w[1]), "two craft share a seed");
+        // And spread over the period rather than clustered in a corner of it.
+        for eighth in 0..8 {
+            let low = period * eighth as f64 / 8.0;
+            assert!(
+                seeds.iter().any(|s| *s >= low && *s < low + period / 8.0),
+                "nothing in the {eighth}th of the period",
+            );
+        }
+    }
+
+    /// The streaks are darker than the gas around them at *any* plume temperature.
+    ///
+    /// The bug this is here for: a temperature ratio on its own does not do it. Above about ten
+    /// thousand kelvin the visible band is on the Rayleigh-Jeans side of the peak, radiance goes
+    /// as `T` rather than as `T^4`, and a streak six per cent down is a plume with no streaks.
+    /// [`SOOT_EMISSIVITY`] is what carries it there.
+    #[test]
+    fn a_streak_is_darker_than_the_gas_beside_it_however_hot_the_plume() {
+        for kelvin in [2_000.0, 6_000.0, 50_000.0, 500_000.0] {
+            let visible = |t: f64| blackbody::band_radiance(Band::ALL[2], t);
+            let ratio = visible(kelvin * SOOT_FRACTION) / visible(kelvin)
+                * SOOT_EMISSIVITY as f64;
+            // A stop and a half down at the very least, which is a lane one can see.
+            assert!(ratio < 0.35, "{kelvin} K: streaks at {ratio} of the core");
+            assert!(ratio > 0.0, "{kelvin} K: streaks are not holes");
+        }
+    }
+
+    /// Why the overflow is spent per channel rather than along one chroma.
+    ///
+    /// Under a natural mapping the plume's three channels are close enough that a single
+    /// overflow along the chroma is nearly right. Under a false-colour one they are decades
+    /// apart — ten microns, two microns and green are three quite different questions to ask a
+    /// fifty-thousand-kelvin gas — and asking only the brightest of them reports its answer as
+    /// the colour of all three. That is how the hottest object in the frame came back a flat
+    /// saturated blue.
+    ///
+    /// This is the premise rather than the rendering, which no test can reach. If a preset is
+    /// retuned until it fails, the shader's per-channel overflow is what to revisit.
+    #[test]
+    fn a_false_colour_mapping_pulls_the_plume_s_channels_decades_apart() {
+        let radiance = PerBand::new(std::array::from_fn(|i| {
+            blackbody::band_radiance(Band::ALL[i], 50_000.0) as f32
+        }));
+        let spread = |mapping: &em_spectra::BandMapping| {
+            let rgb = mapping.apply(&radiance);
+            let (low, high) = rgb.iter().fold((f32::MAX, 0.0f32), |(l, h), c| (l.min(*c), h.max(*c)));
+            // Stops between the dimmest channel and the brightest.
+            (high / low.max(1e-30)).log2()
+        };
+        let natural = spread(&em_spectra::presets::natural());
+        let thermal = spread(&em_spectra::presets::thermal());
+        assert!(natural < 2.0, "natural spreads the channels {natural} stops");
+        assert!(thermal > 3.0, "thermal spreads them only {thermal} stops");
     }
 
     fn mass_of(length_m: f64) -> f64 {

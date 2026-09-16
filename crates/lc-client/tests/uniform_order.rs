@@ -71,3 +71,21 @@ fn the_body_surface_uniform_is_declared_in_one_order() {
         "the shader and the host disagree about the uniform's layout",
     );
 }
+
+/// The plume's uniform grew a second colour and a churn, appended to both — but it is six vectors
+/// the shader reads positionally, and a march that takes the soot for the exposure draws nothing
+/// at all.
+#[test]
+fn the_plume_uniform_is_declared_in_one_order() {
+    let shader = include_str!("../assets/shaders/plume.wgsl");
+    let host = include_str!("../../em-render/src/plume_material.rs");
+
+    let in_shader = fields(shader, "struct PlumeUniform {");
+    let in_host = fields(host, "pub struct PlumeUniform {");
+
+    assert!(in_shader.len() >= 6, "the parse found almost nothing: {in_shader:?}");
+    assert_eq!(
+        in_shader, in_host,
+        "the shader and the host disagree about the uniform's layout",
+    );
+}

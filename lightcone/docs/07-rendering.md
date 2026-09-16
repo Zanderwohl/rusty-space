@@ -717,9 +717,51 @@ and a fifty-kilometre one is hotter still. Nobody picks that.
 The one thing that is neither is the **brightness**. The gas is optically thin by an amount
 nothing here models, so what reaches the eye is some fraction of the blackbody radiance, and
 that fraction is a fudge: the core is placed a fixed number of stops above the exposure's
-reference so it clips and blooms while the falloff carries the edges back down through the
-window. Scale it from the colour instead and a plume is a white rectangle — fifty thousand
-kelvin is ten decades over a planet and no window holds both.
+reference so it overflows the window while the falloff carries the edges back down through it.
+Scale it from the colour instead and a plume is a white rectangle — fifty thousand kelvin is ten
+decades over a planet and no window holds both.
+
+That overflow **leaves as an HDR value** rather than clipping, the same bargain the starfield
+makes with a star twenty stops over. It has to, and the reason is the tone curve's own shape:
+hue and saturation are held constant and only the value is scaled, so a clipped plume returns
+one flat colour for every ray that is over the top — measured, `(135,147,202)` through the deep
+middle against `(134,147,202)` at the near-nozzle throat, which is the same pixel. The column
+depth between those two rays differs by decades and none of it was reaching the screen.
+
+**Inside the window the curve keeps the colour; past it, each channel is on its own.** That is
+the one place this tone map and a sensor part company, and the plume is where it matters. A
+channel does not know what the other two are doing; it saturates when *it* is full. Under
+`natural` the plume's three are within a stop and a half of each other and spending the overflow
+along one chroma is nearly right. Under a false-colour mapping they are decades apart — ten
+microns, two microns and green are three quite different questions to ask a fifty-thousand-kelvin
+gas, and in `thermal` they span nearly four stops. Asking only the brightest and reporting its
+answer as the colour of all three is how the hottest object in the frame came back a flat
+saturated blue. Per channel, the blue fills first, then green, then red, and the core goes white
+the way something too bright to photograph does. Measured at the core, `natural` goes 0.15 → 0.08
+and `thermal` 0.37 → 0.16, while the flanks hold or gain — `thermal`'s go 0.70 → 0.89. `survey`
+does not move, and cannot: all three of its channels are V.
+
+The gain is an order above the sky's, because a plume is a near object filling a good part of
+the frame rather than a point a few pixels across, so its overflow has somewhere to go.
+
+**`BandMapping::bloom` is not the mechanism here, and it looks as though it should be.** It is
+the one channel `thermal` sets — `with_bloom(ThermalIr, 1.0)`, industry and waste heat — and
+nothing in the renderer calls it. It would not help: `thermal` maps red from ten microns and
+nothing else, so `bloom` comes out a constant multiple of the red channel at every temperature
+(2.5695e4, to five figures, from 300 K to 50,000 K). Wiring it in is arithmetically identical to
+scaling red, which is not new information, it is a thumb on the scale.
+
+### Why a hot plume is blue in thermal
+
+It is the preset working, not failing. `thermal` is normalised so a Sun-like spectrum is white
+and an excess at ten microns is red, so red means *infrared-dominated*, which means cool. A
+fifty-thousand-kelvin plume gives channel shares of 0.06 / 0.10 / 0.84 — its thermal emission has
+left the infrared, exactly as an O star's has.
+
+None of which makes it dim there. Its ten-micron radiance is 9.8 times a Sun-like star's and
+about 5,300 times the 300 K hull beside it, which is the reddest thing in the frame. The plume is
+the brightest infrared source by three and a half decades; it is simply not the *reddest*, and
+painting it red to say "hot" would make it read as colder than the ship it is pushing.
 
 The mesh is a **proxy**, not the cone: a closed cylinder that merely has to contain the gas,
 with back faces drawn so each pixel gets one fragment and the camera may be inside it. Each
@@ -735,6 +777,40 @@ from — a ray grazing the side crosses almost nothing. Two traps, both paid for
   `1/r²`, which between them made the column a hundred times deeper at the nozzle than at the
   mouth — every part of the cone landed above the top of the window and the whole thing was one
   flat saturated shape.
+
+#### Streaks
+
+A drive burns fuel-rich, and what leaves the injector unmixed is drawn out by the flow into
+filaments of cooler, sootier gas running the length of the plume. So a sample is **two gases**
+rather than one: the march carries two columns, and the fragment colours them separately. Summing
+one column and tinting it afterwards averages the streaks away before they can be seen.
+
+The division of labour is the same one as everywhere else here. *That* the streaks are darker and
+redder is physics — a cooler blackbody, band-mapped exactly as the core is — with one honest
+correction: soot is the only constituent of a plume that is not optically thin, so it radiates as
+a greybody, at some emissivity below one. That emissivity is also what makes the streaks visible
+at all. Above about ten thousand kelvin the visible band is on the Rayleigh-Jeans side of the
+peak, where radiance goes as `T` and not as `T⁴`, and a streak six per cent down is a plume with
+no streaks in it.
+
+Two things about the noise, both found the hard way:
+
+- It is sampled on the cross-section **in units of the local radius**, not on the point. That
+  coordinate is constant along a streamline — a parcel a third of the way out stays a third of
+  the way out while the cone flares around it — so the pattern is filaments that run the length
+  of the plume and widen with it, rather than dirt hanging still in the proxy while the ship
+  manoeuvres round it.
+- Filaments and not sheets. Using only the *direction* across the cone makes each lane a full
+  radial sheet, and a ray down the middle crosses every angle there is, averages the lot and
+  comes out the colour of clean gas. The plume had a striped fringe and a blank middle.
+
+The pattern travels aft with the **simulation** clock, and how fast is a display model — a third
+one, beside the length and the flare. It has to be: the gas crosses the plume in milliseconds and
+the clock runs from real time to a Julian year a second, so there is no rung of the ladder at
+which the true rate is anything but a blur. An eighth root of the clock's speed maps seven decades
+of rate onto the factor of eight or so over which a moving pattern still reads as moving. The one
+thing that is exact is the bottom of the range: a stopped clock is a still plume, which is what
+every `--rate 0` photograph rests on.
 
 ### Ships in the interface
 
