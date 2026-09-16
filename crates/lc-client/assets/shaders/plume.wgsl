@@ -252,12 +252,28 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // saturation are held constant by the curve, so a brighter part of the plume was only a
     // brighter lavender and the deep middle looked like the thin edge. Carried past one, the
     // display transform desaturates the core toward white and bloom haloes it, while the
-    // edges stay inside the window with their colour intact. The tone curve does not throw
-    // the overflow away; it hands it to the halo. Capped, because a degenerate exposure
-    // should give a bright plume and not an infinite one.
-    let glow = clamp(above, 0.0, 12.0);
+    // edges stay inside the window with their colour intact.
+    //
+    // **Inside the window the curve keeps the colour; past it, each channel is on its own.**
+    // That is the one place a sensor and this tone map part company, and the plume is where it
+    // matters: a channel does not know what the other two are doing, so it saturates when *it*
+    // is full. Under a false-colour mapping the three are decades apart — in `thermal` this
+    // plume's channels span nearly four stops around their own luminance, because ten microns,
+    // two microns and green are three quite different questions to ask a fifty-thousand-kelvin
+    // gas. Scaling one chroma by one overflow asks only the brightest of them and reports the
+    // answer as the colour of all three, which is how the hottest object in the frame came back
+    // a flat saturated blue. Per channel, the blue fills first, then green, then red, and the
+    // core goes white the way something too bright to photograph does.
+    //
+    // The epsilon is to keep `log2` off zero; the cap is so a degenerate exposure gives a
+    // bright plume rather than an infinite one.
+    let over = clamp(
+        log2(max(linear, vec3<f32>(1e-30)) / max(reference, 1e-30)),
+        vec3<f32>(0.0),
+        vec3<f32>(12.0),
+    );
 
     // **Alpha zero.** `AlphaMode::Add` is premultiplied — `src + dst * (1 - alpha)` — so
     // anything else here would rub out what is behind the plume instead of adding to it.
-    return vec4<f32>(chroma * (level + glow * material.exposure.w), 0.0);
+    return vec4<f32>(chroma * level + over * material.exposure.w, 0.0);
 }

@@ -724,15 +724,44 @@ decades over a planet and no window holds both.
 That overflow **leaves as an HDR value** rather than clipping, the same bargain the starfield
 makes with a star twenty stops over. It has to, and the reason is the tone curve's own shape:
 hue and saturation are held constant and only the value is scaled, so a clipped plume returns
-one flat colour for every ray that is over the top — measured, a saturation of 0.33 through the
-deep middle against 0.33 through the near-nozzle throat, which is the same pixel. The column
-depth through a plume varies by decades between a ray down the axis and one grazing the flank,
-and none of that was reaching the screen. Carried past one it does: the display transform
-desaturates the middle toward white, bloom haloes it, and the thin parts stay inside the window
-with their colour. The same measurement after is 0.16 through the middle against 0.37 at the
-edge — a white-hot core in a coloured cone, with the sooty lanes reading against it instead of
-vanishing into it. A plume's gain is an order above the sky's, because it is a near object
-filling a good part of the frame rather than a point a few pixels across.
+one flat colour for every ray that is over the top — measured, `(135,147,202)` through the deep
+middle against `(134,147,202)` at the near-nozzle throat, which is the same pixel. The column
+depth between those two rays differs by decades and none of it was reaching the screen.
+
+**Inside the window the curve keeps the colour; past it, each channel is on its own.** That is
+the one place this tone map and a sensor part company, and the plume is where it matters. A
+channel does not know what the other two are doing; it saturates when *it* is full. Under
+`natural` the plume's three are within a stop and a half of each other and spending the overflow
+along one chroma is nearly right. Under a false-colour mapping they are decades apart — ten
+microns, two microns and green are three quite different questions to ask a fifty-thousand-kelvin
+gas, and in `thermal` they span nearly four stops. Asking only the brightest and reporting its
+answer as the colour of all three is how the hottest object in the frame came back a flat
+saturated blue. Per channel, the blue fills first, then green, then red, and the core goes white
+the way something too bright to photograph does. Measured at the core, `natural` goes 0.15 → 0.08
+and `thermal` 0.37 → 0.16, while the flanks hold or gain — `thermal`'s go 0.70 → 0.89. `survey`
+does not move, and cannot: all three of its channels are V.
+
+The gain is an order above the sky's, because a plume is a near object filling a good part of
+the frame rather than a point a few pixels across, so its overflow has somewhere to go.
+
+**`BandMapping::bloom` is not the mechanism here, and it looks as though it should be.** It is
+the one channel `thermal` sets — `with_bloom(ThermalIr, 1.0)`, industry and waste heat — and
+nothing in the renderer calls it. It would not help: `thermal` maps red from ten microns and
+nothing else, so `bloom` comes out a constant multiple of the red channel at every temperature
+(2.5695e4, to five figures, from 300 K to 50,000 K). Wiring it in is arithmetically identical to
+scaling red, which is not new information, it is a thumb on the scale.
+
+### Why a hot plume is blue in thermal
+
+It is the preset working, not failing. `thermal` is normalised so a Sun-like spectrum is white
+and an excess at ten microns is red, so red means *infrared-dominated*, which means cool. A
+fifty-thousand-kelvin plume gives channel shares of 0.06 / 0.10 / 0.84 — its thermal emission has
+left the infrared, exactly as an O star's has.
+
+None of which makes it dim there. Its ten-micron radiance is 9.8 times a Sun-like star's and
+about 5,300 times the 300 K hull beside it, which is the reddest thing in the frame. The plume is
+the brightest infrared source by three and a half decades; it is simply not the *reddest*, and
+painting it red to say "hot" would make it read as colder than the ship it is pushing.
 
 The mesh is a **proxy**, not the cone: a closed cylinder that merely has to contain the gas,
 with back faces drawn so each pixel gets one fragment and the camera may be inside it. Each

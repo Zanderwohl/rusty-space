@@ -91,12 +91,13 @@ pub const CORE_STOPS: f64 = 4.0;
 /// display transform desaturates the middle toward white, bloom spreads it, and the thin edges
 /// stay inside the window with their colour.
 ///
-/// The sky uses a quarter. A plume wants an order more, and the measurement says why: at a
-/// quarter the deep middle came back at a saturation of 0.29 against the flank's 0.38, which is
-/// a gradient one has to be told about. At three it is 0.16 against 0.37 — a white-hot core in a
-/// coloured cone, and the sooty lanes read against it instead of vanishing into it. The
-/// difference between the two is that a plume is a near object filling a good part of the frame
-/// rather than a point a few pixels across, so its overflow has somewhere to go.
+/// The sky uses a quarter. A plume wants an order more, and the case that decides it is
+/// `thermal`: clipped, its core sat at a saturation of 0.37, and one stop of gain only brings
+/// that to 0.33 — still a flat blue shape. Three brings it to 0.16 against a flank of 0.89,
+/// which is a white-hot core in a coloured cone with the sooty lanes reading against it. Six
+/// buys 0.09 and nothing else, every channel's peak already being at 255. A plume wants more
+/// than the sky does because it is a near object filling a good part of the frame rather than a
+/// point a few pixels across, so its overflow has somewhere to go.
 pub const OVERFLOW_GAIN: f32 = 3.0;
 
 /// Lattice cells across the cone's own radius, and along its whole length.
@@ -549,6 +550,34 @@ mod tests {
             assert!(ratio < 0.35, "{kelvin} K: streaks at {ratio} of the core");
             assert!(ratio > 0.0, "{kelvin} K: streaks are not holes");
         }
+    }
+
+    /// Why the overflow is spent per channel rather than along one chroma.
+    ///
+    /// Under a natural mapping the plume's three channels are close enough that a single
+    /// overflow along the chroma is nearly right. Under a false-colour one they are decades
+    /// apart — ten microns, two microns and green are three quite different questions to ask a
+    /// fifty-thousand-kelvin gas — and asking only the brightest of them reports its answer as
+    /// the colour of all three. That is how the hottest object in the frame came back a flat
+    /// saturated blue.
+    ///
+    /// This is the premise rather than the rendering, which no test can reach. If a preset is
+    /// retuned until it fails, the shader's per-channel overflow is what to revisit.
+    #[test]
+    fn a_false_colour_mapping_pulls_the_plume_s_channels_decades_apart() {
+        let radiance = PerBand::new(std::array::from_fn(|i| {
+            blackbody::band_radiance(Band::ALL[i], 50_000.0) as f32
+        }));
+        let spread = |mapping: &em_spectra::BandMapping| {
+            let rgb = mapping.apply(&radiance);
+            let (low, high) = rgb.iter().fold((f32::MAX, 0.0f32), |(l, h), c| (l.min(*c), h.max(*c)));
+            // Stops between the dimmest channel and the brightest.
+            (high / low.max(1e-30)).log2()
+        };
+        let natural = spread(&em_spectra::presets::natural());
+        let thermal = spread(&em_spectra::presets::thermal());
+        assert!(natural < 2.0, "natural spreads the channels {natural} stops");
+        assert!(thermal > 3.0, "thermal spreads them only {thermal} stops");
     }
 
     fn mass_of(length_m: f64) -> f64 {
