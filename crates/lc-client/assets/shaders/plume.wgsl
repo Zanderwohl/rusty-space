@@ -7,6 +7,11 @@
 //
 // Local space is the proxy's. The axis is `+y`, running from `-0.5` at the nozzle to `+0.5` at
 // the far end, and a radius of one is the proxy wall.
+//
+// The gas is not uniform. A drive burns fuel-rich, and what leaves the injector unmixed is
+// drawn out by the flow into lengthwise streaks of cooler, sootier gas — so every sample is
+// split into two gases with two colours rather than scaled by one, and the streaks travel down
+// the plume with the clock.
 
 #import bevy_pbr::{
     mesh_functions,
@@ -30,12 +35,34 @@ struct PlumeUniform {
     eye_local: vec4<f32>,
     /// `(surface_reference, stops, brightness, unused)`.
     exposure: vec4<f32>,
+    soot: vec4<f32>,
+    /// `(phase, across, along, bite)`. The phase is in lattice cells of the first octave.
+    churn: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: PlumeUniform;
 
 const STEPS: i32 = 24;
 const LUMA = vec3<f32>(0.2126, 0.7152, 0.0722);
+
+/// Octaves of the churn. Two: one for the lanes and one to stop them being combed.
+const OCTAVES: i32 = 2;
+
+/// The churn's period along the flow, in lattice cells of the first octave.
+///
+/// The hash repeats on it, so the host can wrap the phase there and the pattern does not jump.
+/// It has to: the clock runs to tens of millions of times real time, and a phase that only ever
+/// grew would be out of `f32`'s useful spacing long before anyone stopped watching. Mirrored by
+/// `em_render::plume_material::CHURN_PERIOD`.
+const CHURN_PERIOD: f32 = 64.0;
+
+/// Which part of the noise counts as a fuel-rich lane.
+///
+/// A window rather than the noise itself: used raw, every parcel is a bit rich and the plume is
+/// evenly dirty. Taking the top of the distribution gives lanes with clean gas between them,
+/// which is what a striated plume actually looks like.
+const RICH_LOW: f32 = 0.35;
+const RICH_HIGH: f32 = 0.80;
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
@@ -50,14 +77,81 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     return out;
 }
 
-/// How much gas is at a point of the proxy, in arbitrary units.
+/// A lattice value in `[0, 1)`, repeating along `z` with `period`.
+///
+/// Periodic on purpose, and only on that axis: `z` is the one the phase slides along, so a
+/// hash that repeats there is what lets the host wrap the phase without the pattern jumping.
+fn hash3(cell: vec3<f32>, period: f32) -> f32 {
+    let z = cell.z - floor(cell.z / period) * period;
+    // Offset before the cast: the cross-section coordinates are signed, and `u32` of a negative
+    // float is not a number anyone here would want.
+    let key = vec3<u32>(u32(cell.x + 1024.0), u32(cell.y + 1024.0), u32(z));
+    var n = key.x * 1597334677u + key.y * 3812015801u + key.z * 2654435761u;
+    n = (n ^ (n >> 15u)) * 2246822519u;
+    n = (n ^ (n >> 13u)) * 3266489917u;
+    n = n ^ (n >> 16u);
+    return f32(n) * (1.0 / 4294967296.0);
+}
+
+/// Trilinear value noise on that lattice, in `[0, 1]`.
+fn value_noise(p: vec3<f32>, period: f32) -> f32 {
+    let cell = floor(p);
+    let t = p - cell;
+    let w = t * t * (3.0 - 2.0 * t);
+    let a = mix(hash3(cell, period), hash3(cell + vec3<f32>(1.0, 0.0, 0.0), period), w.x);
+    let b = mix(hash3(cell + vec3<f32>(0.0, 1.0, 0.0), period), hash3(cell + vec3<f32>(1.0, 1.0, 0.0), period), w.x);
+    let c = mix(hash3(cell + vec3<f32>(0.0, 0.0, 1.0), period), hash3(cell + vec3<f32>(1.0, 0.0, 1.0), period), w.x);
+    let d = mix(hash3(cell + vec3<f32>(0.0, 1.0, 1.0), period), hash3(cell + vec3<f32>(1.0, 1.0, 1.0), period), w.x);
+    return mix(mix(a, b, w.y), mix(c, d, w.y), w.z);
+}
+
+/// How fuel-rich the gas is at a point: zero is burnt clean, one is a streak of soot.
+///
+/// Sampled on `(where the point sits across the cone, how far along it is)` — the cross-section
+/// **in units of the local radius** rather than in metres. That coordinate is constant along a
+/// streamline, because a parcel that leaves the injector a third of the way out stays a third of
+/// the way out while the cone flares around it. So the pattern is a bundle of filaments running
+/// the length of the plume, widening with it, and travelling aft as the phase slides. Sampling
+/// the raw position instead gives blobs of dirt hanging still in the proxy while the ship
+/// manoeuvres round them.
+///
+/// **Filaments and not sheets.** The first go used only the *direction* across the cone, which
+/// makes each lane a full radial sheet — and a ray down the middle of the plume crosses every
+/// angle there is, averages the lot, and comes out the colour of clean gas. Only the grazing
+/// rays at the silhouette kept any contrast, so the plume had a fringe and a blank middle.
+/// Localising a lane in the cross-section means every ray crosses a few of them and none of it
+/// averages flat.
+fn richness(p: vec3<f32>, radius: f32, along: f32) -> f32 {
+    let flat = p.xz / max(radius, 1e-6);
+    var coord = vec3<f32>(flat * material.churn.y, along * material.churn.z - material.churn.x);
+    var period = CHURN_PERIOD;
+    var amplitude = 1.0;
+    var total = 0.0;
+    var weight = 0.0;
+    for (var i = 0; i < OCTAVES; i = i + 1) {
+        total = total + value_noise(coord, period) * amplitude;
+        weight = weight + amplitude;
+        // The period doubles with the coordinate, so every octave still repeats where the first
+        // one does and the wrap stays seamless for all of them.
+        coord = coord * 2.0;
+        period = period * 2.0;
+        amplitude = amplitude * 0.5;
+    }
+    return smoothstep(RICH_LOW, RICH_HIGH, total / weight);
+}
+
+/// How much gas is at a point of the proxy, split into `(clean, rich)`, in arbitrary units.
 ///
 /// Zero outside the length, and a smooth falloff to the side rather than a wall — a plume in
 /// vacuum has no boundary, it just runs out of gas.
-fn density(p: vec3<f32>) -> f32 {
+///
+/// The split conserves the column: the streaks move gas from one colour to the other and never
+/// destroy it, so the core stays where the exposure was set for it and the plume does not dim
+/// when the churn is turned up.
+fn gas(p: vec3<f32>) -> vec2<f32> {
     let along = p.y + 0.5;
     if (along < 0.0 || along > 1.0) {
-        return 0.0;
+        return vec2<f32>(0.0);
     }
     // The cone: from the nozzle out to the mouth. This is the expansion ratio, drawn.
     let radius = mix(material.shape.x, material.shape.y, along);
@@ -72,7 +166,18 @@ fn density(p: vec3<f32>) -> f32 {
     // flat saturated shape. Bounded by one here, so the depth a ray accumulates is of order the
     // distance it travelled and the brightness scale below means something.
     let fading = pow(max(1.0 - along, 0.0), material.shape.w);
-    return profile * fading;
+    let amount = profile * fading;
+    // Most samples of a convex volume are outside it. Sixteen hashes each is worth skipping.
+    if (amount < 1e-4) {
+        return vec2<f32>(amount, 0.0);
+    }
+
+    // Nothing at the throat: the flow has not run far enough there to have separated into
+    // anything, and a plume that is striated the moment it leaves the nozzle looks like a
+    // painted cone rather than like gas coming apart.
+    let bite = material.churn.w * smoothstep(0.0, 0.2, along);
+    let rich = richness(p, radius, along) * bite;
+    return vec2<f32>(amount * (1.0 - rich), amount * rich);
 }
 
 @fragment
@@ -109,17 +214,23 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Emission only, with no absorption: the gas is thin and it is the brightest thing in the
     // frame, so what reaches the eye is the sum of what every part of it puts out.
+    //
+    // Two columns rather than one, because the ray crosses two gases and they are not the same
+    // colour. Summing the depth first and colouring it afterwards would average the streaks
+    // away — a ray through the flank crosses several lanes and the mean of a lane and the gas
+    // beside it is the gas beside it.
     let step = span / f32(STEPS);
-    var depth = 0.0;
+    var depth = vec2<f32>(0.0);
     for (var i = 0; i < STEPS; i = i + 1) {
         let back = (f32(i) + 0.5) * step;
-        depth = depth + density(in.local - direction * back) * step;
+        depth = depth + gas(in.local - direction * back) * step;
     }
-    if (depth <= 0.0) {
+    if (depth.x + depth.y <= 0.0) {
         return vec4<f32>(0.0);
     }
 
-    let linear = material.glow.rgb * depth * material.exposure.z;
+    let linear = (material.glow.rgb * depth.x + material.soot.rgb * depth.y)
+        * material.exposure.z;
 
     // The tone map of crate::tonemap, the same curve the lit surfaces evaluate, so a plume and
     // the planet it is flying past sit in one exposure rather than two that agree.

@@ -6,6 +6,11 @@
 //! integrates the density along its own view ray. Feathered edges and a bright core come out
 //! of that rather than being painted on, and the proxy's own shape never shows.
 //!
+//! The gas is not uniform either. A drive burns fuel-rich, and the flow combs whatever leaves
+//! the injector unmixed into lengthwise streaks of cooler, sootier gas, so a sample is two gases
+//! with two colours rather than one scaled. The streaks travel aft with [`PlumeUniform::churn`],
+//! whose phase the host advances on *simulation* time — a stopped clock is a still plume.
+//!
 //! Local space is the proxy's: the axis is `+y` running from `-0.5` at the nozzle to `+0.5` at
 //! the far end, and a radius of one is the proxy's wall. The host supplies
 //! `shaders/plume.wgsl`.
@@ -23,6 +28,14 @@ use bevy_mesh::MeshVertexBufferLayoutRef;
 /// A plume is convex and its density is smooth, so this is about resolving the profile rather
 /// than about not missing anything. Two dozen is past where the banding stops being visible.
 pub const STEPS: u32 = 24;
+
+/// The churn's period along the flow, in lattice cells of its first octave.
+///
+/// The shader's hash repeats on it, which is what makes wrapping the phase invisible. Wrapped
+/// it must be: the clock reaches tens of millions of times real time and a phase that only grew
+/// would leave `f32`'s useful spacing while somebody was still looking at it. `plume.wgsl`
+/// carries the same number.
+pub const CHURN_PERIOD: f32 = 64.0;
 
 #[derive(Clone, Debug, PartialEq, ShaderType)]
 pub struct PlumeUniform {
@@ -50,6 +63,19 @@ pub struct PlumeUniform {
     /// The same tone map the lit surfaces evaluate, for the same reason: a plume beside a
     /// planet has to sit in one exposure rather than two that agree.
     pub exposure: Vec4,
+    /// What the fuel-rich streaks radiate, on the same scale as [`Self::glow`]. `w` unused.
+    ///
+    /// A cooler greybody: unmixed fuel burns colder than the core and the soot it leaves is the
+    /// one part of a plume that is not optically thin, so it emits less than a blackbody as well
+    /// as redder. Both of those are the host's to work out — this is only where the answer goes.
+    pub soot: Vec4,
+    /// `(phase, across, along, bite)`.
+    ///
+    /// `phase` slides the pattern aft, in lattice cells, and the host wraps it at
+    /// [`CHURN_PERIOD`]. `across` is how many lanes go round the plume and `along` how many
+    /// lattice cells span its length — their ratio is how stretched a streak is, and a streak
+    /// that is not stretched is a cloud. `bite` is how much of the gas the streaks may claim.
+    pub churn: Vec4,
 }
 
 impl Default for PlumeUniform {
@@ -59,6 +85,8 @@ impl Default for PlumeUniform {
             shape: Vec4::new(0.12, 0.85, 2.5, 1.5),
             eye_local: Vec4::new(0.0, 0.0, -10.0, 0.0),
             exposure: Vec4::new(1.0, 2.5, 1.0, 0.0),
+            soot: Vec4::ZERO,
+            churn: Vec4::new(0.0, 5.0, 1.5, 1.0),
         }
     }
 }

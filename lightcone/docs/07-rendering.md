@@ -736,6 +736,40 @@ from — a ray grazing the side crosses almost nothing. Two traps, both paid for
   mouth — every part of the cone landed above the top of the window and the whole thing was one
   flat saturated shape.
 
+#### Streaks
+
+A drive burns fuel-rich, and what leaves the injector unmixed is drawn out by the flow into
+filaments of cooler, sootier gas running the length of the plume. So a sample is **two gases**
+rather than one: the march carries two columns, and the fragment colours them separately. Summing
+one column and tinting it afterwards averages the streaks away before they can be seen.
+
+The division of labour is the same one as everywhere else here. *That* the streaks are darker and
+redder is physics — a cooler blackbody, band-mapped exactly as the core is — with one honest
+correction: soot is the only constituent of a plume that is not optically thin, so it radiates as
+a greybody, at some emissivity below one. That emissivity is also what makes the streaks visible
+at all. Above about ten thousand kelvin the visible band is on the Rayleigh-Jeans side of the
+peak, where radiance goes as `T` and not as `T⁴`, and a streak six per cent down is a plume with
+no streaks in it.
+
+Two things about the noise, both found the hard way:
+
+- It is sampled on the cross-section **in units of the local radius**, not on the point. That
+  coordinate is constant along a streamline — a parcel a third of the way out stays a third of
+  the way out while the cone flares around it — so the pattern is filaments that run the length
+  of the plume and widen with it, rather than dirt hanging still in the proxy while the ship
+  manoeuvres round it.
+- Filaments and not sheets. Using only the *direction* across the cone makes each lane a full
+  radial sheet, and a ray down the middle crosses every angle there is, averages the lot and
+  comes out the colour of clean gas. The plume had a striped fringe and a blank middle.
+
+The pattern travels aft with the **simulation** clock, and how fast is a display model — a third
+one, beside the length and the flare. It has to be: the gas crosses the plume in milliseconds and
+the clock runs from real time to a Julian year a second, so there is no rung of the ladder at
+which the true rate is anything but a blur. An eighth root of the clock's speed maps seven decades
+of rate onto the factor of eight or so over which a moving pattern still reads as moving. The one
+thing that is exact is the bottom of the range: a stopped clock is a still plume, which is what
+every `--rate 0` photograph rests on.
+
 ### Ships in the interface
 
 The System window has two lists, because "what is here" and "who is here" are different
