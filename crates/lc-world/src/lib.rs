@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod attitude;
 pub mod boost;
 pub mod coast;
 pub mod craft;

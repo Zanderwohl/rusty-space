@@ -108,12 +108,12 @@ pub fn contacts(
                 length_m: craft.length_m,
                 at_ly: sighted.position_ly.to_array(),
                 beta: sighted.beta.to_array(),
-                // Zero where nothing decides it — a craft at rest with the engine off. A
-                // default sent here would be indistinguishable from a nose that really points
-                // that way, and the receiver is the end that knows what it last saw.
+                // Where the nose actually was when the light left, part-way through a turn
+                // included. A craft always has one now — see `lc_world::attitude` — so there is
+                // no "undecided" case left for the receiver to paper over.
                 facing: craft
                     .facing_at(sighted.emitted_s)
-                    .unwrap_or(glam::DVec3::ZERO)
+                    .unwrap_or(glam::DVec3::X)
                     .to_array(),
                 // At the moment the light left, not now. A burn that has since stopped is
                 // still burning as far as this observer is concerned.

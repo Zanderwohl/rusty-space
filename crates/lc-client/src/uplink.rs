@@ -580,6 +580,7 @@ mod tests {
             ship: lc_proto::Motion {
                 at_ly: ship_at,
                 beta: [0.0; 3],
+                attitude: [1.0, 0.0, 0.0],
                 clock_s: 0.0,
                 drive: lc_proto::Drive { accel_g: 5.0, max_beta: 0.999, exhaust_v_m_s: 1.5e7 },
                 motive,
@@ -659,6 +660,7 @@ mod tests {
         let expected = lc_world::resume::Snapshot::from(&lc_proto::Motion {
             at_ly: [4.2, 0.0, 0.0],
             beta: [0.0; 3],
+            attitude: [1.0, 0.0, 0.0],
             clock_s: 0.0,
             drive: lc_proto::Drive { accel_g: 5.0, max_beta: 0.999, exhaust_v_m_s: 1.5e7 },
             motive: lc_proto::Motive::Holding(station),

@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -187,6 +187,9 @@ pub struct Motion {
     pub at_ly: [f64; 3],
     /// Velocity as a fraction of `c`.
     pub beta: [f64; 3],
+    /// Which way the nose points. Carried because a turn takes time and is as often as not
+    /// half finished — nothing in a trajectory says where a nose had got to.
+    pub attitude: [f64; 3],
     /// Seconds on the ship's own clock, which no resynchronising may change.
     pub clock_s: f64,
     pub drive: Drive,
@@ -555,12 +558,13 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 pub mod golden {
     /// `Outbound::Welcome { .., ship: Motion { at [4.2, 0, 0], holding a 12 Mm orbit of Earth } }`
     pub const WELCOME: &[u8] = &[
-        0, 7, 12, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
+        0, 7, 13, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210,
-        77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0, 0,
-        20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56, 156, 108, 65, 2, 1, 1, 5,
-        69, 97, 114, 116, 104, 0, 0, 0, 0, 96, 227, 102, 65, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 224, 63,
+        77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0, 0, 20, 64, 43,
+        135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56, 156, 108, 65, 2, 1, 1, 5, 69, 97, 114,
+        116, 104, 0, 0, 0, 0, 96, 227, 102, 65, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 224, 63,
     ];
 
     /// `Inbound::Act(Intent { ship_id: 42, order: Transmit { power_w: 1500.0 }, .. })`
@@ -579,7 +583,7 @@ pub mod golden {
     /// Pinned because it is now the message that decides whether anyone gets in at all. A
     /// field moving here is a server reading someone else's ticket as this one's.
     pub const HELLO: &[u8] = &[
-        0, 12, 5, 97, 46, 98, 46, 99,
+        0, 13, 5, 97, 46, 98, 46, 99,
     ];
 
     pub const SET_COURSE: &[u8] = &[
@@ -622,17 +626,18 @@ pub mod golden {
     /// relative offset, a relative velocity, and a sighting. A field moving in it is a pursuer
     /// flying at a point its quarry was never at.
     pub const RENDEZVOUS: &[u8] = &[
-        0, 7, 12, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
+        0, 7, 13, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210,
-        77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0, 0,
-        20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56, 156, 108, 65, 1, 149, 214,
-        38, 232, 11, 46, 17, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 191, 0, 0, 0, 0, 0, 0, 0, 0, 17, 234, 45, 129,
-        153, 151, 113, 61, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 119,
-        43, 65, 0, 0, 0, 0, 0, 0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56,
-        156, 108, 65, 205, 204, 204, 204, 204, 204, 16, 64, 149, 214, 38, 232, 11, 46, 17, 62,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 112, 111, 43, 65, 14, 0, 0, 0, 0, 0, 255, 244, 64,
+        77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0, 0, 20, 64, 43,
+        135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56, 156, 108, 65, 1, 149, 214, 38, 232, 11,
+        46, 17, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252,
+        169, 241, 210, 77, 98, 80, 191, 0, 0, 0, 0, 0, 0, 0, 0, 17, 234, 45, 129, 153, 151, 113,
+        61, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 119, 43, 65, 0, 0,
+        0, 0, 0, 0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56, 156, 108, 65,
+        205, 204, 204, 204, 204, 204, 16, 64, 149, 214, 38, 232, 11, 46, 17, 62, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 112, 111, 43, 65, 14, 0, 0, 0, 0, 0, 255, 244, 64,
     ];
     /// `Inbound::Act(Intent { ship_id: 42, order: Intercept { ship_id: 7 }, .. })`
     ///
@@ -674,6 +679,7 @@ mod tests {
             ship: Motion {
                 at_ly: [4.2, 0.0, 0.0],
                 beta: [0.0, 0.001, 0.0],
+                attitude: [1.0, 0.0, 0.0],
                 clock_s: 86_400.0,
                 drive: Drive { accel_g: 5.0, max_beta: 0.999, exhaust_v_m_s: 1.5e7 },
                 motive: Motive::Holding(Waypoint::Orbit {
@@ -774,6 +780,7 @@ mod tests {
             ship: Motion {
                 at_ly: [4.2, 0.0, 0.0],
                 beta: [0.0, 0.001, 0.0],
+                attitude: [1.0, 0.0, 0.0],
                 clock_s: 86_400.0,
                 drive: Drive { accel_g: 5.0, max_beta: 0.999, exhaust_v_m_s: 1.5e7 },
                 motive: Motive::Rendezvous {

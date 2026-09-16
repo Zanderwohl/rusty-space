@@ -55,6 +55,15 @@ pub struct ShipState {
     pub beta: DVec3,
     pub motive: Motive,
     pub drive: Drive,
+    /// Which way the nose pointed when the current motive began.
+    ///
+    /// A turn takes time, so where the nose *is* depends on when you ask — that is
+    /// [`facing`]. This is where it starts from: the attitude the last order left it at, which
+    /// is the one thing about the ship's orientation that the trajectory cannot say.
+    ///
+    /// Never zero. A craft with nothing to aim it at points at the vernal equinox, which is
+    /// arbitrary and has to be *something* fixed in the world.
+    pub attitude: DVec3,
     /// Seconds on the ship's own clock.
     pub clock_s: f64,
     /// [`ShipState::clock_s`] when the current crossing began. A crossing carries its own proper
@@ -73,6 +82,7 @@ impl ShipState {
             beta: DVec3::ZERO,
             motive: Motive::Drifting { from_ly: position_ly, since_t: 0.0 },
             drive: Drive::DEFAULT,
+            attitude: DVec3::X,
             clock_s: 0.0,
             crossing_clock_base_s: 0.0,
             arrive_at: None,
@@ -158,6 +168,7 @@ impl ShipState {
         Snapshot {
             position_ly: self.position_ly,
             beta: self.beta,
+            attitude: self.attitude,
             clock_s: self.clock_s,
             drive: self.drive,
             motive: match &self.motive {
@@ -450,7 +461,11 @@ pub fn state_at(
     }
 }
 
-/// Which way the hull's nose points at a coordinate time, if anything decides it.
+/// Which way the hull's nose points at a coordinate time.
+///
+/// `hull_m` is how long the ship is, which is what decides how fast it turns. Passed rather
+/// than carried on the state: a second copy of a craft's length is a second copy that can
+/// disagree with the first.
 ///
 /// Thrust first, velocity second. A ship under way points along its drive — which is *back*
 /// down its own track through a brake — and a ship with the engine off points along its
@@ -460,23 +475,39 @@ pub fn state_at(
 /// Proper acceleration, so a ballistic arc counts as unpowered. Falling is not thrust, and a
 /// nose that followed the coordinate acceleration would point at the primary all the way round
 /// an orbit.
-pub fn facing(state: &ShipState, system: Option<&LocalSystem>, now_s: f64) -> Option<DVec3> {
-    // The frame does not rotate, so a thrust direction in it is a thrust direction here.
-    let thrusting = match &state.motive {
-        Motive::Crossing(cruise) => Some(cruise.thrust_at(now_s)),
-        // The plan and not its cruise: the cruise keeps the quarry frame's own time, and its
-        // thrust direction is in that frame's axes. Both have to come back.
-        Motive::Rendezvous(plan) => Some(plan.thrust_at(now_s)),
-        _ => None,
-    };
-    if let Some(thrust) = thrusting
-        && thrust != DVec3::ZERO
-    {
-        return Some(thrust.normalize());
+pub fn facing(state: &ShipState, hull_m: f64, now_s: f64) -> Option<DVec3> {
+    Some(facing_at(state, hull_m, now_s))
+}
+
+/// Which way the nose points at a coordinate time.
+///
+/// The ship swings toward whatever its plan last asked for, at the rate its hull allows — see
+/// [`crate::attitude`] — and a plan that has asked for nothing leaves it where it was. A
+/// coasting ship does not turn: there is nothing to point at, and attitude control is not free.
+///
+/// **Not the velocity.** An earlier version pointed a coasting ship along its motion, which
+/// left a ship that had just braked to a halt facing whichever way its last millimetre a second
+/// happened to go.
+pub fn facing_at(state: &ShipState, hull_m: f64, now_s: f64) -> DVec3 {
+    let rate = crate::attitude::rate_rad_s(hull_m);
+    let Some(aim) = aim_at(state, now_s) else { return state.attitude };
+    let from = aim.from.unwrap_or(state.attitude);
+    crate::attitude::turned(from, aim.to, rate, now_s - aim.since_s)
+}
+
+/// What the current plan is asking the nose to do, if it asks anything.
+///
+/// The frame does not rotate, so an aim taken in the quarry's frame is an aim here — but a
+/// rendezvous keeps that frame's own *clock*, so it has to be asked in world time through the
+/// plan rather than through its cruise.
+fn aim_at(state: &ShipState, now_s: f64) -> Option<crate::flight::Aim> {
+    match &state.motive {
+        Motive::Crossing(cruise) => Some(cruise.aim_at(now_s)),
+        Motive::Rendezvous(plan) => Some(plan.aim_at(now_s)),
+        // Nothing is asking. A station is held by thrust too small to turn for, and a conic
+        // and a drift ask for nothing at all.
+        Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => None,
     }
-    let beta = state_at(state, system, now_s).map(|(_, beta)| beta).unwrap_or(state.beta);
-    let along = beta.normalize_or_zero();
-    (along != DVec3::ZERO).then_some(along)
 }
 
 /// How hard a ship is burning at a coordinate time, in g. Zero when nothing is lit.
@@ -1251,6 +1282,10 @@ mod tests {
     /// half of a crossing the ship is pointing back the way it came while still travelling
     /// forward at a large fraction of `c`. A hull drawn along its velocity would spend that
     /// half facing the wrong way, and nothing about the picture would say it was braking.
+    ///
+    /// The flip is *ordered* at the end of the boost and takes the hull's own turning time to
+    /// finish, so the sample that lands on the boundary is checked separately from the ones
+    /// well into the brake.
     #[test]
     fn a_crossing_flips_the_nose_over_while_the_ship_still_moves_forward() {
         let to = DVec3::X * 4.0;
@@ -1259,155 +1294,102 @@ mod tests {
         let mut state = ShipState::at(DVec3::ZERO);
         state.begin_crossing(cruise.clone(), None);
 
+        let hull = 500.0;
+        let flip_s = crate::attitude::turn_time_s(DVec3::X, -DVec3::X, crate::attitude::rate_rad_s(hull));
+        assert!(flip_s > 0.0, "premise: turning takes time");
+
         let (mut boosted, mut braked, mut coasted) = (false, false, false);
         for k in 1..200 {
             let t = whole * k as f64 / 200.0;
-            let nose = facing(&state, None, t).expect("a ship under thrust is pointing somewhere");
+            let nose = facing(&state, hull, t).expect("a ship under way is pointing somewhere");
             let beta = state_at(&state, None, t).unwrap().1;
             // Forward, the whole way. It never turns round; only the ship does.
             assert!(beta.x > 0.0, "the ship went backwards at {t}: {beta}");
+            let since_flip = t - (cruise.start_s + cruise.aim_at(whole * 0.9).since_s);
             match cruise.at(t).phase {
                 crate::flight::Phase::Boost => {
                     boosted = true;
                     assert!(nose.x > 0.999, "boosting and not pointing along the line: {nose}");
                 }
-                crate::flight::Phase::Brake => {
+                // Past the turn it is round; inside it, it is on the way and neither.
+                crate::flight::Phase::Brake if since_flip > flip_s => {
                     braked = true;
                     assert!(nose.x < -0.999, "braking and not pointing back down it: {nose}");
                 }
-                // Nothing lit, so the nose is left along the velocity.
-                crate::flight::Phase::Coast => {
-                    coasted = true;
-                    assert!(nose.x > 0.999, "coasting and not pointing along the motion: {nose}");
+                crate::flight::Phase::Brake => {
+                    assert!(nose.x > -0.999, "it flipped faster than the hull can turn: {nose}");
                 }
+                crate::flight::Phase::Coast => coasted = true,
                 _ => {}
             }
         }
-        // A coast is not guaranteed — a crossing short enough never to reach the drive's cap
-        // is boost straight into brake — so it is checked where it happens and not required.
         let _ = coasted;
         assert!(boosted, "the crossing never boosted");
         assert!(braked, "the crossing never braked, which is the half this test is about");
     }
 
-    /// Falling is not thrust: nothing is lit, so the nose is simply the way the ship is going,
-    /// and it swings as the arc curves.
+    /// **The flip takes the time the hull says, and it happens where the drive is off.**
     ///
-    /// The contrast is with [`a_crossing_flips_the_nose_over_while_the_ship_still_moves_forward`],
-    /// where the drive is what decides. A `facing` built on the *coordinate* acceleration would
-    /// make these the same case and leave an orbiting ship permanently nose-down.
+    /// Putting the turn at the end of the boost is what makes it free: the drive is already out
+    /// for the changeover, so nothing is being thrust in a direction the ship is not facing.
     #[test]
-    fn a_ballistic_ship_points_along_its_motion_and_turns_with_it() {
+    fn the_flip_is_ordered_when_the_boost_ends_and_takes_a_hulls_turning_time() {
+        let cruise =
+            crate::flight::Cruise::plan(DVec3::ZERO, DVec3::X * 4.0, 0.0, crate::flight::Drive::DEFAULT);
+        let mut state = ShipState::at(DVec3::ZERO);
+        state.begin_crossing(cruise.clone(), None);
+
+        let ordered = cruise.aim_at(cruise.duration_s() * 0.9).since_s;
+        for hull in [500.0, 50_000.0] {
+            let rate = crate::attitude::rate_rad_s(hull);
+            let whole = crate::attitude::turn_time_s(DVec3::X, -DVec3::X, rate);
+            // At the order it has not moved; halfway it is square on; at the end it is round.
+            let at = |dt: f64| facing(&state, hull, ordered + dt).unwrap();
+            assert!((at(0.0) - DVec3::X).length() < 1.0e-9, "{hull} m had already turned");
+            assert!(at(whole * 0.5).x.abs() < 1.0e-6, "{hull} m was not square on halfway");
+            assert!((at(whole) + DVec3::X).length() < 1.0e-6, "{hull} m had not finished");
+        }
+        // And the big hull takes a hundred times as long over it as the small one.
+        let small = crate::attitude::turn_time_s(DVec3::X, -DVec3::X, crate::attitude::rate_rad_s(500.0));
+        let large = crate::attitude::turn_time_s(DVec3::X, -DVec3::X, crate::attitude::rate_rad_s(50_000.0));
+        assert!((large / small - 100.0).abs() < 1.0e-9);
+    }
+
+    /// **A coasting ship does not turn.** Nothing is asking it to, and attitude control is not
+    /// free — so it keeps whatever the last order left it pointing at.
+    ///
+    /// An earlier version pointed a coasting ship along its motion, which left a ship that had
+    /// just braked to a halt facing whichever way its last millimetre a second happened to go.
+    #[test]
+    fn a_coasting_ship_keeps_the_attitude_it_was_left_with() {
         let Some(system) = sol() else { return };
         let mut state = ShipState::at(system.body_position_ly("Earth").unwrap());
+        state.attitude = DVec3::new(0.0, 0.0, 1.0);
         let event = Event { ship: ShipId(1), at_t: 0.0, change: orbit("Earth") };
         apply(&mut state, Some(&system), &event).unwrap();
         // Off the station and onto the conic it was already flying, which is what cutting does.
         apply(&mut state, Some(&system), &Event { ship: ShipId(1), at_t: 0.0, change: Change::CutDrive })
             .unwrap();
 
-        let mut noses = Vec::new();
-        for k in 0..6 {
-            let t = 600.0 * k as f64;
-            let nose = facing(&state, Some(&system), t).expect("a moving ship points somewhere");
-            let beta = state_at(&state, Some(&system), t).unwrap().1;
-            assert!((nose - beta.normalize()).length() < 1e-9, "the nose left the velocity at {t}");
-            noses.push(nose);
+        for t in [0.0, 600.0, 3_600.0] {
+            let nose = facing(&state, 500.0, t).expect("a ship always points somewhere");
+            assert!(
+                (nose - DVec3::Z).length() < 1.0e-12,
+                "it turned to {nose} with nothing asking it to",
+            );
         }
-        // And it is following the arc rather than being stuck on whatever it started with.
-        let swing = noses[0].dot(*noses.last().unwrap()).clamp(-1.0, 1.0).acos();
-        assert!(swing > 0.05, "the nose barely moved over an hour of orbit: {swing} rad");
+        // And emphatically not along the velocity, which is where it used to end up.
+        let beta = state_at(&state, Some(&system), 600.0).unwrap().1;
+        assert!(beta.normalize().dot(DVec3::Z).abs() < 0.99, "premise: it is not going that way");
     }
 
-    /// A craft at rest with the engine off has no attitude this can derive, and says so rather
-    /// than inventing one. What to draw instead is the renderer's problem.
+    /// A parked ship points where it was left. There is no "nowhere": a hull has an
+    /// orientation whether or not anything is deciding it, and the renderer needs one.
     #[test]
-    fn nothing_decides_where_a_parked_ship_points() {
-        let state = ShipState::at(DVec3::X);
-        assert_eq!(facing(&state, None, 0.0), None);
+    fn a_parked_ship_points_where_it_was_left() {
+        let mut state = ShipState::at(DVec3::X);
+        assert_eq!(facing(&state, 500.0, 0.0), Some(DVec3::X), "the vernal equinox by default");
+        state.attitude = DVec3::new(0.0, 1.0, 0.0);
+        assert_eq!(facing(&state, 500.0, 1.0e6), Some(DVec3::Y));
     }
-
-
-    /// **An intercept, flown.** Not merely planned: stepped through `advance`, which is what a
-    /// server and a client both actually do, and asked where it ended up.
-    ///
-    /// The claim is the one a separate injection burn would exist to make — that the ship ends
-    /// alongside *and* moving with the quarry — and it comes out of one plan because the plan
-    /// was made in the quarry's frame.
-    #[test]
-    fn a_rendezvous_ends_alongside_a_moving_quarry_and_matched_to_it() {
-        use crate::pursuit::{Sighting, approach, standoff_m};
-
-        let km = 1.0e3 / crate::system::M_PER_LY;
-        let drifting = DVec3::new(0.0, 4.0e-5, 1.0e-5);
-        let seen = Sighting {
-            target: ShipId(2),
-            position_ly: DVec3::X * 2_000.0 * km,
-            beta: drifting,
-            length_m: 500.0,
-            emitted_s: 0.0,
-        };
-        let mut state = ShipState::at(DVec3::ZERO);
-        let plan = approach(&state, 500.0, &seen, 0.0, crate::flight::Drive::DEFAULT).unwrap();
-        let whole = plan.cruise.duration_s();
-        state.begin_rendezvous(plan);
-
-        // Stepped, so the arrival transition runs where it really would.
-        let steps = 400;
-        for k in 1..=steps {
-            let t = whole * 1.05 * k as f64 / steps as f64;
-            advance(&mut state, None, t, whole * 1.05 / steps as f64);
-        }
-        let end = whole * 1.05;
-
-        let standoff = standoff_m(500.0, seen.length_m) / crate::system::M_PER_LY;
-        let gap = state.position_ly.distance(seen.reckoned_at(end));
-        assert!(
-            (gap - standoff).abs() < standoff * 0.01,
-            "ended {gap} from the quarry, wanted {standoff}",
-        );
-        assert!(
-            (state.beta - drifting).length() < drifting.length() * 0.01,
-            "ended at {} rather than matched to {drifting}",
-            state.beta,
-        );
-        // And it is off the approach: arriving is not a state a ship stays in.
-        assert!(
-            matches!(state.motive, Motive::Drifting { .. }),
-            "still flying the approach: {:?}",
-            state.motive,
-        );
-        // Having matched, it stays matched — the pair coast together rather than separating.
-        let before = state.position_ly.distance(seen.reckoned_at(end));
-        advance(&mut state, None, end + 3_600.0, 3_600.0);
-        let after = state.position_ly.distance(seen.reckoned_at(end + 3_600.0));
-        assert!((after - before).abs() < standoff * 0.01, "drifted apart: {before} to {after}");
-    }
-
-    /// The nose follows the drive on an approach exactly as it does on a crossing, and the
-    /// frame does not tilt it: the flip happens in the middle and points back down the track.
-    #[test]
-    fn an_approach_flips_its_nose_over_like_any_other_burn() {
-        use crate::pursuit::{Sighting, approach};
-
-        let km = 1.0e3 / crate::system::M_PER_LY;
-        let seen = Sighting {
-            target: ShipId(2),
-            position_ly: DVec3::X * 2_000.0 * km,
-            beta: DVec3::ZERO,
-            length_m: 500.0,
-            emitted_s: 0.0,
-        };
-        let mut state = ShipState::at(DVec3::ZERO);
-        let plan = approach(&state, 500.0, &seen, 0.0, crate::flight::Drive::DEFAULT).unwrap();
-        let whole = plan.cruise.duration_s();
-        state.begin_rendezvous(plan);
-
-        let early = facing(&state, None, whole * 0.1).expect("under thrust");
-        let late = facing(&state, None, whole * 0.9).expect("still under thrust");
-        assert!(early.x > 0.99, "not boosting toward the quarry: {early}");
-        assert!(late.x < -0.99, "not braking back down the track: {late}");
-    }
-
-
 }

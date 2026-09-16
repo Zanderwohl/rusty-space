@@ -217,8 +217,14 @@ impl Craft {
     /// keeps its history exactly as it was.
     fn remembering<T>(&mut self, at_s: f64, change: impl FnOnce(&mut Self) -> T) -> T {
         let before = self.motion.clone();
+        // Where the turn the old motive had ordered got to. The new one starts from there,
+        // because a ship does not snap back to where it was pointing when it was given a new
+        // order — this is the one place the two motives are both in hand, so it is the only
+        // place that hand-over can happen.
+        let nose = motion::facing_at(&before, self.length_m, at_s);
         let out = change(self);
         if !before.same_worldline_as(&self.motion) {
+            self.motion.attitude = nose;
             self.past.push(Past { until_s: at_s, motion: before });
             self.forget_before(at_s);
         }
@@ -263,6 +269,11 @@ impl Craft {
         Flight::with_past(&self.motion, self.system.as_deref(), &self.past, self.known_from_s)
     }
 
+    /// How fast it can turn, radians a second. See [`crate::attitude`].
+    pub fn slew_rate_rad_s(&self) -> f64 {
+        crate::attitude::rate_rad_s(self.length_m)
+    }
+
     /// How much hull there is, cubic metres.
     ///
     /// The ovoid [`BEAM_PER_LENGTH`] and its neighbour describe, so a craft's volume follows
@@ -301,7 +312,7 @@ impl Craft {
 
     /// Which way the nose points at a coordinate second, or `None` when nothing decides it.
     pub fn facing_at(&self, now_s: f64) -> Option<DVec3> {
-        motion::facing(&self.motion, self.system.as_deref(), now_s)
+        motion::facing(&self.motion, self.length_m, now_s)
     }
 
     /// Where it is at a coordinate microsecond, light-microseconds from the world origin.

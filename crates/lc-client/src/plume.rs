@@ -152,7 +152,7 @@ fn burning(game: &Session, uplink: &crate::uplink::Uplink, eye: &crate::hull::Ey
         mine.length_m,
         mine.jet_power_w(now),
         rated,
-        mine.facing_at(now).unwrap_or(look),
+        mine.facing_at(now).unwrap_or(DVec3::X),
         look * eye.boom_m,
     ) {
         out.push((None, lit));

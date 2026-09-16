@@ -28,6 +28,10 @@ use crate::system::LocalSystem;
 pub struct Snapshot {
     pub position_ly: DVec3,
     pub beta: DVec3,
+    /// Which way the nose was pointing. Restored rather than re-derived, because a turn is
+    /// half-finished as often as not and there is nothing in a trajectory that says where a
+    /// nose had got to.
+    pub attitude: DVec3,
     /// Seconds on the ship's own clock. Never recomputed from the world's: no resynchronising
     /// un-ages a crew. See `lightcone/docs/17-reconciliation.md`.
     pub clock_s: f64,
@@ -81,6 +85,7 @@ impl Snapshot {
     pub fn restore(self, system: Option<&LocalSystem>, now_s: f64) -> ShipState {
         let mut state = ShipState::at(self.position_ly);
         state.beta = self.beta;
+        state.attitude = self.attitude;
         state.drive = self.drive;
         state.clock_s = self.clock_s;
         match self.motive {
@@ -123,6 +128,7 @@ impl From<&Snapshot> for lc_proto::Motion {
         Self {
             at_ly: snapshot.position_ly.to_array(),
             beta: snapshot.beta.to_array(),
+            attitude: snapshot.attitude.to_array(),
             clock_s: snapshot.clock_s,
             drive: drive_out(snapshot.drive),
             motive: match &snapshot.motive {
@@ -171,6 +177,7 @@ impl From<&lc_proto::Motion> for Snapshot {
         Self {
             position_ly: DVec3::from_array(motion.at_ly),
             beta: DVec3::from_array(motion.beta),
+            attitude: DVec3::from_array(motion.attitude),
             clock_s: motion.clock_s,
             drive: drive_in(motion.drive),
             motive: match &motion.motive {

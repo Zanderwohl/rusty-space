@@ -167,6 +167,13 @@ impl Rendezvous {
         self.frame_from_ly + self.frame_beta * (now_s - self.since_t) / JULIAN_YEAR_S
     }
 
+    /// World seconds elapsed at a given moment of the frame's own clock. The inverse of
+    /// [`Rendezvous::frame_time_at`], and the cheap direction: no root find, just the boost.
+    fn world_time_at(&self, frame_s: f64) -> f64 {
+        let x = self.cruise.at(frame_s).position_ly * JULIAN_YEAR_S;
+        boost::gamma_of(self.frame_beta) * (frame_s + self.frame_beta.dot(x))
+    }
+
     /// The frame's own time at which the pursuer is at a given world time.
     ///
     /// The inversion that relativity makes necessary. `t = γ(t' + β·x'(t'))`, and `x'` depends
@@ -256,6 +263,22 @@ impl Rendezvous {
             self.frame_at(now_s) + offset / JULIAN_YEAR_S,
             boost::velocity_from_frame(flight.beta, self.frame_beta),
         )
+    }
+
+    /// What the approach is asking the nose to do, in world axes, at a world time.
+    ///
+    /// The cruise's own aim, asked in the frame's time and aberrated back — the same two
+    /// corrections [`Rendezvous::thrust_at`] makes, and for the same reasons.
+    pub fn aim_at(&self, now_s: f64) -> crate::flight::Aim {
+        let aim = self.cruise.aim_at(self.frame_time_at(now_s - self.since_t));
+        let out = |v: DVec3| boost::velocity_from_frame(v, self.frame_beta).normalize_or_zero();
+        crate::flight::Aim {
+            to: out(aim.to),
+            from: aim.from.map(out),
+            // Back into world time, so the turn is measured against the clock the caller is
+            // holding rather than the quarry's.
+            since_s: self.since_t + self.world_time_at(aim.since_s),
+        }
     }
 
     /// Which way the drive points at a world time, in world axes. Zero where it is not lit.

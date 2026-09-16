@@ -14,7 +14,6 @@
 //! instead of being an error nobody measured.
 
 use bevy::camera::visibility::NoFrustumCulling;
-use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform};
 use em_render::render_space::sim_to_render;
@@ -77,25 +76,16 @@ pub struct Eye {
 #[derive(Component)]
 pub struct Hull(pub Option<ShipId>);
 
-/// The shared ovoid, which craft currently have one, and which way each was last pointing.
+/// The shared ovoid, and which craft currently have one.
 ///
-/// The attitudes are remembered because a craft at rest with the engine off does not have one:
-/// [`lc_world::motion::facing`] says `None` and means it. A ship that was flying and stopped
-/// keeps the nose it stopped with, which is what a ship does.
+/// No remembered attitudes any more. A craft carries its own now — see
+/// `lc_world::motion::facing_at` — so a ship keeps the nose its last order left it with,
+/// turning toward the next one at the rate its hull allows, and the renderer only has to ask.
 #[derive(Resource, Default)]
 pub struct Hulls {
     mesh: Option<Handle<Mesh>>,
     drawn: Vec<Option<ShipId>>,
-    facing: HashMap<Option<ShipId>, DVec3>,
 }
-
-/// Which way a craft points when nothing ever has decided, and nothing is remembered.
-///
-/// The vernal equinox, for want of anything better. Arbitrary, and it has to be *something*
-/// fixed in the world rather than something about the camera — a nose that followed the view
-/// would leave every parked ship permanently end-on, which is the one angle that shows nothing
-/// of a hull's shape.
-const UNDECIDED: DVec3 = DVec3::X;
 
 /// How close and how far the orbit camera may sit, in hull lengths.
 ///
@@ -271,7 +261,9 @@ fn drawn(game: &Session, uplink: &Uplink, eye: &Eye, look: DVec3) -> Vec<(Option
             // the eye was pulled back by.
             offset_m: look * eye.boom_m,
             length_m: game.ship.length_m,
-            facing: game.ship.facing_at(now).unwrap_or(DVec3::ZERO),
+            // Always somewhere: a hull has an orientation whether or not anything is
+            // deciding it, and the world is what remembers which.
+            facing: game.ship.facing_at(now).unwrap_or(DVec3::X),
             at_ly: game.ship.motion.position_ly,
         },
     ));
@@ -338,8 +330,6 @@ pub fn update_hulls(
                 Hull(*id),
             ));
         }
-        // A contact that has gone is a contact whose attitude is no longer about anything.
-        hulls.facing.retain(|id, _| keys.contains(id));
         hulls.drawn = keys;
         // Spawned this frame and placed the next. One frame at the origin is one frame with
         // the hull inside the camera, which is a flash of nothing rather than a wrong picture.
@@ -347,18 +337,10 @@ pub fn update_hulls(
     }
 
     let star = lighting(&game.0);
-    // Split off so the loop can write the remembered attitudes while reading the mesh handle.
-    let remembered = &mut hulls.facing;
     for (mut transform, material, marker) in placed.iter_mut() {
         let Some((_, at)) = want.iter().find(|(id, _)| *id == marker.0) else { continue };
-        let facing = if at.facing != DVec3::ZERO {
-            remembered.insert(marker.0, at.facing);
-            at.facing
-        } else {
-            remembered.get(&marker.0).copied().unwrap_or(UNDECIDED)
-        };
         transform.translation = sim_to_render(at.offset_m / UNIT_M).as_vec3();
-        transform.rotation = attitude(facing);
+        transform.rotation = attitude(at.facing);
         transform.scale = half_extents(at.length_m);
 
         let Some(asset) = materials.get_mut(&material.0) else { continue };

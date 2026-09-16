@@ -91,6 +91,17 @@ pub enum Phase {
     Arrived,
 }
 
+/// An order to point somewhere: where from, where to, and when it was given.
+///
+/// `from` is `None` when nothing has been ordered before — the turn then starts from whatever
+/// the ship was already pointing at, which only it knows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Aim {
+    pub to: DVec3,
+    pub from: Option<DVec3>,
+    pub since_s: f64,
+}
+
 /// Where the ship is and how fast, at one coordinate time.
 #[derive(Clone, Copy, Debug)]
 pub struct FlightState {
@@ -303,6 +314,38 @@ impl Cruise {
             self.coast_beta
         } else {
             beta_of(self.alpha, self.t0_s + self.boost_s)
+        }
+    }
+
+    /// Which way the ship is being told to point, and when it was told.
+    ///
+    /// Not the same question as [`Cruise::thrust_at`], and the difference is the flip. A ship
+    /// coasting between the boost and the brake has nothing lit, so its *thrust* is zero — but
+    /// it is not idling, it is turning around, and it was told to the moment the boost ended.
+    /// Putting the flip in the coast is what makes it free: the drive is off anyway.
+    ///
+    /// `from` is where the previous order left the nose, or `None` when this is the first order
+    /// of the crossing and the answer is whatever the ship was already doing.
+    pub fn aim_at(&self, now_s: f64) -> Aim {
+        let since = now_s - self.start_s;
+        // Shedding the velocity across the line: the drive points against it, and this is the
+        // first thing the crossing asks for.
+        if since < self.match_s {
+            return Aim { to: -self.match_dir, from: None, since_s: self.start_s };
+        }
+        let after_match = self.start_s + self.match_s;
+        // A ship that had no match to fly was never told anything before the boost.
+        let before_boost = (self.match_s > 0.0).then_some(-self.match_dir);
+        let t = since - self.match_s;
+        if t < self.boost_s {
+            return Aim { to: self.direction, from: before_boost, since_s: after_match };
+        }
+        // Everything from the end of the boost onward is one order — turn around and brake —
+        // so the turn is not restarted at the moment the drive relights.
+        Aim {
+            to: -self.direction,
+            from: Some(self.direction),
+            since_s: after_match + self.boost_s,
         }
     }
 
