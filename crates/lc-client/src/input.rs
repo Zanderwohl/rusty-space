@@ -3,7 +3,7 @@
 //! Input produces [`Action`] values and nothing else, so a second front end — a touch build,
 //! a script, a test — needs no new plumbing, and rebinding is a change to this table.
 
-use bevy::input::mouse::AccumulatedMouseMotion;
+use bevy::input::mouse::{AccumulatedMouseMotion, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use bevy_egui::input::EguiWantsInput;
@@ -39,7 +39,35 @@ pub fn bindings() -> Vec<(KeyCode, Action)> {
         (KeyCode::KeyN, Action::SelectNearest),
         (KeyCode::Period, Action::TimeRateUp),
         (KeyCode::Comma, Action::TimeRateDown),
+        // The keyboard path for the wheel, for the same reason the arrow keys shadow the
+        // mouse: it is the one that works without a pointing device.
+        (KeyCode::Equal, Action::Zoom(1.0)),
+        (KeyCode::Minus, Action::Zoom(-1.0)),
     ]
+}
+
+/// Turn the wheel into notches of zoom.
+///
+/// Pixel-precision devices report a continuous scroll rather than detents, so they are divided
+/// down instead of being taken as fifty notches of zoom for one flick of a trackpad.
+pub fn notches(unit: MouseScrollUnit, amount: f32) -> f64 {
+    match unit {
+        MouseScrollUnit::Line => amount as f64,
+        MouseScrollUnit::Pixel => (amount / WHEEL_PIXELS_PER_NOTCH) as f64,
+    }
+}
+
+/// The wheel, as zoom. Ignored while the interface wants it, so scrolling a panel does not
+/// also fly the camera.
+pub fn read_wheel(
+    mut wheel: MessageReader<MouseWheel>,
+    egui: Res<EguiWantsInput>,
+    mut out: MessageWriter<Requested>,
+) {
+    let total: f64 = wheel.read().map(|w| notches(w.unit, w.y)).sum();
+    if total != 0.0 && !egui.wants_any_pointer_input() {
+        out.write(Requested(Action::Zoom(total)));
+    }
 }
 
 /// Keys held rather than pressed. Look is continuous, so it scales with the frame.
@@ -54,6 +82,10 @@ pub fn held_bindings() -> Vec<(KeyCode, (f64, f64))> {
 
 /// Radians of look per pixel of mouse movement.
 pub const MOUSE_SENSITIVITY: f64 = 0.003;
+
+/// Notches of zoom per line of wheel. A pixel-precision wheel — a trackpad — reports pixels
+/// instead, and this many of them make one notch.
+pub const WHEEL_PIXELS_PER_NOTCH: f32 = 50.0;
 
 /// The button that turns the view.
 pub const LOOK_BUTTON: MouseButton = MouseButton::Right;

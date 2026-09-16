@@ -19,6 +19,8 @@ pub struct Entry {
     /// Run a shard in this process and connect to that. Beats `server` when both are given,
     /// because asking for a local one is the more specific request.
     pub local: bool,
+    /// Craft to put near the start, so there is something to look at besides one's own ship.
+    pub traffic: usize,
 }
 
 /// Parses the flag vocabulary both binaries accept.
@@ -56,17 +58,25 @@ pub fn parse(args: &[String]) -> Entry {
     {
         actions.push(Action::SetCurveBand(*band));
     }
-    // Turning is the only way to put something off screen, and an edge indicator cannot be
-    // photographed without one.
+    if flag("--fly") {
+        // Index 0 of the sorted sky is the Sun in the full catalogue; 1 is interstellar.
+        actions.push(Action::FlyToNearest);
+    }
+
+
+    // Last, and after anything that aims: `--turn` exists to put something off screen, and
+    // `--fly` ends by pointing the view at what it is flying to. Pushed first, the aim undid
+    // the turn and the two flags together were the same picture as the one on its own.
     if let Some(degrees) = value::<f64>(args, "--turn") {
         actions.push(Action::Look { yaw: degrees.to_radians(), pitch: 0.0 });
     }
     if let Some(degrees) = value::<f64>(args, "--pitch") {
         actions.push(Action::Look { yaw: 0.0, pitch: degrees.to_radians() });
     }
-    if flag("--fly") {
-        // Index 0 of the sorted sky is the Sun in the full catalogue; 1 is interstellar.
-        actions.push(Action::FlyToNearest);
+    // Both ends of the orbit camera's range are clamps, so the only way to photograph one is
+    // to ask for far more than it will give and let it stop where it stops.
+    if let Some(notches) = value::<f64>(args, "--zoom") {
+        actions.push(Action::Zoom(notches));
     }
 
     // The sign-in modal draws over the main menu, so it cannot be reached by an action that
@@ -80,6 +90,7 @@ pub fn parse(args: &[String]) -> Entry {
         observe_immediately: !stay_in_menu
             && (flag("--observe") || flag("--shot") || flag("--at") || flag("--station")),
         target_swarm: flag("--swarm"),
+        chase: flag("--chase"),
         at_body: after("--at"),
         station: after("--station"),
         lift_deg: value(args, "--lift"),
@@ -95,7 +106,16 @@ pub fn parse(args: &[String]) -> Entry {
     // The first argument only. Scanning for any non-flag token would pick up a flag's own
     // value: in `--band 2` the `2` looks exactly like a path.
     let catalogue = args.first().filter(|a| !a.starts_with("--")).cloned();
-    Entry { dev, catalogue, server: after("--server"), local: flag("--local") }
+    // Asking for traffic is asking for a shard to serve it, so it implies `--local` rather
+    // than silently doing nothing without it.
+    let traffic = value::<usize>(args, "--traffic").unwrap_or(0);
+    Entry {
+        dev,
+        catalogue,
+        server: after("--server"),
+        local: flag("--local") || traffic > 0,
+        traffic,
+    }
 }
 
 /// Reads the flags out of a URL query string.
@@ -243,13 +263,14 @@ mod tests {
 
     #[test]
     fn nothing_at_all_is_a_plain_start() {
-        let Entry { dev, catalogue: cat, server, local } = parse(&[]);
+        let Entry { dev, catalogue: cat, server, local, traffic } = parse(&[]);
         assert!(!dev.observe_immediately);
         assert!(dev.actions.is_empty());
         assert_eq!(cat, None);
         // No server named is the single-process game, not a default address.
         assert_eq!(server, None);
         assert!(!local);
+        assert_eq!(traffic, 0);
     }
 
     /// `--local` is its own thing, not an address, because the port is not known until the

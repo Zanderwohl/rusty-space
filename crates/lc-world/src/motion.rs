@@ -21,11 +21,26 @@ use lc_spacetime::Worldline;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ShipId(pub i64);
 
-/// How a ship is moving. The four are exclusive, and that exclusivity is the model.
+/// How a ship is moving. The six are exclusive, and that exclusivity is the model.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Motive {
     /// Under thrust, on a planned crossing.
     Crossing(Cruise),
+    /// Under thrust, on a crossing flown in a *body's* frame rather than the world's.
+    ///
+    /// What going from one orbit of Earth to another actually is. A motive of its own for the
+    /// same reason [`Motive::Rendezvous`] is: the frame is part of the answer, and reading the
+    /// plan in the world's needs the body back. See [`crate::transfer`], which also says why the
+    /// world frame cannot fly this at all.
+    Transfer(crate::transfer::Transfer),
+    /// Under thrust, closing on another craft and matching its velocity.
+    ///
+    /// A crossing in a moving frame, and it is a motive of its own rather than a `Crossing`
+    /// because the frame is part of the answer: the plan ends at rest in the *quarry's* frame,
+    /// which is what "matched" means, and reading it in the world's needs the frame back. See
+    /// [`crate::pursuit`], which also says why the frame is a frozen sighting and not a handle
+    /// on the quarry's live worldline.
+    Rendezvous(crate::pursuit::Rendezvous),
     /// Held on a place by thrust. A station is a position, not a trajectory.
     Holding(Waypoint),
     /// Ballistic on a conic, about whichever body's influence it is in.
@@ -47,6 +62,15 @@ pub struct ShipState {
     pub beta: DVec3,
     pub motive: Motive,
     pub drive: Drive,
+    /// Which way the nose pointed when the current motive began.
+    ///
+    /// A turn takes time, so where the nose *is* depends on when you ask — that is
+    /// [`facing`]. This is where it starts from: the attitude the last order left it at, which
+    /// is the one thing about the ship's orientation that the trajectory cannot say.
+    ///
+    /// Never zero. A craft with nothing to aim it at points at the vernal equinox, which is
+    /// arbitrary and has to be *something* fixed in the world.
+    pub attitude: DVec3,
     /// Seconds on the ship's own clock.
     pub clock_s: f64,
     /// [`ShipState::clock_s`] when the current crossing began. A crossing carries its own proper
@@ -65,6 +89,7 @@ impl ShipState {
             beta: DVec3::ZERO,
             motive: Motive::Drifting { from_ly: position_ly, since_t: 0.0 },
             drive: Drive::DEFAULT,
+            attitude: DVec3::X,
             clock_s: 0.0,
             crossing_clock_base_s: 0.0,
             arrive_at: None,
@@ -72,7 +97,56 @@ impl ShipState {
     }
 
     pub fn is_under_way(&self) -> bool {
-        matches!(self.motive, Motive::Crossing(_))
+        matches!(
+            self.motive,
+            Motive::Crossing(_) | Motive::Transfer(_) | Motive::Rendezvous(_)
+        )
+    }
+
+    /// Put a ship on an approach solved for it. The counterpart of [`Self::begin_crossing`],
+    /// and it bases the crew's clock the same way.
+    pub fn begin_rendezvous(&mut self, plan: crate::pursuit::Rendezvous) {
+        self.crossing_clock_base_s = self.clock_s;
+        self.motive = Motive::Rendezvous(plan);
+        self.arrive_at = None;
+    }
+
+    /// Put one back part-way through, keeping the clock base it began with.
+    pub fn resume_rendezvous(&mut self, plan: crate::pursuit::Rendezvous, clock_base_s: f64) {
+        self.motive = Motive::Rendezvous(plan);
+        self.arrive_at = None;
+        self.crossing_clock_base_s = clock_base_s;
+    }
+
+    /// Whether two states describe the *same worldline*, rather than the same ship.
+    ///
+    /// The motive, and the velocity as well when the motive is a drift — because that is the
+    /// one arm of [`state_at`] that reads a field outside the motive, and a ship that changes
+    /// velocity while still drifting is on a different line through spacetime even though its
+    /// motive has not changed shape.
+    ///
+    /// Deliberately *not* the whole state. Position, velocity and the crew's clock all move on
+    /// every step of a crossing without the worldline changing at all, and a craft recording a
+    /// stretch of history per step would remember only the last few seconds of its life.
+    ///
+    /// This lives beside [`state_at`] because it is a statement about what that function reads.
+    /// The two are wrong together or right together, and apart they would rot.
+    pub fn same_worldline_as(&self, other: &ShipState) -> bool {
+        if self.motive != other.motive {
+            return false;
+        }
+        match (&self.motive, &other.motive) {
+            (Motive::Drifting { .. }, Motive::Drifting { .. }) => self.beta == other.beta,
+            _ => true,
+        }
+    }
+
+    /// Who this ship is closing on, if it is closing on anybody.
+    pub fn pursuing(&self) -> Option<ShipId> {
+        match &self.motive {
+            Motive::Rendezvous(plan) => Some(plan.target),
+            _ => None,
+        }
     }
 
     /// Where the crossing under way is for, if it is for anywhere.
@@ -85,6 +159,25 @@ impl ShipState {
     /// [`apply`] is the way in for anything a client and a server both have to agree about.
     /// This is for the crossing between stars, which has no course to resolve and no system to
     /// resolve it against.
+    /// Put a ship on a transfer solved for it, basing the crew's clock as a crossing does.
+    pub fn begin_transfer(&mut self, transfer: crate::transfer::Transfer, arrive_at: Waypoint) {
+        self.crossing_clock_base_s = self.clock_s;
+        self.motive = Motive::Transfer(transfer);
+        self.arrive_at = Some(arrive_at);
+    }
+
+    /// Put one back part-way through, keeping the clock base it began with.
+    pub fn resume_transfer(
+        &mut self,
+        transfer: crate::transfer::Transfer,
+        arrive_at: Option<Waypoint>,
+        clock_base_s: f64,
+    ) {
+        self.motive = Motive::Transfer(transfer);
+        self.arrive_at = arrive_at;
+        self.crossing_clock_base_s = clock_base_s;
+    }
+
     pub fn begin_crossing(&mut self, cruise: Cruise, arrive_at: Option<Waypoint>) {
         self.crossing_clock_base_s = self.clock_s;
         self.motive = Motive::Crossing(cruise);
@@ -104,6 +197,7 @@ impl ShipState {
         Snapshot {
             position_ly: self.position_ly,
             beta: self.beta,
+            attitude: self.attitude,
             clock_s: self.clock_s,
             drive: self.drive,
             motive: match &self.motive {
@@ -111,9 +205,25 @@ impl ShipState {
                     from_ly: cruise.from_ly,
                     beta0: cruise.initial_beta(),
                     to_ly: cruise.to_ly,
+                    arrive_beta: cruise.arrive_beta(),
                     start_s: cruise.start_s,
                     drive: cruise.drive,
                     arrive_at: self.arrive_at.clone(),
+                    clock_base_s: self.crossing_clock_base_s,
+                },
+                Motive::Transfer(transfer) => Recipe::Transfer {
+                    about: transfer.about.clone(),
+                    from_ly: transfer.cruise.from_ly,
+                    beta0: transfer.cruise.initial_beta(),
+                    to_ly: transfer.cruise.to_ly,
+                    arrive_beta: transfer.cruise.arrive_beta(),
+                    start_s: transfer.cruise.start_s,
+                    drive: transfer.cruise.drive,
+                    arrive_at: self.arrive_at.clone(),
+                    clock_base_s: self.crossing_clock_base_s,
+                },
+                Motive::Rendezvous(plan) => Recipe::Rendezvous {
+                    approach: plan.recipe(),
                     clock_base_s: self.crossing_clock_base_s,
                 },
                 Motive::Holding(waypoint) => Recipe::Holding(waypoint.clone()),
@@ -177,6 +287,10 @@ impl ShipState {
                 // The place it was flying to is gone even though the flight is not.
                 self.arrive_at = None;
             }
+            // An approach is defined against another craft and not against the system, so
+            // leaving one takes nothing from it. Whether the quarry is still in sight is the
+            // pursuit's business, not the system's.
+            Motive::Rendezvous(_) => {}
             _ => self.set_adrift(now_s),
         }
     }
@@ -314,7 +428,14 @@ pub fn apply(
             state.beta = beta;
             state.drive = *drive;
             state.begin_crossing(
-                crate::flight::Cruise::plan_from(at, beta, stop, event.at_t, *drive),
+                crate::flight::Cruise::plan_from(
+                    at,
+                    beta,
+                    stop,
+                    state.attitude,
+                    event.at_t,
+                    *drive,
+                ),
                 None,
             );
             Ok(())
@@ -328,12 +449,42 @@ pub fn apply(
             let (at, beta) = state_at(state, Some(system), event.at_t)
                 .unwrap_or((state.position_ly, state.beta));
             let waypoint = course.resolve(system, at, event.at_t).ok_or(Rejected::NoSuchPlace)?;
-            let (cruise, aimed) =
-                crate::navigation::plan(system, &waypoint, at, beta, event.at_t, *drive)
-                    .ok_or(Rejected::NoSuchPlace)?;
             state.position_ly = at;
             state.beta = beta;
             state.drive = *drive;
+            // **A station about the body the ship is already falling with is flown in that
+            // body's frame.** In the world's, the destination runs away at the body's own speed
+            // and the arrival time has no fixed point — see `crate::transfer`. Decided here
+            // rather than inside the planner because it is a choice of *motive*, and both sides
+            // have to make the same one from the same event.
+            let about = crate::transfer::primary_for(system, &waypoint, at, event.at_t);
+            let planned = about.as_deref().and_then(|about| {
+                crate::transfer::plan(
+                    system,
+                    about,
+                    &waypoint,
+                    at,
+                    beta,
+                    state.attitude,
+                    event.at_t,
+                    *drive,
+                )
+            });
+            if let Some((transfer, aimed)) = planned {
+                state.begin_transfer(transfer, aimed);
+                return Ok(());
+            }
+            let (cruise, aimed) =
+                crate::navigation::plan(
+                    system,
+                    &waypoint,
+                    at,
+                    beta,
+                    state.attitude,
+                    event.at_t,
+                    *drive,
+                )
+                .ok_or(Rejected::NoSuchPlace)?;
             state.crossing_clock_base_s = state.clock_s;
             state.motive = Motive::Crossing(cruise);
             // Remembered so that arriving becomes holding rather than drifting away from the
@@ -366,6 +517,12 @@ pub fn state_at(
             let flight = cruise.at(now_s);
             Some((flight.position_ly, flight.beta))
         }
+        // The plan is in the body's frame, so the body has to be added back. Without a system
+        // there is no body to add and no answer to give.
+        Motive::Transfer(transfer) => transfer.state_at(system?, now_s),
+        // The plan is relative, so the frame has to be added back. Galilean, and
+        // [`crate::pursuit`] carries the bound on that.
+        Motive::Rendezvous(plan) => Some(plan.state_at(now_s)),
         Motive::Holding(waypoint) => {
             let system = system?;
             let at = waypoint.place_at(system, now_s)?;
@@ -383,6 +540,74 @@ pub fn state_at(
             Some((*from_ly + state.beta * (now_s - since_t) / JULIAN_YEAR_S, state.beta))
         }
     }
+}
+
+/// Which way the hull's nose points at a coordinate time.
+///
+/// `hull_m` is how long the ship is, which is what decides how fast it turns. Passed rather
+/// than carried on the state: a second copy of a craft's length is a second copy that can
+/// disagree with the first.
+///
+/// Thrust first, velocity second. A ship under way points along its drive — which is *back*
+/// down its own track through a brake — and a ship with the engine off points along its
+/// motion. A craft at rest with nothing burning has no attitude this can derive, and `None`
+/// says so rather than inventing one; the renderer holds whatever it last had.
+///
+/// Proper acceleration, so a ballistic arc counts as unpowered. Falling is not thrust, and a
+/// nose that followed the coordinate acceleration would point at the primary all the way round
+/// an orbit.
+pub fn facing(state: &ShipState, hull_m: f64, now_s: f64) -> Option<DVec3> {
+    Some(facing_at(state, hull_m, now_s))
+}
+
+/// Which way the nose points at a coordinate time.
+///
+/// The ship swings toward whatever its plan last asked for, at the rate its hull allows — see
+/// [`crate::attitude`] — and a plan that has asked for nothing leaves it where it was. A
+/// coasting ship does not turn: there is nothing to point at, and attitude control is not free.
+///
+/// **Not the velocity.** An earlier version pointed a coasting ship along its motion, which
+/// left a ship that had just braked to a halt facing whichever way its last millimetre a second
+/// happened to go.
+pub fn facing_at(state: &ShipState, hull_m: f64, now_s: f64) -> DVec3 {
+    let rate = crate::attitude::rate_rad_s(hull_m);
+    let Some(aim) = aim_at(state, now_s) else { return state.attitude };
+    let from = aim.from.unwrap_or(state.attitude);
+    crate::attitude::turned(from, aim.to, rate, now_s - aim.since_s)
+}
+
+/// What the current plan is asking the nose to do, if it asks anything.
+///
+/// The frame does not rotate, so an aim taken in the quarry's frame is an aim here — but a
+/// rendezvous keeps that frame's own *clock*, so it has to be asked in world time through the
+/// plan rather than through its cruise.
+fn aim_at(state: &ShipState, now_s: f64) -> Option<crate::flight::Aim> {
+    match &state.motive {
+        Motive::Crossing(cruise) => Some(cruise.aim_at(now_s)),
+        Motive::Transfer(transfer) => Some(transfer.aim_at(now_s)),
+        Motive::Rendezvous(plan) => Some(plan.aim_at(now_s)),
+        // Nothing is asking. A station is held by thrust too small to turn for, and a conic
+        // and a drift ask for nothing at all.
+        Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => None,
+    }
+}
+
+/// How hard a ship is burning at a coordinate time, in g. Zero when nothing is lit.
+///
+/// The magnitude of what [`facing`] gives the direction of, and it has the same rule: *proper*
+/// acceleration, so a ballistic arc is zero however hard it is falling.
+///
+/// Holding a station is zero too, and that one is a simplification rather than a definition. A
+/// station is held by thrust, but the thrust is whatever cancels the local gravity — milligravities
+/// against the whole-g burns everything else here is about, and a plume nobody would see.
+pub fn thrust_g(state: &ShipState, now_s: f64) -> f64 {
+    let lit = match &state.motive {
+        Motive::Crossing(cruise) => cruise.thrust_at(now_s) != DVec3::ZERO,
+        Motive::Transfer(transfer) => transfer.thrust_at(now_s) != DVec3::ZERO,
+        Motive::Rendezvous(plan) => plan.thrust_at(now_s) != DVec3::ZERO,
+        Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => false,
+    };
+    if lit { state.drive.accel_g } else { 0.0 }
 }
 
 /// Move a ship to a coordinate time.
@@ -409,7 +634,11 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
             // already stopped. The crossing carries the closed form; use it.
             state.clock_s = state.crossing_clock_base_s + flight.proper_s;
             if flight.phase == Phase::Arrived {
-                state.beta = DVec3::ZERO;
+                // Whatever the crossing ended on, which is the station's velocity when there was
+                // one to join and rest otherwise. Not zero: a crossing planned onto an orbit
+                // finishes *moving*, and forcing it to a stop here would throw away the burn
+                // that got it there. See `Cruise::plan_onto`.
+                state.beta = flight.beta;
                 state.motive = match state.arrive_at.take() {
                     Some(waypoint) => {
                         // Placed on it at once, not next step. The crossing ends where the
@@ -422,6 +651,51 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
                         Motive::Holding(waypoint)
                     }
                     None => Motive::Drifting { from_ly: state.position_ly, since_t: now_s },
+                };
+            }
+        }
+        Motive::Transfer(transfer) => {
+            let flight = transfer.flight_at(now_s);
+            state.clock_s = state.crossing_clock_base_s + flight.proper_s;
+            if flight.phase == Phase::Arrived {
+                // The station's velocity, in the world, which is the body's plus the plan's. The
+                // transfer ends *on* it — see `Cruise::plan_onto` — so there is nothing left to
+                // find here.
+                if let Some((at, beta)) = state_at(state, system, now_s) {
+                    state.position_ly = at;
+                    state.beta = beta;
+                }
+                state.motive = match state.arrive_at.take() {
+                    Some(waypoint) => {
+                        if let Some(at) = system.and_then(|s| waypoint.place_at(s, now_s)) {
+                            state.position_ly = at;
+                        }
+                        Motive::Holding(waypoint)
+                    }
+                    None => Motive::Drifting { from_ly: state.position_ly, since_t: now_s },
+                };
+            }
+        }
+        Motive::Rendezvous(plan) => {
+            // Sampled at a world time through the plan, which is what reconciles it with the
+            // quarry frame's own clock. Reading the cruise directly asked it about a moment it
+            // measures differently, and at speed those are months apart.
+            let flight = plan.flight_at(now_s);
+            state.clock_s = state.crossing_clock_base_s + flight.proper_s;
+            if flight.phase == Phase::Arrived {
+                // Arriving is not stopping. What is left is the quarry's own velocity, which
+                // is the whole point of having planned in its frame — so the ship comes off
+                // the approach *already* alongside and moving with it, and goes ballistic from
+                // there by the same route cutting the drive takes.
+                let (at, beta) = plan.state_at(now_s);
+                state.position_ly = at;
+                state.beta = beta;
+                let velocity = beta * crate::flight::C_M_S;
+                state.motive = match system
+                    .and_then(|s| Coast::from_state(s, at, velocity, now_s))
+                {
+                    Some(arc) => Motive::Falling(arc),
+                    None => Motive::Drifting { from_ly: at, since_t: now_s },
                 };
             }
         }
@@ -530,12 +804,37 @@ pub fn repatch_due(state: &ShipState, system: &LocalSystem, now_s: f64) -> Optio
 /// model measures in light-years because that is the unit a galaxy is. This is the join.
 pub const LIGHT_US_PER_LY: f64 = JULIAN_YEAR_S * 1.0e6;
 
+/// A stretch of a worldline that is over: what a ship was doing, and when it stopped.
+///
+/// See [`Flight`] for why a craft keeps these at all.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Past {
+    /// Coordinate seconds at which this stopped being in force.
+    pub until_s: f64,
+    pub motion: ShipState,
+}
+
 /// A ship's worldline, for the light-delay solve.
 ///
 /// Borrowed rather than owned: the motive and the system are the truth, and a copy of them in
 /// another shape is a copy that can be stale. Holding the two together is what makes the
 /// worldline total — a station and a conic mean nothing without the bodies they are defined
 /// against.
+///
+/// **A worldline has a past, and that is not decoration.** A motive is a closed form total in
+/// `t`, so evaluating the *current* one at an earlier time answers about a ship that did not
+/// exist yet: `Motive::Drifting` extrapolates backwards, so a burn would retroactively rewrite
+/// where the ship was an hour ago and how fast. Every retarded solve then reads the new motion
+/// at the old time — which is a client watching a manoeuvre the instant it happens, at any
+/// range, and the end of the game this is all built to be.
+///
+/// So a craft keeps the motives it has flown, stamped with when each stopped, and this picks
+/// the one that was in force. The same shape `crate::observation::Target` uses for emission
+/// models, for the same reason: an event does not alter the past, it appends.
+///
+/// The memory is bounded, so the past runs out. [`Flight::defined_over`] says where, and a
+/// solve that falls off the end returns nothing at all rather than a guess — not seeing
+/// something is always safe, and inventing where it was is not.
 ///
 /// The frame is `lc-spacetime`'s: light-microseconds from the world origin, and coordinate
 /// microseconds. Note the precision this costs at galactic distances — a position is a `f64`
@@ -545,11 +844,41 @@ pub const LIGHT_US_PER_LY: f64 = JULIAN_YEAR_S * 1.0e6;
 pub struct Flight<'a> {
     state: &'a ShipState,
     system: Option<&'a LocalSystem>,
+    /// Oldest first, and each one's `until_s` later than the last.
+    past: &'a [Past],
+    /// The earliest coordinate second this can answer for. `-inf` when nothing has been
+    /// forgotten, which is the case for a craft that has never changed what it was doing.
+    known_from_s: f64,
 }
 
 impl<'a> Flight<'a> {
+    /// A worldline with no past: whatever it is doing now, it has always been doing.
+    ///
+    /// True only of a craft that has never changed its motive. Anything the world has run is
+    /// built by [`crate::craft::Craft::worldline`], which carries the real history.
     pub fn new(state: &'a ShipState, system: Option<&'a LocalSystem>) -> Self {
-        Self { state, system }
+        Self { state, system, past: &[], known_from_s: f64::NEG_INFINITY }
+    }
+
+    pub fn with_past(
+        state: &'a ShipState,
+        system: Option<&'a LocalSystem>,
+        past: &'a [Past],
+        known_from_s: f64,
+    ) -> Self {
+        Self { state, system, past, known_from_s }
+    }
+
+    /// What the ship was doing at a coordinate second.
+    ///
+    /// The first stretch that had not ended yet, or the current motive when none of them
+    /// apply. `past` is ordered, so the first match is the right one.
+    fn doing_at(&self, s: f64) -> &ShipState {
+        self.past
+            .iter()
+            .find(|entry| s < entry.until_s)
+            .map(|entry| &entry.motion)
+            .unwrap_or(self.state)
     }
 
     /// Position and beta at a coordinate microsecond, in light-years.
@@ -558,8 +887,9 @@ impl<'a> Flight<'a> {
     /// body that has gone, or a chain that is integrated. The same choice [`advance`] makes:
     /// keep what is known rather than invent a position from nothing.
     fn read(&self, t_us: f64) -> (DVec3, DVec3) {
-        state_at(self.state, self.system, t_us * 1.0e-6)
-            .unwrap_or((self.state.position_ly, self.state.beta))
+        let s = t_us * 1.0e-6;
+        let state = self.doing_at(s);
+        state_at(state, self.system, s).unwrap_or((state.position_ly, state.beta))
     }
 }
 
@@ -572,11 +902,15 @@ impl Worldline for Flight<'_> {
         self.read(t).1
     }
 
-    /// Total in `t`. A crossing clamps to its endpoints outside its own span rather than
-    /// ending, so every arm answers everywhere and the solve never has to ask whether a ship
-    /// existed yet.
+    /// Forward forever, and back as far as the craft still remembers.
+    ///
+    /// Every arm of a motive answers everywhere, so the forward end never runs out. The back
+    /// end is where the history was pruned: before it this would have to extrapolate a motive
+    /// the ship was not yet flying, and the solver's contract is that a root outside this range
+    /// is no root at all. Which is the answer that is safe — an observer far enough away that
+    /// the light it wants left before the shard remembers simply sees nothing.
     fn defined_over(&self) -> (f64, f64) {
-        (f64::NEG_INFINITY, f64::INFINITY)
+        (self.known_from_s * 1.0e6, f64::INFINITY)
     }
 }
 
@@ -929,6 +1263,128 @@ mod tests {
         assert!(repatch_at(&ship, &system, arrival).is_none(), "a circular orbit stays put");
     }
 
+    /// **A ship pointing the wrong way pays for turning round before it can go anywhere.**
+    ///
+    /// Through the fold, which is what both sides run: the attitude the ship is carrying is what
+    /// the planner is handed, so the crossing the client predicts and the one the server flies
+    /// have the same turn in them.
+    #[test]
+    fn a_course_set_facing_the_wrong_way_turns_before_it_burns() {
+        let Some(system) = sol() else { return };
+        let plan_facing = |attitude: DVec3| {
+            let mut ship = ShipState::at(DVec3::ZERO);
+            ship.attitude = attitude;
+            apply(&mut ship, Some(&system), &Event {
+                ship: ShipId(1),
+                at_t: 0.0,
+                change: orbit("Earth"),
+            })
+            .unwrap();
+            let Motive::Crossing(cruise) = ship.motive.clone() else { panic!("a crossing") };
+            cruise
+        };
+
+        // Which way the crossing wants to be pointed, asked of a plan that was not told where the
+        // nose was and so charged for no turn. Not simply the direction of Earth: a crossing
+        // stops short of a body and aims at the near point of the orbit, which is degrees off.
+        let heading = plan_facing(DVec3::ZERO).aim_at(0.0).to;
+
+        // Nose already down the line: nothing to turn, and the first burn is lit at once.
+        let ready = plan_facing(heading);
+        assert_eq!(ready.turn_s(), 0.0);
+        assert_ne!(ready.thrust_at(0.0), DVec3::ZERO);
+
+        // Nose the other way: a full flip first, with the drive off the whole time. The ship is
+        // at rest, so it does not drift while it turns and the line is the same one.
+        let backwards = plan_facing(-heading);
+        // Not to the bit: turning first makes the crossing a minute longer, so Earth has moved
+        // and the heading is a hair off the one the ship was facing away from.
+        assert!(
+            (backwards.turn_s() - Drive::DEFAULT.flip_s()).abs() < 1.0e-2,
+            "turned for {} s, not the {} s a flip takes",
+            backwards.turn_s(),
+            Drive::DEFAULT.flip_s(),
+        );
+        assert_eq!(backwards.thrust_at(backwards.turn_s() * 0.5), DVec3::ZERO);
+        assert_eq!(
+            backwards.at(backwards.turn_s() * 0.5).phase,
+            crate::flight::Phase::Turn,
+        );
+
+        // And the whole crossing is longer by exactly what the turn cost.
+        let extra = backwards.duration_s() - ready.duration_s();
+        assert!(
+            (extra - backwards.turn_s()).abs() < 1.0,
+            "the turn cost {extra} s but took {} s",
+            backwards.turn_s(),
+        );
+    }
+
+    /// **A course set from an orbit of a body to another orbit of the same body is a transfer**,
+    /// and both sides pick that from the event rather than being told.
+    ///
+    /// The whole round trip through the fold: a ship on a low orbit of Earth asks for a high one,
+    /// flies it, and finishes holding the station — in the right place and at the right speed.
+    /// The world frame cannot do this at all; see [`crate::transfer`].
+    #[test]
+    fn a_course_between_two_orbits_of_one_body_is_flown_in_that_bodys_frame() {
+        let Some(mut system) = sol() else { return };
+        let low = Course::Orbit {
+            body: "Earth".into(),
+            altitude_radii: 0.5,
+            plane: Plane::Equatorial,
+        }
+        .resolve(&system, DVec3::ZERO, 0.0)
+        .expect("a low orbit of Earth");
+
+        // Start on it, moving with it, which is what being in an orbit means.
+        let mut ship = ShipState::at(low.place_at(&system, 0.0).unwrap());
+        ship.beta = crate::coast::beta_of(low.velocity_at(&system, 0.0).unwrap());
+        ship.begin_holding(low.clone());
+        ship.beta = crate::coast::beta_of(low.velocity_at(&system, 0.0).unwrap());
+
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: 0.0,
+            change: orbit("Earth"),
+        })
+        .unwrap();
+        let Motive::Transfer(transfer) = ship.motive.clone() else {
+            panic!("a course about the body the ship is falling with is a transfer, not {:?}", ship.motive)
+        };
+        assert_eq!(transfer.about, "Earth");
+
+        let arrival = transfer.duration_s();
+        let mut now = 0.0;
+        while now < arrival + 1.0 {
+            now = (now + 60.0).min(arrival + 1.0);
+            system.advance_to(now);
+            advance(&mut ship, Some(&system), now, 60.0);
+        }
+
+        let Motive::Holding(station) = ship.motive.clone() else { panic!("{:?}", ship.motive) };
+        let earth = system.body_position_ly("Earth").unwrap();
+        let radii = ship.position_ly.distance(earth) * crate::system::M_PER_LY / 6.371e6;
+        assert!((radii - 3.0).abs() < 0.1, "ended {radii} radii out, not the three asked for");
+
+        // And it met the station: at the instant the transfer ends, in the same place and at the
+        // same velocity. Asked of the transfer at *its* arrival rather than of the ship a step
+        // later, because the station is going round a corner the whole time and a second of that
+        // is a metre a second.
+        let (met_at, met_beta) = transfer.state_at(&system, arrival).expect("a place");
+        let joining = crate::coast::beta_of(station.velocity_at(&system, arrival).unwrap());
+        let miss_m = met_at.distance(station.place_at(&system, arrival).unwrap())
+            * crate::system::M_PER_LY;
+        let short_m_s = (met_beta - joining).length() * crate::flight::C_M_S;
+        assert!(miss_m < 1.0, "arrived {miss_m:e} m off the station");
+        assert!(short_m_s < 1.0e-3, "arrived {short_m_s} m/s off the station");
+
+        // Earth ran further than the orbit is wide while this was flown, which is the premise:
+        // planned in the world frame the destination is simply running away.
+        let ran_m = joining.length() * crate::flight::C_M_S * arrival;
+        assert!(ran_m > 3.0 * 6.371e6, "premise: Earth ran only {ran_m:e} m");
+    }
+
     /// A crossing that arrives becomes a station, not a drift. The place was the point of it.
     #[test]
     fn arriving_becomes_holding() {
@@ -950,8 +1406,18 @@ mod tests {
             system.advance_to(now);
             advance(&mut ship, Some(&system), now, 500.0);
         }
-        assert!(matches!(ship.motive, Motive::Holding(_)), "{:?}", ship.motive);
-        assert_eq!(ship.beta, DVec3::ZERO, "a ship on station is not still burning");
+        let Motive::Holding(station) = ship.motive.clone() else { panic!("{:?}", ship.motive) };
+        // **Arriving is not stopping.** The crossing ends *on* the station's velocity, which for
+        // an orbit of Earth is most of Earth's twenty-nine kilometres a second round the sun. A
+        // ship that braked to a dead halt here would have to find all of that from nowhere
+        // between two samples, which is what the free injection used to be.
+        let joining = crate::coast::beta_of(station.velocity_at(&system, now).unwrap());
+        assert!(joining.length() > 1.0e-5, "premise: the station is moving, at {joining:?}");
+        assert!(
+            (ship.beta - joining).length() < 1.0e-6,
+            "arrived at {:?} rather than on the station's {joining:?}",
+            ship.beta,
+        );
 
         // And it stays on it: the body moves and the ship goes with it.
         let before = ship.position_ly;
@@ -1049,5 +1515,122 @@ mod tests {
         })
         .unwrap();
         assert_eq!(ship, before);
+    }
+
+    /// **Burn, flip and burn, seen from outside.**
+    ///
+    /// The whole of why the nose follows the drive rather than the velocity: for the second
+    /// half of a crossing the ship is pointing back the way it came while still travelling
+    /// forward at a large fraction of `c`. A hull drawn along its velocity would spend that
+    /// half facing the wrong way, and nothing about the picture would say it was braking.
+    ///
+    /// The flip is *ordered* at the end of the boost and takes the hull's own turning time to
+    /// finish, so the sample that lands on the boundary is checked separately from the ones
+    /// well into the brake.
+    #[test]
+    fn a_crossing_flips_the_nose_over_while_the_ship_still_moves_forward() {
+        let to = DVec3::X * 4.0;
+        let cruise = crate::flight::Cruise::plan(DVec3::ZERO, to, 0.0, crate::flight::Drive::DEFAULT);
+        let whole = cruise.duration_s();
+        let mut state = ShipState::at(DVec3::ZERO);
+        state.begin_crossing(cruise.clone(), None);
+
+        let hull = 500.0;
+        let flip_s = crate::attitude::turn_time_s(DVec3::X, -DVec3::X, crate::attitude::rate_rad_s(hull));
+        assert!(flip_s > 0.0, "premise: turning takes time");
+
+        let (mut boosted, mut braked, mut coasted) = (false, false, false);
+        for k in 1..200 {
+            let t = whole * k as f64 / 200.0;
+            let nose = facing(&state, hull, t).expect("a ship under way is pointing somewhere");
+            let beta = state_at(&state, None, t).unwrap().1;
+            // Forward, the whole way. It never turns round; only the ship does.
+            assert!(beta.x > 0.0, "the ship went backwards at {t}: {beta}");
+            let since_flip = t - (cruise.start_s + cruise.aim_at(whole * 0.9).since_s);
+            match cruise.at(t).phase {
+                crate::flight::Phase::Boost => {
+                    boosted = true;
+                    assert!(nose.x > 0.999, "boosting and not pointing along the line: {nose}");
+                }
+                // Past the turn it is round; inside it, it is on the way and neither.
+                crate::flight::Phase::Brake if since_flip > flip_s => {
+                    braked = true;
+                    assert!(nose.x < -0.999, "braking and not pointing back down it: {nose}");
+                }
+                crate::flight::Phase::Brake => {
+                    assert!(nose.x > -0.999, "it flipped faster than the hull can turn: {nose}");
+                }
+                crate::flight::Phase::Coast => coasted = true,
+                _ => {}
+            }
+        }
+        let _ = coasted;
+        assert!(boosted, "the crossing never boosted");
+        assert!(braked, "the crossing never braked, which is the half this test is about");
+    }
+
+    /// **The flip takes the time the hull says, and it happens where the drive is off.**
+    ///
+    /// Putting the turn at the end of the boost is what makes it free: the drive is already out
+    /// for the changeover, so nothing is being thrust in a direction the ship is not facing.
+    #[test]
+    fn the_flip_is_ordered_when_the_boost_ends_and_takes_a_hulls_turning_time() {
+        let cruise =
+            crate::flight::Cruise::plan(DVec3::ZERO, DVec3::X * 4.0, 0.0, crate::flight::Drive::DEFAULT);
+        let mut state = ShipState::at(DVec3::ZERO);
+        state.begin_crossing(cruise.clone(), None);
+
+        let ordered = cruise.aim_at(cruise.duration_s() * 0.9).since_s;
+        for hull in [500.0, 50_000.0] {
+            let rate = crate::attitude::rate_rad_s(hull);
+            let whole = crate::attitude::turn_time_s(DVec3::X, -DVec3::X, rate);
+            // At the order it has not moved; halfway it is square on; at the end it is round.
+            let at = |dt: f64| facing(&state, hull, ordered + dt).unwrap();
+            assert!((at(0.0) - DVec3::X).length() < 1.0e-9, "{hull} m had already turned");
+            assert!(at(whole * 0.5).x.abs() < 1.0e-6, "{hull} m was not square on halfway");
+            assert!((at(whole) + DVec3::X).length() < 1.0e-6, "{hull} m had not finished");
+        }
+        // And the big hull takes a hundred times as long over it as the small one.
+        let small = crate::attitude::turn_time_s(DVec3::X, -DVec3::X, crate::attitude::rate_rad_s(500.0));
+        let large = crate::attitude::turn_time_s(DVec3::X, -DVec3::X, crate::attitude::rate_rad_s(50_000.0));
+        assert!((large / small - 100.0).abs() < 1.0e-9);
+    }
+
+    /// **A coasting ship does not turn.** Nothing is asking it to, and attitude control is not
+    /// free — so it keeps whatever the last order left it pointing at.
+    ///
+    /// An earlier version pointed a coasting ship along its motion, which left a ship that had
+    /// just braked to a halt facing whichever way its last millimetre a second happened to go.
+    #[test]
+    fn a_coasting_ship_keeps_the_attitude_it_was_left_with() {
+        let Some(system) = sol() else { return };
+        let mut state = ShipState::at(system.body_position_ly("Earth").unwrap());
+        state.attitude = DVec3::new(0.0, 0.0, 1.0);
+        let event = Event { ship: ShipId(1), at_t: 0.0, change: orbit("Earth") };
+        apply(&mut state, Some(&system), &event).unwrap();
+        // Off the station and onto the conic it was already flying, which is what cutting does.
+        apply(&mut state, Some(&system), &Event { ship: ShipId(1), at_t: 0.0, change: Change::CutDrive })
+            .unwrap();
+
+        for t in [0.0, 600.0, 3_600.0] {
+            let nose = facing(&state, 500.0, t).expect("a ship always points somewhere");
+            assert!(
+                (nose - DVec3::Z).length() < 1.0e-12,
+                "it turned to {nose} with nothing asking it to",
+            );
+        }
+        // And emphatically not along the velocity, which is where it used to end up.
+        let beta = state_at(&state, Some(&system), 600.0).unwrap().1;
+        assert!(beta.normalize().dot(DVec3::Z).abs() < 0.99, "premise: it is not going that way");
+    }
+
+    /// A parked ship points where it was left. There is no "nowhere": a hull has an
+    /// orientation whether or not anything is deciding it, and the renderer needs one.
+    #[test]
+    fn a_parked_ship_points_where_it_was_left() {
+        let mut state = ShipState::at(DVec3::X);
+        assert_eq!(facing(&state, 500.0, 0.0), Some(DVec3::X), "the vernal equinox by default");
+        state.attitude = DVec3::new(0.0, 1.0, 0.0);
+        assert_eq!(facing(&state, 500.0, 1.0e6), Some(DVec3::Y));
     }
 }

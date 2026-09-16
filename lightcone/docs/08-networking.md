@@ -63,11 +63,111 @@ say anything; the Postgres one has its own, which skip when there is none.
 Make this one function, in one place, with tests that assert the negative case. Every other
 send path calls it. Do not allow a second code path to emit to a socket.
 
-**Built as a type, not a convention.** `Cleared<Sighting>` has a private field and one
-constructor, `Cleared::clear`, which is the gate; `Outbound::Sightings` can hold nothing else.
-"There is no second path to a socket" is then a fact the compiler enforces rather than a rule a
+**Built as a type, not a convention.** `Cleared<T>` has a private field and no constructor but
+its `clear` gates; `Outbound::Sightings` and `Outbound::Present` can hold nothing else. "There
+is no second path to a socket" is then a fact the compiler enforces rather than a rule a
 reviewer has to notice being broken, and the two `compile_fail` doctests on the type are what
 say so — one for a struct literal, one for a destructuring pattern.
+
+### Seeing other ships
+
+`Outbound::Present` is the second gated channel, and it exists because a ship's *position* is
+not an event. Nothing happens when a hull moves, so there is nothing for the event store to
+schedule, and a client with only the event channel can be told that somebody transmitted and
+never told that anybody is there.
+
+A `Presence` is an **appearance**, never a state. The distinction is the whole of it: `Motion`
+is a recipe a receiver evaluates at whatever time it likes, so handing one over for somebody
+else's ship would defeat the light cone in a different shape — the client would simply compute
+where that ship is *now*. So a presence carries one retarded sample — position, velocity,
+attitude, and the coordinate time the light left — and nothing that can be run forward. A
+client holds a contact still between statements or interpolates what it was already told.
+
+`beta` and `facing` are in it because both are measurable at a distance: velocity is what the
+light arrives Doppler-shifted and aberrated by, and a hull's attitude is its silhouette.
+
+Solved per observer against that observer's own worldline, by the same `retarded_times` the
+rest of the design turns on, so it is right for an observer that is itself moving fast. Stated
+every tick there is anything to state, and once more when there stops being — a client that had
+a contact and stops hearing about it has to be able to tell that from a message that went
+missing, and one that has never had any needs no message twenty times a second saying so.
+
+Which craft are worth solving for is a **visibility** rule and not a causality one: sharing a
+system, which is the same `LOCAL_SHELL_LY` both ends already use to decide where a ship is. Not
+an angular size — a five-hundred-metre hull is well under a pixel from anywhere in a system,
+and a rule drawn there would leave a player unable to find traffic they are sitting in the
+middle of. A client hears nothing at all about craft outside it, so a system with nobody in it
+and a system whose traffic is all elsewhere look the same from inside.
+
+### Intercept: a standing order
+
+`Order::Intercept` is the first order that is a **policy** rather than an event. Every other
+one happens at an instant and a trajectory follows from it; this one is re-solved by the
+authority whenever what the pursuer can *see* of its quarry stops agreeing with the plan it is
+flying, and each of those re-solutions is an ordinary motive both ends fold the usual way. The
+standing part lives only on the authority, so nothing about how a trajectory is agreed on has
+changed.
+
+**The pursuer steers by the same sighting its owner is sent.** One `sighting` serves both — two
+would be two answers, and the one the player watched would not be the one the autopilot used.
+So a quarry that manoeuvres is chased on stale information until the news arrives, which across
+a system is seconds to hours, and that delay is the game rather than a shortcoming.
+
+There is no separate "match its acceleration" mode. A quarry holding course never diverges from
+the plan and it runs to completion; one under thrust diverges at once and is re-solved against,
+which from outside *is* a pursuer tracking a burn. One rule cannot disagree with itself at the
+boundary. Hanging about falls out of the same rule with a deadband: once alongside, close again
+only after a real drift.
+
+**Matching velocity is arriving at rest in the quarry's frame**, so the approach is planned
+there: boost in, hand the brachistochrone planner the pursuer's state as measured in that frame
+and a destination a standoff short of the origin, and burn-flip-burn comes out as a rendezvous
+with no separate injection. The boost is a real one, so this holds at any speed a ship can
+reach — an earlier version composed velocities by subtracting and had to refuse anything past a
+tenth of `c`.
+
+Two consequences worth knowing. The frame's clock and the world's disagree about which events
+are *simultaneous*, and by an amount that changes as the ship moves through the frame, so
+reading a plan back out at a world time is a root find and not a division — `flight_at` is the
+one place that reconciliation happens, and sampling the cruise directly is a mistake with no
+symptom until something arrives months late. And the standoff is a **proper** distance,
+measured in the frame the pair end up sharing: in the world's reckoning two ships running
+together are closer than they are, so a deadband on the world's number would let them converge
+as they accelerated.
+
+`Outbound::Flying` exists because of this and nothing else. A client folds its own orders, but
+it cannot fold a re-solve it did not ask for and could not reproduce, so the authority states
+what the ship is now flying — the same `Motion` a welcome carries. It leaks nothing: a
+`Motive::Rendezvous` is relative offsets and one sighting.
+
+**The cost is quadratic and is not yet paid for.** One retarded solve per observer per craft
+per tick is fine for the handful a shard carries today and is not fine for a busy system: a
+hundred craft in one place is ten thousand solves twenty times a second. The shape of the fix
+is the one the event store already uses — bound the work before solving it, with the craft
+indexed by position so an observer visits its own neighbourhood rather than the whole fleet,
+and a statement rate that falls off with range. Neither is built, and the visibility rule above
+is deliberately a single readable predicate so that replacing it is replacing one function.
+
+**The gate decides *when*, not *what*.** It is exact about arrival times and says nothing about
+how the content of a message was computed — and that is where this went wrong once, badly
+enough to be worth writing down. A craft's worldline used to be its *current* motive evaluated
+at whatever time was asked for. A motive is a closed form total in `t`, so it answers about
+times before it was ever flown, and `Drifting` extrapolates backwards: a burn retroactively
+moved the ship an hour earlier and changed how fast it was going there. Every retarded solve
+read the new motion at the old time, so `Outbound::Present` showed every client in the system a
+manoeuvre on the tick it happened, at any range. Every message passed the gate. Every message
+was a lie.
+
+A worldline has a past now — `lc_world::motion::Flight` over the stretches a craft has flown,
+each stamped with when it stopped being in force, which is the shape `lc_world::observation`
+already used for emission models. The memory is bounded, so the past runs out; `defined_over`
+says where, and a solve that falls off the end returns nothing rather than a guess. An observer
+too far away to be answered honestly sees nothing at all, which is the only safe way to not
+know.
+
+The lesson generalises: **anything computed from a worldline has to be computed from the
+worldline as it was**, and a type that cannot represent "as it was" will let a gate pass
+something that should never have left.
 
 Two details the gate turns on:
 

@@ -253,3 +253,20 @@ absence.
 code rather than as an unconditional fact — the two differ the moment anything exceeds `c`.
 See [10-superluminal.md](10-superluminal.md) for what that would cost and for the three
 cheap decisions that keep the option open.
+
+## Subtract before you narrow, in time as well as space
+
+`lc_world::boost` is the change of inertial frame, in seconds and light-seconds so that `c` is
+one. It is used for matching velocity with another craft — see `lc_world::pursuit` — and it
+carries one lesson worth stating on its own.
+
+A frame is pinned to an event, and a long burn carries the ship a long way from it: shedding
+`0.9999c` at five gravities takes most of a century and leaves the anchor hundreds of
+light-years astern. Transforming the ship's position out of the frame and then subtracting the
+quarry's to recover a five-kilometre standoff is a difference of two numbers of order a hundred
+light-years, and `f64` has nothing left at that ratio.
+
+The fix is not a better solver. Ask for the *offset* rather than the position, and the enormous
+`γt'` term cancels symbolically — `separation_in_world` is that cancellation written out, and it
+is the same discipline `em-render` applies to render coordinates, applied to the time axis as
+well as the space ones.

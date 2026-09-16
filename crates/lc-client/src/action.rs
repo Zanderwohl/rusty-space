@@ -52,6 +52,8 @@ pub enum Action {
     // --- looking ----------------------------------------------------------------------
     /// Turn by a relative amount, radians.
     Look { yaw: f64, pitch: f64 },
+    /// Move the orbit camera in or out, in notches. Positive is closer.
+    Zoom(f64),
     LookAtSelected,
     /// Face whatever the station is about: the body below, or the star.
     LookAtStation,
@@ -73,6 +75,10 @@ pub enum Action {
     SetCourse(Course),
     /// Proper acceleration for the next crossing, in g.
     SetDriveAccel(f64),
+    /// Close on another ship, match its velocity, and hold station alongside it.
+    Intercept(lc_proto::ShipId),
+    /// Give up a standing intercept. The ship keeps flying whatever it was flying.
+    BreakOff,
 
     // --- appearance -------------------------------------------------------------------
     /// Replace a starfield pass's drawing parameters. Carries the whole style rather than one
@@ -189,6 +195,14 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
 
         Action::Look { yaw, pitch } => ui.look.turn(yaw, pitch),
+        // Multiplicative, because the range is two and a half decades: a fixed step is either
+        // imperceptible at the far end or the whole range in one notch at the near one. Left
+        // unclamped here and clamped against the viewport by `hull::place_eye`, which is the
+        // only thing that knows how wide a pixel is.
+        Action::Zoom(notches) => {
+            ui.boom_lengths = (ui.boom_lengths * crate::hull::ZOOM_STEP.powf(-notches))
+                .clamp(f64::MIN_POSITIVE, 1.0e9);
+        }
         Action::LookAtSelected => match aim(ui, session) {
             Some(look) => ui.look = look,
             None => effects.push(Effect::Notify("nothing is selected to look at".into())),
@@ -235,6 +249,22 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             ui.focus = target;
         }
         Action::ChooseCourse(course) => ui.course = course,
+        // Both of these only exist against a server. An intercept is a *standing* order and
+        // what makes it stand is the authority re-solving it against sightings; a client
+        // holding the policy itself would be a client steering by a quarry it can only see
+        // the past of, which is the one thing the design will not have.
+        Action::Intercept(ship_id) => {
+            if session.remote {
+                effects.push(Effect::Send(lc_proto::Order::Intercept { ship_id }));
+            } else {
+                effects.push(Effect::Notify("no server, so nobody to close on".into()));
+            }
+        }
+        Action::BreakOff => {
+            if session.remote {
+                effects.push(Effect::Send(lc_proto::Order::BreakOff));
+            }
+        }
         Action::SetCourse(course) => {
             if session.remote {
                 // Sent, not applied. What the server does with it comes back as `Accepted`,
@@ -479,6 +509,29 @@ mod tests {
         apply(Action::ExposureAuto, &mut ui, &mut s);
         assert_eq!(ui.exposure_offset, 0.0);
         assert!((s.tone.reference - auto).abs() < auto * 1e-6);
+    }
+
+    /// Zoom is multiplicative and unbounded here on purpose: how close the camera may come is
+    /// an angle, and only the frame that knows how wide a pixel is can clamp it.
+    #[test]
+    fn zooming_scales_the_boom_rather_than_stepping_it() {
+        let (mut ui, mut s) = fixture();
+        let start = ui.boom_lengths;
+        apply(Action::Zoom(1.0), &mut ui, &mut s);
+        let closer = ui.boom_lengths;
+        assert!(closer < start, "a notch in must come closer: {start} to {closer}");
+        apply(Action::Zoom(-1.0), &mut ui, &mut s);
+        assert!((ui.boom_lengths - start).abs() < start * 1e-9, "a notch back is where it began");
+
+        // Ten notches out is the same as one notch out ten times, which is what a wheel with a
+        // pixel-precision device actually sends.
+        let mut once = UiState::default();
+        apply(Action::Zoom(-10.0), &mut once, &mut s);
+        let mut ten = UiState::default();
+        for _ in 0..10 {
+            apply(Action::Zoom(-1.0), &mut ten, &mut s);
+        }
+        assert!((once.boom_lengths - ten.boom_lengths).abs() < ten.boom_lengths * 1e-9);
     }
 
     #[test]

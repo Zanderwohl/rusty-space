@@ -17,12 +17,55 @@ use std::sync::Arc;
 use glam::DVec3;
 
 use crate::instrument::Instrument;
-use crate::motion::{self, Event, Flight, Motive, Rejected, ShipState};
+use crate::motion::{self, Event, Flight, Motive, Past, Rejected, ShipState};
 use crate::system::LocalSystem;
 
 /// A craft, by the identifier whoever owns it uses. Opaque here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CraftId(pub i64);
+
+/// A hull's beam and height, as fractions of its length.
+///
+/// Every craft is the same ovoid at a different size: five long by three across by one deep.
+/// Shape is not yet a thing a craft can differ in, so it is a constant rather than a field —
+/// one that anything drawing or picking a hull reads, so the silhouette, the bounding size and
+/// the zoom limits cannot drift apart.
+pub const BEAM_PER_LENGTH: f64 = 3.0 / 5.0;
+pub const HEIGHT_PER_LENGTH: f64 = 1.0 / 5.0;
+
+/// How far back a craft remembers what it was doing, coordinate seconds.
+///
+/// The longest light delay anyone can solve across. [`crate::pursuit`] and the contact channel
+/// both only look at craft inside the same shell, so two of them are at most `2 *
+/// LOCAL_SHELL_LY` apart — and a light-year is a year of travel by definition, so that span in
+/// years is that span in seconds of delay.
+pub const HISTORY_S: f64 = 2.0 * crate::system::LOCAL_SHELL_LY * crate::flight::JULIAN_YEAR_S;
+
+/// How many stretches of worldline a craft keeps at once.
+///
+/// A bound on the memory, and the reason [`Flight::defined_over`] has a near end at all. Most
+/// craft have one or two: a ship holding a station has not changed what it is doing since it
+/// arrived. A craft that manoeuvres more often than this inside [`HISTORY_S`] forgets its
+/// oldest stretches, and the observers far enough away to have wanted them stop seeing it —
+/// which is the safe way to be unable to answer.
+pub const HISTORY_STRETCHES: usize = 256;
+
+/// What a hull sits at, kelvin.
+///
+/// One temperature for every craft, and a deliberate simplification: a real hull has a sunward
+/// face and a shadowed one and a radiator problem that dominates its design. These are assumed
+/// to be advanced enough to hold an even skin and dump exactly what they make, so a craft is a
+/// blackbody at a single temperature and nothing about where it is or what it is doing changes
+/// that.
+///
+/// Four hundred kelvin puts a ship well below anything visible and squarely in the thermal
+/// infrared, which is the point: a craft running dark in the optical is a bright object at ten
+/// microns, and which band a player is looking through decides whether they can see it.
+pub const HULL_K: f64 = 400.0;
+
+/// The span of hull lengths the game is designed around, metres. Nothing enforces it; it is
+/// what the camera, the reticle and the point-source crossover are expected to cope with.
+pub const LENGTH_RANGE_M: (f64, f64) = (500.0, 50_000.0);
 
 /// What a craft is for.
 ///
@@ -47,12 +90,58 @@ impl Kind {
     ///
     /// A crew caps acceleration and nothing else does; an uncrewed craft is limited by its
     /// structure, which is a long way above anything a person survives.
+    ///
+    /// The slew rate is the *default* hull's, because that is all a kind knows. A craft built to
+    /// another size turns at another rate, and [`Craft::turning`] is where that is put right.
     pub fn drive(self) -> crate::flight::Drive {
-        match self {
+        let base = match self {
             Kind::Ship => crate::flight::Drive::DEFAULT,
-            Kind::Probe => crate::flight::Drive { accel_g: 30.0, max_beta: 0.999 },
-            // Neither of these is going anywhere in a hurry once it is placed.
-            Kind::Relay | Kind::Beacon => crate::flight::Drive { accel_g: 1.0, max_beta: 0.9 },
+            Kind::Probe => {
+                crate::flight::Drive { accel_g: 30.0, ..crate::flight::Drive::DEFAULT }
+            }
+            // Neither of these is going anywhere in a hurry once it is placed, and neither
+            // carries a torch to do it with — a station-keeping thruster throws mass at a
+            // few hundred kilometres a second, so a beacon correcting itself is a thing you
+            // would have to be close to see.
+            Kind::Relay | Kind::Beacon => crate::flight::Drive {
+                accel_g: 1.0,
+                max_beta: 0.9,
+                exhaust_v_m_s: 0.002 * crate::flight::C_M_S,
+                ..crate::flight::Drive::DEFAULT
+            },
+        };
+        crate::flight::Drive {
+            slew_rate_rad_s: crate::attitude::rate_rad_s(self.length_m()),
+            ..base
+        }
+    }
+
+    /// How long a hull of this kind is by default, metres. A craft may be given another.
+    pub fn length_m(self) -> f64 {
+        match self {
+            Kind::Ship => 500.0,
+            Kind::Probe => 40.0,
+            Kind::Relay => 120.0,
+            Kind::Beacon => 20.0,
+        }
+    }
+
+    /// What a hull of this kind averages over its whole volume, kilograms per cubic metre.
+    ///
+    /// An average and not a material: most of a craft is empty, and what fills the rest differs
+    /// by what the craft is for. A crewed ship carries decks, tankage and shielding; a probe is
+    /// dense instrument and no room to stand up in; a relay and a beacon are mostly a shape
+    /// holding an antenna apart from itself.
+    ///
+    /// Water is a thousand and a modern warship is about two hundred, which is the number to
+    /// argue with. It is here rather than as a mass because mass has to follow size — see
+    /// [`Craft::mass_kg`] — and two ships of a kind are allowed to be different sizes.
+    pub fn density_kg_m3(self) -> f64 {
+        match self {
+            Kind::Ship => 250.0,
+            Kind::Probe => 400.0,
+            Kind::Relay => 150.0,
+            Kind::Beacon => 100.0,
         }
     }
 
@@ -74,6 +163,10 @@ pub struct Craft {
     /// What a player calls it. `None` until someone does.
     pub name: Option<String>,
     pub motion: ShipState,
+    /// How long the hull is, metres. Defaults to the kind's, and is a field rather than a
+    /// lookup because two ships of one kind are allowed to be different sizes — see
+    /// [`LENGTH_RANGE_M`], which is the span the camera and the reticle are built for.
+    pub length_m: f64,
     /// The system its motive is defined against, if it is in one.
     ///
     /// Shared and never mutated: every motive is evaluated at the time asked for rather than
@@ -88,6 +181,14 @@ pub struct Craft {
     /// Private because it is derived: the arc is the fact and this is an answer about it, and
     /// an answer that can be set from outside is an answer that can be about a different arc.
     patch: Option<Event>,
+    /// What it was doing before, oldest first. See [`Flight`].
+    ///
+    /// Private for a stronger reason than the patch: it is only right if *every* change to the
+    /// motive appends to it, so the appending lives in [`Craft::remembering`] and there is no
+    /// way to change a motive that goes round it.
+    past: Vec<Past>,
+    /// The earliest coordinate second this craft can answer for.
+    known_from_s: f64,
 }
 
 impl Craft {
@@ -100,11 +201,67 @@ impl Craft {
             kind,
             name: None,
             motion,
+            length_m: kind.length_m(),
             system: None,
             sensor: kind.sensor(),
             noise_floor: 0.0,
             patch: None,
+            past: Vec::new(),
+            // Nothing has been forgotten, because nothing has happened. A craft that has never
+            // changed what it is doing has always been doing it, which is as true a statement
+            // about its past as there is.
+            known_from_s: f64::NEG_INFINITY,
         }
+    }
+
+    /// Do something that may change what this craft is doing, and remember what it was.
+    ///
+    /// **Every** change to the motive goes through here. The alternative is recording at each
+    /// call site, and the transitions inside [`motion::advance`] — a crossing arriving, an arc
+    /// losing its system — happen without any call site knowing they did.
+    ///
+    /// The clone is the cost of that, and it is paid once per change rather than once per
+    /// step: the comparison is what decides, and a craft that went on doing what it was doing
+    /// keeps its history exactly as it was.
+    fn remembering<T>(&mut self, at_s: f64, change: impl FnOnce(&mut Self) -> T) -> T {
+        let before = self.motion.clone();
+        // Where the turn the old motive had ordered got to. The new one starts from there,
+        // because a ship does not snap back to where it was pointing when it was given a new
+        // order — this is the one place the two motives are both in hand, so it is the only
+        // place that hand-over can happen.
+        let nose = motion::facing_at(&before, self.length_m, at_s);
+        let out = change(self);
+        if !before.same_worldline_as(&self.motion) {
+            self.motion.attitude = nose;
+            self.past.push(Past { until_s: at_s, motion: before });
+            self.forget_before(at_s);
+        }
+        out
+    }
+
+    /// Drop what is too old or too much to keep, and record how far back that leaves.
+    fn forget_before(&mut self, now_s: f64) {
+        let horizon = now_s - HISTORY_S;
+        let stale = self.past.iter().take_while(|entry| entry.until_s < horizon).count();
+        let excess = self.past.len().saturating_sub(HISTORY_STRETCHES);
+        let drop = stale.max(excess);
+        if drop == 0 {
+            return;
+        }
+        // The newest one dropped is the boundary: everything before it is a stretch this craft
+        // can no longer name, so it may no longer be asked about.
+        self.known_from_s = self.past[drop - 1].until_s;
+        self.past.drain(..drop);
+    }
+
+    /// How many stretches of its past this craft is holding. For tests and diagnostics.
+    pub fn remembered(&self) -> usize {
+        self.past.len()
+    }
+
+    /// The earliest coordinate second this craft can be asked about.
+    pub fn known_from_s(&self) -> f64 {
+        self.known_from_s
     }
 
     /// What to call it on screen: its name, or its kind and number.
@@ -117,7 +274,68 @@ impl Craft {
 
     /// The craft as something a light-delay solve can evaluate.
     pub fn worldline(&self) -> Flight<'_> {
-        Flight::new(&self.motion, self.system.as_deref())
+        Flight::with_past(&self.motion, self.system.as_deref(), &self.past, self.known_from_s)
+    }
+
+    /// How fast it can turn, radians a second. See [`crate::attitude`].
+    pub fn slew_rate_rad_s(&self) -> f64 {
+        crate::attitude::rate_rad_s(self.length_m)
+    }
+
+    /// `drive`, turning at *this hull's* rate rather than at whatever was stamped on it.
+    ///
+    /// Every manoeuvre is planned through here, because the slew rate is a plan parameter — a
+    /// crossing holds its coast open for the flip — and the only honest source for it is the
+    /// hull that is flying. Stamped on rather than stored, for the reason [`Craft::mass_kg`]
+    /// gives: a kept copy is a copy that can disagree with the ship it belongs to, and
+    /// [`Craft::length_m`] is a field anyone may set.
+    ///
+    /// Which engine to hand it is the caller's business and the two answers differ. `kind.drive()`
+    /// is the *ceiling*, which is what a new order is clamped against; `motion.drive` is what the
+    /// ship is flying with now, which is what a standing policy should go on flying with.
+    pub fn turning(&self, drive: crate::flight::Drive) -> crate::flight::Drive {
+        crate::flight::Drive { slew_rate_rad_s: self.slew_rate_rad_s(), ..drive }
+    }
+
+    /// How much hull there is, cubic metres.
+    ///
+    /// The ovoid [`BEAM_PER_LENGTH`] and its neighbour describe, so a craft's volume follows
+    /// from the one number that says how big it is. Cubic in the length: a fifty-kilometre ship
+    /// is a million times the ship a five-hundred-metre one is, which is worth knowing before
+    /// being surprised by what it weighs.
+    pub fn volume_m3(&self) -> f64 {
+        let half = self.length_m * 0.5;
+        4.0 / 3.0
+            * std::f64::consts::PI
+            * half
+            * (half * BEAM_PER_LENGTH)
+            * (half * HEIGHT_PER_LENGTH)
+    }
+
+    /// What it weighs, kilograms.
+    ///
+    /// Size times what that size is made of. Nothing stores a mass, because a stored one could
+    /// disagree with the hull it belongs to — and everything that wants a mass wants it to
+    /// follow the ship being talked about.
+    pub fn mass_kg(&self) -> f64 {
+        self.kind.density_kg_m3() * self.volume_m3()
+    }
+
+    /// What the drive is putting into its exhaust at a coordinate second, watts.
+    ///
+    /// Zero whenever nothing is lit, which is most of the time: a ship coasts far more than it
+    /// burns. Everything visible about a burn is this number — see [`crate::flight::Drive`].
+    pub fn jet_power_w(&self, now_s: f64) -> f64 {
+        let accel_g = motion::thrust_g(&self.motion, now_s);
+        if accel_g <= 0.0 {
+            return 0.0;
+        }
+        self.motion.drive.jet_power_w(self.mass_kg(), accel_g)
+    }
+
+    /// Which way the nose points at a coordinate second, or `None` when nothing decides it.
+    pub fn facing_at(&self, now_s: f64) -> Option<DVec3> {
+        motion::facing(&self.motion, self.length_m, now_s)
     }
 
     /// Where it is at a coordinate microsecond, light-microseconds from the world origin.
@@ -126,11 +344,40 @@ impl Craft {
         self.worldline().position_at(t_us)
     }
 
+    /// Cut to a straight line from a point, at a velocity. What a burn does.
+    ///
+    /// A method rather than something a caller assembles, because the *only* way a worldline
+    /// may change is through [`Craft::remembering`] — the server used to replace the whole
+    /// craft here, which both lost everything that was not motion and left no trace of what it
+    /// had been doing.
+    pub fn drift_from(&mut self, at_ly: DVec3, beta: DVec3, now_s: f64) {
+        self.remembering(now_s, |craft| {
+            craft.motion.position_ly = at_ly;
+            craft.motion.beta = beta;
+            craft.motion.set_adrift(now_s);
+            craft.solve_patch(now_s);
+        });
+    }
+
+    /// Put it on an approach, and drop whatever the old motive had predicted.
+    ///
+    /// Not an [`Event`], because an approach is not an order a client sends: it is what the
+    /// authority works out *from* a standing order, once per re-solve, against a sighting only
+    /// it can vouch for. The client receives the answer as a motive and folds it.
+    pub fn begin_rendezvous(&mut self, plan: crate::pursuit::Rendezvous, now_s: f64) {
+        self.remembering(now_s, |craft| {
+            craft.motion.begin_rendezvous(plan);
+            craft.solve_patch(now_s);
+        });
+    }
+
     /// Fold an event, and re-solve the patch if the arc changed.
     pub fn apply(&mut self, event: &Event) -> Result<(), Rejected> {
-        motion::apply(&mut self.motion, self.system.as_deref(), event)?;
-        self.solve_patch(event.at_t);
-        Ok(())
+        self.remembering(event.at_t, |craft| {
+            motion::apply(&mut craft.motion, craft.system.as_deref(), event)?;
+            craft.solve_patch(event.at_t);
+            Ok(())
+        })
     }
 
     /// Put it in a system, or take it out of one. Anything defined against the old system's
@@ -144,11 +391,13 @@ impl Craft {
             (Some(old), Some(new)) => !Arc::ptr_eq(old, new),
             (Some(_), None) => true,
         };
-        self.system = system;
-        if left {
-            self.motion.leave_system(now_s);
-        }
-        self.solve_patch(now_s);
+        self.remembering(now_s, |craft| {
+            craft.system = system;
+            if left {
+                craft.motion.leave_system(now_s);
+            }
+            craft.solve_patch(now_s);
+        });
     }
 
     /// Move to a coordinate time, folding the patch its arc was solved for if that time has
@@ -159,13 +408,15 @@ impl Craft {
     /// server at 438 seconds and a client at 61 reach the same arc.
     pub fn advance(&mut self, now_s: f64, elapsed_s: f64) {
         self.patch_if_due(now_s);
-        let was = matches!(self.motion.motive, Motive::Falling(_));
-        motion::advance(&mut self.motion, self.system.as_deref(), now_s, elapsed_s);
-        // A crossing that arrived, or an arc that lost its system: either way the answer the
-        // patch held is about a motive the craft is no longer on.
-        if was != matches!(self.motion.motive, Motive::Falling(_)) {
-            self.solve_patch(now_s);
-        }
+        self.remembering(now_s, |craft| {
+            let was = matches!(craft.motion.motive, Motive::Falling(_));
+            motion::advance(&mut craft.motion, craft.system.as_deref(), now_s, elapsed_s);
+            // A crossing that arrived, or an arc that lost its system: either way the answer
+            // the patch held is about a motive the craft is no longer on.
+            if was != matches!(craft.motion.motive, Motive::Falling(_)) {
+                craft.solve_patch(now_s);
+            }
+        });
     }
 
     /// When the current arc leaves the sphere it was solved in, if it does.
@@ -202,8 +453,13 @@ impl Craft {
             None => motion::repatch_due(&self.motion, &system, now_s),
         };
         if let Some(event) = event {
-            let _ = motion::apply(&mut self.motion, Some(&system), &event);
-            self.solve_patch(event.at_t);
+            // Stamped at the patch's own coordinate and not at `now_s`, so the stretch it ends
+            // is recorded as ending where the conic actually changed primary. A step that ran
+            // past the join would otherwise claim the old arc held until the end of the step.
+            self.remembering(event.at_t, |craft| {
+                let _ = motion::apply(&mut craft.motion, Some(&system), &event);
+                craft.solve_patch(event.at_t);
+            });
         }
     }
 }
@@ -430,4 +686,216 @@ mod tests {
         craft.name = Some("Huygens".into());
         assert_eq!(craft.designation(), "Huygens");
     }
+
+    use lc_spacetime::Worldline;
+
+    const HOUR_AGO_US: f64 = -3_600.0 * 1.0e6;
+
+    fn drifting(beta: DVec3, since_s: f64) -> Craft {
+        let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+        craft.motion.beta = beta;
+        craft.motion.set_adrift(since_s);
+        craft
+    }
+
+    /// **The bug this history exists to kill.**
+    ///
+    /// A motive is a closed form total in `t`, so the *current* one answers about times before
+    /// it was ever flown — and `Drifting` extrapolates backwards, so a burn would move the ship
+    /// in the past and change how fast it was going there. Every retarded solve reads that, so
+    /// an observer a light-hour away would see a manoeuvre the instant it happened.
+    #[test]
+    fn a_burn_does_not_rewrite_where_the_ship_was_an_hour_ago() {
+        let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+        let (was_at, was_going) = {
+            let line = craft.worldline();
+            (line.position_at(HOUR_AGO_US), line.velocity_at(HOUR_AGO_US))
+        };
+        assert_eq!(was_going, DVec3::ZERO, "premise: it was sitting still");
+
+        // It lights the drive, now.
+        craft.apply(&Event {
+            ship: motion::ShipId(1),
+            at_t: 0.0,
+            change: crate::motion::Change::Cross {
+                to_ly: DVec3::X,
+                drive: crate::flight::Drive::DEFAULT,
+            },
+        })
+        .expect("a crossing");
+        assert!(craft.motion.is_under_way(), "premise: it actually burned");
+
+        let line = craft.worldline();
+        assert_eq!(line.velocity_at(HOUR_AGO_US), was_going, "the burn reached back an hour");
+        assert_eq!(line.position_at(HOUR_AGO_US), was_at, "and moved it there too");
+    }
+
+    /// The same, for the motive that gets it worst: a drift read before it began runs the new
+    /// velocity backwards from the point the burn happened at.
+    #[test]
+    fn a_change_of_drift_does_not_reach_back_either() {
+        let mut craft = drifting(DVec3::ZERO, 0.0);
+        let before = craft.worldline().position_at(HOUR_AGO_US);
+
+        craft.remembering(0.0, |craft| {
+            craft.motion.beta = DVec3::new(0.0, 1.0e-3, 0.0);
+            craft.motion.set_adrift(0.0);
+        });
+        assert_eq!(craft.worldline().position_at(HOUR_AGO_US), before);
+        assert_eq!(craft.worldline().velocity_at(HOUR_AGO_US), DVec3::ZERO);
+        // And the present is the new motion, or nothing has happened at all.
+        assert_ne!(craft.worldline().velocity_at(1.0e6), DVec3::ZERO);
+    }
+
+    /// Doing the same thing for a long time costs nothing: a stretch is recorded when the
+    /// motive *changes*, not when it is looked at.
+    #[test]
+    fn a_craft_that_keeps_doing_one_thing_remembers_one_thing() {
+        let mut craft = drifting(DVec3::new(1.0e-6, 0.0, 0.0), 0.0);
+        for k in 1..500 {
+            craft.advance(k as f64 * 10.0, 10.0);
+        }
+        assert_eq!(craft.remembered(), 0, "a steady drift recorded {} stretches", craft.remembered());
+    }
+
+    /// The memory is bounded, and running off the end is answered by refusing rather than by
+    /// guessing — which is what [`Flight::defined_over`] tells the solver.
+    #[test]
+    fn a_craft_that_manoeuvres_forever_forgets_its_oldest_stretches() {
+        let mut craft = drifting(DVec3::ZERO, 0.0);
+        for k in 1..=(HISTORY_STRETCHES + 40) {
+            let at = k as f64;
+            craft.remembering(at, |craft| {
+                craft.motion.beta = DVec3::X * (k as f64 * 1.0e-9);
+                craft.motion.set_adrift(at);
+            });
+        }
+        assert_eq!(craft.remembered(), HISTORY_STRETCHES, "the history is not bounded");
+        assert!(craft.known_from_s() > 0.0, "it forgot without saying how far back it can go");
+
+        // The solver's contract: a root before that is no root at all.
+        let (from, to) = craft.worldline().defined_over();
+        assert_eq!(from, craft.known_from_s() * 1.0e6);
+        assert!(to.is_infinite());
+    }
+
+    /// A stretch is stamped with when it *ended*, so the state in force is the one whose end
+    /// has not been reached.
+    #[test]
+    fn the_stretch_in_force_is_the_one_that_had_not_ended_yet() {
+        let mut craft = drifting(DVec3::ZERO, 0.0);
+        let steps = [(100.0, 1.0e-6), (200.0, 2.0e-6), (300.0, 3.0e-6)];
+        for (at, beta) in steps {
+            craft.remembering(at, |craft| {
+                craft.motion.beta = DVec3::X * beta;
+                craft.motion.set_adrift(at);
+            });
+        }
+        let at = |s: f64| craft.worldline().velocity_at(s * 1.0e6).x;
+        assert_eq!(at(50.0), 0.0, "before the first change it was still at rest");
+        assert_eq!(at(150.0), 1.0e-6);
+        assert_eq!(at(250.0), 2.0e-6);
+        assert_eq!(at(350.0), 3.0e-6, "past the last change it is the current motive");
+    }
+
+    /// Mass follows size, and size is cubic — which is the fact to have in mind before being
+    /// surprised by what the big end of the range weighs.
+    #[test]
+    fn mass_follows_the_cube_of_the_length() {
+        let mut small = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+        small.length_m = LENGTH_RANGE_M.0;
+        let mut large = Craft::at(CraftId(2), Kind::Ship, DVec3::ZERO);
+        large.length_m = LENGTH_RANGE_M.1;
+
+        let ratio = large.mass_kg() / small.mass_kg();
+        let lengths = LENGTH_RANGE_M.1 / LENGTH_RANGE_M.0;
+        assert!(
+            (ratio - lengths.powi(3)).abs() < ratio * 1.0e-9,
+            "{ratio} against {}",
+            lengths.powi(3),
+        );
+        // And the small end is a number a person can hold: a few million tonnes.
+        assert!(small.mass_kg() > 1.0e9 && small.mass_kg() < 1.0e10, "{}", small.mass_kg());
+    }
+
+    /// The ovoid's own volume, not a box or a sphere: five long by three across by one deep.
+    #[test]
+    fn volume_is_the_ovoid_the_hull_is_drawn_as() {
+        let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+        craft.length_m = 1_000.0;
+        let half = 500.0;
+        let want = 4.0 / 3.0
+            * std::f64::consts::PI
+            * half
+            * (half * BEAM_PER_LENGTH)
+            * (half * HEIGHT_PER_LENGTH);
+        assert!((craft.volume_m3() - want).abs() < want * 1.0e-12);
+        // A box of the same extents would be a long way out, which is what makes this worth
+        // checking rather than assuming.
+        let box_volume = 1_000.0 * 1_000.0 * BEAM_PER_LENGTH * 1_000.0 * HEIGHT_PER_LENGTH;
+        assert!(craft.volume_m3() < box_volume * 0.6);
+    }
+
+    /// Two craft of a size are not two craft of a mass: what fills a hull is what it is for.
+    #[test]
+    fn what_a_hull_is_for_changes_what_it_weighs() {
+        let at = |kind| {
+            let mut craft = Craft::at(CraftId(1), kind, DVec3::ZERO);
+            craft.length_m = 1_000.0;
+            craft.mass_kg()
+        };
+        assert!(at(Kind::Probe) > at(Kind::Ship));
+        assert!(at(Kind::Ship) > at(Kind::Relay));
+        assert!(at(Kind::Relay) > at(Kind::Beacon));
+    }
+
+
+    /// What a burn costs in light, and the shape of the dependence: everything about it scales
+    /// with what is being pushed and how hard.
+    #[test]
+    fn a_burn_radiates_with_the_mass_and_the_acceleration() {
+        use crate::flight::Drive;
+        let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+        craft.length_m = 500.0;
+        let at = |accel_g: f64| craft.motion.drive.jet_power_w(craft.mass_kg(), accel_g);
+
+        // Linear in both, because the thrust is and the exhaust speed is fixed.
+        assert!((at(10.0) / at(5.0) - 2.0).abs() < 1.0e-9);
+        let mut bigger = craft.clone();
+        bigger.length_m = 1_000.0;
+        let ratio = bigger.motion.drive.jet_power_w(bigger.mass_kg(), 5.0) / at(5.0);
+        assert!((ratio - 8.0).abs() < 1.0e-9, "twice the ship is eight times the mass: {ratio}");
+
+        // And the number itself is the one worth having seen: a fair fraction of a star.
+        let full = at(Drive::DEFAULT.accel_g);
+        assert!(full > 1.0e17 && full < 1.0e19, "{full} W");
+    }
+
+    /// Nothing is lit unless something is thrusting, and a ballistic arc is not thrusting
+    /// however hard it is falling.
+    #[test]
+    fn a_coasting_ship_puts_nothing_out() {
+        let craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+        assert_eq!(craft.jet_power_w(0.0), 0.0, "a drifting ship has its engine off");
+
+        let mut under_way = craft.clone();
+        under_way.motion.begin_crossing(
+            crate::flight::Cruise::plan(DVec3::ZERO, DVec3::X, 0.0, crate::flight::Drive::DEFAULT),
+            None,
+        );
+        assert!(under_way.jet_power_w(1.0) > 0.0, "a ship on a crossing is burning");
+    }
+
+    /// A station-keeping thruster is not a torch, so a beacon correcting itself is not the
+    /// same event as a ship getting under way.
+    #[test]
+    fn a_beacon_is_far_quieter_than_a_ship() {
+        let ship = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+        let mut beacon = Craft::at(CraftId(2), Kind::Beacon, DVec3::ZERO);
+        // The same size, so only what it is for is different.
+        beacon.length_m = ship.length_m;
+        let power = |c: &Craft| c.motion.drive.jet_power_w(c.mass_kg(), c.motion.drive.accel_g);
+        assert!(power(&beacon) < power(&ship) / 100.0, "{} against {}", power(&beacon), power(&ship));
+    }
+
 }

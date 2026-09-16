@@ -46,6 +46,7 @@ fn main() {
             if entry.local { None } else { entry.server },
         ))
         .insert_resource(lc_client::uplink::LocalShard(entry.local))
+        .insert_resource(lc_client::uplink::Traffic(entry.traffic))
         .insert_resource(entry.dev)
         .add_plugins(ClientPlugin)
         .run();

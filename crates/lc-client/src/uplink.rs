@@ -12,7 +12,10 @@
 use std::sync::Mutex;
 
 use bevy::prelude::*;
-use lc_proto::{ClientId, Inbound, Order, Outbound, PROTOCOL_VERSION, Refusal, ShipId, Sighting};
+use glam::DVec3;
+use lc_proto::{
+    ClientId, Inbound, Order, Outbound, PROTOCOL_VERSION, Presence, Refusal, ShipId, Sighting,
+};
 
 use crate::link::{Link, Status};
 
@@ -58,6 +61,46 @@ pub struct Joined {
     pub name: String,
 }
 
+/// Another craft, as this ship currently sees it.
+///
+/// Everything here is **retarded**. The position is where the light arriving now left from, so
+/// a contact under way is drawn behind where it actually is, and the faster it is going the
+/// further behind. That is the game rather than a lag.
+///
+/// Held still between statements rather than extrapolated. The server states these every tick
+/// it has any to state, and a client that ran `beta` forward between them would be predicting
+/// a worldline it was deliberately not given — see [`Presence`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Contact {
+    pub ship_id: ShipId,
+    pub name: String,
+    pub length_m: f64,
+    /// Light-years from the world origin, where the light left.
+    pub position_ly: DVec3,
+    pub beta: DVec3,
+    /// Unit vector the nose pointed along.
+    pub facing: DVec3,
+    /// What its drive was putting into its exhaust, watts. Zero when it was coasting.
+    pub jet_power_w: f64,
+    /// Coordinate seconds the light left.
+    pub emitted_s: f64,
+}
+
+impl From<Presence> for Contact {
+    fn from(p: Presence) -> Self {
+        Self {
+            ship_id: p.ship_id,
+            name: p.name,
+            length_m: p.length_m,
+            position_ly: DVec3::from_array(p.at_ly),
+            beta: DVec3::from_array(p.beta),
+            facing: DVec3::from_array(p.facing).normalize_or_zero(),
+            jet_power_w: p.jet_power_w,
+            emitted_s: p.emitted_t as f64 * 1.0e-6,
+        }
+    }
+}
+
 /// Where the server is, if there is one.
 #[derive(Resource, Default)]
 pub struct ServerAddress(pub Option<String>);
@@ -65,6 +108,11 @@ pub struct ServerAddress(pub Option<String>);
 /// Whether to run a shard in this process rather than connect to one. See [`crate::local`].
 #[derive(Resource, Default)]
 pub struct LocalShard(pub bool);
+
+/// How many craft the in-process shard puts near the start, for `--traffic`. Development only:
+/// a deployment's traffic is other players.
+#[derive(Resource, Default)]
+pub struct Traffic(pub usize);
 
 /// Start the in-process shard, and point [`ServerAddress`] at it.
 ///
@@ -74,13 +122,14 @@ pub struct LocalShard(pub bool);
 #[cfg(not(target_arch = "wasm32"))]
 pub fn start_local(
     local: Res<LocalShard>,
+    traffic: Res<Traffic>,
     game: Res<crate::app::Game>,
     mut address: ResMut<ServerAddress>,
 ) {
     if !local.0 || address.0.is_some() {
         return;
     }
-    match crate::local::start(game.0.stars.clone()) {
+    match crate::local::start(game.0.stars.clone(), traffic.0) {
         Ok(at) => {
             info!("a shard is running in this process at {at}");
             address.0 = Some(at);
@@ -103,6 +152,17 @@ pub struct Uplink {
     /// What has been seen, newest last. Kept so there is something to show while folding them
     /// into the world is still ahead.
     pub seen: Vec<Sighting>,
+    /// Everybody else in sight, as of the last statement. Replaced wholesale rather than
+    /// merged: the list is what the server can see of this ship's surroundings, and a contact
+    /// missing from it is a contact that is no longer there.
+    pub contacts: Vec<Contact>,
+    /// Who this ship has a standing order to close on.
+    ///
+    /// The interface's copy of a policy the server owns, kept so a button can read as pressed
+    /// the moment the order is accepted. Not authoritative: what the ship is actually *doing*
+    /// is its motive, and the server drops the pursuit without saying so when the quarry goes
+    /// out of sight — which is why this is cleared by a refusal and by losing the contact.
+    pub chasing: Option<ShipId>,
     /// What the server last said about an order, for the interface to show once and drop. The
     /// client cannot write its own here: an order's outcome is the server's to state.
     pub applied: Option<String>,
@@ -319,6 +379,24 @@ fn fold(
         Outbound::Unauthenticated => {
             uplink.state = State::Refused("the server did not accept this ticket".into());
         }
+        Outbound::Flying { ship_id, ship } => {
+            // Taken, not reconciled. This is the authority saying what this ship is doing,
+            // about a solve the client has no way to reproduce — it cannot see the quarry the
+            // way the server can, which is the whole reason the server flies the policy.
+            if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
+                game.0.restore(&(&ship).into());
+            }
+        }
+        Outbound::Present(cleared) => {
+            uplink.contacts =
+                cleared.into_iter().map(|c| Contact::from(c.into_inner())).collect();
+            // The server drops a pursuit when its quarry goes out of sight and does not say
+            // so — saying so would be a message about somewhere this client can no longer see.
+            // Losing the contact is the same fact arriving the only way it can.
+            if uplink.chasing.is_some_and(|id| !uplink.contacts.iter().any(|c| c.ship_id == id)) {
+                uplink.chasing = None;
+            }
+        }
         Outbound::Sightings(cleared) => {
             uplink
                 .seen
@@ -376,6 +454,18 @@ fn fold(
                     };
                     Some(note)
                 }
+                // A standing intercept folds into nothing here. What it *does* arrives as a
+                // motive, once per re-solve, through the same placement path a reconnect uses
+                // — so the client is told the approach its ship is flying rather than working
+                // one out from a quarry it can only see the past of.
+                Order::Intercept { ship_id } => {
+                    uplink.chasing = Some(*ship_id);
+                    Some(format!("closing on {}", ship_id.0))
+                }
+                Order::BreakOff => {
+                    uplink.chasing = None;
+                    Some("broke off".into())
+                }
                 // Nothing to fold into the ship's motion. A transmission is an event, and the
                 // client learns of it the same way anyone else does: when its light arrives.
                 Order::Transmit { .. } | Order::Burn { .. } => None,
@@ -397,9 +487,14 @@ fn fold(
         }
         Outbound::Refused { ship_id, reason } => {
             warn!(?ship_id, ?reason, "an order was refused");
+            if matches!(reason, Refusal::NotInSight | Refusal::TooFast) {
+                uplink.chasing = None;
+            }
             uplink.applied = Some(match reason {
                 Refusal::Impossible => "the server refused that order".into(),
                 Refusal::NotYours | Refusal::NotYou => "that is not your ship".into(),
+                Refusal::NotInSight => "there is nothing there to close on".into(),
+                Refusal::TooFast => "too fast to match; kill the closing speed first".into(),
             });
         }
         Outbound::Throttled { retry_after_ticks } => {
@@ -449,7 +544,8 @@ impl Plugin for UplinkPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Uplink>()
             .init_resource::<ServerAddress>()
-            .init_resource::<LocalShard>();
+            .init_resource::<LocalShard>()
+            .init_resource::<Traffic>();
         #[cfg(not(target_arch = "wasm32"))]
         app.add_systems(OnEnter(crate::app::AppState::InGame), start_local);
         app
@@ -484,8 +580,14 @@ mod tests {
             ship: lc_proto::Motion {
                 at_ly: ship_at,
                 beta: [0.0; 3],
+                attitude: [1.0, 0.0, 0.0],
                 clock_s: 0.0,
-                drive: lc_proto::Drive { accel_g: 5.0, max_beta: 0.999 },
+                drive: lc_proto::Drive {
+                    accel_g: 5.0,
+                    max_beta: 0.999,
+                    exhaust_v_m_s: 1.5e7,
+                    slew_rate_rad_s: 0.05,
+                },
                 motive,
             },
         }
@@ -563,8 +665,14 @@ mod tests {
         let expected = lc_world::resume::Snapshot::from(&lc_proto::Motion {
             at_ly: [4.2, 0.0, 0.0],
             beta: [0.0; 3],
+            attitude: [1.0, 0.0, 0.0],
             clock_s: 0.0,
-            drive: lc_proto::Drive { accel_g: 5.0, max_beta: 0.999 },
+            drive: lc_proto::Drive {
+                accel_g: 5.0,
+                max_beta: 0.999,
+                exhaust_v_m_s: 1.5e7,
+                slew_rate_rad_s: 0.05,
+            },
             motive: lc_proto::Motive::Holding(station),
         });
         let lc_world::resume::Recipe::Holding(waypoint) = expected.motive else {
@@ -712,6 +820,39 @@ mod tests {
         assert_eq!(game.0.ship.motion.clock_s, 12_345.0, "the crew was un-aged");
     }
 
+    /// A statement about other craft becomes the list the renderer and the reticle draw from,
+    /// carrying the retarded position rather than a recipe for working out a present one.
+    #[test]
+    fn a_presence_becomes_a_contact_to_draw() {
+        let (mut uplink, mut game, mut ui) = app();
+        let presence = lc_proto::Presence {
+            ship_id: ShipId(7),
+            name: "Vela".into(),
+            length_m: 1_200.0,
+            at_ly: [1.0, 2.0, 3.0],
+            beta: [0.0, 0.1, 0.0],
+            facing: [0.0, 0.0, 2.0],
+            jet_power_w: 4.2e17,
+            emitted_t: 500_000,
+            arrive_t: 1_000_000,
+        };
+        let cleared = lc_proto::Cleared::<lc_proto::Presence>::clear(presence, 1_000_000).unwrap();
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Present(vec![cleared]));
+
+        let [contact] = uplink.contacts.as_slice() else { panic!("{:?}", uplink.contacts) };
+        assert_eq!(contact.name, "Vela");
+        assert_eq!(contact.length_m, 1_200.0);
+        assert_eq!(contact.position_ly, glam::DVec3::new(1.0, 2.0, 3.0));
+        // Normalised on the way in, so nothing downstream has to wonder.
+        assert_eq!(contact.facing, glam::DVec3::Z);
+        assert_eq!(contact.emitted_s, 0.5);
+        assert_eq!(contact.jet_power_w, 4.2e17, "it was seen burning");
+
+        // Replaced wholesale, not merged: a contact missing from a statement is gone.
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Present(Vec::new()));
+        assert!(uplink.contacts.is_empty(), "a dropped contact was kept");
+    }
+
     #[test]
     fn a_protocol_mismatch_says_both_numbers() {
         let (mut uplink, mut game, mut ui) = app();
@@ -780,7 +921,7 @@ mod tests {
                 kind: 0,
                 payload: String::new(),
             };
-            let cleared = Cleared::clear(sighting, i64::MAX, 0.0).unwrap();
+            let cleared = Cleared::<Sighting>::clear(sighting, i64::MAX, 0.0).unwrap();
             fold(&mut uplink, &mut game, &mut ui, Outbound::Sightings(vec![cleared]));
         }
         assert_eq!(uplink.seen.len(), REMEMBERED);

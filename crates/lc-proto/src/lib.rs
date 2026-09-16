@@ -3,7 +3,8 @@
 //! Bandwidth here is low and the filter is everything. A bug that leaks an event to a client
 //! before its light arrives is not a rendering glitch; it deletes the game. So the rule that
 //! decides what a client may know is not a convention this crate documents — it is
-//! [`Cleared::clear`], the only constructor of the only type the event channel can carry.
+//! [`Cleared`], whose only constructors are its two `clear` gates and which is the only type
+//! the channels carrying [`Sighting`] and [`Presence`] can hold.
 //!
 //! The wire format is `postcard`: compact, `serde`-based, and not self-describing. Not
 //! self-describing is the point rather than a cost — a stale client that half-understood a
@@ -22,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 16;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -73,13 +74,24 @@ pub enum LagrangePoint {
     L2,
 }
 
-/// What a ship's engine can do. Mirrors `lc_world::flight::Drive`.
+/// What a craft can do under power. Mirrors `lc_world::flight::Drive`.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Drive {
     /// Proper acceleration, in g.
     pub accel_g: f64,
     /// Speed cap as a fraction of `c`.
     pub max_beta: f64,
+    /// How fast it throws its reaction mass, metres a second.
+    ///
+    /// On the wire because a client draws its own ship's plume, and what a burn looks like is
+    /// `½ F v` — the one number a trajectory does not depend on and an exhaust does.
+    pub exhaust_v_m_s: f64,
+    /// How fast the hull can swing its nose, radians a second.
+    ///
+    /// On the wire because a crossing's coast is held open long enough for the flip, so two ends
+    /// that disagree about how fast a ship turns would re-plan the same recipe into two
+    /// different trajectories.
+    pub slew_rate_rad_s: f64,
 }
 
 /// What an orbit is about.
@@ -130,12 +142,55 @@ pub enum Motive {
         /// The velocity the crossing was planned from. A burn does not begin from rest.
         beta0: [f64; 3],
         to_ly: [f64; 3],
+        /// The velocity the crossing ends *on*, which is the station's where there is one to
+        /// join. A burn does not have to end at rest either.
+        arrive_beta: [f64; 3],
         start_s: f64,
         drive: Drive,
         /// Where the crossing is *for*. Arriving becomes holding this.
         arrive_at: Option<Waypoint>,
         /// The ship's own clock when the crossing began, which is what its proper time is
         /// measured from.
+        clock_base_s: f64,
+    },
+    /// A crossing flown in a *body's* frame: one orbit of it to another.
+    ///
+    /// Every coordinate here is relative to that body, so the name is not a label — without it
+    /// the numbers mean nothing. Both ends place the body from their own copy of the system,
+    /// which is why the frame does not have to be sent.
+    Transfer {
+        about: String,
+        from_ly: [f64; 3],
+        beta0: [f64; 3],
+        to_ly: [f64; 3],
+        arrive_beta: [f64; 3],
+        start_s: f64,
+        drive: Drive,
+        arrive_at: Option<Waypoint>,
+        clock_base_s: f64,
+    },
+    /// Closing on another craft and matching its velocity.
+    ///
+    /// The arguments of the approach, like [`Motive::Crossing`], and re-solved at the far end
+    /// by the same planner. Every number is either *relative* to the quarry or a **sighting**
+    /// of it — where it was seen, how fast, and when the light left — so a receiver learns
+    /// nothing here it could not have seen for itself. That is what makes it safe to hand a
+    /// client whose own ship is the pursuer.
+    Rendezvous {
+        /// Relative to the quarry's reckoned position, at `start_s`.
+        from_ly: [f64; 3],
+        /// Relative to the quarry's velocity, at `start_s`.
+        beta0: [f64; 3],
+        /// Where the approach ends, relative: a standoff short of the quarry.
+        to_ly: [f64; 3],
+        start_s: f64,
+        drive: Drive,
+        /// The sighting the frame is anchored at.
+        frame_from_ly: [f64; 3],
+        frame_beta: [f64; 3],
+        since_t: f64,
+        /// Who is being closed on.
+        target: ShipId,
         clock_base_s: f64,
     },
     /// Held on a station by thrust.
@@ -157,6 +212,9 @@ pub struct Motion {
     pub at_ly: [f64; 3],
     /// Velocity as a fraction of `c`.
     pub beta: [f64; 3],
+    /// Which way the nose points. Carried because a turn takes time and is as often as not
+    /// half finished — nothing in a trajectory says where a nose had got to.
+    pub attitude: [f64; 3],
     /// Seconds on the ship's own clock, which no resynchronising may change.
     pub clock_s: f64,
     pub drive: Drive,
@@ -197,6 +255,22 @@ pub enum Order {
     /// Cut the engine. Not a stop — whatever velocity it had, it keeps, on whatever conic that
     /// puts it on.
     CutDrive,
+    /// Close on another craft, match its velocity, and hold station alongside it.
+    ///
+    /// A **standing** order, unlike every other one here, and that is the interesting thing
+    /// about it. The rest are events: they happen at an instant and a trajectory follows. This
+    /// one is a policy — the authority re-solves it whenever what the pursuer can see of its
+    /// quarry stops agreeing with the plan it is flying — and each of those re-solutions is an
+    /// ordinary event both ends fold the usual way. The standing part lives only on the
+    /// authority, so nothing about how a trajectory is agreed on has changed.
+    ///
+    /// The quarry is named by its identifier, which a client can only have because it was told
+    /// about it — see [`Presence`]. There is no way to spell an intercept of a craft whose
+    /// light has not arrived.
+    Intercept { ship_id: ShipId },
+    /// Give up a standing [`Order::Intercept`]. What the ship is doing afterwards is whatever
+    /// it was doing a moment before: breaking off cancels the policy, not the trajectory.
+    BreakOff,
 }
 
 /// A client's request. Never authoritative about anything.
@@ -225,6 +299,47 @@ pub struct Sighting {
     pub strength: f32,
     pub kind: i16,
     pub payload: String,
+}
+
+/// One craft as another sees it: where it appeared to be, and when that light left.
+///
+/// An **appearance**, never a state. [`Motion`] is a recipe, and a recipe for someone else's
+/// ship is a recipe a client can evaluate at its own clock — which is the whole of what the
+/// light-cone gate exists to prevent, handed over in a different shape. So this carries one
+/// sample of a worldline and nothing that can be run forward from it: a client drawing a
+/// contact between updates has to hold it still or interpolate what it was already told, and
+/// either way it cannot get ahead of the light.
+///
+/// [`Presence`] is therefore not a small [`Motion`] and must not grow into one. `beta` is here
+/// because it is *measurable* at a distance — it is what the light arrives Doppler-shifted and
+/// aberrated by — and `facing` because a hull's attitude is simply its silhouette.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Presence {
+    pub ship_id: ShipId,
+    /// What to call it on screen.
+    pub name: String,
+    /// How long the hull is, metres. On the wire rather than derived from a kind, so craft
+    /// varying in size costs no protocol version.
+    pub length_m: f64,
+    /// Light-years from the world origin, at the moment the light left.
+    pub at_ly: [f64; 3],
+    /// Velocity then, as a fraction of `c`.
+    pub beta: [f64; 3],
+    /// Unit vector the nose pointed along then.
+    pub facing: [f64; 3],
+    /// What its drive was putting into its exhaust then, watts. Zero when it was coasting.
+    ///
+    /// Sent rather than derived, and it is worth saying why this is not the "second copy of an
+    /// answer" the rest of this file refuses. A receiver *cannot* work it out: the power of a
+    /// burn is the craft's mass times its acceleration times its exhaust speed, and a client
+    /// knows none of the three about somebody else's ship. What it is, is the one thing about a
+    /// burn that is plainly observable — a plume's brightness is exactly this — so a receiver
+    /// is being told what it can see rather than what it could have computed.
+    pub jet_power_w: f64,
+    /// Coordinate microseconds the light left. Always earlier than [`Presence::arrive_t`].
+    pub emitted_t: i64,
+    /// Coordinate microseconds it arrives. Never later than the server's `t` when it is sent.
+    pub arrive_t: i64,
 }
 
 /// A sighting that has passed the gate, and the only thing the event channel can carry.
@@ -289,6 +404,22 @@ impl Cleared<Sighting> {
     }
 }
 
+impl Cleared<Presence> {
+    /// **The same gate, for what a client is told about other craft.**
+    ///
+    /// One test rather than two: `arrive_t <= now_t` or the client is being shown a ship where
+    /// it has not yet been seen to be. There is no second test here because there is no
+    /// `strength` to compare — whether a hull is large enough to make out is a question about
+    /// the observer and the distance, which the caller has and this does not, so the visibility
+    /// cull happens before a `Presence` is built at all. Causality is what the type enforces.
+    pub fn clear(presence: Presence, now_t: i64) -> Result<Self, Withheld> {
+        if presence.arrive_t > now_t {
+            return Err(Withheld::StillInFlight);
+        }
+        Ok(Self { inner: presence })
+    }
+}
+
 impl<T> Cleared<T> {
     pub fn get(&self) -> &T {
         &self.inner
@@ -324,6 +455,13 @@ pub enum Outbound {
     },
     /// The event channel. Cleared, by construction.
     Sightings(Vec<Cleared<Sighting>>),
+    /// Who else is in sight, and where they appeared to be. Cleared, by construction.
+    ///
+    /// Stated every tick rather than on change, because a contact's *position* is what moved
+    /// and there is no event in that. A client hears nothing at all about craft it cannot see,
+    /// which is how a system with nobody in it and a system whose traffic is all out of range
+    /// look the same from inside.
+    Present(Vec<Cleared<Presence>>),
     /// What time it is, stated periodically.
     ///
     /// The client runs its own clock between these — it has to, because it draws frames far
@@ -366,6 +504,22 @@ pub enum Outbound {
     /// It says nothing about *why*. A client that learned whether its ticket was expired, or
     /// spent, or for another server, would have learned how close it got.
     Unauthenticated,
+    /// **Your ship is now doing this.** What the authority did to a craft that its owner did
+    /// not order.
+    ///
+    /// Every other change to a ship is an order the client sent and can fold for itself. A
+    /// standing [`Order::Intercept`] is the exception and the reason this exists: the authority
+    /// re-solves it against sightings the client cannot reproduce, whenever it likes, and
+    /// without this the two ends would quietly fly different ships — the server closing on a
+    /// quarry while the client's copy drifted where it was left.
+    ///
+    /// The same [`Motion`] a welcome carries, and applied the same way, because a re-acquire
+    /// and "here is what you are doing now" are one question asked by two things. See
+    /// `lightcone/docs/17-reconciliation.md`.
+    ///
+    /// It says nothing a client is not entitled to: a `Motive::Rendezvous` is relative
+    /// offsets and one sighting, which is what its own eyes gave it.
+    Flying { ship_id: ShipId, ship: Motion },
     /// This client is sending faster than the server will take, and the message was dropped
     /// unread. Not a disconnection: a client that hits this has a bug, and is told so it can be
     /// fixed. Nothing about the world leaks through it — it is a fact about the client's own
@@ -378,6 +532,13 @@ pub enum Outbound {
 pub enum Refusal {
     /// No such ship, or it is not this client's.
     NotYours,
+    /// There is no such craft in sight. Deliberately the same answer for a ship that does not
+    /// exist, one in another system, and one whose light has not arrived — a client that could
+    /// tell those apart could probe for craft it has not been told about.
+    NotInSight,
+    /// The quarry is moving too fast for an approach to be solved the way this one is. See
+    /// `lc_world::pursuit`.
+    TooFast,
     /// The ticket did not verify: wrong audience, expired, already spent, or not signed by a
     /// key this server publishes trust in. **Deliberately one variant** — a client learning
     /// *which* is a client learning how close it got.
@@ -422,19 +583,20 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 pub mod golden {
     /// `Outbound::Welcome { .., ship: Motion { at [4.2, 0, 0], holding a 12 Mm orbit of Earth } }`
     pub const WELCOME: &[u8] = &[
-        0, 7, 9, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16,
-        64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0,
-        0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 1, 1, 1, 5, 69, 97, 114,
-        116, 104, 0, 0, 0, 0, 96, 227, 102, 65, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0,
-        0, 0, 0, 0, 224, 63,
+        0, 7, 16, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169,
+        241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0,
+        0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56, 156, 108, 65, 154,
+        153, 153, 153, 153, 153, 169, 63, 3, 1, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 96,
+        227, 102, 65, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240,
+        63, 0, 0, 0, 0, 0, 0, 224, 63,
     ];
 
     /// `Inbound::Act(Intent { ship_id: 42, order: Transmit { power_w: 1500.0 }, .. })`
-    pub const ACT: &[u8] =
-        &[1, 84, 0, 0, 0, 0, 0, 0, 112, 151, 64, 128, 137, 122];
+    pub const ACT: &[u8] = &[
+        1, 84, 0, 0, 0, 0, 0, 0, 112, 151, 64, 128, 137, 122,
+    ];
 
     /// `Inbound::Act(Intent { ship_id: 42, order: SetCourse { Orbit of Earth, polar, 2 radii,
     /// 5 g }, .. })`
@@ -446,11 +608,13 @@ pub mod golden {
     ///
     /// Pinned because it is now the message that decides whether anyone gets in at all. A
     /// field moving here is a server reading someone else's ticket as this one's.
-    pub const HELLO: &[u8] = &[0, 9, 5, 97, 46, 98, 46, 99];
+    pub const HELLO: &[u8] = &[
+        0, 16, 5, 97, 46, 98, 46, 99,
+    ];
 
     pub const SET_COURSE: &[u8] = &[
-        1, 84, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0, 0, 0, 0, 0, 0, 20,
-        64, 128, 137, 122,
+        1, 84, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0, 0, 0, 0, 0, 0,
+        20, 64, 128, 137, 122,
     ];
 
     /// `Inbound::Act(Intent { ship_id: 42, order: Cross { star: 0x0123456789abcdef, 3 g }, .. })`
@@ -458,8 +622,8 @@ pub mod golden {
     /// Pinned because a star id is the one field on this wire whose bytes nobody can eyeball:
     /// it is a hash, so a shifted field reads as a different star rather than as nonsense.
     pub const CROSS: &[u8] = &[
-        1, 84, 3, 239, 155, 175, 205, 248, 172, 209, 145, 1, 0, 0, 0, 0, 0, 0, 8, 64, 128, 137,
-        122,
+        1, 84, 3, 239, 155, 175, 205, 248, 172, 209, 145, 1, 0, 0, 0, 0, 0, 0, 8, 64, 128,
+        137, 122,
     ];
 
     /// `Outbound::Accepted { ship_id: 42, event_id: 9, at_t: 1e6, order: SetCourse { .. 3 g } }`
@@ -467,9 +631,50 @@ pub mod golden {
     /// Pinned because it is the message a client reconciles against. A field moving here is a
     /// client folding the wrong number into where it believes its own ship is.
     pub const ACCEPTED: &[u8] = &[
-        3, 84, 18, 128, 137, 122, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0,
-        0, 0, 0, 0, 0, 8, 64,
+        4, 84, 18, 128, 137, 122, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64,
+        1, 0, 0, 0, 0, 0, 0, 8, 64,
     ];
+    /// `Outbound::Present([Presence { ship 42 "Ada", 500 m, at [4.2, 0, 0], nose +y }])`
+    ///
+    /// Pinned because it is the one message that says where somebody *else* is. A field moving
+    /// here is a client drawing a contact somewhere its light never came from.
+    pub const PRESENT: &[u8] = &[
+        2, 1, 84, 3, 65, 100, 97, 0, 0, 0, 0, 0, 64, 127, 64, 205, 204, 204, 204, 204, 204,
+        16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252,
+        169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 144, 220, 94, 232, 251, 163, 67,
+        192, 132, 61, 128, 137, 122,
+    ];
+
+    /// `Outbound::Welcome { .., ship: Motion { .., motive: Rendezvous { target: 7, .. } } }`
+    ///
+    /// Pinned because it is the one motive whose numbers are all about somebody else — a
+    /// relative offset, a relative velocity, and a sighting. A field moving in it is a pursuer
+    /// flying at a point its quarry was never at.
+    pub const RENDEZVOUS: &[u8] = &[
+        0, 7, 16, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169,
+        241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0,
+        0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56, 156, 108, 65, 154,
+        153, 153, 153, 153, 153, 169, 63, 2, 149, 214, 38, 232, 11, 46, 17, 62, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210, 77,
+        98, 80, 191, 0, 0, 0, 0, 0, 0, 0, 0, 17, 234, 45, 129, 153, 151, 113, 61, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 119, 43, 65, 0, 0, 0, 0, 0,
+        0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56, 156, 108, 65, 154,
+        153, 153, 153, 153, 153, 169, 63, 205, 204, 204, 204, 204, 204, 16, 64, 149, 214,
+        38, 232, 11, 46, 17, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169,
+        241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 112, 111, 43, 65, 14,
+        0, 0, 0, 0, 0, 255, 244, 64,
+    ];
+    /// `Inbound::Act(Intent { ship_id: 42, order: Intercept { ship_id: 7 }, .. })`
+    ///
+    /// Pinned because it names a *ship*, and a shifted field is an intercept of whoever the
+    /// bytes happen to spell.
+    pub const INTERCEPT: &[u8] = &[
+        1, 84, 5, 14, 128, 137, 122,
+    ];
+
 }
 
 #[cfg(test)]
@@ -502,8 +707,14 @@ mod tests {
             ship: Motion {
                 at_ly: [4.2, 0.0, 0.0],
                 beta: [0.0, 0.001, 0.0],
+                attitude: [1.0, 0.0, 0.0],
                 clock_s: 86_400.0,
-                drive: Drive { accel_g: 5.0, max_beta: 0.999 },
+                drive: Drive {
+                    accel_g: 5.0,
+                    max_beta: 0.999,
+                    exhaust_v_m_s: 1.5e7,
+                    slew_rate_rad_s: 0.05,
+                },
                 motive: Motive::Holding(Waypoint::Orbit {
                     about: Anchor::Body("Earth".into()),
                     radius_m: 1.2e7,
@@ -569,6 +780,76 @@ mod tests {
         })
     }
 
+    fn present() -> Outbound {
+        Outbound::Present(vec![
+            Cleared::<Presence>::clear(
+                Presence {
+                    ship_id: ShipId(42),
+                    name: "Ada".into(),
+                    length_m: 500.0,
+                    at_ly: [4.2, 0.0, 0.0],
+                    beta: [0.0, 0.001, 0.0],
+                    facing: [0.0, 1.0, 0.0],
+                    jet_power_w: 7.2e17,
+                    emitted_t: 500_000,
+                    arrive_t: 1_000_000,
+                },
+                1_000_000,
+            )
+            .expect("its light has arrived"),
+        ])
+    }
+
+    /// A ship closing on another, which is the one motive whose numbers are all about
+    /// somebody else. Pinned because a field moving in it is a pursuer flying at a point its
+    /// quarry was never at.
+    fn rendezvous() -> Outbound {
+        Outbound::Welcome {
+            client_id: ClientId(7),
+            protocol: PROTOCOL_VERSION,
+            ship_id: ShipId(42),
+            now_t: 1_000_000,
+            name: "Ada".into(),
+            ship: Motion {
+                at_ly: [4.2, 0.0, 0.0],
+                beta: [0.0, 0.001, 0.0],
+                attitude: [1.0, 0.0, 0.0],
+                clock_s: 86_400.0,
+                drive: Drive {
+                    accel_g: 5.0,
+                    max_beta: 0.999,
+                    exhaust_v_m_s: 1.5e7,
+                    slew_rate_rad_s: 0.05,
+                },
+                motive: Motive::Rendezvous {
+                    from_ly: [1.0e-9, 0.0, 0.0],
+                    beta0: [0.0, -0.001, 0.0],
+                    to_ly: [1.0e-12, 0.0, 0.0],
+                    start_s: 900_000.0,
+                    drive: Drive {
+                        accel_g: 5.0,
+                        max_beta: 0.999,
+                        exhaust_v_m_s: 1.5e7,
+                        slew_rate_rad_s: 0.05,
+                    },
+                    frame_from_ly: [4.2, 1.0e-9, 0.0],
+                    frame_beta: [0.0, 0.001, 0.0],
+                    since_t: 899_000.0,
+                    target: ShipId(7),
+                    clock_base_s: 86_000.0,
+                },
+            },
+        }
+    }
+
+    fn intercept() -> Inbound {
+        Inbound::Act(Intent {
+            ship_id: ShipId(42),
+            order: Order::Intercept { ship_id: ShipId(7) },
+            issued_at_client_t: 1_000_000,
+        })
+    }
+
     #[test]
     fn the_wire_format_for_this_version_has_not_moved() {
         assert_eq!(
@@ -601,6 +882,21 @@ mod tests {
             golden::ACCEPTED,
             "Outbound::Accepted changed shape at protocol version {PROTOCOL_VERSION}",
         );
+        assert_eq!(
+            encode(&present()),
+            golden::PRESENT,
+            "Outbound::Present changed shape at protocol version {PROTOCOL_VERSION}",
+        );
+        assert_eq!(
+            encode(&rendezvous()),
+            golden::RENDEZVOUS,
+            "Motive::Rendezvous changed shape at protocol version {PROTOCOL_VERSION}",
+        );
+        assert_eq!(
+            encode(&intercept()),
+            golden::INTERCEPT,
+            "Order::Intercept changed shape at protocol version {PROTOCOL_VERSION}",
+        );
     }
 
     #[test]
@@ -608,8 +904,10 @@ mod tests {
         let out = [
             welcome(),
             Outbound::Sightings(vec![
-                Cleared::clear(sighting(500, 2.5), 1_000, 0.0).unwrap(),
+                Cleared::<Sighting>::clear(sighting(500, 2.5), 1_000, 0.0).unwrap(),
             ]),
+            present(),
+            rendezvous(),
             accepted(),
             Outbound::Clock { now_t: 1_000_000 },
             Outbound::Refused { ship_id: ShipId(-3), reason: Refusal::NotYours },
@@ -624,6 +922,12 @@ mod tests {
             Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: String::new() },
             act(),
             cross(),
+            intercept(),
+            Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: Order::BreakOff,
+                issued_at_client_t: 0,
+            }),
             Inbound::Act(Intent {
                 ship_id: ShipId(1),
                 order: Order::Burn { beta: [0.1, -0.2, 0.3] },
@@ -635,6 +939,32 @@ mod tests {
             let bytes = encode(&message);
             assert_eq!(decode::<Inbound>(&bytes).unwrap(), message);
         }
+    }
+
+    /// The gate, for the channel that says where other people are.
+    ///
+    /// The same rule and the same reason: a contact drawn from light that has not arrived is a
+    /// client seeing a ship move before it could have.
+    #[test]
+    fn no_contact_arrives_before_its_light_does() {
+        let now = 1_000_000;
+        let at = |arrive_t: i64| Presence {
+            ship_id: ShipId(7),
+            name: "Vela".into(),
+            length_m: 500.0,
+            at_ly: [1.0, 0.0, 0.0],
+            beta: [0.0; 3],
+            facing: [1.0, 0.0, 0.0],
+            jet_power_w: 0.0,
+            emitted_t: arrive_t - 1_000,
+            arrive_t,
+        };
+        assert_eq!(
+            Cleared::<Presence>::clear(at(now + 1), now),
+            Err(Withheld::StillInFlight),
+        );
+        assert!(Cleared::<Presence>::clear(at(now), now).is_ok(), "exactly on the cone");
+        assert!(Cleared::<Presence>::clear(at(now - 1), now).is_ok());
     }
 
     /// Rubbish is a decode error, not a message. A format that is not self-describing will
@@ -651,13 +981,13 @@ mod tests {
     fn nothing_still_in_flight_gets_through() {
         let now = 1_000_000;
         assert_eq!(
-            Cleared::clear(sighting(now + 1, 1.0), now, 0.0),
+            Cleared::<Sighting>::clear(sighting(now + 1, 1.0), now, 0.0),
             Err(Withheld::StillInFlight),
             "a sighting one microsecond early was cleared",
         );
         // The boundary is inclusive: light arriving exactly now has arrived.
-        assert!(Cleared::clear(sighting(now, 1.0), now, 0.0).is_ok());
-        assert!(Cleared::clear(sighting(now - 1, 1.0), now, 0.0).is_ok());
+        assert!(Cleared::<Sighting>::clear(sighting(now, 1.0), now, 0.0).is_ok());
+        assert!(Cleared::<Sighting>::clear(sighting(now - 1, 1.0), now, 0.0).is_ok());
     }
 
     /// Arrival is not detection, and the two refusals are distinguishable — a client that is
@@ -666,14 +996,14 @@ mod tests {
     fn arrival_is_not_detection() {
         let now = 1_000_000;
         assert_eq!(
-            Cleared::clear(sighting(now, 0.5), now, 1.0),
+            Cleared::<Sighting>::clear(sighting(now, 0.5), now, 1.0),
             Err(Withheld::BelowNoiseFloor),
         );
-        assert!(Cleared::clear(sighting(now, 1.0), now, 1.0).is_ok(), "exactly at the floor");
+        assert!(Cleared::<Sighting>::clear(sighting(now, 1.0), now, 1.0).is_ok(), "exactly at the floor");
         // In flight *and* faint is reported as in flight: the causality test comes first and
         // is the one that may never be relaxed.
         assert_eq!(
-            Cleared::clear(sighting(now + 1, 0.0), now, 1.0),
+            Cleared::<Sighting>::clear(sighting(now + 1, 0.0), now, 1.0),
             Err(Withheld::StillInFlight),
         );
     }

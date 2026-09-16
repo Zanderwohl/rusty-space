@@ -42,6 +42,8 @@ pub enum Subject {
     Star(StarId, String),
     /// A population, by its index in the system's list.
     Swarm(usize, String),
+    /// Another craft in the same system, by the identifier the server gave it.
+    Craft(lc_proto::ShipId, String),
 }
 
 impl Subject {
@@ -51,17 +53,25 @@ impl Subject {
             (Subject::Body(a), Subject::Body(b)) => a == b,
             (Subject::Star(a, _), Subject::Star(b, _)) => a == b,
             (Subject::Swarm(a, _), Subject::Swarm(b, _)) => a == b,
+            (Subject::Craft(a, _), Subject::Craft(b, _)) => a == b,
             _ => false,
         }
     }
 
-    /// The action that selects it. The same ones the panel rows send, so a click in the view
-    /// and a click in the list are the same event as far as everything downstream is concerned.
-    fn select(&self) -> Action {
+    /// The action that selects it, where there is one. The same ones the panel rows send, so a
+    /// click in the view and a click in the list are the same event as far as everything
+    /// downstream is concerned.
+    ///
+    /// `None` for a craft. Every [`Target`] is somewhere a course can be plotted to, and a
+    /// course to a ship is a rendezvous with something that is moving and that this client
+    /// only knows the past of. Until that exists a contact is something to see and read the
+    /// name of, not something to select.
+    fn select(&self) -> Option<Action> {
         match self {
-            Subject::Body(name) => Action::FocusTarget(Some(Target::Body(name.clone()))),
-            Subject::Star(id, _) => Action::SelectTarget(Some(*id)),
-            Subject::Swarm(index, _) => Action::FocusTarget(Some(Target::Band(*index))),
+            Subject::Body(name) => Some(Action::FocusTarget(Some(Target::Body(name.clone())))),
+            Subject::Star(id, _) => Some(Action::SelectTarget(Some(*id))),
+            Subject::Swarm(index, _) => Some(Action::FocusTarget(Some(Target::Band(*index)))),
+            Subject::Craft(..) => None,
         }
     }
 }
@@ -87,6 +97,12 @@ pub struct Mark {
 pub struct Picked {
     pub hover: Option<Mark>,
     pub selected: Option<Mark>,
+    /// Every craft in the same system, marked whether or not anyone is pointing at it.
+    ///
+    /// Unlike a body or a star, a ship is a few pixels at any range a player will see it from
+    /// and has nothing in the sky to tell it apart from the background. A name that only
+    /// appeared on hover would be a name nobody found.
+    pub contacts: Vec<Mark>,
 }
 
 pub struct PickPlugin;
@@ -147,6 +163,8 @@ fn survey(
     game: Res<Game>,
     ui: Res<Ui>,
     bodies: Res<Bodies>,
+    eye: Res<crate::hull::Eye>,
+    uplink: Res<crate::uplink::Uplink>,
     windows: Query<&Window, With<PrimaryWindow>>,
     camera: Query<(&Projection, &Transform), With<Camera3d>>,
     buttons: Res<ButtonInput<MouseButton>>,
@@ -164,7 +182,7 @@ fn survey(
 
     let clip_from_view = perspective.get_clip_from_view();
     let rad_per_px = radians_per_pixel(perspective.fov, viewport.y);
-    let sighted = sight(&game, &bodies, camera_at, clip_from_view, rad_per_px);
+    let sighted = sight(&game, &bodies, &uplink, eye.at_ly, camera_at, clip_from_view, rad_per_px);
 
     // Against the whole window, because that is where the cursor can be. A thing under a panel
     // is not pickable anyway: egui takes the pointer first, which is checked below.
@@ -200,10 +218,22 @@ fn survey(
     {
         let seen = &sighted[id as usize];
         picked.hover = Some(mark(seen, viewport, cursor));
-        if buttons.just_pressed(PICK_BUTTON) {
-            out.write(Requested(seen.subject.select()));
+        if buttons.just_pressed(PICK_BUTTON)
+            && let Some(action) = seen.subject.select()
+        {
+            out.write(Requested(action));
         }
     }
+
+    // Every craft, named, whether or not anyone is pointing at it — and against the middle of
+    // the view for the same reason a selection is. The one hovered is dropped from the list so
+    // it is not painted twice, once faint and once not.
+    picked.contacts = sighted
+        .iter()
+        .filter(|seen| matches!(seen.subject, Subject::Craft(..)))
+        .filter(|seen| !picked.hover.as_ref().is_some_and(|m| m.label == label_of(seen)))
+        .map(|seen| mark(seen, viewport, viewport * 0.5))
+        .collect();
 
     // The selection is marked whether or not it is on screen: an arrow at the edge is the only
     // way to say where something went.
@@ -226,6 +256,14 @@ fn selected(ui: &Ui) -> Option<Subject> {
     }
 }
 
+/// What a subject is called on screen.
+fn label_of(seen: &Sighted) -> String {
+    match &seen.subject {
+        Subject::Body(name) => name.clone(),
+        Subject::Star(_, name) | Subject::Swarm(_, name) | Subject::Craft(_, name) => name.clone(),
+    }
+}
+
 /// A mark on `seen`, anchored at whatever part of it is nearest `toward`.
 fn mark(seen: &Sighted, viewport: Vec2, toward: Vec2) -> Mark {
     let clip = match &seen.outline {
@@ -235,10 +273,7 @@ fn mark(seen: &Sighted, viewport: Vec2, toward: Vec2) -> Mark {
     Mark {
         clip,
         radius_px: seen.radius_px,
-        label: match &seen.subject {
-            Subject::Body(name) => name.clone(),
-            Subject::Star(_, name) | Subject::Swarm(_, name) => name.clone(),
-        },
+        label: label_of(seen),
         outline: seen.outline.clone(),
     }
 }
@@ -278,14 +313,37 @@ pub fn project_direction(camera_rotation: Quat, clip_from_view: Mat4, direction:
 fn sight(
     game: &Game,
     bodies: &Bodies,
+    uplink: &crate::uplink::Uplink,
+    eye_ly: DVec3,
     camera_at: &Transform,
     clip_from_view: Mat4,
     rad_per_px: f32,
 ) -> Vec<Sighted> {
-    let ship = game.ship.motion.position_ly;
+    // The eye and not the ship: a mark is measured against the image, and the image is taken
+    // from a boom's length behind the hull.
+    let ship = eye_ly;
     let mut out = Vec::with_capacity(bodies.drawn.len() + game.stars.len());
 
     let project = |direction: DVec3| project_direction(camera_at.rotation, clip_from_view, direction);
+
+    for contact in &uplink.contacts {
+        let offset = contact.position_ly - eye_ly;
+        let distance_m = offset.length() * M_PER_LY;
+        if distance_m <= 0.0 {
+            continue;
+        }
+        out.push(Sighted {
+            subject: Subject::Craft(contact.ship_id, contact.name.clone()),
+            clip: project(offset.normalize_or_zero()),
+            // Its long axis end-on is the most it can cover, which is what the mark is sized
+            // against. A hull at any range a player sees one from is under the hover ring
+            // anyway, so this only matters at the very closest.
+            radius_px: (contact.length_m * 0.5 / distance_m) as f32
+                / rad_per_px.max(f32::MIN_POSITIVE),
+            rank: rank::CRAFT,
+            outline: None,
+        });
+    }
 
     for body in &bodies.drawn {
         let offset = body.position_ly - ship;
@@ -456,6 +514,10 @@ fn draw(mut contexts: EguiContexts, picked: Res<Picked>, windows: Query<&Window,
         egui::Id::new("lc_pick_marks"),
     ));
 
+    // Contacts first and faint, so the one under the cursor or selected draws over them.
+    for mark in &picked.contacts {
+        paint(&painter, mark, viewport, frame, CONTACT, false);
+    }
     for (mark, colour, bracketed) in [
         (picked.hover.as_ref(), HOVER, false),
         (picked.selected.as_ref(), SELECTED, true),
@@ -468,6 +530,9 @@ fn draw(mut contexts: EguiContexts, picked: Res<Picked>, windows: Query<&Window,
 }
 
 const HOVER: egui::Color32 = egui::Color32::from_rgb(150, 170, 190);
+/// Craft, which are always marked and must therefore be quiet enough to sit under everything
+/// else without the view reading as an instrument panel.
+const CONTACT: egui::Color32 = egui::Color32::from_rgb(110, 145, 130);
 const SELECTED: egui::Color32 = egui::Color32::from_rgb(235, 200, 120);
 const LABEL_SIZE: f32 = 12.0;
 
@@ -649,11 +714,18 @@ mod tests {
     #[test]
     fn a_click_sends_the_action_the_list_sends() {
         let body = Subject::Body("Earth".into());
-        assert_eq!(body.select(), Action::FocusTarget(Some(Target::Body("Earth".into()))));
+        assert_eq!(body.select(), Some(Action::FocusTarget(Some(Target::Body("Earth".into())))));
 
         let id = StarId::synthesise("test", 7);
         let star = Subject::Star(id, "Sol".into());
-        assert_eq!(star.select(), Action::SelectTarget(Some(id)));
+        assert_eq!(star.select(), Some(Action::SelectTarget(Some(id))));
+    }
+
+    /// A craft is marked and named and is not a destination. Every `Target` is somewhere a
+    /// course can be plotted to, and there is no course to a ship.
+    #[test]
+    fn clicking_a_craft_asks_for_nothing() {
+        assert_eq!(Subject::Craft(lc_proto::ShipId(3), "Ship 3".into()).select(), None);
     }
 
     /// A belt is a donut, and the model already says so: a spread of semi-major axes, a

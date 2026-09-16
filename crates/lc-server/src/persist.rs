@@ -30,6 +30,10 @@ pub struct Saved {
     pub kind: u8,
     pub name: Option<String>,
     pub noise_floor: f32,
+    /// The hull's length, metres. Stored rather than derived from the kind, because two ships
+    /// of one kind may be different sizes and a craft that came back a different size from the
+    /// one that was saved would be a silent loss nobody would think to look for.
+    pub length_m: f64,
     pub motion: lc_proto::Motion,
 }
 
@@ -42,7 +46,7 @@ pub struct Saved {
 /// otherwise** — deliberately not [`lc_proto::PROTOCOL_VERSION`], which moves for reasons that
 /// have nothing to do with how a craft is stored. Bumping it makes every existing row
 /// unreadable, which is the point and is also the cost.
-pub const SAVE_FORMAT: i32 = 1;
+pub const SAVE_FORMAT: i32 = 2;
 
 /// Everything a shard needs to come back: the clock, the counter, and the craft.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -73,6 +77,7 @@ pub fn save(craft: &Craft, account: Option<&str>, saved_t: i64) -> Ship {
         kind: kind_code(craft.kind),
         name: craft.name.clone(),
         noise_floor: craft.noise_floor,
+        length_m: craft.length_m,
         motion: (&craft.motion.snapshot()).into(),
     };
     Ship {
@@ -100,6 +105,13 @@ pub fn load(row: &Ship, system: Option<&lc_world::system::LocalSystem>) -> Resul
     let mut craft = Craft::at(CraftId(row.ship_id), kind, snapshot.position_ly);
     craft.name = saved.name;
     craft.noise_floor = saved.noise_floor;
+    craft.length_m = saved.length_m;
+    // Assigned rather than changed, and it leaves the craft with no history — so the motive it
+    // was saved on extrapolates backwards for any time before the save. That is the best answer
+    // there is: the shard genuinely does not know what this craft was doing before it was
+    // written down, and the saved motive is what it *was* doing at the moment it was. It is not
+    // a leak either way, because nothing after the save is involved. From here on the craft
+    // records its stretches like any other, and `catch_up` fills the gap to now with real ones.
     craft.motion = snapshot.restore(system, row.saved_t as f64 * 1.0e-6);
     Ok(craft)
 }
@@ -137,6 +149,9 @@ mod tests {
         let mut craft = Craft::at(CraftId(5), Kind::Probe, DVec3::new(1.0, 2.0, 3.0));
         craft.name = Some("Ada".into());
         craft.noise_floor = 0.25;
+        // Not its kind's default, which is the whole case worth saving: a length equal to the
+        // default would round-trip just as well through a row that did not store one at all.
+        craft.length_m = 12_345.0;
         craft
     }
 
@@ -152,6 +167,8 @@ mod tests {
         assert_eq!(back.kind, craft.kind);
         assert_eq!(back.name, craft.name);
         assert_eq!(back.noise_floor, craft.noise_floor);
+        assert_eq!(back.length_m, craft.length_m, "the ship came back a different size");
+        assert_ne!(back.length_m, back.kind.length_m(), "premise: it is not the kind's default");
         assert_eq!(back.motion.position_ly, craft.motion.position_ly);
         assert_eq!(back.motion.motive, craft.motion.motive);
     }

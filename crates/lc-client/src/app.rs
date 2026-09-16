@@ -86,6 +86,10 @@ pub struct DevEntry {
     pub observe_immediately: bool,
     /// Point at the nearest star carrying a swarm, for showing the thing off.
     pub target_swarm: bool,
+    /// Close on the nearest contact as soon as there is one. Closing on somebody cannot be
+    /// photographed without ordering it, and ordering it is a click on a list that does not
+    /// exist until a shard has said who is there.
+    pub chase: bool,
     /// Put the ship beside a body of the local system, by name. There is no action for this and
     /// there never will be; it exists so a thing too small to fly to can be looked at.
     pub at_body: Option<String>,
@@ -126,6 +130,7 @@ impl Plugin for ClientPlugin {
             EguiPlugin::default(),
             RelativisticStarfieldMaterialPlugin,
             PopulationMaterialPlugin,
+            em_render::plume_material::PlumeMaterialPlugin,
             BodySurfaceMaterialPlugin,
             crate::sky_asset::SkyAssetPlugin,
             crate::menu::MainMenuPlugin,
@@ -139,11 +144,14 @@ impl Plugin for ClientPlugin {
             .init_resource::<Looking>()
             .init_resource::<Bodies>()
             .init_resource::<crate::envelope::Envelopes>()
+            .init_resource::<crate::hull::Eye>()
+            .init_resource::<crate::hull::Hulls>()
+            .init_resource::<crate::plume::Plumes>()
             .init_resource::<crate::resolved::Resolved>()
             .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
             .add_systems(Startup, spawn_camera)
             .add_systems(OnEnter(AppState::Loading), begin_load)
-            .add_systems(OnEnter(AppState::InGame), (spawn_sky, run_dev_actions))
+            .add_systems(OnEnter(AppState::InGame), spawn_sky)
             .insert_resource(ClearColor(Color::BLACK))
             .add_systems(
                 Update,
@@ -153,9 +161,13 @@ impl Plugin for ClientPlugin {
                     // Not gated on a state: `--menu --shot` photographs the menu, and the
                     // system does nothing unless a path was asked for.
                     photograph,
+                    run_dev_actions.run_if(in_state(AppState::InGame)),
                     place_at_body.run_if(in_state(AppState::InGame)),
                     place_on_station.run_if(in_state(AppState::InGame)),
-                    (read_keys, grab_cursor, look_around).chain().run_if(in_state(AppState::InGame)),
+                    chase_nearest.run_if(in_state(AppState::InGame)),
+                    (read_keys, grab_cursor, look_around, crate::input::read_wheel)
+                        .chain()
+                        .run_if(in_state(AppState::InGame)),
                     dispatch,
                     // The clock is deliberately not gated on any panel or overlay. See
                     // lightcone/docs/13-client-shell.md: the game does not pause.
@@ -169,6 +181,10 @@ impl Plugin for ClientPlugin {
             .add_systems(
                 Update,
                 (
+                    // First of the stage. Everything below is drawn relative to the eye, and
+                    // one placed against last frame's would shear the whole scene against the
+                    // ship every time the view turned.
+                    crate::hull::place_eye,
                     aim_camera,
                     update_sky,
                     update_bodies,
@@ -177,6 +193,11 @@ impl Plugin for ClientPlugin {
                     crate::resolved::sample_scene,
                     crate::resolved::update_resolved,
                     crate::envelope::update_envelopes,
+                    // Last, because a hull is metered as part of the scene the exposure was
+                    // just placed for.
+                    crate::hull::update_hulls,
+                    // And the exhaust after the ship, so it is placed against the same frame.
+                    crate::plume::update_plumes,
                 )
                     .chain()
                     .in_set(Stage::Scene)
@@ -186,7 +207,7 @@ impl Plugin for ClientPlugin {
             // systems. Nothing else: there are no bodies and nothing to resolve.
             .add_systems(
                 Update,
-                (aim_camera, update_sky)
+                (crate::hull::place_eye, aim_camera, update_sky)
                     .chain()
                     .in_set(Stage::Scene)
                     .run_if(in_state(AppState::MainMenu)),
@@ -355,7 +376,37 @@ fn boot(mut next: ResMut<NextState<AppState>>, mut ui: ResMut<Ui>, dev: Res<DevE
     next.set(AppState::MainMenu);
 }
 
-fn run_dev_actions(dev: Res<DevEntry>, game: Res<Game>, mut out: MessageWriter<Requested>) {
+/// Development entry: do what the flags asked for, once there is a ship to do it to.
+///
+/// **Polled, and it waits for the connection.** These used to run on entering the world, which
+/// is before a welcome can possibly have arrived — so `--fly` put the ship on a crossing, the
+/// welcome landed a dozen frames later and replaced the ship wholesale, and the crossing was
+/// gone with no order ever having reached the server. The flag looked like it worked for about
+/// a third of a second.
+fn run_dev_actions(
+    dev: Res<DevEntry>,
+    game: Res<Game>,
+    uplink: Res<crate::uplink::Uplink>,
+    address: Res<crate::uplink::ServerAddress>,
+    mut out: MessageWriter<Requested>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    // Settled, which is not the same as connected: a build with no shard to talk to is settled
+    // the moment it knows there is none, and one that has been refused is never going to be
+    // any readier than it is.
+    let settled = match &uplink.state {
+        crate::uplink::State::Joined(_) => true,
+        crate::uplink::State::Offline => address.0.is_none(),
+        crate::uplink::State::Connecting => false,
+        crate::uplink::State::Refused(_) | crate::uplink::State::Lost(_) => true,
+    };
+    if !settled {
+        return;
+    }
+    *done = true;
     for action in &dev.actions {
         out.write(Requested(action.clone()));
     }
@@ -401,6 +452,30 @@ fn place_at_body(
         ui.look = look;
     }
     ui.notify(format!("standing off {want}"), game.coordinate_time_s());
+    *done = true;
+}
+
+/// Development entry: close on the nearest contact, once there is one to close on.
+///
+/// Polled rather than run on entering the world, like `--at`: a contact arrives from a shard
+/// that has to connect first, and there is nobody in the list on the frame the sky appears.
+fn chase_nearest(
+    dev: Res<DevEntry>,
+    game: Res<Game>,
+    uplink: Res<crate::uplink::Uplink>,
+    mut out: MessageWriter<Requested>,
+    mut done: Local<bool>,
+) {
+    if *done || !dev.chase {
+        return;
+    }
+    let here = game.ship.motion.position_ly;
+    let Some(nearest) = uplink.contacts.iter().min_by(|a, b| {
+        here.distance_squared(a.position_ly).total_cmp(&here.distance_squared(b.position_ly))
+    }) else {
+        return;
+    };
+    out.write(Requested(Action::Intercept(nearest.ship_id)));
     *done = true;
 }
 

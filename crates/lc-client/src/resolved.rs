@@ -147,11 +147,13 @@ pub fn sample_scene(
     ui: Res<crate::app::Ui>,
     mut game: ResMut<crate::app::Game>,
     bodies: Res<crate::starfield::Bodies>,
+    eye: Res<crate::hull::Eye>,
+    uplink: Res<crate::uplink::Uplink>,
     camera: Query<(&Projection, &Camera), With<Camera3d>>,
     mut last: Local<Option<(usize, f32)>>,
 ) {
     let rad_per_px = crate::starfield::camera_scale(&camera);
-    let observer = game.ship.motion.position_ly;
+    let observer = eye.at_ly;
     let mut scene = Scene { point_sr: rad_per_px * rad_per_px, ..default() };
     // The three numbers rather than the system: the borrow has to end before the scene is
     // written back, and copying two hundred and thirty bodies a frame to avoid that would cost
@@ -179,6 +181,20 @@ pub fn sample_scene(
         }
         scene.points =
             unresolved.iter().map(|(_, b)| point_flux(b, star_teff, observer)).collect();
+    }
+
+    // Hulls, the player's own included. A ship filling half the frame is the brightest thing
+    // in it, and an exposure metered without it puts the picture's subject off the top of the
+    // window — which is a white blob where the ship is.
+    let hulls = std::iter::once((game.ship.length_m, eye.boom_m, observer))
+        .chain(uplink.contacts.iter().map(|c| {
+            (c.length_m, c.position_ly.distance(observer) * M_PER_LY, c.position_ly)
+        }));
+    for (length_m, distance_m, at_ly) in hulls {
+        scene.discs.push(Disc {
+            radiance: crate::hull::radiance_at(&game.0, at_ly),
+            solid_angle_sr: crate::hull::solid_angle_sr(length_m, distance_m),
+        });
     }
 
     // The summary is the power the bodies contribute, which moves with both their brightness
@@ -226,10 +242,26 @@ pub fn reflected_radiance(
     star_teff_k: f64,
     star_distance_m: f64,
 ) -> PerBand<f32> {
+    lit_radiance(body.surface.albedo(), star_radius_m, star_teff_k, star_distance_m)
+}
+
+/// The same law with the albedo given rather than looked up, for anything lit that is not a
+/// world. A hull is one; keeping it here is what stops a ship and the planet beside it being
+/// shaded by two different formulas.
+///
+/// The reflected half only. A hull has no [`Drawable::effective_k`] and so no thermal term —
+/// which is wrong in the far infrared, where a ship is warm and would show it, and is a gap in
+/// the craft model rather than in this.
+pub fn lit_radiance(
+    albedo: f64,
+    star_radius_m: f64,
+    star_teff_k: f64,
+    star_distance_m: f64,
+) -> PerBand<f32> {
     if star_distance_m <= 0.0 {
         return PerBand::splat(0.0);
     }
-    let scale = body.surface.albedo() * (star_radius_m / star_distance_m).powi(2);
+    let scale = albedo * (star_radius_m / star_distance_m).powi(2);
     PerBand::new(std::array::from_fn(|i| {
         (blackbody::band_radiance(Band::ALL[i], star_teff_k) * scale) as f32
     }))
@@ -301,6 +333,7 @@ pub fn update_resolved(
     mut commands: Commands,
     session: Res<crate::app::Game>,
     bodies: Res<crate::starfield::Bodies>,
+    eye: Res<crate::hull::Eye>,
     mut resolved: ResMut<Resolved>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodySurfaceMaterial>>,
@@ -322,7 +355,7 @@ pub fn update_resolved(
     let want: Vec<&Drawable> = bodies
         .drawn
         .iter()
-        .filter(|d| is_resolved(d, session.ship.motion.position_ly, rad_per_px))
+        .filter(|d| is_resolved(d, eye.at_ly, rad_per_px))
         .collect();
     let names: Vec<String> = want.iter().map(|d| d.name.clone()).collect();
 
@@ -355,7 +388,7 @@ pub fn update_resolved(
     for (mut transform, material, marker) in placed.iter_mut() {
         let Some(body) = bodies.drawn.iter().find(|d| d.name == marker.name) else { continue };
         transform.translation =
-            sim_to_render((body.position_ly - session.ship.motion.position_ly) * M_PER_LY / UNIT_M).as_vec3();
+            sim_to_render((body.position_ly - eye.at_ly) * M_PER_LY / UNIT_M).as_vec3();
         transform.rotation =
             Quat::from_rotation_arc(Vec3::Y, sim_to_render(body.pole).as_vec3().normalize());
         transform.scale = Vec3::splat((body.radius_m / UNIT_M) as f32);

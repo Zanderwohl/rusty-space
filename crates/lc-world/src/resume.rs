@@ -28,6 +28,10 @@ use crate::system::LocalSystem;
 pub struct Snapshot {
     pub position_ly: DVec3,
     pub beta: DVec3,
+    /// Which way the nose was pointing. Restored rather than re-derived, because a turn is
+    /// half-finished as often as not and there is nothing in a trajectory that says where a
+    /// nose had got to.
+    pub attitude: DVec3,
     /// Seconds on the ship's own clock. Never recomputed from the world's: no resynchronising
     /// un-ages a crew. See `lightcone/docs/17-reconciliation.md`.
     pub clock_s: f64,
@@ -38,17 +42,41 @@ pub struct Snapshot {
 /// How to rebuild a [`Motive`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum Recipe {
-    /// The arguments of [`Cruise::plan_from`], plus where the crossing is *for*.
+    /// The arguments of [`Cruise::plan_onto`], plus where the crossing is *for*.
     Crossing {
         from_ly: DVec3,
         beta0: DVec3,
         to_ly: DVec3,
+        /// The velocity to arrive on. Zero is [`Cruise::plan_from`], which is most crossings.
+        arrive_beta: DVec3,
         start_s: f64,
         drive: Drive,
         arrive_at: Option<Waypoint>,
         /// The ship's clock when the crossing began. A crossing carries its own proper time as
         /// a closed form and reads the clock from this, so restoring the current value alone
         /// would make the crew's clock jump on the next step.
+        clock_base_s: f64,
+    },
+    /// [`Recipe::Crossing`] in a body's frame, plus which body. Its coordinates mean nothing
+    /// without that name, and everything with it — see [`crate::transfer`].
+    Transfer {
+        about: String,
+        from_ly: DVec3,
+        beta0: DVec3,
+        to_ly: DVec3,
+        arrive_beta: DVec3,
+        start_s: f64,
+        drive: Drive,
+        arrive_at: Option<Waypoint>,
+        clock_base_s: f64,
+    },
+    /// The arguments an approach was solved from, and re-solved at the far end.
+    ///
+    /// Every one of them is relative or a sighting — see [`crate::pursuit::Approach`] — so this
+    /// tells its receiver nothing about the quarry that the receiver's own eyes could not.
+    Rendezvous {
+        approach: crate::pursuit::Approach,
+        /// The ship's clock when the approach began; see [`Recipe::Crossing`].
         clock_base_s: f64,
     },
     /// The station itself, which is already the parameter.
@@ -70,14 +98,55 @@ impl Snapshot {
     /// drifting — the same degradation [`ShipState::leave_system`] makes, and for the same
     /// reason.
     pub fn restore(self, system: Option<&LocalSystem>, now_s: f64) -> ShipState {
+        // **Where the nose was when the motive began**, which every plan below needs and none of
+        // them carries: a crossing has to leave time to come about before its first burn, and
+        // how long that takes depends on where the ship was pointing. It lives on the snapshot
+        // rather than in each recipe because it is a fact about the ship, and all three recipes
+        // would otherwise carry the same copy of it.
+        let attitude0 = self.attitude;
         let mut state = ShipState::at(self.position_ly);
         state.beta = self.beta;
+        state.attitude = self.attitude;
         state.drive = self.drive;
         state.clock_s = self.clock_s;
         match self.motive {
-            Recipe::Crossing { from_ly, beta0, to_ly, start_s, drive, arrive_at, clock_base_s } => {
-                let cruise = Cruise::plan_from(from_ly, beta0, to_ly, start_s, drive);
+            Recipe::Crossing {
+                from_ly,
+                beta0,
+                to_ly,
+                arrive_beta,
+                start_s,
+                drive,
+                arrive_at,
+                clock_base_s,
+            } => {
+                let cruise = Cruise::plan_onto(
+                    from_ly, beta0, to_ly, arrive_beta, attitude0, start_s, drive,
+                );
                 state.resume_crossing(cruise, arrive_at, clock_base_s);
+            }
+            Recipe::Transfer {
+                about,
+                from_ly,
+                beta0,
+                to_ly,
+                arrive_beta,
+                start_s,
+                drive,
+                arrive_at,
+                clock_base_s,
+            } => {
+                let cruise = Cruise::plan_onto(
+                    from_ly, beta0, to_ly, arrive_beta, attitude0, start_s, drive,
+                );
+                state.resume_transfer(
+                    crate::transfer::Transfer { cruise, about },
+                    arrive_at,
+                    clock_base_s,
+                );
+            }
+            Recipe::Rendezvous { approach, clock_base_s } => {
+                state.resume_rendezvous(approach.solve(attitude0), clock_base_s);
             }
             Recipe::Holding(waypoint) => state.begin_holding(waypoint),
             Recipe::Falling => {
@@ -111,6 +180,7 @@ impl From<&Snapshot> for lc_proto::Motion {
         Self {
             at_ly: snapshot.position_ly.to_array(),
             beta: snapshot.beta.to_array(),
+            attitude: snapshot.attitude.to_array(),
             clock_s: snapshot.clock_s,
             drive: drive_out(snapshot.drive),
             motive: match &snapshot.motive {
@@ -118,6 +188,7 @@ impl From<&Snapshot> for lc_proto::Motion {
                     from_ly,
                     beta0,
                     to_ly,
+                    arrive_beta,
                     start_s,
                     drive,
                     arrive_at,
@@ -126,9 +197,43 @@ impl From<&Snapshot> for lc_proto::Motion {
                     from_ly: from_ly.to_array(),
                     beta0: beta0.to_array(),
                     to_ly: to_ly.to_array(),
+                    arrive_beta: arrive_beta.to_array(),
                     start_s: *start_s,
                     drive: drive_out(*drive),
                     arrive_at: arrive_at.as_ref().map(waypoint_out),
+                    clock_base_s: *clock_base_s,
+                },
+                Recipe::Transfer {
+                    about,
+                    from_ly,
+                    beta0,
+                    to_ly,
+                    arrive_beta,
+                    start_s,
+                    drive,
+                    arrive_at,
+                    clock_base_s,
+                } => lc_proto::Motive::Transfer {
+                    about: about.clone(),
+                    from_ly: from_ly.to_array(),
+                    beta0: beta0.to_array(),
+                    to_ly: to_ly.to_array(),
+                    arrive_beta: arrive_beta.to_array(),
+                    start_s: *start_s,
+                    drive: drive_out(*drive),
+                    arrive_at: arrive_at.as_ref().map(waypoint_out),
+                    clock_base_s: *clock_base_s,
+                },
+                Recipe::Rendezvous { approach, clock_base_s } => lc_proto::Motive::Rendezvous {
+                    from_ly: approach.from_ly.to_array(),
+                    beta0: approach.beta0.to_array(),
+                    to_ly: approach.to_ly.to_array(),
+                    start_s: approach.start_s,
+                    drive: drive_out(approach.drive),
+                    frame_from_ly: approach.frame_from_ly.to_array(),
+                    frame_beta: approach.frame_beta.to_array(),
+                    since_t: approach.since_t,
+                    target: lc_proto::ShipId(approach.target.0),
                     clock_base_s: *clock_base_s,
                 },
                 Recipe::Holding(waypoint) => lc_proto::Motive::Holding(waypoint_out(waypoint)),
@@ -147,6 +252,7 @@ impl From<&lc_proto::Motion> for Snapshot {
         Self {
             position_ly: DVec3::from_array(motion.at_ly),
             beta: DVec3::from_array(motion.beta),
+            attitude: DVec3::from_array(motion.attitude),
             clock_s: motion.clock_s,
             drive: drive_in(motion.drive),
             motive: match &motion.motive {
@@ -154,6 +260,7 @@ impl From<&lc_proto::Motion> for Snapshot {
                     from_ly,
                     beta0,
                     to_ly,
+                    arrive_beta,
                     start_s,
                     drive,
                     arrive_at,
@@ -162,9 +269,56 @@ impl From<&lc_proto::Motion> for Snapshot {
                     from_ly: DVec3::from_array(*from_ly),
                     beta0: DVec3::from_array(*beta0),
                     to_ly: DVec3::from_array(*to_ly),
+                    arrive_beta: DVec3::from_array(*arrive_beta),
                     start_s: *start_s,
                     drive: drive_in(*drive),
                     arrive_at: arrive_at.as_ref().map(waypoint_in),
+                    clock_base_s: *clock_base_s,
+                },
+                lc_proto::Motive::Transfer {
+                    about,
+                    from_ly,
+                    beta0,
+                    to_ly,
+                    arrive_beta,
+                    start_s,
+                    drive,
+                    arrive_at,
+                    clock_base_s,
+                } => Recipe::Transfer {
+                    about: about.clone(),
+                    from_ly: DVec3::from_array(*from_ly),
+                    beta0: DVec3::from_array(*beta0),
+                    to_ly: DVec3::from_array(*to_ly),
+                    arrive_beta: DVec3::from_array(*arrive_beta),
+                    start_s: *start_s,
+                    drive: drive_in(*drive),
+                    arrive_at: arrive_at.as_ref().map(waypoint_in),
+                    clock_base_s: *clock_base_s,
+                },
+                lc_proto::Motive::Rendezvous {
+                    from_ly,
+                    beta0,
+                    to_ly,
+                    start_s,
+                    drive,
+                    frame_from_ly,
+                    frame_beta,
+                    since_t,
+                    target,
+                    clock_base_s,
+                } => Recipe::Rendezvous {
+                    approach: crate::pursuit::Approach {
+                        from_ly: DVec3::from_array(*from_ly),
+                        beta0: DVec3::from_array(*beta0),
+                        to_ly: DVec3::from_array(*to_ly),
+                        start_s: *start_s,
+                        drive: drive_in(*drive),
+                        frame_from_ly: DVec3::from_array(*frame_from_ly),
+                        frame_beta: DVec3::from_array(*frame_beta),
+                        since_t: *since_t,
+                        target: crate::motion::ShipId(target.0),
+                    },
                     clock_base_s: *clock_base_s,
                 },
                 lc_proto::Motive::Holding(waypoint) => Recipe::Holding(waypoint_in(waypoint)),
@@ -179,11 +333,21 @@ impl From<&lc_proto::Motion> for Snapshot {
 }
 
 fn drive_out(drive: Drive) -> lc_proto::Drive {
-    lc_proto::Drive { accel_g: drive.accel_g, max_beta: drive.max_beta }
+    lc_proto::Drive {
+        accel_g: drive.accel_g,
+        max_beta: drive.max_beta,
+        exhaust_v_m_s: drive.exhaust_v_m_s,
+        slew_rate_rad_s: drive.slew_rate_rad_s,
+    }
 }
 
 fn drive_in(drive: lc_proto::Drive) -> Drive {
-    Drive { accel_g: drive.accel_g, max_beta: drive.max_beta }
+    Drive {
+        accel_g: drive.accel_g,
+        max_beta: drive.max_beta,
+        exhaust_v_m_s: drive.exhaust_v_m_s,
+        slew_rate_rad_s: drive.slew_rate_rad_s,
+    }
 }
 
 fn waypoint_out(waypoint: &Waypoint) -> lc_proto::Waypoint {
@@ -486,9 +650,16 @@ mod tests {
     fn re_planning_a_crossing_from_its_own_recipe_is_the_same_crossing() {
         let drive = crate::flight::Drive::DEFAULT;
         for beta0 in [DVec3::ZERO, DVec3::new(0.0, 0.4, 0.0), DVec3::new(-0.9, 0.0, 0.0)] {
-            let first = Cruise::plan_from(DVec3::ZERO, beta0, DVec3::new(0.1, 0.0, 0.0), 7.0, drive);
+            let first = Cruise::plan_from(DVec3::ZERO, beta0, DVec3::new(0.1, 0.0, 0.0), DVec3::ZERO, 7.0, drive);
             let again =
-                Cruise::plan_from(first.from_ly, first.initial_beta(), first.to_ly, first.start_s, drive);
+                Cruise::plan_from(
+                    first.from_ly,
+                    first.initial_beta(),
+                    first.to_ly,
+                    first.initial_attitude(),
+                    first.start_s,
+                    drive,
+                );
             assert_eq!(first, again, "re-planning changed the crossing, from {beta0}");
         }
     }

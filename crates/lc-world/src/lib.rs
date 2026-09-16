@@ -8,12 +8,15 @@
 
 #![forbid(unsafe_code)]
 
+pub mod attitude;
+pub mod boost;
 pub mod coast;
 pub mod craft;
 pub mod distribution;
 pub mod emission;
 pub mod flicker;
 pub mod flight;
+pub mod injection;
 pub mod instrument;
 pub mod motion;
 pub mod libration;
@@ -21,6 +24,7 @@ pub mod navigation;
 pub mod observation;
 pub mod occluder;
 pub mod population;
+pub mod pursuit;
 pub mod resume;
 pub mod rings;
 pub mod rng;
@@ -29,6 +33,7 @@ pub mod sky;
 pub mod star;
 pub mod surface;
 pub mod system;
+pub mod transfer;
 
 pub use distribution::{Distribution, Inclination};
 pub use emission::{Body, EmissionModel, invert_moments};

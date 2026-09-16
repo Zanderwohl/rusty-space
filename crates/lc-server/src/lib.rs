@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod chase;
 pub mod journal;
 pub mod persist;
 pub mod rate;

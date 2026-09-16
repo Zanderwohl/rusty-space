@@ -50,7 +50,13 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--signin` | hold at the sign-in modal, which draws over the menu and no action can reach |
 | `--password` | hold at the password form, the one egui surface inside the menu |
 | `--turn <deg>` / `--pitch <deg>` | turn the view, the only way to put something off screen |
+| `--zoom <notches>` | move the orbit camera; both its stops are clamps, so ask for far too much |
+| `--traffic <n>` | put `n` craft near the start, so there is another ship to photograph |
+| `--chase` | close on the nearest of them, the only way to photograph an intercept |
 | `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable |
+
+`--turn`, `--pitch` and `--zoom` are applied **last**, after anything that aims — `--fly` ends
+by pointing the view at what it is flying to, and pushed first the turn was simply undone.
 
 Most of what has gone wrong in the renderer was found this way and could not have been found
 any other way.
@@ -66,6 +72,21 @@ The store's tests need PostgreSQL (`createdb lc_store`; `LC_STORE_URL` overrides
 ## Traps
 
 Each of these cost real time. None of them are visible from the code that hits them.
+
+**The light-cone model**
+
+- A motive is a **closed form total in `t`**, which means it cheerfully answers about times
+  before it was ever flown. `Craft` keeps a history of the stretches it has flown for exactly
+  this reason — without one, changing a motive rewrites the craft's whole past, and every
+  retarded solve reads the new motion at the old time. That shipped once and leaked every
+  manoeuvre instantly to every client in the system. Change a motive only through
+  `Craft`'s own methods; they are what record it.
+- `Cleared::clear` gates **when** a message may be sent and says nothing about how its content
+  was computed. A message can pass the gate and still be a fact from the future.
+- A test that asserts "X did not happen early" passes trivially if X never happens at all, or
+  if it happens for an unrelated reason. Break the mechanism on purpose and check the test
+  fails — both of the light-delay tests in `lc-server` were wrong the first time, and both
+  looked right.
 
 **Rendering**
 

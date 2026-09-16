@@ -1,0 +1,494 @@
+//! Craft as things with a shape, and the camera that looks at one from outside.
+//!
+//! Two jobs that belong together because they are the same geometry read twice. A hull is an
+//! ovoid five long by three across by one deep — see [`lc_world::craft`] — pointed along
+//! [`lc_world::motion::facing`], and how far the orbit camera stands off is that same length
+//! divided by an angle. Put them in separate modules and the ship's size means one thing to
+//! the mesh and another to the zoom.
+//!
+//! **The camera still does not translate.** What moves is the origin everything is drawn
+//! relative to: [`Eye`] is where the player is looking *from*, which is a boom's length behind
+//! the hull rather than inside it, and the ship becomes the one thing drawn at an offset from
+//! the render origin. Every other pass reads the eye where it used to read the ship, so the
+//! parallax a ten-thousand-kilometre boom opens up against a nearby moon is simply correct
+//! instead of being an error nobody measured.
+
+use bevy::camera::visibility::NoFrustumCulling;
+use bevy::prelude::*;
+use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform};
+use em_render::render_space::sim_to_render;
+use em_spectra::PerBand;
+use glam::DVec3;
+use lc_proto::ShipId;
+use em_spectra::blackbody;
+use lc_world::craft::{BEAM_PER_LENGTH, HEIGHT_PER_LENGTH, HULL_K};
+
+use crate::session::Session;
+use crate::system::{M_PER_LY, UNIT_M};
+use crate::uplink::Uplink;
+
+/// Longitude and latitude divisions of the shared ovoid.
+///
+/// Fewer than a planet's, because a hull is never the whole screen for long and its silhouette
+/// is a smooth curve rather than a limb against a star field.
+pub const LONGITUDES: u32 = 48;
+pub const LATITUDES: u32 = 24;
+
+/// The smallest a hull is allowed to be drawn before the camera stops backing away, in pixels
+/// across its long axis.
+///
+/// Below about this a shape is a smudge, and zooming further out reads as the ship vanishing
+/// rather than as distance.
+pub const MIN_HULL_PX: f64 = 5.0;
+
+/// How far the orbit camera starts, in hull lengths.
+pub const DEFAULT_BOOM_LENGTHS: f64 = 4.0;
+
+/// What one notch of the wheel multiplies the boom by.
+pub const ZOOM_STEP: f64 = 1.25;
+
+/// A hull's albedo. Grey paint, near enough, and the one number that says how bright a ship is
+/// against the planet behind it.
+pub const ALBEDO: f64 = 0.35;
+
+/// The two ends of the palette. Equal, because a hull has no generated surface: the material
+/// is a planet's and the pattern is turned off by a contrast of zero.
+const GREY: Vec4 = Vec4::new(0.30, 0.31, 0.33, 1.0);
+
+/// Light on the unlit side, as a fraction. Higher than a planet's, because a hull is small
+/// enough that its dark half is most of its silhouette and a hard terminator eats the shape.
+const NIGHT: f32 = 0.10;
+
+/// Where the player is looking from, and how far back that is.
+///
+/// Recomputed at the head of every frame and read by everything that turns a world position
+/// into a render one. The ship's own position stays what the *physics* is about — light delay,
+/// exposure, the read-out — and this is what the *picture* is about.
+#[derive(Resource, Default)]
+pub struct Eye {
+    /// Light-years from the world origin.
+    pub at_ly: DVec3,
+    /// Metres from the hull's centre, back along the view.
+    pub boom_m: f64,
+}
+
+/// One craft with a mesh. `None` is the player's own ship.
+#[derive(Component)]
+pub struct Hull(pub Option<ShipId>);
+
+/// The shared ovoid, and which craft currently have one.
+///
+/// No remembered attitudes any more. A craft carries its own now — see
+/// `lc_world::motion::facing_at` — so a ship keeps the nose its last order left it with,
+/// turning toward the next one at the rate its hull allows, and the renderer only has to ask.
+#[derive(Resource, Default)]
+pub struct Hulls {
+    mesh: Option<Handle<Mesh>>,
+    drawn: Vec<Option<ShipId>>,
+}
+
+/// How close and how far the orbit camera may sit, in hull lengths.
+///
+/// Both ends are angular and neither mentions a size, which is the point: the zoom is stored
+/// as a multiple of the hull's own length, so a player who changes ships keeps the framing
+/// they had rather than finding themselves inside a bigger one.
+///
+/// The far end holds the hull at [`MIN_HULL_PX`] across. The near end stops it exactly filling
+/// the window — any closer and the ends are off screen, which is not a view of a ship.
+pub fn boom_limits(rad_per_px: f32, fov_x_rad: f32) -> (f64, f64) {
+    // How far back a hull has to be to subtend `angle`, in its own lengths. A body of radius
+    // `a` at distance `d` covers `2 asin(a/d)`, and taking the ovoid's long semi-axis as that
+    // radius is the case where it is broadside and largest.
+    //
+    // The sine matters at the near stop and nowhere else. There the camera is less than a
+    // length away and `a/d` is several per cent short of the angle it stands for — enough to
+    // hang the nose and the tail off the edges of the window, which is what the first version
+    // of this did.
+    let boom_for = |angle: f64| 0.5 / (angle * 0.5).sin().max(f64::MIN_POSITIVE);
+    let far = if rad_per_px > 0.0 {
+        boom_for(MIN_HULL_PX * rad_per_px as f64)
+    } else {
+        f64::from(u16::MAX)
+    };
+    let near = if fov_x_rad > 0.0 { boom_for(fov_x_rad as f64) } else { 1.0 };
+    (near, far.max(near))
+}
+
+/// The horizontal field of view, radians, for a projection given its vertical one.
+pub fn fov_x(fov_y: f32, aspect: f32) -> f32 {
+    2.0 * ((fov_y * 0.5).tan() * aspect.max(f32::MIN_POSITIVE)).atan()
+}
+
+/// The rotation putting a hull's nose along `fore`, in render axes.
+///
+/// The mesh's own axes are beam, height and length on `x`, `y` and `z`, so this is the basis
+/// `(right, up, fore)` written as a rotation. `up` is ecliptic north with the part along the
+/// nose taken out, which leaves roll undefined about nothing — a ship flying straight up the
+/// pole has no preferred roll and any answer is as good as another.
+pub fn attitude(fore_sim: DVec3) -> Quat {
+    let fore = fore_sim.normalize_or_zero();
+    if fore == DVec3::ZERO {
+        return Quat::IDENTITY;
+    }
+    let reference = if fore.z.abs() > 0.999 { DVec3::X } else { DVec3::Z };
+    let up = (reference - fore * reference.dot(fore)).normalize_or_zero();
+    // `right x up = fore`, so the basis is right-handed and survives the change of axes, which
+    // is a proper rotation rather than a mirror.
+    let right = up.cross(fore);
+    let columns = Mat3::from_cols(
+        sim_to_render(right).as_vec3(),
+        sim_to_render(up).as_vec3(),
+        sim_to_render(fore).as_vec3(),
+    );
+    Quat::from_mat3(&columns)
+}
+
+/// The mesh scale for a hull of `length_m`, in render units.
+pub fn half_extents(length_m: f64) -> Vec3 {
+    let half = length_m * 0.5 / UNIT_M;
+    Vec3::new(
+        (half * BEAM_PER_LENGTH) as f32,
+        (half * HEIGHT_PER_LENGTH) as f32,
+        half as f32,
+    )
+}
+
+/// Put the eye a boom's length behind the ship, along the way it is looking.
+///
+/// Ahead of everything in [`crate::app::Stage::Scene`]: the eye is what the rest of the frame
+/// is drawn relative to, and one drawn against last frame's would shear the scene against the
+/// ship every time the view turned.
+pub fn place_eye(
+    mut ui: ResMut<crate::app::Ui>,
+    game: Res<crate::app::Game>,
+    camera: Query<(&Projection, &Camera), With<Camera3d>>,
+    mut eye: ResMut<Eye>,
+) {
+    let (near, far) = match camera.single() {
+        Ok((Projection::Perspective(perspective), camera)) => {
+            let size = camera.logical_viewport_size().unwrap_or(Vec2::new(16.0, 9.0));
+            let rad_per_px = crate::starfield::radians_per_pixel(perspective.fov, size.y);
+            boom_limits(rad_per_px, fov_x(perspective.fov, size.x / size.y.max(1.0)))
+        }
+        // No camera yet, on the first frames. Whatever the interface has is left alone rather
+        // than clamped against a viewport nobody has measured.
+        _ => (ui.boom_lengths, ui.boom_lengths),
+    };
+    ui.boom_lengths = ui.boom_lengths.clamp(near, far);
+    let boom_m = ui.boom_lengths * game.ship.length_m;
+    eye.boom_m = boom_m;
+    eye.at_ly = game.ship.motion.position_ly - ui.look.forward() * (boom_m / M_PER_LY);
+}
+
+/// What a lit hull sends the eye, as linear display light before the tone map.
+///
+/// Through the band mapping and not the tone map, which the shader now evaluates itself — so a
+/// hull and the planet behind it are exposed by one curve rather than two that agree.
+fn shading(session: &Session, star_radius_m: f64, star_teff_k: f64, star_distance_m: f64) -> Vec3 {
+    let radiance =
+        crate::resolved::lit_radiance(ALBEDO, star_radius_m, star_teff_k, star_distance_m);
+    Vec3::from_array(session.mapping.apply(&radiance))
+}
+
+/// Where the light on a hull comes from, and how bright it is there.
+///
+/// The system's own star where there is one. Between the stars there is no system to ask, so
+/// it is the nearest star in the catalogue — which at that range contributes almost nothing,
+/// and the point of it is that a hull out there is a silhouette with a direction rather than a
+/// uniformly unlit blob.
+fn lighting(session: &Session) -> Option<(DVec3, f64, f64)> {
+    if let Some(system) = session.system.as_ref() {
+        return Some((system.star_position_ly(), system.star_radius_m(), system.star_teff_k()));
+    }
+    let here = session.ship.motion.position_ly;
+    let nearest = session
+        .stars
+        .iter()
+        .min_by(|a, b| here.distance_squared(a.position_ly).total_cmp(&here.distance_squared(b.position_ly)))?;
+    Some((nearest.position_ly, nearest.star.radius_m, nearest.star.teff_k))
+}
+
+/// What a hull radiates on its own account, as linear display light.
+///
+/// A blackbody at [`HULL_K`], and nothing else about the craft enters it: a surface at `T` has
+/// radiance `B(T)` whichever way it is turned and however far from a star it is. So this is the
+/// term that makes a ship visible between the stars, and the term that makes one impossible to
+/// hide in the thermal bands.
+fn emitted(session: &Session) -> Vec3 {
+    Vec3::from_array(session.mapping.apply(&hull_radiance()))
+}
+
+/// The same, before the band mapping. Split out because the exposure meters against radiance
+/// and the shader wants display light.
+fn hull_radiance() -> PerBand<f32> {
+    PerBand::new(std::array::from_fn(|i| {
+        blackbody::band_radiance(em_spectra::Band::ALL[i], HULL_K) as f32
+    }))
+}
+
+fn uniforms(
+    to_star: DVec3,
+    reflected: Vec3,
+    emitted: Vec3,
+    tone: &crate::tonemap::ToneMap,
+) -> BodySurfaceUniform {
+    BodySurfaceUniform {
+        dark: GREY,
+        light: GREY,
+        to_star: sim_to_render(to_star.normalize_or_zero()).as_vec3().extend(NIGHT),
+        // A contrast of zero is what turns the generated surface off: the shader mixes the
+        // palette at a half whatever the noise says, and the two ends are the same grey.
+        params: Vec4::new(0.0, 0.0, 0.0, 0.0),
+        reflected: reflected.extend(0.0),
+        // `w` is how far the pattern inverts in the body's own light, and a hull has no
+        // pattern: its two palette ends are the same grey.
+        emitted: emitted.extend(0.0),
+        exposure: Vec4::new(tone.surface_reference, tone.stops, 0.0, 0.0),
+    }
+}
+
+/// Everything with a hull this frame: the player's ship, then everybody in sight.
+///
+/// `facing` may be zero, meaning nothing decided it; resolving that against what was last seen
+/// is [`update_hulls`]'s job, because it is the thing that remembers.
+fn drawn(game: &Session, uplink: &Uplink, eye: &Eye, look: DVec3) -> Vec<(Option<ShipId>, Placed)> {
+    let now = game.coordinate_time_s();
+    let mut out = Vec::with_capacity(uplink.contacts.len() + 1);
+    out.push((
+        None,
+        Placed {
+            // The one thing drawn at an offset from the render origin, and by exactly the boom
+            // the eye was pulled back by.
+            offset_m: look * eye.boom_m,
+            length_m: game.ship.length_m,
+            // Always somewhere: a hull has an orientation whether or not anything is
+            // deciding it, and the world is what remembers which.
+            facing: game.ship.facing_at(now).unwrap_or(DVec3::X),
+            at_ly: game.ship.motion.position_ly,
+        },
+    ));
+    for contact in &uplink.contacts {
+        out.push((
+            Some(contact.ship_id),
+            Placed {
+                offset_m: (contact.position_ly - eye.at_ly) * M_PER_LY,
+                length_m: contact.length_m,
+                facing: contact.facing,
+                at_ly: contact.position_ly,
+            },
+        ));
+    }
+    out
+}
+
+/// One hull, reduced to what the transform and the material need.
+struct Placed {
+    /// From the eye, in simulation axes, metres.
+    offset_m: DVec3,
+    length_m: f64,
+    /// Unit, or zero where nothing decides it.
+    facing: DVec3,
+    /// Where it is in the world, for working out how lit it is.
+    at_ly: DVec3,
+}
+
+/// Keep a mesh for every craft in sight, and the player's own.
+pub fn update_hulls(
+    mut commands: Commands,
+    game: Res<crate::app::Game>,
+    ui: Res<crate::app::Ui>,
+    uplink: Res<Uplink>,
+    eye: Res<Eye>,
+    mut hulls: ResMut<Hulls>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<BodySurfaceMaterial>>,
+    existing: Query<(Entity, &Hull)>,
+    mut placed: Query<(&mut Transform, &MeshMaterial3d<BodySurfaceMaterial>, &Hull)>,
+) {
+    let look = ui.look.forward();
+    let want = drawn(&game.0, &uplink, &eye, look);
+    let keys: Vec<Option<ShipId>> = want.iter().map(|(id, _)| *id).collect();
+
+    if keys != hulls.drawn {
+        for (entity, _) in &existing {
+            commands.entity(entity).despawn();
+        }
+        let mesh = hulls
+            .mesh
+            .get_or_insert_with(|| meshes.add(Sphere::new(1.0).mesh().uv(LONGITUDES, LATITUDES)))
+            .clone();
+        for (id, _) in &want {
+            commands.spawn((
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(materials.add(BodySurfaceMaterial {
+                    uniforms: BodySurfaceUniform::default(),
+                })),
+                Transform::default(),
+                // The same reason a resolved body carries it: these are placed by hand at a
+                // scale where a mesh's own bounds say nothing useful about where it lands.
+                NoFrustumCulling,
+                Hull(*id),
+            ));
+        }
+        hulls.drawn = keys;
+        // Spawned this frame and placed the next. One frame at the origin is one frame with
+        // the hull inside the camera, which is a flash of nothing rather than a wrong picture.
+        return;
+    }
+
+    let star = lighting(&game.0);
+    for (mut transform, material, marker) in placed.iter_mut() {
+        let Some((_, at)) = want.iter().find(|(id, _)| *id == marker.0) else { continue };
+        transform.translation = sim_to_render(at.offset_m / UNIT_M).as_vec3();
+        transform.rotation = attitude(at.facing);
+        transform.scale = half_extents(at.length_m);
+
+        let Some(asset) = materials.get_mut(&material.0) else { continue };
+        let next = match star {
+            Some((star_ly, radius, teff)) => {
+                let distance = star_ly.distance(at.at_ly) * M_PER_LY;
+                uniforms(
+                    star_ly - at.at_ly,
+                    shading(&game.0, radius, teff, distance),
+                    emitted(&game.0),
+                    &game.0.tone,
+                )
+            }
+            // No star to reflect. The hull still glows with its own heat, which is the whole
+            // reason a ship between the stars is a thing you can see at all.
+            None => uniforms(DVec3::Z, Vec3::ZERO, emitted(&game.0), &game.0.tone),
+        };
+        if asset.uniforms != next {
+            asset.uniforms = next;
+        }
+    }
+}
+
+/// What a hull at `at_ly` sends the eye, per band, for metering.
+///
+/// Both halves, because the exposure has to account for both: a ship is reflected starlight in
+/// the optical and its own heat in the infrared, and which one dominates is a question about
+/// the band mapping rather than about the ship.
+pub fn radiance_at(session: &Session, at_ly: DVec3) -> PerBand<f32> {
+    let own = hull_radiance();
+    let Some((star_ly, radius, teff)) = lighting(session) else { return own };
+    let lit =
+        crate::resolved::lit_radiance(ALBEDO, radius, teff, star_ly.distance(at_ly) * M_PER_LY);
+    PerBand::new(std::array::from_fn(|i| {
+        let band = em_spectra::Band::ALL[i];
+        lit[band] + own[band]
+    }))
+}
+
+/// How much sky a hull of `length_m` covers from `distance_m`, steradians.
+///
+/// The ovoid taken as a disc of its own long radius, which is what the exposure wants: a
+/// bound on the share of the frame it can take rather than its exact silhouette.
+pub fn solid_angle_sr(length_m: f64, distance_m: f64) -> f32 {
+    if distance_m <= 0.0 {
+        return 0.0;
+    }
+    let radius = length_m * 0.5;
+    (std::f64::consts::PI * (radius / distance_m).powi(2)) as f32
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const RAD_PER_PX: f32 = 7.67e-4;
+
+    /// The two ends of the zoom, stated as what they are for: five pixels of hull at one end
+    /// and a hull the width of the window at the other.
+    #[test]
+    fn the_zoom_stops_where_the_hull_stops_being_a_shape() {
+        let fov_x = fov_x(std::f32::consts::FRAC_PI_4, 16.0 / 9.0);
+        let (near, far) = boom_limits(RAD_PER_PX, fov_x);
+        assert!(near < far, "{near} to {far}");
+
+        // The angle a hull covers from `booms` of its own lengths away, stated as the
+        // textbook angular diameter rather than by inverting the function under test.
+        let subtends = |booms: f64| 2.0 * (0.5 / booms).asin();
+
+        // At the far stop it is five pixels across, whatever size it is — the stops are pure
+        // numbers, so one check covers the whole designed range of hulls.
+        let px = subtends(far) / RAD_PER_PX as f64;
+        assert!((px - MIN_HULL_PX).abs() < 1e-6, "the far stop came out {px} px");
+        // And at the near stop, exactly the width of the window.
+        let across = subtends(near);
+        assert!((across - fov_x as f64).abs() < 1e-9, "the near stop spans {across} of {fov_x}");
+    }
+
+    /// The default framing has to be inside the stops, or a ship is clamped the moment it is
+    /// drawn and the default means nothing.
+    #[test]
+    fn the_default_framing_is_a_framing_and_not_a_stop() {
+        let (near, far) = boom_limits(RAD_PER_PX, fov_x(std::f32::consts::FRAC_PI_4, 16.0 / 9.0));
+        assert!(near < DEFAULT_BOOM_LENGTHS && DEFAULT_BOOM_LENGTHS < far);
+    }
+
+    /// A viewport nobody has measured must not collapse the range to a point.
+    #[test]
+    fn a_camera_with_no_viewport_still_gives_a_usable_range() {
+        let (near, far) = boom_limits(0.0, 0.0);
+        assert!(near <= far && near > 0.0 && far.is_finite());
+    }
+
+    fn render(v: DVec3) -> Vec3 {
+        sim_to_render(v).as_vec3()
+    }
+
+    /// The nose goes where the ship is pointing, and the hull does not turn inside out on the
+    /// way through the change of axes.
+    #[test]
+    fn the_nose_points_along_the_facing_in_render_axes() {
+        for fore in [DVec3::X, DVec3::Y, -DVec3::X, DVec3::new(1.0, 2.0, -0.5).normalize()] {
+            let q = attitude(fore);
+            let nose = q * Vec3::Z;
+            assert!((nose - render(fore)).length() < 1e-5, "{fore} gave {nose}");
+            // A rotation and not a reflection: the three axes stay right-handed.
+            let (x, y, z) = (q * Vec3::X, q * Vec3::Y, q * Vec3::Z);
+            assert!((x.cross(y) - z).length() < 1e-5, "handedness was lost on {fore}");
+        }
+    }
+
+    /// Straight up the pole, where the roll is genuinely undefined. Any answer will do; a
+    /// degenerate one will not.
+    #[test]
+    fn a_ship_flying_up_the_pole_still_gets_a_rotation() {
+        let q = attitude(DVec3::Z);
+        assert!(q.is_normalized(), "{q:?}");
+        assert!((q * Vec3::Z - render(DVec3::Z)).length() < 1e-5);
+    }
+
+    #[test]
+    fn nothing_deciding_the_attitude_is_not_a_broken_rotation() {
+        assert_eq!(attitude(DVec3::ZERO), Quat::IDENTITY);
+    }
+
+    /// Five by three by one, at whatever size, in the renderer's own units.
+    #[test]
+    fn the_hull_keeps_its_proportions_at_every_size() {
+        for length in [500.0, 5_000.0, 50_000.0] {
+            let e = half_extents(length);
+            // Relative, because the numbers are billionths: a render unit is an astronomical
+            // unit and a hull is metres, so `f32` carries seven digits of a very small one.
+            let want = length * 0.5 / UNIT_M;
+            assert!((e.z as f64 - want).abs() < want * 1e-6, "{length} m gave {}", e.z);
+            assert!((e.x / e.z - 0.6).abs() < 1e-5, "beam {e:?}");
+            assert!((e.y / e.z - 0.2).abs() < 1e-5, "height {e:?}");
+        }
+    }
+
+    /// The smallest hull at the closest the camera may come still clears the near plane, or
+    /// the ship is clipped away at exactly the zoom a player reaches for to look at it.
+    #[test]
+    fn the_nearest_the_camera_comes_is_still_outside_the_near_plane() {
+        let (near, _) = boom_limits(RAD_PER_PX, fov_x(std::f32::consts::FRAC_PI_4, 16.0 / 9.0));
+        let length = lc_world::craft::LENGTH_RANGE_M.0;
+        // Boom to the centre, less the half-length the nose reaches back toward the camera.
+        let clearance = (near - 0.5) * length / UNIT_M;
+        assert!(clearance > crate::app::NEAR_PLANE as f64, "{clearance} units of clearance");
+    }
+}

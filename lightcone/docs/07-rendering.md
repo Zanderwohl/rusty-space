@@ -611,6 +611,144 @@ a ring. It is unusable for navigation, which is correct, and it is the most stri
 renderer can produce. Capturing a still from a ship in transit is worth making an explicit
 affordance; `--shot` does it.
 
+## Ships, and the camera that looks at one
+
+**Decided: third person, on an orbit camera.** A ship is the thing a player owns and the thing
+they are told about other people, and neither is visible from inside it.
+
+A hull is one ovoid at a size: five long by three across by one deep, from
+`lc_world::craft::BEAM_PER_LENGTH` and its neighbour, over a designed range of five hundred
+metres to fifty kilometres. It is drawn by the resolved-body material with the contrast set to
+zero, which turns the generated surface off and leaves a flat grey lit by the system's own star
+and metered into the same exposure as everything else. Shape is a constant rather than a field
+because nothing yet lets one craft differ from another in it; the *length* is on the wire, so
+ships varying in size costs no protocol version.
+
+**The nose follows the drive, not the velocity.** `lc_world::motion::facing` reads what the
+current motive is *aiming* at — see `lc_world::attitude` — which is the thrust where there is
+thrust. Proper acceleration, so a ballistic arc counts as unpowered rather than pointing at
+whatever it is falling towards. The visible consequence is the right one: a crossing is burn,
+flip and burn, so for its whole second half the ship points back the way it came while still
+travelling forward at a large fraction of `c`.
+
+**The turn is not instant, and it is not free.** A hull swings its nose at
+`attitude::rate_rad_s`, which goes as `1/L` — a five-hundred-metre ship flips in a minute and a
+fifty-kilometre one takes nearly two hours. So `flight::Cruise` holds the drive out between the
+boost and the brake for at least `Drive::flip_s`, and the ship covers that ground at its peak
+speed. It also comes about *before* it lights anything: a crossing begins with a `Phase::Turn`
+in which the ship drifts at whatever it had, facing round to its first burn. A ship told to go
+somewhere behind it spends a minute turning before the drive comes on, and the drift during that
+minute is part of the plan rather than an error in it — which is why the turn has to be timed and
+the crossing solved together, not one after the other. On an interstellar crossing it is a minute inside a journey of years and nobody will
+notice; on a hop of a few light-seconds it is most of the trip, and a big hull has to arrive
+slower because it spends the journey coming about. The brake never lights on a nose still
+turning, which is the property the coast exists to buy.
+
+A craft never has *no* attitude: where nothing is deciding one it keeps the one it has, so a
+ship that has just braked to a halt goes on pointing where it finished rather than snapping to
+whichever way its last millimetre a second happened to go.
+
+**Arriving is not stopping.** A station is an orbit and an orbit moves, so a crossing planned
+onto one ends *on* its velocity: the last burn is held at one angle — `flight::Injection` — that
+kills the speed the ship came in with and imparts the speed it is joining, both at once, rather
+than braking to a dead halt and finding kilometres a second out of nowhere on the next step. The
+nose is visibly neither straight back down the track nor across it, but between. The form is
+Newtonian and only offered below `flight::INJECTION_MAX_BETA`; an interstellar crossing brakes
+to rest the exact way, as it always did.
+
+**And a transfer about one body is flown in that body's frame.** Going from one orbit of Earth to
+another is not a straight line in the world: Earth covers a whole orbit radius while the ship
+flies it, so in world coordinates the destination is running away and there is no arrival time to
+find. `lc_world::transfer` plans it relative to the body instead — the frame tracked rather than
+anchored, since both ends hold the same system and can place the body analytically — which turns
+a forty-five-thousand-kilometre miss into a millimetre. What the flight readout shows for one is
+in that frame, so it says which body the speed is *past*.
+
+### The camera still does not translate
+
+What moves is the origin everything is drawn relative to. `hull::Eye` is a boom's length behind
+the hull along the view, and every pass that read the ship's position now reads that — the
+starfield uniform, the bodies, the resolved spheres, the envelopes and the reticle. The ship
+becomes the one thing drawn at an offset from the render origin.
+
+This is not bookkeeping. At the far end of the zoom a fifty-kilometre hull is thirteen thousand
+kilometres from the eye, which is a couple of pixels of parallax against a small moon; drawing
+the sky from the ship and the moon from the camera would have put the two a measurable distance
+apart with nothing in the code to say why.
+
+### Both zoom stops are angles
+
+Stored in **hull lengths**, not metres, so the number is scale-free: a player who changes ships
+keeps the framing rather than finding themselves inside a bigger one. The near stop puts the
+hull at the width of the window and the far one at five pixels across, below which a shape is a
+smudge and backing further off reads as the ship vanishing rather than as distance. For the
+designed range of hulls that is a boom of 0.84 to 261 lengths.
+
+Both come from the angular diameter, `2 asin(a/d)`, and not from a chord over a distance. The
+difference is invisible at the far stop and several per cent at the near one, where the camera
+is less than a length away — enough to hang the nose and the tail off the edges of the window.
+
+### Other ships
+
+Drawn from `Outbound::Present` — see [08-networking.md](08-networking.md) — which is to say at
+their **retarded** positions. A contact under way is drawn behind where it actually is, and the
+faster it is going the further behind. That is the game rather than a lag.
+
+Every craft in the system is marked and named on the reticle whether or not the cursor is on
+it, which is the one place a ship differs from a body or a star: it is a few pixels at any
+range worth seeing it from and has nothing in the sky to tell it apart from the background, so
+a name that only appeared on hover would be a name nobody found. Clicking one asks for nothing
+yet — every `Target` is somewhere a course can be plotted to, and a course to a ship is a
+rendezvous with something moving that this client only knows the past of.
+
+### The exhaust
+
+A burn is drawn as a volume of gas, and one number sizes all of it: the jet power `½ F v`,
+which follows from what is being pushed and how hard. So a heavier ship or a harder burn is a
+longer, hotter plume without that being a rule anybody wrote — it is what more power through the
+same nozzle means.
+
+**The shape is a display model and the light is not.** How many hull lengths the cone runs and
+how far it flares are choices; the temperature is then *forced*, because the power has to go
+somewhere and a blackbody of that area radiating it has exactly one temperature. A
+five-hundred-metre ship at five gravities comes out around fifty thousand kelvin, blue-white,
+and a fifty-kilometre one is hotter still. Nobody picks that.
+
+The one thing that is neither is the **brightness**. The gas is optically thin by an amount
+nothing here models, so what reaches the eye is some fraction of the blackbody radiance, and
+that fraction is a fudge: the core is placed a fixed number of stops above the exposure's
+reference so it clips and blooms while the falloff carries the edges back down through the
+window. Scale it from the colour instead and a plume is a white rectangle — fifty thousand
+kelvin is ten decades over a planet and no window holds both.
+
+The mesh is a **proxy**, not the cone: a closed cylinder that merely has to contain the gas,
+with back faces drawn so each pixel gets one fragment and the camera may be inside it. Each
+fragment integrates the density along its own ray, which is where the feathered edge comes
+from — a ray grazing the side crosses almost nothing. Two traps, both paid for:
+
+- The march runs **from the fragment back toward the eye**, not forward from the eye. A plume is
+  metres long an astronomical unit from the render origin, so the eye is of order `1e8` in the
+  proxy's own units and `eye + direction * t` asks `f32` for a point near the origin as the
+  difference of two numbers near `1e8`, where its spacing is about eight. Every sample comes out
+  quantised to nothing and the plume does not appear at all.
+- The density is bounded by one. An earlier version had both a taper along the length *and* a
+  `1/r²`, which between them made the column a hundred times deeper at the nozzle than at the
+  mouth — every part of the cone landed above the top of the window and the whole thing was one
+  flat saturated shape.
+
+### Ships in the interface
+
+The System window has two lists, because "what is here" and "who is here" are different
+questions that change at different rates — a ship that arrived a second ago would otherwise be
+filed below two hundred moons. The count is on the tab, so whether anyone is here at all costs
+no clicks.
+
+The age of the light is a column and not a footnote. It is taken from the **range**: a
+light-year is a year of travel by definition, so the distance to where the light left is its
+age, and taking it that way needs no agreement with the server about what time it is.
+Differencing the timestamps instead measures the clock skew between the two ends, which at a
+frozen client rate put a ship eight kilometres away five minutes in the past.
+
 ## Checking a renderer without a window
 
 ![Observer snapshot](../images/observer-snapshot.png)

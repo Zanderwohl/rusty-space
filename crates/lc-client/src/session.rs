@@ -217,9 +217,23 @@ impl Session {
     }
 
     /// The crossing under way, if there is one.
+    ///
+    /// A transfer's too. It is the same plan read in a body's frame rather than the world's, so
+    /// its phase, its progress and both its clocks mean what they always did — but the *speeds*
+    /// on it are relative to that body. See [`Session::flown_about`], which is how a caller
+    /// knows to say so.
     pub fn cruise(&self) -> Option<&Cruise> {
         match &self.ship.motion.motive {
             Motive::Crossing(cruise) => Some(cruise),
+            Motive::Transfer(transfer) => Some(&transfer.cruise),
+            _ => None,
+        }
+    }
+
+    /// The body [`Session::cruise`] is being flown about, when it is being flown about one.
+    pub fn flown_about(&self) -> Option<&str> {
+        match &self.ship.motion.motive {
+            Motive::Transfer(transfer) => Some(&transfer.about),
             _ => None,
         }
     }
@@ -353,6 +367,10 @@ impl Session {
         self.ship.motion.position_ly = snapshot.position_ly;
         self.sync_system();
         let now = self.coordinate_time_s();
+        // Taken whole, which drops whatever past this client had recorded for its own ship.
+        // Right: the authority is handing over what the ship *is* doing, and a client's own
+        // history of it was only ever a prediction. Nothing solves a retarded time against
+        // the player's own ship anyway — it is the observer, not a contact.
         self.ship.motion = snapshot.clone().restore(self.system.as_deref(), now);
         // Same system, so nothing is dropped; what this is for is re-solving the patch, which
         // was answered for the arc the craft was on a moment ago and not for this one.
