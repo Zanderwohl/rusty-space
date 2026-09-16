@@ -97,6 +97,8 @@ pub enum Action {
     WriteSnapshot,
     /// Ask the shard to put a scene in the world, by name. See `lc_world::scenario`.
     StageDemo(String),
+    /// Watch from another craft. `None` is back to one's own.
+    WatchFrom(Option<lc_proto::ShipId>),
 }
 
 /// What an action needs from outside: the few things the core cannot do itself.
@@ -340,6 +342,17 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             effects.push(Effect::Notify("no server, so nowhere to stage a scene".into()));
         }
         Action::StageDemo(name) => effects.push(Effect::Stage(name)),
+        // The eye only. What the client works out about light is still solved from the ship
+        // the session owns — see [`crate::ui::CameraPerspective::Pov`], which says what that
+        // costs and where it would start to show.
+        Action::WatchFrom(ship_id) => {
+            ui.perspective = ship_id.map(crate::ui::CameraPerspective::Pov);
+            let said = match ship_id {
+                Some(_) => "watching from another craft",
+                None => "back aboard your own ship",
+            };
+            effects.push(Effect::Notify(said.into()));
+        }
     }
     effects
 }
@@ -748,7 +761,10 @@ mod tests {
     fn a_rate_is_named_by_what_it_feels_like() {
         assert_eq!(rate_label(60.0), "1 year / minute");
         assert_eq!(rate_label(360.0), "1 year / 10 s");
-        assert!(rate_label(123.0).contains("123"), "an unnamed rate still reads");
+        // One off the ladder reads as a period too, not as a factor — the point of the label
+        // is that a rate is something you can feel, and "123x" is not.
+        assert_eq!(rate_label(123.0), "1 year / 29 seconds");
+        assert_eq!(rate_label(0.05), "7 minutes / second");
     }
 
     /// The exit criterion, driven entirely through actions with no window.

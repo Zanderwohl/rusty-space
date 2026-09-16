@@ -504,4 +504,47 @@ mod tests {
         let closed = apart(&server);
         assert!(closed < opening / 4.0, "it barely closed: {opening:.0} to {closed:.0} m");
     }
+    /// The reciprocal of the approach, and the direction that was missing: the small ship is
+    /// the one doing the closing.
+    ///
+    /// **It closes and then rides, rather than closing and stopping.** A standing intercept
+    /// re-solves every ten coordinate minutes, which is far finer than the light delay across a
+    /// system and is what the interval was chosen against — but a craft in high orbit of
+    /// Jupiter covers fourteen thousand kilometres in that time, so the pursuer is always
+    /// flying at a ten-minute-old position. What comes out is a relative orbit a hundred to
+    /// four hundred kilometres across rather than the standoff two still craft settle into.
+    /// That is the honest behaviour of the guidance this scene uses, so it is what is asserted.
+    #[tokio::test]
+    async fn the_small_ship_closes_on_the_large_one() {
+        let Some((mut server, mut wire, _, pov)) = staged(&lc_world::scenario::CLOSING) else {
+            return;
+        };
+        let cast = CraftId(lc_world::scenario::BASE_ID);
+        let apart = |s: &Server<Memory>| {
+            let (a, b) = (s.fleet.get(pov).unwrap(), s.fleet.get(cast).unwrap());
+            a.motion.position_ly.distance(b.motion.position_ly) * lc_world::system::M_PER_LY
+        };
+        server.tick(&mut wire).await.unwrap();
+        let opening = apart(&server);
+
+        for _ in 0..400 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let closed = apart(&server);
+        assert!(closed < opening / 100.0, "it barely closed: {opening:.0} to {closed:.0} m");
+
+        // And it stays closed. A pursuit that overshot would be leaving, and the numbers either
+        // side of this are a factor of four hundred apart, so the bound is loose on purpose:
+        // what it is pinning is "in company", not a distance.
+        let mut furthest: f64 = 0.0;
+        for _ in 0..500 {
+            server.tick(&mut wire).await.unwrap();
+            furthest = furthest.max(apart(&server));
+        }
+        assert!(
+            furthest < opening / 100.0,
+            "it drifted back out to {furthest:.0} m of an opening {opening:.0} m",
+        );
+    }
+
 }

@@ -486,13 +486,26 @@ fn frame_the_cast(
     if uplink.contacts.is_empty() {
         return;
     }
+    // Everybody the camera is *not* on. Watching from another craft, the interesting thing is
+    // the ship you left; watching from your own, it is the cast. Aiming at the hull the boom is
+    // attached to would be aiming at the middle of the screen.
+    let anchored = match ui.perspective {
+        Some(crate::ui::CameraPerspective::Pov(ship_id)) => Some(ship_id),
+        None => None,
+    };
+    let here = match anchored.and_then(|id| uplink.contacts.iter().find(|c| c.ship_id == id)) {
+        Some(contact) => contact.position_ly,
+        None => game.ship.motion.position_ly,
+    };
     // The middle of them, by bearing rather than by position: a scene with one ship in it aims
     // at that ship, and one with four spread about an axis aims down the axis instead of at
     // whichever happens to be nearest — which would throw the other three off to one side.
     // Directions are summed rather than positions, or the furthest would count for the most.
-    let here = game.ship.motion.position_ly;
     let mut bearing = DVec3::ZERO;
-    for contact in &uplink.contacts {
+    if anchored.is_some() {
+        bearing += (game.ship.motion.position_ly - here).normalize_or_zero();
+    }
+    for contact in uplink.contacts.iter().filter(|c| Some(c.ship_id) != anchored) {
         bearing += (contact.position_ly - here).normalize_or_zero();
     }
     if let Some(look) = crate::ui::Look::aimed_at(bearing) {

@@ -11,10 +11,16 @@ use bevy_egui::egui;
 
 use crate::action::Action;
 use crate::input::Requested;
+use crate::ui::CameraPerspective;
 use crate::uplink::Uplink;
 
 /// Draw the list. Every button is the same ask, by name.
-pub fn scenarios(ui: &mut egui::Ui, uplink: &Uplink, out: &mut MessageWriter<Requested>) {
+pub fn scenarios(
+    ui: &mut egui::Ui,
+    uplink: &Uplink,
+    perspective: Option<CameraPerspective>,
+    out: &mut MessageWriter<Requested>,
+) {
     ui.label("Scenes to put in the world. Development only.");
     ui.separator();
     if uplink.joined().is_none() {
@@ -34,5 +40,32 @@ pub fn scenarios(ui: &mut egui::Ui, uplink: &Uplink, out: &mut MessageWriter<Req
             ui.label(format!("Runs at {:.0}x — the shard will say so.", scene.rate));
         }
         ui.separator();
+    }
+    watch_from(ui, uplink, perspective, out);
+}
+
+/// Which craft the camera is behind.
+///
+/// Only the eye moves — the light is still worked out from the player's own ship, which is why
+/// this is here and not in a shipped build. See [`crate::ui::CameraPerspective::Pov`].
+fn watch_from(
+    ui: &mut egui::Ui,
+    uplink: &Uplink,
+    perspective: Option<CameraPerspective>,
+    out: &mut MessageWriter<Requested>,
+) {
+    ui.label("Watch from");
+    let aboard = perspective.is_none();
+    if ui.add_enabled(!aboard, egui::Button::new("your own ship")).clicked() {
+        super::panels::ask(out, Action::WatchFrom(None));
+    }
+    for contact in &uplink.contacts {
+        let watching = perspective == Some(CameraPerspective::Pov(contact.ship_id));
+        if ui.add_enabled(!watching, egui::Button::new(&contact.name)).clicked() {
+            super::panels::ask(out, Action::WatchFrom(Some(contact.ship_id)));
+        }
+    }
+    if uplink.contacts.is_empty() {
+        ui.label("Nobody else in sight.");
     }
 }

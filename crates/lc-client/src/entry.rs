@@ -35,6 +35,12 @@ pub fn parse(args: &[String]) -> Entry {
     }
 
     let mut actions = Vec::new();
+    // Which of a scene's cast to watch from, by its place in the cast list. The identifiers are
+    // the scene's own, so this needs no shard to have answered first.
+    if let Some(slot) = value::<i64>(args, "--demo-pov") {
+        let ship_id = lc_proto::ShipId(lc_world::scenario::BASE_ID + slot.max(0));
+        actions.push(Action::WatchFrom(Some(ship_id)));
+    }
     if let Some(preset) = value::<usize>(args, "--band") {
         actions.push(Action::SetBandPreset(preset));
     }

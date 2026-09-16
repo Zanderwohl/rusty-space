@@ -257,6 +257,7 @@ seven hours twenty times a second having never drifted at all.
 | `--burst <n>` | photograph `n` consecutive frames, numbered. For flicker: two runs stopped at frame `n` and frame `n+1` have accumulated different wall time and are not consecutive at all |
 | `--demo <name>` | stage a scene, and bring a shard to run it in |
 | `--demo-cam <yaw:pitch:booms>` | pin the camera for the run |
+| `--demo-pov <n>` | watch from cast member `n` rather than from one's own ship |
 
 These emit [`Action`]s rather than opening a second path into the client, so they can only do
 what the interface can do. `--shot` exists because WGSL cannot be asserted from a test and a
@@ -272,10 +273,23 @@ staged on the side that decides what happened. See `lc_world::scenario` for the 
 `lc_server::director` for the runner.
 
 What the camera does during one is the ordinary free orbit: a scene is something to look
-around inside, not something to be shown. It turns once to face the cast on arrival — by the
-middle of them by bearing, so four hulls spread about an axis are framed down the axis rather
-than at whichever is nearest — and is the player's from then on. `--demo-cam` pins it instead,
-for a frame two runs are meant to agree about.
+around inside, not something to be shown. It turns once to face everything the camera is *not*
+on — by the middle of them by bearing, so four hulls spread about an axis are framed down the
+axis rather than at whichever is nearest — and is the player's from then on. `--demo-cam` pins
+it instead, for a frame two runs are meant to agree about.
+
+Which craft the camera is behind is a `CameraPerspective`, and it has one variant. An enum
+anyway, because what the camera does is going to grow — a chase view along the velocity, a fixed
+point a scene is composed from, a free fly-around — and each of those is a different answer to
+"where is the eye" rather than a flag on top of this one.
+
+**The eye moves and the observer does not**, which is the boundary to know about. Everything the
+client works out about light — retarded times, aberration, what a contact looked like when it
+left — is still solved from the player's own ship, because that is the craft the session has a
+worldline for. Across a scene, where the cast is kilometres apart, the difference is
+microseconds and there is nothing to see. Across the Oort cloud it would be hours. Watching from
+a craft you are not on is a development view until the observer can move too, which is why the
+only way to reach it is a flag and a panel that does nothing in a shipped build.
 
 ## Getting about inside a system
 

@@ -139,7 +139,7 @@ pub struct Scenario {
 
 impl Scenario {
     /// Every scene there is.
-    pub const ALL: &'static [Scenario] = &[TRAFFIC, MEETING, APPROACH, CHASE];
+    pub const ALL: &'static [Scenario] = &[TRAFFIC, MEETING, APPROACH, CLOSING, CHASE];
 
     /// The one whose name starts with `prefix`, if exactly one does.
     ///
@@ -273,6 +273,41 @@ pub const APPROACH: Scenario = Scenario {
         actor: Slot::Cast(0),
         act: Act::Chase(Slot::Pov),
     }],
+};
+
+/// The other way round: a small ship closing on a large one.
+///
+/// The reciprocal of [`APPROACH`], and not the same picture at all. Being approached is a hull
+/// growing in your window while you hold still; approaching is a planet falling away behind you
+/// and a hull you are aiming at. Both are worth having, and which one a five-kilometre ship and
+/// a five-hundred-metre one make depends entirely on which of them the camera is on.
+///
+/// The big ship is the one in the *high* orbit, which is not decoration. A pursuit curve spends
+/// the approach chasing where the quarry was, so what has to be small is the transit time
+/// against the period it is chasing round: from low to high at five g is a sixteenth of the
+/// upper orbit, which converges. The other way round it is a quarter, which crawls.
+pub const CLOSING: Scenario = Scenario {
+    name: "closing",
+    blurb: "You climb out of low orbit of Jupiter to meet a five-kilometre ship.",
+    star: "Sol",
+    // The same twentieth the other two orbital scenes run at, and for the same reason: an orbit
+    // that comes round in seconds is a strobe rather than a view.
+    rate: 0.05,
+    pov: Member {
+        name: "Kestrel",
+        kind: Kind::Ship,
+        length_m: 500.0,
+        accel_g: 5.0,
+        start: Start::Holding("orbit:Jupiter:low"),
+    },
+    cast: &[Member {
+        name: "Anvil",
+        kind: Kind::Ship,
+        length_m: 5_000.0,
+        accel_g: 5.0,
+        start: Start::Holding("orbit:Jupiter:high"),
+    }],
+    beats: &[Beat { after_s: 0.0, actor: Slot::Pov, act: Act::Chase(Slot::Cast(0)) }],
 };
 
 /// Three months of running, in fifteen seconds of watching.
