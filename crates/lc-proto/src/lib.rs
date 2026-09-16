@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 16;
+pub const PROTOCOL_VERSION: u32 = 17;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -441,6 +441,15 @@ pub enum Outbound {
         ship_id: ShipId,
         now_t: i64,
         name: String,
+        /// How fast this world runs, as a multiple of the design rate — one Julian year an
+        /// hour, the 8766 a client's own clock already counts in.
+        ///
+        /// Stated rather than assumed. The client used to hold a constant of its own that
+        /// happened to agree, which is a different thing from being told: a shard running at
+        /// any other rate would have been joined by a client confidently running at this one.
+        /// Carrying it is also what lets a development shard stage a scene at sixty times the
+        /// design rate, where a three-month chase is fifteen seconds of watching.
+        rate: f64,
         /// The ship, whole: where it is, how fast, how old, and **what it is doing**.
         ///
         /// Without it the client knows only the clock and its own identity, and would place its
@@ -474,7 +483,11 @@ pub enum Outbound {
     /// as a manoeuvre that has already finished, so the ship appears to teleport to its
     /// destination, and the server goes on refusing orders about a system it does not think the
     /// ship has reached.
-    Clock { now_t: i64 },
+    ///
+    /// The rate is restated with it because a welcome happens once and a rate does not have
+    /// to: a shard that stages a scene changes how fast the world runs, and a client still
+    /// ticking at the old one would run away from it exactly as an unstated rate did.
+    Clock { now_t: i64, rate: f64 },
     /// An intent that stood, and **what was actually done with it** — which is not always
     /// what was asked for.
     ///
@@ -560,6 +573,13 @@ pub enum Inbound {
     Act(Intent),
     /// Reconnecting: replay from the last reception this client actually has.
     ResumeFrom { arrive_t: i64 },
+    /// Put a named scene in the world.
+    ///
+    /// Appended last on purpose: every other variant keeps the discriminant its golden was
+    /// pinned at. Refused outright by a shard, which is not started for this — a client that
+    /// could stage a scene could put a craft wherever it liked, which is the one thing no
+    /// client may do. See `lc_server::director`.
+    Stage { scenario: String },
 }
 
 /// Encode anything the protocol carries.
@@ -583,14 +603,14 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 pub mod golden {
     /// `Outbound::Welcome { .., ship: Motion { at [4.2, 0, 0], holding a 12 Mm orbit of Earth } }`
     pub const WELCOME: &[u8] = &[
-        0, 7, 16, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169,
-        241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0,
-        0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56, 156, 108, 65, 154,
-        153, 153, 153, 153, 153, 169, 63, 3, 1, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 96,
-        227, 102, 65, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240,
-        63, 0, 0, 0, 0, 0, 0, 224, 63,
+        0, 7, 17, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
+        245, 64, 0, 0, 0, 0, 0, 0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0,
+        56, 156, 108, 65, 154, 153, 153, 153, 153, 153, 169, 63, 3, 1, 1, 5, 69, 97, 114,
+        116, 104, 0, 0, 0, 0, 96, 227, 102, 65, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 224, 63,
     ];
 
     /// `Inbound::Act(Intent { ship_id: 42, order: Transmit { power_w: 1500.0 }, .. })`
@@ -609,7 +629,7 @@ pub mod golden {
     /// Pinned because it is now the message that decides whether anyone gets in at all. A
     /// field moving here is a server reading someone else's ticket as this one's.
     pub const HELLO: &[u8] = &[
-        0, 16, 5, 97, 46, 98, 46, 99,
+        0, 17, 5, 97, 46, 98, 46, 99,
     ];
 
     pub const SET_COURSE: &[u8] = &[
@@ -652,20 +672,20 @@ pub mod golden {
     /// relative offset, a relative velocity, and a sighting. A field moving in it is a pursuer
     /// flying at a point its quarry was never at.
     pub const RENDEZVOUS: &[u8] = &[
-        0, 7, 16, 84, 128, 137, 122, 3, 65, 100, 97, 205, 204, 204, 204, 204, 204, 16, 64,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169,
-        241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 245, 64, 0, 0, 0, 0, 0,
-        0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56, 156, 108, 65, 154,
-        153, 153, 153, 153, 153, 169, 63, 2, 149, 214, 38, 232, 11, 46, 17, 62, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169, 241, 210, 77,
-        98, 80, 191, 0, 0, 0, 0, 0, 0, 0, 0, 17, 234, 45, 129, 153, 151, 113, 61, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 119, 43, 65, 0, 0, 0, 0, 0,
-        0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56, 156, 108, 65, 154,
-        153, 153, 153, 153, 153, 169, 63, 205, 204, 204, 204, 204, 204, 16, 64, 149, 214,
-        38, 232, 11, 46, 17, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252, 169,
-        241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 112, 111, 43, 65, 14,
-        0, 0, 0, 0, 0, 255, 244, 64,
+        0, 7, 17, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
+        245, 64, 0, 0, 0, 0, 0, 0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0,
+        56, 156, 108, 65, 154, 153, 153, 153, 153, 153, 169, 63, 2, 149, 214, 38, 232, 11,
+        46, 17, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        252, 169, 241, 210, 77, 98, 80, 191, 0, 0, 0, 0, 0, 0, 0, 0, 17, 234, 45, 129, 153,
+        151, 113, 61, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 119,
+        43, 65, 0, 0, 0, 0, 0, 0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0,
+        56, 156, 108, 65, 154, 153, 153, 153, 153, 153, 169, 63, 205, 204, 204, 204, 204,
+        204, 16, 64, 149, 214, 38, 232, 11, 46, 17, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        112, 111, 43, 65, 14, 0, 0, 0, 0, 0, 255, 244, 64,
     ];
     /// `Inbound::Act(Intent { ship_id: 42, order: Intercept { ship_id: 7 }, .. })`
     ///
@@ -701,6 +721,7 @@ mod tests {
             ship_id: ShipId(42),
             now_t: 1_000_000,
             name: "Ada".into(),
+            rate: 1.0,
             // Holding an orbit rather than at rest at a point. A ship doing something is the
             // shape worth pinning: it reaches through `Motion` into `Motive`, `Waypoint` and
             // `Anchor` at once, and those nested enums are where a field moves unnoticed.
@@ -810,6 +831,7 @@ mod tests {
             ship_id: ShipId(42),
             now_t: 1_000_000,
             name: "Ada".into(),
+            rate: 1.0,
             ship: Motion {
                 at_ly: [4.2, 0.0, 0.0],
                 beta: [0.0, 0.001, 0.0],
@@ -909,7 +931,7 @@ mod tests {
             present(),
             rendezvous(),
             accepted(),
-            Outbound::Clock { now_t: 1_000_000 },
+            Outbound::Clock { now_t: 1_000_000, rate: 1.0 },
             Outbound::Refused { ship_id: ShipId(-3), reason: Refusal::NotYours },
             Outbound::WrongProtocol { server: 9 },
         ];

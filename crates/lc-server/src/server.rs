@@ -100,6 +100,16 @@ pub struct Server<J: Journal> {
     /// motive both ends evaluate. Dropped when the quarry goes out of sight, so it cannot keep
     /// a client informed about somewhere it can no longer see.
     pursuits: HashMap<CraftId, Pursuit>,
+    /// How fast this world runs, as a multiple of the design rate. See [`Server::set_rate`].
+    rate: f64,
+    /// Whether a client may stage a scene. See [`Server::directing`].
+    directs: bool,
+    /// Ticks since this server started.
+    ///
+    /// Counted rather than derived from `now_t / TICK_US`, which stopped meaning anything once
+    /// a tick became a rate times a constant: at any rate but one, `now_t` is no longer a
+    /// clean multiple of anything and "about once a real second" came out as never.
+    ticks: u64,
 }
 
 impl<J: Journal> Server<J> {
@@ -122,7 +132,34 @@ impl<J: Journal> Server<J> {
             open: false,
             blocked: HashMap::new(),
             pursuits: HashMap::new(),
+            rate: 1.0,
+            directs: false,
+            ticks: 0,
         }
+    }
+
+    /// How fast this world runs, as a multiple of the design rate.
+    ///
+    /// One for a shard, and one is the only value a deployment has any business at: the rate
+    /// is the game's, not a dial. What it is here for is a development shard staging a scene,
+    /// where sixty — one Julian year a minute — turns a three-month chase into fifteen seconds
+    /// of watching.
+    ///
+    /// Nothing about the world depends on it. Every motive is a closed form evaluated at a
+    /// coordinate time, so a faster tick buys coarser event timestamps and nothing else; the
+    /// step never enters an integrator, so it cannot accumulate. What *does* depend on it is
+    /// the clock the client runs between statements, which is why the rate is on the wire.
+    pub fn set_rate(&mut self, rate: f64) {
+        self.rate = if rate.is_finite() && rate > 0.0 { rate } else { 1.0 };
+    }
+
+    pub fn rate(&self) -> f64 {
+        self.rate
+    }
+
+    /// Coordinate microseconds this server's tick covers.
+    fn tick_us(&self) -> i64 {
+        (TICK_US as f64 * self.rate) as i64
     }
 
     pub fn now_t(&self) -> i64 {
@@ -154,6 +191,15 @@ impl<J: Journal> Server<J> {
     /// reason this is not a deployment mode.
     pub fn admit_without_tickets(&mut self, yes: bool) {
         self.open = yes;
+    }
+
+    /// **Development only: let a client stage a scene.**
+    ///
+    /// Off, and a shard never turns it on. A client that could stage a scene could put a craft
+    /// wherever it liked, which is the one thing the authority keeps for itself — every other
+    /// order a client sends is a request about its own ship. See [`crate::director`].
+    pub fn directing(&mut self, yes: bool) {
+        self.directs = yes;
     }
 
     /// Give the server the stars it is authoritative over.
@@ -292,7 +338,8 @@ impl<J: Journal> Server<J> {
     /// One tick. The order is the whole of it.
     pub async fn tick(&mut self, wire: &mut impl Transport) -> Result<(), JournalError> {
         // 1. Advance.
-        self.now_t += TICK_US;
+        self.ticks += 1;
+        self.now_t += self.tick_us();
         let now_s = self.now_t as f64 * 1.0e-6;
         // Membership before motion, as the client orders it: a station and a conic are both
         // positions *in* a system, and one resolved against the wrong system is a craft in the
@@ -301,7 +348,7 @@ impl<J: Journal> Server<J> {
         // Nothing moved on the server before this. Reading a worldline never needed it — every
         // motive is a closed form — but the transitions do: a crossing that arrives becomes a
         // station, and a ballistic arc folds the patch it was solved for.
-        self.fleet.advance(now_s, TICK_US as f64 * 1.0e-6);
+        self.fleet.advance(now_s, self.tick_us() as f64 * 1.0e-6);
         // Room to write into, kept ahead rather than made on demand. Cheap: the journal holds
         // the range it has already made and this is a comparison until the window moves.
         self.journal.prepare(self.now_t, self.now_t + PREPARE_AHEAD_US).await?;
@@ -361,6 +408,7 @@ impl<J: Journal> Server<J> {
                             ship_id,
                             now_t: self.now_t,
                             name,
+                            rate: self.rate,
                             ship,
                         })
                     }
@@ -386,6 +434,16 @@ impl<J: Journal> Server<J> {
                     Err(reason) => wire.send(from, Outbound::Refused { ship_id, reason }),
                 }
             }
+            // Nothing to stage yet: the catalogue and the director arrive with
+            // `crate::director`. Refused rather than ignored, so a client that asks learns it
+            // asked a shard that does not do this.
+            Inbound::Stage { .. } if !self.directs => {
+                wire.send(from, Outbound::Refused {
+                    ship_id: ShipId(0),
+                    reason: Refusal::Impossible,
+                })
+            }
+            Inbound::Stage { .. } => {}
             Inbound::ResumeFrom { arrive_t } => {
                 // A client that missed an hour missed eight thousand in-game hours. Winding its
                 // cursor back is the whole of catch-up; the next flush replays from there.
@@ -681,12 +739,12 @@ impl<J: Journal> Server<J> {
     /// nearly stops. Without a statement to come back to, that divergence is permanent, and a
     /// client that disagrees about *when* the ship is disagrees about where it is.
     fn state_the_clock(&mut self, wire: &mut impl Transport) {
-        if self.now_t / TICK_US % i64::from(TICKS_PER_SECOND) != 0 {
+        if self.ticks % u64::from(TICKS_PER_SECOND) != 0 {
             return;
         }
-        let now_t = self.now_t;
+        let (now_t, rate) = (self.now_t, self.rate);
         for client in self.clients.keys().copied().collect::<Vec<_>>() {
-            wire.send(client, Outbound::Clock { now_t });
+            wire.send(client, Outbound::Clock { now_t, rate });
         }
     }
 
@@ -1303,6 +1361,43 @@ use crate::transport::Loopback;
         });
         server.tick(&mut wire).await.unwrap();
         assert!(matches!(wire.take(client).as_slice(), [Outbound::Welcome { .. }]));
+    }
+
+    /// **A faster world is the same world.** Its tick buys coarser event timestamps and
+    /// nothing else: every motive is a closed form evaluated at a coordinate time, so the step
+    /// never enters an integrator and cannot accumulate. Sixty ticks at the design rate and one
+    /// at sixty times it must put the same craft in the same place.
+    #[tokio::test]
+    async fn the_rate_does_not_change_where_anything_is() {
+        let at = DVec3::new(500_000.0, 0.0, 0.0);
+        let beta = DVec3::new(0.3, -0.1, 0.0);
+
+        let mut slow = Server::new(Memory::default(), 0, 1);
+        slow.fleet_mut().insert(crate::world::coasting(ShipId(1), at, beta, 0));
+        let mut fast = Server::new(Memory::default(), 0, 1);
+        fast.set_rate(60.0);
+        fast.fleet_mut().insert(crate::world::coasting(ShipId(1), at, beta, 0));
+
+        let mut wire = Loopback::new();
+        for _ in 0..60 {
+            slow.tick(&mut wire).await.unwrap();
+        }
+        fast.tick(&mut wire).await.unwrap();
+
+        assert_eq!(slow.now_t(), fast.now_t(), "sixty slow ticks is not one fast one");
+        let there = |s: &Server<Memory>| s.ship(ShipId(1)).unwrap().motion.position_ly;
+        assert_eq!(there(&slow), there(&fast), "the rate moved the ship");
+    }
+
+    /// A rate nobody could run at is not adopted. Zero would stop the clock and a negative one
+    /// would run it backwards, and both would reach a client as a statement about the world.
+    #[test]
+    fn a_nonsense_rate_is_refused_rather_than_kept() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            server.set_rate(bad);
+            assert_eq!(server.rate(), 1.0, "{bad} was taken as a rate");
+        }
     }
 
     /// A coarser tick produces the same world, only with coarser timestamps. The step never

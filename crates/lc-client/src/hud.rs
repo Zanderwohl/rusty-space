@@ -83,8 +83,9 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
             )
         }),
         coasting: session.coast().map(arc),
-        // The time rate is a development control and the server owns it; say so on screen
-        // rather than letting a fast clock look normal.
+        // Anything but the design rate is said on screen rather than left to look normal —
+        // whether the player set it offline or a shard staging a scene stated it. The clock
+        // running sixty times over is exactly when a readout of how fast earns its place.
         warning: (ui.time_rate != 1.0).then(|| crate::ui::rate_label(ui.time_rate)),
     }
 }

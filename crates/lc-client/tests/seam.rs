@@ -227,7 +227,7 @@ async fn the_server_says_what_time_it_is_without_being_asked() {
     // Nothing is sent from here: a clock statement is the server's own doing.
     let deadline = tokio::time::Instant::now() + PATIENCE;
     loop {
-        if let Some(Outbound::Clock { now_t }) = link
+        if let Some(Outbound::Clock { now_t, .. }) = link
             .poll()
             .into_iter()
             .find(|m| matches!(m, Outbound::Clock { .. }))

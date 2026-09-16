@@ -178,17 +178,16 @@ pub struct Uplink {
     pub round_trip_s: Option<f64>,
 }
 
-/// The rate multiplier at which the client's clock runs at the server's.
+/// The rate a shard runs at, and what a server that says nothing is taken to mean.
 ///
 /// One, because `session::TIME_RATE` — the coordinate seconds a multiplier of 1 buys per real
-/// second — is the same 8766 the server advances by every tick. The client's default is sixty
-/// times that, which is a development convenience whose own constant says "the server owns the
-/// rate in a real session and this multiplier does not exist there". It does not exist there
-/// from here on: joining adopts this.
+/// second — is the same 8766 the server advances by every tick. The client's own default is
+/// sixty times that, which is a development convenience whose own constant says "the server
+/// owns the rate in a real session and this multiplier does not exist there".
 ///
-/// If the two ever stop corresponding, the symptom is the clock correction below firing every
-/// second and never fixing anything, because the client re-diverges as fast as it is pulled
-/// back. That is the alarm working; it is not drift.
+/// It no longer exists there because of this constant, which would only ever have been a guess
+/// that happened to be right. The rate arrives in the welcome and is restated with the clock;
+/// this is the value a deployment sends, not the value a client assumes.
 pub const SERVER_RATE: f64 = 1.0;
 
 /// How far the clock may be out before it is pulled back, in coordinate microseconds.
@@ -199,6 +198,25 @@ pub const SERVER_RATE: f64 = 1.0;
 /// it spent in flight. Below this the difference is smaller than the frames either side draws;
 /// above it, positions disagree.
 pub const CLOCK_SLACK_US: i64 = 3_600 * 1_000_000;
+
+/// The same, against a world running at `rate` times the design rate.
+///
+/// A fixed hour stops being comfortably more than a statement's age as soon as the world runs
+/// faster than one: at sixty, a single server tick is seven coordinate hours, so *every*
+/// statement is further out than the slack and the client snaps back seven hours twenty times
+/// a second, for ever, without the clock ever having drifted. Three ticks is the same margin
+/// the fixed hour was, expressed in the thing it was always really measuring.
+pub fn clock_slack_us(rate: f64) -> i64 {
+    let tick = lc_server_tick_us(rate);
+    CLOCK_SLACK_US.max(tick.saturating_mul(3))
+}
+
+/// Coordinate microseconds a server tick covers at `rate`. Mirrors `lc_server::server::TICK_US`,
+/// which the browser build cannot see.
+fn lc_server_tick_us(rate: f64) -> i64 {
+    const DESIGN_TICK_US: f64 = 50.0 * 8766.0 * 1_000.0;
+    (DESIGN_TICK_US * rate.max(0.0)) as i64
+}
 
 /// How many sightings are remembered. A bound rather than a policy: the fold that replaces
 /// this will not keep a list at all.
@@ -349,6 +367,7 @@ fn fold(
             ship_id,
             now_t,
             name,
+            rate,
             ship,
             ..
         } => {
@@ -364,7 +383,7 @@ fn fold(
             // the client's own default is sixty times the server's, so a joined client ran
             // away from it at a hundred and forty coordinate hours a second without anybody
             // touching a key.
-            ui.0.time_rate = SERVER_RATE;
+            ui.0.time_rate = rate;
             uplink.state = State::Joined(Joined {
                 client_id,
                 ship_id,
@@ -473,11 +492,15 @@ fn fold(
             info!(?ship_id, at_t, ?order, "accepted");
             uplink.applied = said;
         }
-        Outbound::Clock { now_t } => {
+        Outbound::Clock { now_t, rate } => {
+            // A rate can change under a joined client: a development shard staging a scene is
+            // the case, and a client still ticking at the old one runs away from the world
+            // exactly as an unstated rate did.
+            ui.0.time_rate = rate;
             // Only when it matters. Snapping to every statement would pull the clock back by
             // the statement's flight time, once a second, forever.
             let out_by = now_t - (game.0.coordinate_time_s() * 1e6) as i64;
-            if out_by.abs() > CLOCK_SLACK_US {
+            if out_by.abs() > clock_slack_us(rate) {
                 game.0.correct_coordinate_time_us(now_t);
                 let hours = out_by.abs() as f64 / 3.6e9;
                 // Said out loud, because the world jumps when this happens and a jump nobody
@@ -571,9 +594,20 @@ mod tests {
 
     /// A welcome for a ship that is *doing* something, which is what a reconnect finds.
     fn welcome_doing(now_t: i64, ship_at: [f64; 3], motive: lc_proto::Motive) -> Outbound {
+        welcome_running_at(SERVER_RATE, now_t, ship_at, motive)
+    }
+
+    /// A welcome from a world running at some multiple of the design rate.
+    fn welcome_running_at(
+        rate: f64,
+        now_t: i64,
+        ship_at: [f64; 3],
+        motive: lc_proto::Motive,
+    ) -> Outbound {
         Outbound::Welcome {
             client_id: ClientId(3),
             protocol: PROTOCOL_VERSION,
+            rate,
             ship_id: ShipId(7),
             now_t,
             name: "Ada".into(),
@@ -755,6 +789,56 @@ mod tests {
         assert_eq!(ui.0.time_rate, SERVER_RATE, "the client kept its own rate");
     }
 
+    /// **Whatever it says, not whatever was assumed.** The client used to hold a constant that
+    /// happened to agree with a shard; a development shard staging a scene at sixty would have
+    /// been joined by a client confidently running at one.
+    #[test]
+    fn a_client_runs_at_the_rate_the_welcome_states() {
+        for rate in [SERVER_RATE, 60.0, 0.5] {
+            let (mut uplink, mut game, mut ui) = app();
+            let drifting = lc_proto::Motive::Drifting { from_ly: [0.0; 3], since_t: 0.0 };
+            let said = welcome_running_at(rate, 0, [0.0; 3], drifting);
+
+            fold(&mut uplink, &mut game, &mut ui, said);
+
+            assert_eq!(ui.0.time_rate, rate, "the client did not take the stated rate");
+        }
+    }
+
+    /// A rate can change under a joined client, and a clock statement is where it says so.
+    #[test]
+    fn a_restated_rate_is_adopted_without_a_second_welcome() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        assert_eq!(ui.0.time_rate, SERVER_RATE, "premise: joined at the design rate");
+
+        let now_t = (game.0.coordinate_time_s() * 1e6) as i64;
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t, rate: 60.0 });
+
+        assert_eq!(ui.0.time_rate, 60.0, "the client kept the rate it joined at");
+    }
+
+    /// **The correction storm.** At sixty times the design rate one server tick is seven
+    /// coordinate hours, and a fixed one-hour slack makes every statement look like a runaway:
+    /// the client snaps back seven hours twenty times a second, for ever, having never drifted.
+    #[test]
+    fn a_fast_clock_is_not_corrected_by_every_statement() {
+        let (mut uplink, mut game, mut ui) = app();
+        let drifting = lc_proto::Motive::Drifting { from_ly: [0.0; 3], since_t: 0.0 };
+        fold(&mut uplink, &mut game, &mut ui, welcome_running_at(60.0, 0, [0.0; 3], drifting));
+
+        let before = game.0.coordinate_time_s();
+        // One tick of a world running at sixty, which is what a healthy statement is behind by.
+        let tick_us = (50.0 * 8766.0 * 1_000.0 * 60.0) as i64;
+        assert!(tick_us > CLOCK_SLACK_US, "premise: a tick outruns the fixed slack");
+        let now_t = (before * 1e6) as i64 + tick_us;
+
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t, rate: 60.0 });
+
+        assert_eq!(game.0.coordinate_time_s(), before, "a healthy offset moved the clock");
+        assert!(uplink.applied.is_none(), "it complained about nothing");
+    }
+
     /// The arithmetic that made the number recognisable, kept so the correspondence is pinned
     /// rather than remembered: a multiplier of one is the server's 8766 coordinate seconds per
     /// real second, and the old default was sixty of those — 143.7 coordinate hours a second,
@@ -762,6 +846,9 @@ mod tests {
     #[test]
     fn the_servers_rate_is_the_one_the_clocks_agree_at() {
         assert_eq!(crate::session::TIME_RATE * SERVER_RATE, 8766.0);
+        // And a world that says sixty is a Julian year a minute, which is the number this
+        // codebase already reaches for when it wants to watch something happen.
+        assert!((crate::session::TIME_RATE * 60.0 * 60.0 - 31_557_600.0).abs() < 1.0);
         let gained_per_second =
             crate::session::TIME_RATE * (crate::ui::TEST_TIME_RATE - SERVER_RATE);
         assert!(
@@ -782,7 +869,7 @@ mod tests {
         // A statement a fraction of the slack away, which is what a healthy connection looks
         // like: the message spent a tick and a network hop getting here.
         let close = (before * 1e6) as i64 - CLOCK_SLACK_US / 4;
-        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: close });
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: close, rate: SERVER_RATE });
 
         assert_eq!(game.0.coordinate_time_s(), before, "a healthy offset moved the clock");
         assert!(uplink.applied.is_none(), "it complained about nothing");
@@ -798,7 +885,7 @@ mod tests {
         // A day of coordinate time ahead of the server, which a warp reaches in seconds.
         let server_t = 0;
         game.0.correct_coordinate_time_us(24 * CLOCK_SLACK_US);
-        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: server_t });
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: server_t, rate: SERVER_RATE });
 
         assert_eq!(game.0.coordinate_time_s(), 0.0, "the client kept its own clock");
         let said = uplink.applied.clone().expect("a jump nobody explained reads as a bug");
@@ -815,7 +902,7 @@ mod tests {
         game.0.ship.motion.clock_s = 12_345.0;
 
         game.0.correct_coordinate_time_us(24 * CLOCK_SLACK_US);
-        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: 0 });
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: 0, rate: SERVER_RATE });
 
         assert_eq!(game.0.ship.motion.clock_s, 12_345.0, "the crew was un-aged");
     }
