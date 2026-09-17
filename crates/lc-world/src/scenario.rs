@@ -240,7 +240,8 @@ pub const MEETING: Scenario = Scenario {
     name: "meeting",
     blurb: "A five-kilometre ship holds station off your bow, in low orbit of Jupiter.",
     star: "Sol",
-    rate: 1.0,
+    // A low orbit at the design rate sweeps the whole view past twice a second.
+    rate: 0.05,
     watch: Slot::Pov,
     pov: Member {
         name: "Kestrel",
@@ -270,7 +271,7 @@ pub const APPROACH: Scenario = Scenario {
     name: "approach",
     blurb: "You hold a polar orbit of Saturn. Something much larger closes on you.",
     star: "Sol",
-    rate: 1.0,
+    rate: 0.05,
     // From the craft being approached, which is the whole of what makes this different
     // from `closing`: the same two ships and the same manoeuvre, seen from the other end.
     watch: Slot::Pov,
