@@ -111,8 +111,8 @@ What it does to play:
 | `lc-server` | `persist.rs`: `SAVE_FORMAT` 4 → 5, with a format 4 reader. `Fitting` is written through the proto type and postcard is positional, so the new field shifts every byte after it. |
 | `lc-client` | the refit panel and HUD show collection; nothing else changes, because the client folds the same account |
 
-`fitting.rs` is at 512 lines of code. The geometry and flux go in their own module so it stays
-well under the cap.
+The geometry and flux live in their own module, so `fitting.rs` stays under the cap at 568 lines
+of code.
 
 ### What is already there
 
