@@ -23,17 +23,17 @@ use crate::panels::ask;
 use crate::ui::Panel;
 
 /// The page. Not white: paper is not white, and a white panel on a dark screen is a lamp.
-const PAPER: Color32 = Color32::from_rgb(244, 241, 233);
-const INK: Color32 = Color32::from_rgb(26, 25, 23);
+pub(crate) const PAPER: Color32 = Color32::from_rgb(244, 241, 233);
+pub(crate) const INK: Color32 = Color32::from_rgb(26, 25, 23);
 /// The running head and the folio, which are furniture rather than text.
-const FAINT: Color32 = Color32::from_rgb(146, 141, 130);
-const RULE: Color32 = Color32::from_rgb(214, 209, 197);
+pub(crate) const FAINT: Color32 = Color32::from_rgb(146, 141, 130);
+pub(crate) const RULE: Color32 = Color32::from_rgb(214, 209, 197);
 /// The case the page sits in.
-const CASE: Color32 = Color32::from_rgb(38, 40, 44);
-const CASE_EDGE: Color32 = Color32::from_rgb(58, 61, 67);
-const KEY: Color32 = Color32::from_rgb(52, 55, 60);
-const KEY_HOT: Color32 = Color32::from_rgb(70, 74, 80);
-const LABEL: Color32 = Color32::from_rgb(198, 196, 190);
+pub(crate) const CASE: Color32 = Color32::from_rgb(38, 40, 44);
+pub(crate) const CASE_EDGE: Color32 = Color32::from_rgb(58, 61, 67);
+pub(crate) const KEY: Color32 = Color32::from_rgb(52, 55, 60);
+pub(crate) const KEY_HOT: Color32 = Color32::from_rgb(70, 74, 80);
+pub(crate) const LABEL: Color32 = Color32::from_rgb(198, 196, 190);
 
 /// What the reading face is called once it has been installed.
 pub const READING_FAMILY: &str = "reading";
@@ -51,13 +51,13 @@ const PLATE_TEXELS: u32 = 1400;
 /// a book holds a hundred and seventy-eight, which is why this is a cap and not a map.
 const PLATE_CACHE: usize = 12;
 /// The bezel below the page, where the buttons are.
-const KEYS_HEIGHT: f32 = 30.0;
-const SCREEN_MARGIN: Margin = Margin { left: 30, right: 30, top: 26, bottom: 22 };
+pub(crate) const KEYS_HEIGHT: f32 = 30.0;
+pub(crate) const SCREEN_MARGIN: Margin = Margin { left: 30, right: 30, top: 26, bottom: 22 };
 
-struct Setting {
-    body: FontId,
-    heading: FontId,
-    small: FontId,
+pub(crate) struct Setting {
+    pub body: FontId,
+    pub heading: FontId,
+    pub small: FontId,
 }
 
 impl Setting {
@@ -220,6 +220,11 @@ fn settle_face(
     }
 }
 
+/// The faces to set a surface in, serif if this build has one.
+pub(crate) fn setting_for(ctx: &egui::Context) -> Setting {
+    Setting::new(has_serif(ctx))
+}
+
 fn has_serif(ctx: &egui::Context) -> bool {
     ctx.fonts(|f| f.families().iter().any(|family| *family == FontFamily::Name(READING_FAMILY.into())))
 }
@@ -241,7 +246,7 @@ pub fn draw(
     }
     let Ok(ctx) = contexts.ctx_mut() else { return };
     settle_face(ctx, &mut shelf, &assets, &faces);
-    let setting = Setting::new(has_serif(ctx));
+    let setting = setting_for(ctx);
 
     let view = ctx.content_rect();
     let width = 520.0_f32.min(view.width() - 48.0);
@@ -290,7 +295,7 @@ pub fn draw(
     }
 }
 
-fn case() -> egui::Frame {
+pub(crate) fn case() -> egui::Frame {
     egui::Frame {
         inner_margin: Margin::same(12),
         fill: CASE,
@@ -307,6 +312,15 @@ fn case() -> egui::Frame {
 }
 
 /// The top of the case: what is being read, and the way out.
+pub(crate) fn settle_face_for_shelf(
+    ctx: &egui::Context,
+    shelf: &mut Shelf,
+    assets: &AssetServer,
+    faces: &Assets<FontFace>,
+) {
+    settle_face(ctx, shelf, assets, faces);
+}
+
 fn head(ui: &mut egui::Ui, shelf: &Shelf, open: &mut bool, out: &mut MessageWriter<Requested>) {
     ui.horizontal(|ui| {
         ui.add_space(4.0);
@@ -317,6 +331,9 @@ fn head(ui: &mut egui::Ui, shelf: &Shelf, open: &mut bool, out: &mut MessageWrit
             }
             if key(ui, "contents", "the chapter list").clicked() {
                 ask(out, Action::ToggleContents);
+            }
+            if key(ui, "shelf", "the other books").clicked() {
+                ask(out, Action::TogglePanel(Panel::Bookshelf));
             }
         });
     });
@@ -345,11 +362,11 @@ fn keys(ui: &mut egui::Ui, state: &Ui, out: &mut MessageWriter<Requested>) {
 /// egui makes a label selectable by default, and a selectable label eats the drag that would
 /// otherwise move the window — so the one surface a player grabs to move the thing is the one
 /// that refuses to be grabbed. Nothing printed on the bezel is text anyone wants to copy.
-fn engraved(words: impl Into<String>, size: f32, colour: Color32) -> egui::Label {
+pub(crate) fn engraved(words: impl Into<String>, size: f32, colour: Color32) -> egui::Label {
     egui::Label::new(egui::RichText::new(words.into()).size(size).color(colour)).selectable(false)
 }
 
-fn key(ui: &mut egui::Ui, label: &str, hint: &str) -> egui::Response {
+pub(crate) fn key(ui: &mut egui::Ui, label: &str, hint: &str) -> egui::Response {
     let widgets = &mut ui.style_mut().visuals.widgets;
     widgets.inactive.weak_bg_fill = KEY;
     widgets.hovered.weak_bg_fill = KEY_HOT;

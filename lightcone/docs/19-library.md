@@ -356,9 +356,18 @@ sorting lives, and opening a book is the only thing it does.
 
 | shelf | |
 |---|---|
-| sort | title, author, year, recently read |
-| filter | a text field over title and author |
-| per book | title, authors, year, a progress badge, and whether it is downloaded |
+| sort | title, author, year — and recently read, once the server is keeping progress |
+| filter | one line, over title, author, filing name, subject and year |
+| per book | title, by-line, year, and whether it is the one open |
+
+**Every word has to land somewhere, in any order and in any case, as a partial match.** So
+`twain miss` finds the Mississippi novels and `verne sea` finds the one about the sea, which is
+how anyone actually looks for a book they have half-remembered. The subjects come from the
+transcription's own `dc:subject` headings; they are searched and never displayed, because
+`London (England) -- Fiction` is a library heading and not a genre.
+
+**A title files under its first real word.** `The Gilded Age` belongs under G. Every library in
+the world does this, and a shelf that does not has a third of its stock under T.
 
 | reader | key |
 |---|---|
@@ -410,7 +419,7 @@ Each step is useful on its own, and the fun one does not wait for the server.
 | 2 | the shelf on the CDN: `books.toml`, the two scripts, the Caddyfile header | `curl` returns an epub with the right type and an immutable cache header |
 | 3 | **built, less the CDN.** the reader window: `EpubLoader`, plates, the serif, the panel, the mode | `--book <id> --shot` is a page of prose |
 | 4 | the catalogue and progress over the wire: two messages, `0005_reading.sql`, the debounce | signing in on a second machine opens to the same sentence |
-| 5 | the shelf's sorts, the TOC, jump to location, the progress badges | the controls above all exist |
+| 5 | **built, less the badges.** the shelf's sorts and filter, the TOC, jump to location | the controls above all exist |
 
 Step 3 is `crate::library` and `crate::reader` in the client. Three things it taught:
 
@@ -424,6 +433,12 @@ Step 3 is `crate::library` and `crate::reader` in the client. Three things it ta
   sliver of the next line at the foot of every page.
 - **Size the window before drawing into it.** Content sized from what is left inside a window
   that grows to fit its content is a loop whose fixed point is a window taller than the screen.
+
+The catalogue arrives the same way a book does — an asset, parsed by a loader, held in a
+resource — so step 4 replaces where it comes from and nothing above it moves. Until then it is a
+file in the client's asset directory with the shape this document already gave it, and the client
+resolves a name through it: a catalogue id from the shelf, a file stem from a development flag,
+and the same book either way.
 
 Still to do here: books are fetched from the asset directory rather than from the CDN, which is
 `WebAssetPlugin` and a base URL and changes nothing above it. And the first decode of a plate

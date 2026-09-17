@@ -9,10 +9,17 @@ use bevy::asset::{AssetLoader, LoadContext, LoadState};
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use lc_books::{Block, Document, Epub, TocEntry};
+use lc_books::{Block, Catalogue, Document, Epub, TocEntry};
 
 /// Where a book is fetched from, relative to the asset root.
 pub const SHELF: &str = "books";
+
+/// The catalogue, which is the only thing that knows what is on the shelf.
+///
+/// A directory listing would do on a desktop and cannot exist in a browser, where the shelf is
+/// a CDN prefix and HTTP has no way to ask what is under it. So the list is a file, which is
+/// also what lets a title differ from a file name. Step 4 moves this to the server unchanged.
+pub const CATALOGUE: &str = "books/books.toml";
 
 /// The face the page is set in, if the build ships one.
 ///
@@ -29,10 +36,14 @@ pub struct Book {
 #[derive(Asset, TypePath)]
 pub struct FontFace(pub Vec<u8>);
 
+#[derive(Asset, TypePath)]
+pub struct Shelved(pub Catalogue);
+
 #[derive(Debug)]
 pub enum LoadError {
     Io(std::io::Error),
     Book(lc_books::Error),
+    Catalogue(toml::de::Error),
 }
 
 impl std::fmt::Display for LoadError {
@@ -40,6 +51,7 @@ impl std::fmt::Display for LoadError {
         match self {
             Self::Io(e) => write!(f, "{e}"),
             Self::Book(e) => write!(f, "{e}"),
+            Self::Catalogue(e) => write!(f, "the catalogue is malformed: {e}"),
         }
     }
 }
@@ -76,6 +88,31 @@ impl AssetLoader for BookLoader {
 }
 
 #[derive(Default)]
+pub struct CatalogueLoader;
+
+impl AssetLoader for CatalogueLoader {
+    type Asset = Shelved;
+    type Settings = ();
+    type Error = LoadError;
+
+    async fn load(
+        &self,
+        reader: &mut dyn Reader,
+        _settings: &(),
+        _load: &mut LoadContext<'_>,
+    ) -> Result<Shelved, LoadError> {
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await?;
+        let text = String::from_utf8_lossy(&bytes);
+        Catalogue::from_toml(&text).map(Shelved).map_err(LoadError::Catalogue)
+    }
+
+    fn extensions(&self) -> &[&str] {
+        &["toml"]
+    }
+}
+
+#[derive(Default)]
 pub struct FontLoader;
 
 impl AssetLoader for FontLoader {
@@ -106,6 +143,9 @@ impl AssetLoader for FontLoader {
 /// a few milliseconds and happens when a chapter is turned.
 #[derive(Resource, Default)]
 pub struct Shelf {
+    /// Everything on the shelf, whether or not anything is open.
+    pub catalogue: Catalogue,
+    pub catalogue_handle: Option<Handle<Shelved>>,
     pub handle: Option<Handle<Book>>,
     /// The file this handle was asked for, so a change of book is noticed.
     pub file: Option<String>,
@@ -150,10 +190,21 @@ pub fn keep_up(
     }
     let wanted = state.reading.book.clone();
     if wanted != shelf.file {
-        *shelf = Shelf { face: std::mem::take(&mut shelf.face), ..Default::default() };
+        *shelf = Shelf {
+            face: std::mem::take(&mut shelf.face),
+            catalogue: std::mem::take(&mut shelf.catalogue),
+            catalogue_handle: shelf.catalogue_handle.clone(),
+            ..Default::default()
+        };
         shelf.file = wanted.clone();
-        if let Some(file) = wanted {
-            shelf.handle = Some(assets.load(format!("{SHELF}/{file}.epub")));
+        if let Some(name) = wanted {
+            // The catalogue decides what a name means. Without one — a development build with
+            // no shelf file — the name is taken for a file stem, which is what it used to be.
+            let path = match shelf.catalogue.find(&name) {
+                Some(entry) => format!("{SHELF}/{}", entry.file),
+                None => format!("{SHELF}/{name}.epub"),
+            };
+            shelf.handle = Some(assets.load(path));
         }
         return;
     }
@@ -167,6 +218,7 @@ pub fn keep_up(
     }
     let Some(book) = books.get_mut(&handle) else { return };
 
+    // The catalogue's title wins over the book's own: it is the one a person checked.
     if shelf.title.is_empty() {
         shelf.title = book.epub.title().to_owned();
         shelf.chapters = book.epub.toc().to_vec();
@@ -214,6 +266,17 @@ pub fn dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
         .ok()
 }
 
+impl Shelf {
+    /// The catalogue id of the open book, whatever name it was opened under.
+    ///
+    /// A development flag names a book by its file and the shelf names it by its id; both end
+    /// up here, and the shelf marks the right row either way.
+    pub fn open_id(&self) -> Option<&str> {
+        let name = self.file.as_deref()?;
+        self.catalogue.find(name).map(|entry| entry.id.as_str())
+    }
+}
+
 /// Where a chapter begins, worked out when it is asked for.
 ///
 /// Not at load: resolving every entry means parsing every document it points into, and one book
@@ -224,15 +287,36 @@ pub fn chapter_start(books: &mut Assets<Book>, shelf: &Shelf, entry: &TocEntry) 
     book.epub.locate(entry).map(|at| (at.spine, at.char_offset))
 }
 
+/// Fetch the catalogue once, and keep it where everything can read it.
+pub fn read_catalogue(
+    mut shelf: ResMut<Shelf>,
+    assets: Res<AssetServer>,
+    shelved: Res<Assets<Shelved>>,
+) {
+    match &shelf.catalogue_handle {
+        None => shelf.catalogue_handle = Some(assets.load(CATALOGUE)),
+        Some(handle) => {
+            if shelf.catalogue.books.is_empty()
+                && let Some(loaded) = shelved.get(handle)
+            {
+                shelf.catalogue = loaded.0.clone();
+                info!("the shelf holds {} books", shelf.catalogue.books.len());
+            }
+        }
+    }
+}
+
 pub struct LibraryPlugin;
 
 impl Plugin for LibraryPlugin {
     fn build(&self, app: &mut App) {
         app.init_asset::<Book>()
             .init_asset::<FontFace>()
+            .init_asset::<Shelved>()
             .init_asset_loader::<BookLoader>()
             .init_asset_loader::<FontLoader>()
+            .init_asset_loader::<CatalogueLoader>()
             .init_resource::<Shelf>()
-            .add_systems(Update, keep_up);
+            .add_systems(Update, (read_catalogue, keep_up).chain());
     }
 }

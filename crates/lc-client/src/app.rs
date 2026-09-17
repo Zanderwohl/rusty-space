@@ -249,7 +249,7 @@ impl Plugin for ClientPlugin {
                 EguiPrimaryContextPass,
                 (
                     panels::loading.run_if(in_state(AppState::Loading)),
-                    (panels::hud, panels::open_panels, crate::reader::draw)
+                    (panels::hud, panels::open_panels, crate::reader::draw, crate::bookshelf::draw)
                         .run_if(in_state(AppState::InGame)),
                     panels::unreachable.run_if(in_state(AppState::Unreachable)),
                 ),

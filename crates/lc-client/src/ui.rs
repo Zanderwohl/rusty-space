@@ -44,13 +44,15 @@ pub enum Panel {
     Tuning,
     /// Scenes to stage. Development only, and it does nothing without a shard started for it.
     Scenarios,
+    /// What there is to read. Drawn by [`crate::bookshelf`], in the reader's case.
+    Bookshelf,
     /// A book. Drawn by [`crate::reader`] rather than with the others, because it is the one
     /// surface that is not a readout: it has its own frame, its own palette and its own keys.
     Reader,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 9] = [
+    pub const ALL: [Panel; 10] = [
         Panel::Escape,
         Panel::Settings,
         Panel::Debug,
@@ -59,6 +61,7 @@ impl Panel {
         Panel::Flight,
         Panel::Tuning,
         Panel::Scenarios,
+        Panel::Bookshelf,
         Panel::Reader,
     ];
 
@@ -77,6 +80,7 @@ impl Panel {
             Panel::Flight => "Flight",
             Panel::Tuning => "Starfield tuning",
             Panel::Scenarios => "Scenarios",
+            Panel::Bookshelf => "Bookshelf",
             Panel::Reader => "Reader",
         }
     }

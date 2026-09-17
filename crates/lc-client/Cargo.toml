@@ -26,6 +26,8 @@ serde_json = "1"
 # Plates. Every image on the first shelf is a JPEG; the other two are insurance, and the
 # formats this does not name are ones an epub is not allowed to carry anyway.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif"] }
+# The catalogue, which the asset loader parses.
+toml = "0.8"
 
 # The desktop sign-in: a loopback listener, the system browser, and somewhere to keep the
 # device grant. None of it exists in a browser, where the page already has a session.

@@ -183,7 +183,7 @@ pub fn open_panels(
     for panel in ui_state.open_panels().to_vec() {
         // The reader brings its own window: a book is not a readout, and egui's chrome around
         // it would be a dark title bar over a white page. See `crate::reader`.
-        if panel == Panel::Reader {
+        if matches!(panel, Panel::Reader | Panel::Bookshelf) {
             continue;
         }
         let mut open = true;
@@ -207,7 +207,7 @@ pub fn open_panels(
             Panel::Scenarios => {
                 crate::demos::scenarios(ui, &uplink, ui_state.0.perspective, &mut out)
             }
-            Panel::Reader => unreachable!("drawn by crate::reader"),
+            Panel::Reader | Panel::Bookshelf => unreachable!("drawn by crate::reader"),
         });
         if !open {
             ask(&mut out, Action::ClosePanel(panel));

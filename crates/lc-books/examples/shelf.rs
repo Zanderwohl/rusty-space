@@ -215,6 +215,15 @@ fn catalogue(files: &[PathBuf]) {
             Some(y) => println!("year    = {y}  # check: this is the file's date, not the book's"),
             None => println!("# year  = ?"),
         }
+        let subjects: Vec<String> = epub
+            .metadata()
+            .subjects
+            .iter()
+            .map(|s| format!("\"{}\"", escape(s)))
+            .collect();
+        if !subjects.is_empty() {
+            println!("subjects = [{}]", subjects.join(", "));
+        }
         println!("file    = \"{}\"", escape(&name(file)));
         println!();
     }

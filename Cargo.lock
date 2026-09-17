@@ -4537,6 +4537,8 @@ name = "lc-books"
 version = "0.1.0"
 dependencies = [
  "quick-xml 0.39.2",
+ "serde",
+ "toml",
  "zip",
 ]
 
@@ -4570,6 +4572,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "toml",
  "tungstenite",
  "ureq",
  "wasm-bindgen",
