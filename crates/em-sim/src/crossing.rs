@@ -251,6 +251,66 @@ pub fn next_crossing_of(
     None
 }
 
+/// The first crossing of `target`'s sphere within `window`, for a traveller whose speed
+/// relative to the sphere's centre never exceeds `speed_bound`.
+///
+/// Conservative advancement rather than a grid keyed on the traveller's time constant, which
+/// for a near-straight hyperbola at a fraction of `c` is milliseconds. Outside the bounding
+/// radius, or inside the smallest, the boundary cannot be reached sooner than the gap over
+/// `speed_bound`, so that is the step; in the band between, a step moves the traveller a
+/// quarter of the smallest radius. So the cost follows how close the path comes to the sphere
+/// rather than how long the window is.
+///
+/// A crossing shorter than that quarter-radius step is missed, as a grazing one is by
+/// [`crossings_of`]. A `speed_bound` that is not a bound can step over a crossing. The walk
+/// stops after `max_samples`, and one that runs out reports nothing.
+pub fn next_crossing_bounded(
+    system: &System,
+    traveller: &dyn Traveller,
+    target: BodyIndex,
+    window: (Instant, Instant),
+    speed_bound: f64,
+    max_samples: usize,
+) -> Option<Crossing> {
+    const BAND_STEP_OF_RADIUS: f64 = 0.25;
+    let (start, end) = window;
+    if !(speed_bound > 0.0 && speed_bound.is_finite()) || !(start < end) {
+        return None;
+    }
+    let gap_step_s = (end - start).to_seconds() / max_samples.max(1) as f64;
+    let mut time = start;
+    let mut previous: Option<(Instant, f64)> = None;
+    for _ in 0..max_samples {
+        let sample = soi_at(system, target, time).zip(traveller.state_at(time));
+        let step_s = match sample {
+            None => {
+                // A gap in what can be evaluated is not a crossing; do not bracket across it.
+                previous = None;
+                gap_step_s
+            }
+            Some((soi, (position, _))) => {
+                let offset = position - soi.centre;
+                let reach = offset.length();
+                let distance = reach - soi.radius_toward(offset);
+                if let Some(before) = previous
+                    && (before.1 < 0.0) != (distance < 0.0)
+                {
+                    return refine(system, traveller, target, before, (time, distance));
+                }
+                previous = Some((time, distance));
+                let (inner, outer) = (soi.min_radius(), soi.bounding_radius());
+                let clear = (reach - outer).max(inner - reach).max(inner * BAND_STEP_OF_RADIUS);
+                clear / speed_bound
+            }
+        };
+        if time >= end {
+            break;
+        }
+        time = (time + TimeDelta::from_seconds(step_s)).min(end);
+    }
+    None
+}
+
 /// The last crossing strictly before `from`, within `horizon`.
 pub fn previous_crossing_of(
     system: &System,
