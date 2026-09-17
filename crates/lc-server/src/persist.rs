@@ -26,6 +26,7 @@ use glam::DVec3;
 use lc_proto::ShipId;
 use lc_store::ships::Ship;
 use lc_world::craft::{Craft, CraftId, Kind};
+use lc_world::fitting::{Balance, Fitting, Loadout};
 use serde::{Deserialize, Serialize};
 
 use crate::chase::Pursuit;
@@ -46,6 +47,20 @@ pub struct Saved {
     /// The standing intercept it was flying, which outlives the process as it outlives the
     /// pilot's connection. Appended in format 3.
     pub pursuit: Option<lc_proto::Pursuit>,
+    /// Modules and energy, settled when saved. The balance in it is not read back: a shard
+    /// stamps its own. Appended in format 4.
+    pub fitting: Option<lc_proto::Fitting>,
+}
+
+/// [`Saved`] as format 3 wrote it, before ships had modules.
+#[derive(Deserialize)]
+struct SavedV3 {
+    kind: u8,
+    name: Option<String>,
+    noise_floor: f32,
+    length_m: f64,
+    motion: lc_proto::Motion,
+    pursuit: Option<lc_proto::Pursuit>,
 }
 
 /// [`Saved`] as format 2 wrote it, before a pursuit was kept. Read and never written, so the
@@ -68,7 +83,7 @@ struct SavedV2 {
 /// otherwise** — deliberately not [`lc_proto::PROTOCOL_VERSION`], which moves for reasons that
 /// have nothing to do with how a craft is stored. Bumping it makes every existing row
 /// unreadable, which is the point and is also the cost.
-pub const SAVE_FORMAT: i32 = 3;
+pub const SAVE_FORMAT: i32 = 4;
 
 /// The oldest format still read. See [`decode`].
 pub const OLDEST_FORMAT: i32 = 2;
@@ -110,6 +125,7 @@ pub fn save(
         length_m: craft.length_m,
         motion: (&craft.motion.snapshot()).into(),
         pursuit,
+        fitting: craft.fitting().map(Into::into),
     };
     Ship {
         ship_id: craft.id.0,
@@ -141,6 +157,19 @@ pub fn load(row: &Ship, system: Option<&lc_world::system::LocalSystem>) -> Resul
     // a leak either way, because nothing after the save is involved. From here on the craft
     // records its stretches like any other, and `catch_up` fills the gap to now with real ones.
     craft.motion = snapshot.restore(system, row.saved_t as f64 * 1.0e-6);
+    // A player's ship from before modules existed is given the starting ones, full. Its hull
+    // was the starting hull, so it keeps its size and, by how the engines were rated, its
+    // acceleration.
+    let fitting = match &saved.fitting {
+        Some(fitting) => Some(Fitting::from(fitting)),
+        None if row.format < 4 && row.account.is_some() => Some(Fitting::full(
+            Loadout::STARTING,
+            Balance::DEFAULT,
+            row.saved_t as f64 * 1.0e-6,
+        )),
+        None => None,
+    };
+    craft.fit(fitting);
     Ok(craft)
 }
 
@@ -157,6 +186,19 @@ pub fn decode(row: &Ship) -> Result<Saved, String> {
                 length_m: old.length_m,
                 motion: old.motion,
                 pursuit: None,
+                fitting: None,
+            })
+        }
+        3 => {
+            let old: SavedV3 = lc_proto::decode(&row.state).map_err(|why| why.to_string())?;
+            Ok(Saved {
+                kind: old.kind,
+                name: old.name,
+                noise_floor: old.noise_floor,
+                length_m: old.length_m,
+                motion: old.motion,
+                pursuit: old.pursuit,
+                fitting: None,
             })
         }
         other => Err(format!("format {other} is not {OLDEST_FORMAT} to {SAVE_FORMAT}")),
@@ -234,6 +276,10 @@ impl<J: Journal> Server<J> {
             let system = self.position_of(row).and_then(|at| self.world.system_at(at));
             match load(row, system.as_deref()) {
                 Ok(mut craft) => {
+                    if let Some(mut fitting) = craft.fitting().cloned() {
+                        fitting.balance = self.balance;
+                        craft.fit(Some(fitting));
+                    }
                     craft.enter(system, row.saved_t as f64 * 1.0e-6);
                     catch_up(&mut craft, row.saved_t, checkpoint.now_t);
                     if let Some(account) = &row.account {
@@ -431,6 +477,52 @@ mod tests {
         let back = load(&row, None).expect("a format 2 row reads");
         assert_eq!(back.length_m, craft.length_m);
         assert_eq!(decode(&row).unwrap().pursuit, None);
+    }
+
+    #[test]
+    fn a_ships_modules_and_energy_survive_the_round_trip() {
+        let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
+        craft.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, 0.0)));
+        craft.begin_refit(Loadout { engines: 7, ..Loadout::STARTING }, 10.0).unwrap();
+        let back = load(&save(&craft, Some("acct"), None, 20_000_000), None).expect("it reads");
+        assert_eq!(back.fitting(), craft.fitting());
+        assert!(back.is_refitting(20.0));
+    }
+
+    /// **Format 3 still reads**, and a player's ship in it is given the starting modules.
+    #[test]
+    fn a_player_ship_from_before_modules_comes_back_with_the_starting_ones() {
+        #[derive(Serialize)]
+        struct Old {
+            kind: u8,
+            name: Option<String>,
+            noise_floor: f32,
+            length_m: f64,
+            motion: lc_proto::Motion,
+            pursuit: Option<lc_proto::Pursuit>,
+        }
+        let craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
+        let old = Old {
+            kind: kind_code(craft.kind),
+            name: None,
+            noise_floor: 0.0,
+            length_m: 500.0,
+            motion: (&craft.motion.snapshot()).into(),
+            pursuit: None,
+        };
+        let row = |account: Option<&str>| Ship {
+            ship_id: 5,
+            account: account.map(Into::into),
+            saved_t: 3_000_000,
+            state: lc_proto::encode(&old),
+            format: 3,
+        };
+        let player = load(&row(Some("acct")), None).expect("a format 3 row reads");
+        let fitting = player.fitting().expect("a player's ship is fitted");
+        assert_eq!(fitting.loadout, Loadout::STARTING);
+        assert!((player.length_m - 500.0).abs() < 1.0e-9);
+        assert!((player.rated_drive(3.0).accel_g - 5.0).abs() < 1.0e-9);
+        assert!(load(&row(None), None).unwrap().fitting().is_none(), "a craft with no pilot is not");
     }
 
     /// A row that cannot be read is an error and never a fresh ship at the origin.
