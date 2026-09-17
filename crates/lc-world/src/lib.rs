@@ -14,6 +14,7 @@ pub mod coast;
 pub mod craft;
 pub mod distribution;
 pub mod emission;
+pub mod escape;
 pub mod escort;
 pub mod flicker;
 pub mod flight;

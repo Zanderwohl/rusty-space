@@ -773,23 +773,29 @@ pub fn repatch_at(state: &ShipState, system: &LocalSystem, from_s: f64) -> Optio
         return None;
     }
 
-    let horizon = match arc.period_s() {
-        Some(period) => period * PATCH_HORIZON_REVOLUTIONS,
-        None => OPEN_PATCH_HORIZON_S,
-    };
     // Off the boundary the arc may be sitting exactly on, having just been solved there. A
     // search from the join itself finds that same crossing and the walk never advances; the
     // tolerance is a millisecond, so a second is far clear of it and far inside any arc.
     const CLEARANCE_S: f64 = 1.0;
-    let from = Instant::from_seconds_since_j2000(from_s + CLEARANCE_S);
+    let from_s = from_s + CLEARANCE_S;
 
-    let found = em_sim::crossing::first_crossing_of(
-        system.sim(),
-        &arc.path(system),
-        &candidates,
-        from,
-        TimeDelta::from_seconds(horizon),
-    )?;
+    let found = match arc.period_s() {
+        Some(period) => em_sim::crossing::first_crossing_of(
+            system.sim(),
+            &arc.path(system),
+            &candidates,
+            Instant::from_seconds_since_j2000(from_s),
+            TimeDelta::from_seconds(period * PATCH_HORIZON_REVOLUTIONS),
+        ),
+        None => crate::escape::first_crossing(
+            arc,
+            system,
+            primary,
+            &candidates,
+            from_s,
+            from_s + OPEN_PATCH_HORIZON_S,
+        ),
+    }?;
 
     // Which frame the ship lands in, from the crossing rather than from a containment test.
     // Leaving the sphere it is in hands it up to the next primary out; entering a sibling's
