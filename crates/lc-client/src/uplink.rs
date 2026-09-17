@@ -287,6 +287,17 @@ impl Uplink {
     }
 }
 
+/// Why a build that cannot play without a shard cannot go on, or `None` while it still might.
+///
+/// `Offline` with an address is the frame before [`connect`] runs, not a failure.
+pub fn out_of_reach(state: &State, address: Option<&str>) -> Option<String> {
+    match state {
+        State::Refused(why) | State::Lost(why) => Some(why.clone()),
+        State::Offline if address.is_none() => Some("no server was named for this page".into()),
+        State::Offline | State::Connecting | State::Joined(_) => None,
+    }
+}
+
 /// Open a connection when one is configured and there is not one.
 pub fn connect(mut uplink: ResMut<Uplink>, address: Res<ServerAddress>) {
     let Some(address) = address.0.as_deref() else {
@@ -1082,6 +1093,19 @@ mod tests {
         let (severity, words) = note(&State::Refused("no ticket".into()), None).unwrap();
         assert_eq!(severity, Note::Wrong);
         assert!(words.contains("no ticket"), "{words}");
+    }
+
+    /// The browser build strands on these, so a state that only *might* connect must not.
+    #[test]
+    fn only_a_dead_or_missing_link_is_out_of_reach() {
+        let address = Some("wss://shard.example");
+        assert_eq!(out_of_reach(&State::Offline, address), None, "connect has not run yet");
+        assert_eq!(out_of_reach(&State::Connecting, address), None);
+        assert!(out_of_reach(&State::Offline, None).is_some(), "no shard is never going to connect");
+        let refused = out_of_reach(&State::Refused("no ticket".into()), address).unwrap();
+        assert!(refused.contains("no ticket"), "{refused}");
+        let lost = out_of_reach(&State::Lost("connection reset".into()), address).unwrap();
+        assert!(lost.contains("connection reset"), "{lost}");
     }
 
     /// An order the server would not take is not a disconnection.

@@ -10,7 +10,8 @@ one is how to draw a surface without it fighting what is already there.
 ## States
 
 ```
-AppState     Boot -> MainMenu -> Loading -> InGame
+AppState     Boot -> MainMenu -> Loading -> InGame                 desktop
+             Boot -> Loading -> InGame, and Unreachable from either  browser
 MenuPage     sub of MainMenu:  Root | NewWorld | Load | Settings | About
 Overlay      sub of InGame:    None | Escape | Settings | Debug
 ```
@@ -20,9 +21,14 @@ is claiming something untrue. `Overlay` is therefore not a state at all — the 
 settings screen and the debug window are panels in the same set as the telescope, each toggled
 independently. What remains of `AppState` is where the application is, not what is on top of it.
 
-This also fits the browser, where there is barely a main menu to speak of: you arrive already
-in the game. `MainMenu` is the desktop entry point and a thin one; the web build can open
-straight into `Loading`.
+`MainMenu` is the desktop entry point and a thin one. **The browser build has none**, gated by
+`app::HAS_MAIN_MENU`: the page that launched it has already signed the player in and named the
+shard, so it opens straight into `Loading`, and its escape panel has no Quit, because there is
+no menu to return to and no process to end.
+
+Without a menu there is nowhere to fall back to, so a browser build that cannot reach its shard
+— refused, lost, or never named one — goes to `Unreachable`. It is terminal: it says what went
+wrong and to reload the page. Nothing reconnects yet, which is what makes that honest.
 
 `Settings` appears under both parents and is one screen either way. It is reachable from the
 main menu before a world exists and from the escape overlay while one is running, so it may

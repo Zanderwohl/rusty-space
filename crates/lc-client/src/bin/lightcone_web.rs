@@ -1,6 +1,6 @@
 //! The Lightcone client, in a browser.
 //!
-//! Differs from the desktop binary in three things and nothing else:
+//! Differs from the desktop binary in these things and nothing else:
 //!
 //! - **Assets come over HTTP.** `AssetPlugin::file_path` is a URL prefix on this target, so
 //!   pointing it at a CDN is the whole of the CDN integration.
@@ -8,6 +8,7 @@
 //! - **No `.meta` probing**, because every one of those is a round trip and a 404.
 //! - **WebGPU only.** There is no WebGL2 fallback and there will not be one: the renderer
 //!   needs storage buffers and compute, and a silently degraded sky is worse than a refusal.
+//! - **No main menu.** The library gates that, not this file: see `app::HAS_MAIN_MENU`.
 //!
 //! The page is expected to have checked `navigator.gpu` before loading this, because the
 //! check is free and the download is not.

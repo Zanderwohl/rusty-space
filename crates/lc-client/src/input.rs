@@ -124,6 +124,17 @@ pub fn grab_cursor(
     cursor.visible = !grab;
 }
 
+/// Give the cursor back on leaving the sky, since [`grab_cursor`] only runs inside it.
+pub fn release_cursor(
+    mut looking: ResMut<Looking>,
+    mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
+) {
+    looking.0 = false;
+    let Ok(mut cursor) = cursor.single_mut() else { return };
+    cursor.grab_mode = CursorGrabMode::None;
+    cursor.visible = true;
+}
+
 /// Whether to take the cursor, give it back, or leave it alone.
 ///
 /// Separate from the system because this is the part worth testing and `EguiWantsInput` cannot

@@ -12,6 +12,7 @@ pub enum Screen {
     MainMenu,
     Loading,
     InGame,
+    Unreachable,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
