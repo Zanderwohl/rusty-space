@@ -53,9 +53,6 @@ if (!manifest) {
 // the only argument vector a browser has.
 const params = new URLSearchParams(location.search);
 params.set('assets', new URL(at(manifest.asset_base || 'assets'), location.href).href);
-if (manifest.sky && !params.has('sky')) {
-  params.set('sky', manifest.sky.replace(/^assets\//, ''));
-}
 history.replaceState(null, '', `${location.pathname}?${params}`);
 
 say('Loading', `Downloading the client (${(manifest.bytes.wasm / 1e6).toFixed(0)} MB).`);

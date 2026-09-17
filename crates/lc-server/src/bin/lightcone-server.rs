@@ -34,7 +34,7 @@ including the world's clock, without which every saved craft reads as one whose 
 not begun.
 
 Point --sky at the **same chunk the promoted client downloads**, which is
-<cdn>/game/<build>/assets/sky/hyg-v42.lcsky. Both ends place craft into systems by position
+<cdn>/game/<build>/assets/sky/catalogue.lcsky. Both ends place craft into systems by position
 against the same shell radius, so two different catalogues is two different answers to which
 system a ship is in — and nothing reports the disagreement.
 ";

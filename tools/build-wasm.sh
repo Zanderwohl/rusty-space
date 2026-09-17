@@ -42,7 +42,7 @@ rm -rf "$OUT"; mkdir -p "$OUT/assets"
 # no reason to send 34 MB when 0.3 will do.
 echo "==> sky chunk"
 mkdir -p "$OUT/assets/sky"
-cargo run -q -p lc-world --bin skypack -- "$CATALOGUE" "$OUT/assets/sky/hyg-v42.lcsky" \
+cargo run -q -p lc-world --bin skypack -- "$CATALOGUE" "$OUT/assets/sky/catalogue.lcsky" \
   --limit "$SKY_LIMIT"
 
 # `--no-default-features` turns off `hyg`, which is what keeps the CSV reader -- and the only
@@ -70,7 +70,7 @@ tools/check-shaders.sh "$OUT/assets"
 
 WASM_BYTES=$(wc -c < "$OUT/${BIN}_bg.wasm" | tr -d ' ')
 JS_BYTES=$(wc -c < "$OUT/$BIN.js" | tr -d ' ')
-SKY_BYTES=$(wc -c < "$OUT/assets/sky/hyg-v42.lcsky" | tr -d ' ')
+SKY_BYTES=$(wc -c < "$OUT/assets/sky/catalogue.lcsky" | tr -d ' ')
 
 cat > "$OUT/manifest.json" <<JSON
 {
@@ -80,7 +80,6 @@ cat > "$OUT/manifest.json" <<JSON
   "entry": "$BIN.js",
   "wasm": "${BIN}_bg.wasm",
   "asset_base": "assets",
-  "sky": "assets/sky/hyg-v42.lcsky",
   "bytes": { "wasm": $WASM_BYTES, "js": $JS_BYTES, "sky": $SKY_BYTES }
 }
 JSON
@@ -109,7 +108,7 @@ compressible | while IFS= read -r -d '' f; do gzip -9 -f -k -c "$f" > "$f.gz"; d
 
 echo
 echo "==> $OUT"
-for f in "$OUT/${BIN}_bg.wasm" "$OUT/$BIN.js" "$OUT/assets/sky/hyg-v42.lcsky"; do
+for f in "$OUT/${BIN}_bg.wasm" "$OUT/$BIN.js" "$OUT/assets/sky/catalogue.lcsky"; do
   raw=$(wc -c < "$f" | tr -d ' ')
   if [ -f "$f.br" ]; then br=$(wc -c < "$f.br" | tr -d ' '); else br=0; fi
   printf '    %-28s %8.2f MB raw  %8.2f MB brotli\n' \

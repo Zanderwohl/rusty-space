@@ -12,7 +12,7 @@ use crate::app::DevEntry;
 pub struct Entry {
     pub dev: DevEntry,
     /// The catalogue to load: the first positional argument, and an **asset** path rather than
-    /// a filesystem one.
+    /// a filesystem one. Desktop only; the browser build loads its build's own sky.
     pub catalogue: Option<String>,
     /// The shard to connect to. `None` is the single-process game, which is every build before
     /// there was a server to connect to and is still what `--shot` and the snapshot use.
@@ -142,32 +142,23 @@ pub fn parse(args: &[String]) -> Entry {
 
 /// Reads the flags out of a URL query string.
 ///
-/// `?band=2&fly&sky=sky/hyg-v42.lcsky` becomes the same argument vector the desktop binary
-/// receives, so [`parse`] is the only thing that knows what a flag means.
+/// `?band=2&fly` becomes the same argument vector the desktop binary receives, so [`parse`] is
+/// the only thing that knows what a flag means.
+///
+/// Every parameter is a flag, so the catalogue — `parse`'s one positional argument — cannot be
+/// named here. The browser build's sky is fixed by the build it belongs to.
 #[cfg(target_arch = "wasm32")]
 pub fn from_query(query: &str) -> Vec<String> {
     let mut flags = Vec::new();
-    let mut positional = Vec::new();
     for pair in query.trim_start_matches('?').split('&').filter(|p| !p.is_empty()) {
         let (key, value) = match pair.split_once('=') {
             Some((k, v)) => (k, Some(decode(v))),
             None => (pair, None),
         };
-        // `sky` is the catalogue, and is the one parameter that is not a flag.
-        if key == "sky" {
-            if let Some(v) = value {
-                positional.push(v);
-            }
-            continue;
-        }
         flags.push(format!("--{key}"));
-        if let Some(v) = value {
-            flags.push(v);
-        }
+        flags.extend(value);
     }
-    // The catalogue leads, because that is where `parse` looks for it.
-    positional.extend(flags);
-    positional
+    flags
 }
 
 /// The shard the launching page points this build at.
