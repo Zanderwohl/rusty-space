@@ -11,7 +11,7 @@ use time::{OffsetDateTime, Time, UtcOffset};
 use crate::AppState;
 use crate::content::Post;
 
-const TITLE: &str = "Lightcone devlog";
+const TITLE: &str = "Lightcone Frontier devlog";
 const DESCRIPTION: &str = "Notes on building a relativistic sandbox MMO.";
 
 /// RSS 2.0. Built with the `rss` crate rather than by hand: XML escaping is a bug farm and

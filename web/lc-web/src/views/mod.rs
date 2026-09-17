@@ -52,9 +52,9 @@ pub fn document(head: Head<'_>, body: Markup) -> Markup {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (head.title) " — Lightcone" }
+                title { (head.title) " — Lightcone Frontier" }
                 meta name="description" content=(head.description);
-                meta property="og:site_name" content="Lightcone";
+                meta property="og:site_name" content="Lightcone Frontier";
                 meta property="og:title" content=(head.title);
                 meta property="og:description" content=(head.description);
                 meta property="og:type" content=(if head.published.is_some() { "article" } else { "website" });
@@ -63,8 +63,8 @@ pub fn document(head: Head<'_>, body: Markup) -> Markup {
                 }
                 meta name="twitter:card" content="summary";
                 link rel="stylesheet" href=(assets::url(assets::STYLESHEET));
-                link rel="alternate" type="application/rss+xml" title="Lightcone devlog" href="/feed.xml";
-                link rel="alternate" type="application/feed+json" title="Lightcone devlog" href="/feed.json";
+                link rel="alternate" type="application/rss+xml" title="Lightcone Frontier devlog" href="/feed.xml";
+                link rel="alternate" type="application/feed+json" title="Lightcone Frontier devlog" href="/feed.json";
             }
             body { (body) }
         }
@@ -73,7 +73,7 @@ pub fn document(head: Head<'_>, body: Markup) -> Markup {
 
 fn masthead() -> Markup {
     html! {
-        a class="wordmark" href="/" { "Lightcone" }
+        a class="wordmark" href="/" { "Lightcone Frontier" }
         nav {
             a href="/play" { "Play" }
             a href="/blog" { "Devlog" }

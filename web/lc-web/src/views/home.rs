@@ -12,7 +12,7 @@ pub async fn page() -> Markup {
             section class="stack" {
                 h1 { "Everything you know is out of date." }
                 p class="lede" {
-                    "Lightcone is a real-time strategy sandbox set across a volume of real stars. "
+                    "Lightcone Frontier is a real-time strategy sandbox set across a volume of real stars. "
                     "You control one ship. It mines, refines, builds, and launches further ships — "
                     "and every action it takes is an event with a place and a time, which nobody "
                     "else learns about until its light reaches them."
