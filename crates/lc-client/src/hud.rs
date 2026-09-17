@@ -143,16 +143,21 @@ mod tests {
     fn a_pursuit_says_who_and_how_much_space_is_between_the_hulls() {
         let (_, mut s) = fixture();
         s.ship.length_m = 500.0;
-        let quarry = crate::uplink::Contact {
-            ship_id: lc_proto::ShipId(7),
-            name: "Anvil".into(),
-            length_m: 5_000.0,
-            position_ly: s.ship.motion.position_ly + glam::DVec3::X * 3_750.0 / crate::system::M_PER_LY,
-            beta: glam::DVec3::ZERO,
-            facing: glam::DVec3::X,
-            jet_power_w: 0.0,
-            emitted_s: 0.0,
-        };
+        let at_ly = s.ship.motion.position_ly + glam::DVec3::X * 3_750.0 / crate::system::M_PER_LY;
+        let quarry = crate::uplink::Contact::seen(
+            lc_proto::Presence {
+                ship_id: lc_proto::ShipId(7),
+                name: "Anvil".into(),
+                length_m: 5_000.0,
+                at_ly: at_ly.to_array(),
+                beta: [0.0; 3],
+                facing: [1.0, 0.0, 0.0],
+                jet_power_w: 0.0,
+                emitted_t: 0,
+                arrive_t: 0,
+            },
+            None,
+        );
         let close = lc_proto::Pursuit { quarry: quarry.ship_id, closeness: lc_proto::Closeness::Intimate };
         assert_eq!(pursuit(&s, close, Some(&quarry)), "alongside Anvil — 1.0 km between hulls — close in");
         assert_eq!(pursuit(&s, close, None), "alongside ship 7 — close in");

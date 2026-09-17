@@ -33,6 +33,7 @@ pub mod rings;
 pub mod rng;
 pub mod scenario;
 pub mod shell;
+pub mod sighted;
 pub mod sky;
 pub mod star;
 pub mod surface;

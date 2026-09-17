@@ -365,9 +365,9 @@ pub struct Sighting {
 /// An **appearance**, never a state. [`Motion`] is a recipe, and a recipe for someone else's
 /// ship is a recipe a client can evaluate at its own clock — which is the whole of what the
 /// light-cone gate exists to prevent, handed over in a different shape. So this carries one
-/// sample of a worldline and nothing that can be run forward from it: a client drawing a
-/// contact between updates has to hold it still or interpolate what it was already told, and
-/// either way it cannot get ahead of the light.
+/// sample of a worldline and not the motive behind it. A client reckons that sample forward
+/// ballistically to the light arriving now (`lc_world::sighted`), which is wrong about any
+/// manoeuvre since until the next statement — the light of it has not been delivered.
 ///
 /// [`Presence`] is therefore not a small [`Motion`] and must not grow into one. `beta` is here
 /// because it is *measurable* at a distance — it is what the light arrives Doppler-shifted and

@@ -17,6 +17,9 @@ use lc_proto::{
     ClientId, Inbound, Order, Outbound, PROTOCOL_VERSION, Presence, Refusal, ShipId, Sighting,
 };
 
+use lc_world::sighted::Reckoning;
+use lc_world::system::LocalSystem;
+
 use crate::link::{Link, Status};
 
 /// Where this client is with respect to a server.
@@ -67,9 +70,8 @@ pub struct Joined {
 /// a contact under way is drawn behind where it actually is, and the faster it is going the
 /// further behind. That is the game rather than a lag.
 ///
-/// Held still between statements rather than extrapolated. The server states these every tick
-/// it has any to state, and a client that ran `beta` forward between them would be predicting
-/// a worldline it was deliberately not given — see [`Presence`].
+/// Reckoned forward between statements rather than held still — see [`lc_world::sighted`] for
+/// why, and for what that gets wrong. [`Contact::reckon`] runs once a frame, after the clock.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Contact {
     pub ship_id: ShipId,
@@ -78,26 +80,58 @@ pub struct Contact {
     /// Light-years from the world origin, where the light left.
     pub position_ly: DVec3,
     pub beta: DVec3,
-    /// Unit vector the nose pointed along.
+    /// Unit vector the nose pointed along, as last stated.
     pub facing: DVec3,
-    /// What its drive was putting into its exhaust, watts. Zero when it was coasting.
+    /// What its drive was putting into its exhaust, watts, as last stated. Zero when coasting.
     pub jet_power_w: f64,
     /// Coordinate seconds the light left.
     pub emitted_s: f64,
+    reckoning: Reckoning,
 }
 
-impl From<Presence> for Contact {
-    fn from(p: Presence) -> Self {
+impl Contact {
+    /// A contact from a statement. `system` is the one this ship is in, which a contact inside
+    /// it is reckoned along a conic about.
+    pub fn seen(presence: Presence, system: Option<&LocalSystem>) -> Self {
+        let position_ly = DVec3::from_array(presence.at_ly);
+        let beta = DVec3::from_array(presence.beta);
+        let emitted_s = presence.emitted_t as f64 * 1.0e-6;
+        let sighting = lc_world::pursuit::Sighting {
+            target: lc_world::motion::ShipId(presence.ship_id.0),
+            position_ly,
+            beta,
+            length_m: presence.length_m,
+            emitted_s,
+        };
         Self {
-            ship_id: p.ship_id,
-            name: p.name,
-            length_m: p.length_m,
-            position_ly: DVec3::from_array(p.at_ly),
-            beta: DVec3::from_array(p.beta),
-            facing: DVec3::from_array(p.facing).normalize_or_zero(),
-            jet_power_w: p.jet_power_w,
-            emitted_s: p.emitted_t as f64 * 1.0e-6,
+            ship_id: presence.ship_id,
+            name: presence.name,
+            length_m: presence.length_m,
+            position_ly,
+            beta,
+            facing: DVec3::from_array(presence.facing).normalize_or_zero(),
+            jet_power_w: presence.jet_power_w,
+            emitted_s,
+            reckoning: Reckoning::new(system, sighting),
         }
+    }
+
+    /// Bring the contact up to what `observer_ly` sees at `now_s`.
+    pub fn reckon(&mut self, system: Option<&LocalSystem>, observer_ly: DVec3, now_s: f64) {
+        let seen = self.reckoning.appearance_at(system, observer_ly, now_s);
+        self.position_ly = seen.position_ly;
+        self.beta = seen.beta;
+        self.emitted_s = seen.emitted_s;
+    }
+}
+
+/// Reckon every contact against this frame's clock and ship.
+pub fn reckon_contacts(game: Res<crate::app::Game>, mut uplink: ResMut<Uplink>) {
+    let system = game.0.system.as_deref();
+    let here = game.0.ship.motion.position_ly;
+    let now_s = game.0.coordinate_time_s();
+    for contact in &mut uplink.contacts {
+        contact.reckon(system, here, now_s);
     }
 }
 
@@ -409,8 +443,9 @@ fn fold(
             }
         }
         Outbound::Present(cleared) => {
+            let system = game.0.system.as_deref();
             uplink.contacts =
-                cleared.into_iter().map(|c| Contact::from(c.into_inner())).collect();
+                cleared.into_iter().map(|c| Contact::seen(c.into_inner(), system)).collect();
             // The server drops a pursuit when its quarry goes out of sight and does not say
             // so — saying so would be a message about somewhere this client can no longer see.
             // Losing the contact is the same fact arriving the only way it can.
@@ -953,6 +988,65 @@ mod tests {
         // Replaced wholesale, not merged: a contact missing from a statement is gone.
         fold(&mut uplink, &mut game, &mut ui, Outbound::Present(Vec::new()));
         assert!(uplink.contacts.is_empty(), "a dropped contact was kept");
+    }
+
+    /// **The flicker this exists for.** Two craft a kilometre and a half apart in low orbit of
+    /// Jupiter, and a statement once a server tick — 438 coordinate seconds at the design rate,
+    /// three frames at sixty. Held still, the contact fell up to twenty thousand kilometres
+    /// behind the ship between statements and snapped back on each one. Reckoned, the range
+    /// reads the formation.
+    #[test]
+    fn a_contact_in_formation_holds_its_range_between_statements() {
+        use lc_world::navigation::{Course, Plane};
+        use lc_world::system::M_PER_LY;
+
+        let provider =
+            lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
+                .expect("the catalogue");
+        let sun = lc_world::sky::StarProvider::stars(&provider)
+            .iter()
+            .find(|s| s.name.as_deref() == Some("Sol"))
+            .expect("the Sun");
+        let mut system = lc_world::system::LocalSystem::for_star(sun).expect("the solar system");
+        system.advance_to(0.0);
+        let station =
+            Course::Orbit { body: "Jupiter".into(), altitude_radii: 0.5, plane: Plane::Equatorial }
+                .resolve(&system, DVec3::ZERO, 0.0)
+                .expect("an orbit");
+
+        let standoff = DVec3::new(900.0, -1_200.0, 0.0) / M_PER_LY;
+        let observer_at = |t: f64| station.place_at(&system, t).unwrap() + standoff;
+        let tick_s = lc_server_tick_us(1.0) as f64 * 1e-6;
+        let frame_s = tick_s / 3.0;
+
+        for statement in 0..3 {
+            let emitted_s = 1_000.0 + statement as f64 * tick_s;
+            let presence = lc_proto::Presence {
+                ship_id: ShipId(2),
+                name: "Vela".into(),
+                length_m: 500.0,
+                at_ly: station.place_at(&system, emitted_s).unwrap().to_array(),
+                beta: lc_world::coast::beta_of(station.velocity_at(&system, emitted_s).unwrap())
+                    .to_array(),
+                facing: [1.0, 0.0, 0.0],
+                jet_power_w: 0.0,
+                emitted_t: (emitted_s * 1e6) as i64,
+                arrive_t: (emitted_s * 1e6) as i64,
+            };
+            let mut contact = Contact::seen(presence, Some(&system));
+            // Every frame drawn before the next statement lands, and frames from a client whose
+            // clock is behind the shard's, which receives each sample from its own future.
+            for frame in -3..4 {
+                let now_s = emitted_s + frame as f64 * frame_s;
+                let here = observer_at(now_s);
+                contact.reckon(Some(&system), here, now_s);
+                let range_m = here.distance(contact.position_ly) * M_PER_LY;
+                assert!(
+                    (range_m - 1_500.0).abs() < 5.0,
+                    "{range_m:.0} m at {frame} frames after statement {statement}, not 1500"
+                );
+            }
+        }
     }
 
     #[test]
