@@ -92,6 +92,27 @@ fn stepping_a_year_stays_on_the_orbits() {
     }
 }
 
+/// The velocity `state_at` returns is the derivative of the position it returns. Precessing
+/// elements broke this once: the frame's rotation was left out, 9 m/s for Jupiter.
+#[test]
+fn velocity_is_the_derivative_of_position() {
+    let s = built();
+    let h = 1.0;
+    for name in ["Mercury", "Earth", "Jupiter", "Neptune", "Luna", "Io", "Metis", "Titan", "Charon"] {
+        let i = s.by_name(name).unwrap();
+        for days in [0.0, 137.0, 4000.0] {
+            let t = Instant::from_julian_day(2451545.0 + days);
+            let at = |dt: f64| propagate::state_at(&s, i, t + TimeDelta::from_seconds(dt)).unwrap();
+            let (_, v) = at(0.0);
+            let differenced = (at(h).0 - at(-h).0) / (2.0 * h);
+            // Round-off in a ~1e12 m position over a 2 s baseline is ~1e-4 m/s.
+            let error = (v - differenced).length();
+            assert!(error < 1e-2,
+                "{name} at +{days} d: velocity {v:?} vs differenced {differenced:?}, off {error:.3e} m/s");
+        }
+    }
+}
+
 /// Keplerian bodies are evaluated, not integrated, so specific energy is exact.
 #[test]
 fn keplerian_energy_is_exactly_conserved() {

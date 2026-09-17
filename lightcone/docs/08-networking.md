@@ -80,8 +80,16 @@ A `Presence` is an **appearance**, never a state. The distinction is the whole o
 is a recipe a receiver evaluates at whatever time it likes, so handing one over for somebody
 else's ship would defeat the light cone in a different shape — the client would simply compute
 where that ship is *now*. So a presence carries one retarded sample — position, velocity,
-attitude, and the coordinate time the light left — and nothing that can be run forward. A
-client holds a contact still between statements or interpolates what it was already told.
+attitude, and the coordinate time the light left — and not the motive it is flying.
+
+**A client reckons a contact forward between statements**, along the conic that sample puts it
+on inside a system and a straight line outside one, to the instant whose light reaches the ship
+now (`lc_world::sighted`). It used to hold contacts still, and a tick is 438 coordinate seconds
+at the design rate: a craft in low orbit of Jupiter fell up to twenty thousand kilometres behind
+a ship flying formation with it and snapped back twenty times a second. Reckoning never draws
+an event whose light has not arrived. What it can get wrong is a manoeuvre since the sample,
+for at most a tick, which is the same thing a pursuer's dead reckoning gets wrong and for the
+same reason: it was not told.
 
 `beta` and `facing` are in it because both are measurable at a distance: velocity is what the
 light arrives Doppler-shifted and aberrated by, and a hull's attitude is its silhouette.
@@ -98,6 +106,26 @@ an angular size — a five-hundred-metre hull is well under a pixel from anywher
 and a rule drawn there would leave a player unable to find traffic they are sitting in the
 middle of. A client hears nothing at all about craft outside it, so a system with nobody in it
 and a system whose traffic is all elsewhere look the same from inside.
+
+### Drive transitions
+
+A plume is not an appearance a tick can sample. The flip in the middle of every crossing is a
+minute of coasting, and a tick is 438 coordinate seconds at the design rate, so a `Presence`
+once a tick missed it almost every time. So **the drive lighting, going out or changing power
+is an event** (`kind::DRIVE`, payload `DriveChange`), stamped at the instant it happened.
+
+The shard finds them after the fact, once a tick, for the tick just finished
+(`lc_world::ignition`): from each plan's phase boundaries and from every change of motive the
+craft's history recorded. Never scheduled ahead, because a plan replaced before it lit never
+lit and there is then nothing to withdraw. Stamped inside the tick just finished, so the
+cursor still has them in range when they are released at light delay like anything else. That
+costs up to a tick of delivery; it never costs the transition.
+
+A cut carries the power it cut, not zero: a plume going dark is exactly as visible as the plume
+was. The order to cut is still silent, and so is the ship afterwards.
+
+The client draws a contact's plume from whichever is later at the instant its light left: the
+last drive event, or the last statement.
 
 ### Intercept: a standing order
 

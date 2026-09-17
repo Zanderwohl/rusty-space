@@ -186,6 +186,8 @@ impl Plugin for ClientPlugin {
                     // The clock is deliberately not gated on any panel or overlay. See
                     // lightcone/docs/13-client-shell.md: the game does not pause.
                     advance_clock.run_if(in_state(AppState::InGame)),
+                    // After the clock, so a contact is drawn at the same instant as the ship.
+                    crate::uplink::reckon_contacts.run_if(in_state(AppState::InGame)),
                     observe.run_if(in_state(AppState::InGame)),
                     hold_exposure.run_if(in_state(AppState::InGame)),
                 )

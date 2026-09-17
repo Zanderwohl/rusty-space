@@ -221,19 +221,19 @@ impl KeplerMotive {
         Some(state::perifocal_velocity(gravitational_parameter, p, ecc, ta))
     }
 
-    /// Velocity relative to the primary, in the reference frame, m/s. Along the osculating
-    /// ellipse only: a precessing frame's own rotation is not included.
+    /// Velocity relative to the primary, in the reference frame, m/s: the time derivative of
+    /// [`Self::displacement`], so a precessing frame's own rotation is included.
     pub fn velocity(&self, time: Instant, gravitational_parameter: f64) -> Option<DVec3> {
-        let v_pqw = self.velocity_pqw(time, gravitational_parameter)?;
-        Some(self.perifocal_to_reference(v_pqw, time))
+        self.state_vectors(time, gravitational_parameter).map(|(_, v)| v)
     }
 
     /// Position and velocity relative to the primary, in the reference frame.
     ///
-    /// This is the propagation hot path, so it does not go through [`Self::displacement`]
-    /// and [`Self::velocity`]: those each solve Kepler's equation and each build the
-    /// perifocal-to-reference rotation, and both results are shared here. Same answer,
-    /// half the work.
+    /// This is the propagation hot path, so it does not go through [`Self::displacement`]:
+    /// Kepler's equation and the perifocal-to-reference rotation are solved once for both.
+    ///
+    /// The velocity is the time derivative of the position, including a precessing frame's
+    /// rotation, so it does not obey vis-viva exactly; [`Self::velocity_pqw`] does.
     pub fn state_vectors(
         &self,
         time: Instant,
@@ -253,7 +253,11 @@ impl KeplerMotive {
         let v_pqw = state::perifocal_velocity(gravitational_parameter, p, ecc, ta);
 
         let rotation = self.perifocal_to_reference_matrix(time);
-        Some((rotation * r_pqw, rotation * v_pqw))
+        let r = rotation * r_pqw;
+        // Without the frame's rotation the velocity is along the osculating ellipse only, and
+        // disagrees with the differenced position by |omega_dot| r: 9 m/s for Jupiter.
+        let frame_rate = self.rotation.angular_velocity(rotation.z_axis);
+        Some((r, rotation * v_pqw + frame_rate.cross(r)))
     }
 
     /// These elements in radians, true anomaly resolved for `time`.
@@ -440,6 +444,14 @@ impl KeplerRotation {
         self.longitude_of_ascending_node(time_since_epoch).unwrap_or(0.0) + self.argument_of_periapsis(time_since_epoch)
     }
 
+    /// Angular velocity of the perifocal frame, rad/s, in the reference frame. `orbit_normal`
+    /// is the perifocal +W axis in the reference frame. Inclination is constant, so this is the
+    /// node's rate about the reference pole plus periapsis's rate about the orbit normal.
+    pub fn angular_velocity(&self, orbit_normal: DVec3) -> DVec3 {
+        let KeplerRotation::PrecessingEulerAngles(pea) = self else { return DVec3::ZERO };
+        DVec3::Z * pea.nodal_precession_rate() + orbit_normal * pea.apsidal_precession_rate()
+    }
+
     pub fn argument_of_periapsis(&self, time_since_epoch: TimeDelta) -> f64 {
         match self {
             KeplerRotation::EulerAngles(ea) => ea.argument_of_periapsis,
@@ -481,12 +493,27 @@ impl KeplerPrecessingEulerAngles {
         (time_since_epoch.to_seconds() / period) * 360.0
     }
 
+    /// Apsidal precession rate, rad/s. A zero period yields 0.
+    pub fn apsidal_precession_rate(&self) -> f64 {
+        rate_of(self.apsidal_precession_period)
+    }
+
+    /// Nodal precession rate, rad/s. A zero period yields 0.
+    pub fn nodal_precession_rate(&self) -> f64 {
+        rate_of(self.nodal_precession_period)
+    }
+
     /// Degrees of nodal precession since epoch. A zero period yields 0, not inf/NaN.
     pub fn nodal_precession_deg(&self, time_since_epoch: TimeDelta) -> f64 {
         let period = self.nodal_precession_period.to_seconds();
         if period == 0.0 { return 0.0; }
         (time_since_epoch.to_seconds() / period) * 360.0
     }
+}
+
+fn rate_of(period: TimeDelta) -> f64 {
+    let seconds = period.to_seconds();
+    if seconds == 0.0 { 0.0 } else { std::f64::consts::TAU / seconds }
 }
 
 #[derive(Serialize, Deserialize, Clone)]

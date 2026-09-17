@@ -344,6 +344,26 @@ pub struct Intent {
     pub issued_at_client_t: i64,
 }
 
+/// Event kinds, as [`Sighting::kind`] carries them. Named here because both ends read them.
+pub mod kind {
+    pub const TRANSMIT: i16 = 1;
+    /// An order that lights the drive, stamped when it was given.
+    pub const BURN: i16 = 2;
+    pub const CUT: i16 = 3;
+    /// The drive lit, went out or changed power, stamped when it did. The payload is a
+    /// [`super::DriveChange`] as JSON.
+    pub const DRIVE: i16 = 4;
+}
+
+/// What a craft's drive became at a [`kind::DRIVE`] event.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DriveChange {
+    /// Watts into the exhaust from this instant. Zero is the drive going out.
+    pub power_w: f64,
+    /// Unit vector the nose pointed along.
+    pub facing: [f64; 3],
+}
+
 /// One event arriving at one observer: what the client is actually told.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sighting {
@@ -365,9 +385,9 @@ pub struct Sighting {
 /// An **appearance**, never a state. [`Motion`] is a recipe, and a recipe for someone else's
 /// ship is a recipe a client can evaluate at its own clock — which is the whole of what the
 /// light-cone gate exists to prevent, handed over in a different shape. So this carries one
-/// sample of a worldline and nothing that can be run forward from it: a client drawing a
-/// contact between updates has to hold it still or interpolate what it was already told, and
-/// either way it cannot get ahead of the light.
+/// sample of a worldline and not the motive behind it. A client reckons that sample forward
+/// ballistically to the light arriving now (`lc_world::sighted`), which is wrong about any
+/// manoeuvre since until the next statement — the light of it has not been delivered.
 ///
 /// [`Presence`] is therefore not a small [`Motion`] and must not grow into one. `beta` is here
 /// because it is *measurable* at a distance — it is what the light arrives Doppler-shifted and

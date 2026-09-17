@@ -17,6 +17,9 @@ use lc_proto::{
     ClientId, Inbound, Order, Outbound, PROTOCOL_VERSION, Presence, Refusal, ShipId, Sighting,
 };
 
+use lc_world::sighted::Reckoning;
+use lc_world::system::LocalSystem;
+
 use crate::link::{Link, Status};
 
 /// Where this client is with respect to a server.
@@ -67,9 +70,8 @@ pub struct Joined {
 /// a contact under way is drawn behind where it actually is, and the faster it is going the
 /// further behind. That is the game rather than a lag.
 ///
-/// Held still between statements rather than extrapolated. The server states these every tick
-/// it has any to state, and a client that ran `beta` forward between them would be predicting
-/// a worldline it was deliberately not given — see [`Presence`].
+/// Reckoned forward between statements rather than held still — see [`lc_world::sighted`] for
+/// why, and for what that gets wrong. [`Contact::reckon`] runs once a frame, after the clock.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Contact {
     pub ship_id: ShipId,
@@ -78,27 +80,80 @@ pub struct Contact {
     /// Light-years from the world origin, where the light left.
     pub position_ly: DVec3,
     pub beta: DVec3,
-    /// Unit vector the nose pointed along.
+    /// Unit vector the nose pointed along, as last stated.
     pub facing: DVec3,
-    /// What its drive was putting into its exhaust, watts. Zero when it was coasting.
+    /// What its drive was putting into its exhaust, watts, as last stated. Zero when coasting.
     pub jet_power_w: f64,
     /// Coordinate seconds the light left.
     pub emitted_s: f64,
+    reckoning: Reckoning,
+    /// What the statement said the drive was doing, at the statement's own instant.
+    stated_power_w: f64,
 }
 
-impl From<Presence> for Contact {
-    fn from(p: Presence) -> Self {
+/// A drive event, as a contact's plume reads it: coordinate seconds, and the power from then.
+pub type DriveAt = (f64, f64);
+
+/// Drive events remembered per craft. Only the latest before the instant drawn matters, and
+/// the instant drawn is never more than a tick or two behind the newest.
+const REMEMBERED_DRIVES: usize = 16;
+
+impl Contact {
+    /// A contact from a statement. `system` is the one this ship is in, which a contact inside
+    /// it is reckoned along a conic about.
+    pub fn seen(presence: Presence, system: Option<&LocalSystem>) -> Self {
+        let position_ly = DVec3::from_array(presence.at_ly);
+        let beta = DVec3::from_array(presence.beta);
+        let emitted_s = presence.emitted_t as f64 * 1.0e-6;
+        let sighting = lc_world::pursuit::Sighting {
+            target: lc_world::motion::ShipId(presence.ship_id.0),
+            position_ly,
+            beta,
+            length_m: presence.length_m,
+            emitted_s,
+        };
         Self {
-            ship_id: p.ship_id,
-            name: p.name,
-            length_m: p.length_m,
-            position_ly: DVec3::from_array(p.at_ly),
-            beta: DVec3::from_array(p.beta),
-            facing: DVec3::from_array(p.facing).normalize_or_zero(),
-            jet_power_w: p.jet_power_w,
-            emitted_s: p.emitted_t as f64 * 1.0e-6,
+            ship_id: presence.ship_id,
+            name: presence.name,
+            length_m: presence.length_m,
+            position_ly,
+            beta,
+            facing: DVec3::from_array(presence.facing).normalize_or_zero(),
+            jet_power_w: presence.jet_power_w,
+            emitted_s,
+            reckoning: Reckoning::new(system, sighting),
+            stated_power_w: presence.jet_power_w,
         }
     }
+
+    /// Bring the contact up to what `observer_ly` sees at `now_s`. `drives` is this craft's
+    /// drive events, oldest first.
+    pub fn reckon(
+        &mut self,
+        system: Option<&LocalSystem>,
+        observer_ly: DVec3,
+        now_s: f64,
+        drives: &[DriveAt],
+    ) {
+        let seen = self.reckoning.appearance_at(system, observer_ly, now_s);
+        self.position_ly = seen.position_ly;
+        self.beta = seen.beta;
+        self.emitted_s = seen.emitted_s;
+        // The latest word on the drive at the instant drawn, statement or event. The statement
+        // stands when nothing has been said since, including when this clock is behind it.
+        let stated_s = self.reckoning.seen.emitted_s;
+        self.jet_power_w = drives
+            .iter()
+            .rev()
+            .find(|(at_s, _)| *at_s <= seen.emitted_s)
+            .filter(|(at_s, _)| *at_s > stated_s || seen.emitted_s < stated_s)
+            .map_or(self.stated_power_w, |(_, power_w)| *power_w);
+    }
+}
+
+/// Reckon every contact against this frame's clock and ship.
+pub fn reckon_contacts(game: Res<crate::app::Game>, mut uplink: ResMut<Uplink>) {
+    uplink.reckon(game.0.system.as_deref(), game.0.ship.motion.position_ly, game.0.coordinate_time_s());
 }
 
 /// Where the server is, if there is one.
@@ -176,6 +231,8 @@ pub struct Uplink {
     asked_at: Option<f64>,
     /// How long the last order took to come back.
     pub round_trip_s: Option<f64>,
+    /// Drive events per craft, oldest first. Kept across statements, which replace contacts.
+    drives: std::collections::HashMap<ShipId, Vec<DriveAt>>,
 }
 
 /// The rate a shard runs at, and what a server that says nothing is taken to mean.
@@ -263,6 +320,14 @@ impl Uplink {
     }
 
     /// Read everything waiting, and fold it. Returns what arrived, for a caller that wants it.
+    /// Bring every contact up to what `observer_ly` sees at `now_s`.
+    pub fn reckon(&mut self, system: Option<&LocalSystem>, observer_ly: DVec3, now_s: f64) {
+        for contact in &mut self.contacts {
+            let drives = self.drives.get(&contact.ship_id).map_or(&[][..], Vec::as_slice);
+            contact.reckon(system, observer_ly, now_s, drives);
+        }
+    }
+
     fn take(&mut self) -> Vec<Outbound> {
         let Some(link) = self.link.get_mut().unwrap() else {
             return Vec::new();
@@ -409,8 +474,9 @@ fn fold(
             }
         }
         Outbound::Present(cleared) => {
+            let system = game.0.system.as_deref();
             uplink.contacts =
-                cleared.into_iter().map(|c| Contact::from(c.into_inner())).collect();
+                cleared.into_iter().map(|c| Contact::seen(c.into_inner(), system)).collect();
             // The server drops a pursuit when its quarry goes out of sight and does not say
             // so — saying so would be a message about somewhere this client can no longer see.
             // Losing the contact is the same fact arriving the only way it can.
@@ -422,9 +488,19 @@ fn fold(
             }
         }
         Outbound::Sightings(cleared) => {
-            uplink
-                .seen
-                .extend(cleared.into_iter().map(|c| c.into_inner()));
+            let seen: Vec<Sighting> = cleared.into_iter().map(|c| c.into_inner()).collect();
+            for sighting in seen.iter().filter(|s| s.kind == lc_proto::kind::DRIVE) {
+                let Ok(change) = serde_json::from_str::<lc_proto::DriveChange>(&sighting.payload) else {
+                    continue;
+                };
+                let drives = uplink.drives.entry(ShipId(sighting.source_id)).or_default();
+                let at = (sighting.emitted_t as f64 * 1e-6, change.power_w);
+                let place = drives.partition_point(|(at_s, _)| *at_s <= at.0);
+                drives.insert(place, at);
+                let excess = drives.len().saturating_sub(REMEMBERED_DRIVES);
+                drives.drain(..excess);
+            }
+            uplink.seen.extend(seen);
             let excess = uplink.seen.len().saturating_sub(REMEMBERED);
             uplink.seen.drain(..excess);
         }
@@ -433,6 +509,14 @@ fn fold(
             // and neither is what was sent, so folding what was sent instead is how a client
             // ends up somewhere the server does not have it.
             let at_s = at_t as f64 * 1e-6;
+            // The server drops a standing intercept on any flight order, so the pursuit the
+            // interface shows is over too.
+            if matches!(
+                order,
+                Order::SetCourse { .. } | Order::Cross { .. } | Order::CutDrive | Order::Burn { .. }
+            ) {
+                uplink.chasing = None;
+            }
             let said = match &order {
                 Order::SetCourse { course, accel_g } => {
                     let course: lc_world::navigation::Course = course.clone().into();
@@ -953,6 +1037,141 @@ mod tests {
         // Replaced wholesale, not merged: a contact missing from a statement is gone.
         fold(&mut uplink, &mut game, &mut ui, Outbound::Present(Vec::new()));
         assert!(uplink.contacts.is_empty(), "a dropped contact was kept");
+    }
+
+    /// **The flicker this exists for.** Two craft a kilometre and a half apart in low orbit of
+    /// Jupiter, and a statement once a server tick — 438 coordinate seconds at the design rate,
+    /// three frames at sixty. Held still, the contact fell up to twenty thousand kilometres
+    /// behind the ship between statements and snapped back on each one. Reckoned, the range
+    /// reads the formation.
+    #[test]
+    fn a_contact_in_formation_holds_its_range_between_statements() {
+        use lc_world::navigation::{Course, Plane};
+        use lc_world::system::M_PER_LY;
+
+        let provider =
+            lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
+                .expect("the catalogue");
+        let sun = lc_world::sky::StarProvider::stars(&provider)
+            .iter()
+            .find(|s| s.name.as_deref() == Some("Sol"))
+            .expect("the Sun");
+        let mut system = lc_world::system::LocalSystem::for_star(sun).expect("the solar system");
+        system.advance_to(0.0);
+        let station =
+            Course::Orbit { body: "Jupiter".into(), altitude_radii: 0.5, plane: Plane::Equatorial }
+                .resolve(&system, DVec3::ZERO, 0.0)
+                .expect("an orbit");
+
+        let standoff = DVec3::new(900.0, -1_200.0, 0.0) / M_PER_LY;
+        let observer_at = |t: f64| station.place_at(&system, t).unwrap() + standoff;
+        let tick_s = lc_server_tick_us(1.0) as f64 * 1e-6;
+        let frame_s = tick_s / 3.0;
+
+        for statement in 0..3 {
+            let emitted_s = 1_000.0 + statement as f64 * tick_s;
+            let presence = lc_proto::Presence {
+                ship_id: ShipId(2),
+                name: "Vela".into(),
+                length_m: 500.0,
+                at_ly: station.place_at(&system, emitted_s).unwrap().to_array(),
+                beta: lc_world::coast::beta_of(station.velocity_at(&system, emitted_s).unwrap())
+                    .to_array(),
+                facing: [1.0, 0.0, 0.0],
+                jet_power_w: 0.0,
+                emitted_t: (emitted_s * 1e6) as i64,
+                arrive_t: (emitted_s * 1e6) as i64,
+            };
+            let mut contact = Contact::seen(presence, Some(&system));
+            // Every frame drawn before the next statement lands, and frames from a client whose
+            // clock is behind the shard's, which receives each sample from its own future.
+            for frame in -3..4 {
+                let now_s = emitted_s + frame as f64 * frame_s;
+                let here = observer_at(now_s);
+                contact.reckon(Some(&system), here, now_s, &[]);
+                let range_m = here.distance(contact.position_ly) * M_PER_LY;
+                assert!(
+                    (range_m - 1_500.0).abs() < 5.0,
+                    "{range_m:.0} m at {frame} frames after statement {statement}, not 1500"
+                );
+            }
+        }
+    }
+
+    /// A flight order ends a standing intercept on the server, so the interface stops showing
+    /// one. A transmission is not a flight order.
+    #[test]
+    fn an_accepted_flight_order_ends_the_pursuit_shown() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let accepted = |order| Outbound::Accepted { ship_id: ShipId(7), event_id: 1, at_t: 0, order };
+        let pursuit = lc_proto::Pursuit { quarry: ShipId(2), closeness: lc_proto::Closeness::Company };
+
+        uplink.chasing = Some(pursuit);
+        fold(&mut uplink, &mut game, &mut ui, accepted(Order::Transmit { power_w: 1.0 }));
+        assert_eq!(uplink.chasing, Some(pursuit), "a transmission ended it");
+
+        for order in [Order::CutDrive, Order::Burn { beta: [0.0, 1e-3, 0.0] }] {
+            uplink.chasing = Some(pursuit);
+            fold(&mut uplink, &mut game, &mut ui, accepted(order.clone()));
+            assert_eq!(uplink.chasing, None, "{order:?} left the pursuit showing");
+        }
+    }
+
+    /// **A flip between two statements still goes dark.** Sampled burning, then told by drive
+    /// events that it went out at 100 s and lit again at 160 s: drawn in between, the plume is
+    /// out, though no statement ever saw it so.
+    #[test]
+    fn a_contacts_plume_follows_its_drive_events_between_statements() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let burning = 4.0e17;
+        let presence = lc_proto::Presence {
+            ship_id: ShipId(2),
+            name: "Vela".into(),
+            length_m: 500.0,
+            at_ly: [0.0; 3],
+            beta: [0.0; 3],
+            facing: [1.0, 0.0, 0.0],
+            jet_power_w: burning,
+            emitted_t: 0,
+            arrive_t: 0,
+        };
+        let present = |p: lc_proto::Presence| {
+            let arrive_t = p.arrive_t;
+            Outbound::Present(vec![Cleared::<lc_proto::Presence>::clear(p, arrive_t).unwrap()])
+        };
+        fold(&mut uplink, &mut game, &mut ui, present(presence.clone()));
+
+        let drive = |event_id, at_s: f64, power_w| {
+            let change = lc_proto::DriveChange { power_w, facing: [1.0, 0.0, 0.0] };
+            let sighting = Sighting {
+                event_id,
+                source_id: 2,
+                arrive_t: (at_s * 1e6) as i64,
+                emitted_t: (at_s * 1e6) as i64,
+                direction: [1.0, 0.0, 0.0],
+                strength: 1.0,
+                kind: lc_proto::kind::DRIVE,
+                payload: serde_json::to_string(&change).unwrap(),
+            };
+            Cleared::<Sighting>::clear(sighting, (at_s * 1e6) as i64, 0.0).unwrap()
+        };
+        let events = vec![drive(1, 100.0, 0.0), drive(2, 160.0, burning)];
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Sightings(events));
+
+        let power_at = |uplink: &mut Uplink, now_s: f64| {
+            uplink.reckon(None, DVec3::X * 1e3 / lc_world::system::M_PER_LY, now_s);
+            uplink.contacts[0].jet_power_w
+        };
+        assert_eq!(power_at(&mut uplink, 50.0), burning, "before the flip");
+        assert_eq!(power_at(&mut uplink, 130.0), 0.0, "in the flip");
+        assert_eq!(power_at(&mut uplink, 170.0), burning, "after it");
+
+        // A statement newer than every event is the latest word, and survives the next one.
+        let later = lc_proto::Presence { jet_power_w: 0.0, emitted_t: 400_000_000, arrive_t: 400_000_000, ..presence };
+        fold(&mut uplink, &mut game, &mut ui, present(later));
+        assert_eq!(power_at(&mut uplink, 410.0), 0.0, "an older event outranked a newer statement");
     }
 
     #[test]

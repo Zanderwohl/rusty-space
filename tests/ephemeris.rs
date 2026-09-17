@@ -242,8 +242,9 @@ fn velocities_match_jpl() {
     }
 }
 
-/// Speed obeys vis-viva against the body's own elements everywhere on the orbit. Internal
-/// consistency, independent of element accuracy.
+/// Speed along the osculating ellipse obeys vis-viva against the body's own elements
+/// everywhere on the orbit. Internal consistency, independent of element accuracy. The
+/// inertial velocity also carries the precessing frame's rotation, so it is not checked here.
 #[test]
 fn keplerian_speeds_obey_vis_viva() {
     let contents = solar_system();
@@ -266,7 +267,8 @@ fn keplerian_speeds_obey_vis_viva() {
 
         for days in [0.0, 40.0, 500.0, 3000.0, 9000.0] {
             let t = Instant::from_julian_day(2451545.0 + days);
-            let (r, v) = entry.params.state_vectors(t, mu).unwrap();
+            let r = entry.params.displacement(t, mu).unwrap();
+            let v = entry.params.velocity_pqw(t, mu).unwrap();
             let expected = (mu * (2.0 / r.length() - 1.0 / a)).sqrt();
             let rel = (v.length() - expected).abs() / expected;
             assert!(rel < 1e-9, "{body} at +{days} d: speed {} vs vis-viva {expected} (rel {rel:e})",

@@ -309,6 +309,7 @@ impl<J: Journal> Server<J> {
         // After the intents, so an intercept ordered this tick is not immediately re-solved
         // against the plan it just made.
         self.steer_pursuits(wire, &mut events, &mut deliveries);
+        self.announce_drives(self.now_t - self.tick_us(), &mut events, &mut deliveries);
         self.journal.write(&events, &deliveries).await?;
         self.pending = events;
         self.state_the_clock(wire);
@@ -516,8 +517,8 @@ impl<J: Journal> Server<J> {
                         change: Change::CutDrive,
                     })
                     .map_err(refusal_for)?;
-                // Silent. Cutting the engine is the one manoeuvre that puts nothing out, which
-                // is exactly why a player might choose it.
+                // The order puts nothing out. The plume going dark is still seen, by anyone
+                // who could see it lit — `crate::drive` states it — and after that the ship is.
                 (KIND_CUT, 0.0, "{}".to_string(), Order::CutDrive)
             }
             Order::Intercept { ship_id, closeness } => {
@@ -570,6 +571,15 @@ impl<J: Journal> Server<J> {
                 (KIND_CUT, 0.0, "{}".to_string(), Order::BreakOff)
             }
         };
+
+        // A flight order replaces whatever the ship was doing, the standing intercept included.
+        // Left in place, the next tick steered the ship back to its quarry over this order.
+        if matches!(
+            applied,
+            Order::Burn { .. } | Order::SetCourse { .. } | Order::Cross { .. } | Order::CutDrive
+        ) {
+            self.pursuits.remove(&id);
+        }
 
         let at_position = self.fleet.get(id).ok_or(Refusal::NotYours)?.position_at(at as f64);
         let event = Event {
@@ -885,11 +895,11 @@ fn refusal_for(rejected: Rejected) -> Refusal {
     }
 }
 
-/// Event kinds. Small integers on the wire; named here.
-pub const KIND_TRANSMIT: i16 = 1;
-pub const KIND_BURN: i16 = 2;
+pub const KIND_TRANSMIT: i16 = lc_proto::kind::TRANSMIT;
+pub const KIND_BURN: i16 = lc_proto::kind::BURN;
 /// Cutting the engine. Distinct from a burn because it radiates nothing.
-pub const KIND_CUT: i16 = 3;
+pub const KIND_CUT: i16 = lc_proto::kind::CUT;
+pub const KIND_DRIVE: i16 = lc_proto::kind::DRIVE;
 
 /// What a burn radiates, until there is a drive model to ask.
 pub const BURN_POWER_W: f64 = 1.0e12;
@@ -921,6 +931,63 @@ use crate::transport::Loopback;
                 _ => Vec::new(),
             })
             .collect()
+    }
+
+    /// **A drive transition is an event, at the instant it happens.** A crossing lights, goes
+    /// out for the flip, lights again and goes out on arrival. The flip is a sixty-second coast
+    /// inside a 438-second tick, so a statement once a tick could never show it; each of the
+    /// four has to reach the other ship as its own sighting, stamped when it happened.
+    #[tokio::test]
+    async fn a_flip_shorter_than_a_tick_reaches_an_observer_as_two_events() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let (flier, watcher) = (ClientId(1), ClientId(2));
+        server.admit(flier, Craft::at(CraftId(1), lc_world::craft::Kind::Ship, DVec3::ZERO), 0.0);
+        let beside = DVec3::new(0.0, 1.0e6 / lc_world::system::M_PER_LY, 0.0);
+        server.admit(watcher, Craft::at(CraftId(2), lc_world::craft::Kind::Ship, beside), 0.0);
+
+        // Twenty thousand kilometres, past the standoff a crossing stops short of a star by.
+        let trip_ly = 2.0e7 / lc_world::system::M_PER_LY;
+        let to_ly = DVec3::new(lc_world::flight::STANDOFF_LY + trip_ly, 0.0, 0.0);
+        // Folded directly: between the stars there is no course to set, and an order to cross
+        // would need a catalogue star there.
+        let craft = server.fleet_mut().get_mut(CraftId(1)).unwrap();
+        let drive = craft.turning(craft.kind.drive());
+        craft
+            .apply(&lc_world::motion::Event {
+                ship: lc_world::motion::ShipId(1),
+                at_t: 1.0,
+                change: lc_world::motion::Change::Cross { to_ly, drive },
+            })
+            .unwrap();
+        let lc_world::motion::Motive::Crossing(cruise) = &server.ship(ShipId(1)).unwrap().motion.motive else {
+            panic!("premise: a crossing")
+        };
+        let arrive_t = ((cruise.start_s + cruise.duration_s()) * 1e6) as i64;
+
+        let mut seen = Vec::new();
+        while server.now_t() < arrive_t + 3 * server.tick_us() {
+            seen.extend(sightings(&wire.take(watcher)).into_iter().cloned());
+            server.tick(&mut wire).await.unwrap();
+        }
+        seen.extend(sightings(&wire.take(watcher)).into_iter().cloned());
+        let drive: Vec<(i64, f64)> = seen
+            .iter()
+            .filter(|s| s.kind == KIND_DRIVE && s.source_id == 1)
+            .map(|s| {
+                let change: lc_proto::DriveChange = serde_json::from_str(&s.payload).unwrap();
+                (s.emitted_t, change.power_w)
+            })
+            .collect();
+
+        let lit: Vec<bool> = drive.iter().map(|(_, power)| *power > 0.0).collect();
+        assert_eq!(lit, [true, false, true, false], "{drive:?}");
+        let coast_us = drive[2].0 - drive[1].0;
+        assert!(
+            coast_us > 0 && coast_us < server.tick_us(),
+            "premise: a flip inside one tick, got {coast_us} us",
+        );
+        assert!((drive[3].0 - arrive_t).abs() < 1_000, "went out at {}, arrived at {arrive_t}", drive[3].0);
     }
 
     /// **The acceptance criterion.** Two clients, one acts, and the other learns about it at
@@ -1559,6 +1626,53 @@ use crate::transport::Loopback;
     /// something eventually happened. It also needed `Craft` to keep a history before it could
     /// pass at all — a motive evaluated before it was flown answers about a ship that did not
     /// exist yet, and `Drifting` extrapolating backwards made a burn rewrite its own past.
+    /// **A new flight order is the end of the pursuit.** It used to leave the standing order in
+    /// place, and the next tick steered the ship straight back to its quarry over what the player
+    /// had just asked for. A transmission is not a flight order and changes nothing.
+    #[tokio::test]
+    async fn a_flight_order_cancels_a_standing_intercept() {
+        let orders = [
+            (Order::CutDrive, false),
+            (Order::Burn { beta: [0.0, 1.0e-3, 0.0] }, false),
+            (Order::Transmit { power_w: 1.0e6 }, true),
+        ];
+        for (order, keeps) in orders {
+            let mut server = Server::new(Memory::default(), 0, 1);
+            let mut wire = Loopback::new();
+            let hunter = ClientId(1);
+            server.admit(hunter, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+            server.admit(ClientId(2), crate::world::still(ShipId(2), DVec3::new(ONE_LIGHT_SECOND, 0.0, 0.0)), 0.0);
+            wire.client_says(hunter, Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: Order::Intercept { ship_id: ShipId(2), closeness: lc_proto::Closeness::Company },
+                issued_at_client_t: 0,
+            }));
+            for _ in 0..3 {
+                server.tick(&mut wire).await.unwrap();
+            }
+            assert!(server.ship(ShipId(1)).unwrap().motion.pursuing().is_some(), "premise: under way");
+
+            wire.client_says(hunter, Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: order.clone(),
+                issued_at_client_t: server.now_t(),
+            }));
+            for _ in 0..20 {
+                server.tick(&mut wire).await.unwrap();
+            }
+            assert_eq!(server.pursuits.contains_key(&CraftId(1)), keeps, "{order:?}");
+            // Only for the orders that cancel it: a kept intercept against a still quarry has
+            // arrived by now and is drifting alongside, which is the policy working.
+            if !keeps {
+                assert!(
+                    server.ship(ShipId(1)).unwrap().motion.pursuing().is_none(),
+                    "{order:?} was steered back to the quarry: {:?}",
+                    server.ship(ShipId(1)).unwrap().motion.motive,
+                );
+            }
+        }
+    }
+
     #[tokio::test]
     async fn a_pursuer_cannot_react_to_a_burn_before_its_light_arrives() {
         let mut server = Server::new(Memory::default(), 0, 1);

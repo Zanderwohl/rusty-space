@@ -11,6 +11,7 @@
 
 pub mod chase;
 pub mod director;
+pub mod drive;
 pub mod journal;
 pub mod persist;
 pub mod rate;
