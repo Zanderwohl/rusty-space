@@ -47,6 +47,7 @@ cross-reference except where a shared crate is the subject.
 | [16-identity.md](docs/16-identity.md) | accounts as a broker neither product owns, and how a socket proves who it is |
 | [17-reconciliation.md](docs/17-reconciliation.md) | the four ways a client can differ from the server, and which of them is a mechanic |
 | [18-ui-style.md](docs/18-ui-style.md) | which toolkit a surface belongs to, and what it may do to the one behind it |
+| [19-ship-fitting.md](docs/19-ship-fitting.md) | **plan.** modules, energy as mass, the drive as a rocket, and refits |
 
 ## Status
 

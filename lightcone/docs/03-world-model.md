@@ -249,6 +249,9 @@ output, and it is consumed by fabrication, propulsion and transmission. Transmis
 is drawn from the same budget as everything else, which is what makes broadcasting a real
 cost rather than a free action.
 
+Ship modules, stored energy and what propulsion and construction cost are planned in
+[19-ship-fitting.md](19-ship-fitting.md).
+
 ## Von Neumann probes
 
 A probe is a ship whose order program includes construction of another probe. There is no
