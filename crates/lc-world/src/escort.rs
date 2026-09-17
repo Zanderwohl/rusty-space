@@ -293,8 +293,15 @@ pub fn acceleration_of(previous: &Sighting, latest: &Sighting) -> Option<DVec3> 
 
 /// Plan taking up station `standoff_m` off a quarry believed to be accelerating at `accel`.
 ///
-/// Refused as [`Refused::TooFast`] when there is nothing left to close with: a quarry pulling
-/// as hard as the pursuer can is one it can follow but never catch, and one at `c` has no frame.
+/// A quarry pulling harder than the drive can match is **followed**, not refused: it is modelled
+/// as burning at all but [`SPARE_FLOOR`] of the pursuer's drive, so the pursuer copies the burn
+/// as nearly as it can and falls behind by the difference. That model diverges from what is seen
+/// and is re-solved, and the gap closes again once the quarry eases off. Refusing instead gave
+/// the pursuit up and cut the drive, so a ship hanging about with another of the same rating was
+/// left ballistic the moment its companion lit up.
+///
+/// Refused as [`Refused::TooFast`] only for a quarry at `c`, which has no frame, or a pursuer
+/// with no drive at all.
 pub fn escort(
     pursuer: &ShipState,
     standoff_m: f64,
@@ -306,10 +313,11 @@ pub fn escort(
     if seen.beta.length() >= MAX_BETA {
         return Err(Refused::TooFast);
     }
-    let spare_g = drive.accel_g - accel.length() * C_M_S / G0;
-    if spare_g <= drive.accel_g * SPARE_FLOOR {
+    if drive.accel_g <= 0.0 {
         return Err(Refused::TooFast);
     }
+    let accel = followed(accel, drive);
+    let spare_g = drive.accel_g - accel.length() * C_M_S / G0;
     let burning =
         Burning { position_ly: seen.position_ly, beta: seen.beta, accel, since_t: seen.emitted_s };
     // Everything below is measured beside the quarry as it is *now*, on the hyperbola the
@@ -334,9 +342,16 @@ pub fn escort(
     .solve(pursuer.attitude))
 }
 
-/// The least spare thrust worth planning with, as a fraction of the drive. Below it the
-/// approach would take so long that "follow at the same acceleration" is the honest answer, and
-/// that is not a plan this module makes.
+/// The acceleration an escort models its quarry at: what was measured, cut down to leave
+/// [`SPARE_FLOOR`] of `drive` for closing.
+pub fn followed(accel: DVec3, drive: Drive) -> DVec3 {
+    let pull_g = accel.length() * C_M_S / G0;
+    let most_g = drive.accel_g * (1.0 - SPARE_FLOOR);
+    if pull_g > most_g { accel * (most_g / pull_g) } else { accel }
+}
+
+/// The least spare thrust an approach is planned with, as a fraction of the drive. A quarry
+/// that would leave less is followed at the rest; see [`escort`].
 const SPARE_FLOOR: f64 = 0.02;
 
 #[cfg(test)]
@@ -498,13 +513,22 @@ mod tests {
         assert!((measured.length() / FIVE_G - 1.0).abs() < 1.0e-3, "{} g", measured.length() * C_M_S / G0);
     }
 
-    /// A quarry pulling as hard as the pursuer can is followed, never caught, and is refused
-    /// rather than planned into an approach that never ends.
+    /// **Copying, not giving up.** A quarry pulling as hard as the pursuer can, or harder, is
+    /// followed along its burn on everything the drive has, with a sliver kept back to close.
     #[test]
-    fn a_quarry_that_pulls_as_hard_is_refused() {
+    fn a_quarry_that_pulls_as_hard_is_followed() {
         let seen = quarry(0.0, DVec3::ZERO);
-        let ten = DVec3::X * 10.0 * G0 / C_M_S;
-        let refused = escort(&ShipState::at(DVec3::X * -5.0e4 * KM_LY), STANDOFF, &seen, ten, 0.0, ten_g());
-        assert_eq!(refused.err(), Some(Refused::TooFast));
+        let pursuer = ShipState::at(DVec3::X * -5.0e4 * KM_LY);
+        for pull_g in [10.0, 15.0] {
+            let pull = DVec3::X * pull_g * G0 / C_M_S;
+            let plan = escort(&pursuer, STANDOFF, &seen, pull, 0.0, ten_g()).expect("followed");
+            assert!(plan.quarry.accel.dot(pull) > 0.0, "not along the quarry's burn");
+            let late = plan.quarry.since_t + plan.quarry.world_elapsed(1.0e3);
+            for t in [0.0, late] {
+                let g = plan.thrust_g(t);
+                assert!(g <= 10.0 + 1.0e-6, "{g} g is more drive than the ship has");
+                assert!(g > 9.5, "only {g} g behind a {pull_g} g quarry");
+            }
+        }
     }
 }

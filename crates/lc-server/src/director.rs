@@ -680,4 +680,50 @@ mod tests {
     }
 
 
+    /// **Hanging about is following.** Alongside a quarry with the same five-g drive, the
+    /// quarry flies off to Io. The pursuer used to refuse a quarry pulling as hard as it could,
+    /// give the pursuit up and fall ballistic behind. It follows the burn instead, and is back
+    /// on station once the quarry settles into its new orbit.
+    #[tokio::test]
+    async fn a_quarry_that_leaves_is_followed_to_where_it_goes() {
+        let Some((mut server, mut wire, _, pov)) = staged(&lc_world::scenario::CLOSING) else {
+            return;
+        };
+        let cast = CraftId(lc_world::scenario::BASE_ID);
+        let apart = |s: &Server<Memory>| {
+            let (a, b) = (s.fleet.get(pov).unwrap(), s.fleet.get(cast).unwrap());
+            a.motion.position_ly.distance(b.motion.position_ly) * lc_world::system::M_PER_LY
+        };
+        for _ in 0..2000 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let (mine, theirs) =
+            (server.fleet.get(pov).unwrap().length_m, server.fleet.get(cast).unwrap().length_m);
+        let standoff = lc_world::pursuit::Closeness::Company.standoff_m(mine, theirs);
+        assert!((apart(&server) - standoff).abs() < 0.05 * standoff, "premise: on station");
+
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        let quarry = server.fleet.get_mut(cast).unwrap();
+        let drive = quarry.turning(quarry.motion.drive);
+        assert_eq!(drive.accel_g, server.fleet.get(pov).unwrap().motion.drive.accel_g, "premise: evenly matched");
+        let leave = motion::Event {
+            ship: motion::ShipId(cast.0),
+            at_t: now_s,
+            change: Change::SetCourse { course: Course::parse("orbit:Io:low").unwrap(), drive },
+        };
+        server.fleet.get_mut(cast).unwrap().apply(&leave).unwrap();
+
+        let mut arrived = None;
+        for n in 0..1000 {
+            server.tick(&mut wire).await.unwrap();
+            assert!(server.pursuits.contains_key(&pov), "the pursuit was given up {n} ticks in");
+            if arrived.is_none() && matches!(server.fleet.get(cast).unwrap().motion.motive, Motive::Holding(_)) {
+                arrived = Some(n);
+            }
+        }
+        assert!(arrived.is_some(), "premise: the quarry got to Io");
+        let gap = apart(&server);
+        assert!((gap - standoff).abs() < 0.05 * standoff, "{gap:.0} m off a {standoff:.0} m station at Io");
+    }
+
 }

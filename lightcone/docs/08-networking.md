@@ -183,6 +183,15 @@ up, easing through the relative brake, and exactly the quarry's acceleration onc
 five g, three, then four, for a five-g pursuer on a four-g quarry, and never a reversed plume.
 Across a whole Oort chase the drive reverses eleven times, where it reversed eighteen thousand.
 
+**A quarry that out-pulls the pursuer is followed, not given up.** Hanging about with a ship
+means copying what it does, and two ships of the same rating are the common case. The escort
+models such a quarry at all but two percent of the pursuer's drive, so it burns along the same
+line on nearly everything it has and falls behind only by the sliver it keeps back to close
+with. That leaves the approach, and so `STEER_FRACTION`'s wait, hours long — so a burn that
+starts, stops or turns round by more than a quarter of the pursuer's drive is answered at once
+rather than after the wait. Refusing used to cut the drive and leave the pursuer ballistic the
+moment its companion lit up.
+
 Only a *lit* quarry, because a pursuer can see a plume. A quarry holding an orbit accelerates too,
 by gravity, and so does the pursuer; escorting it would chase where the planet takes it while
 ignoring what the planet does to the ship chasing — it is reckoned along its conic instead, see
