@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 19;
+pub const PROTOCOL_VERSION: u32 = 20;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -295,8 +295,9 @@ pub enum Order {
     /// Fly somewhere and hold there.
     ///
     /// The acceleration is asked for, not stated: it is clamped to what the craft's own drive
-    /// can do, so a client cannot ask for a better ship than it has.
-    SetCourse { course: Course, accel_g: f64 },
+    /// can do, so a client cannot ask for a better ship than it has. The speed cap likewise, to
+    /// what its stored energy can pay for.
+    SetCourse { course: Course, accel_g: f64, max_beta: f64 },
     /// Cross to another star, at this acceleration.
     ///
     /// The star is named by **catalogue id**, not by position. A position would let a client
@@ -307,7 +308,7 @@ pub enum Order {
     ///
     /// Separate from [`Order::SetCourse`] because a `Course` names somewhere inside the local
     /// system and this is the one thing a ship does that is not about one.
-    Cross { star: u64, accel_g: f64 },
+    Cross { star: u64, accel_g: f64, max_beta: f64 },
     /// Cut the engine. Not a stop — whatever velocity it had, it keeps, on whatever conic that
     /// puts it on.
     CutDrive,
@@ -330,6 +331,10 @@ pub enum Order {
     /// and the ship keeps whatever velocity the approach or the station left it with, on whatever
     /// conic that is.
     BreakOff,
+    /// Rebuild towards this loadout. Refused while under way.
+    Refit { target: Loadout },
+    /// Stop a refit where it is; the step in progress is reversed.
+    CancelRefit,
 }
 
 /// A client's request. Never authoritative about anything.
@@ -624,6 +629,9 @@ pub enum Outbound {
     /// while its pilot is away — so a client coming back has to be told there is one, or it
     /// has no way to break it off. Appended last.
     Pursuing { ship_id: ShipId, pursuit: Pursuit },
+    /// The ship's modules and energy, as settled by the authority. Sent on sign-in and whenever
+    /// the account changes other than by the passage of time. Appended last.
+    Fitted { ship_id: ShipId, fitting: Fitting },
 }
 
 /// Why an intent was not acted on.
@@ -644,6 +652,70 @@ pub enum Refusal {
     NotYou,
     /// The order itself is impossible — a burn past `c`, a transmitter at negative power.
     Impossible,
+    /// Not enough stored energy for even the slowest version of this.
+    NoEnergy,
+    /// A refit is running, and the drive cannot be lit until it is done or cancelled.
+    Refitting,
+    /// The ship is under way, and cannot refit until it has stopped.
+    UnderWay,
+    /// The refit cannot reach its target from here.
+    Short(Shortfall),
+}
+
+/// Why a refit cannot be done. Mirrors `lc_world::refit::Shortage`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Shortfall {
+    Unbuildable,
+    Energy,
+    Capacity,
+    NoDrones,
+}
+
+/// Module counts and hull slots. Mirrors `lc_world::fitting::Loadout`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Loadout {
+    pub storage: u32,
+    pub drones: u32,
+    pub living: u32,
+    pub engines: u32,
+    pub slots: u32,
+}
+
+/// The shard's tunables. Mirrors `lc_world::fitting::Balance`; stated so a client's refit
+/// preview uses the numbers the authority does.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Balance {
+    pub drive_efficiency: f64,
+    pub recovery: f64,
+    pub storage_per_module: f64,
+    pub engine_thrust_n: f64,
+    pub drone_power_w: f64,
+    pub living_drain_w: f64,
+    pub hull_density_kg_m3: f64,
+    pub slot_volume_m3: f64,
+    pub module_density_kg_m3: f64,
+}
+
+/// A refit as the arguments it is planned from. Mirrors `lc_world::refit::Order`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RefitOrder {
+    pub from: Loadout,
+    pub target: Loadout,
+    pub stored_j: f64,
+    pub start_s: f64,
+}
+
+/// A ship's energy account, settled at `since_s`. Mirrors `lc_world::fitting::Account`, with
+/// the balance it is read under.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Fitting {
+    pub balance: Balance,
+    pub loadout: Loadout,
+    pub stored_j: f64,
+    pub since_s: f64,
+    pub rapidity_since: f64,
+    pub committed_j: f64,
+    pub refit: Option<RefitOrder>,
 }
 
 /// Everything a client says.
@@ -666,6 +738,9 @@ pub enum Inbound {
     /// could stage a scene could put a craft wherever it liked, which is the one thing no
     /// client may do. See `lc_server::director`.
     Stage { scenario: String },
+    /// Put energy in this client's ship. Development only, refused by a shard for the reason
+    /// `Stage` is. Appended last.
+    Grant { joules: f64 },
 }
 
 /// Encode anything the protocol carries.
@@ -689,7 +764,7 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 pub mod golden {
     /// `Outbound::Welcome { .., ship: Motion { at [4.2, 0, 0], holding a 12 Mm orbit of Earth } }`
     pub const WELCOME: &[u8] = &[
-        0, 7, 19, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        0, 7, 20, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
         204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -715,12 +790,12 @@ pub mod golden {
     /// Pinned because it is now the message that decides whether anyone gets in at all. A
     /// field moving here is a server reading someone else's ticket as this one's.
     pub const HELLO: &[u8] = &[
-        0, 19, 5, 97, 46, 98, 46, 99,
+        0, 20, 5, 97, 46, 98, 46, 99,
     ];
 
     pub const SET_COURSE: &[u8] = &[
         1, 84, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0, 0, 0, 0, 0, 0,
-        20, 64, 128, 137, 122,
+        20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 128, 137, 122,
     ];
 
     /// `Inbound::Act(Intent { ship_id: 42, order: Cross { star: 0x0123456789abcdef, 3 g }, .. })`
@@ -728,8 +803,8 @@ pub mod golden {
     /// Pinned because a star id is the one field on this wire whose bytes nobody can eyeball:
     /// it is a hash, so a shifted field reads as a different star rather than as nonsense.
     pub const CROSS: &[u8] = &[
-        1, 84, 3, 239, 155, 175, 205, 248, 172, 209, 145, 1, 0, 0, 0, 0, 0, 0, 8, 64, 128,
-        137, 122,
+        1, 84, 3, 239, 155, 175, 205, 248, 172, 209, 145, 1, 0, 0, 0, 0, 0, 0, 8, 64, 0, 0,
+        0, 0, 0, 0, 224, 63, 128, 137, 122,
     ];
 
     /// `Outbound::Accepted { ship_id: 42, event_id: 9, at_t: 1e6, order: SetCourse { .. 3 g } }`
@@ -738,7 +813,7 @@ pub mod golden {
     /// client folding the wrong number into where it believes its own ship is.
     pub const ACCEPTED: &[u8] = &[
         4, 84, 18, 128, 137, 122, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64,
-        1, 0, 0, 0, 0, 0, 0, 8, 64,
+        1, 0, 0, 0, 0, 0, 0, 8, 64, 0, 0, 0, 0, 0, 0, 208, 63,
     ];
     /// `Outbound::Present([Presence { ship 42 "Ada", 500 m, at [4.2, 0, 0], nose +y }])`
     ///
@@ -762,7 +837,7 @@ pub mod golden {
     /// Pinned beside the rendezvous for the same reason, and one more: its acceleration is the
     /// only number on this wire that is a *measurement* of somebody else's burn.
     pub const ESCORT: &[u8] = &[
-        0, 7, 19, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        0, 7, 20, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
         204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -780,7 +855,7 @@ pub mod golden {
     ];
 
     pub const RENDEZVOUS: &[u8] = &[
-        0, 7, 19, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        0, 7, 20, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
         204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -799,7 +874,7 @@ pub mod golden {
     ///
     /// The rendezvous numbers in a falling frame, pinned for the rendezvous's reason.
     pub const CONSORT: &[u8] = &[
-        0, 7, 19, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        0, 7, 20, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
         204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -821,6 +896,20 @@ pub mod golden {
     /// bytes happen to spell.
     pub const INTERCEPT: &[u8] = &[
         1, 84, 5, 14, 1, 128, 137, 122,
+    ];
+
+    /// `Outbound::Fitted { ship_id: 42, fitting: { starting loadout, a refit to seven engines } }`
+    ///
+    /// Pinned because it is the account a client previews every refit against. A field moving
+    /// here is a player told they can afford what they cannot.
+    pub const FITTED: &[u8] = &[
+        11, 84, 0, 0, 0, 0, 0, 0, 240, 63, 102, 102, 102, 102, 102, 102, 238, 63, 0, 0, 0,
+        0, 0, 0, 20, 64, 0, 0, 0, 208, 136, 195, 48, 66, 192, 159, 64, 162, 6, 243, 243, 67,
+        0, 0, 6, 170, 141, 67, 47, 67, 0, 0, 0, 0, 0, 0, 73, 64, 0, 0, 0, 0, 236, 247, 23,
+        65, 205, 204, 204, 204, 204, 188, 120, 64, 6, 2, 2, 5, 20, 94, 131, 244, 89, 167,
+        182, 117, 69, 0, 0, 0, 0, 128, 132, 46, 65, 0, 0, 0, 0, 0, 0, 192, 63, 180, 157,
+        217, 121, 67, 120, 234, 68, 1, 6, 2, 2, 5, 20, 6, 2, 2, 7, 20, 94, 131, 244, 89,
+        167, 182, 117, 69, 0, 0, 0, 0, 128, 132, 46, 65,
     ];
 
 }
@@ -898,6 +987,7 @@ mod tests {
                     plane: Plane::Polar,
                 },
                 accel_g: 5.0,
+                max_beta: 0.999,
             },
             issued_at_client_t: 1_000_000,
         })
@@ -917,6 +1007,7 @@ mod tests {
                     plane: Plane::Polar,
                 },
                 accel_g: 3.0,
+                max_beta: 0.25,
             },
         }
     }
@@ -924,7 +1015,7 @@ mod tests {
     fn cross() -> Inbound {
         Inbound::Act(Intent {
             ship_id: ShipId(42),
-            order: Order::Cross { star: 0x0123_4567_89ab_cdef, accel_g: 3.0 },
+            order: Order::Cross { star: 0x0123_4567_89ab_cdef, accel_g: 3.0, max_beta: 0.5 },
             issued_at_client_t: 1_000_000,
         })
     }
@@ -1061,6 +1152,37 @@ mod tests {
         }
     }
 
+    fn fitted() -> Outbound {
+        let loadout = Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20 };
+        Outbound::Fitted {
+            ship_id: ShipId(42),
+            fitting: Fitting {
+                balance: Balance {
+                    drive_efficiency: 1.0,
+                    recovery: 0.95,
+                    storage_per_module: 5.0,
+                    engine_thrust_n: 7.2e10,
+                    drone_power_w: 2.3e19,
+                    living_drain_w: 4.4e15,
+                    hull_density_kg_m3: 50.0,
+                    slot_volume_m3: 392_699.0,
+                    module_density_kg_m3: 395.8,
+                },
+                loadout,
+                stored_j: 4.2e26,
+                since_s: 1.0e6,
+                rapidity_since: 0.125,
+                committed_j: 1.0e24,
+                refit: Some(RefitOrder {
+                    from: loadout,
+                    target: Loadout { engines: 7, ..loadout },
+                    stored_j: 4.2e26,
+                    start_s: 1.0e6,
+                }),
+            },
+        }
+    }
+
     fn intercept() -> Inbound {
         Inbound::Act(Intent {
             ship_id: ShipId(42),
@@ -1126,6 +1248,11 @@ mod tests {
             golden::INTERCEPT,
             "Order::Intercept changed shape at protocol version {PROTOCOL_VERSION}",
         );
+        assert_eq!(
+            encode(&fitted()),
+            golden::FITTED,
+            "Outbound::Fitted changed shape at protocol version {PROTOCOL_VERSION}",
+        );
     }
 
     #[test]
@@ -1147,6 +1274,8 @@ mod tests {
                 pursuit: Pursuit { quarry: ShipId(7), closeness: Closeness::Intimate },
             },
             consort(),
+            fitted(),
+            Outbound::Refused { ship_id: ShipId(1), reason: Refusal::Short(Shortfall::Capacity) },
         ];
         for message in out {
             let bytes = encode(&message);
@@ -1169,6 +1298,13 @@ mod tests {
                 issued_at_client_t: i64::MIN,
             }),
             Inbound::ResumeFrom { arrive_t: -1 },
+            Inbound::Grant { joules: 1.5e25 },
+            Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: Order::Refit { target: Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20 } },
+                issued_at_client_t: 0,
+            }),
+            Inbound::Act(Intent { ship_id: ShipId(1), order: Order::CancelRefit, issued_at_client_t: 0 }),
         ];
         for message in inbound {
             let bytes = encode(&message);

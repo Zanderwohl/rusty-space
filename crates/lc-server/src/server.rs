@@ -114,6 +114,10 @@ pub struct Server<J: Journal> {
     /// a tick became a rate times a constant: at any rate but one, `now_t` is no longer a
     /// clean multiple of anything and "about once a real second" came out as never.
     ticks: u64,
+    /// The tunables every fitted ship is read under. See [`Server::set_balance`].
+    pub(crate) balance: lc_world::fitting::Balance,
+    /// Craft whose owner is to be told when their refit finishes.
+    pub(crate) refitting: std::collections::HashSet<CraftId>,
 }
 
 impl<J: Journal> Server<J> {
@@ -140,6 +144,8 @@ impl<J: Journal> Server<J> {
             directs: false,
             director: None,
             ticks: 0,
+            balance: lc_world::fitting::Balance::DEFAULT,
+            refitting: std::collections::HashSet::new(),
         }
     }
 
@@ -234,6 +240,11 @@ impl<J: Journal> Server<J> {
         self.budgets.remove(&client);
     }
 
+    /// The craft a connection flies, if it has one.
+    pub(crate) fn owned_by(&self, client: ClientId) -> Option<CraftId> {
+        self.clients.get(&client).map(|state| CraftId(state.ship.0))
+    }
+
     pub fn ship(&self, id: ShipId) -> Option<&Craft> {
         self.fleet.get(CraftId(id.0))
     }
@@ -310,6 +321,7 @@ impl<J: Journal> Server<J> {
         // against the plan it just made.
         self.steer_pursuits(wire, &mut events, &mut deliveries);
         self.announce_drives(self.now_t - self.tick_us(), &mut events, &mut deliveries);
+        self.keep_accounts(wire);
         self.journal.write(&events, &deliveries).await?;
         self.pending = events;
         self.state_the_clock(wire);
@@ -357,6 +369,7 @@ impl<J: Journal> Server<J> {
                         if let Some(pursuit) = pursuing {
                             wire.send(from, Outbound::Pursuing { ship_id, pursuit });
                         }
+                        self.tell_fitted(wire, CraftId(ship_id.0));
                     }
                     None => wire.send(from, Outbound::Unauthenticated),
                 }
@@ -375,12 +388,15 @@ impl<J: Journal> Server<J> {
                             event_id: applied.event_id,
                             at_t: applied.at_t,
                             order: applied.order,
-                        })
+                        });
+                        // Every accepted order may have committed, spent or refunded energy.
+                        self.tell_fitted(wire, CraftId(ship_id.0));
                     }
                     Err(reason) => wire.send(from, Outbound::Refused { ship_id, reason }),
                 }
             }
             Inbound::Stage { scenario } => self.staged(from, &scenario, wire),
+            Inbound::Grant { joules } => self.granted(from, joules, wire),
             Inbound::ResumeFrom { arrive_t } => {
                 // A client that missed an hour missed eight thousand in-game hours. Winding its
                 // cursor back is the whole of catch-up; the next flush replays from there.
@@ -422,6 +438,14 @@ impl<J: Journal> Server<J> {
         // this floor implies the doc's and adds the part that keeps deliveries findable.
         let floor = state.cursor_t.saturating_add(1);
         let at = intent.issued_at_client_t.clamp(floor.min(self.now_t), self.now_t);
+        let at_s = at as f64 * 1.0e-6;
+        let lights_the_drive = matches!(
+            intent.order,
+            Order::Burn { .. } | Order::SetCourse { .. } | Order::Cross { .. } | Order::Intercept { .. }
+        );
+        if lights_the_drive && self.fleet.get(id).is_some_and(|craft| craft.is_refitting(at_s)) {
+            return Err(Refusal::Refitting);
+        }
 
         let (kind, power_w, payload, applied) = match &intent.order {
             Order::Transmit { power_w } => {
@@ -443,6 +467,7 @@ impl<J: Journal> Server<J> {
                     return Err(Refusal::Impossible);
                 }
                 let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
+                crate::fitting::afford_burn(craft, at_s, beta)?;
                 let here = craft.position_at(at as f64) / lc_world::motion::LIGHT_US_PER_LY;
                 // Edited rather than rebuilt. Replacing the craft lost everything about it
                 // that was not motion — its name, its hull size — and, worse, threw away the
@@ -457,18 +482,22 @@ impl<J: Journal> Server<J> {
                     Order::Burn { beta: beta.to_array() },
                 )
             }
-            Order::SetCourse { course, accel_g } => {
-                if !accel_g.is_finite() || *accel_g <= 0.0 {
+            Order::SetCourse { course, accel_g, max_beta } => {
+                if !accel_g.is_finite() || *accel_g <= 0.0 || !(*max_beta > 0.0) {
                     return Err(Refusal::Impossible);
                 }
                 let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
                 // Asked for, not stated. The ceiling is the craft's own, so a client cannot
                 // fly a better ship than it has by sending a larger number.
-                let mut drive = craft.turning(craft.kind.drive());
+                let mut drive = craft.rated_drive(at_s);
                 drive.accel_g = accel_g.min(drive.accel_g);
+                drive.max_beta = max_beta.min(drive.max_beta);
                 // Not shadowed: the proto course is wanted again below, to say back what was
-                // applied. Only the acceleration is clamped, never the course itself.
+                // applied. Only the drive is clamped, never the course itself.
                 let flown: Course = course.clone().into();
+                let drive = crate::fitting::within_budget(craft, at_s, drive, |drive| {
+                    Change::SetCourse { course: flown.clone(), drive }
+                })?;
                 let change = Change::SetCourse { course: flown, drive };
                 // **The fold, not a second implementation.** The server works the crossing out
                 // from the order exactly as the client will, because it is the same function.
@@ -481,19 +510,27 @@ impl<J: Journal> Server<J> {
                     format!("{{\"accel_g\":{}}}", drive.accel_g),
                     // The clamped acceleration, not the one that was asked for. This is the
                     // whole reason the message exists.
-                    Order::SetCourse { course: course.clone(), accel_g: drive.accel_g },
+                    Order::SetCourse {
+                        course: course.clone(),
+                        accel_g: drive.accel_g,
+                        max_beta: drive.max_beta,
+                    },
                 )
             }
-            Order::Cross { star, accel_g } => {
-                if !accel_g.is_finite() || *accel_g <= 0.0 {
+            Order::Cross { star, accel_g, max_beta } => {
+                if !accel_g.is_finite() || *accel_g <= 0.0 || !(*max_beta > 0.0) {
                     return Err(Refusal::Impossible);
                 }
                 // Resolved here, against this shard's own catalogue. A star it does not hold
                 // is not somewhere anyone may fly to, whatever the client believes it has.
                 let to_ly = self.world.star_at(*star).ok_or(Refusal::Impossible)?;
                 let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
-                let mut drive = craft.turning(craft.kind.drive());
+                let mut drive = craft.rated_drive(at_s);
                 drive.accel_g = accel_g.min(drive.accel_g);
+                drive.max_beta = max_beta.min(drive.max_beta);
+                let drive = crate::fitting::within_budget(craft, at_s, drive, |drive| {
+                    Change::Cross { to_ly, drive }
+                })?;
                 craft
                     .apply(&Change_ {
                         ship: motion_id(id),
@@ -505,7 +542,7 @@ impl<J: Journal> Server<J> {
                     KIND_BURN,
                     BURN_POWER_W,
                     format!("{{\"cross\":{star},\"accel_g\":{}}}", drive.accel_g),
-                    Order::Cross { star: *star, accel_g: drive.accel_g },
+                    Order::Cross { star: *star, accel_g: drive.accel_g, max_beta: drive.max_beta },
                 )
             }
             Order::CutDrive => {
@@ -535,7 +572,15 @@ impl<J: Journal> Server<J> {
                     self.pursuits.get(&id).filter(|p| p.quarry == quarry).and_then(|p| p.last_seen);
                 let craft = self.fleet.get(id).ok_or(Refusal::NotYours)?;
                 match chase::plan(&self.fleet, craft, &seen, last_seen.as_ref(), (*closeness).into(), now_s) {
-                    Ok(plan) => plan.fly(self.fleet.get_mut(id).ok_or(Refusal::NotYours)?, now_s),
+                    Ok(plan) => {
+                        let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
+                        let before = craft.clone();
+                        plan.fly(craft, now_s);
+                        if !crate::fitting::can_pay_for_its_plan(craft, now_s) {
+                            *craft = before;
+                            return Err(Refusal::NoEnergy);
+                        }
+                    }
                     // Already alongside. The order still stands — it is a policy, and the
                     // policy's job from here is to keep it there.
                     Err(lc_world::pursuit::Refused::AlreadyThere) => {}
@@ -569,6 +614,16 @@ impl<J: Journal> Server<J> {
                         .map_err(refusal_for)?;
                 }
                 (KIND_CUT, 0.0, "{}".to_string(), Order::BreakOff)
+            }
+            Order::Refit { target } => {
+                self.refit(id, (*target).into(), at_s)?;
+                // Drones are quiet. Nothing about a refit is visible from outside the hull.
+                (KIND_CUT, 0.0, "{\"refit\":true}".to_string(), Order::Refit { target: *target })
+            }
+            Order::CancelRefit => {
+                self.fleet.get_mut(id).ok_or(Refusal::NotYours)?.cancel_refit(at_s);
+                self.refitting.remove(&id);
+                (KIND_CUT, 0.0, "{\"refit\":false}".to_string(), Order::CancelRefit)
             }
         };
 
@@ -645,6 +700,7 @@ impl<J: Journal> Server<J> {
                 let at = self.world.start().unwrap_or(DVec3::ZERO);
                 let mut craft = Craft::at(CraftId(ship.0), Kind::Ship, at);
                 craft.name = Some(claims.name.clone());
+                self.fit_new(&mut craft);
                 self.fleet.insert(craft);
                 self.by_account.insert(claims.sub.clone(), ship);
                 ship
@@ -887,7 +943,7 @@ fn motion_id(id: CraftId) -> lc_world::motion::ShipId {
     lc_world::motion::ShipId(id.0)
 }
 
-fn refusal_for(rejected: Rejected) -> Refusal {
+pub(crate) fn refusal_for(rejected: Rejected) -> Refusal {
     match rejected {
         Rejected::NotInASystem | Rejected::NoSuchPlace | Rejected::AlreadyThere => {
             Refusal::Impossible
@@ -1362,7 +1418,7 @@ use crate::transport::Loopback;
             ticket: broker.mint("acct-1", "shard-1", 60, "j2"),
         });
         server.tick(&mut wire).await.unwrap();
-        assert!(matches!(wire.take(client).as_slice(), [Outbound::Welcome { .. }]));
+        assert!(matches!(wire.take(client).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }]));
     }
 
     /// **A faster world is the same world.** Its tick buys coarser event timestamps and
@@ -1923,6 +1979,7 @@ pub(crate) mod course_tests {
                     plane: lc_proto::Plane::Equatorial,
                 },
                 accel_g: 5.0,
+                max_beta: 0.999,
             },
             issued_at_client_t: 0,
         }));
@@ -1975,7 +2032,7 @@ pub(crate) mod course_tests {
 
         wire.client_says(client, Inbound::Act(Intent {
             ship_id: ShipId(1),
-            order: Order::SetCourse { course: lc_proto::Course::LeaveSystem, accel_g: 5.0 },
+            order: Order::SetCourse { course: lc_proto::Course::LeaveSystem, accel_g: 5.0, max_beta: 0.999 },
             issued_at_client_t: 0,
         }));
         server.tick(&mut wire).await.unwrap();
@@ -2012,6 +2069,7 @@ pub(crate) mod course_tests {
                     plane: lc_proto::Plane::Equatorial,
                 },
                 accel_g: 1000.0,
+                max_beta: 0.999,
             },
             issued_at_client_t: 0,
         }));
@@ -2025,7 +2083,7 @@ pub(crate) mod course_tests {
         for accel_g in [0.0, -1.0, f64::NAN] {
             wire.client_says(client, Inbound::Act(Intent {
                 ship_id: ShipId(1),
-                order: Order::SetCourse { course: lc_proto::Course::LeaveSystem, accel_g },
+                order: Order::SetCourse { course: lc_proto::Course::LeaveSystem, accel_g, max_beta: 0.999 },
                 issued_at_client_t: 0,
             }));
             server.tick(&mut wire).await.unwrap();
@@ -2072,7 +2130,7 @@ mod world_tests {
         };
         wire.client_says(client, Inbound::Act(Intent {
             ship_id: ShipId(1),
-            order: Order::SetCourse { course: asked.clone(), accel_g: 1000.0 },
+            order: Order::SetCourse { course: asked.clone(), accel_g: 1000.0, max_beta: 0.999 },
             issued_at_client_t: 0,
         }));
         server.tick(&mut wire).await.unwrap();
@@ -2086,7 +2144,7 @@ mod world_tests {
         };
         assert_eq!(*ship_id, ShipId(1));
         assert!(*event_id > 0, "an accepted order names no event");
-        let Order::SetCourse { course, accel_g } = order else { panic!("{order:?}") };
+        let Order::SetCourse { course, accel_g, max_beta: 0.999 } = order else { panic!("{order:?}") };
         assert_eq!(
             *accel_g,
             Kind::Ship.drive().accel_g,
@@ -2196,6 +2254,7 @@ mod world_tests {
                     plane: lc_proto::Plane::Equatorial,
                 },
                 accel_g: 5.0,
+                max_beta: 0.999,
             },
             issued_at_client_t: 0,
         }));
@@ -2245,7 +2304,7 @@ mod world_tests {
         };
         wire.client_says(client, Inbound::Act(Intent {
             ship_id: ShipId(1),
-            order: Order::SetCourse { course: course.clone(), accel_g: 5.0 },
+            order: Order::SetCourse { course: course.clone(), accel_g: 5.0, max_beta: 0.999 },
             issued_at_client_t: 0,
         }));
         server.tick(&mut wire).await.unwrap();
@@ -2360,7 +2419,7 @@ mod hello_tests {
 
         says(&mut server, &mut wire, client, broker.mint("acct-1", SHARD, 60, "j1")).await;
         let said = wire.take(client);
-        let [Outbound::Welcome { ship_id, name, client_id, .. }] = said.as_slice() else {
+        let [Outbound::Welcome { ship_id, name, client_id, .. }, Outbound::Fitted { .. }] = said.as_slice() else {
             panic!("no welcome: {said:?}")
         };
         assert_eq!(*client_id, client);
@@ -2424,7 +2483,7 @@ mod hello_tests {
         let ticket = broker.mint("acct-1", SHARD, 60, "only-once");
 
         says(&mut server, &mut wire, ClientId(1), ticket.clone()).await;
-        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }]));
+        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }]));
 
         says(&mut server, &mut wire, ClientId(2), ticket).await;
         assert!(matches!(wire.take(ClientId(2)).as_slice(), [Outbound::Unauthenticated]));
@@ -2444,7 +2503,7 @@ mod hello_tests {
 
         // The real one, with the same identifier, still works.
         says(&mut server, &mut wire, ClientId(1), ours.mint("acct-1", SHARD, 60, "j1")).await;
-        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }]));
+        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }]));
     }
 
     /// A ticket minted for another shard is not a ticket here, however valid it is there.
@@ -2648,6 +2707,7 @@ mod hello_tests {
                     plane: lc_proto::Plane::Equatorial,
                 },
                 accel_g: 5.0,
+                max_beta: 0.999,
             },
             issued_at_client_t: 0,
         }));
@@ -2716,6 +2776,7 @@ mod hello_tests {
                     plane: lc_proto::Plane::Equatorial,
                 },
                 accel_g: 5.0,
+                max_beta: 0.999,
             },
             issued_at_client_t: 0,
         }));
@@ -2786,7 +2847,7 @@ mod hello_tests {
 
         wire.client_says(ClientId(1), Inbound::Act(Intent {
             ship_id: ship,
-            order: Order::Cross { star: there.id.get(), accel_g: 5.0 },
+            order: Order::Cross { star: there.id.get(), accel_g: 5.0, max_beta: 0.999 },
             issued_at_client_t: 0,
         }));
         server.tick(&mut wire).await.unwrap();
@@ -2847,6 +2908,7 @@ mod hello_tests {
                     plane: lc_proto::Plane::Equatorial,
                 },
                 accel_g: 5.0,
+                max_beta: 0.999,
             },
             issued_at_client_t: 0,
         }));
@@ -2981,6 +3043,7 @@ mod hello_tests {
                         plane: lc_proto::Plane::Equatorial,
                     },
                     accel_g: 5.0,
+                    max_beta: 0.999,
                 },
                 issued_at_client_t: 0,
             })

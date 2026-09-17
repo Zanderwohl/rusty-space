@@ -403,6 +403,101 @@ impl Fitting {
     }
 }
 
+impl From<lc_proto::Loadout> for Loadout {
+    fn from(l: lc_proto::Loadout) -> Self {
+        Self { storage: l.storage, drones: l.drones, living: l.living, engines: l.engines, slots: l.slots }
+    }
+}
+
+impl From<Loadout> for lc_proto::Loadout {
+    fn from(l: Loadout) -> Self {
+        Self { storage: l.storage, drones: l.drones, living: l.living, engines: l.engines, slots: l.slots }
+    }
+}
+
+impl From<lc_proto::Balance> for Balance {
+    fn from(b: lc_proto::Balance) -> Self {
+        Self {
+            drive_efficiency: b.drive_efficiency,
+            recovery: b.recovery,
+            storage_per_module: b.storage_per_module,
+            engine_thrust_n: b.engine_thrust_n,
+            drone_power_w: b.drone_power_w,
+            living_drain_w: b.living_drain_w,
+            hull_density_kg_m3: b.hull_density_kg_m3,
+            slot_volume_m3: b.slot_volume_m3,
+            module_density_kg_m3: b.module_density_kg_m3,
+        }
+    }
+}
+
+impl From<Balance> for lc_proto::Balance {
+    fn from(b: Balance) -> Self {
+        Self {
+            drive_efficiency: b.drive_efficiency,
+            recovery: b.recovery,
+            storage_per_module: b.storage_per_module,
+            engine_thrust_n: b.engine_thrust_n,
+            drone_power_w: b.drone_power_w,
+            living_drain_w: b.living_drain_w,
+            hull_density_kg_m3: b.hull_density_kg_m3,
+            slot_volume_m3: b.slot_volume_m3,
+            module_density_kg_m3: b.module_density_kg_m3,
+        }
+    }
+}
+
+impl From<&Fitting> for lc_proto::Fitting {
+    fn from(f: &Fitting) -> Self {
+        let a = f.account();
+        Self {
+            balance: f.balance.into(),
+            loadout: a.loadout.into(),
+            stored_j: a.stored_j,
+            since_s: a.since_s,
+            rapidity_since: a.rapidity_since,
+            committed_j: a.committed_j,
+            refit: a.refit.map(|o| lc_proto::RefitOrder {
+                from: o.from.into(),
+                target: o.target.into(),
+                stored_j: o.stored_j,
+                start_s: o.start_s,
+            }),
+        }
+    }
+}
+
+impl From<&lc_proto::Fitting> for Fitting {
+    fn from(f: &lc_proto::Fitting) -> Self {
+        let account = Account {
+            loadout: f.loadout.into(),
+            stored_j: f.stored_j,
+            since_s: f.since_s,
+            rapidity_since: f.rapidity_since,
+            committed_j: f.committed_j,
+            refit: f.refit.map(|o| crate::refit::Order {
+                from: o.from.into(),
+                target: o.target.into(),
+                stored_j: o.stored_j,
+                start_s: o.start_s,
+            }),
+        };
+        Fitting::from_account(&account, f.balance.into())
+    }
+}
+
+impl From<crate::refit::Shortage> for lc_proto::Shortfall {
+    fn from(s: crate::refit::Shortage) -> Self {
+        use crate::refit::Shortage;
+        match s {
+            Shortage::Unbuildable => Self::Unbuildable,
+            Shortage::Energy => Self::Energy,
+            Shortage::Capacity => Self::Capacity,
+            Shortage::NoDrones => Self::NoDrones,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -465,6 +560,24 @@ mod tests {
         // Long enough and it is empty, and stays there.
         let forever = 1.0e6 * year;
         assert_eq!(fitting.stored_j_at(&motion, forever), 0.0);
+    }
+
+    #[test]
+    fn an_account_with_a_refit_survives_the_wire() {
+        let b = Balance::DEFAULT;
+        let motion = ShipState::at(DVec3::ZERO);
+        let mut fitting = Fitting::full(Loadout::STARTING, b, 10.0);
+        fitting.settle(&motion, 20.0);
+        let order = crate::refit::Order {
+            from: fitting.loadout,
+            target: Loadout { engines: 6, ..Loadout::STARTING },
+            stored_j: fitting.stored_j_at(&motion, 20.0),
+            start_s: 20.0,
+        };
+        fitting.begin_refit(order.solve(&b).unwrap());
+        let wire = lc_proto::Fitting::from(&fitting);
+        let back = Fitting::from(&lc_proto::decode::<lc_proto::Fitting>(&lc_proto::encode(&wire)).unwrap());
+        assert_eq!(back, fitting);
     }
 
     #[test]
