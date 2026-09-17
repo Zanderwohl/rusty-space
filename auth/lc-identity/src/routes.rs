@@ -444,6 +444,7 @@ async fn ticket(
     match broker.keys.mint(
         &account.id.to_string(),
         &account.display_name,
+        account.permission,
         &audience,
         chrono::Utc::now().timestamp(),
     ) {
@@ -1145,7 +1146,29 @@ mod endpoint_tests {
         assert_eq!(one["sub"], two["sub"]);
         assert_eq!(one["aud"], two["aud"]);
         assert_eq!(one["name"], two["name"]);
+        assert_eq!(one["perm"], two["perm"]);
+        assert_eq!(one["perm"], 0, "a new account is a player");
         assert_ne!(one["jti"], two["jti"], "two tickets shared an identifier");
+
+        broker
+            .store
+            .set_permission(id, crate::store::ADMIN)
+            .await
+            .unwrap();
+        let (_, promoted) = call(
+            &broker,
+            post(
+                "/ticket",
+                serde_json::json!({"account_id": id.to_string(), "audience": SHARD}),
+                Some("shared"),
+            ),
+        )
+        .await;
+        assert_eq!(
+            claims(&promoted)["perm"],
+            1,
+            "the ticket did not carry the permission"
+        );
     }
 
     /// A grant nobody issued is nobody, and the same for one that has been revoked.

@@ -11,6 +11,18 @@
 //! interface lets them: it is the mistake a real operator makes, and it is legible afterwards
 //! because everyone in earshot saw it.
 //!
+//! **The keyring and the acknowledgement window are schedules, not sets.** Both live on
+//! [`crate::server::Server`] and both are written the instant a transmission leaves, stamped
+//! with the coordinate time its light *lands*, and refused by every reader until the clock has
+//! reached that. So a key sent four light-years takes four years to become usable, and the rule
+//! that says so is the same shape as the deliveries table's: work it out at write time, gate it
+//! at read time.
+//!
+//! Scheduling them rather than learning them on arrival is also what makes them work for a
+//! craft nobody is flying. Arrivals are only walked for connected clients — there is nobody to
+//! tell otherwise — and a key that only landed when its owner happened to be signed in would be
+//! a mechanic that depended on who was watching.
+//!
 //! The geometry is `lc_world::signal` and the storage is `lc_store::chat`. See
 //! `lightcone/docs/05-observation.md`.
 
@@ -296,6 +308,33 @@ impl<J: Journal> Server<J> {
             window.drain(..excess);
         }
         Ok(())
+    }
+
+    /// Hand a connection the transcript its ship is party to, once.
+    ///
+    /// Called from the flush and not from the sign-in, because reading it is a query and a
+    /// sign-in is not allowed to be one. Marked as sent before the read, so a store that keeps
+    /// failing costs one attempt per connection rather than one per tick for ever.
+    pub(crate) async fn send_backlog(
+        &mut self,
+        client: lc_proto::ClientId,
+        ship: ShipId,
+        now: i64,
+        wire: &mut impl crate::transport::Transport,
+    ) {
+        if let Some(mine) = self.clients.get_mut(&client) {
+            mine.backlog_sent = true;
+        }
+        match self.backlog(ship, now).await {
+            // Nothing to say is said by not saying it, as an empty contact list is. A client's
+            // log starts empty, so an empty backlog would be a message whose only content is
+            // that there was no message.
+            Ok(Some(backlog)) => wire.send(client, backlog),
+            Ok(None) => {}
+            // Not fatal and not retried. A shard with no store is the development case, and a
+            // conversation nobody can read back is worth less than a connection that works.
+            Err(why) => eprintln!("could not read {ship:?}'s transcript: {why}"),
+        }
     }
 
     /// This ship's own copy of every conversation it is party to, as of `now`.

@@ -125,16 +125,32 @@ pub fn fov_x(fov_y: f32, aspect: f32) -> f32 {
     2.0 * ((fov_y * 0.5).tan() * aspect.max(f32::MIN_POSITIVE)).atan()
 }
 
-/// The rotation putting a hull's nose along `fore`, in render axes.
+/// The rotation putting a hull's nose along `fore` and its belly toward `to_star`, in render axes.
 ///
 /// The mesh's own axes are beam, height and length on `x`, `y` and `z`, so this is the basis
-/// `(right, up, fore)` written as a rotation. `up` is ecliptic north with the part along the
-/// nose taken out, which leaves roll undefined about nothing — a ship flying straight up the
-/// pole has no preferred roll and any answer is as good as another.
-pub fn attitude(fore_sim: DVec3) -> Quat {
+/// `(right, up, fore)` written as a rotation. **`up` is the height axis, which is the hull's
+/// collecting face**: a ship rolls it toward its star, which costs nothing — roll about the nose
+/// changes no thrust — and is what makes an idle ship visibly broadside. See
+/// `lightcone/docs/20-solar-power.md`.
+///
+/// With no star, or one along the nose where the roll toward it is undetermined, it falls back to
+/// ecliptic north; a ship flying straight up the pole then has no preferred roll and any answer is
+/// as good as another.
+pub fn attitude(fore_sim: DVec3, to_star: Option<DVec3>) -> Quat {
     let fore = fore_sim.normalize_or_zero();
     if fore == DVec3::ZERO {
         return Quat::IDENTITY;
+    }
+    let toward = to_star
+        .map(|s| s.normalize_or_zero() - fore * s.normalize_or_zero().dot(fore))
+        .filter(|across| across.length_squared() > 1.0e-6);
+    if let Some(up) = toward.map(|across| across.normalize()) {
+        let right = up.cross(fore);
+        return Quat::from_mat3(&Mat3::from_cols(
+            sim_to_render(right).as_vec3(),
+            sim_to_render(up).as_vec3(),
+            sim_to_render(fore).as_vec3(),
+        ));
     }
     let reference = if fore.z.abs() > 0.999 { DVec3::X } else { DVec3::Z };
     let up = (reference - fore * reference.dot(fore)).normalize_or_zero();
@@ -377,7 +393,7 @@ pub fn update_hulls(
     for (mut transform, material, marker) in placed.iter_mut() {
         let Some((_, at)) = want.iter().find(|(id, _)| *id == marker.0) else { continue };
         transform.translation = sim_to_render(at.offset_m / UNIT_M).as_vec3();
-        transform.rotation = attitude(at.facing);
+        transform.rotation = attitude(at.facing, star.map(|(star_ly, _, _)| star_ly - at.at_ly));
         transform.scale = half_extents(at.length_m);
 
         let Some(asset) = materials.get_mut(&material.0) else { continue };
@@ -481,7 +497,7 @@ mod tests {
     #[test]
     fn the_nose_points_along_the_facing_in_render_axes() {
         for fore in [DVec3::X, DVec3::Y, -DVec3::X, DVec3::new(1.0, 2.0, -0.5).normalize()] {
-            let q = attitude(fore);
+            let q = attitude(fore, None);
             let nose = q * Vec3::Z;
             assert!((nose - render(fore)).length() < 1e-5, "{fore} gave {nose}");
             // A rotation and not a reflection: the three axes stay right-handed.
@@ -494,14 +510,36 @@ mod tests {
     /// degenerate one will not.
     #[test]
     fn a_ship_flying_up_the_pole_still_gets_a_rotation() {
-        let q = attitude(DVec3::Z);
+        let q = attitude(DVec3::Z, None);
         assert!(q.is_normalized(), "{q:?}");
         assert!((q * Vec3::Z - render(DVec3::Z)).length() < 1e-5);
     }
 
     #[test]
     fn nothing_deciding_the_attitude_is_not_a_broken_rotation() {
-        assert_eq!(attitude(DVec3::ZERO), Quat::IDENTITY);
+        assert_eq!(attitude(DVec3::ZERO, None), Quat::IDENTITY);
+        assert_eq!(attitude(DVec3::ZERO, Some(DVec3::X)), Quat::IDENTITY);
+    }
+
+    /// **The collecting face is the one turned to the star.** A hull broadside in the ecliptic is
+    /// the case the old ecliptic-north roll could never draw: its star is in the plane, so north
+    /// is across the beam rather than through the belly.
+    #[test]
+    fn a_hull_rolls_its_belly_toward_its_star() {
+        let fore = DVec3::Y;
+        let to_star = DVec3::X * 3.0;
+        let q = attitude(fore, Some(to_star));
+        // `y` is the height axis, which the mesh is thinnest along: it points at the star.
+        let up = q * Vec3::Y;
+        assert!((up - render(DVec3::X)).length() < 1e-5, "{up}");
+        assert!((q * Vec3::Z - render(fore)).length() < 1e-5);
+        let (x, y, z) = (q * Vec3::X, q * Vec3::Y, q * Vec3::Z);
+        assert!((x.cross(y) - z).length() < 1e-5, "handedness was lost");
+
+        // A star along the nose leaves the roll undetermined, and falls back rather than breaking.
+        let along = attitude(DVec3::X, Some(DVec3::X * 2.0));
+        assert!(along.is_normalized());
+        assert!((along * Vec3::Z - render(DVec3::X)).length() < 1e-5);
     }
 
     /// Five by three by one, at whatever size, in the renderer's own units.

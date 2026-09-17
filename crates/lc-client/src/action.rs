@@ -101,6 +101,18 @@ pub enum Action {
     StageDemo(String),
     /// Watch from another craft. `None` is back to one's own.
     WatchFrom(Option<lc_proto::ShipId>),
+    /// Put energy in the ship. Development only; a shard refuses it.
+    GrantEnergy(f64),
+    /// Grant whatever storage has room for.
+    FillStorage,
+
+    // --- fitting ----------------------------------------------------------------------
+    /// What the refit panel's sliders say. Nothing is built until [`Action::ApplyRefit`].
+    DraftRefit(lc_world::fitting::Loadout),
+    /// Put the sliders back to the ship as it is.
+    ResetRefitDraft,
+    ApplyRefit,
+    CancelRefit,
 
     // --- radio ------------------------------------------------------------------------
     /// Show this craft's conversation, opening the window if it is closed. What a green line
@@ -133,6 +145,8 @@ pub enum Effect {
     /// Ask for a scene. Not an [`Effect::Send`], because an order is something a *ship* does
     /// and this is not: it is a request to the thing that owns the world.
     Stage(String),
+    /// Ask for energy, for the reason [`Effect::Stage`] is not an order.
+    Grant(f64),
 }
 
 /// Where a scene says to stand, as the interface's own state.
@@ -332,6 +346,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 effects.push(Effect::Send(lc_proto::Order::SetCourse {
                     course: (&course).into(),
                     accel_g: session.ship.motion.drive.accel_g,
+                    max_beta: session.ship.motion.drive.max_beta,
                 }));
                 effects.push(Effect::Notify("course sent".into()));
             } else {
@@ -414,6 +429,31 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             };
             effects.push(Effect::Notify(said.into()));
         }
+
+        // Energy and refits exist only against a server: the account is its to keep.
+        Action::GrantEnergy(_) | Action::FillStorage | Action::ApplyRefit | Action::CancelRefit
+            if !session.remote =>
+        {
+            effects.push(Effect::Notify("no server, so nothing to refit or fill".into()));
+        }
+        Action::GrantEnergy(joules) => effects.push(Effect::Grant(joules)),
+        Action::FillStorage => {
+            let now = session.coordinate_time_s();
+            if let Some(fitting) = session.ship.fitting() {
+                let room = fitting.capacity_j_at(now) - fitting.stored_j_at(&session.ship.motion, now);
+                if room > 0.0 {
+                    effects.push(Effect::Grant(room));
+                }
+            }
+        }
+        Action::DraftRefit(loadout) => ui.refit_draft = Some(loadout),
+        Action::ResetRefitDraft => ui.refit_draft = None,
+        Action::ApplyRefit => {
+            if let Some(target) = ui.refit_draft.take() {
+                effects.push(Effect::Send(lc_proto::Order::Refit { target: target.into() }));
+            }
+        }
+        Action::CancelRefit => effects.push(Effect::Send(lc_proto::Order::CancelRefit)),
     }
     effects
 }
@@ -462,6 +502,7 @@ fn fly(ui: &mut UiState, session: &mut Session, id: Option<StarId>, effects: &mu
         effects.push(Effect::Send(lc_proto::Order::Cross {
             star: id.get(),
             accel_g: session.ship.motion.drive.accel_g,
+            max_beta: session.ship.motion.drive.max_beta,
         }));
         // Looking at the destination is what anybody wants by default, and it costs nothing
         // to do before the answer arrives.
@@ -1022,6 +1063,7 @@ mod tests {
             [&lc_proto::Order::SetCourse {
                 course: lc_proto::Course::LeaveSystem,
                 accel_g: 7.0,
+                max_beta: 0.999,
             }],
             "{effects:?}",
         );
@@ -1060,7 +1102,7 @@ mod tests {
         assert!(
             effects.iter().any(|e| matches!(
                 e,
-                Effect::Send(lc_proto::Order::Cross { star, accel_g })
+                Effect::Send(lc_proto::Order::Cross { star, accel_g, .. })
                     if *star == destination.get() && *accel_g == 4.0
             )),
             "{effects:?}",

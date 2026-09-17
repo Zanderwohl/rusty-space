@@ -15,6 +15,9 @@ use glam::DVec3;
 
 pub use crate::injection::{INJECTION_MAX_BETA, Injection};
 
+// What a crossing has cost so far. A child module so it can read the plan's own phases.
+mod lit;
+
 /// Standard gravity, m/s^2.
 pub const G0: f64 = 9.80665;
 

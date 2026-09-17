@@ -38,6 +38,9 @@ pub struct Claims {
     /// Recorded by the game server until it expires, so a ticket in a log or a screenshot is
     /// worth nothing a second time.
     pub jti: String,
+    /// What the account may do beyond playing: `store::PLAYER` or `store::ADMIN`. Signed like
+    /// everything else here, which is what lets a game server take its word.
+    pub perm: i32,
 }
 
 /// The broker's signing key, and the identifier it publishes it under.
@@ -109,6 +112,7 @@ impl Keys {
         &self,
         account_id: &str,
         name: &str,
+        permission: i32,
         audience: &str,
         now: i64,
     ) -> anyhow::Result<String> {
@@ -122,6 +126,7 @@ impl Keys {
             iat: now,
             exp: now + LIFETIME_S,
             jti: URL_SAFE_NO_PAD.encode(jti),
+            perm: permission,
         };
         let mut header = Header::new(Algorithm::EdDSA);
         // Without this the verifier has to guess which key signed it, and "try them all" is how
@@ -174,7 +179,7 @@ mod tests {
     fn a_ticket_verifies_against_the_published_key() {
         let keys = keys();
         let now = now();
-        let token = keys.mint("acct-1", "Ada", AUDIENCE, now).unwrap();
+        let token = keys.mint("acct-1", "Ada", 0, AUDIENCE, now).unwrap();
         let claims = verify(&token, &keys.public_x(), AUDIENCE).expect("it verifies");
 
         assert_eq!(claims.sub, "acct-1");
@@ -182,13 +187,17 @@ mod tests {
         assert_eq!(claims.aud, AUDIENCE);
         assert_eq!(claims.exp, now + LIFETIME_S);
         assert!(!claims.jti.is_empty());
+        assert_eq!(claims.perm, 0);
+
+        let admin = keys.mint("acct-1", "Ada", 1, AUDIENCE, now).unwrap();
+        assert_eq!(verify(&admin, &keys.public_x(), AUDIENCE).unwrap().perm, 1);
     }
 
     /// Scoped to one server. A ticket for the shard you are on is not a ticket for another.
     #[test]
     fn a_ticket_is_useless_at_the_wrong_audience() {
         let keys = keys();
-        let token = keys.mint("acct-1", "Ada", AUDIENCE, now()).unwrap();
+        let token = keys.mint("acct-1", "Ada", 0, AUDIENCE, now()).unwrap();
         // Live at its own audience, so the refusal below is about the audience and nothing else.
         assert!(verify(&token, &keys.public_x(), AUDIENCE).is_ok());
         assert!(verify(&token, &keys.public_x(), "lightcone-server-2").is_err());
@@ -200,7 +209,7 @@ mod tests {
         let keys = keys();
         // Minted far enough in the past that it is expired by any clock skew allowance.
         let long_ago = now() - 3600;
-        let token = keys.mint("acct-1", "Ada", AUDIENCE, long_ago).unwrap();
+        let token = keys.mint("acct-1", "Ada", 0, AUDIENCE, long_ago).unwrap();
         assert!(verify(&token, &keys.public_x(), AUDIENCE).is_err());
     }
 
@@ -209,7 +218,7 @@ mod tests {
     fn another_key_does_not_sign_for_this_one() {
         let mine = keys();
         let theirs = Keys::from_seed(&[9u8; 32], "https://accounts.lightcone.example").unwrap();
-        let token = theirs.mint("acct-1", "Ada", AUDIENCE, now()).unwrap();
+        let token = theirs.mint("acct-1", "Ada", 0, AUDIENCE, now()).unwrap();
         assert!(
             verify(&token, &theirs.public_x(), AUDIENCE).is_ok(),
             "live under its own key"
@@ -223,7 +232,7 @@ mod tests {
     #[test]
     fn a_tampered_ticket_is_refused() {
         let keys = keys();
-        let token = keys.mint("acct-1", "Ada", AUDIENCE, now()).unwrap();
+        let token = keys.mint("acct-1", "Ada", 0, AUDIENCE, now()).unwrap();
         assert!(
             verify(&token, &keys.public_x(), AUDIENCE).is_ok(),
             "live before it is edited"
@@ -233,7 +242,7 @@ mod tests {
             serde_json::to_vec(&json!({
                 "sub": "somebody-else", "name": "Ada", "aud": AUDIENCE,
                 "iss": "https://accounts.lightcone.example",
-                "iat": now(), "exp": now() + 3600, "jti": "x",
+                "iat": now(), "exp": now() + 3600, "jti": "x", "perm": 1,
             }))
             .unwrap(),
         );
@@ -246,8 +255,8 @@ mod tests {
     #[test]
     fn every_ticket_has_its_own_identifier() {
         let keys = keys();
-        let one = keys.mint("acct-1", "Ada", AUDIENCE, now()).unwrap();
-        let two = keys.mint("acct-1", "Ada", AUDIENCE, now()).unwrap();
+        let one = keys.mint("acct-1", "Ada", 0, AUDIENCE, now()).unwrap();
+        let two = keys.mint("acct-1", "Ada", 0, AUDIENCE, now()).unwrap();
         assert_ne!(one, two);
     }
 

@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 20;
+pub const PROTOCOL_VERSION: u32 = 22;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -337,8 +337,9 @@ pub enum Order {
     /// Fly somewhere and hold there.
     ///
     /// The acceleration is asked for, not stated: it is clamped to what the craft's own drive
-    /// can do, so a client cannot ask for a better ship than it has.
-    SetCourse { course: Course, accel_g: f64 },
+    /// can do, so a client cannot ask for a better ship than it has. The speed cap likewise, to
+    /// what its stored energy can pay for.
+    SetCourse { course: Course, accel_g: f64, max_beta: f64 },
     /// Cross to another star, at this acceleration.
     ///
     /// The star is named by **catalogue id**, not by position. A position would let a client
@@ -349,7 +350,7 @@ pub enum Order {
     ///
     /// Separate from [`Order::SetCourse`] because a `Course` names somewhere inside the local
     /// system and this is the one thing a ship does that is not about one.
-    Cross { star: u64, accel_g: f64 },
+    Cross { star: u64, accel_g: f64, max_beta: f64 },
     /// Cut the engine. Not a stop — whatever velocity it had, it keeps, on whatever conic that
     /// puts it on.
     CutDrive,
@@ -372,6 +373,10 @@ pub enum Order {
     /// and the ship keeps whatever velocity the approach or the station left it with, on whatever
     /// conic that is.
     BreakOff,
+    /// Rebuild towards this loadout. Refused while under way.
+    Refit { target: Loadout },
+    /// Stop a refit where it is; the step in progress is reversed.
+    CancelRefit,
     /// Put a message on the air, for `to`, pointed `aim`, readable by `secrecy`.
     ///
     /// **Three independent choices, and keeping them independent is the whole design.** Who it
@@ -752,6 +757,9 @@ pub enum Outbound {
     /// while its pilot is away — so a client coming back has to be told there is one, or it
     /// has no way to break it off. Appended last.
     Pursuing { ship_id: ShipId, pursuit: Pursuit },
+    /// The ship's modules and energy, as settled by the authority. Sent on sign-in and whenever
+    /// the account changes other than by the passage of time. Appended last.
+    Fitted { ship_id: ShipId, fitting: Fitting },
     /// Everything this ship has ever said or been told, and whose keys it holds.
     ///
     /// Sent once, shortly after a welcome. A conversation outlives the connection it happened
@@ -784,11 +792,79 @@ pub enum Refusal {
     NotYou,
     /// The order itself is impossible — a burn past `c`, a transmitter at negative power.
     Impossible,
+    /// Not enough stored energy for even the slowest version of this.
+    NoEnergy,
+    /// A refit is running, and the drive cannot be lit until it is done or cancelled.
+    Refitting,
+    /// The ship is under way, and cannot refit until it has stopped.
+    UnderWay,
+    /// The refit cannot reach its target from here.
+    Short(Shortfall),
     /// This ship does not hold the addressee's key, so it cannot seal anything to them.
     ///
     /// Safe to say plainly, unlike most of these: it is a fact about the sender's own keyring,
     /// which the sender already has. Appended last.
     NoKey,
+}
+
+/// Why a refit cannot be done. Mirrors `lc_world::refit::Shortage`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Shortfall {
+    Unbuildable,
+    Energy,
+    Capacity,
+    NoDrones,
+}
+
+/// Module counts and hull slots. Mirrors `lc_world::fitting::Loadout`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Loadout {
+    pub storage: u32,
+    pub drones: u32,
+    pub living: u32,
+    pub engines: u32,
+    pub slots: u32,
+}
+
+/// The shard's tunables. Mirrors `lc_world::fitting::Balance`; stated so a client's refit
+/// preview uses the numbers the authority does.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Balance {
+    pub drive_efficiency: f64,
+    pub recovery: f64,
+    pub storage_per_module: f64,
+    pub engine_thrust_n: f64,
+    pub drone_power_w: f64,
+    pub living_drain_w: f64,
+    pub hull_density_kg_m3: f64,
+    pub slot_volume_m3: f64,
+    pub module_density_kg_m3: f64,
+    pub solar_efficiency: f64,
+    pub solar_gain: f64,
+}
+
+/// A refit as the arguments it is planned from. Mirrors `lc_world::refit::Order`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RefitOrder {
+    pub from: Loadout,
+    pub target: Loadout,
+    pub stored_j: f64,
+    pub start_s: f64,
+}
+
+/// A ship's energy account, settled at `since_s`. Mirrors `lc_world::fitting::Account`, with
+/// the balance it is read under.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Fitting {
+    pub balance: Balance,
+    pub loadout: Loadout,
+    pub stored_j: f64,
+    pub since_s: f64,
+    pub rapidity_since: f64,
+    pub committed_j: f64,
+    /// Starlight being collected in the segment that began at `since_s`, watts.
+    pub solar_w: f64,
+    pub refit: Option<RefitOrder>,
 }
 
 /// Everything a client says.
@@ -811,6 +887,9 @@ pub enum Inbound {
     /// could stage a scene could put a craft wherever it liked, which is the one thing no
     /// client may do. See `lc_server::director`.
     Stage { scenario: String },
+    /// Put energy in this client's ship. Development only, refused by a shard for the reason
+    /// `Stage` is. Appended last.
+    Grant { joules: f64 },
 }
 
 /// Encode anything the protocol carries.
@@ -827,157 +906,11 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 
 /// The bytes this protocol version encodes to.
 ///
-/// A format that is not self-describing cannot notice a field that moved, so this is what
-/// notices: change the shape of anything above without bumping [`PROTOCOL_VERSION`] and the
-/// test on these fails. A deployed client would otherwise read the new shape as the old one and
-/// be confidently wrong rather than refused.
-pub mod golden {
-    /// `Outbound::Welcome { .., ship: Motion { at [4.2, 0, 0], holding a 12 Mm orbit of Earth } }`
-    pub const WELCOME: &[u8] = &[
-        0, 7, 20, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
-        204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
-        245, 64, 0, 0, 0, 0, 0, 0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0,
-        56, 156, 108, 65, 154, 153, 153, 153, 153, 153, 169, 63, 3, 1, 1, 5, 69, 97, 114,
-        116, 104, 0, 0, 0, 0, 96, 227, 102, 65, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 224, 63,
-    ];
-
-    /// `Inbound::Act(Intent { ship_id: 42, order: Transmit { power_w: 1500.0 }, .. })`
-    pub const ACT: &[u8] = &[
-        1, 84, 0, 0, 0, 0, 0, 0, 112, 151, 64, 128, 137, 122,
-    ];
-
-    /// `Inbound::Act(Intent { ship_id: 42, order: SetCourse { Orbit of Earth, polar, 2 radii,
-    /// 5 g }, .. })`
-    ///
-    /// Pinned as well as the other two because a course is the first thing on this wire with a
-    /// *shape* — nested enums, a string, two floats — rather than a number. It is the message
-    /// most able to move a field without anyone noticing.
-    /// `Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: "a.b.c" }`
-    ///
-    /// Pinned because it is now the message that decides whether anyone gets in at all. A
-    /// field moving here is a server reading someone else's ticket as this one's.
-    pub const HELLO: &[u8] = &[
-        0, 20, 5, 97, 46, 98, 46, 99,
-    ];
-
-    pub const SET_COURSE: &[u8] = &[
-        1, 84, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0, 0, 0, 0, 0, 0,
-        20, 64, 128, 137, 122,
-    ];
-
-    /// `Inbound::Act(Intent { ship_id: 42, order: Cross { star: 0x0123456789abcdef, 3 g }, .. })`
-    ///
-    /// Pinned because a star id is the one field on this wire whose bytes nobody can eyeball:
-    /// it is a hash, so a shifted field reads as a different star rather than as nonsense.
-    pub const CROSS: &[u8] = &[
-        1, 84, 3, 239, 155, 175, 205, 248, 172, 209, 145, 1, 0, 0, 0, 0, 0, 0, 8, 64, 128,
-        137, 122,
-    ];
-
-    /// `Outbound::Accepted { ship_id: 42, event_id: 9, at_t: 1e6, order: SetCourse { .. 3 g } }`
-    ///
-    /// Pinned because it is the message a client reconciles against. A field moving here is a
-    /// client folding the wrong number into where it believes its own ship is.
-    pub const ACCEPTED: &[u8] = &[
-        4, 84, 18, 128, 137, 122, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64,
-        1, 0, 0, 0, 0, 0, 0, 8, 64,
-    ];
-    /// `Outbound::Present([Presence { ship 42 "Ada", 500 m, at [4.2, 0, 0], nose +y }])`
-    ///
-    /// Pinned because it is the one message that says where somebody *else* is. A field moving
-    /// here is a client drawing a contact somewhere its light never came from.
-    pub const PRESENT: &[u8] = &[
-        2, 1, 84, 3, 65, 100, 97, 0, 0, 0, 0, 0, 64, 127, 64, 205, 204, 204, 204, 204, 204,
-        16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 252,
-        169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 144, 220, 94, 232, 251, 163, 67,
-        192, 132, 61, 128, 137, 122,
-    ];
-
-    /// `Inbound::Act(Intent { ship 42, Say { to 7, aim Ship(7), sealed, "well?" }, .. })`
-    ///
-    /// Pinned because it is the first message on this wire carrying text somebody typed, beside
-    /// two enums that decide who may read it. A field moving between `aim` and `secrecy` is a
-    /// sealed message released in clear.
-    pub const SAY: &[u8] = &[
-        1, 84, 7, 14, 1, 14, 1, 5, 119, 101, 108, 108, 63, 128, 137, 122,
-    ];
-
-    /// `Outbound::Welcome { .., ship: Motion { .., motive: Rendezvous { target: 7, .. } } }`
-    ///
-    /// Pinned because it is the one motive whose numbers are all about somebody else — a
-    /// relative offset, a relative velocity, and a sighting. A field moving in it is a pursuer
-    /// flying at a point its quarry was never at.
-    /// `Outbound::Welcome { .., ship: Motion { .., motive: Escort { target: 7, .. } } }`
-    ///
-    /// Pinned beside the rendezvous for the same reason, and one more: its acceleration is the
-    /// only number on this wire that is a *measurement* of somebody else's burn.
-    pub const ESCORT: &[u8] = &[
-        0, 7, 20, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
-        204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
-        245, 64, 0, 0, 0, 0, 0, 0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0,
-        56, 156, 108, 65, 154, 153, 153, 153, 153, 153, 169, 63, 6, 149, 214, 38, 232, 11,
-        46, 17, 190, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17, 234, 45, 129, 153, 151, 113,
-        189, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 119, 43, 65, 0,
-        0, 0, 0, 0, 0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0, 56, 156,
-        108, 65, 154, 153, 153, 153, 153, 153, 169, 63, 205, 204, 204, 204, 204, 204, 16,
-        64, 149, 214, 38, 232, 11, 46, 17, 62, 0, 0, 0, 0, 0, 0, 0, 0, 51, 51, 51, 51, 51,
-        51, 211, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 58, 140, 48, 226, 142,
-        121, 133, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 112, 111,
-        43, 65, 14, 0, 0, 0, 0, 0, 255, 244, 64,
-    ];
-
-    pub const RENDEZVOUS: &[u8] = &[
-        0, 7, 20, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
-        204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
-        245, 64, 0, 0, 0, 0, 0, 0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0,
-        56, 156, 108, 65, 154, 153, 153, 153, 153, 153, 169, 63, 2, 149, 214, 38, 232, 11,
-        46, 17, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        252, 169, 241, 210, 77, 98, 80, 191, 0, 0, 0, 0, 0, 0, 0, 0, 17, 234, 45, 129, 153,
-        151, 113, 61, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 119,
-        43, 65, 0, 0, 0, 0, 0, 0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0,
-        56, 156, 108, 65, 154, 153, 153, 153, 153, 153, 169, 63, 205, 204, 204, 204, 204,
-        204, 16, 64, 149, 214, 38, 232, 11, 46, 17, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        112, 111, 43, 65, 14, 0, 0, 0, 0, 0, 255, 244, 64,
-    ];
-    /// `Outbound::Welcome { .., ship: Motion { .., motive: Consort { target: 7, .. } } }`
-    ///
-    /// The rendezvous numbers in a falling frame, pinned for the rendezvous's reason.
-    pub const CONSORT: &[u8] = &[
-        0, 7, 20, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
-        204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
-        245, 64, 0, 0, 0, 0, 0, 0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0,
-        56, 156, 108, 65, 154, 153, 153, 153, 153, 153, 169, 63, 7, 149, 214, 38, 232, 11,
-        46, 17, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        252, 169, 241, 210, 77, 98, 80, 191, 0, 0, 0, 0, 0, 0, 0, 0, 17, 234, 45, 129, 153,
-        151, 113, 61, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 119,
-        43, 65, 0, 0, 0, 0, 0, 0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0,
-        56, 156, 108, 65, 154, 153, 153, 153, 153, 153, 169, 63, 205, 204, 204, 204, 204,
-        204, 16, 64, 149, 214, 38, 232, 11, 46, 17, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        112, 111, 43, 65, 14, 0, 0, 0, 0, 0, 255, 244, 64,
-    ];
-
-    /// `Inbound::Act(Intent { ship_id: 42, order: Intercept { ship_id: 7, closeness: Intimate }, .. })`
-    ///
-    /// Pinned because it names a *ship*, and a shifted field is an intercept of whoever the
-    /// bytes happen to spell.
-    pub const INTERCEPT: &[u8] = &[
-        1, 84, 5, 14, 1, 128, 137, 122,
-    ];
-
-}
+/// In its own file because it is *data*, not definition: a hundred and sixty lines of pinned
+/// byte arrays beside the types they pin would bury the types. What it is for is unchanged —
+/// a format that is not self-describing cannot notice a field that moved, so this is what
+/// notices.
+pub mod golden;
 
 #[cfg(test)]
 mod tests {
@@ -1052,6 +985,7 @@ mod tests {
                     plane: Plane::Polar,
                 },
                 accel_g: 5.0,
+                max_beta: 0.999,
             },
             issued_at_client_t: 1_000_000,
         })
@@ -1071,6 +1005,7 @@ mod tests {
                     plane: Plane::Polar,
                 },
                 accel_g: 3.0,
+                max_beta: 0.25,
             },
         }
     }
@@ -1078,7 +1013,7 @@ mod tests {
     fn cross() -> Inbound {
         Inbound::Act(Intent {
             ship_id: ShipId(42),
-            order: Order::Cross { star: 0x0123_4567_89ab_cdef, accel_g: 3.0 },
+            order: Order::Cross { star: 0x0123_4567_89ab_cdef, accel_g: 3.0, max_beta: 0.5 },
             issued_at_client_t: 1_000_000,
         })
     }
@@ -1215,6 +1150,40 @@ mod tests {
         }
     }
 
+    fn fitted() -> Outbound {
+        let loadout = Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20 };
+        Outbound::Fitted {
+            ship_id: ShipId(42),
+            fitting: Fitting {
+                balance: Balance {
+                    drive_efficiency: 1.0,
+                    recovery: 0.95,
+                    storage_per_module: 5.0,
+                    engine_thrust_n: 7.2e10,
+                    drone_power_w: 2.3e19,
+                    living_drain_w: 4.4e15,
+                    hull_density_kg_m3: 50.0,
+                    slot_volume_m3: 392_699.0,
+                    module_density_kg_m3: 395.8,
+                    solar_efficiency: 0.7,
+                    solar_gain: 1.18e9,
+                },
+                loadout,
+                stored_j: 4.2e26,
+                since_s: 1.0e6,
+                rapidity_since: 0.125,
+                committed_j: 1.0e24,
+                solar_w: 2.5e17,
+                refit: Some(RefitOrder {
+                    from: loadout,
+                    target: Loadout { engines: 7, ..loadout },
+                    stored_j: 4.2e26,
+                    start_s: 1.0e6,
+                }),
+            },
+        }
+    }
+
     fn intercept() -> Inbound {
         Inbound::Act(Intent {
             ship_id: ShipId(42),
@@ -1294,6 +1263,11 @@ mod tests {
             "Order::Intercept changed shape at protocol version {PROTOCOL_VERSION}",
         );
         assert_eq!(
+            encode(&fitted()),
+            golden::FITTED,
+            "Outbound::Fitted changed shape at protocol version {PROTOCOL_VERSION}",
+        );
+        assert_eq!(
             encode(&say()),
             golden::SAY,
             "Order::Say changed shape at protocol version {PROTOCOL_VERSION}",
@@ -1319,6 +1293,8 @@ mod tests {
                 pursuit: Pursuit { quarry: ShipId(7), closeness: Closeness::Intimate },
             },
             consort(),
+            fitted(),
+            Outbound::Refused { ship_id: ShipId(1), reason: Refusal::Short(Shortfall::Capacity) },
             Outbound::Backlog {
                 messages: vec![Said {
                     event_id: 9,
@@ -1357,6 +1333,13 @@ mod tests {
                 issued_at_client_t: i64::MIN,
             }),
             Inbound::ResumeFrom { arrive_t: -1 },
+            Inbound::Grant { joules: 1.5e25 },
+            Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: Order::Refit { target: Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20 } },
+                issued_at_client_t: 0,
+            }),
+            Inbound::Act(Intent { ship_id: ShipId(1), order: Order::CancelRefit, issued_at_client_t: 0 }),
             say(),
             Inbound::Act(Intent {
                 ship_id: ShipId(42),

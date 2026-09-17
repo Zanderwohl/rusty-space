@@ -32,6 +32,7 @@ pub mod panels;
 pub mod pick;
 pub mod plume;
 pub mod plot;
+pub mod refit_panel;
 pub mod resolved;
 pub mod session;
 #[cfg(not(target_arch = "wasm32"))]

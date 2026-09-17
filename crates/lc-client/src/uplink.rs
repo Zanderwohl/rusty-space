@@ -233,6 +233,8 @@ pub struct Uplink {
     pub round_trip_s: Option<f64>,
     /// Drive events per craft, oldest first. Kept across statements, which replace contacts.
     drives: std::collections::HashMap<ShipId, Vec<DriveAt>>,
+    /// The last account the server stated, re-applied with the placement for the same reason.
+    pub fitting: Option<lc_proto::Fitting>,
     /// Every conversation this ship is in. See [`crate::chat`].
     pub chat: crate::chat::Chat,
 }
@@ -299,6 +301,9 @@ impl Uplink {
         session.set_coordinate_time_us(placement.now_t);
         session.restore(&(&placement.ship).into());
         session.remote = true;
+        if let Some(fitting) = &self.fitting {
+            session.ship.fit(Some(fitting.into()));
+        }
     }
 
     pub fn joined(&self) -> Option<&Joined> {
@@ -561,14 +566,14 @@ fn fold(
                 uplink.chasing = None;
             }
             let said = match &order {
-                Order::SetCourse { course, accel_g } => {
+                Order::SetCourse { course, accel_g, max_beta } => {
                     let course: lc_world::navigation::Course = course.clone().into();
-                    match game.0.set_course_at(at_s, &course, *accel_g) {
+                    match game.0.set_course_at(at_s, &course, *accel_g, *max_beta) {
                         Some(label) => Some(format!("course: {label} at {accel_g:.0} g")),
                         None => Some("that course could not be flown".into()),
                     }
                 }
-                Order::Cross { star, accel_g } => {
+                Order::Cross { star, accel_g, max_beta } => {
                     // Resolved here too, against this client's own catalogue — the same one
                     // the shard was given, which is what makes an id mean one thing on both
                     // ends. A star this build does not hold is a shard and a client that were
@@ -580,7 +585,7 @@ fn fold(
                                 .star_by_raw(*star)
                                 .and_then(|s| s.name.clone())
                                 .unwrap_or_else(|| "an unnamed star".into());
-                            match game.0.cross_to_at(at_s, to_ly, *accel_g) {
+                            match game.0.cross_to_at(at_s, to_ly, *accel_g, *max_beta) {
                                 Some(cruise) => {
                                     let years =
                                         cruise.duration_s() / crate::flight::JULIAN_YEAR_S;
@@ -625,6 +630,9 @@ fn fold(
                 // Nothing to fold into the ship's motion. A transmission is an event, and the
                 // client learns of it the same way anyone else does: when its light arrives.
                 Order::Transmit { .. } | Order::Burn { .. } => None,
+                // What a refit does to the account arrives straight after, as `Fitted`.
+                Order::Refit { .. } => Some("refit begun".into()),
+                Order::CancelRefit => Some("refit stopped where it was".into()),
                 // Recorded against the identifier the server minted, which is the only thing
                 // an acknowledgement will ever name it by. Not shown in the events box: that
                 // box is for what happened *to* this ship, and the chat window already has it.
@@ -676,6 +684,10 @@ fn fold(
                 Refusal::NotYours | Refusal::NotYou => "that is not your ship".into(),
                 Refusal::NotInSight => "there is nothing there to close on".into(),
                 Refusal::TooFast => "too fast to match; kill the closing speed first".into(),
+                Refusal::NoEnergy => "not enough energy stored for that".into(),
+                Refusal::Refitting => "the drones are working: cancel the refit to fly".into(),
+                Refusal::UnderWay => "under way: cut the drive before refitting".into(),
+                Refusal::Short(short) => crate::refit_panel::shortfall(short.into()).into(),
                 // Their key has to arrive before it can be used, and asking for it is a
                 // message like any other — which is to say, it takes as long as the light does.
                 Refusal::NoKey => "no key for them yet; send yours and ask for theirs".into(),
@@ -687,6 +699,13 @@ fn fold(
         Outbound::Pursuing { ship_id, pursuit } => {
             if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
                 uplink.chasing = Some(pursuit);
+            }
+        }
+        // Taken whole, like `Flying`: the authority's account, settled.
+        Outbound::Fitted { ship_id, fitting } => {
+            if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
+                uplink.fitting = Some(fitting);
+                game.0.ship.fit(Some((&fitting).into()));
             }
         }
         Outbound::Backlog { messages, keys } => {

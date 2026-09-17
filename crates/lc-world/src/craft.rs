@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use glam::DVec3;
 
+use crate::fitting::Fitting;
 use crate::instrument::Instrument;
 use crate::motion::{self, Event, Flight, Motive, Past, Rejected, ShipState};
 use crate::system::LocalSystem;
@@ -189,6 +190,11 @@ pub struct Craft {
     past: Vec<Past>,
     /// The earliest coordinate second this craft can answer for.
     known_from_s: f64,
+    /// Modules and energy. Only a player's ship has one; see [`crate::fitting`].
+    ///
+    /// Private for the reason `past` is: every change of motive has to settle it, and that
+    /// happens in [`Craft::remembering`].
+    fitting: Option<Fitting>,
 }
 
 impl Craft {
@@ -211,6 +217,7 @@ impl Craft {
             // changed what it is doing has always been doing it, which is as true a statement
             // about its past as there is.
             known_from_s: f64::NEG_INFINITY,
+            fitting: None,
         }
     }
 
@@ -229,10 +236,29 @@ impl Craft {
         // because a ship does not snap back to where it was pointing when it was given a new
         // order — this is the one place the two motives are both in hand, so it is the only
         // place that hand-over can happen.
-        let nose = motion::facing_at(&before, self.length_m, at_s);
+        let began = self.past.last().map_or(f64::NEG_INFINITY, |entry| entry.until_s);
+        let nose = self.facing_of(&before, began, at_s);
+        // **The plan is made from where the nose is, not from where the last order left it.**
+        // A plan holds its start attitude as a parameter and is re-planned from it on the far
+        // side of a wire or a checkpoint — see [`crate::resume`] — and what is re-planned from
+        // is this field. Setting it after the plan was made left the two disagreeing: the live
+        // crossing turned from the old attitude and the restored one from the new, so a ship
+        // came back from a checkpoint on a slightly different flight. It only showed once an
+        // idle ship's nose could move on its own, which is what turning broadside does.
+        let previous = std::mem::replace(&mut self.motion.attitude, nose);
         let out = change(self);
-        if !before.same_worldline_as(&self.motion) {
-            self.motion.attitude = nose;
+        if before.same_worldline_as(&self.motion) {
+            // Nothing happened, so nothing may be recorded — including the attitude, which
+            // would otherwise creep forward on every step and restart every turn from where it
+            // had got to.
+            self.motion.attitude = previous;
+        } else {
+            if let Some(fitting) = &mut self.fitting {
+                fitting.settle(&before, at_s);
+                fitting.commit(&self.motion, at_s);
+            }
+            // A new motive may collect where the old one could not, or stop collecting.
+            self.begin_solar_segment(at_s);
             self.past.push(Past { until_s: at_s, motion: before });
             self.forget_before(at_s);
         }
@@ -326,7 +352,16 @@ impl Craft {
             * (half * HEIGHT_PER_LENGTH)
     }
 
-    /// What it weighs, kilograms.
+    /// What it weighs at a coordinate second, kilograms: its modules and its stored energy if it
+    /// has a fitting, and [`Craft::mass_kg`] if it does not.
+    pub fn mass_kg_at(&self, now_s: f64) -> f64 {
+        match &self.fitting {
+            Some(fitting) => fitting.mass_kg_at(&self.motion, now_s),
+            None => self.mass_kg(),
+        }
+    }
+
+    /// What an unfitted craft weighs, kilograms.
     ///
     /// Size times what that size is made of. Nothing stores a mass, because a stored one could
     /// disagree with the hull it belongs to — and everything that wants a mass wants it to
@@ -344,18 +379,208 @@ impl Craft {
         if accel_g <= 0.0 {
             return 0.0;
         }
-        self.motion.drive.jet_power_w(self.mass_kg(), accel_g)
+        self.motion.drive.jet_power_w(self.mass_kg_at(now_s), accel_g)
     }
 
     /// Which way the nose points at a coordinate second, or `None` when nothing decides it.
     pub fn facing_at(&self, now_s: f64) -> Option<DVec3> {
-        motion::facing(&self.motion, self.length_m, now_s)
+        let began = self.past.last().map_or(f64::NEG_INFINITY, |entry| entry.until_s);
+        Some(self.facing_of(&self.motion, began, now_s))
+    }
+
+    /// Where `state`'s nose points at `now_s`, for a motive that began at `began_s`.
+    ///
+    /// A plan points the nose where it needs it. A fitted craft with no plan, inside a system,
+    /// turns broadside to the star so its collectors face it — see
+    /// `lightcone/docs/20-solar-power.md` — swinging from the attitude its last order left it at,
+    /// at its hull's rate. The nose goes perpendicular to the star by the smallest turn; the
+    /// renderer rolls the belly toward the star about it.
+    fn facing_of(&self, state: &ShipState, began_s: f64, now_s: f64) -> DVec3 {
+        let broadside = (self.fitting.is_some() && !state.is_under_way())
+            .then(|| self.to_star(state, now_s))
+            .flatten()
+            .map(|to_star| broadside_nose(state.attitude, to_star));
+        match broadside {
+            Some(to) => crate::attitude::turned(state.attitude, to, self.slew_rate_rad_s(), now_s - began_s),
+            None => motion::facing_at(state, self.length_m, now_s),
+        }
+    }
+
+    /// Unit vector from `state`'s position toward its system's primary at `t`.
+    fn to_star(&self, state: &ShipState, t: f64) -> Option<DVec3> {
+        let system = self.system.as_deref()?;
+        let star = system.star_position_at(t)?;
+        let (at, _) = motion::state_at(state, Some(system), t)?;
+        Some((star - at).normalize_or_zero()).filter(|d| *d != DVec3::ZERO)
     }
 
     /// Where it is at a coordinate microsecond, light-microseconds from the world origin.
     pub fn position_at(&self, t_us: f64) -> DVec3 {
         use lc_spacetime::Worldline;
         self.worldline().position_at(t_us)
+    }
+
+    pub fn fitting(&self) -> Option<&Fitting> {
+        self.fitting.as_ref()
+    }
+
+    /// Give it modules, or take them away. Its length follows its slots from here on.
+    pub fn fit(&mut self, fitting: Option<Fitting>) {
+        self.fitting = fitting;
+        self.sync_length();
+        if let Some(since) = self.fitting.as_ref().map(Fitting::since_s) {
+            self.begin_solar_segment(since);
+        }
+    }
+
+    /// How far it is from its system's primary at `t`, metres. `None` between systems.
+    pub fn star_distance_m_at(&self, t: f64) -> Option<f64> {
+        let system = self.system.as_deref()?;
+        let star = system.star_position_at(t)?;
+        let (at, _) = motion::state_at(&self.motion, Some(system), t)?;
+        Some((at - star).length() * crate::system::M_PER_LY)
+    }
+
+    /// What its hull would collect broadside at `t`, watts, at this length. Zero under way,
+    /// between systems, and for a craft with no fitting.
+    pub fn solar_w_at(&self, t: f64) -> f64 {
+        self.solar_w_for(self.length_m, t)
+    }
+
+    /// [`Craft::solar_w_at`] for a hull of another length, as a refit would leave it.
+    pub fn solar_w_for(&self, length_m: f64, t: f64) -> f64 {
+        let (Some(fitting), Some(system)) = (&self.fitting, self.system.as_deref()) else {
+            return 0.0;
+        };
+        if self.motion.is_under_way() {
+            return 0.0;
+        }
+        let Some(distance_m) = self.star_distance_m_at(t) else { return 0.0 };
+        crate::solar::power_w(&fitting.balance, length_m, system.star_luminosity_w(), distance_m)
+    }
+
+    /// Start the income segment that begins at `from_s`, at the power collected at its midpoint.
+    /// Midpoint rather than start, so a distance that changes across the segment averages out to
+    /// first order. Settles to `from_s` first, so the old power is not applied backwards.
+    fn begin_solar_segment(&mut self, from_s: f64) {
+        let Some(since) = self.fitting.as_ref().map(Fitting::since_s) else { return };
+        let from_s = from_s.max(since);
+        if let Some(fitting) = &mut self.fitting {
+            fitting.settle(&self.motion, from_s);
+        }
+        let middle = 0.5 * (from_s + crate::solar::segment_end(from_s));
+        let watts = self.solar_w_at(middle);
+        if let Some(fitting) = &mut self.fitting {
+            fitting.set_solar_w(watts);
+        }
+    }
+
+    /// Settle at every income boundary up to `now_s`, starting each new segment as it goes.
+    fn collect_to(&mut self, now_s: f64) {
+        let Some(since) = self.fitting.as_ref().map(Fitting::since_s) else { return };
+        let step = crate::solar::step_for(since, now_s);
+        let mut boundary = ((since / step).floor() + 1.0) * step;
+        while boundary <= now_s {
+            if let Some(fitting) = &mut self.fitting {
+                fitting.settle(&self.motion, boundary);
+            }
+            let middle = boundary + 0.5 * step;
+            let watts = self.solar_w_at(middle);
+            if let Some(fitting) = &mut self.fitting {
+                fitting.set_solar_w(watts);
+            }
+            boundary += step;
+        }
+    }
+
+    fn sync_length(&mut self) {
+        if let Some(fitting) = &self.fitting {
+            self.length_m = fitting.balance.length_m(fitting.loadout.slots);
+        }
+    }
+
+    /// Fold the fitting's account up to `now_s`: finished refit steps, drain, and whatever the
+    /// motive has burned.
+    pub fn settle(&mut self, now_s: f64) {
+        self.collect_to(now_s);
+        if let Some(fitting) = &mut self.fitting {
+            fitting.settle(&self.motion, now_s);
+        }
+        self.sync_length();
+    }
+
+    /// The drive a new order is clamped against: the kind's, turning at this hull's rate, and
+    /// pulling what its engines can move this mass at if it has engines.
+    pub fn rated_drive(&self, now_s: f64) -> crate::flight::Drive {
+        let mut drive = self.turning(self.kind.drive());
+        if let Some(fitting) = &self.fitting {
+            drive.accel_g = fitting.rated_g_at(&self.motion, now_s);
+        }
+        drive
+    }
+
+    /// Energy stored and not committed, joules. Unlimited for a craft with no fitting.
+    pub fn free_j_at(&self, now_s: f64) -> f64 {
+        match &self.fitting {
+            Some(fitting) => fitting.free_j_at(&self.motion, now_s),
+            None => f64::INFINITY,
+        }
+    }
+
+    /// Whether a refit is under way at `now_s`. Flying and refitting exclude each other.
+    pub fn is_refitting(&self, now_s: f64) -> bool {
+        self.fitting.as_ref().and_then(Fitting::refit).is_some_and(|r| !r.is_done(now_s))
+    }
+
+    /// What folding `event` would commit, joules, without folding it. Zero for an unfitted craft.
+    ///
+    /// The plan's whole remaining rapidity at this craft's mass now. [`Craft::apply`] commits the
+    /// same number, because it is the same arithmetic on the same state.
+    pub fn cost_of(&self, event: &Event) -> Result<f64, Rejected> {
+        let Some(fitting) = &self.fitting else { return Ok(0.0) };
+        let mut trial = self.motion.clone();
+        motion::apply(&mut trial, self.system.as_deref(), event)?;
+        let mut account = fitting.clone();
+        account.settle(&self.motion, event.at_t);
+        Ok(account.commit(&trial, event.at_t))
+    }
+
+    /// Add energy, as far as storage allows.
+    pub fn grant(&mut self, joules: f64, now_s: f64) {
+        self.settle(now_s);
+        if let Some(fitting) = &mut self.fitting {
+            fitting.grant(joules);
+        }
+    }
+
+    /// Begin rebuilding towards `target`. Refused while under way, and when it cannot be done.
+    pub fn begin_refit(
+        &mut self,
+        target: crate::fitting::Loadout,
+        now_s: f64,
+    ) -> Result<(), crate::refit::Shortage> {
+        self.settle(now_s);
+        let Some(fitting) = &mut self.fitting else {
+            return Err(crate::refit::Shortage::NoDrones);
+        };
+        let order = crate::refit::Order {
+            from: fitting.loadout,
+            target,
+            stored_j: fitting.stored_j_at(&self.motion, now_s),
+            start_s: now_s,
+        };
+        let refit = order.solve(&fitting.balance)?;
+        fitting.begin_refit(refit);
+        Ok(())
+    }
+
+    /// Stop a refit where it is, reversing the step in progress.
+    pub fn cancel_refit(&mut self, now_s: f64) {
+        self.settle(now_s);
+        if let Some(fitting) = &mut self.fitting {
+            fitting.cancel_refit(now_s);
+        }
+        self.sync_length();
     }
 
     /// Cut to a straight line from a point, at a velocity. What a burn does.
@@ -365,6 +590,12 @@ impl Craft {
     /// craft here, which both lost everything that was not motion and left no trace of what it
     /// had been doing.
     pub fn drift_from(&mut self, at_ly: DVec3, beta: DVec3, now_s: f64) {
+        if let Some(fitting) = &mut self.fitting {
+            let was = motion::state_at(&self.motion, self.system.as_deref(), now_s)
+                .map_or(self.motion.beta, |(_, beta)| beta);
+            fitting.settle(&self.motion, now_s);
+            fitting.spend(crate::cost::rapidity_between(was, beta));
+        }
         self.remembering(now_s, |craft| {
             craft.motion.position_ly = at_ly;
             craft.motion.beta = beta;
@@ -419,6 +650,11 @@ impl Craft {
             (Some(old), Some(new)) => !Arc::ptr_eq(old, new),
             (Some(_), None) => true,
         };
+        let changed = match (&self.system, &system) {
+            (Some(old), Some(new)) => !Arc::ptr_eq(old, new),
+            (None, None) => false,
+            _ => true,
+        };
         self.remembering(now_s, |craft| {
             craft.system = system;
             if left {
@@ -426,6 +662,10 @@ impl Craft {
             }
             craft.solve_patch(now_s);
         });
+        // A star to collect from, or none, from here.
+        if changed {
+            self.begin_solar_segment(now_s);
+        }
     }
 
     /// Move to a coordinate time, folding the patch its arc was solved for if that time has
@@ -435,6 +675,10 @@ impl Craft {
     /// its own solved coordinate whatever step happened to run past it. That is what lets a
     /// server at 438 seconds and a client at 61 reach the same arc.
     pub fn advance(&mut self, now_s: f64, elapsed_s: f64) {
+        // Before anything changes the motive: each segment passed is priced by the motive that
+        // was flying it.
+        self.collect_to(now_s);
+        self.sync_length();
         self.patch_if_due(now_s);
         self.remembering(now_s, |craft| {
             let was = matches!(craft.motion.motive, Motive::Falling(_));
@@ -445,6 +689,10 @@ impl Craft {
                 craft.solve_patch(now_s);
             }
         });
+        // A finished refit step changes the loadout, and a grown hull its length.
+        if self.fitting.as_ref().is_some_and(|f| f.refit().is_some()) {
+            self.settle(now_s);
+        }
     }
 
     /// When the current arc leaves the sphere it was solved in, if it does.
@@ -502,6 +750,19 @@ impl std::fmt::Debug for Craft {
             .field("in_a_system", &self.system.is_some())
             .finish()
     }
+}
+
+/// The nose direction nearest `attitude` that is perpendicular to `to_star`: `attitude` with its
+/// component along the star removed. A nose pointing straight at the star or away from it has no
+/// nearest perpendicular, and takes the one toward ecliptic north.
+pub fn broadside_nose(attitude: DVec3, to_star: DVec3) -> DVec3 {
+    let s = to_star.normalize_or_zero();
+    let across = attitude - s * attitude.dot(s);
+    if across.length_squared() > 1.0e-12 {
+        return across.normalize();
+    }
+    let reference = if s.z.abs() > 0.999 { DVec3::X } else { DVec3::Z };
+    (reference - s * reference.dot(s)).normalize_or_zero()
 }
 
 /// Every craft there is. The single source of truth for craft state.
@@ -718,6 +979,271 @@ mod tests {
     use lc_spacetime::Worldline;
 
     const HOUR_AGO_US: f64 = -3_600.0 * 1.0e6;
+
+    fn fitted() -> Craft {
+        use crate::fitting::{Balance, Loadout};
+        let mut craft = Craft::at(CraftId(9), Kind::Ship, DVec3::ZERO);
+        craft.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, 0.0)));
+        craft
+    }
+
+    fn cross(craft: &mut Craft, to_ly: DVec3, at_t: f64) -> f64 {
+        let event = Event {
+            ship: ShipId(9),
+            at_t,
+            change: Change::Cross { to_ly, drive: craft.rated_drive(at_t) },
+        };
+        let quoted = craft.cost_of(&event).unwrap();
+        craft.apply(&event).unwrap();
+        quoted
+    }
+
+    #[test]
+    fn a_crossing_is_paid_for_when_it_is_ordered_and_spent_as_it_is_flown() {
+        let mut craft = fitted();
+        let free = craft.free_j_at(0.0);
+        let mass = craft.mass_kg_at(0.0);
+        let quoted = cross(&mut craft, DVec3::X * 0.05, 0.0);
+        assert!(quoted > 0.0 && quoted < free);
+        let Motive::Crossing(cruise) = &craft.motion.motive else { panic!("not crossing") };
+        let (eta, end) = (cruise.planned_rapidity(), cruise.duration_s());
+        assert!((quoted / crate::cost::energy_j(mass, eta, 1.0) - 1.0).abs() < 1.0e-12);
+        // Committed at once, so what is free drops before anything is spent.
+        assert!((craft.free_j_at(0.0) - (free - quoted)).abs() < 1.0e-9 * free);
+
+        // Half-way, stored has fallen and the commitment with it.
+        let fitting = craft.fitting().unwrap();
+        let stored_half = fitting.stored_j_at(&craft.motion, end * 0.5);
+        assert!(stored_half < free && stored_half > free - quoted);
+
+        // Flown to the end: what was quoted, plus the drain, has gone — a little less, because
+        // the account settles every game day and the drain has made the ship lighter for the rest
+        // of the burn. That remainder is the drain's mass times the burn's own fraction.
+        craft.advance(end + 1.0, end + 1.0);
+        assert!(!craft.motion.is_under_way(), "{:?}", craft.motion.motive);
+        let drain = 2.0 * crate::fitting::Balance::DEFAULT.living_drain_w * (end + 1.0);
+        let stored = craft.fitting().unwrap().stored_j_at(&craft.motion, end + 1.0);
+        let expected = free - quoted - drain;
+        assert!(stored >= expected * (1.0 - 1.0e-12), "{stored} vs {expected}");
+        assert!(stored - expected <= drain * quoted / (mass * crate::fitting::C2), "{stored} vs {expected}");
+        assert!(craft.mass_kg_at(end + 1.0) < mass);
+        // Lighter, so its engines pull harder.
+        assert!(craft.rated_drive(end + 1.0).accel_g > 5.0);
+    }
+
+    #[test]
+    fn cutting_the_drive_returns_what_was_not_flown() {
+        let mut flown = fitted();
+        let free = flown.free_j_at(0.0);
+        let quoted = cross(&mut flown, DVec3::X * 0.05, 0.0);
+        let Motive::Crossing(cruise) = &flown.motion.motive else { panic!("not crossing") };
+        let cut_at = cruise.duration_s() * 0.25;
+        flown
+            .apply(&Event { ship: ShipId(9), at_t: cut_at, change: Change::CutDrive })
+            .unwrap();
+        let left = flown.free_j_at(cut_at);
+        assert!(left > free - quoted, "nothing came back: {left}");
+        assert!(left < free, "it flew for nothing");
+    }
+
+    #[test]
+    fn a_burn_spends_the_rapidity_it_changes_by() {
+        let mut craft = fitted();
+        let mass = craft.mass_kg_at(0.0);
+        let before = craft.fitting().unwrap().stored_j_at(&craft.motion, 0.0);
+        craft.drift_from(DVec3::ZERO, DVec3::X * 1.0e-4, 0.0);
+        let after = craft.fitting().unwrap().stored_j_at(&craft.motion, 0.0);
+        let spent = before - after;
+        let expected = crate::cost::energy_j(mass, 1.0e-4f64.atanh(), 1.0);
+        assert!((spent / expected - 1.0).abs() < 1.0e-9, "{spent} vs {expected}");
+    }
+
+    /// An empty fitted ship at rest `au` from the Sun, or on a conic through there with `speed`
+    /// of circular.
+    fn near_the_sun(system: &Arc<LocalSystem>, au: f64, speed: Option<f64>) -> Craft {
+        use crate::fitting::{Account, Balance, Loadout};
+        let star = system.star_position_at(0.0).expect("a star");
+        let at = star + DVec3::X * au * crate::system::UNIT_M / crate::system::M_PER_LY;
+        let mut craft = Craft::at(CraftId(9), Kind::Ship, at);
+        let full = Fitting::full(Loadout::STARTING, Balance::DEFAULT, 0.0);
+        let empty = Account { stored_j: 0.0, ..full.account() };
+        craft.fit(Some(Fitting::from_account(&empty, Balance::DEFAULT)));
+        craft.enter(Some(system.clone()), 0.0);
+        if let Some(fraction) = speed {
+            let mu = crate::star::Star::SOL.mu;
+            let v = fraction * (mu / (au * crate::system::UNIT_M)).sqrt();
+            craft.drift_from(at, DVec3::Y * v / crate::flight::C_M_S, 0.0);
+            craft.apply(&Event { ship: ShipId(9), at_t: 0.0, change: Change::CutDrive }).unwrap();
+        }
+        craft
+    }
+
+    fn stored(craft: &Craft, t: f64) -> f64 {
+        craft.fitting().unwrap().stored_j_at(&craft.motion, t)
+    }
+
+    /// The anchor, flown rather than computed: a starting ship at rest a tenth of an AU from the
+    /// real Sun is about half full after half a year and full after a year.
+    #[test]
+    fn a_ship_holding_still_near_the_sun_fills_up() {
+        let Some(system) = sol() else { return };
+        let mut craft = near_the_sun(&system, 0.1, None);
+        let capacity = craft.fitting().unwrap().capacity_j_at(0.0);
+        let year = crate::flight::JULIAN_YEAR_S;
+        let mut t = 0.0;
+        while t < 0.5 * year {
+            t += 3_600.0 * 6.0;
+            craft.advance(t, 3_600.0 * 6.0);
+        }
+        // The catalogue Sun is not exactly the anchor's 1361 W/m², so a few per cent either way.
+        let half = stored(&craft, t) / capacity;
+        assert!((half - 0.5).abs() < 0.03, "{half} full after half a year");
+        craft.advance(1.1 * year, 0.6 * year);
+        assert_eq!(stored(&craft, 1.1 * year), capacity, "it stops at capacity");
+    }
+
+    #[test]
+    fn nothing_is_collected_under_way_or_between_systems() {
+        let Some(system) = sol() else { return };
+        let day = crate::solar::SOLAR_STEP_S;
+        let mut flying = near_the_sun(&system, 0.1, None);
+        let to = flying.motion.position_ly + DVec3::X * 0.01;
+        let drive = flying.rated_drive(0.0);
+        flying.apply(&Event { ship: ShipId(9), at_t: 0.0, change: Change::Cross { to_ly: to, drive } }).unwrap();
+        flying.advance(3.0 * day, 3.0 * day);
+        assert!(flying.motion.is_under_way());
+        assert_eq!(flying.fitting().unwrap().solar_w(), 0.0);
+
+        let mut outside = near_the_sun(&system, 0.1, None);
+        outside.enter(None, 0.0);
+        outside.advance(3.0 * day, 3.0 * day);
+        assert_eq!(stored(&outside, 3.0 * day), 0.0);
+    }
+
+    /// **The midpoint earns its place.** Along an eccentric conic the collected energy is what
+    /// midpoint-priced day-long segments give, which is far closer to the true integral than
+    /// pricing each segment at its start — and the same whether the craft is stepped by the hour
+    /// or by the week.
+    #[test]
+    fn income_along_an_eccentric_orbit_is_priced_at_each_segments_midpoint() {
+        let Some(system) = sol() else { return };
+        let day = crate::solar::SOLAR_STEP_S;
+        let span = 40.0 * day;
+        let mut hourly = near_the_sun(&system, 0.3, Some(0.8));
+        assert!(matches!(hourly.motion.motive, Motive::Falling(_)), "{:?}", hourly.motion.motive);
+        let mut weekly = hourly.clone();
+        let reference = hourly.clone();
+
+        let mut t = 0.0;
+        while t < span {
+            t = (t + 3_600.0).min(span);
+            hourly.advance(t, 3_600.0);
+        }
+        let mut t = 0.0;
+        while t < span {
+            t = (t + 7.0 * day).min(span);
+            weekly.advance(t, 7.0 * day);
+        }
+        let (by_hour, by_week) = (stored(&hourly, span), stored(&weekly, span));
+        assert!((by_hour / by_week - 1.0).abs() < 1.0e-9, "{by_hour} vs {by_week}");
+
+        let drain = reference.fitting().unwrap().balance.drain_w(&crate::fitting::Loadout::STARTING);
+        let power = |t: f64| reference.solar_w_at(t) - drain;
+        let (mut midpoint, mut start, mut exact) = (0.0, 0.0, 0.0);
+        for k in 0..40 {
+            let t0 = k as f64 * day;
+            midpoint += power(t0 + 0.5 * day) * day;
+            start += power(t0) * day;
+            for j in 0..200 {
+                exact += power(t0 + (j as f64 + 0.5) * day / 200.0) * day / 200.0;
+            }
+        }
+        assert!((by_hour / midpoint - 1.0).abs() < 1.0e-9, "{by_hour} vs {midpoint}");
+        let (mid_err, start_err) = ((midpoint - exact).abs(), (start - exact).abs());
+        assert!(mid_err * 10.0 < start_err, "midpoint off by {mid_err}, start by {start_err}");
+    }
+
+    /// An idle fitted ship holds its nose perpendicular to the star, and after a flight it swings
+    /// back to broadside at its hull's own rate rather than snapping.
+    #[test]
+    fn an_idle_ship_turns_broadside_to_its_star() {
+        let Some(system) = sol() else { return };
+        let mut craft = near_the_sun(&system, 0.1, None);
+        let to_star = |craft: &Craft, t: f64| {
+            (system.star_position_at(t).unwrap() - craft.motion.position_ly).normalize()
+        };
+        // Idle since before anything: already round, with no turn left to make.
+        assert!(craft.facing_at(0.0).unwrap().dot(to_star(&craft, 0.0)).abs() < 1.0e-9);
+
+        // Nothing unfitted turns: a probe keeps the attitude it was left with.
+        let mut probe = Craft::at(CraftId(3), Kind::Probe, craft.motion.position_ly);
+        probe.enter(Some(system.clone()), 0.0);
+        assert_eq!(probe.facing_at(1.0e4), Some(DVec3::X));
+
+        // Sent somewhere, it points where the plan needs it.
+        let drive = craft.rated_drive(0.0);
+        // Straight out from the star, so the plan's nose is along it and not broadside.
+        let to = craft.motion.position_ly + DVec3::X * 0.05;
+        craft.apply(&Event { ship: ShipId(9), at_t: 0.0, change: Change::Cross { to_ly: to, drive } }).unwrap();
+        let flying = craft.facing_at(600.0).unwrap();
+        assert!(flying.dot(to_star(&craft, 600.0)).abs() > 0.5, "{flying} is still broadside");
+
+        // Drive cut: the turn back starts from the nose the crossing left, and takes a quarter
+        // turn at the hull's rate to arrive.
+        let cut_at = 600.0;
+        craft.apply(&Event { ship: ShipId(9), at_t: cut_at, change: Change::CutDrive }).unwrap();
+        assert!((craft.facing_at(cut_at).unwrap() - flying).length() < 1.0e-9, "the nose snapped");
+        let quarter = 0.5 * std::f64::consts::PI / craft.slew_rate_rad_s();
+        let part_way = craft.facing_at(cut_at + 0.25 * quarter).unwrap();
+        assert!(part_way.dot(flying) < 0.999, "it did not begin turning");
+        assert!(part_way.dot(to_star(&craft, cut_at)).abs() > 1.0e-6, "it arrived at once");
+        let settled = craft.facing_at(cut_at + quarter * 1.01).unwrap();
+        assert!(settled.dot(to_star(&craft, cut_at + quarter)).abs() < 1.0e-6, "{settled}");
+        assert!(settled.is_normalized());
+    }
+
+    /// **A plan is planned from the attitude the craft then records.** They are two halves of one
+    /// hand-over, and a plan is re-planned from the recorded one at the far end of a wire or a
+    /// checkpoint — so a plan made from anything else comes back as a different flight. This went
+    /// wrong the moment an idle ship's nose could move on its own.
+    #[test]
+    fn a_plan_starts_from_the_attitude_the_craft_records() {
+        let Some(system) = sol() else { return };
+        let mut craft = near_the_sun(&system, 0.5, None);
+        // Broadside, so the nose is not the attitude the last order left it at.
+        let nose = craft.facing_at(0.0).unwrap();
+        assert!((nose - craft.motion.attitude).length() > 0.1, "premise: the nose has moved");
+
+        let drive = craft.rated_drive(0.0);
+        let to = craft.motion.position_ly + DVec3::X * 0.05;
+        craft.apply(&Event { ship: ShipId(9), at_t: 0.0, change: Change::Cross { to_ly: to, drive } }).unwrap();
+        let Motive::Crossing(cruise) = &craft.motion.motive else { panic!("not crossing") };
+        assert_eq!(cruise.initial_attitude(), craft.motion.attitude);
+        assert_eq!(craft.motion.attitude, nose, "it planned from somewhere the nose had not been");
+    }
+
+    #[test]
+    fn a_broadside_nose_is_the_nearest_perpendicular() {
+        let s = DVec3::X;
+        assert_eq!(broadside_nose(DVec3::new(1.0, 1.0, 0.0), s), DVec3::Y);
+        assert_eq!(broadside_nose(DVec3::Z, s), DVec3::Z);
+        let head_on = broadside_nose(-DVec3::X, s);
+        assert!(head_on.dot(s).abs() < 1.0e-12 && head_on.is_normalized(), "{head_on}");
+    }
+
+    #[test]
+    fn a_refit_that_grows_the_hull_lengthens_it() {
+        use crate::fitting::Loadout;
+        let mut craft = fitted();
+        assert!((craft.length_m - 500.0).abs() < 1.0e-9);
+        craft.begin_refit(Loadout { slots: 22, ..Loadout::STARTING }, 0.0).unwrap();
+        assert!(craft.is_refitting(1.0));
+        let year = crate::flight::JULIAN_YEAR_S;
+        craft.advance(year, year);
+        assert!(!craft.is_refitting(year));
+        assert_eq!(craft.fitting().unwrap().loadout.slots, 22);
+        assert!((craft.length_m / (500.0 * 1.1f64.cbrt()) - 1.0).abs() < 1.0e-12);
+    }
 
     fn drifting(beta: DVec3, since_s: f64) -> Craft {
         let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
