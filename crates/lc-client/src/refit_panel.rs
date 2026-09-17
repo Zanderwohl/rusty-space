@@ -6,8 +6,10 @@
 
 use bevy::prelude::*;
 use bevy_egui::egui;
+use std::ops::RangeInclusive;
+
 use lc_world::craft::Craft;
-use lc_world::fitting::{Loadout, Module};
+use lc_world::fitting::{Balance, Loadout, Module};
 use lc_world::refit::{Shortage, Step};
 
 use crate::action::Action;
@@ -36,12 +38,7 @@ pub fn preview(ship: &Craft, draft: Loadout, remote: bool, now_s: f64) -> Option
     let balance = fitting.balance;
     let current = fitting.loadout_at(now_s);
     let stored_j = fitting.stored_j_at(&ship.motion, now_s);
-    let module_j = balance.module_energy_j();
-    let mut available_j = stored_j;
-    for module in Module::ALL {
-        available_j += moved(current.count(module), draft.count(module), module_j, balance.recovery);
-    }
-    available_j += moved(current.slots, draft.slots, balance.slot_energy_j(), balance.recovery);
+    let available_j = budget_j(&balance, current, draft, stored_j);
 
     let planned = lc_world::refit::Order { from: current, target: draft, stored_j, start_s: now_s }
         .solve(&balance)
@@ -67,6 +64,79 @@ pub fn preview(ship: &Craft, draft: Loadout, remote: bool, now_s: f64) -> Option
         planned,
         blocked,
     })
+}
+
+/// Stored energy, plus what dismantling returns, less what building costs, if `draft` were built
+/// from `current`. Negative when it cannot be paid for.
+fn budget_j(balance: &Balance, current: Loadout, draft: Loadout, stored_j: f64) -> f64 {
+    let module_j = balance.module_energy_j();
+    let mut budget = stored_j;
+    for module in Module::ALL {
+        budget += moved(current.count(module), draft.count(module), module_j, balance.recovery);
+    }
+    budget + moved(current.slots, draft.slots, balance.slot_energy_j(), balance.recovery)
+}
+
+/// Whether a loadout could be ended at: every module has a slot, the builds are paid for, and
+/// what is left fits in the storage it ends with.
+fn ends_well(balance: &Balance, current: Loadout, draft: Loadout, stored_j: f64) -> bool {
+    let budget = budget_j(balance, current, draft, stored_j);
+    draft.modules() <= draft.slots && budget >= 0.0 && budget <= balance.capacity_j(&draft)
+}
+
+/// A slider on the refit panel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Knob {
+    Module(Module),
+    Slots,
+}
+
+impl Knob {
+    fn get(self, loadout: &Loadout) -> u32 {
+        match self {
+            Knob::Module(module) => loadout.count(module),
+            Knob::Slots => loadout.slots,
+        }
+    }
+
+    fn with(self, loadout: Loadout, value: u32) -> Loadout {
+        let mut out = loadout;
+        match self {
+            Knob::Module(module) => *out.count_mut(module) = value,
+            Knob::Slots => out.slots = value,
+        }
+        out
+    }
+}
+
+/// How far a slider may move from where the draft has it without leaving a loadout that could
+/// not be ended at, within `limits`.
+///
+/// Walked out one step at a time from the draft's own value, so the range is always the
+/// contiguous run the player can actually reach. A draft that is already out of bounds — the
+/// ship's own loadout on a ship holding more than it could — is given the whole of `limits`, or
+/// no slider could be moved at all.
+pub fn reach(
+    balance: &Balance,
+    current: Loadout,
+    draft: Loadout,
+    stored_j: f64,
+    knob: Knob,
+    limits: RangeInclusive<u32>,
+) -> RangeInclusive<u32> {
+    let ok = |value: u32| ends_well(balance, current, knob.with(draft, value), stored_j);
+    let at = knob.get(&draft).clamp(*limits.start(), *limits.end());
+    if !ok(at) {
+        return limits;
+    }
+    let (mut lo, mut hi) = (at, at);
+    while lo > *limits.start() && ok(lo - 1) {
+        lo -= 1;
+    }
+    while hi < *limits.end() && ok(hi + 1) {
+        hi += 1;
+    }
+    lo..=hi
 }
 
 /// Energy a change of count returns, positive, or costs, negative.
@@ -146,16 +216,20 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
 
     let current = fitting.loadout_at(now);
     let draft = state.refit_draft.unwrap_or(current);
+    let balance = fitting.balance;
+    // Each slider stops where the draft would stop being something the ship could end at, so
+    // the only way to an unaffordable loadout is not to have one.
     let mut changed = draft;
     for module in Module::ALL {
         let floor = if module == Module::Drone { 1 } else { 0 };
+        let limits = floor..=draft.slots.max(floor);
+        let range = reach(&balance, current, draft, stored, Knob::Module(module), limits);
         let count = changed.count_mut(module);
-        ui.add(egui::Slider::new(count, floor..=draft.slots.max(floor)).text(module.name()));
+        ui.add(egui::Slider::new(count, range).text(module.name()));
     }
-    let most = (current.slots * 2).max(40);
-    let fewest = changed.modules().max(1);
-    ui.add(egui::Slider::new(&mut changed.slots, fewest..=most).text("hull slots"));
-    changed.slots = changed.slots.max(changed.modules());
+    let limits = 1..=(current.slots * 2).max(40);
+    let range = reach(&balance, current, draft, stored, Knob::Slots, limits);
+    ui.add(egui::Slider::new(&mut changed.slots, range).text("hull slots"));
     if changed != draft {
         ask(out, Action::DraftRefit(changed));
     }
@@ -244,6 +318,46 @@ mod tests {
         assert_eq!(same.blocked, Some("nothing to change"));
         let offline = preview(&ship(), Loadout { engines: 6, ..Loadout::STARTING }, false, 0.0);
         assert!(offline.unwrap().blocked.unwrap().starts_with("no server"));
+    }
+
+    /// **The sliders cannot reach an unaffordable loadout.** Checked against the budget worked
+    /// out by hand, not against `ends_well`, which is what is being tested.
+    #[test]
+    fn a_slider_stops_where_the_energy_runs_out() {
+        let b = Balance::DEFAULT;
+        let me = b.module_energy_j();
+        let start = Loadout::STARTING;
+        let engines = Knob::Module(Module::Engine);
+
+        // Three module-energies stored and five slots free: three more engines, not five.
+        let range = reach(&b, start, start, 3.0 * me, engines, 0..=20);
+        assert_eq!(*range.end(), 8);
+        // And every engine can come out: storage has room for all five refunds.
+        assert_eq!(*range.start(), 0);
+
+        // With plenty stored it is the free slots that stop it.
+        assert_eq!(*reach(&b, start, start, 25.0 * me, engines, 0..=20).end(), 10);
+
+        // Full, so living space cannot be taken apart — its refund has nowhere to go — but the
+        // five free slots can all be filled.
+        let living = Knob::Module(Module::Living);
+        assert_eq!(reach(&b, start, start, 30.0 * me, living, 0..=20), 2..=7);
+
+        // And the hull cannot shrink below its modules, or grow past what it can pay for.
+        let slots = reach(&b, start, start, 0.5 * me, Knob::Slots, 1..=40);
+        assert_eq!(*slots.start(), 15);
+        let growth = (0.5 / (b.slot_energy_j() / me)).floor() as u32;
+        assert_eq!(*slots.end(), 20 + growth);
+
+        // Nothing inside the range is a loadout the budget cannot pay for.
+        for n in range_of(reach(&b, start, start, 3.0 * me, engines, 0..=20)) {
+            let draft = Loadout { engines: n, ..start };
+            assert!(budget_j(&b, start, draft, 3.0 * me) >= 0.0, "{n} engines");
+        }
+    }
+
+    fn range_of(range: RangeInclusive<u32>) -> Vec<u32> {
+        range.collect()
     }
 
     #[test]
