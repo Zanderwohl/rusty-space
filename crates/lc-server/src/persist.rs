@@ -52,6 +52,47 @@ pub struct Saved {
     pub fitting: Option<lc_proto::Fitting>,
 }
 
+/// [`Saved`] as format 4 wrote it, before a fitting carried starlight.
+#[derive(Deserialize)]
+struct SavedV4 {
+    kind: u8,
+    name: Option<String>,
+    noise_floor: f32,
+    length_m: f64,
+    motion: lc_proto::Motion,
+    pursuit: Option<lc_proto::Pursuit>,
+    fitting: Option<FittingV4>,
+}
+
+/// `lc_proto::Fitting` as format 4 wrote it. The balance is read to keep the bytes aligned and
+/// then dropped: a shard stamps its own.
+#[derive(Deserialize)]
+struct FittingV4 {
+    _balance: [f64; 9],
+    loadout: lc_proto::Loadout,
+    stored_j: f64,
+    since_s: f64,
+    rapidity_since: f64,
+    committed_j: f64,
+    refit: Option<lc_proto::RefitOrder>,
+}
+
+impl From<FittingV4> for lc_proto::Fitting {
+    fn from(old: FittingV4) -> Self {
+        Self {
+            balance: Balance::DEFAULT.into(),
+            loadout: old.loadout,
+            stored_j: old.stored_j,
+            since_s: old.since_s,
+            rapidity_since: old.rapidity_since,
+            committed_j: old.committed_j,
+            // Starts at the next settlement, within a game day.
+            solar_w: 0.0,
+            refit: old.refit,
+        }
+    }
+}
+
 /// [`Saved`] as format 3 wrote it, before ships had modules.
 #[derive(Deserialize)]
 struct SavedV3 {
@@ -83,7 +124,7 @@ struct SavedV2 {
 /// otherwise** — deliberately not [`lc_proto::PROTOCOL_VERSION`], which moves for reasons that
 /// have nothing to do with how a craft is stored. Bumping it makes every existing row
 /// unreadable, which is the point and is also the cost.
-pub const SAVE_FORMAT: i32 = 4;
+pub const SAVE_FORMAT: i32 = 5;
 
 /// The oldest format still read. See [`decode`].
 pub const OLDEST_FORMAT: i32 = 2;
@@ -187,6 +228,18 @@ pub fn decode(row: &Ship) -> Result<Saved, String> {
                 motion: old.motion,
                 pursuit: None,
                 fitting: None,
+            })
+        }
+        4 => {
+            let old: SavedV4 = lc_proto::decode(&row.state).map_err(|why| why.to_string())?;
+            Ok(Saved {
+                kind: old.kind,
+                name: old.name,
+                noise_floor: old.noise_floor,
+                length_m: old.length_m,
+                motion: old.motion,
+                pursuit: old.pursuit,
+                fitting: old.fitting.map(Into::into),
             })
         }
         3 => {
@@ -477,6 +530,86 @@ mod tests {
         let back = load(&row, None).expect("a format 2 row reads");
         assert_eq!(back.length_m, craft.length_m);
         assert_eq!(decode(&row).unwrap().pursuit, None);
+    }
+
+    /// **Format 4 still reads**, its account whole and collecting nothing until the next
+    /// settlement starts a segment.
+    #[test]
+    fn a_fitted_ship_from_before_starlight_still_reads() {
+        // Written the way format 4 wrote it — nine named fields — not as the array the reader
+        // skips them with, so the test does not agree with the reader by construction.
+        #[derive(Serialize)]
+        struct OldBalance {
+            drive_efficiency: f64,
+            recovery: f64,
+            storage_per_module: f64,
+            engine_thrust_n: f64,
+            drone_power_w: f64,
+            living_drain_w: f64,
+            hull_density_kg_m3: f64,
+            slot_volume_m3: f64,
+            module_density_kg_m3: f64,
+        }
+        #[derive(Serialize)]
+        struct OldFitting {
+            balance: OldBalance,
+            loadout: lc_proto::Loadout,
+            stored_j: f64,
+            since_s: f64,
+            rapidity_since: f64,
+            committed_j: f64,
+            refit: Option<lc_proto::RefitOrder>,
+        }
+        #[derive(Serialize)]
+        struct Old {
+            kind: u8,
+            name: Option<String>,
+            noise_floor: f32,
+            length_m: f64,
+            motion: lc_proto::Motion,
+            pursuit: Option<lc_proto::Pursuit>,
+            fitting: Option<OldFitting>,
+        }
+        let craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
+        let old = Old {
+            kind: kind_code(craft.kind),
+            name: Some("Ada".into()),
+            noise_floor: 0.0,
+            length_m: 500.0,
+            motion: (&craft.motion.snapshot()).into(),
+            pursuit: None,
+            fitting: Some(OldFitting {
+                balance: OldBalance {
+                    drive_efficiency: 1.0,
+                    recovery: 0.95,
+                    storage_per_module: 5.0,
+                    engine_thrust_n: 7.2e10,
+                    drone_power_w: 2.3e19,
+                    living_drain_w: 4.4e15,
+                    hull_density_kg_m3: 50.0,
+                    slot_volume_m3: 392_699.0,
+                    module_density_kg_m3: 395.8,
+                },
+                loadout: Loadout::STARTING.into(),
+                stored_j: 1.25e26,
+                since_s: 3.0,
+                rapidity_since: 0.0,
+                committed_j: 0.0,
+                refit: None,
+            }),
+        };
+        let row = Ship {
+            ship_id: 5,
+            account: Some("acct".into()),
+            saved_t: 3_000_000,
+            state: lc_proto::encode(&old),
+            format: 4,
+        };
+        let back = load(&row, None).expect("a format 4 row reads");
+        let fitting = back.fitting().expect("fitted");
+        assert_eq!(fitting.loadout, Loadout::STARTING);
+        assert_eq!(fitting.account().stored_j, 1.25e26);
+        assert_eq!(fitting.solar_w(), 0.0);
     }
 
     #[test]

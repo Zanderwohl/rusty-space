@@ -122,9 +122,10 @@ therefore cannot run dry halfway through a burn, and the server needs no bookkee
 - **Refunds.** `CutDrive`, `BreakOff`, and a standing intercept being re-solved all refund the
   part of the commitment not yet flown, and a re-solved plan commits afresh. A re-solve the ship
   cannot pay for breaks off.
-- Burn cost is priced at the mass when the account was last settled, ignoring what the living
-  drain takes off it meanwhile. That over-charges, by about 0.2% over a decade, and the
-  difference is kept: it is the rule rather than an error to reconcile.
+- Burn cost is priced at the mass when the account was last settled. The account settles at least
+  once a game day — see [20-solar-power.md](20-solar-power.md) — so what the drain takes off the
+  mass meanwhile is priced in a day late, and what that over-commits comes back when the plan
+  ends.
 
 ### The budget sets the speed
 

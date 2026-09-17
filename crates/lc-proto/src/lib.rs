@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 20;
+pub const PROTOCOL_VERSION: u32 = 21;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -694,6 +694,8 @@ pub struct Balance {
     pub hull_density_kg_m3: f64,
     pub slot_volume_m3: f64,
     pub module_density_kg_m3: f64,
+    pub solar_efficiency: f64,
+    pub solar_gain: f64,
 }
 
 /// A refit as the arguments it is planned from. Mirrors `lc_world::refit::Order`.
@@ -715,6 +717,8 @@ pub struct Fitting {
     pub since_s: f64,
     pub rapidity_since: f64,
     pub committed_j: f64,
+    /// Starlight being collected in the segment that began at `since_s`, watts.
+    pub solar_w: f64,
     pub refit: Option<RefitOrder>,
 }
 
@@ -764,7 +768,7 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 pub mod golden {
     /// `Outbound::Welcome { .., ship: Motion { at [4.2, 0, 0], holding a 12 Mm orbit of Earth } }`
     pub const WELCOME: &[u8] = &[
-        0, 7, 20, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        0, 7, 21, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
         204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -790,7 +794,7 @@ pub mod golden {
     /// Pinned because it is now the message that decides whether anyone gets in at all. A
     /// field moving here is a server reading someone else's ticket as this one's.
     pub const HELLO: &[u8] = &[
-        0, 20, 5, 97, 46, 98, 46, 99,
+        0, 21, 5, 97, 46, 98, 46, 99,
     ];
 
     pub const SET_COURSE: &[u8] = &[
@@ -837,7 +841,7 @@ pub mod golden {
     /// Pinned beside the rendezvous for the same reason, and one more: its acceleration is the
     /// only number on this wire that is a *measurement* of somebody else's burn.
     pub const ESCORT: &[u8] = &[
-        0, 7, 20, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        0, 7, 21, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
         204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -855,7 +859,7 @@ pub mod golden {
     ];
 
     pub const RENDEZVOUS: &[u8] = &[
-        0, 7, 20, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        0, 7, 21, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
         204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -874,7 +878,7 @@ pub mod golden {
     ///
     /// The rendezvous numbers in a falling frame, pinned for the rendezvous's reason.
     pub const CONSORT: &[u8] = &[
-        0, 7, 20, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        0, 7, 21, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
         204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -906,10 +910,11 @@ pub mod golden {
         11, 84, 0, 0, 0, 0, 0, 0, 240, 63, 102, 102, 102, 102, 102, 102, 238, 63, 0, 0, 0,
         0, 0, 0, 20, 64, 0, 0, 0, 208, 136, 195, 48, 66, 192, 159, 64, 162, 6, 243, 243, 67,
         0, 0, 6, 170, 141, 67, 47, 67, 0, 0, 0, 0, 0, 0, 73, 64, 0, 0, 0, 0, 236, 247, 23,
-        65, 205, 204, 204, 204, 204, 188, 120, 64, 6, 2, 2, 5, 20, 94, 131, 244, 89, 167,
-        182, 117, 69, 0, 0, 0, 0, 128, 132, 46, 65, 0, 0, 0, 0, 0, 0, 192, 63, 180, 157,
-        217, 121, 67, 120, 234, 68, 1, 6, 2, 2, 5, 20, 6, 2, 2, 7, 20, 94, 131, 244, 89,
-        167, 182, 117, 69, 0, 0, 0, 0, 128, 132, 46, 65,
+        65, 205, 204, 204, 204, 204, 188, 120, 64, 102, 102, 102, 102, 102, 102, 230, 63, 0,
+        0, 0, 192, 87, 149, 209, 65, 6, 2, 2, 5, 20, 94, 131, 244, 89, 167, 182, 117, 69, 0,
+        0, 0, 0, 128, 132, 46, 65, 0, 0, 0, 0, 0, 0, 192, 63, 180, 157, 217, 121, 67, 120,
+        234, 68, 0, 200, 78, 103, 109, 193, 139, 67, 1, 6, 2, 2, 5, 20, 6, 2, 2, 7, 20, 94,
+        131, 244, 89, 167, 182, 117, 69, 0, 0, 0, 0, 128, 132, 46, 65,
     ];
 
 }
@@ -1167,12 +1172,15 @@ mod tests {
                     hull_density_kg_m3: 50.0,
                     slot_volume_m3: 392_699.0,
                     module_density_kg_m3: 395.8,
+                    solar_efficiency: 0.7,
+                    solar_gain: 1.18e9,
                 },
                 loadout,
                 stored_j: 4.2e26,
                 since_s: 1.0e6,
                 rapidity_since: 0.125,
                 committed_j: 1.0e24,
+                solar_w: 2.5e17,
                 refit: Some(RefitOrder {
                     from: loadout,
                     target: Loadout { engines: 7, ..loadout },

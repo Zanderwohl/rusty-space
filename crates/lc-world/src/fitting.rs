@@ -112,7 +112,18 @@ pub struct Balance {
     pub hull_density_kg_m3: f64,
     pub slot_volume_m3: f64,
     pub module_density_kg_m3: f64,
+    /// η: what fraction of the starlight falling on the hull's collectors is stored.
+    pub solar_efficiency: f64,
+    /// An unphysical multiplier on collection, because a module-energy is `mc²` and real
+    /// starlight on a real hull would take billions of years to pay for one. See
+    /// `lightcone/docs/20-solar-power.md`.
+    pub solar_gain: f64,
 }
+
+/// The distance, AU from a Sun-like star, at which the starting ship broadside fills from empty in
+/// [`SOLAR_ANCHOR_S`], net of its living drain. What [`Balance::solar_gain`] is derived from.
+pub const SOLAR_ANCHOR_AU: f64 = 0.1;
+pub const SOLAR_ANCHOR_S: f64 = crate::flight::JULIAN_YEAR_S;
 
 impl Balance {
     pub const DEFAULT: Self = {
@@ -128,6 +139,16 @@ impl Balance {
             + start.slots as f64 * slot_volume_m3 * hull_density_kg_m3;
         let week_s = 7.0 * 86_400.0;
         let century_s = 100.0 * crate::flight::JULIAN_YEAR_S;
+        let living_drain_w = module_kg * C2 / century_s;
+        let solar_efficiency = 0.7;
+        // Collection that fills the starting storage in the anchor time and pays the drain too,
+        // over what real starlight on the broadside of a 500 m hull would give.
+        let wanted_w = storage_per_module * start.storage as f64 * module_kg * C2 / SOLAR_ANCHOR_S
+            + start.living as f64 * living_drain_w;
+        let broadside_m2 = std::f64::consts::PI
+            * 250.0
+            * (250.0 * crate::craft::BEAM_PER_LENGTH);
+        let flux = crate::solar::SOLAR_CONSTANT_W_M2 / (SOLAR_ANCHOR_AU * SOLAR_ANCHOR_AU);
         Self {
             drive_efficiency: 1.0,
             recovery: 0.95,
@@ -136,10 +157,12 @@ impl Balance {
             // ship flew at before it had engines.
             engine_thrust_n: G0 * full_kg,
             drone_power_w: module_kg * C2 / week_s,
-            living_drain_w: module_kg * C2 / century_s,
+            living_drain_w,
             hull_density_kg_m3,
             slot_volume_m3,
             module_density_kg_m3,
+            solar_efficiency,
+            solar_gain: wanted_w / (solar_efficiency * flux * broadside_m2),
         }
     };
 
@@ -212,6 +235,9 @@ pub struct Fitting {
     /// Energy the motive in force still has to spend as of `since_s`, joules. Reserved, so the
     /// drain cannot eat it.
     committed_j: f64,
+    /// What starlight adds from `since_s`, watts, until the craft starts the next segment. See
+    /// [`crate::solar`].
+    solar_w: f64,
     refit: Option<Refit>,
 }
 
@@ -223,6 +249,7 @@ pub struct Account {
     pub since_s: f64,
     pub rapidity_since: f64,
     pub committed_j: f64,
+    pub solar_w: f64,
     pub refit: Option<crate::refit::Order>,
 }
 
@@ -236,6 +263,7 @@ impl Fitting {
             since_s: now_s,
             rapidity_since: 0.0,
             committed_j: 0.0,
+            solar_w: 0.0,
             refit: None,
         }
     }
@@ -247,6 +275,7 @@ impl Fitting {
             since_s: self.since_s,
             rapidity_since: self.rapidity_since,
             committed_j: self.committed_j,
+            solar_w: self.solar_w,
             refit: self.refit.as_ref().map(Refit::order),
         }
     }
@@ -262,6 +291,7 @@ impl Fitting {
             since_s: account.since_s,
             rapidity_since: account.rapidity_since,
             committed_j: account.committed_j,
+            solar_w: account.solar_w,
             refit,
         }
     }
@@ -272,6 +302,16 @@ impl Fitting {
 
     pub fn since_s(&self) -> f64 {
         self.since_s
+    }
+
+    /// What starlight is adding in the segment in force, watts.
+    pub fn solar_w(&self) -> f64 {
+        self.solar_w
+    }
+
+    /// Start a segment at this power. Settle first, at the segment's start.
+    pub fn set_solar_w(&mut self, watts: f64) {
+        self.solar_w = watts.max(0.0);
     }
 
     /// The loadout at a coordinate time, counting refit steps finished by then.
@@ -299,12 +339,22 @@ impl Fitting {
         self.balance.dry_mass_kg(&self.loadout) + self.stored_j / C2
     }
 
-    /// What the living modules have drained by `now_s`. It stops once only committed energy
-    /// is left, and running out costs nothing else.
-    fn drained_j(&self, now_s: f64) -> f64 {
+    /// What starlight has added, less what living space has drained, by `now_s`.
+    ///
+    /// Filling stops at capacity, and the excess is lost. Draining stops once only committed
+    /// energy is left, and running out costs nothing else. The clamp is on the segment's total
+    /// rather than its path, which is exact until a limit is reached and off by at most one
+    /// segment's income when one is.
+    fn income_j(&self, now_s: f64) -> f64 {
         let elapsed = (now_s - self.since_s).max(0.0);
-        let free = (self.stored_j - self.committed_j).max(0.0);
-        (self.balance.drain_w(&self.loadout) * elapsed).min(free)
+        let net_w = self.solar_w - self.balance.drain_w(&self.loadout);
+        if net_w >= 0.0 {
+            let room = (self.balance.capacity_j(&self.loadout) - self.stored_j).max(0.0);
+            (net_w * elapsed).min(room)
+        } else {
+            let free = (self.stored_j - self.committed_j).max(0.0);
+            -(-net_w * elapsed).min(free)
+        }
     }
 
     /// Stored energy at a coordinate time, joules.
@@ -313,7 +363,7 @@ impl Fitting {
             Some(refit) => refit.at(now_s).consumed_j - refit.at(self.since_s).consumed_j,
             None => 0.0,
         };
-        (self.stored_j - self.drained_j(now_s) - self.burn_spent_j(motion, now_s) - moved).max(0.0)
+        (self.stored_j + self.income_j(now_s) - self.burn_spent_j(motion, now_s) - moved).max(0.0)
     }
 
     /// What is stored and not committed, joules.
@@ -427,6 +477,8 @@ impl From<lc_proto::Balance> for Balance {
             hull_density_kg_m3: b.hull_density_kg_m3,
             slot_volume_m3: b.slot_volume_m3,
             module_density_kg_m3: b.module_density_kg_m3,
+            solar_efficiency: b.solar_efficiency,
+            solar_gain: b.solar_gain,
         }
     }
 }
@@ -443,6 +495,8 @@ impl From<Balance> for lc_proto::Balance {
             hull_density_kg_m3: b.hull_density_kg_m3,
             slot_volume_m3: b.slot_volume_m3,
             module_density_kg_m3: b.module_density_kg_m3,
+            solar_efficiency: b.solar_efficiency,
+            solar_gain: b.solar_gain,
         }
     }
 }
@@ -457,6 +511,7 @@ impl From<&Fitting> for lc_proto::Fitting {
             since_s: a.since_s,
             rapidity_since: a.rapidity_since,
             committed_j: a.committed_j,
+            solar_w: a.solar_w,
             refit: a.refit.map(|o| lc_proto::RefitOrder {
                 from: o.from.into(),
                 target: o.target.into(),
@@ -475,6 +530,7 @@ impl From<&lc_proto::Fitting> for Fitting {
             since_s: f.since_s,
             rapidity_since: f.rapidity_since,
             committed_j: f.committed_j,
+            solar_w: f.solar_w,
             refit: f.refit.map(|o| crate::refit::Order {
                 from: o.from.into(),
                 target: o.target.into(),

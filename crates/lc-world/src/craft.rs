@@ -243,6 +243,8 @@ impl Craft {
                 fitting.settle(&before, at_s);
                 fitting.commit(&self.motion, at_s);
             }
+            // A new motive may collect where the old one could not, or stop collecting.
+            self.begin_solar_segment(at_s);
             self.motion.attitude = nose;
             self.past.push(Past { until_s: at_s, motion: before });
             self.forget_before(at_s);
@@ -386,6 +388,69 @@ impl Craft {
     pub fn fit(&mut self, fitting: Option<Fitting>) {
         self.fitting = fitting;
         self.sync_length();
+        if let Some(since) = self.fitting.as_ref().map(Fitting::since_s) {
+            self.begin_solar_segment(since);
+        }
+    }
+
+    /// How far it is from its system's primary at `t`, metres. `None` between systems.
+    pub fn star_distance_m_at(&self, t: f64) -> Option<f64> {
+        let system = self.system.as_deref()?;
+        let star = system.star_position_at(t)?;
+        let (at, _) = motion::state_at(&self.motion, Some(system), t)?;
+        Some((at - star).length() * crate::system::M_PER_LY)
+    }
+
+    /// What its hull would collect broadside at `t`, watts, at this length. Zero under way,
+    /// between systems, and for a craft with no fitting.
+    pub fn solar_w_at(&self, t: f64) -> f64 {
+        self.solar_w_for(self.length_m, t)
+    }
+
+    /// [`Craft::solar_w_at`] for a hull of another length, as a refit would leave it.
+    pub fn solar_w_for(&self, length_m: f64, t: f64) -> f64 {
+        let (Some(fitting), Some(system)) = (&self.fitting, self.system.as_deref()) else {
+            return 0.0;
+        };
+        if self.motion.is_under_way() {
+            return 0.0;
+        }
+        let Some(distance_m) = self.star_distance_m_at(t) else { return 0.0 };
+        crate::solar::power_w(&fitting.balance, length_m, system.star_luminosity_w(), distance_m)
+    }
+
+    /// Start the income segment that begins at `from_s`, at the power collected at its midpoint.
+    /// Midpoint rather than start, so a distance that changes across the segment averages out to
+    /// first order. Settles to `from_s` first, so the old power is not applied backwards.
+    fn begin_solar_segment(&mut self, from_s: f64) {
+        let Some(since) = self.fitting.as_ref().map(Fitting::since_s) else { return };
+        let from_s = from_s.max(since);
+        if let Some(fitting) = &mut self.fitting {
+            fitting.settle(&self.motion, from_s);
+        }
+        let middle = 0.5 * (from_s + crate::solar::segment_end(from_s));
+        let watts = self.solar_w_at(middle);
+        if let Some(fitting) = &mut self.fitting {
+            fitting.set_solar_w(watts);
+        }
+    }
+
+    /// Settle at every income boundary up to `now_s`, starting each new segment as it goes.
+    fn collect_to(&mut self, now_s: f64) {
+        let Some(since) = self.fitting.as_ref().map(Fitting::since_s) else { return };
+        let step = crate::solar::step_for(since, now_s);
+        let mut boundary = ((since / step).floor() + 1.0) * step;
+        while boundary <= now_s {
+            if let Some(fitting) = &mut self.fitting {
+                fitting.settle(&self.motion, boundary);
+            }
+            let middle = boundary + 0.5 * step;
+            let watts = self.solar_w_at(middle);
+            if let Some(fitting) = &mut self.fitting {
+                fitting.set_solar_w(watts);
+            }
+            boundary += step;
+        }
     }
 
     fn sync_length(&mut self) {
@@ -397,6 +462,7 @@ impl Craft {
     /// Fold the fitting's account up to `now_s`: finished refit steps, drain, and whatever the
     /// motive has burned.
     pub fn settle(&mut self, now_s: f64) {
+        self.collect_to(now_s);
         if let Some(fitting) = &mut self.fitting {
             fitting.settle(&self.motion, now_s);
         }
@@ -544,6 +610,11 @@ impl Craft {
             (Some(old), Some(new)) => !Arc::ptr_eq(old, new),
             (Some(_), None) => true,
         };
+        let changed = match (&self.system, &system) {
+            (Some(old), Some(new)) => !Arc::ptr_eq(old, new),
+            (None, None) => false,
+            _ => true,
+        };
         self.remembering(now_s, |craft| {
             craft.system = system;
             if left {
@@ -551,6 +622,10 @@ impl Craft {
             }
             craft.solve_patch(now_s);
         });
+        // A star to collect from, or none, from here.
+        if changed {
+            self.begin_solar_segment(now_s);
+        }
     }
 
     /// Move to a coordinate time, folding the patch its arc was solved for if that time has
@@ -560,6 +635,10 @@ impl Craft {
     /// its own solved coordinate whatever step happened to run past it. That is what lets a
     /// server at 438 seconds and a client at 61 reach the same arc.
     pub fn advance(&mut self, now_s: f64, elapsed_s: f64) {
+        // Before anything changes the motive: each segment passed is priced by the motive that
+        // was flying it.
+        self.collect_to(now_s);
+        self.sync_length();
         self.patch_if_due(now_s);
         self.remembering(now_s, |craft| {
             let was = matches!(craft.motion.motive, Motive::Falling(_));
@@ -884,13 +963,16 @@ mod tests {
         let stored_half = fitting.stored_j_at(&craft.motion, end * 0.5);
         assert!(stored_half < free && stored_half > free - quoted);
 
-        // Flown to the end: what was quoted, plus the drain, has gone.
+        // Flown to the end: what was quoted, plus the drain, has gone — a little less, because
+        // the account settles every game day and the drain has made the ship lighter for the rest
+        // of the burn. That remainder is the drain's mass times the burn's own fraction.
         craft.advance(end + 1.0, end + 1.0);
         assert!(!craft.motion.is_under_way(), "{:?}", craft.motion.motive);
         let drain = 2.0 * crate::fitting::Balance::DEFAULT.living_drain_w * (end + 1.0);
         let stored = craft.fitting().unwrap().stored_j_at(&craft.motion, end + 1.0);
         let expected = free - quoted - drain;
-        assert!((stored / expected - 1.0).abs() < 1.0e-9, "{stored} vs {expected}");
+        assert!(stored >= expected * (1.0 - 1.0e-12), "{stored} vs {expected}");
+        assert!(stored - expected <= drain * quoted / (mass * crate::fitting::C2), "{stored} vs {expected}");
         assert!(craft.mass_kg_at(end + 1.0) < mass);
         // Lighter, so its engines pull harder.
         assert!(craft.rated_drive(end + 1.0).accel_g > 5.0);
@@ -921,6 +1003,111 @@ mod tests {
         let spent = before - after;
         let expected = crate::cost::energy_j(mass, 1.0e-4f64.atanh(), 1.0);
         assert!((spent / expected - 1.0).abs() < 1.0e-9, "{spent} vs {expected}");
+    }
+
+    /// An empty fitted ship at rest `au` from the Sun, or on a conic through there with `speed`
+    /// of circular.
+    fn near_the_sun(system: &Arc<LocalSystem>, au: f64, speed: Option<f64>) -> Craft {
+        use crate::fitting::{Account, Balance, Loadout};
+        let star = system.star_position_at(0.0).expect("a star");
+        let at = star + DVec3::X * au * crate::system::UNIT_M / crate::system::M_PER_LY;
+        let mut craft = Craft::at(CraftId(9), Kind::Ship, at);
+        let full = Fitting::full(Loadout::STARTING, Balance::DEFAULT, 0.0);
+        let empty = Account { stored_j: 0.0, ..full.account() };
+        craft.fit(Some(Fitting::from_account(&empty, Balance::DEFAULT)));
+        craft.enter(Some(system.clone()), 0.0);
+        if let Some(fraction) = speed {
+            let mu = crate::star::Star::SOL.mu;
+            let v = fraction * (mu / (au * crate::system::UNIT_M)).sqrt();
+            craft.drift_from(at, DVec3::Y * v / crate::flight::C_M_S, 0.0);
+            craft.apply(&Event { ship: ShipId(9), at_t: 0.0, change: Change::CutDrive }).unwrap();
+        }
+        craft
+    }
+
+    fn stored(craft: &Craft, t: f64) -> f64 {
+        craft.fitting().unwrap().stored_j_at(&craft.motion, t)
+    }
+
+    /// The anchor, flown rather than computed: a starting ship at rest a tenth of an AU from the
+    /// real Sun is about half full after half a year and full after a year.
+    #[test]
+    fn a_ship_holding_still_near_the_sun_fills_up() {
+        let Some(system) = sol() else { return };
+        let mut craft = near_the_sun(&system, 0.1, None);
+        let capacity = craft.fitting().unwrap().capacity_j_at(0.0);
+        let year = crate::flight::JULIAN_YEAR_S;
+        let mut t = 0.0;
+        while t < 0.5 * year {
+            t += 3_600.0 * 6.0;
+            craft.advance(t, 3_600.0 * 6.0);
+        }
+        // The catalogue Sun is not exactly the anchor's 1361 W/m², so a few per cent either way.
+        let half = stored(&craft, t) / capacity;
+        assert!((half - 0.5).abs() < 0.03, "{half} full after half a year");
+        craft.advance(1.1 * year, 0.6 * year);
+        assert_eq!(stored(&craft, 1.1 * year), capacity, "it stops at capacity");
+    }
+
+    #[test]
+    fn nothing_is_collected_under_way_or_between_systems() {
+        let Some(system) = sol() else { return };
+        let day = crate::solar::SOLAR_STEP_S;
+        let mut flying = near_the_sun(&system, 0.1, None);
+        let to = flying.motion.position_ly + DVec3::X * 0.01;
+        let drive = flying.rated_drive(0.0);
+        flying.apply(&Event { ship: ShipId(9), at_t: 0.0, change: Change::Cross { to_ly: to, drive } }).unwrap();
+        flying.advance(3.0 * day, 3.0 * day);
+        assert!(flying.motion.is_under_way());
+        assert_eq!(flying.fitting().unwrap().solar_w(), 0.0);
+
+        let mut outside = near_the_sun(&system, 0.1, None);
+        outside.enter(None, 0.0);
+        outside.advance(3.0 * day, 3.0 * day);
+        assert_eq!(stored(&outside, 3.0 * day), 0.0);
+    }
+
+    /// **The midpoint earns its place.** Along an eccentric conic the collected energy is what
+    /// midpoint-priced day-long segments give, which is far closer to the true integral than
+    /// pricing each segment at its start — and the same whether the craft is stepped by the hour
+    /// or by the week.
+    #[test]
+    fn income_along_an_eccentric_orbit_is_priced_at_each_segments_midpoint() {
+        let Some(system) = sol() else { return };
+        let day = crate::solar::SOLAR_STEP_S;
+        let span = 40.0 * day;
+        let mut hourly = near_the_sun(&system, 0.3, Some(0.8));
+        assert!(matches!(hourly.motion.motive, Motive::Falling(_)), "{:?}", hourly.motion.motive);
+        let mut weekly = hourly.clone();
+        let reference = hourly.clone();
+
+        let mut t = 0.0;
+        while t < span {
+            t = (t + 3_600.0).min(span);
+            hourly.advance(t, 3_600.0);
+        }
+        let mut t = 0.0;
+        while t < span {
+            t = (t + 7.0 * day).min(span);
+            weekly.advance(t, 7.0 * day);
+        }
+        let (by_hour, by_week) = (stored(&hourly, span), stored(&weekly, span));
+        assert!((by_hour / by_week - 1.0).abs() < 1.0e-9, "{by_hour} vs {by_week}");
+
+        let drain = reference.fitting().unwrap().balance.drain_w(&crate::fitting::Loadout::STARTING);
+        let power = |t: f64| reference.solar_w_at(t) - drain;
+        let (mut midpoint, mut start, mut exact) = (0.0, 0.0, 0.0);
+        for k in 0..40 {
+            let t0 = k as f64 * day;
+            midpoint += power(t0 + 0.5 * day) * day;
+            start += power(t0) * day;
+            for j in 0..200 {
+                exact += power(t0 + (j as f64 + 0.5) * day / 200.0) * day / 200.0;
+            }
+        }
+        assert!((by_hour / midpoint - 1.0).abs() < 1.0e-9, "{by_hour} vs {midpoint}");
+        let (mid_err, start_err) = ((midpoint - exact).abs(), (start - exact).abs());
+        assert!(mid_err * 10.0 < start_err, "midpoint off by {mid_err}, start by {start_err}");
     }
 
     #[test]
