@@ -89,8 +89,9 @@ Always on screen, never in a panel a player can close:
 
 | readout | example |
 |---|---|
-| coordinate time | `T + 14.62 years` |
-| age of the selected target's light | `Proxima Centauri — light is 4.24 years old` |
+| coordinate time, and the ship's own | `T + 14.62 years` beside `T' + 12.08 years` |
+| distance to the selected target, which is the age of its light | `Proxima Centauri — 4.24 ly` |
+| stored energy, for a ship with modules | `ENERGY`, a bar, `23.4 / 30.0 ME` |
 | what the band mapping is | `NATURAL` |
 
 If a player forgets they are looking at the past, the game has failed at the only thing it is

@@ -74,12 +74,16 @@ pub fn hud(
         ui.horizontal(|ui| {
             ui.strong(&lines.clock);
             ui.separator();
+            ui.strong(&lines.ship_clock);
+            ui.separator();
             ui.label(format!("BAND {}", lines.mapping));
             ui.separator();
             ui.label(format!("EXPOSURE {}", lines.exposure));
             if let Some(energy) = &lines.energy {
                 ui.separator();
-                ui.label(energy);
+                ui.label("ENERGY");
+                ui.add(egui::ProgressBar::new(energy.fraction).desired_width(80.0));
+                ui.label(&energy.amount);
             }
             if let Some(warning) = &lines.warning {
                 ui.separator();
@@ -96,12 +100,10 @@ pub fn hud(
             ui.colored_label(egui::Color32::from_rgb(240, 190, 110), target);
         }
         ui.horizontal(|ui| {
-            ui.weak(&lines.ship_clock);
             // A pursuit takes the crossing's place and its button: × is no further corrections,
             // which for a pursuit means giving up the policy as well as cutting the drive.
             if let Some(pursuit) = uplink.chasing {
                 let quarry = uplink.contacts.iter().find(|c| c.ship_id == pursuit.quarry);
-                ui.separator();
                 ui.colored_label(
                     egui::Color32::from_rgb(130, 200, 250),
                     hud::pursuit(&game.0, pursuit, quarry),
@@ -114,7 +116,6 @@ pub fn hud(
                     ask(&mut out, Action::Intercept(pursuit.quarry, next));
                 }
             } else if let Some(flight) = &lines.flight {
-                ui.separator();
                 ui.colored_label(egui::Color32::from_rgb(130, 200, 250), flight);
                 // No confirmation. Cutting the engine is not destructive -- the ship keeps its
                 // velocity -- and a dialogue between a player and their own throttle is worse
@@ -126,7 +127,10 @@ pub fn hud(
                 }
             }
             if let Some(coasting) = &lines.coasting {
-                ui.separator();
+                // The row's first item since the ship clock moved up, unless something is flying.
+                if uplink.chasing.is_some() || lines.flight.is_some() {
+                    ui.separator();
+                }
                 ui.colored_label(egui::Color32::from_rgb(170, 190, 170), coasting);
             }
         });

@@ -217,19 +217,21 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
     let current = fitting.loadout_at(now);
     let draft = state.refit_draft.unwrap_or(current);
     let balance = fitting.balance;
-    // Each slider stops where the draft would stop being something the ship could end at, so
-    // the only way to an unaffordable loadout is not to have one.
+    // Each slider ends where the budget does, and a drag below the lowest loadout the ship could
+    // end at stops there. The left end stays put, so a handle does not jump as the range moves.
     let mut changed = draft;
+    let knob = |ui: &mut egui::Ui, knob: Knob, floor: u32, most: u32, value: &mut u32, name: &str| {
+        let range = reach(&balance, current, draft, stored, knob, floor..=most);
+        ui.add(egui::Slider::new(value, floor..=*range.end()).text(name));
+        *value = (*value).clamp(*range.start(), *range.end());
+    };
     for module in Module::ALL {
         let floor = if module == Module::Drone { 1 } else { 0 };
-        let limits = floor..=draft.slots.max(floor);
-        let range = reach(&balance, current, draft, stored, Knob::Module(module), limits);
-        let count = changed.count_mut(module);
-        ui.add(egui::Slider::new(count, range).text(module.name()));
+        let most = draft.slots.max(floor);
+        knob(ui, Knob::Module(module), floor, most, changed.count_mut(module), module.name());
     }
-    let limits = 1..=(current.slots * 2).max(40);
-    let range = reach(&balance, current, draft, stored, Knob::Slots, limits);
-    ui.add(egui::Slider::new(&mut changed.slots, range).text("hull slots"));
+    let most = (current.slots * 2).max(40);
+    knob(ui, Knob::Slots, 1, most, &mut changed.slots, "hull slots");
     if changed != draft {
         ask(out, Action::DraftRefit(changed));
     }
