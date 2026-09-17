@@ -123,14 +123,18 @@ pub enum Action {
     /// Put a message on the air. `idem` is `None` for something newly typed, which mints one,
     /// and `Some` for a resend, which repeats the message rather than saying a second thing.
     Say {
-        to: lc_proto::ShipId,
+        /// `None` broadcasts: the public channel, addressed to nobody.
+        to: Option<lc_proto::ShipId>,
         aim: lc_proto::Aim,
         secrecy: lc_proto::Secrecy,
         body: String,
         idem: Option<lc_proto::MessageKey>,
     },
-    /// Put this ship's public key on the air, so `to` can encrypt messages back.
-    OfferKey { to: lc_proto::ShipId, aim: lc_proto::Aim },
+    /// Put this ship's public key on the air, so `to` — or anyone at all, for `None` — can
+    /// encrypt messages back.
+    OfferKey { to: Option<lc_proto::ShipId>, aim: lc_proto::Aim },
+    /// Answer this craft automatically, or stop.
+    AutoAck { with: lc_proto::ShipId, on: bool },
     // A resend is [`Action::Say`] with the original's `idem`, not an action of its own: it is
     // the same message, said again, and the only thing that makes it one is the key.
 }
@@ -148,6 +152,9 @@ pub enum Effect {
     CancelSignIn,
     SignInWithPassword { email: String, password: String },
     SignOut,
+    /// Answer a craft automatically from now on, or stop. Reaches `crate::uplink`'s chat log,
+    /// which `apply` cannot see.
+    AutoAck { with: lc_proto::ShipId, on: bool },
     /// An order for the server. Emitted instead of a local change when a server is
     /// authoritative over the ship: see [`crate::session::Session::remote`].
     Send(lc_proto::Order),
@@ -328,8 +335,10 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         // The client learns of its own message when the acceptance comes back.
         Action::Say { to, aim, secrecy, body, idem } => {
             let body = body.trim().to_string();
-            if body.is_empty() {
-                // Nothing to report. An empty field is a keystroke, not a mistake.
+            // An empty body is a *bare acknowledgement* and is a real message — but only one
+            // this client sends deliberately, by repeating a key. An empty draft with no key
+            // is somebody pressing send on an empty field, which is a keystroke, not a message.
+            if body.is_empty() && idem.is_none() {
             } else if !session.remote {
                 effects.push(Effect::Notify("no server, so nobody to talk to".into()));
             } else if body.len() > lc_proto::MESSAGE_LIMIT {
@@ -343,7 +352,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 // a counter either end would have to reconcile.
                 let idem = idem.unwrap_or_else(|| {
                     lc_world::rng::hash(&[
-                        to.0 as u64,
+                        to.map_or(0, |t| t.0 as u64),
                         (session.coordinate_time_s() * 1.0e6) as u64,
                         body.len() as u64,
                         body.bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64)),
@@ -355,6 +364,9 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 effects.push(Effect::Send(lc_proto::Order::Say { to, aim, secrecy, body, idem }));
             }
         }
+        // An effect rather than a change to `UiState`, because what it sets lives on the
+        // conversation — which is the connection's, not the interface's.
+        Action::AutoAck { with, on } => effects.push(Effect::AutoAck { with, on }),
         Action::OfferKey { to, aim } => {
             if session.remote {
                 effects.push(Effect::Send(lc_proto::Order::OfferKey { to, aim }));

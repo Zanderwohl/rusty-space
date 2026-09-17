@@ -237,6 +237,12 @@ pub struct Uplink {
     pub fitting: Option<lc_proto::Fitting>,
     /// Every conversation this ship is in. See [`crate::chat`].
     pub chat: crate::chat::Chat,
+    /// Automatic acknowledgements this ship owes, drained by [`pump`] into orders.
+    ///
+    /// Collected rather than sent where they are decided, because folding the wire is not
+    /// allowed to reach the wire: an answer is an order like any other and goes out through
+    /// the one dispatcher every order does.
+    owed: Vec<(ShipId, lc_proto::Aim)>,
 }
 
 /// The rate a shard runs at, and what a server that says nothing is taken to mean.
@@ -405,6 +411,7 @@ pub fn pump(
     time: Res<bevy::prelude::Time>,
     mut game: ResMut<crate::app::Game>,
     mut ui: ResMut<crate::app::Ui>,
+    mut out: MessageWriter<crate::input::Requested>,
 ) {
     let greet_now = {
         let link = uplink.link.get_mut().unwrap();
@@ -435,6 +442,27 @@ pub fn pump(
     if let Some(said) = uplink.applied.take() {
         let at = game.0.coordinate_time_s();
         ui.0.notify(said, at);
+    }
+
+    // What arrived and is owed an answer. Through the ordinary request channel, so an automatic
+    // acknowledgement is the same kind of thing as one a player sent, and is clamped, rate
+    // limited and recorded exactly as one.
+    for (to, aim) in std::mem::take(&mut uplink.owed) {
+        out.write(crate::input::Requested(crate::action::Action::Say {
+            to: Some(to),
+            aim,
+            // Never encrypted. There is nothing in it to protect — an acknowledgement is its
+            // identifiers and no body — and encrypting one would mean holding a key this ship
+            // may not have.
+            secrecy: lc_proto::Secrecy::Open,
+            body: String::new(),
+            // Its own message, and a real one: it is minted a key so that a resend of *it*
+            // would be the same message rather than another.
+            idem: Some(
+                lc_world::rng::hash(&[to.0 as u64, (game.0.coordinate_time_s() * 1.0e6) as u64])
+                    .max(1),
+            ),
+        }));
     }
 }
 
@@ -527,7 +555,9 @@ fn fold(
                 };
                 let who = name.clone().unwrap_or_else(|| format!("ship {}", from.0));
                 ui.0.heard(from, format!("{who}: {said}"), sighting.arrive_t as f64 * 1e-6);
-                uplink.chat.received(
+                // The bearing the signal came in on, which is what a dish answers down. Not
+                // where they are now, and not where they will be: where the light left them.
+                if let Some(aim) = uplink.chat.received(
                     from,
                     name.as_deref(),
                     sighting.event_id,
@@ -535,7 +565,11 @@ fn fold(
                     key,
                     sighting.emitted_t as f64 * 1e-6,
                     sighting.arrive_t as f64 * 1e-6,
-                );
+                    sighting.strength,
+                    sighting.direction,
+                ) {
+                    uplink.owed.push((from, aim));
+                }
             }
             for sighting in seen.iter().filter(|s| s.kind == lc_proto::kind::DRIVE) {
                 let Ok(change) = serde_json::from_str::<lc_proto::DriveChange>(&sighting.payload) else {
@@ -637,7 +671,9 @@ fn fold(
                 // an acknowledgement will ever name it by. Not shown in the events box: that
                 // box is for what happened *to* this ship, and the chat window already has it.
                 Order::Say { to, secrecy, body, idem, .. } => {
-                    let name = uplink.contacts.iter().find(|c| c.ship_id == *to).map(|c| c.name.clone());
+                    let name = to
+                        .and_then(|t| uplink.contacts.iter().find(|c| c.ship_id == t))
+                        .map(|c| c.name.clone());
                     uplink.chat.sent(
                         *to,
                         name.as_deref(),
@@ -651,7 +687,9 @@ fn fold(
                     None
                 }
                 Order::OfferKey { to, .. } => {
-                    let name = uplink.contacts.iter().find(|c| c.ship_id == *to).map(|c| c.name.clone());
+                    let name = to
+                        .and_then(|t| uplink.contacts.iter().find(|c| c.ship_id == t))
+                        .map(|c| c.name.clone());
                     uplink.chat.sent(*to, name.as_deref(), event_id, 0, None, false, true, at_s);
                     None
                 }
@@ -1219,7 +1257,8 @@ mod tests {
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
         let spoken = lc_proto::Spoken {
-            to: 7,
+            to: Some(7),
+            beamed: false,
             idem: 11,
             sealed: false,
             body: Some("are you there".into()),
@@ -1243,7 +1282,14 @@ mod tests {
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
         let spoken =
-            lc_proto::Spoken { to: 99, idem: 12, sealed: true, body: None, acks: Vec::new() };
+            lc_proto::Spoken {
+                to: Some(99),
+                beamed: false,
+                idem: 12,
+                sealed: true,
+                body: None,
+                acks: Vec::new(),
+            };
         fold(&mut uplink, &mut game, &mut ui, heard(98, 2, spoken, lc_proto::kind::MESSAGE));
 
         let line = &uplink.chat.get(ShipId(2)).expect("a conversation").lines[0];
@@ -1265,7 +1311,7 @@ mod tests {
             event_id: 4242,
             at_t: 2_000_000,
             order: Order::Say {
-                to: ShipId(2),
+                to: Some(ShipId(2)),
                 aim: lc_proto::Aim::Omni,
                 secrecy: lc_proto::Secrecy::Open,
                 body: "hello".into(),
@@ -1281,7 +1327,8 @@ mod tests {
 
         // And the acknowledgement, when it comes back, names it.
         let spoken = lc_proto::Spoken {
-            to: 7,
+            to: Some(7),
+            beamed: false,
             idem: 13,
             sealed: false,
             body: Some("got it".into()),
@@ -1299,7 +1346,8 @@ mod tests {
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
         assert!(!uplink.chat.holds_key(ShipId(2)));
         let spoken = lc_proto::Spoken {
-            to: 7,
+            to: Some(7),
+            beamed: false,
             idem: 0,
             sealed: false,
             body: Some(String::new()),

@@ -30,6 +30,7 @@ use lc_proto::{
     ACK_DEPTH, Aim, MESSAGE_LIMIT, MessageKey, Order, Outbound, Refusal, Said, Secrecy, ShipId,
     Spoken,
 };
+use glam::DVec3;
 use lc_world::craft::CraftId;
 use lc_world::motion::LIGHT_US_PER_LY;
 use lc_world::signal::{Beam, Transmitter};
@@ -52,7 +53,7 @@ pub const SIGNAL_POWER_W: f64 = 1.0e6;
 /// reasons — see [`crate::journal::Journal::record`] — and because the identifier is minted
 /// after the order is validated.
 pub(crate) struct Utterance {
-    to: ShipId,
+    to: Option<ShipId>,
     /// Which message this is, across its resends. Zero for a key offer, which nothing resends.
     idem: MessageKey,
     sealed: bool,
@@ -90,44 +91,34 @@ impl<J: Journal> Server<J> {
     ) -> Result<Transmission, Refusal> {
         match order {
             Order::Say { to, aim, secrecy, body, idem } => {
-                if body.is_empty() || body.len() > MESSAGE_LIMIT || *to == from {
+                // An empty body is allowed and is how a bare acknowledgement is spelled: a
+                // message whose whole content is the identifiers riding in its payload.
+                if body.len() > MESSAGE_LIMIT || *to == Some(from) {
                     return Err(Refusal::Impossible);
                 }
                 let sealed = matches!(secrecy, Secrecy::Sealed);
-                if sealed && !self.holds_key(id, *to, at) {
+                // Sealing needs somebody to seal it to. Refused rather than quietly sent in
+                // the open, which is the failure that matters.
+                let Some(addressee) = *to else {
+                    if sealed {
+                        return Err(Refusal::Impossible);
+                    }
+                    return self.transmission(id, aim, at, None, false, body, *idem, Vec::new());
+                };
+                if sealed && !self.holds_key(id, addressee, at) {
                     return Err(Refusal::NoKey);
                 }
-                let beam = self.beam_for(id, aim, at)?;
-                let acks = self.acks_for(id, *to, at);
-                let spoken = Spoken {
-                    to: to.0,
-                    idem: *idem,
-                    sealed,
-                    body: Some(body.clone()),
-                    acks: acks.clone(),
-                };
-                Ok(Transmission {
-                    kind: lc_proto::kind::MESSAGE,
-                    payload: serde_json::to_string(&spoken).unwrap_or_else(|_| "{}".into()),
-                    beam,
-                    said: Utterance {
-                        to: *to,
-                        idem: *idem,
-                        sealed,
-                        key: false,
-                        body: body.clone(),
-                        acks,
-                    },
-                    applied: order.clone(),
-                })
+                let acks = self.acks_for(id, addressee, at);
+                return self.transmission(id, aim, at, Some(addressee), sealed, body, *idem, acks);
             }
             Order::OfferKey { to, aim } => {
-                if *to == from {
+                if *to == Some(from) {
                     return Err(Refusal::Impossible);
                 }
                 let beam = self.beam_for(id, aim, at)?;
                 let spoken = Spoken {
-                    to: to.0,
+                    to: to.map(|t| t.0),
+                    beamed: !beam.is_omni(),
                     idem: 0,
                     sealed: false,
                     body: Some(String::new()),
@@ -153,6 +144,56 @@ impl<J: Journal> Server<J> {
         }
     }
 
+    /// The half of [`Server::compose`] that is the same whoever it is for.
+    #[allow(clippy::too_many_arguments)]
+    fn transmission(
+        &self,
+        id: CraftId,
+        aim: &Aim,
+        at: i64,
+        to: Option<ShipId>,
+        sealed: bool,
+        body: &str,
+        idem: MessageKey,
+        acks: Vec<i64>,
+    ) -> Result<Transmission, Refusal> {
+        let beam = self.beam_for(id, aim, at)?;
+                let spoken = Spoken {
+                    to: to.map(|t| t.0),
+                    // What a receiver answers in when it answers automatically. The
+                    // transmitter states it because nothing downstream can work it out: a
+                    // beam and a shout of the same power are the same light.
+                    beamed: !beam.is_omni(),
+                    idem,
+                    sealed,
+                    body: Some(body.to_string()),
+                    acks: acks.clone(),
+                };
+                Ok(Transmission {
+                    kind: lc_proto::kind::MESSAGE,
+                    payload: serde_json::to_string(&spoken).unwrap_or_else(|_| "{}".into()),
+                    beam,
+                    said: Utterance {
+                        to,
+                        idem,
+                        sealed,
+                        key: false,
+                        body: body.to_string(),
+                        acks,
+                    },
+                    applied: Order::Say {
+                        to,
+                        aim: *aim,
+                        secrecy: match sealed {
+                            true => Secrecy::Sealed,
+                            false => Secrecy::Open,
+                        },
+                        body: body.to_string(),
+                        idem,
+                    },
+                })
+    }
+
     /// Write a transmission into the conversations it belongs to, and schedule what it teaches.
     ///
     /// Everything here is stamped with the time the light **lands**, never the time it left.
@@ -172,7 +213,7 @@ impl<J: Journal> Server<J> {
         self.said.push(lc_store::chat::Message {
             event_id,
             sender: sender.0,
-            addressee: said.to.0,
+            addressee: said.to.map(|t| t.0),
             sealed: said.sealed,
             is_key: said.key,
             body: said.body.clone(),
@@ -266,6 +307,16 @@ impl<J: Journal> Server<J> {
                 Aim::Star(star) => {
                     let to = self.world.star_at(*star).ok_or(Refusal::Impossible)?;
                     (to * LIGHT_US_PER_LY - from).try_normalize().ok_or(Refusal::Impossible)?
+                }
+                // Straight back down a bearing, with no sighting consulted and none needed —
+                // which is the point of it. A dish knows which way a signal came in without
+                // knowing who sent it, so this can answer a craft the sender cannot see.
+                //
+                // Nothing is checked against the world here, and nothing needs to be: a
+                // direction is not a claim about anybody. It is aimed where the sender *was*
+                // when the light left, so a craft under thrust since is missed.
+                Aim::Bearing(along) => {
+                    DVec3::from_array(*along).try_normalize().ok_or(Refusal::Impossible)?
                 }
             };
             return Ok(Beam::along(axis, Transmitter::SHIP.half_angle_rad()));
@@ -373,8 +424,9 @@ impl<J: Journal> Server<J> {
             messages.push(Said {
                 event_id: m.event_id,
                 idem: m.idem.unwrap_or_default() as MessageKey,
-                with: ShipId(m.addressee),
-                with_name: name_of(m.addressee),
+                with: m.addressee.map(ShipId),
+                // A broadcast is in nobody's conversation, so there is nobody to name it with.
+                with_name: m.addressee.map(name_of).unwrap_or_else(|| "everyone".into()),
                 mine: true,
                 key: m.is_key,
                 sealed: m.sealed,
@@ -388,11 +440,11 @@ impl<J: Journal> Server<J> {
             if arrive_t > now {
                 continue;
             }
-            let readable = !m.sealed || m.addressee == ship.0;
+            let readable = !m.sealed || m.addressee == Some(ship.0);
             messages.push(Said {
                 event_id: m.event_id,
                 idem: m.idem.unwrap_or_default() as MessageKey,
-                with: ShipId(m.sender),
+                with: Some(ShipId(m.sender)),
                 with_name: name_of(m.sender),
                 mine: false,
                 key: m.is_key,
@@ -444,7 +496,7 @@ pub(crate) fn redact(kind: i16, payload: &str, observer: ShipId) -> String {
     let Ok(mut spoken) = serde_json::from_str::<Spoken>(payload) else {
         return payload.to_string();
     };
-    if spoken.sealed && spoken.to != observer.0 {
+    if spoken.sealed && spoken.to != Some(observer.0) {
         spoken.body = None;
     }
     serde_json::to_string(&spoken).unwrap_or_else(|_| payload.to_string())
@@ -490,7 +542,7 @@ mod tests {
 
     fn say(to: i64, aim: Aim, secrecy: Secrecy, body: &str) -> Order {
         // A fresh key per call, so two test messages are never taken for one.
-        Order::Say { to: ShipId(to), aim, secrecy, body: body.into(), idem: next_key() }
+        Order::Say { to: Some(ShipId(to)), aim, secrecy, body: body.into(), idem: next_key() }
     }
 
     /// Two ships a light-hour apart and a third beside the second. An open message is read by
@@ -512,7 +564,7 @@ mod tests {
         // Bry offers a key first, and the message waits for its light.
         wire.client_says(bry, Inbound::Act(Intent {
             ship_id: ShipId(2),
-            order: Order::OfferKey { to: ShipId(1), aim: Aim::Omni },
+            order: Order::OfferKey { to: Some(ShipId(1)), aim: Aim::Omni },
             issued_at_client_t: 0,
         }));
         server.tick(&mut wire).await.unwrap();
@@ -558,7 +610,7 @@ mod tests {
         let to_nosy = spoken(&wire.take(nosy));
         let (_, theirs) = to_nosy.iter().find(|(_, s)| s.sealed).expect("the eavesdropper heard it");
         assert_eq!(theirs.body, None, "an eavesdropper read a sealed message");
-        assert_eq!(theirs.to, 2, "and could still see who it was for");
+        assert_eq!(theirs.to, Some(2), "and could still see who it was for");
     }
 
     /// A beam is aimed and a bystander off it gets nothing at all — not a faint copy.
@@ -709,10 +761,18 @@ mod tests {
 
         for order in [
             say(1, Aim::Omni, Secrecy::Open, "hello me"),
-            say(2, Aim::Omni, Secrecy::Open, ""),
             say(2, Aim::Omni, Secrecy::Open, &"x".repeat(MESSAGE_LIMIT + 1)),
             // Nothing in sight to point at: the same answer an intercept gives.
             say(2, Aim::Ship(ShipId(2)), Secrecy::Open, "where are you"),
+            // Sealed to nobody. There is no key for "everyone", and sending it in the open
+            // instead would be the one failure that actually matters.
+            Order::Say {
+                to: None,
+                aim: Aim::Omni,
+                secrecy: Secrecy::Sealed,
+                body: "for nobody".into(),
+                idem: next_key(),
+            },
         ] {
             wire.client_says(client, Inbound::Act(Intent {
                 ship_id: ShipId(1),
@@ -726,5 +786,107 @@ mod tests {
             );
         }
         assert!(server.journal().messages.is_empty(), "a refused message was written down");
+    }
+
+    /// **An empty body is a message.** It is how a bare acknowledgement is spelled: nothing to
+    /// read, and the identifiers riding in its payload are the whole of what it carries.
+    #[tokio::test]
+    async fn a_message_with_no_body_is_sent_and_carries_its_acknowledgements() {
+        let mut wire = Loopback::new();
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let (ada, bry) = (ClientId(1), ClientId(2));
+        server.admit(ada, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+        server.admit(bry, crate::world::still(ShipId(2), DVec3::new(1.0e6, 0.0, 0.0)), 0.0);
+
+        // Ada says something, it lands, and Bry answers with nothing at all.
+        wire.client_says(ada, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: say(2, Aim::Omni, Secrecy::Open, "anyone there"),
+            issued_at_client_t: 0,
+        }));
+        for _ in 0..4 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let heard = spoken(&wire.take(bry));
+        let first = heard.first().expect("bry heard it").0;
+
+        wire.client_says(bry, Inbound::Act(Intent {
+            ship_id: ShipId(2),
+            order: say(1, Aim::Omni, Secrecy::Open, ""),
+            issued_at_client_t: server.now_t(),
+        }));
+        for _ in 0..4 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let back = spoken(&wire.take(ada));
+        let (_, ack) = back.last().expect("the acknowledgement arrived");
+        assert_eq!(ack.body.as_deref(), Some(""), "an empty body is still a body");
+        assert_eq!(ack.acks, vec![first], "an empty message is nothing but its acknowledgements");
+    }
+
+    /// A broadcast is addressed to nobody, heard by everyone in range, and in no conversation.
+    #[tokio::test]
+    async fn a_broadcast_reaches_everyone_and_is_addressed_to_no_one() {
+        let mut wire = Loopback::new();
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let (ada, bry, cass) = (ClientId(1), ClientId(2), ClientId(3));
+        server.admit(ada, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+        server.admit(bry, crate::world::still(ShipId(2), DVec3::new(1.0e6, 0.0, 0.0)), 0.0);
+        server.admit(cass, crate::world::still(ShipId(3), DVec3::new(0.0, 1.0e6, 0.0)), 0.0);
+
+        wire.client_says(ada, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Say {
+                to: None,
+                aim: Aim::Omni,
+                secrecy: Secrecy::Open,
+                body: "to whoever is listening".into(),
+                idem: next_key(),
+            },
+            issued_at_client_t: 0,
+        }));
+        for _ in 0..4 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        for (who, name) in [(bry, "bry"), (cass, "cass")] {
+            let heard = spoken(&wire.take(who));
+            let (_, said) = heard.first().unwrap_or_else(|| panic!("{name} heard nothing"));
+            assert_eq!(said.body.as_deref(), Some("to whoever is listening"));
+            assert_eq!(said.to, None, "a broadcast named an addressee");
+        }
+    }
+
+    /// The bearing aim answers down the line a signal came in on, without a sighting — which is
+    /// what lets a craft reply to something it cannot see.
+    #[tokio::test]
+    async fn a_bearing_is_aimed_without_consulting_any_sighting() {
+        let mut wire = Loopback::new();
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let (ada, bry, nosy) = (ClientId(1), ClientId(2), ClientId(3));
+        let far = DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0);
+        server.admit(ada, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+        server.admit(bry, crate::world::still(ShipId(2), far), 0.0);
+        server.admit(nosy, crate::world::still(ShipId(3), far + DVec3::new(0.0, 1.0e8, 0.0)), 0.0);
+
+        // Straight along +x, which is where Bry is and where the bystander is not.
+        wire.client_says(ada, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Say {
+                to: None,
+                aim: Aim::Bearing([1.0, 0.0, 0.0]),
+                secrecy: Secrecy::Open,
+                body: "down this line".into(),
+                idem: next_key(),
+            },
+            issued_at_client_t: 0,
+        }));
+        server.tick(&mut wire).await.unwrap();
+        while server.now_t() < TWO_LIGHT_HOURS as i64 + TICK_US * 2 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let to_bry = spoken(&wire.take(bry));
+        let (_, said) = to_bry.first().expect("the bearing did not land on the craft it faced");
+        assert!(said.beamed, "a beam did not say that it was one");
+        assert!(spoken(&wire.take(nosy)).is_empty(), "a bystander heard a beam it was not on");
     }
 }

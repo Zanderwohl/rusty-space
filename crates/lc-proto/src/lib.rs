@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 23;
+pub const PROTOCOL_VERSION: u32 = 24;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -283,7 +283,10 @@ pub struct Motion {
 /// carry the same energy; the beam concentrates it, so it is heard further along its axis and
 /// not at all off it. What that buys and what it costs is `lc_world::signal` and
 /// `lightcone/docs/05-observation.md`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Not `Eq`, because [`Aim::Bearing`] carries floats. Nothing compares two aims for equality;
+/// the interface compares its own choice of aim, which is a separate type for that reason.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Aim {
     /// In every direction. Reaches everyone in range, and tells all of them where you are.
     #[default]
@@ -297,6 +300,16 @@ pub enum Aim {
     /// At a star, by catalogue id: the whole system, for when you do not know where in it they
     /// are. A star does not manoeuvre, so this always lands — on everybody there.
     Star(u64),
+    /// Straight back along a bearing, as a unit vector in world axes.
+    ///
+    /// What a **directional antenna** can do that nothing else here can: answer a beam without
+    /// knowing who sent it or where they are, because the dish already knows which way the
+    /// signal came in. No sighting is needed and none is consulted.
+    ///
+    /// It is a bearing and not a target, so it is aimed at where the sender *was* when the
+    /// light left them — not where they will be when the answer arrives. A craft that has been
+    /// under thrust since is missed, and by more the further away it is. Appended last.
+    Bearing([f64; 3]),
 }
 
 /// Whether anyone but the addressee can read it.
@@ -397,17 +410,23 @@ pub enum Order {
     /// A player who conflates them broadcasts a private message in clear across a system, which
     /// is a mistake the interface should let them make.
     ///
-    /// Addressed to exactly one craft even when it is shouted omnidirectionally: a chat is with
-    /// somebody. The bystanders who hear an open one are eavesdroppers, and they see that.
-    /// Appended last.
-    Say { to: ShipId, aim: Aim, secrecy: Secrecy, body: String, idem: MessageKey },
+    /// `to` is **`None` for a broadcast**: something said to nobody in particular, which is
+    /// what the public channel sends. Everything else is addressed to one craft even when it is
+    /// shouted omnidirectionally — a chat is with somebody, and the bystanders who hear an open
+    /// one are eavesdroppers who can see that they are.
+    ///
+    /// A broadcast cannot be sealed. There is nobody for it to be sealed *to*, and the server
+    /// refuses the combination rather than quietly sending it in the open. Appended last.
+    Say { to: Option<ShipId>, aim: Aim, secrecy: Secrecy, body: String, idem: MessageKey },
     /// Put your public key on the air, so `to` can seal messages to you.
     ///
     /// A message like any other, and that is the mechanic rather than an implementation note:
     /// it travels at `c`, so a key sent across four light-years is usable four years later, and
     /// an omnidirectional offer hands it to everyone in range at the same time. Nobody starts
     /// holding anybody's key — first contact is loud by necessity. Appended last.
-    OfferKey { to: ShipId, aim: Aim },
+    /// `to` is `None` to offer it to **whoever hears it**, which is what the public channel
+    /// does: anyone in range can answer in private from then on.
+    OfferKey { to: Option<ShipId>, aim: Aim },
 }
 
 /// A client's request. Never authoritative about anything.
@@ -458,8 +477,17 @@ pub struct DriveChange {
 /// rests on an event being a point.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Spoken {
-    /// Who it was addressed to. Everyone else in earshot is an eavesdropper.
-    pub to: i64,
+    /// Who it was addressed to, or `None` for a broadcast. Everyone else in earshot is an
+    /// eavesdropper.
+    pub to: Option<i64>,
+    /// Whether it went out as a beam rather than in every direction.
+    ///
+    /// A byte the transmitter sets, which is how a receiver can answer in the mode it was
+    /// spoken to in without knowing anything about the sender. Pair it with the bearing the
+    /// signal arrived on — [`Sighting::direction`] — and a dish can reply down the same line it
+    /// listened on. See [`Aim::Bearing`].
+    #[serde(default)]
+    pub beamed: bool,
     /// Which message this is, across however many times it was transmitted. See
     /// [`MessageKey`]; a receiver that has this one already shows one line, not two.
     #[serde(default)]
@@ -500,8 +528,9 @@ pub struct Said {
     /// Named apart from [`Said::key`], which is a different thing entirely: that one says the
     /// message *is* a public key being handed over.
     pub idem: MessageKey,
-    /// The other craft in this conversation: who it went to, or who it came from.
-    pub with: ShipId,
+    /// The other craft in this conversation: who it went to, or who it came from. `None` for a
+    /// broadcast this ship sent, which is in nobody's conversation and only in the public log.
+    pub with: Option<ShipId>,
     /// What to call them. Carried because a backlog names craft that are nowhere in sight, and
     /// there is no contact to read a name off.
     pub with_name: String,
@@ -1218,7 +1247,7 @@ mod tests {
         Inbound::Act(Intent {
             ship_id: ShipId(42),
             order: Order::Say {
-                to: ShipId(7),
+                to: Some(ShipId(7)),
                 aim: Aim::Ship(ShipId(7)),
                 secrecy: Secrecy::Sealed,
                 body: "well?".into(),
@@ -1322,7 +1351,7 @@ mod tests {
                 messages: vec![Said {
                     event_id: 9,
                     idem: 99,
-                    with: ShipId(7),
+                    with: Some(ShipId(7)),
                     with_name: "Ada".into(),
                     mine: false,
                     key: false,
@@ -1368,7 +1397,7 @@ mod tests {
             Inbound::Act(Intent {
                 ship_id: ShipId(42),
                 order: Order::Say {
-                    to: ShipId(7),
+                    to: None,
                     aim: Aim::Star(0x0123_4567_89ab_cdef),
                     secrecy: Secrecy::Open,
                     body: String::new(),
@@ -1378,7 +1407,7 @@ mod tests {
             }),
             Inbound::Act(Intent {
                 ship_id: ShipId(42),
-                order: Order::OfferKey { to: ShipId(7), aim: Aim::Omni },
+                order: Order::OfferKey { to: Some(ShipId(7)), aim: Aim::Omni },
                 issued_at_client_t: 0,
             }),
         ];

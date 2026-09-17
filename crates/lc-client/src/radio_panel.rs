@@ -98,6 +98,10 @@ pub(crate) fn chat(
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                 ui.set_min_width(LIST_WIDTH - 8.0);
+                // Justified, so every entry is the width of the column rather than the width
+                // of its own name. A list whose click targets are each a different size reads
+                // as a pile of labels; one where they line up reads as a list.
+                ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
                 if ui
                     .selectable_label(showing == Channel::Public, "Public")
                     .on_hover_text("everything said in the open, to and from everyone")
@@ -126,12 +130,23 @@ pub(crate) fn chat(
                         false => "no server",
                     });
                 }
+                });
             });
         },
         );
         ui.separator();
         ui.vertical(|ui| match showing {
-            Channel::Public => public_log(ui, uplink, &own, out),
+            Channel::Public => {
+                let star = state.0.selected;
+                // No craft to aim at, so that choice is not offered: a beam at one ship is not
+                // a broadcast, whatever the panel is showing.
+                if *aimed == Aimed::AtThem || (*aimed == Aimed::AtTheSelectedStar && star.is_none())
+                {
+                    *aimed = Aimed::Omni;
+                }
+                public_log(ui, uplink, &own, out);
+                compose(ui, game, uplink, None, star, false, aim_of(*aimed, None, star), draft, aimed, seal, out);
+            }
             Channel::With(with) => {
                 let star = state.0.selected;
                 let in_sight = uplink.contacts.iter().any(|c| c.ship_id == with);
@@ -144,9 +159,11 @@ pub(crate) fn chat(
                 {
                     *aimed = Aimed::Omni;
                 }
-                let aim = aim_of(*aimed, with, star);
+                let aim = aim_of(*aimed, Some(with), star);
                 conversation(ui, uplink, with, &own, aim, out);
-                compose(ui, game, uplink, with, star, in_sight, aim, draft, aimed, seal, out);
+                compose(
+                    ui, game, uplink, Some(with), star, in_sight, aim, draft, aimed, seal, out,
+                );
             }
         });
     });
@@ -161,7 +178,7 @@ fn public_log(
     out: &mut MessageWriter<Requested>,
 ) {
     let lines = uplink.chat.public();
-    log_area(ui, "chat_public", BODY_HEIGHT, |ui| {
+    log_area(ui, "chat_public", BODY_HEIGHT - COMPOSER_HEIGHT, |ui| {
         if lines.is_empty() {
             ui.weak("Nothing has been said in the open.");
             return;
@@ -176,14 +193,20 @@ fn public_log(
                 body_of(ui, line, line.mine);
                 // Who it was *to*, which a public log needs and a conversation does not: the
                 // same open message read here has no other way of saying who it was for.
-                if line.mine {
-                    ui.weak(format!("to {name}"));
-                } else if ui
-                    .small_button("reply")
-                    .on_hover_text("open this conversation")
-                    .clicked()
-                {
-                    ask(out, Action::ChatWith(Channel::With(*with)));
+                match (line.mine, with) {
+                    (true, _) => {
+                        ui.weak(format!("to {name}"));
+                    }
+                    (false, Some(with)) => {
+                        if ui
+                            .small_button("reply")
+                            .on_hover_text("open this conversation")
+                            .clicked()
+                        {
+                            ask(out, Action::ChatWith(Channel::With(*with)));
+                        }
+                    }
+                    (false, None) => {}
                 }
             });
         }
@@ -231,7 +254,7 @@ fn conversation(
                         }
                         false if unacknowledged(ui, line.event_ids.len()).clicked() => {
                             ask(out, Action::Say {
-                                to: with,
+                                to: Some(with),
                                 aim,
                                 // The original's, never the panel's. A message sent encrypted
                                 // must not become one sent in the open by a second click.
@@ -282,6 +305,24 @@ fn speaker(ui: &mut egui::Ui, name: &str, mine: bool) {
     ui.colored_label(colour, format!("{name}:"));
 }
 
+/// What a message's tooltip says: when this ship learnt of it, and how loud it was.
+///
+/// Two facts and no more. Both are about the *reception* rather than the message — a signal is
+/// something that arrived somewhere at some strength, and everything else on the line is what
+/// it said.
+fn reception(line: &crate::chat::Line) -> String {
+    let Some(arrived) = line.arrive_s else {
+        return "Sent. Nothing here can see it land.".to_string();
+    };
+    let when = format!("Received T + {:.2} years", arrived / crate::flight::JULIAN_YEAR_S);
+    match line.decibels() {
+        Some(db) => format!("{when}\n{db:.1} dB, after {} in flight", duration((arrived - line.sent_s).max(0.0))),
+        // A transcript read back from the store has no strength: how loudly a signal landed is
+        // a fact about one receiver, and what is written down is what was said.
+        None => format!("{when}\nsignal strength not recorded"),
+    }
+}
+
 fn body_of(ui: &mut egui::Ui, line: &crate::chat::Line, mine: bool) {
     let colour = match mine {
         true => egui::Color32::from_rgb(170, 190, 200),
@@ -295,10 +336,7 @@ fn body_of(ui: &mut egui::Ui, line: &crate::chat::Line, mine: bool) {
         // that somebody in earshot is talking in private.
         (None, _) => ui.weak("(encrypted, and not for this ship)"),
     }
-    .on_hover_text(match line.arrive_s {
-        Some(arrived) => format!("{} in flight", duration((arrived - line.sent_s).max(0.0))),
-        None => "sent; nothing here can see it land".to_string(),
-    });
+    .on_hover_text(reception(line));
 }
 
 /// The warning on a message nothing has acknowledged, which is also the button that resends it.
@@ -334,8 +372,8 @@ fn unacknowledged(ui: &mut egui::Ui, sends: usize) -> egui::Response {
     response.on_hover_text(match sends {
         // A resend is a second pulse of light, not a retry of a failed one: nothing failed, and
         // nothing at either end can tell a message that missed from one still crossing.
-        1 => "nothing has acknowledged this. Click to send it again".to_string(),
-        n => format!("sent {n} times, still unacknowledged. Click to send it again"),
+        1 => "Not ACKed. Click to re-send.".to_string(),
+        n => format!("Not ACKed. Click to re-send. (sent {n} times)"),
     })
 }
 
@@ -345,7 +383,8 @@ fn compose(
     ui: &mut egui::Ui,
     game: &Game,
     uplink: &crate::uplink::Uplink,
-    with: lc_proto::ShipId,
+    // `None` on the public channel: addressed to nobody, and nobody's key to encrypt with.
+    with: Option<lc_proto::ShipId>,
     star: Option<StarId>,
     in_sight: bool,
     aim: lc_proto::Aim,
@@ -355,17 +394,21 @@ fn compose(
     out: &mut MessageWriter<Requested>,
 ) {
     ui.separator();
-    let holds_key = uplink.chat.holds_key(with);
+    let holds_key = with.is_some_and(|with| uplink.chat.holds_key(with));
 
     ui.horizontal(|ui| {
         ui.selectable_value(aimed, Aimed::Omni, "omni")
             .on_hover_text("every direction: heard by everyone in range, and it says where you are");
-        ui.add_enabled_ui(in_sight, |ui| {
-            ui.selectable_value(aimed, Aimed::AtThem, "beam").on_hover_text(match in_sight {
-                true => "aimed where they are predicted to be; a craft under thrust is missed",
-                false => "nothing in sight to aim at",
+        // Not offered at all on the public channel: aiming a broadcast at one ship is not a
+        // broadcast, and an option that contradicts the channel is worse than a missing one.
+        if with.is_some() {
+            ui.add_enabled_ui(in_sight, |ui| {
+                ui.selectable_value(aimed, Aimed::AtThem, "beam").on_hover_text(match in_sight {
+                    true => "aimed where they are predicted to be; a craft under thrust is missed",
+                    false => "nothing in sight to aim at",
+                });
             });
-        });
+        }
         ui.add_enabled_ui(star.is_some(), |ui| {
             let name = star
                 .and_then(|id| game.star(id))
@@ -378,9 +421,12 @@ fn compose(
     });
     ui.horizontal(|ui| {
         ui.add_enabled_ui(holds_key, |ui| {
-            ui.checkbox(seal, "encrypt").on_hover_text(match holds_key {
-                true => "only they can read it",
-                false => "this ship does not hold their key yet",
+            ui.checkbox(seal, "encrypt").on_hover_text(match (with, holds_key) {
+                (_, true) => "only they can read it",
+                (Some(_), false) => "this ship does not hold their key yet",
+                // There is nobody for a broadcast to be encrypted to, and the server refuses
+                // the combination rather than quietly sending it in the open.
+                (None, false) => "a broadcast is addressed to nobody, so there is nobody to encrypt it for",
             });
         });
         if !holds_key {
@@ -388,10 +434,30 @@ fn compose(
         }
         if ui
             .button("send key")
-            .on_hover_text("so they can encrypt messages back; it travels at c like anything else")
+            .on_hover_text(match with {
+                Some(_) => "so they can encrypt messages back; it travels at c like anything else",
+                // The reason to put a key on the public channel at all: it is the only way
+                // somebody you have never spoken to can open a private conversation with you.
+                None => "to whoever hears it, so anyone in range can answer in private",
+            })
             .clicked()
         {
             ask(out, Action::OfferKey { to: with, aim });
+        }
+        // One craft, one standing answer. Never on the public channel: a ship that answered
+        // every broadcast it heard would announce its position to everything in range.
+        if let Some(with) = with {
+            let mut on = uplink.chat.auto_acks(with);
+            if ui
+                .checkbox(&mut on, "auto-ack")
+                .on_hover_text(
+                    "answer anything they say with an empty acknowledgement, in the mode it \
+                     arrived in. A beam is answered down the bearing it came in on",
+                )
+                .changed()
+            {
+                ask(out, Action::AutoAck { with, on });
+            }
         }
     });
 
@@ -424,10 +490,14 @@ fn compose(
     }
 }
 
-fn aim_of(aimed: Aimed, with: lc_proto::ShipId, star: Option<StarId>) -> lc_proto::Aim {
+fn aim_of(aimed: Aimed, with: Option<lc_proto::ShipId>, star: Option<StarId>) -> lc_proto::Aim {
     match (aimed, star) {
         (Aimed::Omni, _) => lc_proto::Aim::Omni,
-        (Aimed::AtThem, _) => lc_proto::Aim::Ship(with),
+        (Aimed::AtThem, _) => match with {
+            Some(with) => lc_proto::Aim::Ship(with),
+            // Nobody to aim at, which the public channel never offers.
+            None => lc_proto::Aim::Omni,
+        },
         (Aimed::AtTheSelectedStar, Some(star)) => lc_proto::Aim::Star(star.get()),
         // The star went away between the choice and the click. Shouting is the safe fallback:
         // a beam with nothing to aim at is refused, and being refused is worse than being loud.

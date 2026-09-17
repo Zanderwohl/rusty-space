@@ -144,6 +144,15 @@ rather than "what did we two say". Encrypted messages are absent from it whichev
 from, this ship's own included, because a private message in a public log is one somebody can
 read over your shoulder.
 
+Public can transmit, and what it offers is narrower than a conversation's. There is no craft to
+aim at, so "beam" is not shown at all rather than shown and disabled — an option that contradicts
+the channel is worse than a missing one. Omni and a beam at the selected star remain, and so does
+**send key**, which is the point of putting one out in the open: anyone in range can answer in
+private from then on.
+
+Every entry in the list is the width of the column rather than the width of its own name. A list
+whose click targets are each a different size reads as a pile of labels.
+
 Both halves scroll inside a **fixed body**, so the window is the same size with one message in it
 and with two hundred. That matters more here than in most panels, because what fills it arrives
 without being asked for.
@@ -155,6 +164,19 @@ is the only delivery report there is, and why a resend is a second pulse of ligh
 retry. The triangle is *painted* rather than typed: the obvious glyph is U+26A0 and the default
 font draws a tofu box for it, which is the trap that has already cost this interface a close
 button and a pair of arrows.
+
+Hovering a message gives two lines and no more, both about the *reception* rather than the
+message: when this ship learnt of it, and how loud it was in dB. The strength is referred to one
+strength unit — the same arbitrary scale the noise floor is quoted in — so it means something
+compared to another signal, which is how anybody reads a dB figure anyway. A message read back
+from a transcript has no reading at all, because how loudly a signal landed is a fact about one
+receiver and what is written down is what was said.
+
+**auto-ack** answers that craft automatically, in the mode it was spoken to in; see
+[05-observation.md](05-observation.md#answering-automatically-and-the-bearing-a-dish-answers-on)
+for the bearing a beam is answered on and for why an acknowledgement is never itself
+acknowledged. It is per craft and never on the public channel: a ship that answered every
+broadcast it heard would announce its position to everything in range.
 
 A resend keeps the original's encryption and takes the panel's **current aim**. That asymmetry is
 the point of the button: the usual reason a message went unacknowledged is a beam aimed where a

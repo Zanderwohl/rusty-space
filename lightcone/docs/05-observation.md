@@ -380,6 +380,42 @@ The key is a hash of who sent it, when, and what it said. Not a sequence number:
 not agree about how many messages exist, because half of them are in flight, so a counter would
 need reconciling against something that is not there.
 
+### Answering automatically, and the bearing a dish answers on
+
+A ship can be set to acknowledge one craft automatically: anything that craft says comes back
+answered, with an empty body whose whole content is the identifiers riding in its payload. An
+empty message is a real message here, and this is what it is for.
+
+**In the mode it was spoken in.** Every transmission states whether it went out as a beam — one
+byte, set by the transmitter, because nothing downstream can work it out: a beam and a shout of
+the same power are the same light. A beam is answered down the **bearing it arrived on**, which
+a directional antenna knows without knowing who sent it or where they are. That aim needs no
+sighting and consults none, so a craft can answer something it cannot see.
+
+It is a bearing and not a target, and the difference is the mechanic: it points where the sender
+*was* when the light left, not where they will be when the answer lands. A craft under thrust in
+between is missed, and by more the further away it is.
+
+**A bare acknowledgement is never itself acknowledged.** Two ships each answering the other
+automatically would trade light for ever, at whatever the round trip between them is, with no
+pilot present at either end. Only a message with something in it earns an answer, and a resend
+earns one answer rather than one per attempt.
+
+It is off for every craft until it is asked for. A ship that answered everything it heard would
+announce its position to everything in range the moment anybody pinged it.
+
+### Saying it to nobody
+
+A message need not be addressed to anyone. A broadcast is something said to no one in
+particular: everyone in range hears it, anyone may answer, and it is in nobody's conversation
+because there is no conversation it is part of.
+
+A broadcast cannot be encrypted — there is nobody to encrypt it *to* — and the combination is
+refused rather than quietly sent in the open, which is the failure that would matter. What a
+broadcast *can* carry is a public key, offered to whoever hears it, and that is the only way
+somebody you have never spoken to can open a private channel with you. First contact is loud by
+necessity, and this is the shape of the loudness.
+
 ## Interferometry
 
 Two instruments separated by a baseline `B` resolve `lambda / B`. At the scales available here

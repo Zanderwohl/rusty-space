@@ -16,8 +16,9 @@ use tokio_postgres::{Client, Error};
 pub struct Message {
     pub event_id: i64,
     pub sender: i64,
-    /// Who it was addressed to, which is not who heard it.
-    pub addressee: i64,
+    /// Who it was addressed to, which is not who heard it. `None` for a broadcast: something
+    /// said to nobody in particular, which everyone in range hears.
+    pub addressee: Option<i64>,
     pub sealed: bool,
     /// A key offer: a message with nothing in it, kept in the same transcript because that is
     /// where a player looks for it.
@@ -251,7 +252,7 @@ mod tests {
         Message {
             event_id,
             sender: from,
-            addressee: to,
+            addressee: Some(to),
             sealed: false,
             is_key: false,
             body: body.into(),

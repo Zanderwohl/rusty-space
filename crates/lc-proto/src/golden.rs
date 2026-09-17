@@ -9,7 +9,7 @@
 
 /// `Outbound::Welcome { .., ship: Motion { at [4.2, 0, 0], holding a 12 Mm orbit of Earth } }`
 pub const WELCOME: &[u8] = &[
-    0, 7, 23, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+    0, 7, 24, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
     204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -35,7 +35,7 @@ pub const ACT: &[u8] = &[
 /// Pinned because it is now the message that decides whether anyone gets in at all. A
 /// field moving here is a server reading someone else's ticket as this one's.
 pub const HELLO: &[u8] = &[
-    0, 23, 5, 97, 46, 98, 46, 99,
+    0, 24, 5, 97, 46, 98, 46, 99,
 ];
 
 pub const SET_COURSE: &[u8] = &[
@@ -79,10 +79,11 @@ pub const PRESENT: &[u8] = &[
 /// sealed message released in clear.
 ///
 /// The third byte is the order's discriminant, and it has already earned its keep: merging
-/// the refit work moved `Say` from 7 to 9, and this is what said so.
+/// the refit work moved `Say` from 7 to 9, and this is what said so. The `1` after it is the
+/// `Some` of an optional addressee — a broadcast writes a `0` there and nothing else moves.
 pub const SAY: &[u8] = &[
-    1, 84, 9, 14, 1, 14, 1, 5, 119, 101, 108, 108, 63, 240, 189, 243, 213, 137, 207, 149, 154,
-    18, 128, 137, 122,
+    1, 84, 9, 1, 14, 1, 14, 1, 5, 119, 101, 108, 108, 63, 240, 189, 243, 213, 137, 207, 149,
+    154, 18, 128, 137, 122,
 ];
 
 /// `Outbound::Welcome { .., ship: Motion { .., motive: Rendezvous { target: 7, .. } } }`
@@ -95,7 +96,7 @@ pub const SAY: &[u8] = &[
 /// Pinned beside the rendezvous for the same reason, and one more: its acceleration is the
 /// only number on this wire that is a *measurement* of somebody else's burn.
 pub const ESCORT: &[u8] = &[
-    0, 7, 23, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+    0, 7, 24, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
     204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -113,7 +114,7 @@ pub const ESCORT: &[u8] = &[
 ];
 
 pub const RENDEZVOUS: &[u8] = &[
-    0, 7, 23, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+    0, 7, 24, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
     204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -132,7 +133,7 @@ pub const RENDEZVOUS: &[u8] = &[
 ///
 /// The rendezvous numbers in a falling frame, pinned for the rendezvous's reason.
 pub const CONSORT: &[u8] = &[
-    0, 7, 23, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+    0, 7, 24, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
     204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
