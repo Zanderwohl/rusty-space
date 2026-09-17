@@ -192,8 +192,12 @@ A ticket is a signed JWT with a deliberately hostile shape:
   round trip, not a session.
 - **single use.** The game server records the `jti` until it expires. A replayed ticket is
   refused, so a ticket in a log or a screenshot is worth nothing a minute later.
-- **claims** `sub` (account id), `name`, `iat`, `exp`, `aud`, `jti`. Nothing else. A claim the
-  game does not need is a claim that leaks.
+- **claims** `sub` (account id), `name`, `iat`, `exp`, `aud`, `jti`, `perm`. Nothing else. A
+  claim the game does not need is a claim that leaks.
+- **`perm`** is the account's permission level, from `accounts.permission`: 0 a player, 1 an
+  admin. An integer because it will grow into levels or groups. The broker only carries it; a
+  game server decides what a level allows, and today a shard lets an admin issue development
+  actions. There is no interface for it: the first admin was set by migration `0003`.
 
 The native client cannot rely on a website session. It opens the **system browser** at the same
 `/signin`, with a loopback `return_to`, takes the code, and exchanges it for a long-lived
