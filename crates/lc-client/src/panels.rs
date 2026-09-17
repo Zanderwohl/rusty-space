@@ -71,7 +71,23 @@ pub fn hud(
         }
         ui.horizontal(|ui| {
             ui.weak(&lines.ship_clock);
-            if let Some(flight) = &lines.flight {
+            // A pursuit takes the crossing's place and its button: × is no further corrections,
+            // which for a pursuit means giving up the policy as well as cutting the drive.
+            if let Some(pursuit) = uplink.chasing {
+                let quarry = uplink.contacts.iter().find(|c| c.ship_id == pursuit.quarry);
+                ui.separator();
+                ui.colored_label(
+                    egui::Color32::from_rgb(130, 200, 250),
+                    hud::pursuit(&game.0, pursuit, quarry),
+                );
+                if ui.small_button("×").on_hover_text("break off: no further corrections").clicked() {
+                    ask(&mut out, Action::BreakOff);
+                }
+                let (label, hint, next) = closer(pursuit.closeness);
+                if ui.small_button(label).on_hover_text(hint).clicked() {
+                    ask(&mut out, Action::Intercept(pursuit.quarry, next));
+                }
+            } else if let Some(flight) = &lines.flight {
                 ui.separator();
                 ui.colored_label(egui::Color32::from_rgb(130, 200, 250), flight);
                 // No confirmation. Cutting the engine is not destructive -- the ship keeps its
@@ -100,6 +116,19 @@ pub fn hud(
                     ui.label(&note.text);
                 }
             });
+    }
+}
+
+/// The button that changes a pursuit's closeness: what it says, what it does, and what it asks
+/// for.
+fn closer(now: lc_proto::Closeness) -> (&'static str, &'static str, lc_proto::Closeness) {
+    match now {
+        lc_proto::Closeness::Company => {
+            ("close in", "within sight: a kilometre between hulls", lc_proto::Closeness::Intimate)
+        }
+        lc_proto::Closeness::Intimate => {
+            ("stand off", "back to formation distance", lc_proto::Closeness::Company)
+        }
     }
 }
 
@@ -524,30 +553,39 @@ fn ships(
     egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
         for contact in rows {
             let range = here.distance(contact.position_ly);
-            let chasing = uplink.chasing == Some(contact.ship_id);
+            let chasing = uplink.chasing.filter(|p| p.quarry == contact.ship_id);
             ui.horizontal(|ui| {
                 ui.label(&contact.name);
                 ui.weak(span(range));
                 // Inline rather than right-aligned: a right-to-left layout claims the whole
                 // available width, and the panel grew to a third of the screen to hold one
                 // button.
-                if chasing {
-                    if ui.button("break off").clicked() {
-                        ask(out, Action::BreakOff);
+                match chasing {
+                    Some(pursuit) => {
+                        if ui.button("break off").clicked() {
+                            ask(out, Action::BreakOff);
+                        }
+                        let (label, hint, next) = closer(pursuit.closeness);
+                        if ui.button(label).on_hover_text(hint).clicked() {
+                            ask(out, Action::Intercept(contact.ship_id, next));
+                        }
                     }
-                } else if ui.button("intercept").clicked() {
-                    ask(out, Action::Intercept(contact.ship_id));
+                    None => {
+                        if ui.button("intercept").clicked() {
+                            ask(out, Action::Intercept(contact.ship_id, lc_proto::Closeness::Company));
+                        }
+                    }
                 }
             });
             ui.horizontal(|ui| {
                 ui.add_space(12.0);
-                if chasing {
+                if chasing.is_some() {
                     // What the ship is *doing* rather than what was asked for: a standing
                     // order and the approach it most recently produced are different facts,
                     // and only the second one says where the ship will actually be.
-                    ui.weak(match game.ship.motion.pursuing() {
-                        Some(_) => "closing",
-                        None => "alongside",
+                    ui.weak(match game.ship.motion.still_closing(game.coordinate_time_s()) {
+                        true => "closing",
+                        false => "alongside",
                     });
                 }
                 ui.weak(format!(

@@ -312,12 +312,21 @@ impl Waypoint {
 
     /// How fast the station is moving, metres a second, world frame.
     ///
-    /// Differenced rather than differentiated: a waypoint is a closed form but three different
-    /// ones, and the same central difference serves all of them. Only cancelling asks for this,
-    /// so the two extra propagations cost nothing anyone can see.
+    /// **An orbit's is analytic**: the body's velocity as em-sim states it, plus the circle's.
+    /// That is the convention [`crate::coast::Coast`] reads and writes a velocity in, so a ship
+    /// cutting its drive on a station goes onto that very circle, and a craft reckoning a quarry
+    /// on one along a conic — see [`crate::consort`] — stays on it. Differencing positions
+    /// instead read em-sim's own inconsistency between the two back in (nine metres a second
+    /// about Jupiter), and at four light-years out, where a light-year coordinate is only good to
+    /// eight metres, it read a metre and a half a second of rounding as well.
+    ///
+    /// Anything else is differenced: a closed form, but several different ones, and the same
+    /// central difference serves all of them.
     pub fn velocity_at(&self, system: &LocalSystem, seconds: f64) -> Option<DVec3> {
-        if matches!(self, Waypoint::Fixed(_)) {
-            return Some(DVec3::ZERO);
+        match self {
+            Waypoint::Fixed(_) => return Some(DVec3::ZERO),
+            Waypoint::Orbit(orbit) => return orbit.velocity_at(system, seconds),
+            Waypoint::Lagrange { .. } | Waypoint::Libration(_) => {}
         }
         let step =
             self.period_s(system, seconds).map(|p| p / 4096.0).unwrap_or(1.0).clamp(1.0e-3, 60.0);
@@ -388,15 +397,34 @@ impl Orbit {
         self.rate(mu) * seconds + self.phase_rad
     }
 
+    /// How fast a craft on it is moving, metres a second, world frame. See
+    /// [`Waypoint::velocity_at`].
+    fn velocity_at(&self, system: &LocalSystem, seconds: f64) -> Option<DVec3> {
+        let (_, mu) = self.centre_of_at(system, seconds)?;
+        let index = self.centre_index(system)?;
+        let (_, carried) = system.body_state_at(index, seconds)?;
+        if self.radius_m <= 0.0 || mu <= 0.0 {
+            return None;
+        }
+        let theta = self.angle_at(seconds, mu);
+        let (u, v) = basis(self.pole);
+        let along = v * theta.cos() - u * theta.sin();
+        Some(carried + along * self.rate(mu) * self.radius_m)
+    }
+
+    fn centre_index(&self, system: &LocalSystem) -> Option<em_sim::id::BodyIndex> {
+        match &self.about {
+            Anchor::Star => Some(system.primary()),
+            Anchor::Body(name) => system.body_named(name),
+        }
+    }
+
     /// Where the orbit is centred, light-years, and the `mu` that sets its rate.
     ///
     /// `G m` of the centre, not `System::mu`, which is the `mu` of the orbit the centre itself
     /// is on — `G(M_sun + M_earth)` for Earth. Using it put a low Earth orbit at eleven seconds.
     fn centre_of_at(&self, system: &LocalSystem, seconds: f64) -> Option<(DVec3, f64)> {
-        let index = match &self.about {
-            Anchor::Star => system.primary(),
-            Anchor::Body(name) => system.body_named(name)?,
-        };
+        let index = self.centre_index(system)?;
         let (at_m, _) = system.body_state_at(index, seconds)?;
         let at = system.origin_ly + at_m / M_PER_LY;
         Some((at, system.sim().gravitational_constant() * system.sim().mass(index)))

@@ -20,9 +20,17 @@
 //! exactly the property everything else is built to preserve. Postcard writes an f64 as its
 //! eight bytes and reads them back.
 
+use std::collections::HashMap;
+
+use glam::DVec3;
+use lc_proto::ShipId;
 use lc_store::ships::Ship;
 use lc_world::craft::{Craft, CraftId, Kind};
 use serde::{Deserialize, Serialize};
+
+use crate::chase::Pursuit;
+use crate::journal::Journal;
+use crate::server::{Server, TICK_US};
 
 /// A craft, as JSON in [`Ship::state`].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -35,6 +43,20 @@ pub struct Saved {
     /// one that was saved would be a silent loss nobody would think to look for.
     pub length_m: f64,
     pub motion: lc_proto::Motion,
+    /// The standing intercept it was flying, which outlives the process as it outlives the
+    /// pilot's connection. Appended in format 3.
+    pub pursuit: Option<lc_proto::Pursuit>,
+}
+
+/// [`Saved`] as format 2 wrote it, before a pursuit was kept. Read and never written, so the
+/// shards already running do not refuse every account they have.
+#[derive(Deserialize)]
+struct SavedV2 {
+    kind: u8,
+    name: Option<String>,
+    noise_floor: f32,
+    length_m: f64,
+    motion: lc_proto::Motion,
 }
 
 /// What wrote a row's bytes, and a contract rather than a note.
@@ -46,7 +68,10 @@ pub struct Saved {
 /// otherwise** — deliberately not [`lc_proto::PROTOCOL_VERSION`], which moves for reasons that
 /// have nothing to do with how a craft is stored. Bumping it makes every existing row
 /// unreadable, which is the point and is also the cost.
-pub const SAVE_FORMAT: i32 = 2;
+pub const SAVE_FORMAT: i32 = 3;
+
+/// The oldest format still read. See [`decode`].
+pub const OLDEST_FORMAT: i32 = 2;
 
 /// Everything a shard needs to come back: the clock, the counter, and the craft.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -71,14 +96,20 @@ pub struct Unreadable {
     pub why: String,
 }
 
-/// Turn a craft and its account into a row.
-pub fn save(craft: &Craft, account: Option<&str>, saved_t: i64) -> Ship {
+/// Turn a craft, its account and its standing intercept into a row.
+pub fn save(
+    craft: &Craft,
+    account: Option<&str>,
+    pursuit: Option<lc_proto::Pursuit>,
+    saved_t: i64,
+) -> Ship {
     let saved = Saved {
         kind: kind_code(craft.kind),
         name: craft.name.clone(),
         noise_floor: craft.noise_floor,
         length_m: craft.length_m,
         motion: (&craft.motion.snapshot()).into(),
+        pursuit,
     };
     Ship {
         ship_id: craft.id.0,
@@ -96,10 +127,7 @@ pub fn save(craft: &Craft, account: Option<&str>, saved_t: i64) -> Ship {
 /// it — and solving those as though they were current puts the ship on an orbit it is not on.
 /// The caller advances from here to now; see [`crate::server::Server::adopt`].
 pub fn load(row: &Ship, system: Option<&lc_world::system::LocalSystem>) -> Result<Craft, String> {
-    if row.format != SAVE_FORMAT {
-        return Err(format!("format {} is not {SAVE_FORMAT}", row.format));
-    }
-    let saved: Saved = lc_proto::decode(&row.state).map_err(|why| why.to_string())?;
+    let saved = decode(row)?;
     let kind = kind_of(saved.kind).ok_or_else(|| format!("unknown craft kind {}", saved.kind))?;
     let snapshot = lc_world::resume::Snapshot::from(&saved.motion);
     let mut craft = Craft::at(CraftId(row.ship_id), kind, snapshot.position_ly);
@@ -114,6 +142,25 @@ pub fn load(row: &Ship, system: Option<&lc_world::system::LocalSystem>) -> Resul
     // records its stretches like any other, and `catch_up` fills the gap to now with real ones.
     craft.motion = snapshot.restore(system, row.saved_t as f64 * 1.0e-6);
     Ok(craft)
+}
+
+/// A row's bytes, in whichever format wrote them.
+pub fn decode(row: &Ship) -> Result<Saved, String> {
+    match row.format {
+        SAVE_FORMAT => lc_proto::decode(&row.state).map_err(|why| why.to_string()),
+        OLDEST_FORMAT => {
+            let old: SavedV2 = lc_proto::decode(&row.state).map_err(|why| why.to_string())?;
+            Ok(Saved {
+                kind: old.kind,
+                name: old.name,
+                noise_floor: old.noise_floor,
+                length_m: old.length_m,
+                motion: old.motion,
+                pursuit: None,
+            })
+        }
+        other => Err(format!("format {other} is not {OLDEST_FORMAT} to {SAVE_FORMAT}")),
+    }
 }
 
 /// The stored number for a craft kind.
@@ -139,6 +186,121 @@ fn kind_of(code: u8) -> Option<Kind> {
     }
 }
 
+impl<J: Journal> Server<J> {
+    /// The whole shard as of now, for whoever is going to write it down.
+    ///
+    /// Every craft, not the connected ones: a ship exists whether or not anyone is flying it,
+    /// which is the same reason the tick advances the whole fleet.
+    pub fn checkpoint(&self) -> Checkpoint {
+        let account_of: HashMap<ShipId, &str> =
+            self.by_account.iter().map(|(account, ship)| (*ship, account.as_str())).collect();
+        Checkpoint {
+            now_t: self.now_t,
+            next_ship: self.next_ship,
+            ships: self
+                .fleet
+                .iter()
+                .map(|craft| {
+                    let account = account_of.get(&ShipId(craft.id.0)).copied();
+                    let pursuit = self.pursuits.get(&craft.id).map(|p| lc_proto::Pursuit {
+                        quarry: p.quarry,
+                        closeness: p.closeness.into(),
+                    });
+                    save(craft, account, pursuit, self.now_t)
+                })
+                .collect(),
+        }
+    }
+
+    /// Take a checkpoint as this shard's world. **Load the world first**, or a ballistic arc
+    /// has no system to be re-solved against and comes back as a straight line.
+    ///
+    /// Each craft is read at the time it was saved and then advanced to the checkpoint's clock,
+    /// in tick-sized steps. The steps matter for exactly one motive: a ballistic arc crosses
+    /// spheres of influence, and each crossing is an event that has to be folded as it comes.
+    /// Everything else is a closed form and would not notice a single leap.
+    ///
+    /// The clock resumes where it stopped rather than jumping forward by however long the
+    /// process was down. A shard that fabricated the missing years would be asserting that
+    /// things happened in them, when nothing was journalled and nobody was told.
+    pub fn adopt(
+        &mut self,
+        checkpoint: Checkpoint,
+    ) -> Vec<Unreadable> {
+        self.now_t = checkpoint.now_t;
+        self.next_ship = self.next_ship.max(checkpoint.next_ship);
+        let mut unreadable = Vec::new();
+        for row in &checkpoint.ships {
+            let system = self.position_of(row).and_then(|at| self.world.system_at(at));
+            match load(row, system.as_deref()) {
+                Ok(mut craft) => {
+                    craft.enter(system, row.saved_t as f64 * 1.0e-6);
+                    catch_up(&mut craft, row.saved_t, checkpoint.now_t);
+                    if let Some(account) = &row.account {
+                        self.by_account.insert(account.clone(), ShipId(craft.id.0));
+                    }
+                    // Taken up again on the next tick, which plans as for a fresh order.
+                    let pursuit = decode(row).ok().and_then(|saved| saved.pursuit);
+                    if let Some(pursuit) = pursuit {
+                        self.pursuits.insert(craft.id, Pursuit {
+                            quarry: pursuit.quarry,
+                            closeness: pursuit.closeness.into(),
+                            last_plan_t: i64::MIN,
+                            last_seen: None,
+                        });
+                    }
+                    self.next_ship = self.next_ship.max(craft.id.0 + 1);
+                    self.fleet.insert(craft);
+                }
+                Err(why) => {
+                    if let Some(account) = &row.account {
+                        self.blocked.insert(account.clone(), why.clone());
+                    }
+                    unreadable.push(Unreadable {
+                        ship_id: row.ship_id,
+                        account: row.account.clone(),
+                        why,
+                    });
+                }
+            }
+        }
+        unreadable
+    }
+
+    /// Where a saved craft is, without committing to being able to read the rest of it.
+    fn position_of(&mut self, row: &Ship) -> Option<DVec3> {
+        let saved = decode(row).ok()?;
+        Some(DVec3::from_array(saved.motion.at_ly))
+    }
+}
+
+/// Fly a restored craft from when it was saved to when the shard is now.
+///
+/// Tick-sized steps rather than one leap, because a ballistic arc folds a patch when it reaches
+/// one and a single step past several would fold at most one of them. Capped, because the cost
+/// is linear in the downtime and a shard that has been off for a month must still come back:
+/// past the cap the remainder is taken in one step, which is exact for everything but a conic
+/// that changes primary in it.
+fn catch_up(craft: &mut Craft, from_t: i64, to_t: i64) {
+    let mut at = from_t;
+    let mut steps = 0;
+    while at < to_t && steps < MAX_CATCHUP_TICKS {
+        let next = (at + TICK_US).min(to_t);
+        craft.advance(next as f64 * 1.0e-6, (next - at) as f64 * 1.0e-6);
+        at = next;
+        steps += 1;
+    }
+    if at < to_t {
+        craft.advance(to_t as f64 * 1.0e-6, (to_t - at) as f64 * 1.0e-6);
+    }
+}
+
+/// How many tick-sized steps a restored craft is flown in before the rest is taken at once.
+///
+/// Twenty thousand is about two and a half hours of downtime at the design rate, which covers a
+/// restart, a deploy and an outage somebody slept through.
+pub const MAX_CATCHUP_TICKS: usize = 20_000;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,7 +320,7 @@ mod tests {
     #[test]
     fn a_craft_saved_and_read_back_is_the_same_craft() {
         let craft = a_craft();
-        let row = save(&craft, Some("acct-1"), 7_000_000);
+        let row = save(&craft, Some("acct-1"), None, 7_000_000);
         assert_eq!(row.ship_id, 5);
         assert_eq!(row.account.as_deref(), Some("acct-1"));
 
@@ -200,7 +362,7 @@ mod tests {
         craft.motion.position_ly = DVec3::new(4.200079062537049, awkward, 0.0);
         craft.motion.beta = DVec3::new(awkward, 0.0, 1.0e-9);
 
-        let back = load(&save(&craft, None, 0), None).expect("it reads");
+        let back = load(&save(&craft, None, None, 0), None).expect("it reads");
         assert_eq!(back.motion.position_ly, craft.motion.position_ly);
         assert_eq!(back.motion.beta, craft.motion.beta);
         assert_eq!(
@@ -220,10 +382,55 @@ mod tests {
     /// would happily read the wrong fields out of the right bytes.
     #[test]
     fn a_row_from_another_format_is_refused() {
-        let mut row = save(&a_craft(), None, 0);
-        row.format = SAVE_FORMAT - 1;
+        let mut row = save(&a_craft(), None, None, 0);
+        row.format = OLDEST_FORMAT - 1;
         let why = load(&row, None).expect_err("it should refuse");
         assert!(why.contains("format"), "{why}");
+    }
+
+    /// A pursuit is written down with the craft, so a ship hanging about with another is still
+    /// hanging about after a restart.
+    #[test]
+    fn a_pursuit_survives_the_round_trip() {
+        let pursuit = lc_proto::Pursuit {
+            quarry: lc_proto::ShipId(9),
+            closeness: lc_proto::Closeness::Intimate,
+        };
+        let row = save(&a_craft(), None, Some(pursuit), 0);
+        assert_eq!(decode(&row).expect("it reads").pursuit, Some(pursuit));
+    }
+
+    /// **Format 2 still reads**, as a craft with no pursuit. Refusing it would refuse every
+    /// account on every shard already running, which is the cost the format bump exists to
+    /// make visible and nothing here needs to pay.
+    #[test]
+    fn a_row_from_before_pursuits_were_kept_still_reads() {
+        #[derive(Serialize)]
+        struct Old {
+            kind: u8,
+            name: Option<String>,
+            noise_floor: f32,
+            length_m: f64,
+            motion: lc_proto::Motion,
+        }
+        let craft = a_craft();
+        let old = Old {
+            kind: kind_code(craft.kind),
+            name: craft.name.clone(),
+            noise_floor: craft.noise_floor,
+            length_m: craft.length_m,
+            motion: (&craft.motion.snapshot()).into(),
+        };
+        let row = Ship {
+            ship_id: 5,
+            account: None,
+            saved_t: 0,
+            state: lc_proto::encode(&old),
+            format: OLDEST_FORMAT,
+        };
+        let back = load(&row, None).expect("a format 2 row reads");
+        assert_eq!(back.length_m, craft.length_m);
+        assert_eq!(decode(&row).unwrap().pursuit, None);
     }
 
     /// A row that cannot be read is an error and never a fresh ship at the origin.
@@ -245,7 +452,7 @@ mod tests {
     fn the_crews_clock_survives_the_round_trip() {
         let mut craft = a_craft();
         craft.motion.clock_s = 86_400.0 * 365.0;
-        let back = load(&save(&craft, None, 0), None).expect("it reads");
+        let back = load(&save(&craft, None, None, 0), None).expect("it reads");
         assert_eq!(back.motion.clock_s, craft.motion.clock_s);
     }
 
@@ -254,7 +461,7 @@ mod tests {
         let mut craft = a_craft();
         craft.motion.beta = DVec3::new(0.0, 0.1, 0.0);
         craft.motion.resume_drifting(DVec3::new(9.0, 0.0, 0.0), 1_234.0);
-        let back = load(&save(&craft, None, 5_000_000), None).expect("it reads");
+        let back = load(&save(&craft, None, None, 5_000_000), None).expect("it reads");
         match back.motion.motive {
             Motive::Drifting { from_ly, since_t } => {
                 assert_eq!(from_ly, DVec3::new(9.0, 0.0, 0.0));

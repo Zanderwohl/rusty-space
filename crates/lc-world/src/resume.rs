@@ -84,6 +84,11 @@ pub enum Recipe {
         station: crate::escort::Station,
         clock_base_s: f64,
     },
+    /// The same, for a quarry reckoned along its conic; see [`crate::consort::Formation`].
+    Consort {
+        formation: crate::consort::Formation,
+        clock_base_s: f64,
+    },
     /// The station itself, which is already the parameter.
     Holding(Waypoint),
     /// Carries nothing: the conic is re-solved from the position and velocity above, against
@@ -155,6 +160,14 @@ impl Snapshot {
             }
             Recipe::Escort { station, clock_base_s } => {
                 state.resume_escort(station.solve(attitude0), clock_base_s);
+            }
+            Recipe::Consort { formation, clock_base_s } => {
+                // Without its system the conic has nothing to be about, and the ship comes back
+                // drifting the way a falling one does.
+                match system.and_then(|system| formation.solve(system, attitude0)) {
+                    Some(plan) => state.resume_consort(plan, clock_base_s),
+                    None => state.set_adrift(now_s),
+                }
             }
             Recipe::Holding(waypoint) => state.begin_holding(waypoint),
             Recipe::Falling => {
@@ -255,6 +268,18 @@ impl From<&Snapshot> for lc_proto::Motion {
                     accel: station.quarry.accel.to_array(),
                     since_t: station.quarry.since_t,
                     target: lc_proto::ShipId(station.target.0),
+                    clock_base_s: *clock_base_s,
+                },
+                Recipe::Consort { formation, clock_base_s } => lc_proto::Motive::Consort {
+                    from_ly: formation.from_ly.to_array(),
+                    beta0: formation.beta0.to_array(),
+                    to_ly: formation.to_ly.to_array(),
+                    start_s: formation.start_s,
+                    drive: drive_out(formation.drive),
+                    frame_from_ly: formation.seen_ly.to_array(),
+                    frame_beta: formation.seen_beta.to_array(),
+                    since_t: formation.seen_s,
+                    target: lc_proto::ShipId(formation.target.0),
                     clock_base_s: *clock_base_s,
                 },
                 Recipe::Holding(waypoint) => lc_proto::Motive::Holding(waypoint_out(waypoint)),
@@ -367,6 +392,31 @@ impl From<&lc_proto::Motion> for Snapshot {
                             accel: DVec3::from_array(*accel),
                             since_t: *since_t,
                         },
+                        target: crate::motion::ShipId(target.0),
+                    },
+                    clock_base_s: *clock_base_s,
+                },
+                lc_proto::Motive::Consort {
+                    from_ly,
+                    beta0,
+                    to_ly,
+                    start_s,
+                    drive,
+                    frame_from_ly,
+                    frame_beta,
+                    since_t,
+                    target,
+                    clock_base_s,
+                } => Recipe::Consort {
+                    formation: crate::consort::Formation {
+                        from_ly: DVec3::from_array(*from_ly),
+                        beta0: DVec3::from_array(*beta0),
+                        to_ly: DVec3::from_array(*to_ly),
+                        start_s: *start_s,
+                        drive: drive_in(*drive),
+                        seen_ly: DVec3::from_array(*frame_from_ly),
+                        seen_beta: DVec3::from_array(*frame_beta),
+                        seen_s: *since_t,
                         target: crate::motion::ShipId(target.0),
                     },
                     clock_base_s: *clock_base_s,

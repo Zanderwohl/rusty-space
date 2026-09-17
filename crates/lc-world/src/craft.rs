@@ -371,6 +371,13 @@ impl Craft {
         });
     }
 
+    pub fn begin_consort(&mut self, plan: crate::consort::Consort, now_s: f64) {
+        self.remembering(now_s, |craft| {
+            craft.motion.begin_consort(plan);
+            craft.solve_patch(now_s);
+        });
+    }
+
     pub fn begin_rendezvous(&mut self, plan: crate::pursuit::Rendezvous, now_s: f64) {
         self.remembering(now_s, |craft| {
             craft.motion.begin_rendezvous(plan);
