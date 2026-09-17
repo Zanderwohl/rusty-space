@@ -2,7 +2,9 @@
 
 What a ship is made of, what it costs to change that, and what it costs to fly.
 
-**Status: plan.** Nothing here is built yet. The order of work is at the end.
+**Status: built.** `lc_world::{fitting, cost, refit}`, `lc_server::fitting`, and the Refit
+(`R`) and Dev actions (`F5`) panels. Where the build departed from the plan, this says what was
+built.
 
 Energy is the currency of everything. A ship stores it, spends it on every burn, spends it
 building modules, gets most of it back by taking modules apart, and bleeds a little of it
@@ -112,15 +114,17 @@ therefore cannot run dry halfway through a burn, and the server needs no bookkee
 
 - Each plan exposes the proper time it spends lit. `Cruise` already tracks boost, coast and brake
   proper time, and `Transfer`, `Rendezvous` and `Consort` are built on it. `Escort` is the
-  exception: its thrust follows the quarry's acceleration, so its Δη is integrated numerically,
-  once, when it is planned.
+  exception: its push follows the quarry's acceleration, for as long as the quarry burns, which
+  no plan bounds. Its approach is committed as usual and its station-keeping is charged as it
+  goes, at the magnitude of the quarry's acceleration — an overstatement, never an
+  understatement. The server breaks an escort off when its storage runs out.
 - `Burn` changes velocity instantly: Δη is the rapidity of the new velocity relative to the old.
 - **Refunds.** `CutDrive`, `BreakOff`, and a standing intercept being re-solved all refund the
   part of the commitment not yet flown, and a re-solved plan commits afresh. A re-solve the ship
   cannot pay for breaks off.
-- The commitment ignores future living drain. Drain makes the ship slightly lighter, so ignoring
-  it over-charges. The server settles the difference when the plan ends. Over a decade the
-  overcharge is about 0.2%.
+- Burn cost is priced at the mass when the account was last settled, ignoring what the living
+  drain takes off it meanwhile. That over-charges, by about 0.2% over a decade, and the
+  difference is kept: it is the rule rather than an error to reconcile.
 
 ### The budget sets the speed
 
@@ -130,7 +134,7 @@ With `F` joules not already committed, the most rapidity a ship can buy is
 
 which is `ε · ln(wet / dry)` for a full ship. A crossing spends it on the match, then splits the
 rest evenly between boost and brake. Rather than refusing an unaffordable crossing, **the server
-lowers its speed cap** to `tanh(η_peak)`, and returns the lowered `max_beta` in `Accepted`, as
+lowers its speed cap**, bisecting it a fixed forty times against the plan's own cost, and returns the lowered `max_beta` in `Accepted`, as
 it already returns a lowered acceleration.
 
 That puts a ceiling on the game. A ship that is nothing but storage modules has
@@ -167,8 +171,9 @@ A step moves `E` joules at `drones × drone_power_w`, so it takes `E / (drones �
 seconds and the whole refit is a closed form in time. Energy moves continuously through a step, so
 stored energy has no jumps. The server folds completed steps as the clock passes them.
 
-A step's energy is **ship proper time**, like living drain: drones and crew both work on the
-ship's clock.
+Steps and the living drain are both measured in **coordinate** time. A refit only runs when the
+ship is not under way, where the two clocks agree to parts in a billion, and a drain that read the
+crew's clock would need the motive to evaluate.
 
 ### Cancel
 
@@ -197,9 +202,11 @@ Free energy is stored minus the commitment still outstanding. The drain draws on
 
 ## Balance
 
-One struct, `lc_world::fitting::Balance`, with a `DEFAULT`. The server holds one and **states it
-in `Welcome`**, for the reason `rate` is stated there: a client assuming a constant would
-confidently preview refits against numbers the server does not use.
+One struct, `lc_world::fitting::Balance`, with a `DEFAULT`. The server holds one
+(`Server::set_balance`) and **states it with every account** in `Outbound::Fitted`, for the reason
+`rate` is stated with the clock: a client assuming a constant would confidently preview refits
+against numbers the server does not use. Stating it beside the account rather than in `Welcome`
+keeps the welcome's shape and puts the numbers next to what they govern.
 
 | setting | default | meaning |
 |---|---|---|
@@ -240,14 +247,15 @@ The starting ship: 5 engines, 6 storage, 2 drones, 2 living, 5 slots empty, 20 s
 discriminant keeps its encoding.
 
 - `Order::Refit { target: Loadout }` and `Order::CancelRefit`
-- `Outbound::Fitting(Fitting)`: loadout, `stored_j` at `at_t`, outstanding commitment, and the refit
-  under way as its target and start. Sent on `Welcome` and on every change: an accepted order,
-  a refit starting, finishing or cancelled, a plan settling, a grant.
+- `Outbound::Fitted { ship_id, fitting }`: the balance, the loadout, stored energy at `since_s`,
+  the motive's rapidity then, the outstanding commitment, and the refit under way as its recipe.
+  Sent after `Welcome`, after every accepted order and every `Flying`, when a refit finishes, and
+  after a grant. The client takes it whole.
 - `Inbound::Grant { joules }`: **development only**. Refused unless the server is directing, the
   same gate `Inbound::Stage` has, so a shard never honours it.
 - `Refusal::NoEnergy`, `Refusal::NoRoom`, `Refusal::Refitting`, `Refusal::UnderWay`
-- `Welcome` gains `balance`, and `Accepted` for `SetCourse` and `Cross` returns `max_beta` as well
-  as `accel_g`.
+- `Order::SetCourse` and `Order::Cross` gain `max_beta`: asked for by the client, and returned in
+  `Accepted` lowered to what the ship could pay for.
 
 ## Persistence
 
@@ -263,14 +271,14 @@ when the visuals should follow.
 ## Client
 
 - **HUD**: stored / capacity, and the commitment while one is outstanding.
-- **Refit panel** (`Panel::Refit`, so `--panel refit` opens it):
+- **Refit panel** (`Panel::Refit`, key `R`, `--panel refit`):
   - a slider per module kind, and one for slots, which cannot go below what the target occupies
   - the preview, from the planner run locally: energy available (stored + refunds − builds −
     hull), capacity after, step count, duration, and whether it can be done
   - **Apply**, disabled *with the reason shown* when it cannot be done or the ship is under way
     ([18-ui-style.md](18-ui-style.md)); **Cancel** while a refit runs, with progress
-- **Dev actions panel** (`Panel::DevActions`): *+1 ME*, *fill storage*. Development only, like
-  Scenarios, and useless against a shard.
+- **Dev actions panel** (`Panel::DevActions`, key `F5`, `--panel dev`): *+1 ME*, *+10 ME*, *fill
+  storage*. Development only, like Scenarios, and refused by a shard.
 - **Flight panel**: the acceleration buttons offer what the ship is rated for now, not fixed
   values up to `MAX_ACCEL_G`.
 
@@ -288,7 +296,7 @@ tested without a window ([13-client-shell.md](13-client-shell.md)).
 
 ## Order of work
 
-Each step builds, passes its tests and is committed before the next begins.
+As planned, and done in this order.
 
 1. **`fitting`**. Tests: the 500 m hull is exactly 20 slots; derived length round-trips; the
    starting ship full is 5 g; stored energy weighs `E/c²`.
@@ -320,3 +328,8 @@ Each step builds, passes its tests and is committed before the next begins.
 - **Transmission** should draw on the same budget; `Order::Transmit` states a power and is free.
 - **Other modules**: weapons, cargo, sensors. The planner's order of priority will need a rule
   for each.
+- **A full ship cannot swap a module.** Taking one apart returns energy storage has no room for,
+  so a full ship asked to trade living space for an engine is refused for capacity. Venting the
+  excess is the obvious answer and is not built.
+- **Holding a station is free**, as it was before energy: `motion::thrust_g` treats the
+  milligravities as zero, and so does the cost.

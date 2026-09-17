@@ -120,6 +120,8 @@ with.
 | notifications | automatic | target out of range, observation returned nothing, instrument saturated |
 | debug | `F3` | below |
 | scenarios | — | scenes to stage. Development only, and every button does nothing without a shard started for it |
+| refit | `R` | module counts and hull slots as sliders, what applying them would cost and take, and the refit under way. See [19-ship-fitting.md](19-ship-fitting.md) |
+| dev actions | `F5` | energy for the ship. Development only; a shard refuses it |
 
 Panels are windows rather than menu pages because the clock never stops: a player has to be
 able to watch a curve and fly at the same time.

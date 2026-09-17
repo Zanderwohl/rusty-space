@@ -249,8 +249,9 @@ output, and it is consumed by fabrication, propulsion and transmission. Transmis
 is drawn from the same budget as everything else, which is what makes broadcasting a real
 cost rather than a free action.
 
-Ship modules, stored energy and what propulsion and construction cost are planned in
-[19-ship-fitting.md](19-ship-fitting.md).
+Ship modules, stored energy and what propulsion and construction cost are in
+[19-ship-fitting.md](19-ship-fitting.md). A player's ship stores energy as mass and spends it as a
+rocket whose exhaust is that energy; nothing yet collects any.
 
 ## Von Neumann probes
 
