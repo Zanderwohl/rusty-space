@@ -28,6 +28,11 @@ pub struct Preview {
     pub capacity_after_j: f64,
     /// Dry mass of the draft plus the energy it would end with, before drain.
     pub mass_after_kg: f64,
+    /// What the draft's engines pull with storage empty, and with it full.
+    pub g_dry: f64,
+    pub g_wet: f64,
+    /// What a change of velocity of one kilometre a second costs the draft at `mass_after_kg`.
+    pub energy_per_km_s_j: f64,
     /// Steps and how long they take, or why it cannot be done.
     pub planned: Result<(usize, f64), Shortage>,
     /// Why Apply cannot be pressed, when it cannot.
@@ -41,6 +46,8 @@ pub fn preview(ship: &Craft, draft: Loadout, remote: bool, now_s: f64) -> Option
     let current = fitting.loadout_at(now_s);
     let stored_j = fitting.stored_j_at(&ship.motion, now_s);
     let available_j = budget_j(&balance, current, draft, stored_j);
+    let dry_kg = balance.dry_mass_kg(&draft);
+    let mass_after_kg = dry_kg + available_j.max(0.0) / lc_world::fitting::C2;
 
     let planned = lc_world::refit::Order { from: current, target: draft, stored_j, start_s: now_s }
         .solve(&balance)
@@ -63,7 +70,10 @@ pub fn preview(ship: &Craft, draft: Loadout, remote: bool, now_s: f64) -> Option
         stored_j,
         available_j,
         capacity_after_j: balance.capacity_j(&draft),
-        mass_after_kg: balance.dry_mass_kg(&draft) + available_j.max(0.0) / lc_world::fitting::C2,
+        mass_after_kg,
+        g_dry: balance.accel_g(&draft, dry_kg),
+        g_wet: balance.accel_g(&draft, dry_kg + balance.capacity_j(&draft) / lc_world::fitting::C2),
+        energy_per_km_s_j: energy_per_km_s_j(&balance, mass_after_kg),
         planned,
         blocked,
     })
@@ -175,6 +185,20 @@ fn step_name(step: Step) -> String {
     }
 }
 
+/// What changing a ship of `mass_kg`'s velocity by one kilometre a second costs, joules.
+pub fn energy_per_km_s_j(balance: &Balance, mass_kg: f64) -> f64 {
+    let rapidity = lc_world::cost::rapidity_between(
+        glam::DVec3::ZERO,
+        glam::DVec3::X * 1.0e3 / lc_world::flight::C_M_S,
+    );
+    lc_world::cost::energy_j(mass_kg, rapidity, balance.drive_efficiency)
+}
+
+/// An energy small enough to need an exponent, in module-energies.
+fn me_small(joules: f64, module_j: f64) -> String {
+    format!("{:.3e} ME", joules / module_j)
+}
+
 /// A hull length: metres, or kilometres once there are thousands of them.
 pub fn length(metres: f64) -> String {
     if metres < 1.0e4 { format!("{metres:.0} m") } else { format!("{:.2} km", metres / 1.0e3) }
@@ -209,6 +233,9 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
         ui.end_row();
         ui.label("length");
         ui.label(length(ship.length_m));
+        ui.end_row();
+        ui.label("energy / km/s");
+        ui.label(me_small(energy_per_km_s_j(&fitting.balance, ship.mass_kg_at(now)), module_j));
         ui.end_row();
     });
     ui.separator();
@@ -268,6 +295,9 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
             format!("{} of {}", me(view.available_j, module_j), me(view.capacity_after_j, module_j)),
         );
         row("mass", format!("{:.3e} kg", view.mass_after_kg));
+        row("g dry", format!("{:.1} g", view.g_dry));
+        row("g wet", format!("{:.1} g", view.g_wet));
+        row("energy / km/s", me_small(view.energy_per_km_s_j, module_j));
         let (steps, days) = match view.planned {
             Ok((steps, duration_s)) => (steps.to_string(), format!("{:.1}", duration_s / 86_400.0)),
             Err(_) => ("—".into(), "—".into()),
@@ -388,6 +418,17 @@ mod tests {
             let draft = Loadout { engines: n, ..start };
             assert!(budget_j(&b, start, draft, 3.0 * me) >= 0.0, "{n} engines");
         }
+    }
+
+    /// Checked against the rocket law's low-speed form, `m Δv c / ε`, and the engine rating.
+    #[test]
+    fn the_after_table_rates_the_draft_dry_wet_and_per_km_s() {
+        let b = Balance::DEFAULT;
+        let view = preview(&ship(), Loadout::STARTING, true, 0.0).unwrap();
+        assert!((view.g_wet - 5.0).abs() < 1.0e-9, "{}", view.g_wet);
+        assert!((view.g_dry - 13.56).abs() < 0.01, "{}", view.g_dry);
+        let linear = view.mass_after_kg * 1.0e3 * lc_world::flight::C_M_S / b.drive_efficiency;
+        assert!((view.energy_per_km_s_j / linear - 1.0).abs() < 1.0e-5);
     }
 
     #[test]
