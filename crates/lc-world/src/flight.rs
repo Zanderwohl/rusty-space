@@ -678,6 +678,15 @@ impl Cruise {
         self.beta0
     }
 
+    /// The instants its phases change, on its own clock: the burn lights, the match gives way
+    /// to the boost, the drive goes out for the flip, lights for the brake, and goes out on
+    /// arrival. Coincident where a phase has no length.
+    pub fn phase_changes_s(&self) -> [f64; 5] {
+        let lit = self.start_s + self.turn_s;
+        let line = lit + self.match_s;
+        [lit, line, line + self.boost_s, line + self.brake_s, line + self.arrive_s]
+    }
+
     /// Coordinate seconds the whole crossing takes, the turn-in and the match included.
     pub fn duration_s(&self) -> f64 {
         self.turn_s + self.match_s + self.arrive_s

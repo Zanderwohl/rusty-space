@@ -344,6 +344,26 @@ pub struct Intent {
     pub issued_at_client_t: i64,
 }
 
+/// Event kinds, as [`Sighting::kind`] carries them. Named here because both ends read them.
+pub mod kind {
+    pub const TRANSMIT: i16 = 1;
+    /// An order that lights the drive, stamped when it was given.
+    pub const BURN: i16 = 2;
+    pub const CUT: i16 = 3;
+    /// The drive lit, went out or changed power, stamped when it did. The payload is a
+    /// [`super::DriveChange`] as JSON.
+    pub const DRIVE: i16 = 4;
+}
+
+/// What a craft's drive became at a [`kind::DRIVE`] event.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DriveChange {
+    /// Watts into the exhaust from this instant. Zero is the drive going out.
+    pub power_w: f64,
+    /// Unit vector the nose pointed along.
+    pub facing: [f64; 3],
+}
+
 /// One event arriving at one observer: what the client is actually told.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sighting {

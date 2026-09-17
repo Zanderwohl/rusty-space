@@ -285,17 +285,23 @@ impl Rendezvous {
     /// Always exactly one root: `dt/dt' = γ(1 + β·β')` and `|β'| < 1`, so it rises at no less
     /// than `γ(1 − |β|) > 0`. Newton on a bracket, which converges in a handful of steps
     /// because the profile is smooth inside each phase of the burn.
+    /// World seconds since [`Rendezvous::since_t`] at which the frame's clock reads `frame_s`.
+    pub fn world_elapsed(&self, frame_s: f64) -> f64 {
+        let beta = self.frame_beta;
+        if beta.length_squared() <= 0.0 {
+            return frame_s;
+        }
+        let x = self.cruise.at(frame_s).position_ly * JULIAN_YEAR_S;
+        boost::gamma_of(beta) * (frame_s + beta.dot(x))
+    }
+
     fn frame_time_at(&self, elapsed_s: f64) -> f64 {
         let beta = self.frame_beta;
         if beta.length_squared() <= 0.0 {
             return elapsed_s;
         }
         let gamma = boost::gamma_of(beta);
-        // World seconds elapsed, as a function of the frame's own elapsed seconds.
-        let world_at = |t: f64| {
-            let x = self.cruise.at(t).position_ly * JULIAN_YEAR_S;
-            gamma * (t + beta.dot(x))
-        };
+        let world_at = |t: f64| self.world_elapsed(t);
 
         // The cruise holds its endpoints outside its own span, so `β·x'` is bounded and a
         // bracket is found by doubling out from the answer a drift alone would give.

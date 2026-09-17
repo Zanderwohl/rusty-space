@@ -19,6 +19,7 @@ pub mod escape;
 pub mod escort;
 pub mod flicker;
 pub mod flight;
+pub mod ignition;
 pub mod injection;
 pub mod instrument;
 pub mod motion;

@@ -87,7 +87,16 @@ pub struct Contact {
     /// Coordinate seconds the light left.
     pub emitted_s: f64,
     reckoning: Reckoning,
+    /// What the statement said the drive was doing, at the statement's own instant.
+    stated_power_w: f64,
 }
+
+/// A drive event, as a contact's plume reads it: coordinate seconds, and the power from then.
+pub type DriveAt = (f64, f64);
+
+/// Drive events remembered per craft. Only the latest before the instant drawn matters, and
+/// the instant drawn is never more than a tick or two behind the newest.
+const REMEMBERED_DRIVES: usize = 16;
 
 impl Contact {
     /// A contact from a statement. `system` is the one this ship is in, which a contact inside
@@ -113,26 +122,38 @@ impl Contact {
             jet_power_w: presence.jet_power_w,
             emitted_s,
             reckoning: Reckoning::new(system, sighting),
+            stated_power_w: presence.jet_power_w,
         }
     }
 
-    /// Bring the contact up to what `observer_ly` sees at `now_s`.
-    pub fn reckon(&mut self, system: Option<&LocalSystem>, observer_ly: DVec3, now_s: f64) {
+    /// Bring the contact up to what `observer_ly` sees at `now_s`. `drives` is this craft's
+    /// drive events, oldest first.
+    pub fn reckon(
+        &mut self,
+        system: Option<&LocalSystem>,
+        observer_ly: DVec3,
+        now_s: f64,
+        drives: &[DriveAt],
+    ) {
         let seen = self.reckoning.appearance_at(system, observer_ly, now_s);
         self.position_ly = seen.position_ly;
         self.beta = seen.beta;
         self.emitted_s = seen.emitted_s;
+        // The latest word on the drive at the instant drawn, statement or event. The statement
+        // stands when nothing has been said since, including when this clock is behind it.
+        let stated_s = self.reckoning.seen.emitted_s;
+        self.jet_power_w = drives
+            .iter()
+            .rev()
+            .find(|(at_s, _)| *at_s <= seen.emitted_s)
+            .filter(|(at_s, _)| *at_s > stated_s || seen.emitted_s < stated_s)
+            .map_or(self.stated_power_w, |(_, power_w)| *power_w);
     }
 }
 
 /// Reckon every contact against this frame's clock and ship.
 pub fn reckon_contacts(game: Res<crate::app::Game>, mut uplink: ResMut<Uplink>) {
-    let system = game.0.system.as_deref();
-    let here = game.0.ship.motion.position_ly;
-    let now_s = game.0.coordinate_time_s();
-    for contact in &mut uplink.contacts {
-        contact.reckon(system, here, now_s);
-    }
+    uplink.reckon(game.0.system.as_deref(), game.0.ship.motion.position_ly, game.0.coordinate_time_s());
 }
 
 /// Where the server is, if there is one.
@@ -210,6 +231,8 @@ pub struct Uplink {
     asked_at: Option<f64>,
     /// How long the last order took to come back.
     pub round_trip_s: Option<f64>,
+    /// Drive events per craft, oldest first. Kept across statements, which replace contacts.
+    drives: std::collections::HashMap<ShipId, Vec<DriveAt>>,
 }
 
 /// The rate a shard runs at, and what a server that says nothing is taken to mean.
@@ -297,6 +320,14 @@ impl Uplink {
     }
 
     /// Read everything waiting, and fold it. Returns what arrived, for a caller that wants it.
+    /// Bring every contact up to what `observer_ly` sees at `now_s`.
+    pub fn reckon(&mut self, system: Option<&LocalSystem>, observer_ly: DVec3, now_s: f64) {
+        for contact in &mut self.contacts {
+            let drives = self.drives.get(&contact.ship_id).map_or(&[][..], Vec::as_slice);
+            contact.reckon(system, observer_ly, now_s, drives);
+        }
+    }
+
     fn take(&mut self) -> Vec<Outbound> {
         let Some(link) = self.link.get_mut().unwrap() else {
             return Vec::new();
@@ -457,9 +488,19 @@ fn fold(
             }
         }
         Outbound::Sightings(cleared) => {
-            uplink
-                .seen
-                .extend(cleared.into_iter().map(|c| c.into_inner()));
+            let seen: Vec<Sighting> = cleared.into_iter().map(|c| c.into_inner()).collect();
+            for sighting in seen.iter().filter(|s| s.kind == lc_proto::kind::DRIVE) {
+                let Ok(change) = serde_json::from_str::<lc_proto::DriveChange>(&sighting.payload) else {
+                    continue;
+                };
+                let drives = uplink.drives.entry(ShipId(sighting.source_id)).or_default();
+                let at = (sighting.emitted_t as f64 * 1e-6, change.power_w);
+                let place = drives.partition_point(|(at_s, _)| *at_s <= at.0);
+                drives.insert(place, at);
+                let excess = drives.len().saturating_sub(REMEMBERED_DRIVES);
+                drives.drain(..excess);
+            }
+            uplink.seen.extend(seen);
             let excess = uplink.seen.len().saturating_sub(REMEMBERED);
             uplink.seen.drain(..excess);
         }
@@ -1047,7 +1088,7 @@ mod tests {
             for frame in -3..4 {
                 let now_s = emitted_s + frame as f64 * frame_s;
                 let here = observer_at(now_s);
-                contact.reckon(Some(&system), here, now_s);
+                contact.reckon(Some(&system), here, now_s, &[]);
                 let range_m = here.distance(contact.position_ly) * M_PER_LY;
                 assert!(
                     (range_m - 1_500.0).abs() < 5.0,
@@ -1075,6 +1116,62 @@ mod tests {
             fold(&mut uplink, &mut game, &mut ui, accepted(order.clone()));
             assert_eq!(uplink.chasing, None, "{order:?} left the pursuit showing");
         }
+    }
+
+    /// **A flip between two statements still goes dark.** Sampled burning, then told by drive
+    /// events that it went out at 100 s and lit again at 160 s: drawn in between, the plume is
+    /// out, though no statement ever saw it so.
+    #[test]
+    fn a_contacts_plume_follows_its_drive_events_between_statements() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let burning = 4.0e17;
+        let presence = lc_proto::Presence {
+            ship_id: ShipId(2),
+            name: "Vela".into(),
+            length_m: 500.0,
+            at_ly: [0.0; 3],
+            beta: [0.0; 3],
+            facing: [1.0, 0.0, 0.0],
+            jet_power_w: burning,
+            emitted_t: 0,
+            arrive_t: 0,
+        };
+        let present = |p: lc_proto::Presence| {
+            let arrive_t = p.arrive_t;
+            Outbound::Present(vec![Cleared::<lc_proto::Presence>::clear(p, arrive_t).unwrap()])
+        };
+        fold(&mut uplink, &mut game, &mut ui, present(presence.clone()));
+
+        let drive = |event_id, at_s: f64, power_w| {
+            let change = lc_proto::DriveChange { power_w, facing: [1.0, 0.0, 0.0] };
+            let sighting = Sighting {
+                event_id,
+                source_id: 2,
+                arrive_t: (at_s * 1e6) as i64,
+                emitted_t: (at_s * 1e6) as i64,
+                direction: [1.0, 0.0, 0.0],
+                strength: 1.0,
+                kind: lc_proto::kind::DRIVE,
+                payload: serde_json::to_string(&change).unwrap(),
+            };
+            Cleared::<Sighting>::clear(sighting, (at_s * 1e6) as i64, 0.0).unwrap()
+        };
+        let events = vec![drive(1, 100.0, 0.0), drive(2, 160.0, burning)];
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Sightings(events));
+
+        let power_at = |uplink: &mut Uplink, now_s: f64| {
+            uplink.reckon(None, DVec3::X * 1e3 / lc_world::system::M_PER_LY, now_s);
+            uplink.contacts[0].jet_power_w
+        };
+        assert_eq!(power_at(&mut uplink, 50.0), burning, "before the flip");
+        assert_eq!(power_at(&mut uplink, 130.0), 0.0, "in the flip");
+        assert_eq!(power_at(&mut uplink, 170.0), burning, "after it");
+
+        // A statement newer than every event is the latest word, and survives the next one.
+        let later = lc_proto::Presence { jet_power_w: 0.0, emitted_t: 400_000_000, arrive_t: 400_000_000, ..presence };
+        fold(&mut uplink, &mut game, &mut ui, present(later));
+        assert_eq!(power_at(&mut uplink, 410.0), 0.0, "an older event outranked a newer statement");
     }
 
     #[test]

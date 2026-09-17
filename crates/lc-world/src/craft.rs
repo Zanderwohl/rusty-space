@@ -272,6 +272,20 @@ impl Craft {
         }
     }
 
+    /// What it was doing at a coordinate second, as far back as it remembers.
+    pub fn motion_at(&self, s: f64) -> &ShipState {
+        self.past.iter().find(|entry| s < entry.until_s).map(|entry| &entry.motion).unwrap_or(&self.motion)
+    }
+
+    /// What it has done, oldest first: each motive with the coordinate second it stopped, and
+    /// the current one with infinity.
+    pub fn stretches(&self) -> impl Iterator<Item = (f64, &ShipState)> + '_ {
+        self.past
+            .iter()
+            .map(|entry| (entry.until_s, &entry.motion))
+            .chain(std::iter::once((f64::INFINITY, &self.motion)))
+    }
+
     /// The craft as something a light-delay solve can evaluate.
     pub fn worldline(&self) -> Flight<'_> {
         Flight::with_past(&self.motion, self.system.as_deref(), &self.past, self.known_from_s)
