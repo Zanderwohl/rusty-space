@@ -118,12 +118,21 @@ pub enum Action {
     /// Show this craft's conversation, opening the window if it is closed. What a green line
     /// in the events box does when it is clicked.
     OpenChat(lc_proto::ShipId),
-    /// Change which conversation the window is showing. `None` is none of them.
-    ChatWith(Option<lc_proto::ShipId>),
-    /// Put a message on the air.
-    Say { to: lc_proto::ShipId, aim: lc_proto::Aim, secrecy: lc_proto::Secrecy, body: String },
-    /// Put this ship's public key on the air, so `to` can seal messages back.
+    /// Change what the window is showing: one craft, or the public log.
+    ChatWith(crate::ui::Channel),
+    /// Put a message on the air. `idem` is `None` for something newly typed, which mints one,
+    /// and `Some` for a resend, which repeats the message rather than saying a second thing.
+    Say {
+        to: lc_proto::ShipId,
+        aim: lc_proto::Aim,
+        secrecy: lc_proto::Secrecy,
+        body: String,
+        idem: Option<lc_proto::MessageKey>,
+    },
+    /// Put this ship's public key on the air, so `to` can encrypt messages back.
     OfferKey { to: lc_proto::ShipId, aim: lc_proto::Aim },
+    // A resend is [`Action::Say`] with the original's `idem`, not an action of its own: it is
+    // the same message, said again, and the only thing that makes it one is the key.
 }
 
 /// What an action needs from outside: the few things the core cannot do itself.
@@ -310,14 +319,14 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
 
         Action::OpenChat(ship_id) => {
-            ui.chat_with = Some(ship_id);
+            ui.chat_with = crate::ui::Channel::With(ship_id);
             ui.open(Panel::Chat);
         }
-        Action::ChatWith(ship_id) => ui.chat_with = ship_id,
+        Action::ChatWith(channel) => ui.chat_with = channel,
         // Sent and never applied locally, for the same reason a course is: what a transmission
         // becomes is an event with an identifier, and the identifier is the server's to mint.
         // The client learns of its own message when the acceptance comes back.
-        Action::Say { to, aim, secrecy, body } => {
+        Action::Say { to, aim, secrecy, body, idem } => {
             let body = body.trim().to_string();
             if body.is_empty() {
                 // Nothing to report. An empty field is a keystroke, not a mistake.
@@ -329,7 +338,21 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                     body.len() - lc_proto::MESSAGE_LIMIT
                 )));
             } else {
-                effects.push(Effect::Send(lc_proto::Order::Say { to, aim, secrecy, body }));
+                // Minted here and never by the server, because only the sender knows that a
+                // resend *is* one. A hash of who, when and what: unique to this ship without
+                // a counter either end would have to reconcile.
+                let idem = idem.unwrap_or_else(|| {
+                    lc_world::rng::hash(&[
+                        to.0 as u64,
+                        (session.coordinate_time_s() * 1.0e6) as u64,
+                        body.len() as u64,
+                        body.bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64)),
+                    ])
+                    // Zero means "not keyed" to every reader, so it is the one value a real
+                    // key may not take.
+                    .max(1)
+                });
+                effects.push(Effect::Send(lc_proto::Order::Say { to, aim, secrecy, body, idem }));
             }
         }
         Action::OfferKey { to, aim } => {

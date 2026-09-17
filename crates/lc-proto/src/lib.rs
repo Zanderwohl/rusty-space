@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 22;
+pub const PROTOCOL_VERSION: u32 = 23;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -312,6 +312,18 @@ pub enum Secrecy {
     Sealed,
 }
 
+/// What makes two transmissions the *same message*.
+///
+/// A resend is a second pulse of light and a second event — it really happened, at its own
+/// coordinate, and the store records both. What it is not is a second thing somebody said, so
+/// the receiver collapses them into one line by this.
+///
+/// **Not a sequence number.** The two ends do not agree about how many messages exist, because
+/// half of them are in flight, so a counter would have to be reconciled and there is nothing to
+/// reconcile it with. This only has to be unique to the sender, which a hash of who sent it,
+/// when, and what it said already is.
+pub type MessageKey = u64;
+
 /// The longest message body, in bytes.
 ///
 /// A bound on what one client can make a server store and fan out to every receiver in range,
@@ -388,7 +400,7 @@ pub enum Order {
     /// Addressed to exactly one craft even when it is shouted omnidirectionally: a chat is with
     /// somebody. The bystanders who hear an open one are eavesdroppers, and they see that.
     /// Appended last.
-    Say { to: ShipId, aim: Aim, secrecy: Secrecy, body: String },
+    Say { to: ShipId, aim: Aim, secrecy: Secrecy, body: String, idem: MessageKey },
     /// Put your public key on the air, so `to` can seal messages to you.
     ///
     /// A message like any other, and that is the mechanic rather than an implementation note:
@@ -448,6 +460,10 @@ pub struct DriveChange {
 pub struct Spoken {
     /// Who it was addressed to. Everyone else in earshot is an eavesdropper.
     pub to: i64,
+    /// Which message this is, across however many times it was transmitted. See
+    /// [`MessageKey`]; a receiver that has this one already shows one line, not two.
+    #[serde(default)]
+    pub idem: MessageKey,
     /// Whether it was sealed. True on a copy with no body is somebody else's mail; true on one
     /// *with* a body means you are the addressee.
     pub sealed: bool,
@@ -478,6 +494,12 @@ pub const ACK_DEPTH: usize = 10;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Said {
     pub event_id: i64,
+    /// Which message this is. A backlog carries one entry per *transmission*, so a message
+    /// sent three times is three entries sharing this and the client folds them into one.
+    ///
+    /// Named apart from [`Said::key`], which is a different thing entirely: that one says the
+    /// message *is* a public key being handed over.
+    pub idem: MessageKey,
     /// The other craft in this conversation: who it went to, or who it came from.
     pub with: ShipId,
     /// What to call them. Carried because a backlog names craft that are nowhere in sight, and
@@ -1200,6 +1222,7 @@ mod tests {
                 aim: Aim::Ship(ShipId(7)),
                 secrecy: Secrecy::Sealed,
                 body: "well?".into(),
+                idem: 0x1234_5678_9abc_def0,
             },
             issued_at_client_t: 1_000_000,
         })
@@ -1298,6 +1321,7 @@ mod tests {
             Outbound::Backlog {
                 messages: vec![Said {
                     event_id: 9,
+                    idem: 99,
                     with: ShipId(7),
                     with_name: "Ada".into(),
                     mine: false,
@@ -1348,6 +1372,7 @@ mod tests {
                     aim: Aim::Star(0x0123_4567_89ab_cdef),
                     secrecy: Secrecy::Open,
                     body: String::new(),
+                    idem: 7,
                 },
                 issued_at_client_t: 0,
             }),

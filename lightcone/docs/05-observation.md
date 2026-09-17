@@ -366,8 +366,19 @@ By identifier rather than by count, because the two ends do not agree about how 
 exist: half of them are in flight. An identifier names one message and means the same thing to
 both.
 
-There is no retransmission and there cannot be. A message that did not arrive is light that went
-somewhere else.
+There is no *automatic* retransmission and there cannot be: nothing at either end knows a
+message missed, so nothing can decide to send it again. What there is is a player deciding, and
+the interface marks an unacknowledged message so they can.
+
+A resend is a **second pulse of light**, not a retry. It is a real emission at its own
+coordinate and both are in the store, because both happened. What it is not is a second thing
+somebody said, so every message carries a key that says which message it is, and a receiver that
+already has that key shows one line rather than two. Acknowledging any transmission of a message
+acknowledges the message — which pulse got there is not something the sender needs to know.
+
+The key is a hash of who sent it, when, and what it said. Not a sequence number: the two ends do
+not agree about how many messages exist, because half of them are in flight, so a counter would
+need reconciling against something that is not there.
 
 ## Interferometry
 

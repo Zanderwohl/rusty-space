@@ -1,0 +1,436 @@
+//! The radio window: a list of craft on the left, one log on the right.
+//!
+//! Deliberately a log with a selector rather than a messaging app. Everything in it is minutes
+//! to years old and there is no typing indicator to be had, so an interface that pretended the
+//! far end was present would be lying about the one thing this game is about.
+//!
+//! What a conversation *is* lives in [`crate::chat`], which has no engine in it. This draws one
+//! and asks; it decides nothing. See `lightcone/docs/05-observation.md` for the mechanic and
+//! `13-client-shell.md` for the window.
+
+use bevy::prelude::*;
+use bevy_egui::egui;
+
+use lc_world::sky::StarId;
+
+use crate::action::Action;
+use crate::app::{Game, Ui};
+use crate::input::Requested;
+use crate::panels::{ask, duration};
+use crate::ui::Channel;
+
+/// Somebody talking. The one colour in the interface that means a person rather than a reading.
+pub(crate) const RADIO: egui::Color32 = egui::Color32::from_rgb(120, 220, 140);
+
+/// Where a transmission is pointed, as the window offers it.
+///
+/// A mirror of [`lc_proto::Aim`] and not the type itself, because the third choice is "at
+/// whatever star the telescope is on" — which is a thing the interface knows and the protocol
+/// does not: on the wire it is already a catalogue identifier.
+#[derive(Clone, Copy, Default, PartialEq)]
+pub enum Aimed {
+    #[default]
+    Omni,
+    AtThem,
+    AtTheSelectedStar,
+}
+
+/// How wide the list of craft is, and how tall the window's body stays.
+///
+/// Fixed, both of them. A window that resizes itself as messages arrive is a window whose
+/// buttons move under the cursor, and everything in here arrives without being asked for.
+const LIST_WIDTH: f32 = 130.0;
+/// The whole body: both columns, the composer included.
+const BODY_HEIGHT: f32 = 260.0;
+/// What the composer under a log needs — the aim row, the key row, the field.
+const COMPOSER_HEIGHT: f32 = 92.0;
+const PANEL_WIDTH: f32 = 460.0;
+
+/// How wide the log and the composer under it are. The column, less its separator and padding.
+const LOG_WIDTH: f32 = PANEL_WIDTH - LIST_WIDTH - 24.0;
+
+/// The radio: a list of craft on the left, one log on the right.
+///
+/// Deliberately a log with a selector rather than a messaging app. Everything here is minutes
+/// to years old and there is no typing indicator to be had, so an interface that pretended the
+/// far end was present would be lying about the one thing this game is about.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn chat(
+    ui: &mut egui::Ui,
+    state: &Ui,
+    game: &Game,
+    uplink: &crate::uplink::Uplink,
+    draft: &mut String,
+    aimed: &mut Aimed,
+    seal: &mut bool,
+    out: &mut MessageWriter<Requested>,
+) {
+    // Everyone this ship has talked to, most recent first, then everyone in sight it has not.
+    // The second half is how a conversation starts at all.
+    let mut parties: Vec<(lc_proto::ShipId, String)> =
+        uplink.chat.conversations().into_iter().map(|(id, c)| (id, c.name.clone())).collect();
+    for contact in &uplink.contacts {
+        if !parties.iter().any(|(id, _)| *id == contact.ship_id) {
+            parties.push((contact.ship_id, contact.name.clone()));
+        }
+    }
+
+    // What this ship is called, for its own lines. The account's name as the broker knows it,
+    // which is what every other craft sees on its contact list.
+    let own = uplink.joined().map(|j| j.name.clone()).unwrap_or_else(|| "this ship".into());
+    let showing = state.0.chat_with;
+
+    // **One allocation for the whole body.** Everything inside is bounded by it, so the window
+    // is the same size with one message in it and with two hundred — which matters here more
+    // than in most panels, because what fills it arrives without being asked for.
+    ui.allocate_ui(egui::vec2(PANEL_WIDTH, BODY_HEIGHT), |ui| {
+    ui.horizontal_top(|ui| {
+        // `allocate_ui_with_layout`, not `allocate_ui`: a child of a horizontal layout keeps
+        // that direction, so the plain form laid the whole list out left to right — one name
+        // per column, with the separator between "Public" and the first craft standing on end.
+        ui.allocate_ui_with_layout(
+            egui::vec2(LIST_WIDTH, BODY_HEIGHT),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("chat_parties")
+                .max_height(BODY_HEIGHT)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                ui.set_min_width(LIST_WIDTH - 8.0);
+                if ui
+                    .selectable_label(showing == Channel::Public, "Public")
+                    .on_hover_text("everything said in the open, to and from everyone")
+                    .clicked()
+                {
+                    ask(out, Action::ChatWith(Channel::Public));
+                }
+                ui.separator();
+                for (id, name) in &parties {
+                    let in_sight = uplink.contacts.iter().any(|c| c.ship_id == *id);
+                    let label = ui
+                        .selectable_label(showing == Channel::With(*id), name.as_str())
+                        .on_hover_text(match in_sight {
+                            true => "in sight",
+                            // Said, because it decides whether a beam can be aimed and whether
+                            // a reply is years or minutes away.
+                            false => "out of sight; still worth writing to",
+                        });
+                    if label.clicked() {
+                        ask(out, Action::ChatWith(Channel::With(*id)));
+                    }
+                }
+                if parties.is_empty() {
+                    ui.weak(match game.remote {
+                        true => "nobody yet",
+                        false => "no server",
+                    });
+                }
+            });
+        },
+        );
+        ui.separator();
+        ui.vertical(|ui| match showing {
+            Channel::Public => public_log(ui, uplink, &own, out),
+            Channel::With(with) => {
+                let star = state.0.selected;
+                let in_sight = uplink.contacts.iter().any(|c| c.ship_id == with);
+                // Corrected once, here, so the log's resend button and the composer's send
+                // button cannot disagree about where a message is pointed. A choice the panel
+                // offered and the world has since withdrawn — the contact left, or the
+                // telescope moved — falls back to a shout rather than a beam at nothing.
+                if (*aimed == Aimed::AtThem && !in_sight)
+                    || (*aimed == Aimed::AtTheSelectedStar && star.is_none())
+                {
+                    *aimed = Aimed::Omni;
+                }
+                let aim = aim_of(*aimed, with, star);
+                conversation(ui, uplink, with, &own, aim, out);
+                compose(ui, game, uplink, with, star, in_sight, aim, draft, aimed, seal, out);
+            }
+        });
+    });
+    });
+}
+
+/// Everything said in the open, from every conversation at once.
+fn public_log(
+    ui: &mut egui::Ui,
+    uplink: &crate::uplink::Uplink,
+    own: &str,
+    out: &mut MessageWriter<Requested>,
+) {
+    let lines = uplink.chat.public();
+    log_area(ui, "chat_public", BODY_HEIGHT, |ui| {
+        if lines.is_empty() {
+            ui.weak("Nothing has been said in the open.");
+            return;
+        }
+        for (with, name, line) in &lines {
+            let said_by = match line.mine {
+                true => own,
+                false => name,
+            };
+            ui.horizontal_wrapped(|ui| {
+                speaker(ui, said_by, line.mine);
+                body_of(ui, line, line.mine);
+                // Who it was *to*, which a public log needs and a conversation does not: the
+                // same open message read here has no other way of saying who it was for.
+                if line.mine {
+                    ui.weak(format!("to {name}"));
+                } else if ui
+                    .small_button("reply")
+                    .on_hover_text("open this conversation")
+                    .clicked()
+                {
+                    ask(out, Action::ChatWith(Channel::With(*with)));
+                }
+            });
+        }
+    });
+}
+
+/// One craft's conversation, both halves.
+fn conversation(
+    ui: &mut egui::Ui,
+    uplink: &crate::uplink::Uplink,
+    with: lc_proto::ShipId,
+    own: &str,
+    aim: lc_proto::Aim,
+    out: &mut MessageWriter<Requested>,
+) {
+    let conversation = uplink.chat.get(with);
+    log_area(ui, "chat_log", BODY_HEIGHT - COMPOSER_HEIGHT, |ui| {
+        let Some(conversation) = conversation else {
+            ui.weak("Nothing said yet.");
+            return;
+        };
+        for line in &conversation.lines {
+            ui.horizontal_wrapped(|ui| {
+                let said_by = match line.mine {
+                    true => own,
+                    false => conversation.name.as_str(),
+                };
+                speaker(ui, said_by, line.mine);
+                body_of(ui, line, line.mine);
+                if line.sealed {
+                    ui.weak("encrypted");
+                }
+                // Only for something this ship said, and never for a key offer: a key is not
+                // a thing anyone acknowledges — the server keeps it out of the window on
+                // purpose — so marking one unacknowledged would be a warning that can never
+                // clear.
+                if line.mine && !line.key {
+                    // The only delivery report there is. Silence is not a failure — it is a
+                    // reply that has not been composed yet, or one still crossing.
+                    match conversation.delivered(line) {
+                        true => {
+                            ui.colored_label(RADIO, "ack").on_hover_text(
+                                "they named this message in something they sent back",
+                            );
+                        }
+                        false if unacknowledged(ui, line.event_ids.len()).clicked() => {
+                            ask(out, Action::Say {
+                                to: with,
+                                aim,
+                                // The original's, never the panel's. A message sent encrypted
+                                // must not become one sent in the open by a second click.
+                                secrecy: match line.sealed {
+                                    true => lc_proto::Secrecy::Sealed,
+                                    false => lc_proto::Secrecy::Open,
+                                },
+                                body: line.body.clone().unwrap_or_default(),
+                                // What makes this the same message rather than a second one.
+                                idem: Some(line.idem),
+                            });
+                        }
+                        false => {}
+                    }
+                }
+            });
+        }
+    });
+}
+
+/// A scrolling region of a fixed height, so the window does not breathe as messages land.
+fn log_area(ui: &mut egui::Ui, id: &str, height: f32, add: impl FnOnce(&mut egui::Ui)) {
+    let width = LOG_WIDTH;
+    // Allocated to an exact size and then scrolled inside it. `max_height` alone only stops it
+    // growing: a log with one line in it would still be one line tall, and the composer under
+    // it would sit at a different height in every conversation.
+    ui.allocate_ui(egui::vec2(width, height), |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt(id)
+            .max_height(height)
+            .min_scrolled_height(height)
+            .auto_shrink([false, false])
+            .stick_to_bottom(true)
+            .show(ui, |ui| {
+                ui.set_min_width(width);
+                add(ui);
+            });
+    });
+}
+
+/// Who said it. Named rather than arrowed: the default font has no U+2192 and draws a tofu box
+/// for it, and a name reads better in a log than a direction does.
+fn speaker(ui: &mut egui::Ui, name: &str, mine: bool) {
+    let colour = match mine {
+        true => egui::Color32::from_rgb(170, 190, 200),
+        false => RADIO,
+    };
+    ui.colored_label(colour, format!("{name}:"));
+}
+
+fn body_of(ui: &mut egui::Ui, line: &crate::chat::Line, mine: bool) {
+    let colour = match mine {
+        true => egui::Color32::from_rgb(170, 190, 200),
+        false => RADIO,
+    };
+    match (&line.body, line.key) {
+        (_, true) if mine => ui.weak("sent them this ship's key"),
+        (_, true) => ui.colored_label(RADIO, "sent this ship its key"),
+        (Some(body), _) => ui.colored_label(colour, body),
+        // Heard and unreadable, which is worth showing rather than hiding: a player can see
+        // that somebody in earshot is talking in private.
+        (None, _) => ui.weak("(encrypted, and not for this ship)"),
+    }
+    .on_hover_text(match line.arrive_s {
+        Some(arrived) => format!("{} in flight", duration((arrived - line.sent_s).max(0.0))),
+        None => "sent; nothing here can see it land".to_string(),
+    });
+}
+
+/// The warning on a message nothing has acknowledged, which is also the button that resends it.
+///
+/// **Painted rather than typed.** The obvious glyph for this is U+26A0, and the default font
+/// draws a tofu box for it — the trap that has already cost this interface a close button and a
+/// pair of arrows. A triangle is four lines of geometry and cannot be missing.
+fn unacknowledged(ui: &mut egui::Ui, sends: usize) -> egui::Response {
+    let size = egui::vec2(14.0, 14.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let amber = match response.hovered() {
+        true => egui::Color32::from_rgb(255, 210, 90),
+        false => egui::Color32::from_rgb(210, 165, 60),
+    };
+    let c = rect.center();
+    let h = rect.height() * 0.42;
+    let w = rect.width() * 0.46;
+    let points = vec![
+        egui::pos2(c.x, c.y - h),
+        egui::pos2(c.x + w, c.y + h),
+        egui::pos2(c.x - w, c.y + h),
+    ];
+    let painter = ui.painter();
+    painter.add(egui::Shape::convex_polygon(points, amber, egui::Stroke::NONE));
+    // The bar and dot of an exclamation mark, in the window's own background colour so the
+    // triangle reads as a warning sign rather than a plain arrowhead.
+    let ink = ui.visuals().window_fill;
+    painter.line_segment(
+        [egui::pos2(c.x, c.y - h * 0.35), egui::pos2(c.x, c.y + h * 0.35)],
+        egui::Stroke::new(1.6_f32, ink),
+    );
+    painter.circle_filled(egui::pos2(c.x, c.y + h * 0.65), 0.9, ink);
+    response.on_hover_text(match sends {
+        // A resend is a second pulse of light, not a retry of a failed one: nothing failed, and
+        // nothing at either end can tell a message that missed from one still crossing.
+        1 => "nothing has acknowledged this. Click to send it again".to_string(),
+        n => format!("sent {n} times, still unacknowledged. Click to send it again"),
+    })
+}
+
+/// The aim, the encryption and the field a message is typed into.
+#[allow(clippy::too_many_arguments)]
+fn compose(
+    ui: &mut egui::Ui,
+    game: &Game,
+    uplink: &crate::uplink::Uplink,
+    with: lc_proto::ShipId,
+    star: Option<StarId>,
+    in_sight: bool,
+    aim: lc_proto::Aim,
+    draft: &mut String,
+    aimed: &mut Aimed,
+    seal: &mut bool,
+    out: &mut MessageWriter<Requested>,
+) {
+    ui.separator();
+    let holds_key = uplink.chat.holds_key(with);
+
+    ui.horizontal(|ui| {
+        ui.selectable_value(aimed, Aimed::Omni, "omni")
+            .on_hover_text("every direction: heard by everyone in range, and it says where you are");
+        ui.add_enabled_ui(in_sight, |ui| {
+            ui.selectable_value(aimed, Aimed::AtThem, "beam").on_hover_text(match in_sight {
+                true => "aimed where they are predicted to be; a craft under thrust is missed",
+                false => "nothing in sight to aim at",
+            });
+        });
+        ui.add_enabled_ui(star.is_some(), |ui| {
+            let name = star
+                .and_then(|id| game.star(id))
+                .and_then(|s| s.name.clone())
+                .unwrap_or_else(|| "the selected star".into());
+            ui.selectable_value(aimed, Aimed::AtTheSelectedStar, "beam star").on_hover_text(
+                format!("{name}: the whole system, for when you do not know where in it they are"),
+            );
+        });
+    });
+    ui.horizontal(|ui| {
+        ui.add_enabled_ui(holds_key, |ui| {
+            ui.checkbox(seal, "encrypt").on_hover_text(match holds_key {
+                true => "only they can read it",
+                false => "this ship does not hold their key yet",
+            });
+        });
+        if !holds_key {
+            *seal = false;
+        }
+        if ui
+            .button("send key")
+            .on_hover_text("so they can encrypt messages back; it travels at c like anything else")
+            .clicked()
+        {
+            ask(out, Action::OfferKey { to: with, aim });
+        }
+    });
+
+    ui.horizontal(|ui| {
+        // From the column rather than from `available_width`, which inside a fixed allocation
+        // is the whole remaining window and pushed the send button out past the panel's edge.
+        let field = ui.add(
+            egui::TextEdit::singleline(draft)
+                .desired_width(LOG_WIDTH - 52.0)
+                .hint_text("say something"),
+        );
+        let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if (ui.button("send").clicked() || entered) && !draft.trim().is_empty() {
+            ask(out, Action::Say {
+                to: with,
+                aim,
+                secrecy: match *seal {
+                    true => lc_proto::Secrecy::Sealed,
+                    false => lc_proto::Secrecy::Open,
+                },
+                body: std::mem::take(draft),
+                idem: None,
+            });
+            field.request_focus();
+        }
+    });
+    let left = lc_proto::MESSAGE_LIMIT.saturating_sub(draft.len());
+    if left < 80 {
+        ui.weak(format!("{left} characters left"));
+    }
+}
+
+fn aim_of(aimed: Aimed, with: lc_proto::ShipId, star: Option<StarId>) -> lc_proto::Aim {
+    match (aimed, star) {
+        (Aimed::Omni, _) => lc_proto::Aim::Omni,
+        (Aimed::AtThem, _) => lc_proto::Aim::Ship(with),
+        (Aimed::AtTheSelectedStar, Some(star)) => lc_proto::Aim::Star(star.get()),
+        // The star went away between the choice and the click. Shouting is the safe fallback:
+        // a beam with nothing to aim at is refused, and being refused is worse than being loud.
+        (Aimed::AtTheSelectedStar, None) => lc_proto::Aim::Omni,
+    }
+}

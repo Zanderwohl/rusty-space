@@ -636,12 +636,13 @@ fn fold(
                 // Recorded against the identifier the server minted, which is the only thing
                 // an acknowledgement will ever name it by. Not shown in the events box: that
                 // box is for what happened *to* this ship, and the chat window already has it.
-                Order::Say { to, secrecy, body, .. } => {
+                Order::Say { to, secrecy, body, idem, .. } => {
                     let name = uplink.contacts.iter().find(|c| c.ship_id == *to).map(|c| c.name.clone());
                     uplink.chat.sent(
                         *to,
                         name.as_deref(),
                         event_id,
+                        *idem,
                         Some(body.clone()),
                         matches!(secrecy, lc_proto::Secrecy::Sealed),
                         false,
@@ -651,7 +652,7 @@ fn fold(
                 }
                 Order::OfferKey { to, .. } => {
                     let name = uplink.contacts.iter().find(|c| c.ship_id == *to).map(|c| c.name.clone());
-                    uplink.chat.sent(*to, name.as_deref(), event_id, None, false, true, at_s);
+                    uplink.chat.sent(*to, name.as_deref(), event_id, 0, None, false, true, at_s);
                     None
                 }
             };
@@ -1219,6 +1220,7 @@ mod tests {
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
         let spoken = lc_proto::Spoken {
             to: 7,
+            idem: 11,
             sealed: false,
             body: Some("are you there".into()),
             acks: Vec::new(),
@@ -1240,7 +1242,8 @@ mod tests {
     fn a_sealed_message_for_somebody_else_is_still_noticed() {
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
-        let spoken = lc_proto::Spoken { to: 99, sealed: true, body: None, acks: Vec::new() };
+        let spoken =
+            lc_proto::Spoken { to: 99, idem: 12, sealed: true, body: None, acks: Vec::new() };
         fold(&mut uplink, &mut game, &mut ui, heard(98, 2, spoken, lc_proto::kind::MESSAGE));
 
         let line = &uplink.chat.get(ShipId(2)).expect("a conversation").lines[0];
@@ -1266,23 +1269,26 @@ mod tests {
                 aim: lc_proto::Aim::Omni,
                 secrecy: lc_proto::Secrecy::Open,
                 body: "hello".into(),
+                idem: 4242,
             },
         });
         let conversation = uplink.chat.get(ShipId(2)).expect("a conversation");
-        assert_eq!(conversation.lines[0].event_id, 4242);
+        assert_eq!(conversation.lines[0].event_ids, vec![4242]);
         assert!(conversation.lines[0].mine);
-        assert!(!conversation.delivered(4242), "unanswered, so not acknowledged");
+        let sent = conversation.lines[0].clone();
+        assert!(!conversation.delivered(&sent), "unanswered, so not acknowledged");
         assert_eq!(ui.0.notifications.len(), before, "a sent message reported itself as news");
 
         // And the acknowledgement, when it comes back, names it.
         let spoken = lc_proto::Spoken {
             to: 7,
+            idem: 13,
             sealed: false,
             body: Some("got it".into()),
             acks: vec![4242],
         };
         fold(&mut uplink, &mut game, &mut ui, heard(43, 2, spoken, lc_proto::kind::MESSAGE));
-        assert!(uplink.chat.get(ShipId(2)).unwrap().delivered(4242));
+        assert!(uplink.chat.get(ShipId(2)).unwrap().delivered(&sent));
     }
 
     /// A key offer arriving is what puts a key in the ring, and the ring is what the interface
@@ -1292,8 +1298,13 @@ mod tests {
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
         assert!(!uplink.chat.holds_key(ShipId(2)));
-        let spoken =
-            lc_proto::Spoken { to: 7, sealed: false, body: Some(String::new()), acks: Vec::new() };
+        let spoken = lc_proto::Spoken {
+            to: 7,
+            idem: 0,
+            sealed: false,
+            body: Some(String::new()),
+            acks: Vec::new(),
+        };
         fold(&mut uplink, &mut game, &mut ui, heard(50, 2, spoken, lc_proto::kind::KEY));
         assert!(uplink.chat.holds_key(ShipId(2)));
         assert!(uplink.chat.get(ShipId(2)).unwrap().lines[0].key, "it is in the transcript too");

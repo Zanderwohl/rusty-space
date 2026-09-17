@@ -130,15 +130,41 @@ able to watch a curve and fly at the same time.
 
 ### The radio window
 
-**One window and one selector, not a thread per craft.** Everything in it is minutes to years
-old and there is no typing indicator to be had, so the interface that suits it is a log with a
-dropdown rather than a messaging app pretending the far end is present. A message someone sent
-shows a dot until they acknowledge it, and then it shows `ack` — which is the only delivery
-report there is, for the reason in
-[05-observation.md](05-observation.md#acknowledgement-is-the-only-delivery-report).
+**A list of craft on the left, one log on the right.** Everything in it is minutes to years old
+and there is no typing indicator to be had, so the interface that suits it is a log with a
+selector rather than a messaging app pretending the far end is present.
+
+The list is ordered **most recently heard from first**, which is how a player finds the
+conversation they are in the middle of. The cost is worth naming: a list that reorders itself can
+be misclicked, and it reorders exactly when a message lands.
+
+At the top of it is **Public** — every open message, sent and received, from every craft at once.
+It is a *view* and deliberately not a stored conversation: the answer to "what has been going on"
+rather than "what did we two say". Encrypted messages are absent from it whichever end they came
+from, this ship's own included, because a private message in a public log is one somebody can
+read over your shoulder.
+
+Both halves scroll inside a **fixed body**, so the window is the same size with one message in it
+and with two hundred. That matters more here than in most panels, because what fills it arrives
+without being asked for.
+
+A message this ship sent shows `ack` once the far end names it, and an **amber warning triangle**
+until then — which is also the button that sends it again. See
+[05-observation.md](05-observation.md#acknowledgement-is-the-only-delivery-report) for why that
+is the only delivery report there is, and why a resend is a second pulse of light rather than a
+retry. The triangle is *painted* rather than typed: the obvious glyph is U+26A0 and the default
+font draws a tofu box for it, which is the trap that has already cost this interface a close
+button and a pair of arrows.
+
+A resend keeps the original's encryption and takes the panel's **current aim**. That asymmetry is
+the point of the button: the usual reason a message went unacknowledged is a beam aimed where a
+craft turned out not to be, and the useful retry is the same words pointed somewhere else. A
+message sent encrypted must never become one sent in the open by a second click.
 
 A transmission arriving is also a **green line in the notifications box**, and that line is a
-link. It is the one kind of event with somewhere to go: everything else in that box is the
+button — it lights up under the cursor, because an affordance nobody can see is one nobody
+uses. (`Button::frame_when_inactive(false)`, not `frame(false)`: egui gates the hover paint on
+the frame's margin existing, so a frameless button is one that never lights up.) It is the one kind of event with somewhere to go: everything else in that box is the
 interface reporting on itself. Somebody else's sealed message is a line too, saying that it was
 heard and cannot be read — a signal falling on the antenna is a fact about the world, and hiding
 it would let a player learn that nothing was sent by not being told.

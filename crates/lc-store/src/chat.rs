@@ -26,6 +26,9 @@ pub struct Message {
     /// Event ids of the addressee's messages the sender had received when this went out.
     pub acks: Vec<i64>,
     pub sent_t: i64,
+    /// Which message this is, across its resends. `None` for a row written before the column
+    /// existed; see `sql/0006_message_key.sql` for why that is not a zero.
+    pub idem: Option<i64>,
 }
 
 /// A transmission landing on somebody: the addressee, or anyone else in earshot.
@@ -60,8 +63,8 @@ pub async fn save_messages(client: &Client, messages: &[Message]) -> Result<u64,
         written += client
             .execute(
                 "INSERT INTO lc_messages
-                     (event_id, sender, addressee, sealed, is_key, body, acks, sent_t)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                     (event_id, sender, addressee, sealed, is_key, body, acks, sent_t, idem)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                  ON CONFLICT (event_id) DO NOTHING",
                 &[
                     &m.event_id,
@@ -72,6 +75,7 @@ pub async fn save_messages(client: &Client, messages: &[Message]) -> Result<u64,
                     &m.body,
                     &m.acks,
                     &m.sent_t,
+                    &m.idem,
                 ],
             )
             .await?;
@@ -126,10 +130,11 @@ fn message_from(row: &tokio_postgres::Row) -> Message {
         body: row.get(5),
         acks: row.get(6),
         sent_t: row.get(7),
+        idem: row.get(8),
     }
 }
 
-const COLUMNS: &str = "event_id, sender, addressee, sealed, is_key, body, acks, sent_t";
+const COLUMNS: &str = "event_id, sender, addressee, sealed, is_key, body, acks, sent_t, idem";
 
 /// Everything this ship transmitted, oldest first.
 pub async fn sent_by(client: &Client, ship: i64) -> Result<Vec<Message>, Error> {
@@ -163,7 +168,7 @@ pub async fn heard_by(client: &Client, ship: i64) -> Result<Vec<(Message, i64)>,
         )
         .await?;
     let mut out: Vec<(Message, i64)> =
-        rows.iter().map(|row| (message_from(row), row.get(8))).collect();
+        rows.iter().map(|row| (message_from(row), row.get(9))).collect();
     out.reverse();
     Ok(out)
 }
@@ -252,6 +257,7 @@ mod tests {
             body: body.into(),
             acks: Vec::new(),
             sent_t,
+            idem: Some(event_id),
         }
     }
 

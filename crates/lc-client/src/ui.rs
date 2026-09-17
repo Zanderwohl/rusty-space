@@ -144,6 +144,22 @@ impl Look {
     }
 }
 
+/// What the radio window is showing.
+///
+/// [`Channel::Public`] is not a conversation and is deliberately not stored as one: it is a
+/// *view* over every other, answering "what has been going on" rather than "what did we two
+/// say". Sealed messages are absent from it whichever end they came from — including this
+/// ship's own, because a private message listed in a public log is a private message on a
+/// screen somebody can read over your shoulder.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Channel {
+    /// Everything said in the open, from and to everyone.
+    #[default]
+    Public,
+    /// One craft's conversation, both halves.
+    With(lc_proto::ShipId),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Notification {
     pub text: String,
@@ -290,7 +306,7 @@ pub struct UiState {
     ///
     /// Here rather than local to the panel because a click in the events box has to be able to
     /// change it, and that click is an [`crate::action::Action`] like any other.
-    pub chat_with: Option<lc_proto::ShipId>,
+    pub chat_with: Channel,
 }
 
 impl Default for UiState {
@@ -316,7 +332,7 @@ impl Default for UiState {
             time_rate: TEST_TIME_RATE,
             notifications: Vec::new(),
             refit_draft: None,
-            chat_with: None,
+            chat_with: Channel::default(),
         }
     }
 }

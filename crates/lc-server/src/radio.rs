@@ -27,7 +27,8 @@
 //! `lightcone/docs/05-observation.md`.
 
 use lc_proto::{
-    ACK_DEPTH, Aim, MESSAGE_LIMIT, Order, Outbound, Refusal, Said, Secrecy, ShipId, Spoken,
+    ACK_DEPTH, Aim, MESSAGE_LIMIT, MessageKey, Order, Outbound, Refusal, Said, Secrecy, ShipId,
+    Spoken,
 };
 use lc_world::craft::CraftId;
 use lc_world::motion::LIGHT_US_PER_LY;
@@ -52,6 +53,8 @@ pub const SIGNAL_POWER_W: f64 = 1.0e6;
 /// after the order is validated.
 pub(crate) struct Utterance {
     to: ShipId,
+    /// Which message this is, across its resends. Zero for a key offer, which nothing resends.
+    idem: MessageKey,
     sealed: bool,
     /// A key offer, which is a message with nothing in it.
     key: bool,
@@ -86,7 +89,7 @@ impl<J: Journal> Server<J> {
         at: i64,
     ) -> Result<Transmission, Refusal> {
         match order {
-            Order::Say { to, aim, secrecy, body } => {
+            Order::Say { to, aim, secrecy, body, idem } => {
                 if body.is_empty() || body.len() > MESSAGE_LIMIT || *to == from {
                     return Err(Refusal::Impossible);
                 }
@@ -96,14 +99,20 @@ impl<J: Journal> Server<J> {
                 }
                 let beam = self.beam_for(id, aim, at)?;
                 let acks = self.acks_for(id, *to, at);
-                let spoken =
-                    Spoken { to: to.0, sealed, body: Some(body.clone()), acks: acks.clone() };
+                let spoken = Spoken {
+                    to: to.0,
+                    idem: *idem,
+                    sealed,
+                    body: Some(body.clone()),
+                    acks: acks.clone(),
+                };
                 Ok(Transmission {
                     kind: lc_proto::kind::MESSAGE,
                     payload: serde_json::to_string(&spoken).unwrap_or_else(|_| "{}".into()),
                     beam,
                     said: Utterance {
                         to: *to,
+                        idem: *idem,
                         sealed,
                         key: false,
                         body: body.clone(),
@@ -119,6 +128,7 @@ impl<J: Journal> Server<J> {
                 let beam = self.beam_for(id, aim, at)?;
                 let spoken = Spoken {
                     to: to.0,
+                    idem: 0,
                     sealed: false,
                     body: Some(String::new()),
                     acks: Vec::new(),
@@ -129,6 +139,7 @@ impl<J: Journal> Server<J> {
                     beam,
                     said: Utterance {
                         to: *to,
+                        idem: 0,
                         sealed: false,
                         key: true,
                         body: String::new(),
@@ -167,6 +178,7 @@ impl<J: Journal> Server<J> {
             body: said.body.clone(),
             acks: said.acks.clone(),
             sent_t: at,
+            idem: (!said.key).then_some(said.idem as i64),
         });
         for (observer, arrive_t) in landings {
             if *observer == sender {
@@ -360,6 +372,7 @@ impl<J: Journal> Server<J> {
         for m in transcript.sent {
             messages.push(Said {
                 event_id: m.event_id,
+                idem: m.idem.unwrap_or_default() as MessageKey,
                 with: ShipId(m.addressee),
                 with_name: name_of(m.addressee),
                 mine: true,
@@ -378,6 +391,7 @@ impl<J: Journal> Server<J> {
             let readable = !m.sealed || m.addressee == ship.0;
             messages.push(Said {
                 event_id: m.event_id,
+                idem: m.idem.unwrap_or_default() as MessageKey,
                 with: ShipId(m.sender),
                 with_name: name_of(m.sender),
                 mine: false,
@@ -468,8 +482,15 @@ mod tests {
             .collect()
     }
 
+    fn next_key() -> MessageKey {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    }
+
     fn say(to: i64, aim: Aim, secrecy: Secrecy, body: &str) -> Order {
-        Order::Say { to: ShipId(to), aim, secrecy, body: body.into() }
+        // A fresh key per call, so two test messages are never taken for one.
+        Order::Say { to: ShipId(to), aim, secrecy, body: body.into(), idem: next_key() }
     }
 
     /// Two ships a light-hour apart and a third beside the second. An open message is read by

@@ -581,6 +581,7 @@ fn open_the_radio(
         aim: lc_proto::Aim::Omni,
         secrecy: lc_proto::Secrecy::Open,
         body: words.clone(),
+        idem: None,
     }));
 }
 
