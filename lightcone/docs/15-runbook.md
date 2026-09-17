@@ -87,7 +87,7 @@ names one build's chunk, and a shard reading one sky while players download anot
 with them about which system every ship is in. See
 [the broker and a shard](#the-broker-and-a-shard-on-rocinante).
 
-Builds staged before `80ed77f` named the chunk `assets/sky/hyg-v42.lcsky`. A shard pointed at
+Builds staged before 2026-09-17 named the chunk `assets/sky/hyg-v42.lcsky`. A shard pointed at
 one of those keeps working; the new name only matters when you repoint it at a newer build.
 
 `build-wasm.sh` refuses nothing but takes about four minutes cold. `publish-build.sh` refuses a
