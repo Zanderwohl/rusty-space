@@ -26,6 +26,8 @@ pub struct Preview {
     /// Stored energy, plus what dismantling returns, less what building costs. Before drain.
     pub available_j: f64,
     pub capacity_after_j: f64,
+    /// Dry mass of the draft plus the energy it would end with, before drain.
+    pub mass_after_kg: f64,
     /// Steps and how long they take, or why it cannot be done.
     pub planned: Result<(usize, f64), Shortage>,
     /// Why Apply cannot be pressed, when it cannot.
@@ -61,6 +63,7 @@ pub fn preview(ship: &Craft, draft: Loadout, remote: bool, now_s: f64) -> Option
         stored_j,
         available_j,
         capacity_after_j: balance.capacity_j(&draft),
+        mass_after_kg: balance.dry_mass_kg(&draft) + available_j.max(0.0) / lc_world::fitting::C2,
         planned,
         blocked,
     })
@@ -231,6 +234,7 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
     let balance = fitting.balance;
     // Each slider ends where the budget does, and a drag below the lowest loadout the ship could
     // end at stops there. The left end stays put, so a handle does not jump as the range moves.
+    ui.strong("Plan");
     let mut changed = draft;
     let knob = |ui: &mut egui::Ui, knob: Knob, floor: u32, most: u32, value: &mut u32, name: &str| {
         let range = reach(&balance, current, draft, stored, knob, floor..=most);
@@ -250,16 +254,27 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
 
     let Some(view) = preview(ship, draft, game.remote, now) else { return };
     ui.separator();
-    ui.label(format!("free slots after: {}", draft.free_slots()));
-    ui.label(format!("length after: {}", length(balance.length_m(draft.slots))));
-    ui.label(format!(
-        "energy after: {} of {}",
-        me(view.available_j, module_j),
-        me(view.capacity_after_j, module_j)
-    ));
-    if let Ok((steps, duration_s)) = view.planned {
-        ui.label(format!("{steps} steps, {}", span(duration_s)));
-    }
+    ui.strong("After");
+    egui::Grid::new("refit-after").num_columns(2).show(ui, |ui| {
+        let mut row = |key: &str, value: String| {
+            ui.label(key);
+            ui.label(value);
+            ui.end_row();
+        };
+        row("free slots", draft.free_slots().to_string());
+        row("length", length(balance.length_m(draft.slots)));
+        row(
+            "energy",
+            format!("{} of {}", me(view.available_j, module_j), me(view.capacity_after_j, module_j)),
+        );
+        row("mass", format!("{:.3e} kg", view.mass_after_kg));
+        let (steps, days) = match view.planned {
+            Ok((steps, duration_s)) => (steps.to_string(), format!("{:.1}", duration_s / 86_400.0)),
+            Err(_) => ("—".into(), "—".into()),
+        };
+        row("steps", steps);
+        row("days", days);
+    });
     ui.horizontal(|ui| {
         if ui.add_enabled(view.blocked.is_none(), egui::Button::new("Apply")).clicked() {
             ask(out, Action::ApplyRefit);
@@ -321,6 +336,10 @@ mod tests {
         let expected = view.stored_j + 2.0 * 0.95 * b.module_energy_j() - b.module_energy_j();
         assert!((view.available_j / expected - 1.0).abs() < 1.0e-12);
         assert!(matches!(view.planned, Ok((3, _))), "{:?}", view.planned);
+        // Two taken apart and one built: the ship is lighter by the 5% of two modules radiated.
+        let mass_before = b.dry_mass_kg(&Loadout::STARTING) + view.stored_j / lc_world::fitting::C2;
+        let lost = mass_before - view.mass_after_kg;
+        assert!((lost / (2.0 * 0.05 * b.module_mass_kg()) - 1.0).abs() < 1.0e-9, "{lost}");
         assert_eq!(view.blocked, None);
     }
 
