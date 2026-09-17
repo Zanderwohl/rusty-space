@@ -89,8 +89,9 @@ Always on screen, never in a panel a player can close:
 
 | readout | example |
 |---|---|
-| coordinate time | `T + 14.62 years` |
-| age of the selected target's light | `Proxima Centauri — light is 4.24 years old` |
+| coordinate time, and the ship's own | `T + 14.62 years` beside `T' + 12.08 years` |
+| distance to the selected target, which is the age of its light | `Proxima Centauri — 4.24 ly` |
+| stored energy, for a ship with modules | `ENERGY`, a bar, `23.4 / 30.0 ME` |
 | what the band mapping is | `NATURAL` |
 
 If a player forgets they are looking at the past, the game has failed at the only thing it is
@@ -120,6 +121,8 @@ with.
 | notifications | automatic | target out of range, observation returned nothing, instrument saturated |
 | debug | `F3` | below |
 | scenarios | — | scenes to stage. Development only, and every button does nothing without a shard started for it |
+| refit | `R` | module counts and hull slots as sliders, what applying them would cost and take, and the refit under way. See [19-ship-fitting.md](19-ship-fitting.md) |
+| dev actions | `F5` | energy for the ship. Development only; a shard refuses it |
 
 Panels are windows rather than menu pages because the clock never stops: a player has to be
 able to watch a curve and fly at the same time.

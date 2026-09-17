@@ -44,10 +44,14 @@ pub enum Panel {
     Tuning,
     /// Scenes to stage. Development only, and it does nothing without a shard started for it.
     Scenarios,
+    /// Rebuilding the ship: how many of each module, and the hull.
+    Refit,
+    /// Development only: things no player can do, such as being handed energy.
+    DevActions,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 8] = [
+    pub const ALL: [Panel; 10] = [
         Panel::Escape,
         Panel::Settings,
         Panel::Debug,
@@ -56,6 +60,8 @@ impl Panel {
         Panel::Flight,
         Panel::Tuning,
         Panel::Scenarios,
+        Panel::Refit,
+        Panel::DevActions,
     ];
 
     /// A panel by the name a development flag would use.
@@ -73,6 +79,8 @@ impl Panel {
             Panel::Flight => "Flight",
             Panel::Tuning => "Starfield tuning",
             Panel::Scenarios => "Scenarios",
+            Panel::Refit => "Refit",
+            Panel::DevActions => "Dev actions",
         }
     }
 }
@@ -266,6 +274,8 @@ pub struct UiState {
     /// Development only; the server owns the rate.
     pub time_rate: f64,
     pub notifications: Vec<Notification>,
+    /// The loadout the refit panel's sliders are set to, or `None` to follow the ship.
+    pub refit_draft: Option<lc_world::fitting::Loadout>,
 }
 
 impl Default for UiState {
@@ -290,6 +300,7 @@ impl Default for UiState {
             god_view: false,
             time_rate: TEST_TIME_RATE,
             notifications: Vec::new(),
+            refit_draft: None,
         }
     }
 }

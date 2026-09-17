@@ -297,8 +297,8 @@ impl Session {
     /// yet, so aiming at where it is recorded and aiming at where it will be are the same.
     pub fn fly_to(&mut self, id: StarId) -> Option<&Cruise> {
         let to_ly = self.star(id)?.position_ly;
-        let accel_g = self.ship.motion.drive.accel_g;
-        self.cross_to_at(self.coordinate_time_s(), to_ly, accel_g)
+        let drive = self.ship.motion.drive;
+        self.cross_to_at(self.coordinate_time_s(), to_ly, drive.accel_g, drive.max_beta)
     }
 
     /// Cross to a coordinate at a stated time and acceleration.
@@ -306,9 +306,16 @@ impl Session {
     /// The reading `fly_to` is written in terms of, and the one a server's acceptance uses —
     /// both go through `Change::Cross`, so the standoff and the plan are one implementation
     /// rather than two that have to agree.
-    pub fn cross_to_at(&mut self, at_s: f64, to_ly: DVec3, accel_g: f64) -> Option<&Cruise> {
+    pub fn cross_to_at(
+        &mut self,
+        at_s: f64,
+        to_ly: DVec3,
+        accel_g: f64,
+        max_beta: f64,
+    ) -> Option<&Cruise> {
         let mut drive = self.ship.motion.drive;
         drive.accel_g = accel_g;
+        drive.max_beta = max_beta;
         let event = motion::Event {
             ship: motion::ShipId(0),
             at_t: at_s,
@@ -329,7 +336,8 @@ impl Session {
     /// it — a moon that is not there, rings on a body without any, a libration point of the
     /// star itself.
     pub fn set_course(&mut self, course: &crate::navigation::Course) -> Option<String> {
-        self.set_course_at(self.coordinate_time_s(), course, self.ship.motion.drive.accel_g)
+        let drive = self.ship.motion.drive;
+        self.set_course_at(self.coordinate_time_s(), course, drive.accel_g, drive.max_beta)
     }
 
     /// Set a course at a stated time and acceleration.
@@ -343,9 +351,11 @@ impl Session {
         at_s: f64,
         course: &crate::navigation::Course,
         accel_g: f64,
+        max_beta: f64,
     ) -> Option<String> {
         let mut drive = self.ship.motion.drive;
         drive.accel_g = accel_g;
+        drive.max_beta = max_beta;
         let event = motion::Event {
             ship: motion::ShipId(0),
             at_t: at_s,

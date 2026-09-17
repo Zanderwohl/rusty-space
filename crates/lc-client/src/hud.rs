@@ -15,7 +15,7 @@ const YEAR_S: f64 = 31_557_600.0;
 pub struct Hud {
     /// Coordinate time.
     pub clock: String,
-    /// The ship's own clock. Behind [`Hud::clock`] by whatever the ship has flown.
+    /// The ship's own clock, `T'`. Behind [`Hud::clock`] by whatever the ship has flown.
     pub ship_clock: String,
     /// The selected target and how old its light is, if anything is selected.
     pub target: Option<String>,
@@ -29,6 +29,17 @@ pub struct Hud {
     pub coasting: Option<String>,
     /// Set when the clock is running at something other than the canonical rate.
     pub warning: Option<String>,
+    /// Stored energy, for a ship with modules.
+    pub energy: Option<Energy>,
+}
+
+/// The energy readout: a bar, and the numbers beside it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Energy {
+    /// Stored over capacity, `[0, 1]`.
+    pub fraction: f32,
+    /// `23.4 / 30.0 ME`, and what is spoken for: a plan's commitment or a refit under way.
+    pub amount: String,
 }
 
 /// What an arc reads as: the two apsides, or the periapsis alone on an escape.
@@ -94,7 +105,7 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
     let name = presets::all().get(ui.preset).map(|(n, _)| *n).unwrap_or("custom");
     Hud {
         clock: format!("T + {:.2} years", session.coordinate_time_s() / YEAR_S),
-        ship_clock: format!("ship {:.2} years", session.ship.motion.clock_s / YEAR_S),
+        ship_clock: format!("T' + {:.2} years", session.ship.motion.clock_s / YEAR_S),
         target: ui.selected.and_then(|id| {
             let star = session.star(id)?;
             // Distance directly, not by way of sky(): shading six thousand stars once a frame
@@ -102,7 +113,7 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
             // cost. A light-year of distance is a year of staleness by definition.
             let age = session.distance_to(star);
             let label = star.name.clone().unwrap_or_else(|| format!("star {:x}", id.get()));
-            Some(format!("{label} — light is {age:.2} years old"))
+            Some(format!("{label} — {age:.2} ly"))
         }),
         mapping: name.to_uppercase(),
         exposure: match ui.exposure_offset {
@@ -124,7 +135,30 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
         // whether the player set it offline or a shard staging a scene stated it. The clock
         // running sixty times over is exactly when a readout of how fast earns its place.
         warning: (ui.time_rate != 1.0).then(|| crate::ui::rate_label(ui.time_rate)),
+        energy: energy(session),
     }
+}
+
+fn energy(session: &Session) -> Option<Energy> {
+    let now = session.coordinate_time_s();
+    let ship = &session.ship;
+    let fitting = ship.fitting()?;
+    let module_j = fitting.balance.module_energy_j();
+    let (stored, capacity) = (fitting.stored_j_at(&ship.motion, now), fitting.capacity_j_at(now));
+    let mut line = format!("{:.1} / {:.1} ME", stored / module_j, capacity / module_j);
+    if fitting.solar_w() > 0.0 {
+        let net = fitting.solar_w() - fitting.balance.drain_w(&fitting.loadout_at(now));
+        line += &format!(" {}", crate::refit_panel::me_per_year(net, module_j));
+    }
+    let committed = fitting.committed_j_at(&ship.motion, now);
+    if committed > 0.0 {
+        line += &format!(" ({:.2} committed)", committed / module_j);
+    }
+    if ship.is_refitting(now) {
+        line += " — REFITTING";
+    }
+    let fraction = if capacity > 0.0 { (stored / capacity).clamp(0.0, 1.0) as f32 } else { 0.0 };
+    Some(Energy { fraction, amount: line })
 }
 
 #[cfg(test)]
@@ -179,9 +213,20 @@ mod tests {
         assert!(lines(&s, &ui).target.is_none());
         apply(Action::SelectTarget(Some(id)), &mut ui, &mut s);
         let target = lines(&s, &ui).target.expect("a target line");
-        assert!(target.contains("light is"), "{target}");
-        // The sample provider's nearest star is 4.2 light-years out.
-        assert!(target.contains("4.2"), "{target}");
+        // The sample provider's nearest star is 4.2 light-years out, and a light-year of
+        // distance is a year of staleness.
+        assert!(target.contains("4.2") && target.ends_with(" ly"), "{target}");
+    }
+
+    #[test]
+    fn a_fitted_ship_shows_its_energy_as_a_bar_and_numbers() {
+        use lc_world::fitting::{Balance, Fitting, Loadout};
+        let (ui, mut s) = fixture();
+        assert!(lines(&s, &ui).energy.is_none(), "an unfitted ship has no energy readout");
+        s.ship.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, s.coordinate_time_s())));
+        let energy = lines(&s, &ui).energy.expect("an energy readout");
+        assert!((energy.fraction - 1.0).abs() < 1.0e-6, "{}", energy.fraction);
+        assert_eq!(energy.amount, "30.0 / 30.0 ME");
     }
 
     #[test]
@@ -234,7 +279,7 @@ mod tests {
         let flight = l.flight.expect("a flight line");
         assert!(flight.contains('c') && flight.contains("to go"), "{flight}");
         let coordinate: f64 = l.clock.trim_start_matches("T + ").trim_end_matches(" years").parse().unwrap();
-        let aboard: f64 = l.ship_clock.trim_start_matches("ship ").trim_end_matches(" years").parse().unwrap();
+        let aboard: f64 = l.ship_clock.trim_start_matches("T' + ").trim_end_matches(" years").parse().unwrap();
         assert!(aboard < coordinate, "ship {aboard} should be behind coordinate {coordinate}");
     }
 
@@ -246,6 +291,6 @@ mod tests {
             star.name = None;
         }
         apply(Action::SelectTarget(Some(id)), &mut ui, &mut s);
-        assert!(lines(&s, &ui).target.unwrap().contains("light is"));
+        assert!(lines(&s, &ui).target.unwrap().ends_with(" ly"));
     }
 }

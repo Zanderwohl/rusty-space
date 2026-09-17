@@ -70,7 +70,10 @@ async fn greet(link: &mut WebSocketLink, protocol: u32, ticket: &str) {
 async fn hear(link: &mut WebSocketLink, what: &str) -> Outbound {
     let deadline = tokio::time::Instant::now() + PATIENCE;
     loop {
-        if let Some(message) = link.poll().into_iter().next() {
+        // A ship's account follows its welcome and every order, and none of these tests is
+        // about energy.
+        let heard = link.poll().into_iter().find(|m| !matches!(m, Outbound::Fitted { .. }));
+        if let Some(message) = heard {
             return message;
         }
         if let Status::Closed(why) = link.status() {
@@ -176,12 +179,12 @@ async fn a_crossing_names_a_star_the_server_also_holds() {
     link.send(Inbound::Act(Intent {
         ship_id,
         // More than any craft can pull, so the answer has to differ from the request.
-        order: Order::Cross { star: destination, accel_g: 1000.0 },
+        order: Order::Cross { star: destination, accel_g: 1000.0, max_beta: 0.999 },
         issued_at_client_t: 0,
     }));
 
     let said = hear(&mut link, "an acceptance").await;
-    let Outbound::Accepted { order: Order::Cross { star, accel_g }, .. } = said else {
+    let Outbound::Accepted { order: Order::Cross { star, accel_g, .. }, .. } = said else {
         panic!("a crossing was not accepted: {said:?}");
     };
     assert_eq!(star, destination, "it agreed to a different star");
@@ -203,7 +206,7 @@ async fn a_crossing_to_a_star_the_server_does_not_have_is_refused() {
 
     link.send(Inbound::Act(Intent {
         ship_id,
-        order: Order::Cross { star: 0xdead_beef_dead_beef, accel_g: 1.0 },
+        order: Order::Cross { star: 0xdead_beef_dead_beef, accel_g: 1.0, max_beta: 0.999 },
         issued_at_client_t: 0,
     }));
 

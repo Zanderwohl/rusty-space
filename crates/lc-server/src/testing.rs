@@ -32,23 +32,32 @@ impl Broker {
         }]})
     }
 
+    /// A ticket with no `perm`, as a broker from before permissions minted one.
     pub fn mint(&self, sub: &str, aud: &str, exp_in: i64, jti: &str) -> String {
+        self.mint_claims(sub, aud, exp_in, jti, None)
+    }
+
+    /// A ticket for an account at a permission level.
+    pub fn mint_with(&self, sub: &str, aud: &str, jti: &str, perm: i32) -> String {
+        self.mint_claims(sub, aud, 60, jti, Some(perm))
+    }
+
+    fn mint_claims(&self, sub: &str, aud: &str, exp_in: i64, jti: &str, perm: Option<i32>) -> String {
         use ed25519_dalek::pkcs8::EncodePrivateKey;
         let now = jsonwebtoken::get_current_timestamp() as i64;
         let der = self.signing.to_pkcs8_der().unwrap();
         let key = jsonwebtoken::EncodingKey::from_ed_der(der.as_bytes());
         let mut header = jsonwebtoken::Header::new(Algorithm::EdDSA);
         header.kid = Some(self.kid.clone());
-        jsonwebtoken::encode(
-            &header,
-            &json!({
-                "sub": sub, "name": "Ada", "aud": aud,
-                "iss": "https://accounts.lightcone.example",
-                "iat": now, "exp": now + exp_in, "jti": jti,
-            }),
-            &key,
-        )
-        .unwrap()
+        let mut claims = json!({
+            "sub": sub, "name": "Ada", "aud": aud,
+            "iss": "https://accounts.lightcone.example",
+            "iat": now, "exp": now + exp_in, "jti": jti,
+        });
+        if let Some(perm) = perm {
+            claims["perm"] = json!(perm);
+        }
+        jsonwebtoken::encode(&header, &claims, &key).unwrap()
     }
 }
 
