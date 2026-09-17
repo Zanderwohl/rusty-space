@@ -340,7 +340,10 @@ no fonts, so a first play is 6.4 MB and 94% of it is the binary. egui's built-in
 font — correct for a readout, wrong for forty minutes of prose.
 
 So the reader ships one serif, OFL-licensed, subset to Latin-1 and the punctuation Gutenberg
-actually uses: roughly 200 KB, and its licence file ships beside it. **It is loaded as an asset
+actually uses: roughly 200 KB, and its licence file ships beside it. **The build does not have
+one yet.** The client asks the asset server for `fonts/reader.ttf` when a book is first opened
+and sets the page in the interface font when it is not there, so the feature works without one
+and looks right with one; choosing the face and subsetting it is an errand, not a design. **It is loaded as an asset
 when the reader is first opened, not embedded in the binary**, so a player who never opens a
 book never pays for it and the first-play figure above is unchanged. Installing a font into
 egui at runtime is one call against `FontDefinitions`; doing it lazily is what keeps this from
@@ -405,9 +408,26 @@ Each step is useful on its own, and the fun one does not wait for the server.
 |---|---|---|
 | 1 | **built.** `lc-books`: zip, OPF, spine, TOC, the block model, locations, the paginator over `Measure` | a headless test paginates a real Gutenberg epub and round-trips a locator |
 | 2 | the shelf on the CDN: `books.toml`, the two scripts, the Caddyfile header | `curl` returns an epub with the right type and an immutable cache header |
-| 3 | the reader window: `WebAssetPlugin`, `EpubLoader`, the serif, the panels, the mode | `--panel reader --book <id> --shot` is a page of prose |
+| 3 | **built, less the CDN.** the reader window: `EpubLoader`, the serif, the panel, the mode | `--book <id> --shot` is a page of prose |
 | 4 | the catalogue and progress over the wire: two messages, `0005_reading.sql`, the debounce | signing in on a second machine opens to the same sentence |
 | 5 | the shelf's sorts, the TOC, jump to location, the progress badges | the controls above all exist |
+
+Step 3 is `crate::library` and `crate::reader` in the client. Three things it taught:
+
+- **A page turn cannot be an action.** Turning one means laying it out, and only the surface
+  with the fonts in it can do that — so `TurnPage` records a request and the reader spends it on
+  the next frame. A jump to a chapter is spent somewhere else again, beside the fetch, because
+  what it changes is which chapter is loaded: spent next to a page turn, the turn runs off the
+  end of the chapter being left. That was a real bug and the photograph is what found it.
+- **Measure the rows the way the painter draws them.** A row's `pos.y` is rounded to the pixel
+  grid and its `size.y` is not, and a paginator fed one while the painter uses the other shows a
+  sliver of the next line at the foot of every page.
+- **Size the window before drawing into it.** Content sized from what is left inside a window
+  that grows to fit its content is a loop whose fixed point is a window taller than the screen.
+
+Still to do here: plates are a ruled box with their alt text in it rather than the image, and
+books are fetched from the asset directory rather than from the CDN. Both are the same seam —
+`WebAssetPlugin` and a decode — and neither changes anything above.
 
 Step 1 is in `crates/lc-books`: about 1 600 lines, no engine and no renderer, and its checks run
 two ways. Twenty-two unit tests hold the invariants against a chapter written to break them, and

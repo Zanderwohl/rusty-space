@@ -167,14 +167,18 @@ pub fn look_around(
     looking: Res<Looking>,
     motion: Res<AccumulatedMouseMotion>,
     time: Res<Time>,
+    state: Res<crate::app::Ui>,
     mut out: MessageWriter<Requested>,
 ) {
     let mut yaw = 0.0;
     let mut pitch = 0.0;
 
+    // The arrows belong to the book while one is open. The mouse still turns the view, because
+    // nothing about reading stops the ship.
+    let turning = !state.is_open(Panel::Reader);
     let step = LOOK_STEP * time.delta_secs_f64() * 60.0;
     for (key, (y, p)) in held_bindings() {
-        if keys.pressed(key) {
+        if turning && keys.pressed(key) {
             yaw += y * step;
             pitch += p * step;
         }
@@ -191,8 +195,32 @@ pub fn look_around(
 }
 
 /// Turn key presses into requests.
-pub fn read_keys(keys: Res<ButtonInput<KeyCode>>, mut out: MessageWriter<Requested>) {
-    for (key, action) in bindings() {
+/// What the keyboard is doing, which is not the same thing in a book as in a cockpit.
+///
+/// Arrow keys turn the view and the reader needs them to turn pages, so the table is chosen by
+/// mode rather than merged. egui cannot decide this: `EguiWantsInput` reports keyboard interest
+/// only when a *text field* has focus, and a page of prose has none.
+pub fn reading_bindings() -> Vec<(KeyCode, Action)> {
+    vec![
+        (KeyCode::Escape, Action::CloseBook),
+        (KeyCode::Space, Action::TurnPage(1)),
+        (KeyCode::ArrowRight, Action::TurnPage(1)),
+        (KeyCode::PageDown, Action::TurnPage(1)),
+        (KeyCode::Backspace, Action::TurnPage(-1)),
+        (KeyCode::ArrowLeft, Action::TurnPage(-1)),
+        (KeyCode::PageUp, Action::TurnPage(-1)),
+        (KeyCode::KeyC, Action::ToggleContents),
+    ]
+}
+
+pub fn read_keys(
+    keys: Res<ButtonInput<KeyCode>>,
+    state: Res<crate::app::Ui>,
+    mut out: MessageWriter<Requested>,
+) {
+    let reading = state.is_open(Panel::Reader);
+    let table = if reading { reading_bindings() } else { bindings() };
+    for (key, action) in table {
         if keys.just_pressed(key) {
             out.write(Requested(action));
         }
@@ -211,6 +239,16 @@ mod tests {
         keys.sort_by_key(|k| format!("{k:?}"));
         keys.dedup();
         assert_eq!(keys.len(), before, "a key is bound to two actions");
+    }
+
+    #[test]
+    fn no_reading_key_is_bound_twice() {
+        let b = reading_bindings();
+        let mut keys: Vec<KeyCode> = b.iter().map(|(k, _)| *k).collect();
+        let before = keys.len();
+        keys.sort_by_key(|k| format!("{k:?}"));
+        keys.dedup();
+        assert_eq!(keys.len(), before, "a key turns two pages at once");
     }
 
     #[test]
@@ -257,6 +295,9 @@ mod tests {
             .init_resource::<AccumulatedMouseMotion>()
             .init_resource::<EguiWantsInput>()
             .init_resource::<Looking>()
+            // The arrows belong to the view unless a book is open, so the systems under test
+            // need to be able to ask which it is.
+            .insert_resource(crate::app::Ui(crate::ui::UiState::default()))
             .add_systems(Update, (grab_cursor, look_around).chain());
         let window = app
             .world_mut()
@@ -352,5 +393,20 @@ mod tests {
         app.world_mut().resource_mut::<Messages<Requested>>().clear();
         app.update();
         assert_eq!(app.world_mut().resource_mut::<Messages<Requested>>().drain().count(), 1);
+    }
+
+    #[test]
+    fn a_book_takes_the_arrow_keys_from_the_view() {
+        let (mut app, _) = harness();
+        app.world_mut().resource_mut::<crate::app::Ui>().open(Panel::Reader);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ArrowLeft);
+        app.update();
+        app.world_mut().resource_mut::<Messages<Requested>>().clear();
+        app.update();
+        assert_eq!(
+            app.world_mut().resource_mut::<Messages<Requested>>().drain().count(),
+            0,
+            "the view turned while a page was being read"
+        );
     }
 }

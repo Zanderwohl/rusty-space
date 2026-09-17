@@ -44,10 +44,13 @@ pub enum Panel {
     Tuning,
     /// Scenes to stage. Development only, and it does nothing without a shard started for it.
     Scenarios,
+    /// A book. Drawn by [`crate::reader`] rather than with the others, because it is the one
+    /// surface that is not a readout: it has its own frame, its own palette and its own keys.
+    Reader,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 8] = [
+    pub const ALL: [Panel; 9] = [
         Panel::Escape,
         Panel::Settings,
         Panel::Debug,
@@ -56,6 +59,7 @@ impl Panel {
         Panel::Flight,
         Panel::Tuning,
         Panel::Scenarios,
+        Panel::Reader,
     ];
 
     /// A panel by the name a development flag would use.
@@ -73,6 +77,7 @@ impl Panel {
             Panel::Flight => "Flight",
             Panel::Tuning => "Starfield tuning",
             Panel::Scenarios => "Scenarios",
+            Panel::Reader => "Reader",
         }
     }
 }
@@ -266,6 +271,30 @@ pub struct UiState {
     /// Development only; the server owns the rate.
     pub time_rate: f64,
     pub notifications: Vec<Notification>,
+    pub reading: Reading,
+}
+
+/// Where the player is up to in a book.
+///
+/// **A character offset, never a page.** A page is a fact about this window at this size; the
+/// offset is a fact about the book, and it is what gets written down. See
+/// `lightcone/docs/19-library.md`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Reading {
+    /// The book being read, by the name its file has on the shelf.
+    pub book: Option<String>,
+    pub spine: usize,
+    pub offset: usize,
+    /// Pages asked for and not yet turned.
+    ///
+    /// An action cannot turn a page, because turning one means laying it out and only the
+    /// surface with the fonts in it can do that. So the action records the request and the
+    /// reader spends it on the next frame, which is also what makes a page turn survive a
+    /// resize arriving in the same frame.
+    pub turn: i32,
+    /// A place to jump to, spent the same way.
+    pub goto: Option<(usize, usize)>,
+    pub contents: bool,
 }
 
 impl Default for UiState {
@@ -290,6 +319,7 @@ impl Default for UiState {
             god_view: false,
             time_rate: TEST_TIME_RATE,
             notifications: Vec::new(),
+            reading: Reading::default(),
         }
     }
 }

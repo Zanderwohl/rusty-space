@@ -86,6 +86,18 @@ one, and the reader gets both sets of text at once. The sign-in modal's panel is
 the password form's frame. Both were translucent first, and both looked broken in exactly the
 same way.
 
+**And a page of prose is opaque and light**, which is the one surface in the client that does not
+take the palette at all. `crate::reader` draws black serif on a gentle white, inside a dark case,
+because a player should know what it is before reading a word of it — and because prose over a
+drifting starfield is unreadable in a way a readout over one is not. The rule's own reason argues
+for the exception: a panel is translucent so it feels part of the scene, and a book is not part of
+the scene. See [19-library.md](19-library.md).
+
+What the exception does **not** licence is hiding the world behind it. The flight readout and the
+staleness figure stay visible, and notifications still draw on top; the whole premise of the
+feature is that the player is waiting for something, so the thing they are waiting for has to be
+able to interrupt them.
+
 ## The palette crosses the boundary, not the guess
 
 One source — `em_ui::vfd` — and a conversion at the edge:

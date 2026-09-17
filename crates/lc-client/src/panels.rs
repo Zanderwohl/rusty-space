@@ -181,6 +181,11 @@ pub fn open_panels(
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
     for panel in ui_state.open_panels().to_vec() {
+        // The reader brings its own window: a book is not a readout, and egui's chrome around
+        // it would be a dark title bar over a white page. See `crate::reader`.
+        if panel == Panel::Reader {
+            continue;
+        }
         let mut open = true;
         egui::Window::new(panel.title()).open(&mut open).show(ctx, |ui| match panel {
             Panel::Escape => escape(ui, &mut out),
@@ -202,6 +207,7 @@ pub fn open_panels(
             Panel::Scenarios => {
                 crate::demos::scenarios(ui, &uplink, ui_state.0.perspective, &mut out)
             }
+            Panel::Reader => unreachable!("drawn by crate::reader"),
         });
         if !open {
             ask(&mut out, Action::ClosePanel(panel));

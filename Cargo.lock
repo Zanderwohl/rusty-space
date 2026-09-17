@@ -4540,6 +4540,7 @@ dependencies = [
  "glam",
  "js-sys",
  "keyring",
+ "lc-books",
  "lc-proto",
  "lc-server",
  "lc-spacetime",

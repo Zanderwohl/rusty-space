@@ -33,6 +33,16 @@ pub enum Action {
     /// Forget the device grant.
     SignOut,
 
+    // --- reading -----------------------------------------------------------------------
+    /// Open a book by the name of its file on the shelf. Nothing in the world changes.
+    OpenBook(String),
+    CloseBook,
+    /// Pages, forward or back. Spent by the reader, which is the only thing that can lay one out.
+    TurnPage(i32),
+    /// Spine document and character offset: a chapter, or a saved place.
+    GoTo(usize, usize),
+    ToggleContents,
+
     // --- instruments ------------------------------------------------------------------
     SetBandPreset(usize),
     NextBandPreset,
@@ -170,6 +180,23 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
         Action::SignOut => effects.push(Effect::SignOut),
         Action::Quit => effects.push(Effect::Quit),
+
+        Action::OpenBook(file) => {
+            if ui.reading.book.as_deref() != Some(file.as_str()) {
+                ui.reading = crate::ui::Reading { book: Some(file), ..Default::default() };
+            }
+            ui.open(Panel::Reader);
+        }
+        Action::CloseBook => {
+            ui.reading.contents = false;
+            ui.close(Panel::Reader);
+        }
+        Action::TurnPage(by) => ui.reading.turn += by,
+        Action::GoTo(spine, offset) => {
+            ui.reading.goto = Some((spine, offset));
+            ui.reading.contents = false;
+        }
+        Action::ToggleContents => ui.reading.contents = !ui.reading.contents,
 
         Action::SetBandPreset(i) => set_preset(ui, session, i, &mut effects),
         Action::NextBandPreset => {

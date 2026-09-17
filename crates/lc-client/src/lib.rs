@@ -23,6 +23,7 @@ pub mod envelope;
 pub mod hud;
 pub mod hull;
 pub mod input;
+pub mod library;
 pub mod link;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod local;
@@ -31,6 +32,7 @@ pub mod panels;
 pub mod pick;
 pub mod plume;
 pub mod plot;
+pub mod reader;
 pub mod resolved;
 pub mod session;
 #[cfg(not(target_arch = "wasm32"))]
