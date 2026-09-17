@@ -33,6 +33,9 @@ pub struct Preview {
     pub g_wet: f64,
     /// What a change of velocity of one kilometre a second costs the draft at `mass_after_kg`.
     pub energy_per_km_s_j: f64,
+    /// What the draft's hull would collect here, holding still, and what its living space drains.
+    pub solar_after_w: f64,
+    pub drain_after_w: f64,
     /// Steps and how long they take, or why it cannot be done.
     pub planned: Result<(usize, f64), Shortage>,
     /// Why Apply cannot be pressed, when it cannot.
@@ -74,6 +77,8 @@ pub fn preview(ship: &Craft, draft: Loadout, remote: bool, now_s: f64) -> Option
         g_dry: balance.accel_g(&draft, dry_kg),
         g_wet: balance.accel_g(&draft, dry_kg + balance.capacity_j(&draft) / lc_world::fitting::C2),
         energy_per_km_s_j: energy_per_km_s_j(&balance, mass_after_kg),
+        solar_after_w: ship.solar_w_for(balance.length_m(draft.slots), now_s),
+        drain_after_w: balance.drain_w(&draft),
         planned,
         blocked,
     })
@@ -194,6 +199,12 @@ pub fn energy_per_km_s_j(balance: &Balance, mass_kg: f64) -> f64 {
     lc_world::cost::energy_j(mass_kg, rapidity, balance.drive_efficiency)
 }
 
+/// A rate of energy, in module-energies a game year, signed.
+pub fn me_per_year(watts: f64, module_j: f64) -> String {
+    let rate = watts * lc_world::flight::JULIAN_YEAR_S / module_j;
+    if rate.abs() < 0.1 { format!("{rate:+.3} ME/yr") } else { format!("{rate:+.2} ME/yr") }
+}
+
 /// An energy small enough to need an exponent, in module-energies.
 fn me_small(joules: f64, module_j: f64) -> String {
     format!("{:.3e} ME", joules / module_j)
@@ -236,6 +247,13 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
         ui.end_row();
         ui.label("energy / km/s");
         ui.label(me_small(energy_per_km_s_j(&fitting.balance, ship.mass_kg_at(now)), module_j));
+        ui.end_row();
+        let drain = fitting.balance.drain_w(&fitting.loadout_at(now));
+        ui.label("solar");
+        ui.label(me_per_year(fitting.solar_w(), module_j));
+        ui.end_row();
+        ui.label("net");
+        ui.label(me_per_year(fitting.solar_w() - drain, module_j));
         ui.end_row();
     });
     ui.separator();
@@ -298,6 +316,8 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
         row("g dry", format!("{:.1} g", view.g_dry));
         row("g wet", format!("{:.1} g", view.g_wet));
         row("energy / km/s", me_small(view.energy_per_km_s_j, module_j));
+        row("solar", me_per_year(view.solar_after_w, module_j));
+        row("net", me_per_year(view.solar_after_w - view.drain_after_w, module_j));
         let (steps, days) = match view.planned {
             Ok((steps, duration_s)) => (steps.to_string(), format!("{:.1}", duration_s / 86_400.0)),
             Err(_) => ("—".into(), "—".into()),
@@ -429,6 +449,23 @@ mod tests {
         assert!((view.g_dry - 13.56).abs() < 0.01, "{}", view.g_dry);
         let linear = view.mass_after_kg * 1.0e3 * lc_world::flight::C_M_S / b.drive_efficiency;
         assert!((view.energy_per_km_s_j / linear - 1.0).abs() < 1.0e-5);
+    }
+
+    #[test]
+    fn a_rate_reads_signed_in_module_energies_a_year() {
+        let me = Balance::DEFAULT.module_energy_j();
+        let per_year = me / lc_world::flight::JULIAN_YEAR_S;
+        assert_eq!(me_per_year(4.2 * per_year, me), "+4.20 ME/yr");
+        assert_eq!(me_per_year(-0.009 * per_year, me), "-0.009 ME/yr");
+    }
+
+    /// A ship between systems collects nothing, so After's solar is zero and its net is the drain.
+    #[test]
+    fn a_draft_between_systems_collects_nothing() {
+        let b = Balance::DEFAULT;
+        let view = preview(&ship(), Loadout { living: 3, ..Loadout::STARTING }, true, 0.0).unwrap();
+        assert_eq!(view.solar_after_w, 0.0);
+        assert_eq!(view.drain_after_w, 3.0 * b.living_drain_w);
     }
 
     #[test]

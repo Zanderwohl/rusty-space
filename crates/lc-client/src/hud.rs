@@ -146,6 +146,10 @@ fn energy(session: &Session) -> Option<Energy> {
     let module_j = fitting.balance.module_energy_j();
     let (stored, capacity) = (fitting.stored_j_at(&ship.motion, now), fitting.capacity_j_at(now));
     let mut line = format!("{:.1} / {:.1} ME", stored / module_j, capacity / module_j);
+    if fitting.solar_w() > 0.0 {
+        let net = fitting.solar_w() - fitting.balance.drain_w(&fitting.loadout_at(now));
+        line += &format!(" {}", crate::refit_panel::me_per_year(net, module_j));
+    }
     let committed = fitting.committed_j_at(&ship.motion, now);
     if committed > 0.0 {
         line += &format!(" ({:.2} committed)", committed / module_j);

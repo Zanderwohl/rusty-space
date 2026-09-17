@@ -3,9 +3,10 @@
 Every hull is covered in collectors, so a ship earns energy from starlight when it holds still
 near a star.
 
-**Status: design, not built.** The first half is the mechanic and the numbers behind it. The
-second half is how it fits into the code that exists; see [19-ship-fitting.md](19-ship-fitting.md)
-for the energy account it extends.
+**Status: built,** except the attitude drawing below, which is deferred. `lc_world::solar`
+holds the geometry and flux; `Craft` walks the segments. The first half of this doc is the
+mechanic and the numbers behind it. The second half is how it fits into the energy account in
+[19-ship-fitting.md](19-ship-fitting.md).
 
 ## The mechanic
 
@@ -175,6 +176,10 @@ is not reached, and off by at most one segment's income when it is.
 
 ### Settling across boundaries
 
+Settling a day at a time has a side effect on burns: the rest of a burn is re-priced at the
+ship's mass after each day's drain, so a plan spends slightly less than it committed, and the
+difference is refunded when it ends.
+
 `Craft::advance` already settles every frame while a refit runs. It now also settles at each
 grid boundary it passes, in order, and computes the next segment's power as it goes:
 
@@ -223,10 +228,12 @@ storage, in which case the excess is lost, the same rule as any full ship.
 
 ### Client
 
-- **HUD:** net income beside the energy bar while collecting — `+4.2 ME/yr` — and nothing while
-  under way.
-- **Refit panel:** `solar` and `net` rows in both tables, for the ship as it is and for the
-  draft. That is where size's effect on break-even becomes visible.
+- **HUD:** net income beside the energy bar while collecting — `+4.20 ME/yr` — and nothing
+  while under way. A new ship on the local shard starts 5 AU out and reads `-0.008 ME/yr`: it
+  collects, but not enough to cover two living modules that far from the Sun.
+- **Refit panel:** `solar` and `net` rows in both tables. The top table shows the segment in
+  force. After shows what the draft's hull would collect holding still where the ship is now, so
+  growing a hull or adding living space shows its effect on break-even before it is built.
 
 ### Tests
 
