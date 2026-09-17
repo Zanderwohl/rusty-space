@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use glam::DVec3;
 
+use crate::fitting::Fitting;
 use crate::instrument::Instrument;
 use crate::motion::{self, Event, Flight, Motive, Past, Rejected, ShipState};
 use crate::system::LocalSystem;
@@ -189,6 +190,11 @@ pub struct Craft {
     past: Vec<Past>,
     /// The earliest coordinate second this craft can answer for.
     known_from_s: f64,
+    /// Modules and energy. Only a player's ship has one; see [`crate::fitting`].
+    ///
+    /// Private for the reason `past` is: every change of motive has to settle it, and that
+    /// happens in [`Craft::remembering`].
+    fitting: Option<Fitting>,
 }
 
 impl Craft {
@@ -211,6 +217,7 @@ impl Craft {
             // changed what it is doing has always been doing it, which is as true a statement
             // about its past as there is.
             known_from_s: f64::NEG_INFINITY,
+            fitting: None,
         }
     }
 
@@ -232,6 +239,10 @@ impl Craft {
         let nose = motion::facing_at(&before, self.length_m, at_s);
         let out = change(self);
         if !before.same_worldline_as(&self.motion) {
+            if let Some(fitting) = &mut self.fitting {
+                fitting.settle(&before, at_s);
+                fitting.commit(&self.motion, at_s);
+            }
             self.motion.attitude = nose;
             self.past.push(Past { until_s: at_s, motion: before });
             self.forget_before(at_s);
@@ -326,7 +337,16 @@ impl Craft {
             * (half * HEIGHT_PER_LENGTH)
     }
 
-    /// What it weighs, kilograms.
+    /// What it weighs at a coordinate second, kilograms: its modules and its stored energy if it
+    /// has a fitting, and [`Craft::mass_kg`] if it does not.
+    pub fn mass_kg_at(&self, now_s: f64) -> f64 {
+        match &self.fitting {
+            Some(fitting) => fitting.mass_kg_at(&self.motion, now_s),
+            None => self.mass_kg(),
+        }
+    }
+
+    /// What an unfitted craft weighs, kilograms.
     ///
     /// Size times what that size is made of. Nothing stores a mass, because a stored one could
     /// disagree with the hull it belongs to — and everything that wants a mass wants it to
@@ -344,7 +364,7 @@ impl Craft {
         if accel_g <= 0.0 {
             return 0.0;
         }
-        self.motion.drive.jet_power_w(self.mass_kg(), accel_g)
+        self.motion.drive.jet_power_w(self.mass_kg_at(now_s), accel_g)
     }
 
     /// Which way the nose points at a coordinate second, or `None` when nothing decides it.
@@ -358,6 +378,105 @@ impl Craft {
         self.worldline().position_at(t_us)
     }
 
+    pub fn fitting(&self) -> Option<&Fitting> {
+        self.fitting.as_ref()
+    }
+
+    /// Give it modules, or take them away. Its length follows its slots from here on.
+    pub fn fit(&mut self, fitting: Option<Fitting>) {
+        self.fitting = fitting;
+        self.sync_length();
+    }
+
+    fn sync_length(&mut self) {
+        if let Some(fitting) = &self.fitting {
+            self.length_m = fitting.balance.length_m(fitting.loadout.slots);
+        }
+    }
+
+    /// Fold the fitting's account up to `now_s`: finished refit steps, drain, and whatever the
+    /// motive has burned.
+    pub fn settle(&mut self, now_s: f64) {
+        if let Some(fitting) = &mut self.fitting {
+            fitting.settle(&self.motion, now_s);
+        }
+        self.sync_length();
+    }
+
+    /// The drive a new order is clamped against: the kind's, turning at this hull's rate, and
+    /// pulling what its engines can move this mass at if it has engines.
+    pub fn rated_drive(&self, now_s: f64) -> crate::flight::Drive {
+        let mut drive = self.turning(self.kind.drive());
+        if let Some(fitting) = &self.fitting {
+            drive.accel_g = fitting.rated_g_at(&self.motion, now_s);
+        }
+        drive
+    }
+
+    /// Energy stored and not committed, joules. Unlimited for a craft with no fitting.
+    pub fn free_j_at(&self, now_s: f64) -> f64 {
+        match &self.fitting {
+            Some(fitting) => fitting.free_j_at(&self.motion, now_s),
+            None => f64::INFINITY,
+        }
+    }
+
+    /// Whether a refit is under way at `now_s`. Flying and refitting exclude each other.
+    pub fn is_refitting(&self, now_s: f64) -> bool {
+        self.fitting.as_ref().and_then(Fitting::refit).is_some_and(|r| !r.is_done(now_s))
+    }
+
+    /// What folding `event` would commit, joules, without folding it. Zero for an unfitted craft.
+    ///
+    /// The plan's whole remaining rapidity at this craft's mass now. [`Craft::apply`] commits the
+    /// same number, because it is the same arithmetic on the same state.
+    pub fn cost_of(&self, event: &Event) -> Result<f64, Rejected> {
+        let Some(fitting) = &self.fitting else { return Ok(0.0) };
+        let mut trial = self.motion.clone();
+        motion::apply(&mut trial, self.system.as_deref(), event)?;
+        let mut account = fitting.clone();
+        account.settle(&self.motion, event.at_t);
+        Ok(account.commit(&trial, event.at_t))
+    }
+
+    /// Add energy, as far as storage allows.
+    pub fn grant(&mut self, joules: f64, now_s: f64) {
+        self.settle(now_s);
+        if let Some(fitting) = &mut self.fitting {
+            fitting.grant(joules);
+        }
+    }
+
+    /// Begin rebuilding towards `target`. Refused while under way, and when it cannot be done.
+    pub fn begin_refit(
+        &mut self,
+        target: crate::fitting::Loadout,
+        now_s: f64,
+    ) -> Result<(), crate::refit::Shortage> {
+        self.settle(now_s);
+        let Some(fitting) = &mut self.fitting else {
+            return Err(crate::refit::Shortage::NoDrones);
+        };
+        let order = crate::refit::Order {
+            from: fitting.loadout,
+            target,
+            stored_j: fitting.stored_j_at(&self.motion, now_s),
+            start_s: now_s,
+        };
+        let refit = order.solve(&fitting.balance)?;
+        fitting.begin_refit(refit);
+        Ok(())
+    }
+
+    /// Stop a refit where it is, reversing the step in progress.
+    pub fn cancel_refit(&mut self, now_s: f64) {
+        self.settle(now_s);
+        if let Some(fitting) = &mut self.fitting {
+            fitting.cancel_refit(now_s);
+        }
+        self.sync_length();
+    }
+
     /// Cut to a straight line from a point, at a velocity. What a burn does.
     ///
     /// A method rather than something a caller assembles, because the *only* way a worldline
@@ -365,6 +484,12 @@ impl Craft {
     /// craft here, which both lost everything that was not motion and left no trace of what it
     /// had been doing.
     pub fn drift_from(&mut self, at_ly: DVec3, beta: DVec3, now_s: f64) {
+        if let Some(fitting) = &mut self.fitting {
+            let was = motion::state_at(&self.motion, self.system.as_deref(), now_s)
+                .map_or(self.motion.beta, |(_, beta)| beta);
+            fitting.settle(&self.motion, now_s);
+            fitting.spend(crate::cost::rapidity_between(was, beta));
+        }
         self.remembering(now_s, |craft| {
             craft.motion.position_ly = at_ly;
             craft.motion.beta = beta;
@@ -445,6 +570,10 @@ impl Craft {
                 craft.solve_patch(now_s);
             }
         });
+        // A finished refit step changes the loadout, and a grown hull its length.
+        if self.fitting.as_ref().is_some_and(|f| f.refit().is_some()) {
+            self.settle(now_s);
+        }
     }
 
     /// When the current arc leaves the sphere it was solved in, if it does.
@@ -718,6 +847,95 @@ mod tests {
     use lc_spacetime::Worldline;
 
     const HOUR_AGO_US: f64 = -3_600.0 * 1.0e6;
+
+    fn fitted() -> Craft {
+        use crate::fitting::{Balance, Loadout};
+        let mut craft = Craft::at(CraftId(9), Kind::Ship, DVec3::ZERO);
+        craft.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, 0.0)));
+        craft
+    }
+
+    fn cross(craft: &mut Craft, to_ly: DVec3, at_t: f64) -> f64 {
+        let event = Event {
+            ship: ShipId(9),
+            at_t,
+            change: Change::Cross { to_ly, drive: craft.rated_drive(at_t) },
+        };
+        let quoted = craft.cost_of(&event).unwrap();
+        craft.apply(&event).unwrap();
+        quoted
+    }
+
+    #[test]
+    fn a_crossing_is_paid_for_when_it_is_ordered_and_spent_as_it_is_flown() {
+        let mut craft = fitted();
+        let free = craft.free_j_at(0.0);
+        let mass = craft.mass_kg_at(0.0);
+        let quoted = cross(&mut craft, DVec3::X * 0.05, 0.0);
+        assert!(quoted > 0.0 && quoted < free);
+        let Motive::Crossing(cruise) = &craft.motion.motive else { panic!("not crossing") };
+        let (eta, end) = (cruise.planned_rapidity(), cruise.duration_s());
+        assert!((quoted / crate::cost::energy_j(mass, eta, 1.0) - 1.0).abs() < 1.0e-12);
+        // Committed at once, so what is free drops before anything is spent.
+        assert!((craft.free_j_at(0.0) - (free - quoted)).abs() < 1.0e-9 * free);
+
+        // Half-way, stored has fallen and the commitment with it.
+        let fitting = craft.fitting().unwrap();
+        let stored_half = fitting.stored_j_at(&craft.motion, end * 0.5);
+        assert!(stored_half < free && stored_half > free - quoted);
+
+        // Flown to the end: what was quoted, plus the drain, has gone.
+        craft.advance(end + 1.0, end + 1.0);
+        assert!(!craft.motion.is_under_way(), "{:?}", craft.motion.motive);
+        let drain = 2.0 * crate::fitting::Balance::DEFAULT.living_drain_w * (end + 1.0);
+        let stored = craft.fitting().unwrap().stored_j_at(&craft.motion, end + 1.0);
+        let expected = free - quoted - drain;
+        assert!((stored / expected - 1.0).abs() < 1.0e-9, "{stored} vs {expected}");
+        assert!(craft.mass_kg_at(end + 1.0) < mass);
+        // Lighter, so its engines pull harder.
+        assert!(craft.rated_drive(end + 1.0).accel_g > 5.0);
+    }
+
+    #[test]
+    fn cutting_the_drive_returns_what_was_not_flown() {
+        let mut flown = fitted();
+        let free = flown.free_j_at(0.0);
+        let quoted = cross(&mut flown, DVec3::X * 0.05, 0.0);
+        let Motive::Crossing(cruise) = &flown.motion.motive else { panic!("not crossing") };
+        let cut_at = cruise.duration_s() * 0.25;
+        flown
+            .apply(&Event { ship: ShipId(9), at_t: cut_at, change: Change::CutDrive })
+            .unwrap();
+        let left = flown.free_j_at(cut_at);
+        assert!(left > free - quoted, "nothing came back: {left}");
+        assert!(left < free, "it flew for nothing");
+    }
+
+    #[test]
+    fn a_burn_spends_the_rapidity_it_changes_by() {
+        let mut craft = fitted();
+        let mass = craft.mass_kg_at(0.0);
+        let before = craft.fitting().unwrap().stored_j_at(&craft.motion, 0.0);
+        craft.drift_from(DVec3::ZERO, DVec3::X * 1.0e-4, 0.0);
+        let after = craft.fitting().unwrap().stored_j_at(&craft.motion, 0.0);
+        let spent = before - after;
+        let expected = crate::cost::energy_j(mass, 1.0e-4f64.atanh(), 1.0);
+        assert!((spent / expected - 1.0).abs() < 1.0e-9, "{spent} vs {expected}");
+    }
+
+    #[test]
+    fn a_refit_that_grows_the_hull_lengthens_it() {
+        use crate::fitting::Loadout;
+        let mut craft = fitted();
+        assert!((craft.length_m - 500.0).abs() < 1.0e-9);
+        craft.begin_refit(Loadout { slots: 22, ..Loadout::STARTING }, 0.0).unwrap();
+        assert!(craft.is_refitting(1.0));
+        let year = crate::flight::JULIAN_YEAR_S;
+        craft.advance(year, year);
+        assert!(!craft.is_refitting(year));
+        assert_eq!(craft.fitting().unwrap().loadout.slots, 22);
+        assert!((craft.length_m / (500.0 * 1.1f64.cbrt()) - 1.0).abs() < 1.0e-12);
+    }
 
     fn drifting(beta: DVec3, since_s: f64) -> Craft {
         let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
