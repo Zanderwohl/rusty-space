@@ -102,6 +102,35 @@ fn steer_floor_us(pursuer: &Craft) -> i64 {
     (duration_s * STEER_FRACTION * crate::world::MICROS_PER_SECOND as f64) as i64
 }
 
+/// How far the quarry's burn may move from the one an escort is modelling, as a fraction of the
+/// pursuer's drive, before a new plan skips [`STEER_FRACTION`]'s wait.
+///
+/// The wait is a fraction of the approach, and following a quarry that pulls as hard as the
+/// pursuer leaves a sliver of thrust to close with, so the approach — and the wait — runs to
+/// hours. Held to it, a pursuer went on burning outward long after its quarry had flipped and
+/// braked, and ended eight million kilometres past it. A burn starting, stopping or turning
+/// round is a new manoeuvre rather than a correction, so it is answered at once; a steady burn
+/// matches its model and is still rate-limited.
+pub const BURN_CHANGE_FRACTION: f64 = 0.25;
+
+/// The quarry's proper acceleration, when its plume was lit at the sighting and two sightings
+/// can measure it.
+fn burn_of(fleet: &Fleet, seen: &pursuit::Sighting, previous: Option<&pursuit::Sighting>) -> Option<glam::DVec3> {
+    let lit = fleet
+        .get(CraftId(seen.target.0))
+        .is_some_and(|quarry| quarry.jet_power_w(seen.emitted_s) > 0.0);
+    lit.then(|| previous.and_then(|p| escort::acceleration_of(p, seen))).flatten()
+}
+
+/// Whether the quarry is doing something other than what the pursuer's plan assumes of its drive.
+fn burn_changed(pursuer: &Craft, burn: Option<glam::DVec3>) -> bool {
+    let Motive::Escort(plan) = &pursuer.motion.motive else { return burn.is_some() };
+    let drive = pursuer.turning(pursuer.motion.drive);
+    let now = escort::followed(burn.unwrap_or_default(), drive);
+    let off_g = (now - plan.quarry.accel).length() * lc_world::flight::C_M_S / lc_world::flight::G0;
+    off_g > drive.accel_g * BURN_CHANGE_FRACTION
+}
+
 /// Whether an observer is entitled to know a craft exists at all.
 ///
 /// Sharing a system, which is the same [`LOCAL_SHELL_LY`] rule both ends already use to decide
@@ -253,11 +282,7 @@ pub fn plan(
 ) -> Result<Plan, Refused> {
     let standoff = closeness.standoff_m(pursuer.length_m, seen.length_m);
     let drive = pursuer.turning(pursuer.motion.drive);
-    let lit = fleet
-        .get(CraftId(seen.target.0))
-        .is_some_and(|quarry| quarry.jet_power_w(seen.emitted_s) > 0.0);
-    let burning = lit.then(|| previous.and_then(|p| escort::acceleration_of(p, seen))).flatten();
-    if let Some(accel) = burning {
+    if let Some(accel) = burn_of(fleet, seen, previous) {
         return escort::escort(&pursuer.motion, standoff, seen, accel, now_s, drive).map(Plan::Escort);
     }
     let falling = pursuer
@@ -300,7 +325,9 @@ pub fn decide(
         // Saturating, because "never planned" is a legitimate thing for a caller to say and
         // the obvious way to say it overflows the subtraction.
         let since = now_t.saturating_sub(pursuit.last_plan_t);
-        if since < steer_floor_us(pursuer) || !should_close(pursuer, &seen, pursuit.closeness, now_s) {
+        let waiting = since < steer_floor_us(pursuer)
+            && !burn_changed(pursuer, burn_of(fleet, &seen, previous.as_ref()));
+        if waiting || !should_close(pursuer, &seen, pursuit.closeness, now_s) {
             continue;
         }
         match plan(fleet, pursuer, &seen, previous.as_ref(), pursuit.closeness, now_s) {
@@ -308,7 +335,8 @@ pub fn decide(
             // On station. Nothing to fly, and the policy stays: it is what will notice the
             // next time this craft has drifted.
             Err(Refused::AlreadyThere) => {}
-            // Pulling as hard as the pursuer can, or at `c`: followable, never catchable.
+            // At `c`, where there is no frame to match. A quarry merely out-pulling the
+            // pursuer is followed; see `escort::escort`.
             Err(Refused::TooFast) => decided.push((*id, None)),
         }
     }
