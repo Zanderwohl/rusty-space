@@ -267,20 +267,56 @@ pub trait Measure {
 lands on is a line, not a paragraph — and a row that knows its own char offset means the break
 *is* the locator, with no second derivation to disagree with the first.
 
-Three rules the algorithm follows:
+Four rules the algorithm follows:
 
 - **Never paginate the book, or even the chapter.** Break forward from the current anchor until
-  the page is full, and stop. The list of breaks already walked is a cache that makes *previous
-  page* a lookup; it is thrown away whole on a resize or a font change, and the anchor is a
-  char offset, so the player stays on the same sentence.
+  the page is full, and stop. A resize or a font change throws the page away and lays out the
+  anchor again, and because the anchor is a character offset the player stays on the same
+  sentence.
+- **Every page holds at least one row, whatever the frame.** This is not typography, it is
+  termination: a page that can be empty is a page that does not advance, and pagination that
+  does not advance never ends. A window too short for a single line still pages, one line at a
+  time.
 - **Widows and orphans**: a heading does not end a page, and a single row of a paragraph does
-  not begin or end one where moving it costs less than a third of a page.
+  not begin or end one — refused when it would cost more than a third of a page, which is the
+  difference between typesetting and a hole.
 - **An image never splits.** One taller than the column is scaled to fit the page; one that
   does not fit beside the text starts a new page.
 
 This is where the bugs will be, and it is testable headless with a measurer where every row is
-ten units tall — the same trick as the sky chunk's equivalence test, and the reason the
-algorithm is in a crate with no window in it.
+one unit tall — the same trick as the sky chunk's equivalence test, and the reason the
+algorithm is in a crate with no window in it. `lc_books::grid` is that measurer, and it is not
+only for tests: it prints a page to a terminal, and a page that can be printed is a page that
+can be diffed.
+
+### Backwards is laid out backwards
+
+*Previous page* looks like a cache problem and is not one. The obvious implementation — lay
+pages out forward from a guessed origin and keep the last one that ends in time — **is wrong,
+and a test written against a synthetic chapter caught it**: a tiling depends on where it
+started, so the page it produces need not end where the reader actually is, and the rows in
+between belong to no page at all. Going backwards from the reader's own position, a row at a
+time until the frame is full, cannot do that; the page it returns ends where they are by
+construction.
+
+The page it returns is not the page the forward tiling would have produced, and that is
+allowed. What is guaranteed is what a reader can tell: nothing falls between the two pages, and
+turning forward again returns to the page they came from. Its foot is a break that was already
+tidied on the way forward and must not move again; its head is still free, so that is the end
+the widow rule is applied to.
+
+### A cursor is not a locator
+
+Traversal is by `(block, row)` and what gets saved is a character offset, and they are not the
+same thing — **a plate and the paragraph beneath it begin at the same character**, because a
+plate is made of no characters at all. Paging forward has to tell them apart or it repeats one
+forever; a bookmark cannot, and does not need to. Where the ambiguity is real, reopening
+resolves to the earlier block: being shown a plate twice is a smaller wrong than never being
+shown it.
+
+This is the one place the two coordinates touch, and finding it took six real books rather than
+a fixture — which is the argument for checking a paginator against Twain, who was not writing
+test data.
 
 ---
 
@@ -367,11 +403,17 @@ Each step is useful on its own, and the fun one does not wait for the server.
 
 | # | step | done when |
 |---|---|---|
-| 1 | `lc-books`: zip, OPF, spine, TOC, the block model, locations, the paginator over `Measure` | a headless test paginates a real Gutenberg epub and round-trips a locator |
+| 1 | **built.** `lc-books`: zip, OPF, spine, TOC, the block model, locations, the paginator over `Measure` | a headless test paginates a real Gutenberg epub and round-trips a locator |
 | 2 | the shelf on the CDN: `books.toml`, the two scripts, the Caddyfile header | `curl` returns an epub with the right type and an immutable cache header |
 | 3 | the reader window: `WebAssetPlugin`, `EpubLoader`, the serif, the panels, the mode | `--panel reader --book <id> --shot` is a page of prose |
 | 4 | the catalogue and progress over the wire: two messages, `0005_reading.sql`, the debounce | signing in on a second machine opens to the same sentence |
 | 5 | the shelf's sorts, the TOC, jump to location, the progress badges | the controls above all exist |
+
+Step 1 is in `crates/lc-books`: about 1 600 lines, no engine and no renderer, and its checks run
+two ways. Twenty-two unit tests hold the invariants against a chapter written to break them, and
+`--verify` runs the same invariants over whole books — 13 700 pages across six of them at three
+frame sizes, in twelve seconds. The unit tests find the bug; the books find the case nobody
+thought to write down, and on the first run they found two.
 
 ---
 

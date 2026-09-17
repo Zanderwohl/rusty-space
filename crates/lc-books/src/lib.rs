@@ -8,13 +8,17 @@
 #![forbid(unsafe_code)]
 
 mod archive;
+pub mod grid;
 pub mod nav;
 pub mod opf;
+pub mod paginate;
 pub mod text;
 mod xml;
 
+pub use grid::Grid;
 pub use nav::TocEntry;
 pub use opf::{Author, Item, Metadata};
+pub use paginate::{Cursor, Frame, Measure, Measured, Page, Row, Slice};
 pub use text::{Block, Document, Located, Run, Style, Text};
 
 /// Characters of body text in one location.

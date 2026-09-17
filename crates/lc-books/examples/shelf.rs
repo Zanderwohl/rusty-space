@@ -4,10 +4,13 @@
 //!     cargo run -p lc-books --example shelf -- target/library --toml
 //!     cargo run -p lc-books --example shelf -- target/library/pg43-images-3.epub --toc
 //!     cargo run -p lc-books --example shelf -- target/library/pg43-images-3.epub --read 2
+//!     cargo run -p lc-books --example shelf -- target/library/pg43-images-3.epub --page 4
+//!     cargo run -p lc-books --example shelf -- target/library --verify
 
 use std::path::{Path, PathBuf};
 
-use lc_books::{Block, Epub, LOCATION_CHARS};
+use lc_books::paginate::{self, Frame};
+use lc_books::{Block, Epub, Grid, LOCATION_CHARS, Page};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -33,6 +36,18 @@ fn main() {
         let spine: usize = after("--read").and_then(|s| s.parse().ok()).unwrap_or(0);
         for file in &files {
             read(file, spine);
+        }
+    } else if flag("--page") {
+        let at: usize = after("--page").and_then(|s| s.parse().ok()).unwrap_or(0);
+        let spine: usize = after("--spine").and_then(|s| s.parse().ok()).unwrap_or(1);
+        let columns: usize = after("--columns").and_then(|s| s.parse().ok()).unwrap_or(66);
+        let lines: usize = after("--lines").and_then(|s| s.parse().ok()).unwrap_or(24);
+        for file in &files {
+            turn(file, spine, at, Grid::frame(columns, lines));
+        }
+    } else if flag("--verify") {
+        for file in &files {
+            verify(file);
         }
     } else if flag("--toml") {
         catalogue(&files);
@@ -229,4 +244,134 @@ fn slug(s: &str) -> String {
 
 fn escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// One page, laid out and printed — which is the only way to read a paginator.
+fn turn(file: &Path, spine: usize, at: usize, frame: Frame) {
+    let Some(mut epub) = open(file) else { return };
+    let title = epub.title().to_owned();
+    let doc = match epub.document(spine) {
+        Ok(doc) => doc,
+        Err(why) => {
+            println!("{}: {why}", name(file));
+            return;
+        }
+    };
+
+    let pages: Vec<Page> = paginate::pages(&doc, &Grid, frame).collect();
+    let at = at.min(pages.len().saturating_sub(1));
+    let Some(page) = pages.get(at) else {
+        println!("{title}: spine {spine} has nothing to read");
+        return;
+    };
+    let columns = frame.width as usize;
+
+    println!("┌{}┐", "─".repeat(columns + 2));
+    println!("│ {:<columns$} │", trim(&title, columns));
+    println!("├{}┤", "─".repeat(columns + 2));
+    let mut drawn = 0;
+    for slice in &page.slices {
+        if slice.lead {
+            let lead = Grid.lead(&doc.blocks[slice.block].block);
+            for _ in 0..lead {
+                println!("│ {:<columns$} │", "");
+                drawn += 1;
+            }
+        }
+        let lines = Grid.lines(&doc.blocks[slice.block].block, columns);
+        for (_, line) in lines.iter().skip(slice.first_row).take(slice.rows) {
+            println!("│ {:<columns$} │", trim(line, columns));
+            drawn += 1;
+        }
+    }
+    for _ in drawn..frame.height as usize {
+        println!("│ {:<columns$} │", "");
+    }
+    println!("├{}┤", "─".repeat(columns + 2));
+    let footer = format!(
+        "page {} of {}   location {}   locator (spine {spine}, char {})",
+        at + 1,
+        pages.len(),
+        page.start / LOCATION_CHARS + 1,
+        page.start,
+    );
+    println!("│ {:<columns$} │", trim(&footer, columns));
+    println!("└{}┘", "─".repeat(columns + 2));
+}
+
+fn trim(s: &str, columns: usize) -> String {
+    if s.chars().count() <= columns {
+        return s.to_owned();
+    }
+    s.chars().take(columns.saturating_sub(1)).chain(['…']).collect()
+}
+
+/// The pagination invariants, over whole books rather than a fixture.
+///
+/// The unit tests assert these against a chapter written to break them; this asserts them
+/// against Twain, who did not know he was writing test data. Both are worth having: one finds
+/// the bug, the other finds the case nobody thought to write down.
+fn verify(file: &Path) {
+    let Some(mut epub) = open(file) else { return };
+    let frames = [Grid::frame(40, 12), Grid::frame(66, 24), Grid::frame(96, 44)];
+    let mut pages = 0usize;
+    let mut trouble: Vec<String> = Vec::new();
+
+    for spine in 0..epub.spine().len() {
+        let Ok(doc) = epub.document(spine) else { continue };
+        for frame in frames {
+            let mut expected: Vec<(usize, usize)> = Vec::new();
+            for (i, located) in doc.blocks.iter().enumerate() {
+                let rows = Grid.lines(&located.block, frame.width as usize).len();
+                expected.extend((0..rows).map(|r| (i, r)));
+            }
+
+            let laid: Vec<Page> = paginate::pages(&doc, &Grid, frame).collect();
+            let drawn: Vec<(usize, usize)> = laid
+                .iter()
+                .flat_map(|p| {
+                    p.slices.iter().flat_map(|s| {
+                        (s.first_row..s.first_row + s.rows).map(move |r| (s.block, r))
+                    })
+                })
+                .collect();
+            if drawn != expected {
+                trouble.push(format!("spine {spine} at {}x{} does not tile", frame.width, frame.height));
+            }
+            pages += laid.len();
+
+            for pair in laid.windows(2) {
+                let Some(back) = paginate::page_before(&doc, &Grid, frame, pair[1].cursor()) else {
+                    trouble.push(format!("spine {spine}: no page before {:?}", pair[1].cursor()));
+                    continue;
+                };
+                if back.next != pair[1].cursor() {
+                    trouble.push(format!("spine {spine}: paging back skips rows"));
+                }
+                if back.cursor() >= pair[1].cursor() {
+                    trouble.push(format!("spine {spine}: paging back did not move backwards"));
+                }
+            }
+
+            for page in &laid {
+                let cursor = paginate::cursor_at(&doc, &Grid, frame, page.start);
+                let reopened = paginate::page_at(&doc, &Grid, frame, cursor);
+                if reopened.start > page.start || page.start > reopened.end {
+                    trouble.push(format!("spine {spine}: locator {} does not come back", page.start));
+                }
+            }
+        }
+    }
+
+    trouble.dedup();
+    println!("{}", name(file));
+    println!("    {pages} pages laid out at three frames");
+    if trouble.is_empty() {
+        println!("    tiles, pages back, and every locator returns\n");
+    } else {
+        for line in trouble.iter().take(8) {
+            println!("    FAILED: {line}");
+        }
+        println!();
+    }
 }
