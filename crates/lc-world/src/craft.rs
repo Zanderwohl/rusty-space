@@ -238,15 +238,27 @@ impl Craft {
         // place that hand-over can happen.
         let began = self.past.last().map_or(f64::NEG_INFINITY, |entry| entry.until_s);
         let nose = self.facing_of(&before, began, at_s);
+        // **The plan is made from where the nose is, not from where the last order left it.**
+        // A plan holds its start attitude as a parameter and is re-planned from it on the far
+        // side of a wire or a checkpoint — see [`crate::resume`] — and what is re-planned from
+        // is this field. Setting it after the plan was made left the two disagreeing: the live
+        // crossing turned from the old attitude and the restored one from the new, so a ship
+        // came back from a checkpoint on a slightly different flight. It only showed once an
+        // idle ship's nose could move on its own, which is what turning broadside does.
+        let previous = std::mem::replace(&mut self.motion.attitude, nose);
         let out = change(self);
-        if !before.same_worldline_as(&self.motion) {
+        if before.same_worldline_as(&self.motion) {
+            // Nothing happened, so nothing may be recorded — including the attitude, which
+            // would otherwise creep forward on every step and restart every turn from where it
+            // had got to.
+            self.motion.attitude = previous;
+        } else {
             if let Some(fitting) = &mut self.fitting {
                 fitting.settle(&before, at_s);
                 fitting.commit(&self.motion, at_s);
             }
             // A new motive may collect where the old one could not, or stop collecting.
             self.begin_solar_segment(at_s);
-            self.motion.attitude = nose;
             self.past.push(Past { until_s: at_s, motion: before });
             self.forget_before(at_s);
         }
@@ -1188,6 +1200,26 @@ mod tests {
         let settled = craft.facing_at(cut_at + quarter * 1.01).unwrap();
         assert!(settled.dot(to_star(&craft, cut_at + quarter)).abs() < 1.0e-6, "{settled}");
         assert!(settled.is_normalized());
+    }
+
+    /// **A plan is planned from the attitude the craft then records.** They are two halves of one
+    /// hand-over, and a plan is re-planned from the recorded one at the far end of a wire or a
+    /// checkpoint — so a plan made from anything else comes back as a different flight. This went
+    /// wrong the moment an idle ship's nose could move on its own.
+    #[test]
+    fn a_plan_starts_from_the_attitude_the_craft_records() {
+        let Some(system) = sol() else { return };
+        let mut craft = near_the_sun(&system, 0.5, None);
+        // Broadside, so the nose is not the attitude the last order left it at.
+        let nose = craft.facing_at(0.0).unwrap();
+        assert!((nose - craft.motion.attitude).length() > 0.1, "premise: the nose has moved");
+
+        let drive = craft.rated_drive(0.0);
+        let to = craft.motion.position_ly + DVec3::X * 0.05;
+        craft.apply(&Event { ship: ShipId(9), at_t: 0.0, change: Change::Cross { to_ly: to, drive } }).unwrap();
+        let Motive::Crossing(cruise) = &craft.motion.motive else { panic!("not crossing") };
+        assert_eq!(cruise.initial_attitude(), craft.motion.attitude);
+        assert_eq!(craft.motion.attitude, nose, "it planned from somewhere the nose had not been");
     }
 
     #[test]
