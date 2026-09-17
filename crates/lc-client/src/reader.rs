@@ -276,7 +276,7 @@ fn case() -> egui::Frame {
 fn head(ui: &mut egui::Ui, shelf: &Shelf, open: &mut bool, out: &mut MessageWriter<Requested>) {
     ui.horizontal(|ui| {
         ui.add_space(4.0);
-        ui.label(egui::RichText::new(shelf.title.to_uppercase()).size(10.0).color(LABEL));
+        ui.add(engraved(shelf.title.to_uppercase(), 10.0, LABEL));
         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
             if key(ui, "×", "close the book").clicked() {
                 *open = false;
@@ -301,9 +301,18 @@ fn keys(ui: &mut egui::Ui, state: &Ui, out: &mut MessageWriter<Requested>) {
                 ask(out, Action::TurnPage(1));
             }
             let at = state.reading.offset / LOCATION_CHARS + 1;
-            ui.label(egui::RichText::new(format!("location {at}")).size(10.0).color(FAINT));
+            ui.add(engraved(format!("location {at}"), 10.0, FAINT));
         });
     });
+}
+
+/// Writing on the case rather than text on the page.
+///
+/// egui makes a label selectable by default, and a selectable label eats the drag that would
+/// otherwise move the window — so the one surface a player grabs to move the thing is the one
+/// that refuses to be grabbed. Nothing printed on the bezel is text anyone wants to copy.
+fn engraved(words: impl Into<String>, size: f32, colour: Color32) -> egui::Label {
+    egui::Label::new(egui::RichText::new(words.into()).size(size).color(colour)).selectable(false)
 }
 
 fn key(ui: &mut egui::Ui, label: &str, hint: &str) -> egui::Response {
