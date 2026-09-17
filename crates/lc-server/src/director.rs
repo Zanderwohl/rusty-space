@@ -496,9 +496,11 @@ mod tests {
             let (a, b) = (s.fleet.get(pov).unwrap(), s.fleet.get(cast).unwrap());
             a.motion.position_ly.distance(b.motion.position_ly) * lc_world::system::M_PER_LY
         };
+        // Tick counts are game time at the design rate, and the scene runs slower than that.
+        let ticks = |n: usize| (n as f64 / lc_world::scenario::APPROACH.rate).round() as usize;
         server.tick(&mut wire).await.unwrap();
         let opening = apart(&server);
-        for _ in 0..1500 {
+        for _ in 0..ticks(1500) {
             server.tick(&mut wire).await.unwrap();
         }
         let closed = apart(&server);
@@ -512,7 +514,7 @@ mod tests {
         // flips in sixty and holds fifty kilometres. Big ships stand further off; that is the
         // shape of the thing, not a number wanting tuning.
         let mut nearest = f64::INFINITY;
-        for _ in 0..1000 {
+        for _ in 0..ticks(1000) {
             server.tick(&mut wire).await.unwrap();
             nearest = nearest.min(apart(&server));
         }

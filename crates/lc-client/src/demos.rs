@@ -37,7 +37,7 @@ pub fn scenarios(
         if scene.rate != 1.0 {
             // The rate is the server's to state and it changes when a scene is staged, so what
             // the clock will do afterwards is part of what the button does.
-            ui.label(format!("Runs at {:.0}x — the shard will say so.", scene.rate));
+            ui.label(format!("Runs at {} — the shard will say so.", crate::ui::rate_label(scene.rate)));
         }
         ui.separator();
     }
