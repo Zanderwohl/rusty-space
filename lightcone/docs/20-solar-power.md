@@ -3,8 +3,8 @@
 Every hull is covered in collectors, so a ship earns energy from starlight when it holds still
 near a star.
 
-**Status: built,** except the attitude drawing below, which is deferred. `lc_world::solar`
-holds the geometry and flux; `Craft` walks the segments. The first half of this doc is the
+**Status: built.** `lc_world::solar` holds the geometry and flux; `Craft` walks the segments and
+turns idle ships broadside. The first half of this doc is the
 mechanic and the numbers behind it. The second half is how it fits into the energy account in
 [19-ship-fitting.md](19-ship-fitting.md).
 
@@ -203,21 +203,26 @@ is corrected by the next `Fitted`.
 
 ### Attitude
 
-The accounting assumes broadside. The **drawing** does not show it yet. `hull::attitude` builds
-the hull's orientation from the nose alone, with roll fixed by ecliptic north, so a ship in the
-ecliptic with its nose along the orbit already has its short axis to the Sun, and one pointing
-sunward does not.
+The accounting assumes broadside, and the picture agrees, in two halves.
 
-Two ways to make the picture agree, both deferred:
+**The nose.** `Craft::facing_at` turns a fitted craft with no plan and a star to look at onto the
+nearest heading perpendicular to that star, at its hull's own slew rate from the attitude its last
+order left it with. A craft that has been idle since before anything is already there, having had
+forever to turn. A ship given an order starts the plan's turn from wherever the broadside turn had
+got to, which is what `Craft::remembering` already hands over. Nothing unfitted turns: a probe
+keeps the attitude it was left with.
 
-- **Aim idle ships.** `motion::aim_at` returns an aim for `Holding`, `Falling` and `Drifting`
-  that puts the nose perpendicular to the star. That changes `facing`, and so what other players
-  see in a `Presence`, which is honest: a ship charging is a ship turned to its star.
-- **Carry roll.** Add an up vector to the attitude model, so broadside can be any nose direction.
-  A bigger change: `ShipState::attitude`, `Presence::facing` and the hull transform all assume a
-  nose alone.
+That changes what a `Presence` carries, which is honest — a ship charging is a ship turned to its
+star — and it costs no protocol change, because `facing` is already on the wire.
 
-Neither affects income, and income does not wait for either.
+**The roll.** `hull::attitude` takes the direction to the star as well as the nose, and rolls the
+hull's height axis — its collecting face — toward it. Roll about the nose changes no thrust, so
+every hull does it, under way or not. With no star, or one along the nose where the roll toward it
+is undetermined, it falls back to ecliptic north as it did before.
+
+Rolling was not optional. The height axis used to be ecliptic north with the nose taken out, and a
+star in the ecliptic can never lie along that, so a ship in the plane could not be drawn broadside
+at all.
 
 ### Refits
 

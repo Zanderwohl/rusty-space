@@ -236,7 +236,8 @@ impl Craft {
         // because a ship does not snap back to where it was pointing when it was given a new
         // order — this is the one place the two motives are both in hand, so it is the only
         // place that hand-over can happen.
-        let nose = motion::facing_at(&before, self.length_m, at_s);
+        let began = self.past.last().map_or(f64::NEG_INFINITY, |entry| entry.until_s);
+        let nose = self.facing_of(&before, began, at_s);
         let out = change(self);
         if !before.same_worldline_as(&self.motion) {
             if let Some(fitting) = &mut self.fitting {
@@ -371,7 +372,34 @@ impl Craft {
 
     /// Which way the nose points at a coordinate second, or `None` when nothing decides it.
     pub fn facing_at(&self, now_s: f64) -> Option<DVec3> {
-        motion::facing(&self.motion, self.length_m, now_s)
+        let began = self.past.last().map_or(f64::NEG_INFINITY, |entry| entry.until_s);
+        Some(self.facing_of(&self.motion, began, now_s))
+    }
+
+    /// Where `state`'s nose points at `now_s`, for a motive that began at `began_s`.
+    ///
+    /// A plan points the nose where it needs it. A fitted craft with no plan, inside a system,
+    /// turns broadside to the star so its collectors face it — see
+    /// `lightcone/docs/20-solar-power.md` — swinging from the attitude its last order left it at,
+    /// at its hull's rate. The nose goes perpendicular to the star by the smallest turn; the
+    /// renderer rolls the belly toward the star about it.
+    fn facing_of(&self, state: &ShipState, began_s: f64, now_s: f64) -> DVec3 {
+        let broadside = (self.fitting.is_some() && !state.is_under_way())
+            .then(|| self.to_star(state, now_s))
+            .flatten()
+            .map(|to_star| broadside_nose(state.attitude, to_star));
+        match broadside {
+            Some(to) => crate::attitude::turned(state.attitude, to, self.slew_rate_rad_s(), now_s - began_s),
+            None => motion::facing_at(state, self.length_m, now_s),
+        }
+    }
+
+    /// Unit vector from `state`'s position toward its system's primary at `t`.
+    fn to_star(&self, state: &ShipState, t: f64) -> Option<DVec3> {
+        let system = self.system.as_deref()?;
+        let star = system.star_position_at(t)?;
+        let (at, _) = motion::state_at(state, Some(system), t)?;
+        Some((star - at).normalize_or_zero()).filter(|d| *d != DVec3::ZERO)
     }
 
     /// Where it is at a coordinate microsecond, light-microseconds from the world origin.
@@ -710,6 +738,19 @@ impl std::fmt::Debug for Craft {
             .field("in_a_system", &self.system.is_some())
             .finish()
     }
+}
+
+/// The nose direction nearest `attitude` that is perpendicular to `to_star`: `attitude` with its
+/// component along the star removed. A nose pointing straight at the star or away from it has no
+/// nearest perpendicular, and takes the one toward ecliptic north.
+pub fn broadside_nose(attitude: DVec3, to_star: DVec3) -> DVec3 {
+    let s = to_star.normalize_or_zero();
+    let across = attitude - s * attitude.dot(s);
+    if across.length_squared() > 1.0e-12 {
+        return across.normalize();
+    }
+    let reference = if s.z.abs() > 0.999 { DVec3::X } else { DVec3::Z };
+    (reference - s * reference.dot(s)).normalize_or_zero()
 }
 
 /// Every craft there is. The single source of truth for craft state.
@@ -1108,6 +1149,54 @@ mod tests {
         assert!((by_hour / midpoint - 1.0).abs() < 1.0e-9, "{by_hour} vs {midpoint}");
         let (mid_err, start_err) = ((midpoint - exact).abs(), (start - exact).abs());
         assert!(mid_err * 10.0 < start_err, "midpoint off by {mid_err}, start by {start_err}");
+    }
+
+    /// An idle fitted ship holds its nose perpendicular to the star, and after a flight it swings
+    /// back to broadside at its hull's own rate rather than snapping.
+    #[test]
+    fn an_idle_ship_turns_broadside_to_its_star() {
+        let Some(system) = sol() else { return };
+        let mut craft = near_the_sun(&system, 0.1, None);
+        let to_star = |craft: &Craft, t: f64| {
+            (system.star_position_at(t).unwrap() - craft.motion.position_ly).normalize()
+        };
+        // Idle since before anything: already round, with no turn left to make.
+        assert!(craft.facing_at(0.0).unwrap().dot(to_star(&craft, 0.0)).abs() < 1.0e-9);
+
+        // Nothing unfitted turns: a probe keeps the attitude it was left with.
+        let mut probe = Craft::at(CraftId(3), Kind::Probe, craft.motion.position_ly);
+        probe.enter(Some(system.clone()), 0.0);
+        assert_eq!(probe.facing_at(1.0e4), Some(DVec3::X));
+
+        // Sent somewhere, it points where the plan needs it.
+        let drive = craft.rated_drive(0.0);
+        // Straight out from the star, so the plan's nose is along it and not broadside.
+        let to = craft.motion.position_ly + DVec3::X * 0.05;
+        craft.apply(&Event { ship: ShipId(9), at_t: 0.0, change: Change::Cross { to_ly: to, drive } }).unwrap();
+        let flying = craft.facing_at(600.0).unwrap();
+        assert!(flying.dot(to_star(&craft, 600.0)).abs() > 0.5, "{flying} is still broadside");
+
+        // Drive cut: the turn back starts from the nose the crossing left, and takes a quarter
+        // turn at the hull's rate to arrive.
+        let cut_at = 600.0;
+        craft.apply(&Event { ship: ShipId(9), at_t: cut_at, change: Change::CutDrive }).unwrap();
+        assert!((craft.facing_at(cut_at).unwrap() - flying).length() < 1.0e-9, "the nose snapped");
+        let quarter = 0.5 * std::f64::consts::PI / craft.slew_rate_rad_s();
+        let part_way = craft.facing_at(cut_at + 0.25 * quarter).unwrap();
+        assert!(part_way.dot(flying) < 0.999, "it did not begin turning");
+        assert!(part_way.dot(to_star(&craft, cut_at)).abs() > 1.0e-6, "it arrived at once");
+        let settled = craft.facing_at(cut_at + quarter * 1.01).unwrap();
+        assert!(settled.dot(to_star(&craft, cut_at + quarter)).abs() < 1.0e-6, "{settled}");
+        assert!(settled.is_normalized());
+    }
+
+    #[test]
+    fn a_broadside_nose_is_the_nearest_perpendicular() {
+        let s = DVec3::X;
+        assert_eq!(broadside_nose(DVec3::new(1.0, 1.0, 0.0), s), DVec3::Y);
+        assert_eq!(broadside_nose(DVec3::Z, s), DVec3::Z);
+        let head_on = broadside_nose(-DVec3::X, s);
+        assert!(head_on.dot(s).abs() < 1.0e-12 && head_on.is_normalized(), "{head_on}");
     }
 
     #[test]
