@@ -28,6 +28,28 @@ pub fn loading(mut contexts: EguiContexts) {
     });
 }
 
+/// The browser build's dead end. Nothing is behind it, so it says what happened and the one
+/// thing that helps.
+pub fn unreachable(
+    mut contexts: EguiContexts,
+    uplink: Res<crate::uplink::Uplink>,
+    address: Res<crate::uplink::ServerAddress>,
+) {
+    let Ok(ctx) = contexts.ctx_mut() else { return };
+    let why = crate::uplink::out_of_reach(&uplink.state, address.0.as_deref());
+    egui::CentralPanel::default().show(ctx, |ui| {
+        ui.vertical_centered(|ui| {
+            ui.add_space(120.0);
+            ui.heading("Not connected to the server");
+            if let Some(why) = why {
+                ui.colored_label(connection_colour(crate::uplink::Note::Wrong), why);
+            }
+            ui.add_space(12.0);
+            ui.label("Reload the page to try again.");
+        });
+    });
+}
+
 /// The palette for a connection state. The words are `uplink`'s; only the colour is here.
 fn connection_colour(note: crate::uplink::Note) -> egui::Color32 {
     match note {
@@ -194,7 +216,9 @@ fn escape(ui: &mut egui::Ui, out: &mut MessageWriter<Requested>) {
     if ui.button("Settings").clicked() {
         ask(out, Action::OpenPanel(Panel::Settings));
     }
-    if ui.button("Quit").clicked() {
+    // A browser tab has no menu to return to and no process to quit; closing it is the
+    // browser's.
+    if crate::app::HAS_MAIN_MENU && ui.button("Quit").clicked() {
         ask(out, Action::Quit);
     }
 }

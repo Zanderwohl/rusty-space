@@ -381,8 +381,12 @@ cdn.<domain>/game/<build-id>/manifest.json
 cdn.<domain>/game/<build-id>/lightcone_web.js
 cdn.<domain>/game/<build-id>/lightcone_web_bg.wasm
 cdn.<domain>/game/<build-id>/assets/shaders/*.wgsl
-cdn.<domain>/game/<build-id>/assets/sky/hyg-<content-hash>.lcsky
+cdn.<domain>/game/<build-id>/assets/sky/catalogue.lcsky
 ```
+
+The sky is at the same path in every build and is not a parameter: the client always asks for
+`sky/catalogue.lcsky`, and which catalogue that is is decided by the build that staged it. A
+build directory is immutable, so the name needs no content hash to be cacheable.
 
 ```json
 {
@@ -517,7 +521,7 @@ not fetch an HTTP build — so the day the site gets TLS, the CDN needs it the s
 CI, on a tag:
 
 1. build wasm, `wasm-opt`, stage the merged asset tree
-2. hash and name the sky chunk
+2. pack the sky chunk to `assets/sky/catalogue.lcsky`
 3. write `manifest.json`
 4. `aws s3 cp --recursive` into `game/<build-id>/` with the headers above
 5. `POST /internal/release` on the site: `{build_id, cdn_base, manifest_key, bytes}` — inserts

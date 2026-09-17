@@ -1,6 +1,6 @@
 //! The Lightcone client, in a browser.
 //!
-//! Differs from the desktop binary in three things and nothing else:
+//! Differs from the desktop binary in these things and nothing else:
 //!
 //! - **Assets come over HTTP.** `AssetPlugin::file_path` is a URL prefix on this target, so
 //!   pointing it at a CDN is the whole of the CDN integration.
@@ -8,6 +8,9 @@
 //! - **No `.meta` probing**, because every one of those is a round trip and a 404.
 //! - **WebGPU only.** There is no WebGL2 fallback and there will not be one: the renderer
 //!   needs storage buffers and compute, and a silently degraded sky is worse than a refusal.
+//! - **The sky is not an argument.** Every build ships its catalogue at [`SKY`], so the CDN
+//!   decides what is loaded and a URL cannot.
+//! - **No main menu.** The library gates that, not this file: see `app::HAS_MAIN_MENU`.
 //!
 //! The page is expected to have checked `navigator.gpu` before loading this, because the
 //! check is free and the download is not.
@@ -33,6 +36,11 @@ const CANVAS: &str = "#lightcone";
 /// hosted build passes an absolute CDN URL instead.
 #[cfg(target_arch = "wasm32")]
 const DEFAULT_ASSET_BASE: &str = "assets";
+
+/// The packed catalogue, under the asset base. `tools/build-wasm.sh` writes it here, and a
+/// shard's `--sky` names the same object.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+const SKY: &str = "sky/catalogue.lcsky";
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
@@ -88,7 +96,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .insert_resource(Catalogue(entry.catalogue))
+        .insert_resource(Catalogue(Some(SKY.to_owned())))
         .insert_resource(lc_client::uplink::ServerAddress(server))
         .insert_resource(entry.dev)
         .add_plugins(ClientPlugin)

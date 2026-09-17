@@ -29,7 +29,17 @@ pub enum AppState {
     MainMenu,
     Loading,
     InGame,
+    /// The browser build could not reach its shard, or lost it. Terminal: there is no menu to
+    /// fall back to, and reloading the page is the way back.
+    Unreachable,
 }
+
+/// Whether this build has a main menu to start at and to leave the game for.
+///
+/// The browser build does not. The page that launches it has already signed the player in and
+/// named the shard, so it opens straight into the world, and failing to reach that shard ends
+/// at [`AppState::Unreachable`] rather than at a menu.
+pub const HAS_MAIN_MENU: bool = cfg!(not(target_arch = "wasm32"));
 
 /// The order a frame is built in. Every system in [`Update`] belongs to one of these.
 ///
@@ -142,7 +152,6 @@ impl Plugin for ClientPlugin {
             em_render::plume_material::PlumeMaterialPlugin,
             BodySurfaceMaterialPlugin,
             crate::sky_asset::SkyAssetPlugin,
-            crate::menu::MainMenuPlugin,
         ))
             .init_state::<AppState>()
             .add_message::<Requested>()
@@ -240,8 +249,21 @@ impl Plugin for ClientPlugin {
                 (
                     panels::loading.run_if(in_state(AppState::Loading)),
                     (panels::hud, panels::open_panels).run_if(in_state(AppState::InGame)),
+                    panels::unreachable.run_if(in_state(AppState::Unreachable)),
                 ),
             );
+        if HAS_MAIN_MENU {
+            app.add_plugins(crate::menu::MainMenuPlugin);
+        } else {
+            app.add_systems(
+                Update,
+                strand
+                    .in_set(Stage::Act)
+                    .run_if(not(in_state(AppState::Boot)))
+                    .run_if(not(in_state(AppState::Unreachable))),
+            )
+            .add_systems(OnEnter(AppState::Unreachable), crate::input::release_cursor);
+        }
     }
 }
 
@@ -383,13 +405,27 @@ fn lifted(at: DVec3, star: DVec3, degrees: f64) -> DVec3 {
 
 /// One frame of boot, so the window is up before anything slow happens.
 fn boot(mut next: ResMut<NextState<AppState>>, mut ui: ResMut<Ui>, dev: Res<DevEntry>) {
-    if dev.observe_immediately {
+    if dev.observe_immediately || !HAS_MAIN_MENU {
         ui.screen = Screen::Loading;
         next.set(AppState::Loading);
         return;
     }
     ui.screen = Screen::MainMenu;
     next.set(AppState::MainMenu);
+}
+
+/// Leave for the error screen once the shard is out of reach, for a build with nowhere else to go.
+fn strand(
+    uplink: Res<crate::uplink::Uplink>,
+    address: Res<crate::uplink::ServerAddress>,
+    mut ui: ResMut<Ui>,
+    mut next: ResMut<NextState<AppState>>,
+) {
+    if let Some(why) = crate::uplink::out_of_reach(&uplink.state, address.0.as_deref()) {
+        warn!("stranded: {why}");
+        ui.screen = Screen::Unreachable;
+        next.set(AppState::Unreachable);
+    }
 }
 
 /// Development entry: do what the flags asked for, once there is a ship to do it to.

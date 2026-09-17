@@ -77,6 +77,19 @@ Four steps because three of them are reversible and one is not. Publishing is th
 one — a build id on the CDN is never overwritten — and promotion is the one that changes what
 players get.
 
+**A build carries its own sky.** `build-wasm.sh` packs `CATALOGUE` to
+`assets/sky/catalogue.lcsky` inside the build, and the client asks for exactly that path — there
+is no URL parameter for it. To ship a different catalogue, change `CATALOGUE` in the script and
+commit, so the build id names the catalogue as well as the code.
+
+**Promoting a build is also repointing the shard**, when the catalogue changed: its `--sky`
+names one build's chunk, and a shard reading one sky while players download another disagrees
+with them about which system every ship is in. See
+[the broker and a shard](#the-broker-and-a-shard-on-rocinante).
+
+Builds staged before 2026-09-17 named the chunk `assets/sky/hyg-v42.lcsky`. A shard pointed at
+one of those keeps working; the new name only matters when you repoint it at a newer build.
+
 `build-wasm.sh` refuses nothing but takes about four minutes cold. `publish-build.sh` refuses a
 `-dirty` build id: a build that exists on one laptop is not something anyone can roll back to.
 
@@ -461,7 +474,8 @@ ssh zandy@rocinante.local '
 docker --context rocinante run -d --name lightcone-shard --restart unless-stopped \
     --network lightcone --env-file ~/.config/lightcone/shard.env lightcone-shard:<tag> \
     --bind 0.0.0.0:8080 --audience shard-1 \
-    --jwks http://lightcone-identity:3200/.well-known/jwks.json
+    --jwks http://lightcone-identity:3200/.well-known/jwks.json \
+    --sky http://lightcone-cdn:3101/game/<promoted-build>/assets/sky/catalogue.lcsky
 ```
 
 ### The shard's own database
@@ -495,7 +509,7 @@ process was down. The alternative asserts that things happened in the missing ti
 nothing was journalled and nobody was told.
 
 **Point `--sky` at the promoted build's own chunk**, by the CDN's *container* name —
-`http://lightcone-cdn:3101/game/<build>/assets/sky/hyg-v42.lcsky`. Not the public
+`http://lightcone-cdn:3101/game/<build>/assets/sky/catalogue.lcsky`. Not the public
 `https://cdn.…` name: that resolves to the host's own address and hairpins, exactly as the
 site's call to the broker does. Same container, same bytes, different route. Both ends place craft into systems by position
 against the same shell radius, so two catalogues is two answers to which system a ship is in —
@@ -592,6 +606,10 @@ nobody has deployed yet.
 one is what the broker and the shard agree a ticket is *for*, the other is where the shard
 happens to be, and moving it should not reissue anything.
 
+The sky is not handed over at all. The client loads `sky/catalogue.lcsky` from its build's asset
+base, so a build served from anywhere — the CDN, or a staged directory on disk — draws the
+catalogue it was built with.
+
 A page served over TLS may only open `wss://`. A browser refuses `ws://` from an `https://`
 origin outright, which is the one failure here that looks like the server being down.
 
@@ -622,7 +640,7 @@ nothing should ever compare them.
 |---|---|
 | `/play` says "Needs a secure connection" | the page is on plain HTTP. Tunnel, or TLS |
 | `/play` says "Build not found" | the promoted build id is not on the CDN. `tools/release.sh list`, then `publish-build.sh` |
-| the client starts and the sky is three stars | the sky chunk 404'd; the client says so and falls back to a sample |
+| the client starts and the sky is three stars | `assets/sky/catalogue.lcsky` 404'd under the build; the client says so and falls back to a sample |
 | thousands of requests for one asset | a wrong asset base. Bevy retries a failed load without bound |
 | a stylesheet change does not appear | the asset version did not move, or the tunnel is serving you the deployed container |
 | `pool timed out while waiting for an open connection` | mDNS handed out a link-local IPv6. Use the IPv4 address |
