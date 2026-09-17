@@ -779,6 +779,9 @@ impl<J: Journal> Server<J> {
             ship_id: ShipId(id.0),
             ship: (&craft.motion.snapshot()).into(),
         });
+        // A new plan committed energy, and the client took the motion whole rather than folding
+        // it, so its account is stale until told.
+        self.tell_fitted(wire, id);
     }
 
     /// Fly every standing intercept one tick.

@@ -171,7 +171,6 @@ impl<J: Journal> Server<J> {
             let cut = Change_ { ship: MotionId(id.0), at_t: now_s, change: Change::CutDrive };
             if craft.apply(&cut).is_ok() {
                 self.tell_flying(wire, id);
-                self.tell_fitted(wire, id);
             }
         }
     }

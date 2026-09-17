@@ -29,6 +29,8 @@ pub struct Hud {
     pub coasting: Option<String>,
     /// Set when the clock is running at something other than the canonical rate.
     pub warning: Option<String>,
+    /// Stored energy, and what is committed or being rebuilt, for a ship with modules.
+    pub energy: Option<String>,
 }
 
 /// What an arc reads as: the two apsides, or the periapsis alone on an escape.
@@ -124,7 +126,29 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
         // whether the player set it offline or a shard staging a scene stated it. The clock
         // running sixty times over is exactly when a readout of how fast earns its place.
         warning: (ui.time_rate != 1.0).then(|| crate::ui::rate_label(ui.time_rate)),
+        energy: energy(session),
     }
+}
+
+/// `ENERGY 23.4 / 30.0 ME`, and what is spoken for: a plan's commitment or a refit under way.
+fn energy(session: &Session) -> Option<String> {
+    let now = session.coordinate_time_s();
+    let ship = &session.ship;
+    let fitting = ship.fitting()?;
+    let module_j = fitting.balance.module_energy_j();
+    let mut line = format!(
+        "ENERGY {:.1} / {:.1} ME",
+        fitting.stored_j_at(&ship.motion, now) / module_j,
+        fitting.capacity_j_at(now) / module_j,
+    );
+    let committed = fitting.committed_j_at(&ship.motion, now);
+    if committed > 0.0 {
+        line += &format!(" ({:.2} committed)", committed / module_j);
+    }
+    if ship.is_refitting(now) {
+        line += " — REFITTING";
+    }
+    Some(line)
 }
 
 #[cfg(test)]

@@ -77,6 +77,10 @@ pub fn hud(
             ui.label(format!("BAND {}", lines.mapping));
             ui.separator();
             ui.label(format!("EXPOSURE {}", lines.exposure));
+            if let Some(energy) = &lines.energy {
+                ui.separator();
+                ui.label(energy);
+            }
             if let Some(warning) = &lines.warning {
                 ui.separator();
                 ui.colored_label(egui::Color32::from_rgb(240, 170, 60), warning);
@@ -202,6 +206,8 @@ pub fn open_panels(
             Panel::Scenarios => {
                 crate::demos::scenarios(ui, &uplink, ui_state.0.perspective, &mut out)
             }
+            Panel::Refit => crate::refit_panel::refit(ui, &ui_state.0, &game, &mut out),
+            Panel::DevActions => crate::refit_panel::dev_actions(ui, &game, &mut out),
         });
         if !open {
             ask(&mut out, Action::ClosePanel(panel));
@@ -398,8 +404,12 @@ fn tuning(ui: &mut egui::Ui, state: &Ui, out: &mut MessageWriter<Requested>) {
 
 fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {
     ui.label(format!("drive: {:.0} g, cap {:.3}c", game.ship.motion.drive.accel_g, game.ship.motion.drive.max_beta));
+    let rated = game.ship.rated_drive(game.coordinate_time_s()).accel_g;
+    if game.ship.fitting().is_some() {
+        ui.weak(format!("engines rated for {rated:.1} g at this mass"));
+    }
     ui.horizontal(|ui| {
-        for g in [1.0, 5.0, 20.0, 100.0] {
+        for g in [1.0, 5.0, 20.0, 100.0].into_iter().filter(|g| *g <= rated.max(1.0)) {
             if ui.button(format!("{g:.0} g")).clicked() {
                 ask(out, Action::SetDriveAccel(g));
             }

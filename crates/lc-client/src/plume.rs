@@ -257,7 +257,7 @@ fn burning(game: &Session, uplink: &crate::uplink::Uplink, eye: &crate::hull::Ey
     let now = game.coordinate_time_s();
     let mut out = Vec::new();
     let mine = &game.ship;
-    let rated = mine.motion.drive.jet_power_w(mine.mass_kg(), mine.motion.drive.accel_g);
+    let rated = mine.motion.drive.jet_power_w(mine.mass_kg_at(now), mine.motion.drive.accel_g);
     if let Some(lit) = Burning::of(
         mine.length_m,
         mine.jet_power_w(now),

@@ -498,6 +498,18 @@ impl From<crate::refit::Shortage> for lc_proto::Shortfall {
     }
 }
 
+impl From<lc_proto::Shortfall> for crate::refit::Shortage {
+    fn from(short: lc_proto::Shortfall) -> Self {
+        use lc_proto::Shortfall;
+        match short {
+            Shortfall::Unbuildable => Self::Unbuildable,
+            Shortfall::Energy => Self::Energy,
+            Shortfall::Capacity => Self::Capacity,
+            Shortfall::NoDrones => Self::NoDrones,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

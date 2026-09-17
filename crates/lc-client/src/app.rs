@@ -710,6 +710,10 @@ fn dispatch(
                     uplink.say(lc_proto::Inbound::Stage { scenario });
                     uplink.asked(time.elapsed_secs_f64());
                 }
+                Effect::Grant(joules) => {
+                    uplink.say(lc_proto::Inbound::Grant { joules });
+                    uplink.asked(time.elapsed_secs_f64());
+                }
                 Effect::Send(order) => {
                     // A ship the server has not named is a ship this client does not have, so
                     // there is nothing to send an order for.
