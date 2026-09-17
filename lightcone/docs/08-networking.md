@@ -113,11 +113,12 @@ would be two answers, and the one the player watched would not be the one the au
 So a quarry that manoeuvres is chased on stale information until the news arrives, which across
 a system is seconds to hours, and that delay is the game rather than a shortcoming.
 
-There is no separate "match its acceleration" mode. A quarry holding course never diverges from
-the plan and it runs to completion; one under thrust diverges at once and is re-solved against,
-which from outside *is* a pursuer tracking a burn. One rule cannot disagree with itself at the
-boundary. Hanging about falls out of the same rule with a deadband: once alongside, close again
-only after a real drift.
+A quarry holding course never diverges from the plan and it runs to completion. There used to
+be no separate mode for one under thrust, on the argument that re-solving against it every tick
+*is* a pursuer tracking a burn and that one rule cannot disagree with itself at a boundary. That
+argument was right about where the pursuer went and wrong about what it looked like doing it —
+see below. Hanging about still falls out of a deadband: once alongside, close again only after a
+real drift.
 
 **Matching velocity is arriving at rest in the quarry's frame**, so the approach is planned
 there: boost in, hand the brachistochrone planner the pursuer's state as measured in that frame
@@ -135,10 +136,37 @@ measured in the frame the pair end up sharing: in the world's reckoning two ship
 together are closer than they are, so a deadband on the world's number would let them converge
 as they accelerated.
 
+**A quarry under thrust is escorted, not met.** "Re-solve against a burn" was right about
+position and wrong about everything a player watches. Each re-solve was a fresh plan to arrive at
+rest where the quarry had been, and against a burning quarry every one of them was about a tick
+long — so the client replayed a whole turn, burn, flip and brake between each pair of sightings,
+and a pursuer plainly leaving the system drew its drive reversing twenty times a second. It never
+gained either: measured, it held two million kilometres off for the whole chase, spending the
+second half of every plan shedding the speed the first half built.
+
+So a quarry whose plume was lit at the sighting is escorted (`Motive::Escort`,
+`lc_world::escort`). Its acceleration is read from two sightings as the change in `γβ` over the
+world time between them, which is exact under constant thrust at any speed — the obvious
+version, coordinate acceleration scaled by `γ³`, is a few parts in a hundred thousand high at a
+hundredth of `c` and put the modelled quarry forty kilometres wrong in ten ticks. The approach is
+planned in the frame that accelerates with the quarry, where it holds still and the pursuer's
+spare thrust is its drive less the quarry's. Back in the world the two add: full thrust to catch
+up, easing through the relative brake, and exactly the quarry's acceleration once alongside —
+five g, three, then four, for a five-g pursuer on a four-g quarry, and never a reversed plume.
+Across a whole Oort chase the drive reverses eleven times, where it reversed eighteen thousand.
+
+Only a *lit* quarry, because a pursuer can see a plume. A quarry holding an orbit accelerates too,
+by gravity, and so does the pursuer; escorting it would chase where the planet takes it while
+ignoring what the planet does to the ship chasing. An escort that sees its quarry cut the drive
+stays an escort at zero acceleration rather than falling back to a rendezvous, because a
+rendezvous that arrives goes ballistic — and a ship coasting outward at a good fraction of `c` is
+the most expensive thing there is to keep patching into spheres of influence.
+
 `Outbound::Flying` exists because of this and nothing else. A client folds its own orders, but
 it cannot fold a re-solve it did not ask for and could not reproduce, so the authority states
 what the ship is now flying — the same `Motion` a welcome carries. It leaks nothing: a
-`Motive::Rendezvous` is relative offsets and one sighting.
+`Motive::Rendezvous` is relative offsets and one sighting, and a `Motive::Escort` adds only the
+acceleration the pursuer measured from two of them.
 
 **The cost is quadratic and is not yet paid for.** One retarded solve per observer per craft
 per tick is fine for the handful a shard carries today and is not fine for a busy system: a
@@ -280,6 +308,15 @@ from the same coordinate time, so the client computes where everything is and th
 authoritative only where they disagree. This is why `Welcome` carries `now_t`: adopting the
 server's clock is the whole of agreeing about where anything is.
 
+It carries the **rate** as well, and `Clock` restates it. Agreeing about what time it is is
+only half of agreeing about time — the client draws frames far faster than a statement arrives
+and has to run its own clock between them, so it also has to know how fast to run it. That used
+to be a constant in the client that happened to equal the server's, which is not the same as
+being told: a shard running at any other rate would have been joined by a client confidently
+running at this one. Restated rather than said once, because a rate does not have to hold still
+— a development shard staging a scene changes how fast the world runs, and a client still
+ticking at the old one runs away from it exactly as an unstated rate did.
+
 Channels:
 
 | channel | delivery | contents |
@@ -297,6 +334,24 @@ The server advances coordinate time continuously at 8766x and processes in fixed
 real tick     = 50 ms  (20 Hz)
 coordinate dt = 50 ms * 8766 = 438 s of in-game time
 ```
+
+Times the server's rate, which is one for a shard and is one for anything a deployment has any
+business at. Nothing about the *world* depends on it: every motive is a closed form evaluated
+at a coordinate time, so a faster tick buys coarser event timestamps and nothing else, and the
+step never enters an integrator so it cannot accumulate. Sixty slow ticks and one fast one put
+the same craft in the same place, which is pinned by a test.
+
+A standing intercept re-solves on a fraction of the approach it is flying rather than on a
+fixed interval, and the reason is the same shape as this one: a floor that suits the first long
+run at a quarry is far too coarse for the short correction at the end of it. Ten coordinate
+minutes — chosen against the light delay across a system, which it is indeed much finer than —
+is fourteen thousand kilometres of travel for a craft in high orbit of Jupiter, and an orbital
+rendezvous spent the whole approach flying at a ten-minute-old position.
+
+What does depend on the rate is the clock the client runs between statements, and the deadband
+that clock is corrected against. A fixed one-hour slack is comfortably more than a statement's own
+age at the design rate and is less than a single tick at sixty, so it has to scale or the
+correction fires on every statement for ever without the clock ever having drifted.
 
 A client's cursor starts *before* everything rather than at the current time. "Told everything
 up to now" would swallow an event stamped at exactly now — a ship's own act, on the tick it

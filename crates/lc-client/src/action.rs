@@ -95,6 +95,10 @@ pub enum Action {
     TimeRateUp,
     TimeRateDown,
     WriteSnapshot,
+    /// Ask the shard to put a scene in the world, by name. See `lc_world::scenario`.
+    StageDemo(String),
+    /// Watch from another craft. `None` is back to one's own.
+    WatchFrom(Option<lc_proto::ShipId>),
 }
 
 /// What an action needs from outside: the few things the core cannot do itself.
@@ -113,6 +117,18 @@ pub enum Effect {
     /// An order for the server. Emitted instead of a local change when a server is
     /// authoritative over the ship: see [`crate::session::Session::remote`].
     Send(lc_proto::Order),
+    /// Ask for a scene. Not an [`Effect::Send`], because an order is something a *ship* does
+    /// and this is not: it is a request to the thing that owns the world.
+    Stage(String),
+}
+
+/// Where a scene says to stand, as the interface's own state.
+///
+/// `None` for a scene watched from the player's ship, which is what the camera has always done
+/// and is what every scene but one asks for.
+pub fn watching(scene: &lc_world::scenario::Scenario) -> Option<crate::ui::CameraPerspective> {
+    let id = lc_world::scenario::Scenario::craft_for(scene.watch)?;
+    Some(crate::ui::CameraPerspective::Pov(lc_proto::ShipId(id)))
 }
 
 /// Stops of exposure per keypress.
@@ -328,6 +344,32 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             effects.push(Effect::Notify(format!("clock: {}", crate::ui::rate_label(ui.time_rate))));
         }
         Action::WriteSnapshot => effects.push(Effect::WriteSnapshot),
+        // Only a shard can do this, and only one started for it will. Offline there is no
+        // authority to ask and nothing that could honour the answer.
+        Action::StageDemo(name) if !session.remote => {
+            let _ = name;
+            effects.push(Effect::Notify("no server, so nowhere to stage a scene".into()));
+        }
+        Action::StageDemo(name) => {
+            // The scene says where to stand, so staging one moves the camera to wherever it is
+            // about. Set here rather than waiting for the shard to answer: the perspective is
+            // the interface's own state and there is nothing to ask anybody.
+            if let Some(scene) = lc_world::scenario::Scenario::named(&name) {
+                ui.perspective = watching(scene);
+            }
+            effects.push(Effect::Stage(name));
+        }
+        // The eye only. What the client works out about light is still solved from the ship
+        // the session owns — see [`crate::ui::CameraPerspective::Pov`], which says what that
+        // costs and where it would start to show.
+        Action::WatchFrom(ship_id) => {
+            ui.perspective = ship_id.map(crate::ui::CameraPerspective::Pov);
+            let said = match ship_id {
+                Some(_) => "watching from another craft",
+                None => "back aboard your own ship",
+            };
+            effects.push(Effect::Notify(said.into()));
+        }
     }
     effects
 }
@@ -736,7 +778,10 @@ mod tests {
     fn a_rate_is_named_by_what_it_feels_like() {
         assert_eq!(rate_label(60.0), "1 year / minute");
         assert_eq!(rate_label(360.0), "1 year / 10 s");
-        assert!(rate_label(123.0).contains("123"), "an unnamed rate still reads");
+        // One off the ladder reads as a period too, not as a factor — the point of the label
+        // is that a rate is something you can feel, and "123x" is not.
+        assert_eq!(rate_label(123.0), "1 year / 29 seconds");
+        assert_eq!(rate_label(0.05), "7 minutes / second");
     }
 
     /// The exit criterion, driven entirely through actions with no window.
@@ -1018,4 +1063,42 @@ mod tests {
         apply(Action::SetTimeRate(60.0), &mut ui, &mut s);
         assert_eq!(ui.time_rate, 60.0);
     }
+    /// Only an authority can put a craft somewhere, so offline the button says so rather than
+    /// appearing to work.
+    #[test]
+    fn a_scene_is_asked_for_of_the_server_and_nobody_else() {
+        let (mut ui, mut s) = fixture();
+        let said = apply(Action::StageDemo("chase".into()), &mut ui, &mut s);
+        assert!(
+            matches!(said.as_slice(), [Effect::Notify(m)] if m.contains("no server")),
+            "{said:?}",
+        );
+
+        s.remote = true;
+        let said = apply(Action::StageDemo("chase".into()), &mut ui, &mut s);
+        assert_eq!(said, vec![Effect::Stage("chase".into())]);
+    }
+
+    /// A scene carries where to stand, so staging one moves the camera there and nothing has to
+    /// be passed in. `closing` is the one that is watched from its cast; the rest are watched
+    /// from the player, which is what the camera has always done.
+    #[test]
+    fn staging_a_scene_stands_where_the_scene_says() {
+        let (mut ui, mut s) = fixture();
+        s.remote = true;
+
+        apply(Action::StageDemo("closing".into()), &mut ui, &mut s);
+        let want = lc_world::scenario::Scenario::craft_for(lc_world::scenario::CLOSING.watch);
+        assert_eq!(
+            ui.perspective,
+            want.map(|id| crate::ui::CameraPerspective::Pov(lc_proto::ShipId(id))),
+        );
+        assert!(ui.perspective.is_some(), "premise: closing is watched from its cast");
+
+        // And one watched from the player puts the camera back, rather than leaving it on
+        // whoever the last scene was about.
+        apply(Action::StageDemo("approach".into()), &mut ui, &mut s);
+        assert_eq!(ui.perspective, None);
+    }
+
 }

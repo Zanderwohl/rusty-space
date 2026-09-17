@@ -5,6 +5,7 @@
 //! and a second copy of this parsing would be a second set of flag names.
 
 use crate::action::Action;
+use lc_world::scenario;
 use crate::app::DevEntry;
 
 /// What a request to start the client asked for.
@@ -19,8 +20,8 @@ pub struct Entry {
     /// Run a shard in this process and connect to that. Beats `server` when both are given,
     /// because asking for a local one is the more specific request.
     pub local: bool,
-    /// Craft to put near the start, so there is something to look at besides one's own ship.
-    pub traffic: usize,
+    /// A scene to stage, by name. Implies `local`: a scene needs a shard to run in.
+    pub demo: Option<String>,
 }
 
 /// Parses the flag vocabulary both binaries accept.
@@ -35,6 +36,14 @@ pub fn parse(args: &[String]) -> Entry {
     }
 
     let mut actions = Vec::new();
+    // A scene says where to stand, so there is nothing to pass in. The identifiers are the
+    // scene's own, which is why this needs no shard to have answered first.
+    if let Some(scene) = after("--demo").as_deref().and_then(scenario::Scenario::named) {
+        if let Some(watch) = crate::action::watching(scene) {
+            let crate::ui::CameraPerspective::Pov(ship_id) = watch;
+            actions.push(Action::WatchFrom(Some(ship_id)));
+        }
+    }
     if let Some(preset) = value::<usize>(args, "--band") {
         actions.push(Action::SetBandPreset(preset));
     }
@@ -88,9 +97,22 @@ pub fn parse(args: &[String]) -> Entry {
     let stay_in_menu = flag("--menu") || menu_page.is_some();
     let dev = DevEntry {
         observe_immediately: !stay_in_menu
-            && (flag("--observe") || flag("--shot") || flag("--at") || flag("--station")),
+            && (flag("--observe")
+                || flag("--shot")
+                || flag("--at")
+                || flag("--station")
+                || flag("--demo")),
         target_swarm: flag("--swarm"),
-        chase: flag("--chase"),
+        // Not when the camera is pinned: a pin is a request for one exact frame, and turning
+        // to face something first would be the aim it exists to stop racing.
+        frame_cast: flag("--demo") && !flag("--demo-cam"),
+        camera: after("--demo-cam").and_then(|spec| {
+            let mut fields = spec.split(':').map(|f| f.parse::<f64>());
+            match (fields.next(), fields.next(), fields.next()) {
+                (Some(Ok(yaw)), Some(Ok(pitch)), Some(Ok(booms))) => Some((yaw, pitch, booms)),
+                _ => None,
+            }
+        }),
         at_body: after("--at"),
         station: after("--station"),
         lift_deg: value(args, "--lift"),
@@ -106,15 +128,15 @@ pub fn parse(args: &[String]) -> Entry {
     // The first argument only. Scanning for any non-flag token would pick up a flag's own
     // value: in `--band 2` the `2` looks exactly like a path.
     let catalogue = args.first().filter(|a| !a.starts_with("--")).cloned();
-    // Asking for traffic is asking for a shard to serve it, so it implies `--local` rather
-    // than silently doing nothing without it.
-    let traffic = value::<usize>(args, "--traffic").unwrap_or(0);
+    // Asking for a scene is asking for a shard to run it in, so it implies `--local` rather
+    // than silently doing nothing without one.
+    let demo = after("--demo").filter(|name| scenario::Scenario::named(name).is_some());
     Entry {
         dev,
         catalogue,
         server: after("--server"),
-        local: flag("--local") || traffic > 0,
-        traffic,
+        local: flag("--local") || demo.is_some(),
+        demo,
     }
 }
 
@@ -263,14 +285,40 @@ mod tests {
 
     #[test]
     fn nothing_at_all_is_a_plain_start() {
-        let Entry { dev, catalogue: cat, server, local, traffic } = parse(&[]);
+        let Entry { dev, catalogue: cat, server, local, demo } = parse(&[]);
         assert!(!dev.observe_immediately);
         assert!(dev.actions.is_empty());
         assert_eq!(cat, None);
         // No server named is the single-process game, not a default address.
         assert_eq!(server, None);
         assert!(!local);
-        assert_eq!(traffic, 0);
+        assert_eq!(demo, None);
+        assert_eq!(dev.camera, None);
+    }
+
+    /// A scene needs a shard to run in, so asking for one asks for a shard rather than
+    /// silently doing nothing without it.
+    #[test]
+    fn a_scene_brings_its_own_shard() {
+        let entry = parse(&args("--demo chase"));
+        assert_eq!(entry.demo.as_deref(), Some("chase"));
+        assert!(entry.local, "a scene was asked for with nowhere to run it");
+        assert!(entry.dev.observe_immediately, "it stopped at the menu");
+    }
+
+    /// A name nobody has is no name at all. Better a plain start than a shard staging silence.
+    #[test]
+    fn a_scene_nobody_has_is_not_taken() {
+        assert_eq!(parse(&args("--demo nonesuch")).demo, None);
+        assert!(!parse(&args("--demo nonesuch")).local);
+    }
+
+    /// The camera pin is three numbers, and anything else is not a pin.
+    #[test]
+    fn a_pinned_camera_is_read_whole_or_not_at_all() {
+        assert_eq!(parse(&args("--demo-cam 90:20:6")).dev.camera, Some((90.0, 20.0, 6.0)));
+        assert_eq!(parse(&args("--demo-cam 90:20")).dev.camera, None);
+        assert_eq!(parse(&args("--demo-cam what")).dev.camera, None);
     }
 
     /// `--local` is its own thing, not an address, because the port is not known until the

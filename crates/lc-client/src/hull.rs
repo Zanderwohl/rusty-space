@@ -70,6 +70,12 @@ pub struct Eye {
     pub at_ly: DVec3,
     /// Metres from the hull's centre, back along the view.
     pub boom_m: f64,
+    /// The craft the boom is on, or `None` for the player's own.
+    ///
+    /// Read by [`drawn`], which gives that one craft the boom exactly rather than the
+    /// difference of two light-year positions. A metres-wide offset taken that way loses most
+    /// of its bits, and the hull the camera is closest to is the one that can least afford it.
+    pub anchored: Option<ShipId>,
 }
 
 /// One craft with a mesh. `None` is the player's own ship.
@@ -161,6 +167,7 @@ pub fn half_extents(length_m: f64) -> Vec3 {
 pub fn place_eye(
     mut ui: ResMut<crate::app::Ui>,
     game: Res<crate::app::Game>,
+    uplink: Res<Uplink>,
     camera: Query<(&Projection, &Camera), With<Camera3d>>,
     mut eye: ResMut<Eye>,
 ) {
@@ -174,10 +181,33 @@ pub fn place_eye(
         // than clamped against a viewport nobody has measured.
         _ => (ui.boom_lengths, ui.boom_lengths),
     };
+    let (anchored, at_ly, length_m) = anchor(&ui, &game, &uplink);
     ui.boom_lengths = ui.boom_lengths.clamp(near, far);
-    let boom_m = ui.boom_lengths * game.ship.length_m;
+    let boom_m = ui.boom_lengths * length_m;
     eye.boom_m = boom_m;
-    eye.at_ly = game.ship.motion.position_ly - ui.look.forward() * (boom_m / M_PER_LY);
+    eye.anchored = anchored;
+    eye.at_ly = at_ly - ui.look.forward() * (boom_m / M_PER_LY);
+}
+
+/// Which craft the camera is behind, where it is and how long it is.
+///
+/// Falls back to the player's own for a perspective naming a craft that is not in sight — a
+/// contact that has gone is one the camera cannot follow, and hanging the view on its last
+/// known position would be a picture of somewhere nothing is.
+fn anchor(
+    ui: &crate::ui::UiState,
+    game: &Session,
+    uplink: &Uplink,
+) -> (Option<ShipId>, DVec3, f64) {
+    let own = (None, game.ship.motion.position_ly, game.ship.length_m);
+    let Some(crate::ui::CameraPerspective::Pov(ship_id)) = ui.perspective else { return own };
+    if game.ship.id.0 == ship_id.0 {
+        return own;
+    }
+    match uplink.contacts.iter().find(|c| c.ship_id == ship_id) {
+        Some(contact) => (Some(ship_id), contact.position_ly, contact.length_m),
+        None => own,
+    }
 }
 
 /// What a lit hull sends the eye, as linear display light before the tone map.
@@ -254,12 +284,19 @@ fn uniforms(
 fn drawn(game: &Session, uplink: &Uplink, eye: &Eye, look: DVec3) -> Vec<(Option<ShipId>, Placed)> {
     let now = game.coordinate_time_s();
     let mut out = Vec::with_capacity(uplink.contacts.len() + 1);
+    // Exactly the boom the eye was pulled back by, for whichever craft the boom is on; a
+    // light-year difference for everything else. See [`Eye::anchored`].
+    let offset_of = |at_ly: DVec3, ship_id: Option<ShipId>| {
+        if ship_id.map(|s| s.0) == eye.anchored.map(|s| s.0) {
+            look * eye.boom_m
+        } else {
+            (at_ly - eye.at_ly) * M_PER_LY
+        }
+    };
     out.push((
         None,
         Placed {
-            // The one thing drawn at an offset from the render origin, and by exactly the boom
-            // the eye was pulled back by.
-            offset_m: look * eye.boom_m,
+            offset_m: offset_of(game.ship.motion.position_ly, None),
             length_m: game.ship.length_m,
             // Always somewhere: a hull has an orientation whether or not anything is
             // deciding it, and the world is what remembers which.
@@ -271,7 +308,7 @@ fn drawn(game: &Session, uplink: &Uplink, eye: &Eye, look: DVec3) -> Vec<(Option
         out.push((
             Some(contact.ship_id),
             Placed {
-                offset_m: (contact.position_ly - eye.at_ly) * M_PER_LY,
+                offset_m: offset_of(contact.position_ly, Some(contact.ship_id)),
                 length_m: contact.length_m,
                 facing: contact.facing,
                 at_ly: contact.position_ly,

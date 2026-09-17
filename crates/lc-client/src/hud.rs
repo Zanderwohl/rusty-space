@@ -83,8 +83,9 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
             )
         }),
         coasting: session.coast().map(arc),
-        // The time rate is a development control and the server owns it; say so on screen
-        // rather than letting a fast clock look normal.
+        // Anything but the design rate is said on screen rather than left to look normal —
+        // whether the player set it offline or a shard staging a scene stated it. The clock
+        // running sixty times over is exactly when a readout of how fast earns its place.
         warning: (ui.time_rate != 1.0).then(|| crate::ui::rate_label(ui.time_rate)),
     }
 }
@@ -149,7 +150,12 @@ mod tests {
         let (mut ui, mut s) = fixture();
         assert_eq!(lines(&s, &ui).warning.unwrap(), "1 year / minute", "the test rate must be flagged");
         apply(Action::SetTimeRate(64.0), &mut ui, &mut s);
-        assert!(lines(&s, &ui).warning.unwrap().contains("64"), "and so must one off the ladder");
+        let off_ladder = lines(&s, &ui).warning.expect("one off the ladder must be flagged");
+        assert_eq!(off_ladder, "1 year / 56 seconds");
+        // And a rate *below* the design one is flagged just as loudly. A scene runs slowly so
+        // an orbit can be looked at, and a slow clock is no more normal than a fast one.
+        apply(Action::SetTimeRate(0.05), &mut ui, &mut s);
+        assert_eq!(lines(&s, &ui).warning.unwrap(), "7 minutes / second");
         apply(Action::SetTimeRate(1.0), &mut ui, &mut s);
         assert!(lines(&s, &ui).warning.is_none(), "the canonical rate needs no warning");
     }

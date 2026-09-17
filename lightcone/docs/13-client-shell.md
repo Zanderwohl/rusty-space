@@ -113,6 +113,7 @@ with.
 | sky | always | the all-sky map; selection happens here |
 | notifications | automatic | target out of range, observation returned nothing, instrument saturated |
 | debug | `F3` | below |
+| scenarios | — | scenes to stage. Development only, and every button does nothing without a shard started for it |
 
 Panels are windows rather than menu pages because the clock never stops: a player has to be
 able to watch a curve and fly at the same time.
@@ -222,6 +223,20 @@ labelled by period rather than by factor — `1 year / 10 s`, not `360x` — bec
 not something anyone can feel, and the head-up display flags any rate off the design one so a
 fast clock never looks normal.
 
+**Owning it means stating it.** The rate is in the welcome and is restated with every clock,
+and a joined client runs at whatever it is told. It used to hold a constant of its own that
+happened to agree, which is a different thing: a shard at any other rate would have been joined
+by a client confidently running at this one. What made the difference worth paying for is that
+a scene can now choose its clock — a low orbit of Jupiter comes round every four hours, which
+at the design rate is a revolution every second and a half, and a three-month chase at a year
+a minute is fifteen seconds of watching.
+
+One consequence that is not obvious and cost a debugging session to see coming. The slack the
+client's clock is corrected against has to scale with the rate. It was a fixed coordinate hour,
+which is comfortably more than a statement's own age at the design rate and is *less than one
+tick* at sixty — so every statement would look like a runaway and the client would snap back
+seven hours twenty times a second having never drifted at all.
+
 ### Development flags
 
 | flag | does |
@@ -240,12 +255,45 @@ fast clock never looks normal.
 | `--station <course>` | put the ship straight on a station: `orbit:Earth`, `polar:Mars:high`, `rings:Saturn`, `l2:Earth`, `belt:0`, `leave` |
 | `--panel <name>` | open a panel by name |
 | `--burst <n>` | photograph `n` consecutive frames, numbered. For flicker: two runs stopped at frame `n` and frame `n+1` have accumulated different wall time and are not consecutive at all |
+| `--demo <name>` | stage a scene, and bring a shard to run it in |
+| `--demo-cam <yaw:pitch:booms>` | pin the camera for the run |
 
 These emit [`Action`]s rather than opening a second path into the client, so they can only do
 what the interface can do. `--shot` exists because WGSL cannot be asserted from a test and a
 window nobody is watching proves nothing; both images in
 [07-rendering.md](07-rendering.md) were taken with it. `--rate` without `--shot` is the screen
 recording setup.
+
+`--demo` is the exception that proves the rule, and it is worth saying why. It cannot be an
+action, because what it asks for is a craft placed somewhere by fiat and that is the one thing
+no client may ask for — every order on the wire is a request a ship makes about itself. So it
+is a message of its own, honoured only by a shard started for it, and the scene it names is
+staged on the side that decides what happened. See `lc_world::scenario` for the scenes and
+`lc_server::director` for the runner.
+
+What the camera does during one is the ordinary free orbit: a scene is something to look
+around inside, not something to be shown. It turns once to face everything the camera is *not*
+on — by the middle of them by bearing, so four hulls spread about an axis are framed down the
+axis rather than at whichever is nearest — and is the player's from then on. `--demo-cam` pins
+it instead, for a frame two runs are meant to agree about.
+
+Which craft the camera is behind is a `CameraPerspective`, and it has one variant. An enum
+anyway, because what the camera does is going to grow — a chase view along the velocity, a fixed
+point a scene is composed from, a free fly-around — and each of those is a different answer to
+"where is the eye" rather than a flag on top of this one.
+
+**A scene says where to stand, and how fast to run.** Both are fields on it rather than things
+to pass in: it knows what it is about, and a rendezvous is two different events seen from its
+two ends. `approach` and `closing` are the same two ships doing the same manoeuvre, watched from
+one end and then the other.
+
+**The eye moves and the observer does not**, which is the boundary to know about. Everything the
+client works out about light — retarded times, aberration, what a contact looked like when it
+left — is still solved from the player's own ship, because that is the craft the session has a
+worldline for. Across a scene, where the cast is kilometres apart, the difference is
+microseconds and there is nothing to see. Across the Oort cloud it would be hours. Watching from
+a craft you are not on is a development view until the observer can move too, which is why the
+only way to reach it is a flag and a panel that does nothing in a shipped build.
 
 ## Getting about inside a system
 

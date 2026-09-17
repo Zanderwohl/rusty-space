@@ -17,6 +17,7 @@ use lc_spacetime::Worldline;
 use lc_spacetime::worldline::retarded_times_at;
 use lc_world::craft::{Craft, CraftId, Fleet};
 use lc_world::motion::{LIGHT_US_PER_LY, Motive};
+use lc_world::escort;
 use lc_world::pursuit;
 use lc_world::system::LOCAL_SHELL_LY;
 
@@ -27,15 +28,63 @@ use crate::server::Connected;
 pub struct Pursuit {
     pub quarry: ShipId,
     pub last_plan_t: i64,
+    /// The sighting before the newest, which is the only way a pursuer learns how hard its
+    /// quarry is burning: two things that arrived, and the difference between them.
+    pub last_seen: Option<pursuit::Sighting>,
 }
 
-/// How often a standing intercept may re-solve, in coordinate microseconds.
+/// What guidance decided to fly.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Plan {
+    /// Close on a quarry that is coasting, and arrive matched.
+    Rendezvous(pursuit::Rendezvous),
+    /// Close on a quarry that is burning, and stay with it. See [`lc_world::escort`].
+    Escort(escort::Escort),
+}
+
+/// The shortest gap between two plans for one chase, as a fraction of the approach being flown.
 ///
-/// A guidance loop runs at a finite rate, and this is that rate. Without it a quarry under
-/// thrust would have its pursuer re-plan on every tick of the chase, and every one of those is
-/// an event written to the journal and scheduled to every observer. Ten coordinate minutes is
-/// far finer than the light delay across a system, so it costs nothing a player can see.
-pub const STEER_INTERVAL_US: i64 = 600 * crate::world::MICROS_PER_SECOND;
+/// **A cost bound and nothing else.** Whether a plan is still worth flying is already decided,
+/// and decided properly, by [`pursuit::wants_replan`]: it extrapolates the frozen sighting the
+/// plan was built on to the newest sighting's emission time and throws the plan away when the
+/// quarry is not where that said it would be. That test is a *distance*, so it already scales
+/// with how the quarry is moving. All this does is stop a quarry under continuous thrust from
+/// buying a fresh plan every tick, each of which is an event written to the journal and
+/// scheduled to every observer.
+///
+/// It was a flat ten coordinate minutes, which conflated the two jobs and suppressed the good
+/// signal. Ten minutes is far finer than the light delay across a system, which is what it was
+/// chosen against — and a craft in high orbit of Jupiter covers **fourteen thousand
+/// kilometres** in it. An orbital rendezvous spent the whole approach flying at a ten-minute-old
+/// position and settled into a relative orbit a hundred to four hundred kilometres across
+/// instead of onto the standoff.
+///
+/// A fraction of the plan rather than a time, because what a guidance loop owes is a number of
+/// corrections across the manoeuvre, not a cadence in seconds — and because the approach
+/// *shrinks*. A fixed floor that is reasonable for the first three-thousand-second run at a
+/// quarry is hopeless for the sixty-second correction at the end of it, which is exactly how
+/// ten minutes came to be too coarse without ever looking wrong.
+///
+/// **Ten of them, and more is worse.** That is not what you would guess, and it was measured:
+/// at a fiftieth of the plan a rendezvous thrashed between three and four hundred million
+/// metres before capturing, and at a two-hundredth it did not capture inside two thousand
+/// ticks. Each plan is a whole manoeuvre — a burn, a flip and a burn — rather than a
+/// controller's output, so re-solving faster than the manoeuvre can run keeps resetting the
+/// flip and the pursuer never reaches its brake. Anything from a tenth to a third behaves the
+/// same; a tenth is the middle of the plateau.
+pub const STEER_FRACTION: f64 = 0.1;
+
+/// The shortest gap before this pursuer may be given another plan, coordinate microseconds.
+///
+/// Zero with no plan in hand: the first solve of a chase is the one nothing is waiting for.
+fn steer_floor_us(pursuer: &Craft) -> i64 {
+    let duration_s = match &pursuer.motion.motive {
+        Motive::Rendezvous(plan) => plan.cruise.duration_s(),
+        Motive::Escort(plan) => plan.cruise.duration_s(),
+        _ => return 0,
+    };
+    (duration_s * STEER_FRACTION * crate::world::MICROS_PER_SECOND as f64) as i64
+}
 
 /// Whether an observer is entitled to know a craft exists at all.
 ///
@@ -81,6 +130,34 @@ pub fn sighting(
         length_m: quarry.length_m,
         emitted_s: emitted * 1.0e-6,
     })
+}
+
+/// How hard the quarry is burning, if it is being escorted rather than met.
+///
+/// **Only while its plume was lit when the light left**, which is a thing a pursuer can see.
+/// A quarry holding an orbit is accelerating too — by gravity, and so is the pursuer — and
+/// escorting it would chase where the planet takes it while ignoring what the planet does to
+/// the ship chasing. Every scene that settles onto a station is one of those.
+///
+/// A pursuer already escorting stays an escort when the quarry cuts its drive, at zero
+/// acceleration. Handing it back to a rendezvous would have it arrive and go ballistic beside
+/// something it had been matching under thrust, and a ship coasting outward at a good fraction
+/// of `c` is the most expensive thing there is to keep patching into spheres of influence.
+fn burn_of(
+    fleet: &Fleet,
+    quarry: ShipId,
+    pursuer: &Craft,
+    seen: &pursuit::Sighting,
+    previous: Option<&pursuit::Sighting>,
+) -> Option<glam::DVec3> {
+    let lit = fleet.get(CraftId(quarry.0)).is_some_and(|q| q.jet_power_w(seen.emitted_s) > 0.0);
+    let escorting = matches!(pursuer.motion.motive, Motive::Escort(_));
+    if lit {
+        if let Some(accel) = previous.and_then(|p| escort::acceleration_of(p, seen)) {
+            return Some(accel);
+        }
+    }
+    escorting.then_some(glam::DVec3::ZERO)
 }
 
 /// Where everybody else appeared to be, per connection.
@@ -158,12 +235,12 @@ pub fn should_close(pursuer: &Craft, seen: &pursuit::Sighting, now_s: f64) -> bo
 /// carry on doing whatever it is doing.
 pub fn decide(
     fleet: &Fleet,
-    pursuits: &HashMap<CraftId, Pursuit>,
+    pursuits: &mut HashMap<CraftId, Pursuit>,
     now_t: i64,
-) -> Vec<(CraftId, Option<pursuit::Rendezvous>)> {
+) -> Vec<(CraftId, Option<Plan>)> {
     let now_s = now_t as f64 * 1.0e-6;
     let mut decided = Vec::new();
-    for (id, pursuit) in pursuits {
+    for (id, pursuit) in pursuits.iter_mut() {
         let Some(pursuer) = fleet.get(*id) else { continue };
         // Out of sight is the end of it. A policy that survived would be one waiting to act on
         // a craft this one is no longer entitled to know about.
@@ -171,22 +248,37 @@ pub fn decide(
             decided.push((*id, None));
             continue;
         };
-        if now_t - pursuit.last_plan_t < STEER_INTERVAL_US || !should_close(pursuer, &seen, now_s)
-        {
+        // Remembered every tick, planned or not, so the acceleration it measures is over one
+        // sighting interval rather than over however long the last plan happened to last.
+        let previous = pursuit.last_seen.replace(seen);
+        // Saturating, because "never planned" is a legitimate thing for a caller to say and
+        // the obvious way to say it overflows the subtraction.
+        let since = now_t.saturating_sub(pursuit.last_plan_t);
+        if since < steer_floor_us(pursuer) || !should_close(pursuer, &seen, now_s) {
             continue;
         }
-        match pursuit::approach(
-            &pursuer.motion,
-            pursuer.length_m,
-            &seen,
-            now_s,
-            pursuer.turning(pursuer.motion.drive),
-        ) {
-            Ok(plan) => decided.push((*id, Some(plan))),
-            // On station. Nothing to fly, and the policy stays: it is what will notice the
-            // next time this craft has drifted.
-            Err(pursuit::Refused::AlreadyThere) => {}
-            Err(pursuit::Refused::TooFast) => decided.push((*id, None)),
+        let drive = pursuer.turning(pursuer.motion.drive);
+        match burn_of(fleet, pursuit.quarry, pursuer, &seen, previous.as_ref()) {
+            Some(accel) => match escort::escort(
+                &pursuer.motion,
+                pursuer.length_m,
+                &seen,
+                accel,
+                now_s,
+                drive,
+            ) {
+                Ok(plan) => decided.push((*id, Some(Plan::Escort(plan)))),
+                // Pulling as hard as the pursuer can, or at `c`: followable, never catchable.
+                Err(_) => decided.push((*id, None)),
+            },
+            None => match pursuit::approach(&pursuer.motion, pursuer.length_m, &seen, now_s, drive)
+            {
+                Ok(plan) => decided.push((*id, Some(Plan::Rendezvous(plan)))),
+                // On station. Nothing to fly, and the policy stays: it is what will notice the
+                // next time this craft has drifted.
+                Err(pursuit::Refused::AlreadyThere) => {}
+                Err(pursuit::Refused::TooFast) => decided.push((*id, None)),
+            },
         }
     }
     decided

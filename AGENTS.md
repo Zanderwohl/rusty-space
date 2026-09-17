@@ -51,12 +51,24 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--password` | hold at the password form, the one egui surface inside the menu |
 | `--turn <deg>` / `--pitch <deg>` | turn the view, the only way to put something off screen |
 | `--zoom <notches>` | move the orbit camera; both its stops are clamps, so ask for far too much |
-| `--traffic <n>` | put `n` craft near the start, so there is another ship to photograph |
-| `--chase` | close on the nearest of them, the only way to photograph an intercept |
-| `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable |
+| `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `chase`. Brings its own shard |
+| `--demo-cam <yaw:pitch:booms>` | pin the camera for the run, so two shots of a scene are the same shot |
+| `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable. Offline only — a shard states its own |
 
 `--turn`, `--pitch` and `--zoom` are applied **last**, after anything that aims — `--fly` ends
 by pointing the view at what it is flying to, and pushed first the turn was simply undone.
+
+They are still *actions*, though, so they race whatever else aims the camera; the note further
+down about a pitch that did not land three runs in a row is about exactly that. `--demo-cam`
+does not race anything, because it is written every frame after the dispatcher rather than once
+on arrival. Prefer it for anything two runs are meant to agree about.
+
+A scene replaces what used to be `--traffic <n>` and `--chase`, and does more than either: the
+craft have names, sizes and somewhere to be, and `lc_world::scenario` is where what they do is
+written. `--demo traffic` is the old fan of hulls. The clock is the scene's to state — `meeting`
+and `approach` run at a twentieth of the design rate because a low orbit otherwise sweeps the
+whole view past twice a second, and `chase` runs at sixty, which is where three months of
+running becomes fifteen seconds of watching.
 
 Most of what has gone wrong in the renderer was found this way and could not have been found
 any other way.

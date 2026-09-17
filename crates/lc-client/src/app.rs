@@ -86,10 +86,19 @@ pub struct DevEntry {
     pub observe_immediately: bool,
     /// Point at the nearest star carrying a swarm, for showing the thing off.
     pub target_swarm: bool,
-    /// Close on the nearest contact as soon as there is one. Closing on somebody cannot be
-    /// photographed without ordering it, and ordering it is a click on a list that does not
-    /// exist until a shard has said who is there.
-    pub chase: bool,
+    /// Turn to face the nearest contact once there is one, for a scene that has a cast.
+    ///
+    /// A scene is about a second ship, and the odds of the camera happening to point at it are
+    /// the odds of a bearing picked at random. Once, not every frame: the camera is the
+    /// player's from then on, which is the whole reason it is not pinned.
+    pub frame_cast: bool,
+    /// Yaw and pitch in degrees, and a boom in hull lengths, held there for the run.
+    ///
+    /// `--turn` and `--pitch` are *actions*, and they race whatever else aims the camera — the
+    /// same command three times has come back twice at pitch zero. A pin does not race
+    /// anything: it is written every frame, so the frame the shutter opens on is the one that
+    /// was asked for.
+    pub camera: Option<(f64, f64, f64)>,
     /// Put the ship beside a body of the local system, by name. There is no action for this and
     /// there never will be; it exists so a thing too small to fly to can be looked at.
     pub at_body: Option<String>,
@@ -164,11 +173,16 @@ impl Plugin for ClientPlugin {
                     run_dev_actions.run_if(in_state(AppState::InGame)),
                     place_at_body.run_if(in_state(AppState::InGame)),
                     place_on_station.run_if(in_state(AppState::InGame)),
-                    chase_nearest.run_if(in_state(AppState::InGame)),
                     (read_keys, grab_cursor, look_around, crate::input::read_wheel)
                         .chain()
                         .run_if(in_state(AppState::InGame)),
                     dispatch,
+                    // After the dispatcher and after the look, because those are what it is
+                    // overruling: a pin that ran before them would be undone by a hand on the
+                    // mouse or by a crossing aiming itself, on the same frame.
+                    frame_the_cast.run_if(in_state(AppState::InGame)),
+                    // After the framing, because a pin overrules everything including that.
+                    pin_camera.run_if(in_state(AppState::InGame)),
                     // The clock is deliberately not gated on any panel or overlay. See
                     // lightcone/docs/13-client-shell.md: the game does not pause.
                     advance_clock.run_if(in_state(AppState::InGame)),
@@ -455,28 +469,61 @@ fn place_at_body(
     *done = true;
 }
 
-/// Development entry: close on the nearest contact, once there is one to close on.
+/// Development entry: turn to face the cast, once there is one to face.
 ///
-/// Polled rather than run on entering the world, like `--at`: a contact arrives from a shard
-/// that has to connect first, and there is nobody in the list on the frame the sky appears.
-fn chase_nearest(
+/// Polled rather than run on entering the world, like `--at`: a contact comes from a shard that
+/// has to connect first, and there is nobody in the list on the frame the sky appears.
+fn frame_the_cast(
     dev: Res<DevEntry>,
     game: Res<Game>,
     uplink: Res<crate::uplink::Uplink>,
-    mut out: MessageWriter<Requested>,
+    mut ui: ResMut<Ui>,
     mut done: Local<bool>,
 ) {
-    if *done || !dev.chase {
+    if *done || !dev.frame_cast {
         return;
     }
-    let here = game.ship.motion.position_ly;
-    let Some(nearest) = uplink.contacts.iter().min_by(|a, b| {
-        here.distance_squared(a.position_ly).total_cmp(&here.distance_squared(b.position_ly))
-    }) else {
+    if uplink.contacts.is_empty() {
         return;
+    }
+    // Everybody the camera is *not* on. Watching from another craft, the interesting thing is
+    // the ship you left; watching from your own, it is the cast. Aiming at the hull the boom is
+    // attached to would be aiming at the middle of the screen.
+    let anchored = match ui.perspective {
+        Some(crate::ui::CameraPerspective::Pov(ship_id)) => Some(ship_id),
+        None => None,
     };
-    out.write(Requested(Action::Intercept(nearest.ship_id)));
+    let here = match anchored.and_then(|id| uplink.contacts.iter().find(|c| c.ship_id == id)) {
+        Some(contact) => contact.position_ly,
+        None => game.ship.motion.position_ly,
+    };
+    // The middle of them, by bearing rather than by position: a scene with one ship in it aims
+    // at that ship, and one with four spread about an axis aims down the axis instead of at
+    // whichever happens to be nearest — which would throw the other three off to one side.
+    // Directions are summed rather than positions, or the furthest would count for the most.
+    let mut bearing = DVec3::ZERO;
+    if anchored.is_some() {
+        bearing += (game.ship.motion.position_ly - here).normalize_or_zero();
+    }
+    for contact in uplink.contacts.iter().filter(|c| Some(c.ship_id) != anchored) {
+        bearing += (contact.position_ly - here).normalize_or_zero();
+    }
+    if let Some(look) = crate::ui::Look::aimed_at(bearing) {
+        ui.look = look;
+    }
     *done = true;
+}
+
+/// Development entry: hold the camera still, so two runs photograph the same view.
+///
+/// Written every frame rather than once, which is the whole point: anything that aims the
+/// camera — an arriving crossing, a snap to a target, a hand on the mouse — is overruled on the
+/// frame after it, so there is nothing left for a shot to race.
+fn pin_camera(dev: Res<DevEntry>, mut ui: ResMut<Ui>) {
+    let Some((yaw_deg, pitch_deg, booms)) = dev.camera else { return };
+    ui.look.yaw = yaw_deg.to_radians();
+    ui.look.pitch = pitch_deg.to_radians();
+    ui.boom_lengths = booms;
 }
 
 /// Photograph the sky through the real pipeline, then quit.
@@ -621,6 +668,10 @@ fn dispatch(
                     let at = game.coordinate_time_s();
                     ui.notify(text, at);
                 }
+                Effect::Stage(scenario) => {
+                    uplink.say(lc_proto::Inbound::Stage { scenario });
+                    uplink.asked(time.elapsed_secs_f64());
+                }
                 Effect::Send(order) => {
                     // A ship the server has not named is a ship this client does not have, so
                     // there is nothing to send an order for.
@@ -648,6 +699,20 @@ fn dispatch(
 }
 
 /// Advance coordinate time. Runs whatever is on screen.
+/// Buy coordinate time with the real seconds that have passed.
+///
+/// The *virtual* clock, which Bevy clamps to a quarter of a second a frame, and the clamp is
+/// load-bearing for a reason that is not the usual one. Nothing here is integrated, so a slow
+/// frame does not threaten the physics — but the shard this client talks to is a thread on a
+/// twenty-hertz timer that does not make up ticks it misses, so when the machine is busy the
+/// *world* falls behind real time too. Losing the same quarter-second the server lost keeps the
+/// two roughly together.
+///
+/// Measured, because the obvious change is the wrong one: taking `Time<Real>` here made the
+/// client track real time perfectly and pull away from a server that could not, turning three
+/// corrections of half a day into one of ninety-one days. What would actually fix it is slewing
+/// this rate to the server's observed progress rather than trusting a nominal one — the first
+/// tier of `lightcone/docs/17-reconciliation.md`, which does not exist yet.
 fn advance_clock(time: Res<Time>, ui: Res<Ui>, mut game: ResMut<Game>) {
     game.advance(time.delta_secs_f64() * ui.time_rate.max(0.0));
 }

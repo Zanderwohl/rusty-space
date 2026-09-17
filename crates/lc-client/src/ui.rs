@@ -41,10 +41,12 @@ pub enum Panel {
     System,
     Flight,
     Tuning,
+    /// Scenes to stage. Development only, and it does nothing without a shard started for it.
+    Scenarios,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 7] = [
+    pub const ALL: [Panel; 8] = [
         Panel::Escape,
         Panel::Settings,
         Panel::Debug,
@@ -52,6 +54,7 @@ impl Panel {
         Panel::System,
         Panel::Flight,
         Panel::Tuning,
+        Panel::Scenarios,
     ];
 
     /// A panel by the name a development flag would use.
@@ -68,8 +71,29 @@ impl Panel {
             Panel::System => "System",
             Panel::Flight => "Flight",
             Panel::Tuning => "Starfield tuning",
+            Panel::Scenarios => "Scenarios",
         }
     }
+}
+
+/// Which craft the camera is behind.
+///
+/// One variant, and an enum anyway. What the camera does is going to grow — a chase view along
+/// the velocity, a fixed point a scene is composed from, a free fly-around — and every one of
+/// those is a different answer to "where is the eye", not a flag on top of this one. Growing it
+/// here keeps that a new arm rather than a second mechanism.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CameraPerspective {
+    /// Over the shoulder of a craft, as its own pilot would have it.
+    ///
+    /// **The eye moves; the observer does not.** Everything the client works out about *light*
+    /// — retarded times, aberration, what a contact looked like when it left — is still solved
+    /// from the player's own ship, because that is the craft the session has a worldline for.
+    /// Across a scene, where the cast is kilometres apart, the difference is microseconds and
+    /// there is nothing to see. Across the Oort cloud it would be hours, and this would be a
+    /// lie. Watching from a craft you are not on is a development view until the observer can
+    /// move too.
+    Pov(lc_proto::ShipId),
 }
 
 /// Where the ship is looking: ecliptic angles, yaw about the pole from +X and pitch from the
@@ -144,9 +168,43 @@ pub const REAL_TIME: f64 = 3600.0 / 31_557_600.0;
 
 /// The ladder's name for a rate, or the bare factor for one set from outside it.
 pub fn rate_label(rate: f64) -> String {
-    match RATE_LADDER.iter().find(|(r, _)| (r - rate).abs() < 1e-9) {
-        Some((_, name)) => (*name).to_string(),
-        None => format!("{rate:.0}x the design rate"),
+    if let Some((_, name)) = RATE_LADDER.iter().find(|(r, _)| (r - rate).abs() < 1e-9) {
+        return (*name).to_string();
+    }
+    if rate <= 0.0 {
+        return "stopped".into();
+    }
+    // A period, like every rung of the ladder, rather than a factor. The fallback used to be
+    // `{rate:.0}x the design rate`, which printed a shard running at a twentieth as **0x** —
+    // a slow clock reading as a stopped one, which is the one thing this label exists to stop.
+    //
+    // The idiom turns over at the design rate for the same reason the ladder's does: below it a
+    // year is too long to be a period anyone can hold, and what you want to know is how much
+    // game time a second buys.
+    if rate < 1.0 {
+        format!("{} / second", span(rate * crate::session::TIME_RATE))
+    } else {
+        format!("1 year / {}", span(3600.0 / rate))
+    }
+}
+
+/// A duration in the largest unit it is more than one of. Whole numbers: this is a readout to
+/// be glanced at, and "1.7 hours" is not something anyone can feel either.
+fn span(seconds: f64) -> String {
+    const MINUTE: f64 = 60.0;
+    const HOUR: f64 = 60.0 * MINUTE;
+    const DAY: f64 = 24.0 * HOUR;
+    let (size, unit) = match seconds {
+        s if s >= DAY => (DAY, "day"),
+        s if s >= HOUR => (HOUR, "hour"),
+        s if s >= MINUTE => (MINUTE, "minute"),
+        _ => (1.0, "second"),
+    };
+    let how_many = (seconds / size).round().max(1.0);
+    if how_many == 1.0 {
+        unit.to_string()
+    } else {
+        format!("{how_many:.0} {unit}s")
     }
 }
 
@@ -172,6 +230,9 @@ pub const TEST_TIME_RATE: f64 = 60.0;
 pub struct UiState {
     pub screen: Screen,
     pub menu_page: MenuPage,
+    /// Which craft the camera is behind. `None` is the player's own, which is what it has
+    /// always been and is the only perspective a shipped build offers.
+    pub perspective: Option<CameraPerspective>,
     /// Open panels, most recently opened last. Order is what "back" walks.
     open: Vec<Panel>,
     pub selected: Option<StarId>,
@@ -216,6 +277,7 @@ impl Default for UiState {
             focus: None,
             course: None,
             look: Look::default(),
+            perspective: None,
             boom_lengths: crate::hull::DEFAULT_BOOM_LENGTHS,
             distant: crate::starfield::DISTANT,
             local: crate::starfield::LOCAL,
@@ -310,4 +372,25 @@ mod tests {
             assert!(!p.title().is_empty());
         }
     }
+    /// **A slow clock must not read as a stopped one.** The fallback used to print a rate of a
+    /// twentieth as "0x the design rate", which is the label's whole job failing: a scene that
+    /// runs slowly so an orbit can be looked at would have said the world was frozen.
+    #[test]
+    fn a_rate_off_the_ladder_is_still_a_period() {
+        assert_eq!(rate_label(0.05), "7 minutes / second");
+        assert_eq!(rate_label(20.0), "1 year / 3 minutes");
+        assert!(!rate_label(0.05).starts_with('0'), "a slow clock read as a stopped one");
+        // Nothing may divide by a rate that is not one.
+        assert_eq!(rate_label(0.0), "stopped");
+        assert_eq!(rate_label(-1.0), "stopped");
+    }
+
+    /// Every rung the ladder names it names; the general form is only for what falls between.
+    #[test]
+    fn every_rung_keeps_the_name_it_was_given() {
+        for (rate, name) in RATE_LADDER {
+            assert_eq!(rate_label(rate), name, "{rate}");
+        }
+    }
+
 }

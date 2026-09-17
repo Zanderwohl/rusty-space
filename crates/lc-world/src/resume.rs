@@ -79,6 +79,11 @@ pub enum Recipe {
         /// The ship's clock when the approach began; see [`Recipe::Crossing`].
         clock_base_s: f64,
     },
+    /// The same, for a quarry that was under thrust; see [`crate::escort::Station`].
+    Escort {
+        station: crate::escort::Station,
+        clock_base_s: f64,
+    },
     /// The station itself, which is already the parameter.
     Holding(Waypoint),
     /// Carries nothing: the conic is re-solved from the position and velocity above, against
@@ -147,6 +152,9 @@ impl Snapshot {
             }
             Recipe::Rendezvous { approach, clock_base_s } => {
                 state.resume_rendezvous(approach.solve(attitude0), clock_base_s);
+            }
+            Recipe::Escort { station, clock_base_s } => {
+                state.resume_escort(station.solve(attitude0), clock_base_s);
             }
             Recipe::Holding(waypoint) => state.begin_holding(waypoint),
             Recipe::Falling => {
@@ -236,6 +244,19 @@ impl From<&Snapshot> for lc_proto::Motion {
                     target: lc_proto::ShipId(approach.target.0),
                     clock_base_s: *clock_base_s,
                 },
+                Recipe::Escort { station, clock_base_s } => lc_proto::Motive::Escort {
+                    from_ly: station.from_ly.to_array(),
+                    beta0: station.beta0.to_array(),
+                    to_ly: station.to_ly.to_array(),
+                    start_s: station.start_s,
+                    drive: drive_out(station.drive),
+                    frame_from_ly: station.quarry.position_ly.to_array(),
+                    frame_beta: station.quarry.beta.to_array(),
+                    accel: station.quarry.accel.to_array(),
+                    since_t: station.quarry.since_t,
+                    target: lc_proto::ShipId(station.target.0),
+                    clock_base_s: *clock_base_s,
+                },
                 Recipe::Holding(waypoint) => lc_proto::Motive::Holding(waypoint_out(waypoint)),
                 Recipe::Falling => lc_proto::Motive::Falling,
                 Recipe::Drifting { from_ly, since_t } => lc_proto::Motive::Drifting {
@@ -317,6 +338,35 @@ impl From<&lc_proto::Motion> for Snapshot {
                         frame_from_ly: DVec3::from_array(*frame_from_ly),
                         frame_beta: DVec3::from_array(*frame_beta),
                         since_t: *since_t,
+                        target: crate::motion::ShipId(target.0),
+                    },
+                    clock_base_s: *clock_base_s,
+                },
+                lc_proto::Motive::Escort {
+                    from_ly,
+                    beta0,
+                    to_ly,
+                    start_s,
+                    drive,
+                    frame_from_ly,
+                    frame_beta,
+                    accel,
+                    since_t,
+                    target,
+                    clock_base_s,
+                } => Recipe::Escort {
+                    station: crate::escort::Station {
+                        from_ly: DVec3::from_array(*from_ly),
+                        beta0: DVec3::from_array(*beta0),
+                        to_ly: DVec3::from_array(*to_ly),
+                        start_s: *start_s,
+                        drive: drive_in(*drive),
+                        quarry: crate::escort::Burning {
+                            position_ly: DVec3::from_array(*frame_from_ly),
+                            beta: DVec3::from_array(*frame_beta),
+                            accel: DVec3::from_array(*accel),
+                            since_t: *since_t,
+                        },
                         target: crate::motion::ShipId(target.0),
                     },
                     clock_base_s: *clock_base_s,

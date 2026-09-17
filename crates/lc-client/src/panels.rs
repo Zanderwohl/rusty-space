@@ -13,7 +13,7 @@ use crate::plot::CurvePlot;
 use crate::navigation::Target;
 use crate::ui::Panel;
 
-fn ask(out: &mut MessageWriter<Requested>, action: Action) {
+pub(crate) fn ask(out: &mut MessageWriter<Requested>, action: Action) {
     out.write(Requested(action));
 }
 
@@ -148,6 +148,9 @@ pub fn open_panels(
             ),
             Panel::Flight => flight(ui, &ui_state, &game, &mut out),
             Panel::Tuning => tuning(ui, &ui_state, &mut out),
+            Panel::Scenarios => {
+                crate::demos::scenarios(ui, &uplink, ui_state.0.perspective, &mut out)
+            }
         });
         if !open {
             ask(&mut out, Action::ClosePanel(panel));
