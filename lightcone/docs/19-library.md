@@ -408,7 +408,7 @@ Each step is useful on its own, and the fun one does not wait for the server.
 |---|---|---|
 | 1 | **built.** `lc-books`: zip, OPF, spine, TOC, the block model, locations, the paginator over `Measure` | a headless test paginates a real Gutenberg epub and round-trips a locator |
 | 2 | the shelf on the CDN: `books.toml`, the two scripts, the Caddyfile header | `curl` returns an epub with the right type and an immutable cache header |
-| 3 | **built, less the CDN.** the reader window: `EpubLoader`, the serif, the panel, the mode | `--book <id> --shot` is a page of prose |
+| 3 | **built, less the CDN.** the reader window: `EpubLoader`, plates, the serif, the panel, the mode | `--book <id> --shot` is a page of prose |
 | 4 | the catalogue and progress over the wire: two messages, `0005_reading.sql`, the debounce | signing in on a second machine opens to the same sentence |
 | 5 | the shelf's sorts, the TOC, jump to location, the progress badges | the controls above all exist |
 
@@ -425,9 +425,10 @@ Step 3 is `crate::library` and `crate::reader` in the client. Three things it ta
 - **Size the window before drawing into it.** Content sized from what is left inside a window
   that grows to fit its content is a loop whose fixed point is a window taller than the screen.
 
-Still to do here: plates are a ruled box with their alt text in it rather than the image, and
-books are fetched from the asset directory rather than from the CDN. Both are the same seam —
-`WebAssetPlugin` and a decode — and neither changes anything above.
+Still to do here: books are fetched from the asset directory rather than from the CDN, which is
+`WebAssetPlugin` and a base URL and changes nothing above it. And the first decode of a plate
+happens on the frame it appears, which is a hitch of tens of milliseconds on a page turn — worth
+moving to a task if it is ever felt, and not worth the machinery before then.
 
 Step 1 is in `crates/lc-books`: about 1 600 lines, no engine and no renderer, and its checks run
 two ways. Twenty-two unit tests hold the invariants against a chapter written to break them, and

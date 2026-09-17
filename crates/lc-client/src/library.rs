@@ -6,8 +6,10 @@
 
 use bevy::asset::io::Reader;
 use bevy::asset::{AssetLoader, LoadContext, LoadState};
+use std::collections::HashMap;
+
 use bevy::prelude::*;
-use lc_books::{Document, Epub, TocEntry};
+use lc_books::{Block, Document, Epub, TocEntry};
 
 /// Where a book is fetched from, relative to the asset root.
 pub const SHELF: &str = "books";
@@ -112,6 +114,13 @@ pub struct Shelf {
     pub spine_count: usize,
     /// The parsed spine document, and which one it is.
     pub open: Option<(usize, Document)>,
+    /// How big each plate in the open chapter is, in its own pixels.
+    ///
+    /// Read when the chapter is, because **pagination needs it**: a plate's height on the page
+    /// follows from its shape, and a measurer that had to guess would move the text under the
+    /// reader when the guess was corrected. Only the dimensions are kept; the pixels are read
+    /// again when one is actually drawn.
+    pub plates: HashMap<String, (u32, u32)>,
     pub trouble: Option<String>,
     pub face: Face,
 }
@@ -167,10 +176,42 @@ pub fn keep_up(
     let spine = state.reading.spine.min(shelf.spine_count.saturating_sub(1));
     if shelf.open.as_ref().map(|(at, _)| *at) != Some(spine) {
         match book.epub.document(spine) {
-            Ok(doc) => shelf.open = Some((spine, doc)),
+            Ok(doc) => {
+                shelf.plates = plate_sizes(book, &doc);
+                shelf.open = Some((spine, doc));
+            }
             Err(why) => shelf.trouble = Some(why.to_string()),
         }
     }
+}
+
+/// The shape of every plate in a chapter.
+///
+/// A header read, not a decode: `into_dimensions` stops as soon as the format has told it how
+/// big the image is, so this costs the zip entry rather than the picture.
+fn plate_sizes(book: &mut Book, doc: &Document) -> HashMap<String, (u32, u32)> {
+    let mut sizes = HashMap::new();
+    for located in &doc.blocks {
+        let Block::Image { path, .. } = &located.block else { continue };
+        if sizes.contains_key(path) {
+            continue;
+        }
+        if let Ok(bytes) = book.epub.resource(path)
+            && let Some(size) = dimensions(&bytes)
+        {
+            sizes.insert(path.clone(), size);
+        }
+    }
+    sizes
+}
+
+/// How big an encoded image is, without decoding it.
+pub fn dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()
 }
 
 /// Where a chapter begins, worked out when it is asked for.

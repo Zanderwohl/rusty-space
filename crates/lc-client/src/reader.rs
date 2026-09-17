@@ -39,9 +39,17 @@ const LABEL: Color32 = Color32::from_rgb(198, 196, 190);
 pub const READING_FAMILY: &str = "reading";
 
 const BODY_SIZE: f32 = 17.0;
-/// A plate is not decoded yet, so it reserves a band and says what it is. See step 3 in
-/// `lightcone/docs/19-library.md`.
-const PLATE_HEIGHT: f32 = 76.0;
+/// Air above and below a plate, so it does not touch the text it interrupts.
+const PLATE_GAP: f32 = 10.0;
+/// What a plate of unknown shape reserves, and the box drawn while it is being read.
+const PLATE_UNKNOWN: Vec2 = Vec2::new(4.0, 3.0);
+/// The widest a plate is uploaded at. A transcription's plates are a few hundred pixels across;
+/// a cover can be two thousand, and a texture of one is eight megabytes for a picture nobody
+/// will look at closely.
+const PLATE_TEXELS: u32 = 1400;
+/// How many decoded plates are kept. One chapter of an illustrated edition holds a handful;
+/// a book holds a hundred and seventy-eight, which is why this is a cap and not a map.
+const PLATE_CACHE: usize = 12;
 /// The bezel below the page, where the buttons are.
 const KEYS_HEIGHT: f32 = 30.0;
 const SCREEN_MARGIN: Margin = Margin { left: 30, right: 30, top: 26, bottom: 22 };
@@ -71,6 +79,11 @@ impl Setting {
 struct Setter<'a> {
     ctx: &'a egui::Context,
     setting: &'a Setting,
+    /// The shape of each plate, from the chapter's own images.
+    plates: &'a std::collections::HashMap<String, (u32, u32)>,
+    /// The tallest anything on this page may be, which is what stops a cover from being
+    /// measured at twice the height of the frame it has to fit in.
+    ceiling: f32,
 }
 
 impl Measure for Setter<'_> {
@@ -81,8 +94,9 @@ impl Measure for Setter<'_> {
             Block::Rule => BODY_SIZE,
             _ => BODY_SIZE * 0.55,
         };
-        if let Block::Image { .. } = block {
-            return Measured { lead, rows: vec![Row { height: PLATE_HEIGHT, offset: 0 }] };
+        if let Block::Image { path, .. } = block {
+            let drawn = plate_size(self.plates.get(path), width, self.ceiling - PLATE_GAP * 2.0);
+            return Measured { lead, rows: vec![Row { height: drawn.y + PLATE_GAP * 2.0, offset: 0 }] };
         }
         let galley = self.ctx.fonts_mut(|f| f.layout_job(job(block, width, self.setting)));
         let mut rows = Vec::with_capacity(galley.rows.len());
@@ -100,6 +114,24 @@ impl Measure for Setter<'_> {
         }
         Measured { lead, rows }
     }
+}
+
+/// How big a plate is drawn: its own size, down to whatever fits.
+///
+/// Never larger than the image itself. A four-hundred-pixel woodcut blown up to fill a column
+/// is a blurred woodcut, and the transcriptions on this shelf are full of them.
+fn plate_size(natural: Option<&(u32, u32)>, column: f32, ceiling: f32) -> Vec2 {
+    let (w, h) = match natural {
+        Some((w, h)) => (*w.max(&1) as f32, *h.max(&1) as f32),
+        None => (PLATE_UNKNOWN.x, PLATE_UNKNOWN.y),
+    };
+    let mut width = column.min(w);
+    let mut height = width * h / w;
+    if height > ceiling {
+        height = ceiling.max(1.0);
+        width = height * w / h;
+    }
+    Vec2::new(width.max(1.0), height.max(1.0))
 }
 
 /// How far a block is inset from the column, in points.
@@ -192,6 +224,7 @@ fn has_serif(ctx: &egui::Context) -> bool {
     ctx.fonts(|f| f.families().iter().any(|family| *family == FontFamily::Name(READING_FAMILY.into())))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: EguiContexts,
     mut state: ResMut<Ui>,
@@ -201,6 +234,7 @@ pub fn draw(
     assets: Res<AssetServer>,
     mut out: MessageWriter<Requested>,
     mut counted: Local<Counted>,
+    mut plates: Local<Plates>,
 ) {
     if !state.is_open(Panel::Reader) {
         return;
@@ -245,7 +279,7 @@ pub fn draw(
                 if state.reading.contents {
                     contents(ui, &shelf, &mut books, &setting, &mut out);
                 } else {
-                    page(ui, &mut state, &shelf, &setting, &mut counted);
+                    page(ui, &mut state, &shelf, &mut books, &setting, &mut counted, &mut plates);
                 }
             });
             ui.add_space(6.0);
@@ -337,12 +371,15 @@ pub struct Counted {
     pages: usize,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn page(
     ui: &mut egui::Ui,
     state: &mut Ui,
     shelf: &Shelf,
+    books: &mut Assets<Book>,
     setting: &Setting,
     counted: &mut Counted,
+    plates: &mut Plates,
 ) {
     let Some((spine, doc)) = &shelf.open else {
         waiting(ui, shelf, setting);
@@ -360,7 +397,7 @@ fn page(
     // Cloned because it is an `Arc` inside and the alternative is holding a borrow of the `Ui`
     // across everything below, which is the one thing a `Ui` will not allow.
     let ctx = ui.ctx().clone();
-    let setter = Setter { ctx: &ctx, setting };
+    let setter = Setter { ctx: &ctx, setting, plates: &shelf.plates, ceiling: height };
 
     // A page turn is spent here rather than in `action::apply`, because turning one means
     // laying it out and this is the only place with the fonts to do that.
@@ -416,9 +453,14 @@ fn page(
         if slice.lead {
             y += setter.measure(block, width).lead;
         }
-        if let Block::Image { alt, .. } = block {
-            plate(&painter, rect, y, alt, setting);
-            y += PLATE_HEIGHT;
+        if let Block::Image { path, alt } = block {
+            let drawn = plate_size(shelf.plates.get(path), width, height - PLATE_GAP * 2.0);
+            let band = Rect::from_min_size(
+                egui::pos2(rect.left() + (width - drawn.x).max(0.0) / 2.0, y + PLATE_GAP),
+                drawn,
+            );
+            plate(&painter, &ctx, band, path, alt, shelf, books, plates, setting);
+            y += drawn.y + PLATE_GAP * 2.0;
             continue;
         }
         let galley = ctx.fonts_mut(|f| f.layout_job(job(block, width, setting)));
@@ -455,25 +497,117 @@ fn start_cursor<M: Measure>(doc: &Document, measure: &M, frame: PageFrame, offse
     paginate::cursor_at(doc, measure, frame, offset)
 }
 
-fn plate(painter: &egui::Painter, rect: Rect, y: f32, alt: &str, setting: &Setting) {
-    let band = Rect::from_min_size(
-        egui::pos2(rect.left(), y + 6.0),
-        Vec2::new(rect.width(), PLATE_HEIGHT - 12.0),
-    );
-    painter.rect_stroke(
-        band,
-        CornerRadius::same(2),
-        Stroke::new(1.0_f32, RULE),
-        egui::StrokeKind::Inside,
-    );
-    let words = if alt.is_empty() { "plate".to_owned() } else { alt.to_owned() };
-    painter.text(
-        band.center(),
-        egui::Align2::CENTER_CENTER,
-        words,
-        setting.small.clone(),
-        FAINT,
-    );
+/// One plate, decoded on its way to the screen and kept for a while afterwards.
+///
+/// The pixels live in the book's own zip, so they cannot come through the asset server — but
+/// they also cannot be decoded during pagination, which runs over a shape and nothing else.
+/// This is the only place a picture is turned into a picture.
+#[allow(clippy::too_many_arguments)]
+fn plate(
+    painter: &egui::Painter,
+    ctx: &egui::Context,
+    band: Rect,
+    path: &str,
+    alt: &str,
+    shelf: &Shelf,
+    books: &mut Assets<Book>,
+    plates: &mut Plates,
+    setting: &Setting,
+) {
+    match plates.get(ctx, path, shelf, books) {
+        Some(texture) => {
+            painter.image(
+                texture.id(),
+                band,
+                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+        // A plate that will not decode still occupies the space the page was laid out around,
+        // and says what it was supposed to be.
+        None => {
+            painter.rect_stroke(
+                band,
+                CornerRadius::same(2),
+                Stroke::new(1.0_f32, RULE),
+                egui::StrokeKind::Inside,
+            );
+            let words = if alt.is_empty() { "plate".to_owned() } else { alt.to_owned() };
+            painter.text(
+                band.center(),
+                egui::Align2::CENTER_CENTER,
+                words,
+                setting.small.clone(),
+                FAINT,
+            );
+        }
+    }
+}
+
+/// Decoded plates, kept while they are worth keeping.
+///
+/// Bounded by count rather than by bytes because a plate is uploaded at a bounded size, and
+/// cleared whole when the book changes — every key in it is a path inside one archive.
+#[derive(Default)]
+pub struct Plates {
+    book: Option<String>,
+    /// `None` records a plate that would not decode, so it is not read again every frame.
+    held: std::collections::HashMap<String, Option<egui::TextureHandle>>,
+    order: std::collections::VecDeque<String>,
+}
+
+impl Plates {
+    fn get(
+        &mut self,
+        ctx: &egui::Context,
+        path: &str,
+        shelf: &Shelf,
+        books: &mut Assets<Book>,
+    ) -> Option<egui::TextureHandle> {
+        if self.book != shelf.file {
+            self.book = shelf.file.clone();
+            self.held.clear();
+            self.order.clear();
+        }
+        if let Some(held) = self.held.get(path) {
+            return held.clone();
+        }
+        let decoded = decode(ctx, path, shelf, books);
+        self.held.insert(path.to_owned(), decoded.clone());
+        self.order.push_back(path.to_owned());
+        while self.order.len() > PLATE_CACHE {
+            if let Some(old) = self.order.pop_front() {
+                self.held.remove(&old);
+            }
+        }
+        decoded
+    }
+}
+
+fn decode(
+    ctx: &egui::Context,
+    path: &str,
+    shelf: &Shelf,
+    books: &mut Assets<Book>,
+) -> Option<egui::TextureHandle> {
+    let handle = shelf.handle.as_ref()?;
+    let bytes = books.get_mut(handle)?.epub.resource(path).ok()?;
+    let image = image::ImageReader::new(std::io::Cursor::new(&bytes))
+        .with_guessed_format()
+        .ok()?
+        .decode()
+        .ok()?;
+    let image = if image.width().max(image.height()) > PLATE_TEXELS {
+        let scale = PLATE_TEXELS as f32 / image.width().max(image.height()) as f32;
+        let (w, h) = (image.width() as f32 * scale, image.height() as f32 * scale);
+        image.resize(w as u32, h as u32, image::imageops::FilterType::Triangle)
+    } else {
+        image
+    };
+    let rgba = image.to_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let colours = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+    Some(ctx.load_texture(path, colours, egui::TextureOptions::LINEAR))
 }
 
 /// The foot of the page: where this is, in the two units that mean anything.
