@@ -325,7 +325,8 @@ As planned, and done in this order.
 - **Balance is a guess.** Every default above is a first number to argue with once it can be flown.
 - **Zero energy** has no consequence. Living space is where one would go.
 - **Energy income** — collectors, per [03-world-model.md](03-world-model.md) — is what makes
-  the dev grant unnecessary.
+  the dev grant unnecessary. The first source, hull solar, is designed in
+  [20-solar-power.md](20-solar-power.md).
 - **Transmission** should draw on the same budget; `Order::Transmit` states a power and is free.
 - **Other modules**: weapons, cargo, sensors. The planner's order of priority will need a rule
   for each.
