@@ -468,6 +468,14 @@ fn fold(
             // and neither is what was sent, so folding what was sent instead is how a client
             // ends up somewhere the server does not have it.
             let at_s = at_t as f64 * 1e-6;
+            // The server drops a standing intercept on any flight order, so the pursuit the
+            // interface shows is over too.
+            if matches!(
+                order,
+                Order::SetCourse { .. } | Order::Cross { .. } | Order::CutDrive | Order::Burn { .. }
+            ) {
+                uplink.chasing = None;
+            }
             let said = match &order {
                 Order::SetCourse { course, accel_g } => {
                     let course: lc_world::navigation::Course = course.clone().into();
@@ -1046,6 +1054,26 @@ mod tests {
                     "{range_m:.0} m at {frame} frames after statement {statement}, not 1500"
                 );
             }
+        }
+    }
+
+    /// A flight order ends a standing intercept on the server, so the interface stops showing
+    /// one. A transmission is not a flight order.
+    #[test]
+    fn an_accepted_flight_order_ends_the_pursuit_shown() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let accepted = |order| Outbound::Accepted { ship_id: ShipId(7), event_id: 1, at_t: 0, order };
+        let pursuit = lc_proto::Pursuit { quarry: ShipId(2), closeness: lc_proto::Closeness::Company };
+
+        uplink.chasing = Some(pursuit);
+        fold(&mut uplink, &mut game, &mut ui, accepted(Order::Transmit { power_w: 1.0 }));
+        assert_eq!(uplink.chasing, Some(pursuit), "a transmission ended it");
+
+        for order in [Order::CutDrive, Order::Burn { beta: [0.0, 1e-3, 0.0] }] {
+            uplink.chasing = Some(pursuit);
+            fold(&mut uplink, &mut game, &mut ui, accepted(order.clone()));
+            assert_eq!(uplink.chasing, None, "{order:?} left the pursuit showing");
         }
     }
 

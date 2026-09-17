@@ -571,6 +571,15 @@ impl<J: Journal> Server<J> {
             }
         };
 
+        // A flight order replaces whatever the ship was doing, the standing intercept included.
+        // Left in place, the next tick steered the ship back to its quarry over this order.
+        if matches!(
+            applied,
+            Order::Burn { .. } | Order::SetCourse { .. } | Order::Cross { .. } | Order::CutDrive
+        ) {
+            self.pursuits.remove(&id);
+        }
+
         let at_position = self.fleet.get(id).ok_or(Refusal::NotYours)?.position_at(at as f64);
         let event = Event {
             id: self.minter.mint(at).ok_or(Refusal::Impossible)?.get(),
@@ -1559,6 +1568,53 @@ use crate::transport::Loopback;
     /// something eventually happened. It also needed `Craft` to keep a history before it could
     /// pass at all — a motive evaluated before it was flown answers about a ship that did not
     /// exist yet, and `Drifting` extrapolating backwards made a burn rewrite its own past.
+    /// **A new flight order is the end of the pursuit.** It used to leave the standing order in
+    /// place, and the next tick steered the ship straight back to its quarry over what the player
+    /// had just asked for. A transmission is not a flight order and changes nothing.
+    #[tokio::test]
+    async fn a_flight_order_cancels_a_standing_intercept() {
+        let orders = [
+            (Order::CutDrive, false),
+            (Order::Burn { beta: [0.0, 1.0e-3, 0.0] }, false),
+            (Order::Transmit { power_w: 1.0e6 }, true),
+        ];
+        for (order, keeps) in orders {
+            let mut server = Server::new(Memory::default(), 0, 1);
+            let mut wire = Loopback::new();
+            let hunter = ClientId(1);
+            server.admit(hunter, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+            server.admit(ClientId(2), crate::world::still(ShipId(2), DVec3::new(ONE_LIGHT_SECOND, 0.0, 0.0)), 0.0);
+            wire.client_says(hunter, Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: Order::Intercept { ship_id: ShipId(2), closeness: lc_proto::Closeness::Company },
+                issued_at_client_t: 0,
+            }));
+            for _ in 0..3 {
+                server.tick(&mut wire).await.unwrap();
+            }
+            assert!(server.ship(ShipId(1)).unwrap().motion.pursuing().is_some(), "premise: under way");
+
+            wire.client_says(hunter, Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: order.clone(),
+                issued_at_client_t: server.now_t(),
+            }));
+            for _ in 0..20 {
+                server.tick(&mut wire).await.unwrap();
+            }
+            assert_eq!(server.pursuits.contains_key(&CraftId(1)), keeps, "{order:?}");
+            // Only for the orders that cancel it: a kept intercept against a still quarry has
+            // arrived by now and is drifting alongside, which is the policy working.
+            if !keeps {
+                assert!(
+                    server.ship(ShipId(1)).unwrap().motion.pursuing().is_none(),
+                    "{order:?} was steered back to the quarry: {:?}",
+                    server.ship(ShipId(1)).unwrap().motion.motive,
+                );
+            }
+        }
+    }
+
     #[tokio::test]
     async fn a_pursuer_cannot_react_to_a_burn_before_its_light_arrives() {
         let mut server = Server::new(Memory::default(), 0, 1);
