@@ -11,33 +11,55 @@ natively `linux/amd64`. Ports 3000–3999 are this project's; 3000 belongs to an
 | `lightcone-proxy` | 80, 443 | TLS, and the only thing that should be reached from a browser |
 | `lightcone-web` | 3100 | the site |
 | `lightcone-cdn` | 3101 | game builds |
-| `lightcone-db` | 3102 | the site's PostgreSQL |
+| `lightcone-db` | 3102 | PostgreSQL: `lc_site`, `lc_identity`, `lc_store` |
+| `lightcone-identity` | — | the account broker |
+| `lightcone-shard` | — | one shard |
 
 They share a docker network called `lightcone` and address each other by container name. The
 published ports are for debugging; the addresses that matter are:
 
 | | |
 |---|---|
-| https://lc.zanderlowry.com | the site, the blog, `/play` |
-| https://cdn.lc.zanderlowry.com | game builds |
+| https://dev.lightconefrontier.com | the site, the blog, `/play`, and the shard at `/ws` |
+| https://accounts.dev.lightconefrontier.com | the identity broker |
+| https://cdn.dev.lightconefrontier.com | game builds |
 
-Both resolve to `10.37.1.100` in public DNS and are reachable only from the LAN. The
-certificate is real; see [TLS](#tls).
+These are **the** development URLs; the tools default to them. All three resolve to
+`10.37.1.100` in public DNS and are reachable only from the LAN. The certificate is real; see
+[TLS](#tls). The bare `lightconefrontier.com` is kept for production.
 
-## Secrets
+## Secrets and settings
 
-Three, none of which belong in this repository or in a shell history.
+Every container's configuration is an env file in `~/.config/lightcone/` **on rocinante**, mode
+600, one per container. None of it belongs in this repository or in a shell history, and none of
+it goes on a `docker run` command line — a setting that exists only in a running container's
+arguments is lost the first time the container is replaced.
 
-| | where it lives | used by |
+| file | container | holds |
 |---|---|---|
-| Namecheap API key | `~/.config/lightcone/proxy.env` on rocinante, mode 600 | the proxy, at certificate renewal |
-| `RELEASE_TOKEN` | the same file, and your shell when running `tools/release.sh` | promoting builds |
-| PostgreSQL password | the same file | the site |
+| `proxy.env` | `lightcone-proxy` | `LC_DOMAIN`, the Namecheap API key and ACME settings |
+| `db.env` | `lightcone-db` | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` |
+| `cdn.env` | `lightcone-cdn` | `CDN_ALLOW_ORIGIN` |
+| `web.env` | `lightcone-web` | `BASE_URL`, `CDN_BASE`, `DATABASE_URL`, `RELEASE_TOKEN`, `FALLBACK_BUILD_ID` |
+| `site-identity.env` | `lightcone-web` | how the site reaches the broker and the shard |
+| `identity.env` | `lightcone-identity` | the broker's database, secrets and public URLs |
+| `shard.env` | `lightcone-shard` | `LC_SHARD_DB` |
+
+The domain appears in `proxy.env`, `cdn.env`, `web.env`, `site-identity.env` and
+`identity.env`. Moving to another one is a `sed` across those five and recreating the
+containers; nothing in the images names it.
 
 To set one without it reaching your history or the screen:
 
 ```bash
-read -rs -p 'value: ' v && sed -i "s|^NAME=.*|NAME=$v|" ~/.config/lightcone/proxy.env && unset v
+read -rs -p 'value: ' v && sed -i "s|^NAME=.*|NAME=$v|" ~/.config/lightcone/<file>.env && unset v
+```
+
+`tools/release.sh` needs `RELEASE_TOKEN` in your shell. Take it from the host without printing
+it:
+
+```bash
+export RELEASE_TOKEN=$(ssh zandy@rocinante.local 'grep ^RELEASE_TOKEN= ~/.config/lightcone/web.env | cut -d= -f2-')
 ```
 
 Containers read it with `--env-file`. **That flag is resolved by whichever docker CLI you
@@ -63,7 +85,7 @@ version from the lock file is how the two stay together.
 ## Shipping a game build
 
 ```bash
-export RELEASE_TOKEN=...               # and LC_SITE if the site is not on localhost:3100
+export RELEASE_TOKEN=...               # see Secrets; LC_SITE/LC_CDN default to dev
 tools/build-wasm.sh                    # stages target/web/<build-id>/
 tools/publish-build.sh                 # uploads the most recent staged build
 tools/release.sh register <build-id>   # tells the site the build exists
@@ -95,16 +117,16 @@ Each release row carries its own `cdn_base`, so a build can move without a code 
 deploy. Re-register it against the new one:
 
 ```bash
-LC_CDN=https://cdn.lc.zanderlowry.com tools/release.sh register <build-id>
+LC_CDN=https://cdn.example tools/release.sh register <build-id>
 ```
 
 `CDN_BASE` on the site is only the default for builds served from the fallback path. Changing
 that environment variable does **not** move builds already registered, which is the intended
 behaviour and reliably surprising the first time.
 
-**Set `LC_CDN` when you register.** It defaults to the development CDN, so a build registered
-without it carries `http://rocinante.local:3101` no matter what the site is configured with.
-Against an https site a browser then blocks the assets as mixed content, and what `/play`
+**Set `LC_SITE` and `LC_CDN` together.** Both default to the development deployment, so a build
+registered against another site without `LC_CDN` carries `https://cdn.dev.lightconefrontier.com`
+no matter what that site is configured with. Against an https site a browser then blocks the assets as mixed content, and what `/play`
 reports is *"the site is pointing at a build that is not on the CDN"* — naming a URL that is
 perfectly reachable by hand, which sends you looking at the CDN instead of at the row.
 `release.sh register` now refuses an http CDN for an https site outright.
@@ -129,16 +151,14 @@ docker --context rocinante build -f web/Dockerfile \
     --build-arg SITE_BUILD="$SITE_BUILD" \
     -t lightcone-web:"$SITE_BUILD" -t lightcone-web:latest web
 
-docker --context rocinante rm -f lightcone-web
-docker --context rocinante run -d --name lightcone-web --restart unless-stopped \
-    --read-only --cap-drop ALL --security-opt no-new-privileges \
-    -p 3100:3100 \
-    -e BASE_URL=https://lightcone.example \
-    -e CDN_BASE=https://cdn.lightcone.example \
-    -e DATABASE_URL="postgres://lc_site@lightcone-db/lc_site" \
-    -e FALLBACK_BUILD_ID=<build-id> \
-    -e RELEASE_TOKEN="$(cat ~/.lightcone-release-token)" \
-    lightcone-web:"$SITE_BUILD"
+# Over ssh, because --env-file is read by the CLI you invoke and those files are on rocinante.
+ssh zandy@rocinante.local "
+  cd ~/.config/lightcone
+  docker rm -f lightcone-web
+  docker run -d --name lightcone-web --restart unless-stopped --network lightcone \
+      --read-only --cap-drop ALL --security-opt no-new-privileges \
+      --env-file web.env --env-file site-identity.env \
+      -p 3100:3100 lightcone-web:$SITE_BUILD"
 ```
 
 **`--build-arg SITE_BUILD` is not optional.** Without it `build.rs` falls back to the crate
@@ -151,8 +171,8 @@ To roll back, run the same command with an older tag. The image holds its own co
 
 ## TLS
 
-Running today: real Let's Encrypt certificates for `lc.zanderlowry.com` and
-`*.lc.zanderlowry.com`, issued over DNS-01, renewing automatically, on a machine with no
+Running today: real Let's Encrypt certificates for `dev.lightconefrontier.com` and
+`*.dev.lightconefrontier.com`, issued over DNS-01, renewing automatically, on a machine with no
 inbound connectivity. The sections below are how it got there and how to rebuild it.
 
 **The site and the CDN need certificates on the same day.** Mixed-content rules forbid an
@@ -235,7 +255,7 @@ $50+ balance, or $50+ spent in the last two years**, and the domain must be on N
 BasicDNS rather than external nameservers.
 
 If that gate does not open, do not fight it. Delegate the subdomain instead: create `NS`
-records for `lc.<domain>` pointing at a free DNS host with a usable API (Cloudflare and deSEC
+records for `dev.<domain>` pointing at a free DNS host with a usable API (Cloudflare and deSEC
 both qualify), and rebuild the proxy image `--with github.com/caddy-dns/cloudflare`. The
 registration stays at Namecheap and only that subdomain's DNS moves. Nothing else in this
 setup changes.
@@ -254,10 +274,11 @@ error rather than as anything about addresses.
 
 | host | type | value |
 |---|---|---|
-| `lc` | A | `10.37.1.100` |
-| `cdn.lc` | A | `10.37.1.100` |
+| `dev` | A | `10.37.1.100` |
+| `accounts.dev` | A | `10.37.1.100` |
+| `cdn.dev` | A | `10.37.1.100` |
 
-A wildcard `*.lc` A record works too if Namecheap accepts a nested wildcard, and saves adding
+A wildcard `*.dev` A record works too if Namecheap accepts a nested wildcard, and saves adding
 a row per service. Explicit records always work, so start there.
 
 #### 3. Run it
@@ -265,7 +286,7 @@ a row per service. Explicit records always work, so start there.
 Credentials live in `~/.config/lightcone/proxy.env` **on rocinante**:
 
 ```
-LC_DOMAIN=lc.zanderlowry.com
+LC_DOMAIN=dev.lightconefrontier.com
 NAMECHEAP_CLIENT_IP=108.242.43.159
 ACME_CA=https://acme-v02.api.letsencrypt.org/directory
 ACME_EMAIL=...
@@ -306,12 +327,18 @@ it, the limit is per week and waiting is the only remedy — so add `acme_ca` po
 Let's Encrypt's **staging** endpoint while getting the configuration right, and remove it once
 a staging certificate is issued successfully.
 
+**Expect one `challenge failed … NXDOMAIN` on a fresh volume.** The bare name and the wildcard
+both write their TXT record at `_acme-challenge.dev.<domain>`, and Namecheap's API replaces a
+domain's whole record set on every write, so the two orders race and one wipes the other's
+record. The loser retries on its own and succeeds a couple of minutes later. Only a failure
+that repeats is worth investigating.
+
 Then redeploy the site with the HTTPS origins, because feeds, the sitemap and the loader all
 build absolute URLs from them:
 
 ```bash
--e BASE_URL=https://lc.<domain>
--e CDN_BASE=https://cdn.lc.<domain>
+BASE_URL=https://dev.<domain>        # web.env
+CDN_BASE=https://cdn.dev.<domain>
 ```
 
 #### 4. Point the site and the CDN at the new names
@@ -319,19 +346,19 @@ build absolute URLs from them:
 Three things, and the first two are one deploy:
 
 ```bash
--e BASE_URL=https://lc.zanderlowry.com        # feeds and the sitemap build absolute URLs
--e CDN_BASE=https://cdn.lc.zanderlowry.com    # the default for the fallback path
+BASE_URL=https://dev.lightconefrontier.com        # web.env; feeds and the sitemap build absolute URLs
+CDN_BASE=https://cdn.dev.lightconefrontier.com    # web.env; the default for the fallback path
 ```
 
 ```bash
--e CDN_ALLOW_ORIGIN=https://lc.zanderlowry.com   # on lightcone-cdn; `*` was a dev convenience
+CDN_ALLOW_ORIGIN=https://dev.lightconefrontier.com   # cdn.env; `*` was a dev convenience
 ```
 
 And re-register every build, because a release row carries its own `cdn_base` and an
 environment variable does not reach it:
 
 ```bash
-LC_CDN=https://cdn.lc.zanderlowry.com tools/release.sh register <build-id>
+LC_CDN=https://cdn.dev.lightconefrontier.com tools/release.sh register <build-id>
 ```
 
 Miss the last one and `/play` reports "Build not found" while pointing at an `http://` URL —
@@ -345,10 +372,10 @@ which is the mixed-content rule doing its job, and reads like the CDN being down
   everything so far has been gzip — about 9 MB rather than 6.4. This is the first time the
   `.br` files are read at all, which makes it the first time a mistake in them could show.
 - **The CDN's `Access-Control-Allow-Origin` should stop being `*`** and become
-  `https://lc.<domain>`. The wildcard is a development convenience for serving several local
+  `https://dev.<domain>`. The wildcard is a development convenience for serving several local
   origins and should not outlive them.
 - The hostname appears in public Certificate Transparency logs. Not a vulnerability, and the
-  wildcard means only `lc.<domain>` is published rather than every service under it.
+  wildcard means only `dev.<domain>` is published rather than every service under it.
 
 ### Production: a real domain, and Caddy in front of both
 
@@ -385,12 +412,12 @@ Set `BASE_URL` and `CDN_BASE` to the `https://` origins in the same deploy.
 ## The database
 
 ```bash
-docker --context rocinante network create lightcone
-docker --context rocinante run -d --name lightcone-db --restart unless-stopped \
-    --network lightcone \
-    -e POSTGRES_USER=lc_site -e POSTGRES_PASSWORD=<password> -e POSTGRES_DB=lc_site \
-    -v lightcone-db-data:/var/lib/postgresql/data \
-    -p 3102:5432 postgres:17-bookworm
+ssh zandy@rocinante.local '
+  docker network create lightcone
+  docker run -d --name lightcone-db --restart unless-stopped --network lightcone \
+      --env-file ~/.config/lightcone/db.env \
+      -v lightcone-db-data:/var/lib/postgresql/data \
+      -p 3102:5432 postgres:17-bookworm'
 ```
 
 Its own database and its own role. The site's credentials must not reach `lc_game`: two
@@ -417,7 +444,7 @@ deliberately now and then:
 
 ```bash
 docker --context rocinante stop lightcone-db
-curl -sS -o /dev/null -w '%{http_code}\n' http://localhost:3100/play    # still 200
+curl -sS -o /dev/null -w '%{http_code}\n' https://dev.lightconefrontier.com/play    # still 200
 docker --context rocinante start lightcone-db
 ```
 
@@ -456,12 +483,13 @@ docker --context rocinante build -f crates/lc-server/Dockerfile -t lightcone-sha
 ssh zandy@rocinante.local '
   docker rm -f lightcone-identity 2>/dev/null
   docker run -d --name lightcone-identity --restart unless-stopped --network lightcone \
-      --env-file ~/.config/lightcone/identity.env lightcone-identity:<tag>'
-
-docker --context rocinante run -d --name lightcone-shard --restart unless-stopped \
-    --network lightcone --env-file ~/.config/lightcone/shard.env lightcone-shard:<tag> \
-    --bind 0.0.0.0:8080 --audience shard-1 \
-    --jwks http://lightcone-identity:3200/.well-known/jwks.json
+      --env-file ~/.config/lightcone/identity.env lightcone-identity:<tag>
+  docker rm -f lightcone-shard 2>/dev/null
+  docker run -d --name lightcone-shard --restart unless-stopped --network lightcone \
+      --env-file ~/.config/lightcone/shard.env lightcone-shard:<tag> \
+      --bind 0.0.0.0:8080 --audience shard-1 \
+      --jwks http://lightcone-identity:3200/.well-known/jwks.json \
+      --sky http://lightcone-cdn:3101/game/<build-id>/assets/sky/hyg-v42.lcsky'
 ```
 
 ### The shard's own database
@@ -511,7 +539,7 @@ anyone reconnecting. A shard that restarts while the broker is down will not sta
 
 ### Two addresses for the broker, and why
 
-`LC_IDENTITY_BASE` is where the **browser** is sent: `https://accounts.lc.zanderlowry.com`.
+`LC_IDENTITY_BASE` is where the **browser** is sent: `https://accounts.dev.lightconefrontier.com`.
 `LC_IDENTITY_API` is where the **site** calls `/exchange` and `/ticket`:
 `http://lightcone-identity:3200`.
 
@@ -606,9 +634,9 @@ ticket the shard would not take. The words carry it and the colour only agrees �
 ## Checks
 
 ```bash
-curl -sS localhost:3100/healthz                    # liveness, no dependencies
-curl -sS localhost:3100/readyz                     # readiness, pings the pool
-curl -sSI localhost:3100/ | grep x-lightcone-build # which site build is up
+curl -sS https://dev.lightconefrontier.com/healthz                    # liveness, no dependencies
+curl -sS https://dev.lightconefrontier.com/readyz                     # readiness, pings the pool
+curl -sSI https://dev.lightconefrontier.com/ | grep x-lightcone-build # which site build is up
 tools/release.sh list                              # which game build is promoted
 ```
 

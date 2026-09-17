@@ -14,8 +14,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SITE=${LC_SITE:-http://localhost:3100}
-CDN=${LC_CDN:-http://rocinante.local:3101}
+# The development deployment on rocinante. Override both to talk to anything else.
+SITE=${LC_SITE:-https://dev.lightconefrontier.com}
+CDN=${LC_CDN:-https://cdn.dev.lightconefrontier.com}
 TOKEN=${RELEASE_TOKEN:-}
 
 [ -n "$TOKEN" ] || { echo "RELEASE_TOKEN is not set" >&2; exit 1; }
@@ -76,7 +77,7 @@ for r in d["releases"]:
       https://*:http://*)
         echo "refusing: $SITE is https and LC_CDN is $CDN" >&2
         echo "a browser will not load http assets into an https page. Set LC_CDN to the" >&2
-        echo "https CDN this site serves, e.g. LC_CDN=https://cdn.lc.zanderlowry.com" >&2
+        echo "https CDN this site serves, e.g. LC_CDN=https://cdn.dev.lightconefrontier.com" >&2
         exit 1
         ;;
     esac
