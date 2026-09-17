@@ -172,6 +172,11 @@ fn step_name(step: Step) -> String {
     }
 }
 
+/// A hull length: metres, or kilometres once there are thousands of them.
+pub fn length(metres: f64) -> String {
+    if metres < 1.0e4 { format!("{metres:.0} m") } else { format!("{:.2} km", metres / 1.0e3) }
+}
+
 /// A duration a refit is measured in: days, or years past a few hundred of them.
 fn span(seconds: f64) -> String {
     let days = seconds / 86_400.0;
@@ -192,13 +197,20 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
     if capacity > 0.0 {
         ui.add(egui::ProgressBar::new((stored / capacity) as f32));
     }
-    ui.label(format!(
-        "mass {:.3e} kg — engines give {:.1} g",
-        ship.mass_kg_at(now),
-        fitting.rated_g_at(&ship.motion, now)
-    ));
+    egui::Grid::new("refit-stats").num_columns(2).show(ui, |ui| {
+        ui.label("mass");
+        ui.label(format!("{:.3e} kg", ship.mass_kg_at(now)));
+        ui.end_row();
+        ui.label("accel");
+        ui.label(format!("{:.1} g", fitting.rated_g_at(&ship.motion, now)));
+        ui.end_row();
+        ui.label("length");
+        ui.label(length(ship.length_m));
+        ui.end_row();
+    });
     ui.separator();
 
+    // While the drones work there is nothing to draft: the panel is the refit's progress.
     if let Some(running) = fitting.refit().filter(|_| ship.is_refitting(now)) {
         let progress = running.at(now);
         let total = running.steps().count();
@@ -211,7 +223,7 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
         if ui.button("Cancel refit").on_hover_text("the step under way is reversed").clicked() {
             ask(out, Action::CancelRefit);
         }
-        ui.separator();
+        return;
     }
 
     let current = fitting.loadout_at(now);
@@ -239,6 +251,7 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
     let Some(view) = preview(ship, draft, game.remote, now) else { return };
     ui.separator();
     ui.label(format!("free slots after: {}", draft.free_slots()));
+    ui.label(format!("length after: {}", length(balance.length_m(draft.slots))));
     ui.label(format!(
         "energy after: {} of {}",
         me(view.available_j, module_j),
@@ -356,6 +369,13 @@ mod tests {
             let draft = Loadout { engines: n, ..start };
             assert!(budget_j(&b, start, draft, 3.0 * me) >= 0.0, "{n} engines");
         }
+    }
+
+    #[test]
+    fn a_length_reads_in_metres_until_it_is_kilometres() {
+        assert_eq!(length(500.0), "500 m");
+        assert_eq!(length(Balance::DEFAULT.length_m(22)), "516 m");
+        assert_eq!(length(50_000.0), "50.00 km");
     }
 
     fn range_of(range: RangeInclusive<u32>) -> Vec<u32> {
