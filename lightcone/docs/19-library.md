@@ -115,21 +115,26 @@ serving whichever one won is worse than not starting.
 [[book]]
 id      = "frankenstein"
 title   = "Frankenstein; or, The Modern Prometheus"
-authors = [{ name = "Mary Wollstonecraft Shelley", sort = "Shelley" }]
+authors = [{ name = "Mary Wollstonecraft Shelley", sort = "Shelley, Mary Wollstonecraft" }]
 year    = 1818
 file    = "frankenstein.epub"
 sha256  = "…"
 source  = "https://www.gutenberg.org/ebooks/84.epub3.images"
 ```
 
-- **The id is the file stem.** A second identifier is a second thing that can disagree with the
-  first, and the id is already in the URL.
+- **The id is not the file name.** The first real shelf contains `pg2488-images-3.epub`, and
+  two files whose names differ from their titles by a lost colon. The id is written down, seeded
+  from the title; `file` is a separate field and the two are allowed to look nothing alike.
 - **`sort` exists because "sort by author" is a requested control.** "Mary Wollstonecraft
-  Shelley" sorts under M without it, and under S with it. The default is the last
-  whitespace-separated token, which is right for most Western names and wrong often enough
-  that the field has to be there to override it.
-- **`year` is first publication, not this edition.** A player sorting by year wants the book's
-  age, not the transcription's. It is optional; some works do not have one.
+  Shelley" sorts under M without it, and under S with it. **The books already carry it** — as
+  `opf:file-as` in EPUB 2 and a `<meta property="file-as" refines>` in EPUB 3 — so the importer
+  seeds this field rather than a person typing it. The fallback when a book is silent is the
+  last whitespace-separated word, which is right for most Western names and wrong often enough
+  that the field has to exist.
+- **`year` is first publication, not this edition, and no book on the shelf knows it.** All six
+  of the first files state a `dc:date` between 1993 and 2008: the day Gutenberg posted the
+  transcription of a book written in the 1870s or 1880s. The importer emits it as a comment to
+  be corrected, never as the answer. It is optional; some works do not have one.
 - `authors` is a list because many books have several, and the shelf groups by each of them.
 
 The catalogue is data the client renders, so it is also the only place a typo shows up. Boot
@@ -233,6 +238,12 @@ that needs any of those is a book the shelf does not carry.
 **Every block carries the `char_offset` of its first character**, counted over the spine
 document's body text. That single coordinate is what makes the locator, the table of contents
 and a future in-book search the same mechanism rather than three.
+
+**A chapter is not a spine document**, and assuming it is breaks the contents menu on real
+books. *The Gilded Age* puts seventy-three chapters in nine documents and distinguishes them by
+nothing but the fragment on the href. So the parse also records every element id against the
+offset it sits at, and a contents entry resolves to a full locator rather than to the head of
+whatever document happens to contain it.
 
 New dependencies: `zip` with `default-features = false, features = ["deflate"]` — the defaults
 drag in bzip2, zstd, lzma and AES, none of which an epub uses — and one XML parser, where both

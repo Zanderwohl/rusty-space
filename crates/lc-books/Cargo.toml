@@ -1,0 +1,13 @@
+[package]
+name = "lc-books"
+version = "0.1.0"
+edition = "2024"
+description = "Epub parsing and pagination for the Lightcone library. No engine, no renderer."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[dependencies]
+# An epub is a zip of deflated entries and nothing else. The default features add bzip2, zstd,
+# lzma and AES, none of which the format permits.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+quick-xml = "0.39"
