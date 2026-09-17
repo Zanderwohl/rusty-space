@@ -16,9 +16,10 @@ use lc_proto::{Cleared, ClientId, Presence, ShipId, Withheld};
 use lc_spacetime::Worldline;
 use lc_spacetime::worldline::retarded_times_at;
 use lc_world::craft::{Craft, CraftId, Fleet};
-use lc_world::motion::{LIGHT_US_PER_LY, Motive};
+use lc_world::consort;
 use lc_world::escort;
-use lc_world::pursuit;
+use lc_world::motion::{LIGHT_US_PER_LY, Motive};
+use lc_world::pursuit::{self, Closeness, Refused};
 use lc_world::system::LOCAL_SHELL_LY;
 
 use crate::server::Connected;
@@ -27,6 +28,7 @@ use crate::server::Connected;
 #[derive(Clone, Copy, Debug)]
 pub struct Pursuit {
     pub quarry: ShipId,
+    pub closeness: Closeness,
     pub last_plan_t: i64,
     /// The sighting before the newest, which is the only way a pursuer learns how hard its
     /// quarry is burning: two things that arrived, and the difference between them.
@@ -40,6 +42,19 @@ pub enum Plan {
     Rendezvous(pursuit::Rendezvous),
     /// Close on a quarry that is burning, and stay with it. See [`lc_world::escort`].
     Escort(escort::Escort),
+    /// Close on a quarry that is falling, and stay with it. See [`lc_world::consort`].
+    Consort(consort::Consort),
+}
+
+impl Plan {
+    /// Put a craft on it.
+    pub fn fly(self, craft: &mut Craft, now_s: f64) {
+        match self {
+            Plan::Rendezvous(plan) => craft.begin_rendezvous(plan, now_s),
+            Plan::Escort(plan) => craft.begin_escort(plan, now_s),
+            Plan::Consort(plan) => craft.begin_consort(plan, now_s),
+        }
+    }
 }
 
 /// The shortest gap between two plans for one chase, as a fraction of the approach being flown.
@@ -81,6 +96,7 @@ fn steer_floor_us(pursuer: &Craft) -> i64 {
     let duration_s = match &pursuer.motion.motive {
         Motive::Rendezvous(plan) => plan.cruise.duration_s(),
         Motive::Escort(plan) => plan.cruise.duration_s(),
+        Motive::Consort(plan) => plan.cruise.duration_s(),
         _ => return 0,
     };
     (duration_s * STEER_FRACTION * crate::world::MICROS_PER_SECOND as f64) as i64
@@ -130,34 +146,6 @@ pub fn sighting(
         length_m: quarry.length_m,
         emitted_s: emitted * 1.0e-6,
     })
-}
-
-/// How hard the quarry is burning, if it is being escorted rather than met.
-///
-/// **Only while its plume was lit when the light left**, which is a thing a pursuer can see.
-/// A quarry holding an orbit is accelerating too — by gravity, and so is the pursuer — and
-/// escorting it would chase where the planet takes it while ignoring what the planet does to
-/// the ship chasing. Every scene that settles onto a station is one of those.
-///
-/// A pursuer already escorting stays an escort when the quarry cuts its drive, at zero
-/// acceleration. Handing it back to a rendezvous would have it arrive and go ballistic beside
-/// something it had been matching under thrust, and a ship coasting outward at a good fraction
-/// of `c` is the most expensive thing there is to keep patching into spheres of influence.
-fn burn_of(
-    fleet: &Fleet,
-    quarry: ShipId,
-    pursuer: &Craft,
-    seen: &pursuit::Sighting,
-    previous: Option<&pursuit::Sighting>,
-) -> Option<glam::DVec3> {
-    let lit = fleet.get(CraftId(quarry.0)).is_some_and(|q| q.jet_power_w(seen.emitted_s) > 0.0);
-    let escorting = matches!(pursuer.motion.motive, Motive::Escort(_));
-    if lit {
-        if let Some(accel) = previous.and_then(|p| escort::acceleration_of(p, seen)) {
-            return Some(accel);
-        }
-    }
-    escorting.then_some(glam::DVec3::ZERO)
 }
 
 /// Where everybody else appeared to be, per connection.
@@ -215,17 +203,75 @@ pub fn contacts(
 
 /// Whether a craft flying a standing intercept should be given a new plan this tick.
 ///
-/// Two different questions wearing one name. A ship still flying an approach is asked whether
-/// its quarry has stopped agreeing with it — which is the whole manoeuvre response, and which
-/// it cannot notice until the light of the manoeuvre arrives. A ship that has arrived, or is
-/// doing anything else, is asked whether it has drifted off station.
-pub fn should_close(pursuer: &Craft, seen: &pursuit::Sighting, now_s: f64) -> bool {
-    match &pursuer.motion.motive {
+/// Two different questions wearing one name. A ship still flying a plan for this quarry is
+/// asked whether its quarry has stopped agreeing with it — which is the whole manoeuvre
+/// response, and which it cannot notice until the light of the manoeuvre arrives — or whether
+/// the plan is for another closeness. A ship that has arrived, or is doing anything else, is
+/// asked whether it has drifted off station.
+pub fn should_close(pursuer: &Craft, seen: &pursuit::Sighting, closeness: Closeness, now_s: f64) -> bool {
+    let standoff = closeness.standoff_m(pursuer.length_m, seen.length_m);
+    let replan = closeness.replan_m(standoff);
+    let motive = &pursuer.motion.motive;
+    match motive {
         Motive::Rendezvous(plan) if plan.target == seen.target && !plan.has_arrived(now_s) => {
-            pursuit::wants_replan(&pursuer.motion.motive, seen, pursuer.length_m, now_s)
+            pursuit::wants_replan(motive, seen, standoff, replan, now_s)
         }
-        _ => pursuit::wants_closing(&pursuer.motion, pursuer.length_m, seen, now_s),
+        Motive::Escort(plan) if plan.target == seen.target => {
+            pursuit::wants_replan(motive, seen, standoff, replan, now_s)
+        }
+        // Never runs out and never drifts, so only the quarry leaving its conic, or a new
+        // closeness, is a reason.
+        Motive::Consort(plan) if plan.target == seen.target => {
+            let off = pursuer.system.as_deref().and_then(|system| plan.divergence_m(system, seen));
+            !pursuit::aims_for(plan.cruise.to_ly, standoff) || off.is_none_or(|off| off > replan)
+        }
+        _ => pursuit::wants_closing(&pursuer.motion, closeness.band_m(standoff), seen, now_s),
     }
+}
+
+/// The plan for taking station on a quarry, of whichever of the three kinds it needs.
+///
+/// **A quarry whose plume was lit when the light left is escorted**, once there are two
+/// sightings to measure its acceleration from. A quarry holding an orbit accelerates too — by
+/// gravity, and so does the pursuer — and escorting it would chase where the planet takes it
+/// while ignoring what the planet does to the ship chasing. So a quarry that is not burning is
+/// **reckoned along its conic** where there is one, which is anywhere in a system at a speed
+/// the Galilean frame holds for, and **met by a rendezvous** everywhere else.
+///
+/// A pursuer already escorting stays an escort when the quarry cuts its drive out there, at
+/// zero acceleration. Handing it back to a rendezvous would have it arrive and go ballistic
+/// beside something it had been matching under thrust, and a ship coasting outward at a good
+/// fraction of `c` is the most expensive thing there is to keep patching into spheres of
+/// influence.
+pub fn plan(
+    fleet: &Fleet,
+    pursuer: &Craft,
+    seen: &pursuit::Sighting,
+    previous: Option<&pursuit::Sighting>,
+    closeness: Closeness,
+    now_s: f64,
+) -> Result<Plan, Refused> {
+    let standoff = closeness.standoff_m(pursuer.length_m, seen.length_m);
+    let drive = pursuer.turning(pursuer.motion.drive);
+    let lit = fleet
+        .get(CraftId(seen.target.0))
+        .is_some_and(|quarry| quarry.jet_power_w(seen.emitted_s) > 0.0);
+    let burning = lit.then(|| previous.and_then(|p| escort::acceleration_of(p, seen))).flatten();
+    if let Some(accel) = burning {
+        return escort::escort(&pursuer.motion, standoff, seen, accel, now_s, drive).map(Plan::Escort);
+    }
+    let falling = pursuer
+        .system
+        .as_deref()
+        .and_then(|system| consort::approach(system, &pursuer.motion, standoff, seen, now_s, drive));
+    if let Some(plan) = falling {
+        return Ok(Plan::Consort(plan));
+    }
+    if matches!(pursuer.motion.motive, Motive::Escort(_)) {
+        return escort::escort(&pursuer.motion, standoff, seen, glam::DVec3::ZERO, now_s, drive)
+            .map(Plan::Escort);
+    }
+    pursuit::approach(&pursuer.motion, standoff, seen, now_s, drive).map(Plan::Rendezvous)
 }
 
 /// What each standing intercept wants done this tick.
@@ -254,31 +300,16 @@ pub fn decide(
         // Saturating, because "never planned" is a legitimate thing for a caller to say and
         // the obvious way to say it overflows the subtraction.
         let since = now_t.saturating_sub(pursuit.last_plan_t);
-        if since < steer_floor_us(pursuer) || !should_close(pursuer, &seen, now_s) {
+        if since < steer_floor_us(pursuer) || !should_close(pursuer, &seen, pursuit.closeness, now_s) {
             continue;
         }
-        let drive = pursuer.turning(pursuer.motion.drive);
-        match burn_of(fleet, pursuit.quarry, pursuer, &seen, previous.as_ref()) {
-            Some(accel) => match escort::escort(
-                &pursuer.motion,
-                pursuer.length_m,
-                &seen,
-                accel,
-                now_s,
-                drive,
-            ) {
-                Ok(plan) => decided.push((*id, Some(Plan::Escort(plan)))),
-                // Pulling as hard as the pursuer can, or at `c`: followable, never catchable.
-                Err(_) => decided.push((*id, None)),
-            },
-            None => match pursuit::approach(&pursuer.motion, pursuer.length_m, &seen, now_s, drive)
-            {
-                Ok(plan) => decided.push((*id, Some(Plan::Rendezvous(plan)))),
-                // On station. Nothing to fly, and the policy stays: it is what will notice the
-                // next time this craft has drifted.
-                Err(pursuit::Refused::AlreadyThere) => {}
-                Err(pursuit::Refused::TooFast) => decided.push((*id, None)),
-            },
+        match plan(fleet, pursuer, &seen, previous.as_ref(), pursuit.closeness, now_s) {
+            Ok(plan) => decided.push((*id, Some(plan))),
+            // On station. Nothing to fly, and the policy stays: it is what will notice the
+            // next time this craft has drifted.
+            Err(Refused::AlreadyThere) => {}
+            // Pulling as hard as the pursuer can, or at `c`: followable, never catchable.
+            Err(Refused::TooFast) => decided.push((*id, None)),
         }
     }
     decided

@@ -15,13 +15,14 @@ use crate::flight::{Cruise, Drive, JULIAN_YEAR_S, Phase};
 use crate::navigation::{Course, Waypoint};
 use crate::system::LocalSystem;
 use em_foundations::time::{Instant, TimeDelta};
-use lc_spacetime::Worldline;
+
+pub use crate::worldline::{Flight, Past};
 
 /// A ship, by the identifier whoever owns it uses. Opaque here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ShipId(pub i64);
 
-/// How a ship is moving. The six are exclusive, and that exclusivity is the model.
+/// How a ship is moving. The eight are exclusive, and that exclusivity is the model.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Motive {
     /// Under thrust, on a planned crossing.
@@ -44,6 +45,9 @@ pub enum Motive {
     /// Under thrust beside a craft that is itself under thrust, having closed on it or while
     /// closing. A rendezvous with a quarry that will not hold still: see [`crate::escort`].
     Escort(crate::escort::Escort),
+    /// Closing on a craft that is falling, or holding station beside it, in the frame that falls
+    /// with it. See [`crate::consort`].
+    Consort(crate::consort::Consort),
     /// Held on a place by thrust. A station is a position, not a trajectory.
     Holding(Waypoint),
     /// Ballistic on a conic, about whichever body's influence it is in.
@@ -102,7 +106,11 @@ impl ShipState {
     pub fn is_under_way(&self) -> bool {
         matches!(
             self.motive,
-            Motive::Crossing(_) | Motive::Transfer(_) | Motive::Rendezvous(_) | Motive::Escort(_)
+            Motive::Crossing(_)
+                | Motive::Transfer(_)
+                | Motive::Rendezvous(_)
+                | Motive::Escort(_)
+                | Motive::Consort(_)
         )
     }
 
@@ -119,6 +127,20 @@ impl ShipState {
         self.crossing_clock_base_s = self.clock_s;
         self.motive = Motive::Escort(plan);
         self.arrive_at = None;
+    }
+
+    /// Take up station on a falling quarry. Bases the crew's clock as a crossing does.
+    pub fn begin_consort(&mut self, plan: crate::consort::Consort) {
+        self.crossing_clock_base_s = self.clock_s;
+        self.motive = Motive::Consort(plan);
+        self.arrive_at = None;
+    }
+
+    /// Put one back part-way through, keeping the clock base it began with.
+    pub fn resume_consort(&mut self, plan: crate::consort::Consort, clock_base_s: f64) {
+        self.motive = Motive::Consort(plan);
+        self.arrive_at = None;
+        self.crossing_clock_base_s = clock_base_s;
     }
 
     /// Put one back part-way through, keeping the clock base it began with.
@@ -158,12 +180,24 @@ impl ShipState {
         }
     }
 
-    /// Who this ship is closing on, if it is closing on anybody.
+    /// Who this ship is closing on or keeping station with, if anybody.
     pub fn pursuing(&self) -> Option<ShipId> {
         match &self.motive {
             Motive::Rendezvous(plan) => Some(plan.target),
             Motive::Escort(plan) => Some(plan.target),
+            Motive::Consort(plan) => Some(plan.target),
             _ => None,
+        }
+    }
+
+    /// Whether the approach to [`Self::pursuing`]'s quarry is still being flown, rather than
+    /// done and holding alongside.
+    pub fn still_closing(&self, now_s: f64) -> bool {
+        match &self.motive {
+            Motive::Rendezvous(plan) => !plan.has_arrived(now_s),
+            Motive::Escort(plan) => !plan.has_closed(now_s),
+            Motive::Consort(plan) => !plan.has_closed(now_s),
+            _ => false,
         }
     }
 
@@ -246,6 +280,10 @@ impl ShipState {
                 },
                 Motive::Escort(plan) => Recipe::Escort {
                     station: plan.recipe(),
+                    clock_base_s: self.crossing_clock_base_s,
+                },
+                Motive::Consort(plan) => Recipe::Consort {
+                    formation: plan.recipe(),
                     clock_base_s: self.crossing_clock_base_s,
                 },
                 Motive::Holding(waypoint) => Recipe::Holding(waypoint.clone()),
@@ -546,6 +584,7 @@ pub fn state_at(
         // [`crate::pursuit`] carries the bound on that.
         Motive::Rendezvous(plan) => Some(plan.state_at(now_s)),
         Motive::Escort(plan) => Some(plan.state_at(now_s)),
+        Motive::Consort(plan) => plan.state_at(system?, now_s),
         Motive::Holding(waypoint) => {
             let system = system?;
             let at = waypoint.place_at(system, now_s)?;
@@ -610,6 +649,7 @@ fn aim_at(state: &ShipState, now_s: f64) -> Option<crate::flight::Aim> {
         Motive::Transfer(transfer) => Some(transfer.aim_at(now_s)),
         Motive::Rendezvous(plan) => Some(plan.aim_at(now_s)),
         Motive::Escort(plan) => Some(plan.aim_at(now_s)),
+        Motive::Consort(plan) => Some(plan.aim_at(now_s)),
         // Nothing is asking. A station is held by thrust too small to turn for, and a conic
         // and a drift ask for nothing at all.
         Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => None,
@@ -629,6 +669,9 @@ pub fn thrust_g(state: &ShipState, now_s: f64) -> f64 {
         Motive::Crossing(cruise) => cruise.thrust_at(now_s) != DVec3::ZERO,
         Motive::Transfer(transfer) => transfer.thrust_at(now_s) != DVec3::ZERO,
         Motive::Rendezvous(plan) => plan.thrust_at(now_s) != DVec3::ZERO,
+        // Station-keeping beside it is the quarry's tidal difference, which is the same
+        // simplification as holding a station.
+        Motive::Consort(plan) => plan.thrust_at(now_s) != DVec3::ZERO,
         // The one motive whose burn is not the drive's rating: beside a quarry, it is the
         // quarry's acceleration, and that is what a plume should show.
         Motive::Escort(plan) => return plan.thrust_g(now_s),
@@ -706,6 +749,11 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
         // Never ends by itself. Alongside a quarry that keeps burning is a place to *stay*, and
         // going ballistic on arrival — as a rendezvous does — would drop straight behind it.
         Motive::Escort(plan) => {
+            state.clock_s = state.crossing_clock_base_s + plan.proper_s_at(now_s);
+        }
+        // Never ends either, for the same reason: beside a quarry on its orbit is somewhere to
+        // stay, and going ballistic there drifts off by the difference between two orbits.
+        Motive::Consort(plan) => {
             state.clock_s = state.crossing_clock_base_s + plan.proper_s_at(now_s);
         }
         Motive::Rendezvous(plan) => {
@@ -842,116 +890,6 @@ pub fn repatch_due(state: &ShipState, system: &LocalSystem, now_s: f64) -> Optio
 /// model measures in light-years because that is the unit a galaxy is. This is the join.
 pub const LIGHT_US_PER_LY: f64 = JULIAN_YEAR_S * 1.0e6;
 
-/// A stretch of a worldline that is over: what a ship was doing, and when it stopped.
-///
-/// See [`Flight`] for why a craft keeps these at all.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Past {
-    /// Coordinate seconds at which this stopped being in force.
-    pub until_s: f64,
-    pub motion: ShipState,
-}
-
-/// A ship's worldline, for the light-delay solve.
-///
-/// Borrowed rather than owned: the motive and the system are the truth, and a copy of them in
-/// another shape is a copy that can be stale. Holding the two together is what makes the
-/// worldline total — a station and a conic mean nothing without the bodies they are defined
-/// against.
-///
-/// **A worldline has a past, and that is not decoration.** A motive is a closed form total in
-/// `t`, so evaluating the *current* one at an earlier time answers about a ship that did not
-/// exist yet: `Motive::Drifting` extrapolates backwards, so a burn would retroactively rewrite
-/// where the ship was an hour ago and how fast. Every retarded solve then reads the new motion
-/// at the old time — which is a client watching a manoeuvre the instant it happens, at any
-/// range, and the end of the game this is all built to be.
-///
-/// So a craft keeps the motives it has flown, stamped with when each stopped, and this picks
-/// the one that was in force. The same shape `crate::observation::Target` uses for emission
-/// models, for the same reason: an event does not alter the past, it appends.
-///
-/// The memory is bounded, so the past runs out. [`Flight::defined_over`] says where, and a
-/// solve that falls off the end returns nothing at all rather than a guess — not seeing
-/// something is always safe, and inventing where it was is not.
-///
-/// The frame is `lc-spacetime`'s: light-microseconds from the world origin, and coordinate
-/// microseconds. Note the precision this costs at galactic distances — a position is a `f64`
-/// count of light-microseconds, so a ship in a system a hundred light-years out is at `3e15`
-/// and resolves to about a hundred metres. Fine for a light-delay solve, useless for an orbit,
-/// and the reason doc 08 shards the frame rather than keeping one origin for everything.
-pub struct Flight<'a> {
-    state: &'a ShipState,
-    system: Option<&'a LocalSystem>,
-    /// Oldest first, and each one's `until_s` later than the last.
-    past: &'a [Past],
-    /// The earliest coordinate second this can answer for. `-inf` when nothing has been
-    /// forgotten, which is the case for a craft that has never changed what it was doing.
-    known_from_s: f64,
-}
-
-impl<'a> Flight<'a> {
-    /// A worldline with no past: whatever it is doing now, it has always been doing.
-    ///
-    /// True only of a craft that has never changed its motive. Anything the world has run is
-    /// built by [`crate::craft::Craft::worldline`], which carries the real history.
-    pub fn new(state: &'a ShipState, system: Option<&'a LocalSystem>) -> Self {
-        Self { state, system, past: &[], known_from_s: f64::NEG_INFINITY }
-    }
-
-    pub fn with_past(
-        state: &'a ShipState,
-        system: Option<&'a LocalSystem>,
-        past: &'a [Past],
-        known_from_s: f64,
-    ) -> Self {
-        Self { state, system, past, known_from_s }
-    }
-
-    /// What the ship was doing at a coordinate second.
-    ///
-    /// The first stretch that had not ended yet, or the current motive when none of them
-    /// apply. `past` is ordered, so the first match is the right one.
-    fn doing_at(&self, s: f64) -> &ShipState {
-        self.past
-            .iter()
-            .find(|entry| s < entry.until_s)
-            .map(|entry| &entry.motion)
-            .unwrap_or(self.state)
-    }
-
-    /// Position and beta at a coordinate microsecond, in light-years.
-    ///
-    /// Falls back to the ship's last known position when the motive cannot be evaluated — a
-    /// body that has gone, or a chain that is integrated. The same choice [`advance`] makes:
-    /// keep what is known rather than invent a position from nothing.
-    fn read(&self, t_us: f64) -> (DVec3, DVec3) {
-        let s = t_us * 1.0e-6;
-        let state = self.doing_at(s);
-        state_at(state, self.system, s).unwrap_or((state.position_ly, state.beta))
-    }
-}
-
-impl Worldline for Flight<'_> {
-    fn position_at(&self, t: f64) -> DVec3 {
-        self.read(t).0 * LIGHT_US_PER_LY
-    }
-
-    fn velocity_at(&self, t: f64) -> DVec3 {
-        self.read(t).1
-    }
-
-    /// Forward forever, and back as far as the craft still remembers.
-    ///
-    /// Every arm of a motive answers everywhere, so the forward end never runs out. The back
-    /// end is where the history was pruned: before it this would have to extrapolate a motive
-    /// the ship was not yet flying, and the solver's contract is that a root outside this range
-    /// is no root at all. Which is the answer that is safe — an observer far enough away that
-    /// the light it wants left before the shard remembers simply sees nothing.
-    fn defined_over(&self) -> (f64, f64) {
-        (self.known_from_s * 1.0e6, f64::INFINITY)
-    }
-}
-
 /// How fast a ship is going, metres a second, world frame.
 pub fn velocity_m_s(state: &ShipState, system: Option<&LocalSystem>, now_s: f64) -> DVec3 {
     let beta = state_at(state, system, now_s).map(|(_, beta)| beta).unwrap_or(state.beta);
@@ -961,6 +899,7 @@ pub fn velocity_m_s(state: &ShipState, system: Option<&LocalSystem>, now_s: f64)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lc_spacetime::Worldline;
     use crate::navigation::Plane;
     use crate::sky::{CatalogueStar, StarProvider};
 

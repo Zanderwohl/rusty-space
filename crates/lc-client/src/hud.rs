@@ -53,6 +53,43 @@ fn span(metres: f64) -> String {
     }
 }
 
+/// What a standing intercept reads as, in the place a crossing's progress would be: who, whether
+/// the approach is still being flown, and how much space there is between the two hulls.
+///
+/// No percentage, because there is nothing to be a percentage of — a pursuit re-plans whenever
+/// its quarry does something new. And between the hulls rather than between centres, because
+/// that is what a closeness is set in; see `lc_world::pursuit::Closeness`.
+pub fn pursuit(
+    session: &Session,
+    pursuit: lc_proto::Pursuit,
+    quarry: Option<&crate::uplink::Contact>,
+) -> String {
+    let doing = match session.ship.motion.still_closing(session.coordinate_time_s()) {
+        true => "closing on",
+        false => "alongside",
+    };
+    let how = match pursuit.closeness {
+        lc_proto::Closeness::Company => "in company",
+        lc_proto::Closeness::Intimate => "close in",
+    };
+    let Some(quarry) = quarry else {
+        return format!("{doing} ship {} — {how}", pursuit.quarry.0);
+    };
+    let centres_m =
+        session.ship.motion.position_ly.distance(quarry.position_ly) * crate::system::M_PER_LY;
+    let clear_m = (centres_m - 0.5 * (session.ship.length_m + quarry.length_m)).max(0.0);
+    format!("{doing} {} — {} between hulls — {how}", quarry.name, near(clear_m))
+}
+
+/// A short distance, finely enough to see a kilometre-and-a-quarter wander.
+fn near(metres: f64) -> String {
+    match metres {
+        m if m < 1.0e3 => format!("{m:.0} m"),
+        m if m < 1.0e5 => format!("{:.1} km", m / 1.0e3),
+        m => span(m),
+    }
+}
+
 pub fn lines(session: &Session, ui: &UiState) -> Hud {
     let name = presets::all().get(ui.preset).map(|(n, _)| *n).unwrap_or("custom");
     Hud {
@@ -99,6 +136,26 @@ mod tests {
 
     fn fixture() -> (UiState, Session) {
         (UiState::default(), Session::new(&AuthoredStars::sample(), 3))
+    }
+
+    /// The pursuit reads where a crossing's progress would, and in hull clearance.
+    #[test]
+    fn a_pursuit_says_who_and_how_much_space_is_between_the_hulls() {
+        let (_, mut s) = fixture();
+        s.ship.length_m = 500.0;
+        let quarry = crate::uplink::Contact {
+            ship_id: lc_proto::ShipId(7),
+            name: "Anvil".into(),
+            length_m: 5_000.0,
+            position_ly: s.ship.motion.position_ly + glam::DVec3::X * 3_750.0 / crate::system::M_PER_LY,
+            beta: glam::DVec3::ZERO,
+            facing: glam::DVec3::X,
+            jet_power_w: 0.0,
+            emitted_s: 0.0,
+        };
+        let close = lc_proto::Pursuit { quarry: quarry.ship_id, closeness: lc_proto::Closeness::Intimate };
+        assert_eq!(pursuit(&s, close, Some(&quarry)), "alongside Anvil — 1.0 km between hulls — close in");
+        assert_eq!(pursuit(&s, close, None), "alongside ship 7 — close in");
     }
 
     #[test]

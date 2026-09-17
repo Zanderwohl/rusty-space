@@ -18,7 +18,6 @@ use lc_world::craft::{Craft, CraftId, Fleet, Kind};
 use lc_world::motion::{Change, Event as Change_, Rejected};
 use lc_world::navigation::Course;
 use crate::chase::{self, Pursuit};
-use lc_world::pursuit;
 use lc_world::system::LocalSystem;
 use std::sync::Arc;
 
@@ -74,8 +73,8 @@ pub struct Server<J: Journal> {
     trusted: Trusted,
     spent: Spent,
     /// Which craft belongs to which account, so signing in twice reaches the same ship.
-    by_account: HashMap<String, ShipId>,
-    next_ship: i64,
+    pub(crate) by_account: HashMap<String, ShipId>,
+    pub(crate) next_ship: i64,
     /// Who owns what. The server's fact, not the world's: a probe has a worldline and no
     /// client, and a client is a connection rather than a thing in space.
     pub(crate) owners: HashMap<CraftId, ClientId>,
@@ -91,7 +90,7 @@ pub struct Server<J: Journal> {
     /// [`Server::admit_without_tickets`].
     open: bool,
     /// Accounts whose saved craft could not be read. See [`crate::persist::Unreadable`].
-    blocked: HashMap<String, String>,
+    pub(crate) blocked: HashMap<String, String>,
     /// Who is chasing whom.
     ///
     /// The one piece of *standing* state in a server otherwise made of events. It is here and
@@ -99,6 +98,9 @@ pub struct Server<J: Journal> {
     /// only ever holds the approach a policy most recently produced, which is an ordinary
     /// motive both ends evaluate. Dropped when the quarry goes out of sight, so it cannot keep
     /// a client informed about somewhere it can no longer see.
+    ///
+    /// **Not** dropped when the pilot signs out. A ship hanging about with another goes on
+    /// hanging about, and a checkpoint writes the policy down with the craft.
     pub(crate) pursuits: HashMap<CraftId, Pursuit>,
     /// How fast this world runs, as a multiple of the design rate. See [`Server::set_rate`].
     rate: f64,
@@ -236,78 +238,6 @@ impl<J: Journal> Server<J> {
         self.fleet.get(CraftId(id.0))
     }
 
-    /// The whole shard as of now, for whoever is going to write it down.
-    ///
-    /// Every craft, not the connected ones: a ship exists whether or not anyone is flying it,
-    /// which is the same reason the tick advances the whole fleet.
-    pub fn checkpoint(&self) -> crate::persist::Checkpoint {
-        let account_of: HashMap<ShipId, &str> =
-            self.by_account.iter().map(|(account, ship)| (*ship, account.as_str())).collect();
-        crate::persist::Checkpoint {
-            now_t: self.now_t,
-            next_ship: self.next_ship,
-            ships: self
-                .fleet
-                .iter()
-                .map(|craft| {
-                    let account = account_of.get(&ShipId(craft.id.0)).copied();
-                    crate::persist::save(craft, account, self.now_t)
-                })
-                .collect(),
-        }
-    }
-
-    /// Take a checkpoint as this shard's world. **Load the world first**, or a ballistic arc
-    /// has no system to be re-solved against and comes back as a straight line.
-    ///
-    /// Each craft is read at the time it was saved and then advanced to the checkpoint's clock,
-    /// in tick-sized steps. The steps matter for exactly one motive: a ballistic arc crosses
-    /// spheres of influence, and each crossing is an event that has to be folded as it comes.
-    /// Everything else is a closed form and would not notice a single leap.
-    ///
-    /// The clock resumes where it stopped rather than jumping forward by however long the
-    /// process was down. A shard that fabricated the missing years would be asserting that
-    /// things happened in them, when nothing was journalled and nobody was told.
-    pub fn adopt(
-        &mut self,
-        checkpoint: crate::persist::Checkpoint,
-    ) -> Vec<crate::persist::Unreadable> {
-        self.now_t = checkpoint.now_t;
-        self.next_ship = self.next_ship.max(checkpoint.next_ship);
-        let mut unreadable = Vec::new();
-        for row in &checkpoint.ships {
-            let system = self.position_of(row).and_then(|at| self.world.system_at(at));
-            match crate::persist::load(row, system.as_deref()) {
-                Ok(mut craft) => {
-                    craft.enter(system, row.saved_t as f64 * 1.0e-6);
-                    catch_up(&mut craft, row.saved_t, checkpoint.now_t);
-                    if let Some(account) = &row.account {
-                        self.by_account.insert(account.clone(), ShipId(craft.id.0));
-                    }
-                    self.next_ship = self.next_ship.max(craft.id.0 + 1);
-                    self.fleet.insert(craft);
-                }
-                Err(why) => {
-                    if let Some(account) = &row.account {
-                        self.blocked.insert(account.clone(), why.clone());
-                    }
-                    unreadable.push(crate::persist::Unreadable {
-                        ship_id: row.ship_id,
-                        account: row.account.clone(),
-                        why,
-                    });
-                }
-            }
-        }
-        unreadable
-    }
-
-    /// Where a saved craft is, without committing to being able to read the rest of it.
-    fn position_of(&mut self, row: &lc_store::ships::Ship) -> Option<DVec3> {
-        let saved: crate::persist::Saved = lc_proto::decode(&row.state).ok()?;
-        Some(DVec3::from_array(saved.motion.at_ly))
-    }
-
     /// What a client has actually sent. The measurement that will one day replace the guess in
     /// [`crate::rate`] with evidence.
     pub fn usage(&self, client: ClientId) -> Option<crate::rate::Usage> {
@@ -402,6 +332,10 @@ impl<J: Journal> Server<J> {
                 }
                 match self.sign_in(from, &ticket) {
                     Some((ship_id, name)) => {
+                        let pursuing = self.pursuits.get(&CraftId(ship_id.0)).map(|p| lc_proto::Pursuit {
+                            quarry: p.quarry,
+                            closeness: p.closeness.into(),
+                        });
                         // What it is doing, not merely where it is: an account coming back
                         // finds its craft mid-orbit or mid-burn, and a welcome that said only
                         // the position put it back at rest there. See `lc_world::resume`.
@@ -417,7 +351,11 @@ impl<J: Journal> Server<J> {
                             name,
                             rate: self.rate,
                             ship,
-                        })
+                        });
+                        // After the welcome, which is the message a client has to have first.
+                        if let Some(pursuit) = pursuing {
+                            wire.send(from, Outbound::Pursuing { ship_id, pursuit });
+                        }
                     }
                     None => wire.send(from, Outbound::Unauthenticated),
                 }
@@ -582,7 +520,7 @@ impl<J: Journal> Server<J> {
                 // is exactly why a player might choose it.
                 (KIND_CUT, 0.0, "{}".to_string(), Order::CutDrive)
             }
-            Order::Intercept { ship_id } => {
+            Order::Intercept { ship_id, closeness } => {
                 let quarry = *ship_id;
                 // The first plan is made here rather than left to the next tick, so that a
                 // player who presses the button sees the ship move on the same round trip as
@@ -590,28 +528,45 @@ impl<J: Journal> Server<J> {
                 let now_s = at as f64 * 1.0e-6;
                 let seen = chase::sighting(&self.fleet, id, quarry, at)
                     .ok_or(Refusal::NotInSight)?;
-                let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
-                let drive = craft.turning(craft.motion.drive);
-                match pursuit::approach(&craft.motion, craft.length_m, &seen, now_s, drive) {
-                    Ok(plan) => craft.begin_rendezvous(plan, now_s),
+                // Closing in on the quarry already being chased keeps what has been measured of
+                // it, so an escort does not lose its acceleration for a tick.
+                let last_seen =
+                    self.pursuits.get(&id).filter(|p| p.quarry == quarry).and_then(|p| p.last_seen);
+                let craft = self.fleet.get(id).ok_or(Refusal::NotYours)?;
+                match chase::plan(&self.fleet, craft, &seen, last_seen.as_ref(), (*closeness).into(), now_s) {
+                    Ok(plan) => plan.fly(self.fleet.get_mut(id).ok_or(Refusal::NotYours)?, now_s),
                     // Already alongside. The order still stands — it is a policy, and the
                     // policy's job from here is to keep it there.
-                    Err(pursuit::Refused::AlreadyThere) => {}
-                    Err(pursuit::Refused::TooFast) => return Err(Refusal::TooFast),
+                    Err(lc_world::pursuit::Refused::AlreadyThere) => {}
+                    Err(lc_world::pursuit::Refused::TooFast) => return Err(Refusal::TooFast),
                 }
-                self.pursuits.insert(id, Pursuit { quarry, last_plan_t: at, last_seen: None });
+                self.pursuits.insert(id, Pursuit {
+                    quarry,
+                    closeness: (*closeness).into(),
+                    last_plan_t: at,
+                    last_seen,
+                });
                 (
                     KIND_BURN,
                     BURN_POWER_W,
                     format!("{{\"intercept\":{}}}", quarry.0),
-                    Order::Intercept { ship_id: quarry },
+                    Order::Intercept { ship_id: quarry, closeness: *closeness },
                 )
             }
             Order::BreakOff => {
-                // Only the policy is cancelled. Whatever approach the ship is flying it goes
-                // on flying, and it will finish alongside and then simply stay where it ends
-                // up — which is what giving up a chase looks like from outside.
                 self.pursuits.remove(&id);
+                // No further corrections: whatever it was closing or keeping station on, it now
+                // keeps the velocity it has, on whatever conic that is.
+                let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
+                if craft.motion.pursuing().is_some() {
+                    craft
+                        .apply(&Change_ {
+                            ship: motion_id(id),
+                            at_t: at as f64 * 1.0e-6,
+                            change: Change::CutDrive,
+                        })
+                        .map_err(refusal_for)?;
+                }
                 (KIND_CUT, 0.0, "{}".to_string(), Order::BreakOff)
             }
         };
@@ -777,15 +732,21 @@ impl<J: Journal> Server<J> {
         let now = self.now_t;
         let now_s = now as f64 * 1.0e-6;
         for (id, plan) in chase::decide(&self.fleet, &mut self.pursuits, now) {
+            let Some(craft) = self.fleet.get_mut(id) else { continue };
             let Some(plan) = plan else {
                 self.pursuits.remove(&id);
+                // Given up, so nothing is steering: a station kept beside a quarry nobody can
+                // see is a ship holding formation with a guess. Silent, as cutting always is,
+                // and its owner is told what it is doing now.
+                if craft.motion.pursuing().is_some() {
+                    let cut = Change_ { ship: motion_id(id), at_t: now_s, change: Change::CutDrive };
+                    if craft.apply(&cut).is_ok() {
+                        self.tell_flying(wire, id);
+                    }
+                }
                 continue;
             };
-            let Some(craft) = self.fleet.get_mut(id) else { continue };
-            match plan {
-                chase::Plan::Rendezvous(plan) => craft.begin_rendezvous(plan, now_s),
-                chase::Plan::Escort(plan) => craft.begin_escort(plan, now_s),
-            }
+            plan.fly(craft, now_s);
             if let Some(entry) = self.pursuits.get_mut(&id) {
                 entry.last_plan_t = now;
             }
@@ -911,33 +872,6 @@ impl<J: Journal> Server<J> {
 fn adrift_at_the_origin() -> lc_proto::Motion {
     (&lc_world::motion::ShipState::at(DVec3::ZERO).snapshot()).into()
 }
-
-/// Fly a restored craft from when it was saved to when the shard is now.
-///
-/// Tick-sized steps rather than one leap, because a ballistic arc folds a patch when it reaches
-/// one and a single step past several would fold at most one of them. Capped, because the cost
-/// is linear in the downtime and a shard that has been off for a month must still come back:
-/// past the cap the remainder is taken in one step, which is exact for everything but a conic
-/// that changes primary in it.
-fn catch_up(craft: &mut Craft, from_t: i64, to_t: i64) {
-    let mut at = from_t;
-    let mut steps = 0;
-    while at < to_t && steps < MAX_CATCHUP_TICKS {
-        let next = (at + TICK_US).min(to_t);
-        craft.advance(next as f64 * 1.0e-6, (next - at) as f64 * 1.0e-6);
-        at = next;
-        steps += 1;
-    }
-    if at < to_t {
-        craft.advance(to_t as f64 * 1.0e-6, (to_t - at) as f64 * 1.0e-6);
-    }
-}
-
-/// How many tick-sized steps a restored craft is flown in before the rest is taken at once.
-///
-/// Twenty thousand is about two and a half hours of downtime at the design rate, which covers a
-/// restart, a deploy and an outage somebody slept through.
-pub const MAX_CATCHUP_TICKS: usize = 20_000;
 
 fn motion_id(id: CraftId) -> lc_world::motion::ShipId {
     lc_world::motion::ShipId(id.0)
@@ -1537,7 +1471,7 @@ use crate::transport::Loopback;
 
         wire.client_says(hunter, Inbound::Act(Intent {
             ship_id: ShipId(1),
-            order: Order::Intercept { ship_id: ShipId(2) },
+            order: Order::Intercept { ship_id: ShipId(2), closeness: lc_proto::Closeness::Company },
             issued_at_client_t: 0,
         }));
         server.tick(&mut wire).await.unwrap();
@@ -1572,6 +1506,44 @@ use crate::transport::Loopback;
         );
     }
 
+    /// **Breaking off is no further corrections.** The ship is left on whatever its velocity
+    /// makes of it, not flying out the rest of an approach and not holding a station on its own.
+    #[tokio::test]
+    async fn breaking_off_leaves_the_ship_ballistic() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let hunter = ClientId(1);
+        server.admit(hunter, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+        server.admit(ClientId(2), crate::world::still(ShipId(2), DVec3::new(ONE_LIGHT_SECOND, 0.0, 0.0)), 0.0);
+        wire.client_says(hunter, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Intercept { ship_id: ShipId(2), closeness: lc_proto::Closeness::Company },
+            issued_at_client_t: 0,
+        }));
+        for _ in 0..3 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        assert!(server.ship(ShipId(1)).unwrap().motion.pursuing().is_some(), "premise: under way");
+
+        wire.client_says(hunter, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::BreakOff,
+            issued_at_client_t: server.now_t(),
+        }));
+        server.tick(&mut wire).await.unwrap();
+        let motion = &server.ship(ShipId(1)).unwrap().motion;
+        assert!(
+            matches!(motion.motive, lc_world::motion::Motive::Drifting { .. }),
+            "still flying {:?}",
+            motion.motive,
+        );
+        assert!(!server.pursuits.contains_key(&CraftId(1)));
+        for _ in 0..20 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        assert!(server.ship(ShipId(1)).unwrap().motion.pursuing().is_none(), "it was steered again");
+    }
+
     /// **The rule the whole design turns on, applied to an autopilot.**
     ///
     /// A pursuer steers by the light that has reached it. When its quarry burns, the pursuer
@@ -1602,7 +1574,7 @@ use crate::transport::Loopback;
 
         wire.client_says(hunter, Inbound::Act(Intent {
             ship_id: ShipId(1),
-            order: Order::Intercept { ship_id: ShipId(2) },
+            order: Order::Intercept { ship_id: ShipId(2), closeness: lc_proto::Closeness::Company },
             issued_at_client_t: 0,
         }));
         server.tick(&mut wire).await.unwrap();
@@ -1752,7 +1724,7 @@ use crate::transport::Loopback;
 
         wire.client_says(hunter, Inbound::Act(Intent {
             ship_id: ShipId(1),
-            order: Order::Intercept { ship_id: ShipId(2) },
+            order: Order::Intercept { ship_id: ShipId(2), closeness: lc_proto::Closeness::Company },
             issued_at_client_t: 0,
         }));
         server.tick(&mut wire).await.unwrap();
@@ -2948,6 +2920,71 @@ mod hello_tests {
     /// Searched rather than matched as the whole queue: a tick that welcomes a client may also
     /// state the traffic around it, and `Welcome` being first is the invariant that matters
     /// rather than it being alone.
+    /// **A ship hanging about with another goes on doing so while its pilot is away**, and
+    /// across the shard being restarted, and the pilot is told so on coming back.
+    #[tokio::test]
+    async fn a_pursuit_outlives_signing_out_and_a_restart() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        let mut wire = Loopback::new();
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let ship = welcomed(&mut wire, ClientId(1));
+        let quarry = ShipId(500);
+        // A light-second off, in the light-microseconds `still` places in.
+        let at = server.ship(ship).unwrap().position_at(server.now_t() as f64);
+        server.admit(ClientId(9), crate::world::still(quarry, at + DVec3::X * 1.0e6), 0.0);
+        let at_now = |server: &Server<Memory>, id: ShipId| {
+            server.ship(id).unwrap().position_at(server.now_t() as f64)
+                / lc_world::motion::LIGHT_US_PER_LY
+        };
+        server.tick(&mut wire).await.unwrap();
+
+        wire.client_says(ClientId(1), Inbound::Act(Intent {
+            ship_id: ship,
+            order: Order::Intercept { ship_id: quarry, closeness: lc_proto::Closeness::Intimate },
+            issued_at_client_t: server.now_t(),
+        }));
+        server.tick(&mut wire).await.unwrap();
+        server.disconnected(ClientId(1));
+        wire.take(ClientId(1));
+        // And the quarry leaves, so staying with it takes steering rather than the plan already
+        // flying when the pilot went.
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        let leaving = server.fleet_mut().get_mut(CraftId(quarry.0)).unwrap();
+        let from = leaving.motion.position_ly;
+        leaving.drift_from(from, DVec3::Y * 1.0e-5, now_s);
+
+        // Nobody at the controls, and it still closes and keeps station.
+        for _ in 0..500 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let (mine, theirs) = (server.ship(ship).unwrap().length_m, server.ship(quarry).unwrap().length_m);
+        let standoff = lc_world::pursuit::Closeness::Intimate.standoff_m(mine, theirs);
+        let apart = at_now(&server, ship).distance(at_now(&server, quarry)) * lc_world::system::M_PER_LY;
+        assert!(
+            (apart - standoff).abs() < lc_world::pursuit::INTIMATE_SLACK_M,
+            "{apart} m off a {standoff} m standoff with nobody signed in",
+        );
+
+        // Restarted from a checkpoint, the policy comes back with the craft.
+        let mut restarted = trusting(&broker);
+        assert!(restarted.adopt(server.checkpoint()).is_empty());
+        let kept = restarted.pursuits.get(&CraftId(ship.0)).expect("the pursuit was not saved");
+        assert_eq!((kept.quarry, kept.closeness), (quarry, lc_world::pursuit::Closeness::Intimate));
+
+        // And signing back in says so, straight after the welcome.
+        says(&mut restarted, &mut wire, ClientId(2), broker.mint("acct-1", SHARD, 60, "j2")).await;
+        let said = wire.take(ClientId(2));
+        assert!(matches!(said.first(), Some(Outbound::Welcome { .. })), "{said:?}");
+        assert_eq!(
+            said.get(1),
+            Some(&Outbound::Pursuing {
+                ship_id: ship,
+                pursuit: lc_proto::Pursuit { quarry, closeness: lc_proto::Closeness::Intimate },
+            }),
+        );
+    }
+
     fn welcomed(wire: &mut Loopback, client: ClientId) -> ShipId {
         let said = wire.take(client);
         match said.first() {

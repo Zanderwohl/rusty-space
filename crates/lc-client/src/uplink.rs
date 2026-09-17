@@ -162,7 +162,7 @@ pub struct Uplink {
     /// the moment the order is accepted. Not authoritative: what the ship is actually *doing*
     /// is its motive, and the server drops the pursuit without saying so when the quarry goes
     /// out of sight — which is why this is cleared by a refusal and by losing the contact.
-    pub chasing: Option<ShipId>,
+    pub chasing: Option<lc_proto::Pursuit>,
     /// What the server last said about an order, for the interface to show once and drop. The
     /// client cannot write its own here: an order's outcome is the server's to state.
     pub applied: Option<String>,
@@ -379,6 +379,8 @@ fn fold(
             // See `Placement` for what goes wrong when it is only applied once.
             uplink.placement = Some(Placement { now_t, ship });
             uplink.place(&mut game.0);
+            // A pursuit that outlived the last connection is stated straight after this.
+            uplink.chasing = None;
             // **The server's rate, adopted.** Refusing to *change* the rate was not enough:
             // the client's own default is sixty times the server's, so a joined client ran
             // away from it at a hundred and forty coordinate hours a second without anybody
@@ -412,7 +414,10 @@ fn fold(
             // The server drops a pursuit when its quarry goes out of sight and does not say
             // so — saying so would be a message about somewhere this client can no longer see.
             // Losing the contact is the same fact arriving the only way it can.
-            if uplink.chasing.is_some_and(|id| !uplink.contacts.iter().any(|c| c.ship_id == id)) {
+            if uplink
+                .chasing
+                .is_some_and(|p| !uplink.contacts.iter().any(|c| c.ship_id == p.quarry))
+            {
                 uplink.chasing = None;
             }
         }
@@ -477,12 +482,17 @@ fn fold(
                 // motive, once per re-solve, through the same placement path a reconnect uses
                 // — so the client is told the approach its ship is flying rather than working
                 // one out from a quarry it can only see the past of.
-                Order::Intercept { ship_id } => {
-                    uplink.chasing = Some(*ship_id);
+                Order::Intercept { ship_id, closeness } => {
+                    uplink.chasing = Some(lc_proto::Pursuit { quarry: *ship_id, closeness: *closeness });
                     Some(format!("closing on {}", ship_id.0))
                 }
+                // The server cut the drive of a ship that was flying the pursuit, and this folds
+                // the same cut at the same instant.
                 Order::BreakOff => {
                     uplink.chasing = None;
+                    if game.0.ship.motion.pursuing().is_some() {
+                        game.0.cut_drive_at(at_s);
+                    }
                     Some("broke off".into())
                 }
                 // Nothing to fold into the ship's motion. A transmission is an event, and the
@@ -522,6 +532,11 @@ fn fold(
         }
         Outbound::Throttled { retry_after_ticks } => {
             warn!(retry_after_ticks, "throttled");
+        }
+        Outbound::Pursuing { ship_id, pursuit } => {
+            if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
+                uplink.chasing = Some(pursuit);
+            }
         }
     }
 }

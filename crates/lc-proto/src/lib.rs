@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 18;
+pub const PROTOCOL_VERSION: u32 = 19;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -220,6 +220,41 @@ pub enum Motive {
         target: ShipId,
         clock_base_s: f64,
     },
+    /// Closing on, or holding station beside, a craft reckoned along its conic about a body.
+    ///
+    /// The [`Motive::Rendezvous`] numbers, read differently: the frame is the conic through the
+    /// sighting, which the receiver re-solves against its own copy of the system as it does a
+    /// [`Motive::Falling`], and the offsets are Galilean in it. Appended last.
+    Consort {
+        from_ly: [f64; 3],
+        beta0: [f64; 3],
+        to_ly: [f64; 3],
+        start_s: f64,
+        drive: Drive,
+        frame_from_ly: [f64; 3],
+        frame_beta: [f64; 3],
+        since_t: f64,
+        target: ShipId,
+        clock_base_s: f64,
+    },
+}
+
+/// How close a craft hangs about once it has matched with its quarry. Mirrors
+/// `lc_world::pursuit::Closeness`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Closeness {
+    /// Formation flying, a few combined hull lengths off.
+    #[default]
+    Company,
+    /// A kilometre of clear space between the hulls.
+    Intimate,
+}
+
+/// A standing intercept: who, and how close.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pursuit {
+    pub quarry: ShipId,
+    pub closeness: Closeness,
 }
 
 /// A ship's whole state of motion.
@@ -288,9 +323,12 @@ pub enum Order {
     /// The quarry is named by its identifier, which a client can only have because it was told
     /// about it — see [`Presence`]. There is no way to spell an intercept of a craft whose
     /// light has not arrived.
-    Intercept { ship_id: ShipId },
-    /// Give up a standing [`Order::Intercept`]. What the ship is doing afterwards is whatever
-    /// it was doing a moment before: breaking off cancels the policy, not the trajectory.
+    ///
+    /// Sent again for the same quarry with another closeness, it closes in or stands off.
+    Intercept { ship_id: ShipId, closeness: Closeness },
+    /// Give up a standing [`Order::Intercept`], with no further corrections: the drive is cut
+    /// and the ship keeps whatever velocity the approach or the station left it with, on whatever
+    /// conic that is.
     BreakOff,
 }
 
@@ -559,6 +597,13 @@ pub enum Outbound {
     /// fixed. Nothing about the world leaks through it — it is a fact about the client's own
     /// sending and reveals nothing that was withheld.
     Throttled { retry_after_ticks: u32 },
+    /// The standing intercept a ship has, stated on sign-in.
+    ///
+    /// Every other change to it is an order the client sent and saw accepted. A pursuit
+    /// outlives the connection that ordered it — a ship goes on hanging about with its quarry
+    /// while its pilot is away — so a client coming back has to be told there is one, or it
+    /// has no way to break it off. Appended last.
+    Pursuing { ship_id: ShipId, pursuit: Pursuit },
 }
 
 /// Why an intent was not acted on.
@@ -624,7 +669,7 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 pub mod golden {
     /// `Outbound::Welcome { .., ship: Motion { at [4.2, 0, 0], holding a 12 Mm orbit of Earth } }`
     pub const WELCOME: &[u8] = &[
-        0, 7, 18, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        0, 7, 19, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
         204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -650,7 +695,7 @@ pub mod golden {
     /// Pinned because it is now the message that decides whether anyone gets in at all. A
     /// field moving here is a server reading someone else's ticket as this one's.
     pub const HELLO: &[u8] = &[
-        0, 18, 5, 97, 46, 98, 46, 99,
+        0, 19, 5, 97, 46, 98, 46, 99,
     ];
 
     pub const SET_COURSE: &[u8] = &[
@@ -697,7 +742,7 @@ pub mod golden {
     /// Pinned beside the rendezvous for the same reason, and one more: its acceleration is the
     /// only number on this wire that is a *measurement* of somebody else's burn.
     pub const ESCORT: &[u8] = &[
-        0, 7, 18, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        0, 7, 19, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
         204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -715,7 +760,7 @@ pub mod golden {
     ];
 
     pub const RENDEZVOUS: &[u8] = &[
-        0, 7, 18, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        0, 7, 19, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
         204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -730,12 +775,32 @@ pub mod golden {
         0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         112, 111, 43, 65, 14, 0, 0, 0, 0, 0, 255, 244, 64,
     ];
-    /// `Inbound::Act(Intent { ship_id: 42, order: Intercept { ship_id: 7 }, .. })`
+    /// `Outbound::Welcome { .., ship: Motion { .., motive: Consort { target: 7, .. } } }`
+    ///
+    /// The rendezvous numbers in a falling frame, pinned for the rendezvous's reason.
+    pub const CONSORT: &[u8] = &[
+        0, 7, 19, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
+        245, 64, 0, 0, 0, 0, 0, 0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0,
+        56, 156, 108, 65, 154, 153, 153, 153, 153, 153, 169, 63, 7, 149, 214, 38, 232, 11,
+        46, 17, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        252, 169, 241, 210, 77, 98, 80, 191, 0, 0, 0, 0, 0, 0, 0, 0, 17, 234, 45, 129, 153,
+        151, 113, 61, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 119,
+        43, 65, 0, 0, 0, 0, 0, 0, 20, 64, 43, 135, 22, 217, 206, 247, 239, 63, 0, 0, 0, 0,
+        56, 156, 108, 65, 154, 153, 153, 153, 153, 153, 169, 63, 205, 204, 204, 204, 204,
+        204, 16, 64, 149, 214, 38, 232, 11, 46, 17, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        112, 111, 43, 65, 14, 0, 0, 0, 0, 0, 255, 244, 64,
+    ];
+
+    /// `Inbound::Act(Intent { ship_id: 42, order: Intercept { ship_id: 7, closeness: Intimate }, .. })`
     ///
     /// Pinned because it names a *ship*, and a shifted field is an intercept of whoever the
     /// bytes happen to spell.
     pub const INTERCEPT: &[u8] = &[
-        1, 84, 5, 14, 128, 137, 122,
+        1, 84, 5, 14, 1, 128, 137, 122,
     ];
 
 }
@@ -945,10 +1010,41 @@ mod tests {
         }
     }
 
+    /// The rendezvous numbers again, in a frame that falls.
+    fn consort() -> Outbound {
+        let Outbound::Welcome { client_id, protocol, ship_id, now_t, name, rate, ship } =
+            rendezvous()
+        else {
+            unreachable!("the rendezvous fixture is a welcome")
+        };
+        let Motive::Rendezvous {
+            from_ly, beta0, to_ly, start_s, drive, frame_from_ly, frame_beta, since_t, target,
+            clock_base_s,
+        } = ship.motive.clone()
+        else {
+            unreachable!("the rendezvous fixture is a rendezvous")
+        };
+        Outbound::Welcome {
+            client_id,
+            protocol,
+            ship_id,
+            now_t,
+            name,
+            rate,
+            ship: Motion {
+                motive: Motive::Consort {
+                    from_ly, beta0, to_ly, start_s, drive, frame_from_ly, frame_beta, since_t,
+                    target, clock_base_s,
+                },
+                ..ship
+            },
+        }
+    }
+
     fn intercept() -> Inbound {
         Inbound::Act(Intent {
             ship_id: ShipId(42),
-            order: Order::Intercept { ship_id: ShipId(7) },
+            order: Order::Intercept { ship_id: ShipId(7), closeness: Closeness::Intimate },
             issued_at_client_t: 1_000_000,
         })
     }
@@ -1001,6 +1097,11 @@ mod tests {
             "Motive::Escort changed shape at protocol version {PROTOCOL_VERSION}",
         );
         assert_eq!(
+            encode(&consort()),
+            golden::CONSORT,
+            "Motive::Consort changed shape at protocol version {PROTOCOL_VERSION}",
+        );
+        assert_eq!(
             encode(&intercept()),
             golden::INTERCEPT,
             "Order::Intercept changed shape at protocol version {PROTOCOL_VERSION}",
@@ -1021,6 +1122,11 @@ mod tests {
             Outbound::Clock { now_t: 1_000_000, rate: 1.0 },
             Outbound::Refused { ship_id: ShipId(-3), reason: Refusal::NotYours },
             Outbound::WrongProtocol { server: 9 },
+            Outbound::Pursuing {
+                ship_id: ShipId(42),
+                pursuit: Pursuit { quarry: ShipId(7), closeness: Closeness::Intimate },
+            },
+            consort(),
         ];
         for message in out {
             let bytes = encode(&message);

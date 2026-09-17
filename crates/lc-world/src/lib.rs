@@ -11,6 +11,7 @@
 pub mod attitude;
 pub mod boost;
 pub mod coast;
+pub mod consort;
 pub mod craft;
 pub mod distribution;
 pub mod emission;
@@ -37,6 +38,7 @@ pub mod star;
 pub mod surface;
 pub mod system;
 pub mod transfer;
+pub mod worldline;
 
 pub use distribution::{Distribution, Inclination};
 pub use emission::{Body, EmissionModel, invert_moments};

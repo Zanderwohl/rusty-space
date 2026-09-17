@@ -157,16 +157,55 @@ Across a whole Oort chase the drive reverses eleven times, where it reversed eig
 
 Only a *lit* quarry, because a pursuer can see a plume. A quarry holding an orbit accelerates too,
 by gravity, and so does the pursuer; escorting it would chase where the planet takes it while
-ignoring what the planet does to the ship chasing. An escort that sees its quarry cut the drive
+ignoring what the planet does to the ship chasing — it is reckoned along its conic instead, see
+below. An escort that sees its quarry cut the drive where there is no conic to reckon along
 stays an escort at zero acceleration rather than falling back to a rendezvous, because a
 rendezvous that arrives goes ballistic — and a ship coasting outward at a good fraction of `c` is
 the most expensive thing there is to keep patching into spheres of influence.
 
+**A quarry that is falling is reckoned along its conic** (`Motive::Consort`, `lc_world::consort`).
+A rendezvous reckons in a straight line and plans in a frame that does not fall, which between
+the stars is exact and inside a system is not: a quarry in low orbit of Jupiter is bent off that
+line at nearly two gravities, a plan ignoring it is ninety kilometres out a hundred seconds in,
+and pursuers rode relative orbits tens to thousands of kilometres across. So inside a system,
+below a thousandth of `c`, the conic through the sighting is solved — the same `Coast` a
+`Motive::Falling` is, re-solved at the far end from the same numbers — and the approach is
+planned Galilean in the frame that falls along it. Both ships fall together, so what is left is
+the relative motion, and a plan that ends at rest there *stays* matched: it never ends, like an
+escort, and holds its offset for as long as the quarry holds its arc. What that ignores is the
+tidal difference between two falls, milligravities a thousand kilometres apart, which is the
+bookkeeping a held station already waves away. A quarry that manoeuvres leaves its conic and is
+re-solved against when the light of it arrives.
+
+Two things had to be true of the numbers for that to hold a kilometre. An orbit station's
+velocity is analytic — the body's as em-sim states it, plus the circle's — rather than
+differenced from positions, which read em-sim's own disagreement between its positions and
+velocities (nine metres a second about Jupiter) back in, and at four light-years out, where a
+light-year coordinate is good to eight metres, a metre and a half a second of rounding as well.
+With both, a consort holds its standoff to metres an orbit.
+
+**How close is a setting of the policy**, `Closeness`, and sending the intercept again with the
+other one closes in or stands off. *Company* is five combined hull lengths, a deadband from half
+of it to twice it. *Intimate* is a kilometre of clear space between the hulls — so half of each
+hull plus a kilometre between centres, which keeps a small ship out of a fifty-kilometre one —
+held to a quarter of a kilometre either side, and re-solved when the quarry strays an eighth.
+A plan for one closeness is a reason to re-plan under the other.
+
+**A pursuit outlives its pilot's connection.** The policy belongs to the craft, not the socket,
+so a ship goes on hanging about with its quarry while nobody is signed in; a checkpoint writes it
+down with the craft (save format 3, which still reads format 2 as a craft with none), and a
+pilot signing back in is told with `Outbound::Pursuing` straight after the welcome — the only
+way it could learn there is a policy to break off. **Breaking off is no further corrections**:
+the policy goes and the drive is cut, so the ship keeps whatever velocity the approach or the
+station left it with, on whatever conic that is. The authority does the same when it gives a
+pursuit up because the quarry went out of sight, and tells the owner what it is flying now.
+
 `Outbound::Flying` exists because of this and nothing else. A client folds its own orders, but
 it cannot fold a re-solve it did not ask for and could not reproduce, so the authority states
 what the ship is now flying — the same `Motion` a welcome carries. It leaks nothing: a
-`Motive::Rendezvous` is relative offsets and one sighting, and a `Motive::Escort` adds only the
-acceleration the pursuer measured from two of them.
+`Motive::Rendezvous` is relative offsets and one sighting, a `Motive::Consort` is the same
+numbers in a falling frame, and a `Motive::Escort` adds only the acceleration the pursuer
+measured from two of them.
 
 **The cost is quadratic and is not yet paid for.** One retarded solve per observer per craft
 per tick is fine for the handful a shard carries today and is not fine for a busy system: a

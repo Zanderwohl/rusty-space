@@ -62,6 +62,88 @@ pub const DRIFT_ALLOWANCE: f64 = 2.0;
 /// the quarry.
 pub const REPLAN_FRACTION: f64 = 0.25;
 
+/// How far apart two hulls hang about when they are close enough to see each other, metres of
+/// clear space between them.
+///
+/// Between the hulls rather than between their centres, so a fifty-kilometre ship is not
+/// parked inside by a small one sidling up to "a kilometre".
+pub const INTIMATE_CLEARANCE_M: f64 = 1_000.0;
+
+/// How far either side of the intimate standoff a craft may wander before it corrects, metres.
+pub const INTIMATE_SLACK_M: f64 = 250.0;
+
+/// How close to the standoff counts as being on it, as a fraction of it. Inside this an order
+/// to take station has nothing to fly.
+pub const ON_STATION_FRACTION: f64 = 0.05;
+
+/// How close a craft hangs about once it has matched with its quarry.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Closeness {
+    /// [`STANDOFF_LENGTHS`] combined hull lengths: formation flying, where neither is
+    /// manoeuvring inside the other's hull.
+    #[default]
+    Company,
+    /// Within sight of the other's hull: [`INTIMATE_CLEARANCE_M`] of space between them, held
+    /// to [`INTIMATE_SLACK_M`].
+    Intimate,
+}
+
+impl Closeness {
+    /// The proper distance between centres a craft of `mine` metres keeps from one of `theirs`.
+    pub fn standoff_m(self, mine: f64, theirs: f64) -> f64 {
+        match self {
+            Closeness::Company => (mine + theirs) * STANDOFF_LENGTHS,
+            Closeness::Intimate => 0.5 * (mine + theirs) + INTIMATE_CLEARANCE_M,
+        }
+    }
+
+    /// The nearest and furthest a craft on station may be before it closes again, metres.
+    ///
+    /// A deadband and not a tolerance; see [`DRIFT_ALLOWANCE`].
+    pub fn band_m(self, standoff_m: f64) -> (f64, f64) {
+        match self {
+            Closeness::Company => (standoff_m / DRIFT_ALLOWANCE, standoff_m * DRIFT_ALLOWANCE),
+            Closeness::Intimate => (standoff_m - INTIMATE_SLACK_M, standoff_m + INTIMATE_SLACK_M),
+        }
+    }
+
+    /// How far the quarry may stray from a standing plan's model of it before the plan is
+    /// re-solved, metres. See [`REPLAN_FRACTION`].
+    ///
+    /// Half the slack when intimate, so the correction lands inside the band rather than on its
+    /// edge.
+    pub fn replan_m(self, standoff_m: f64) -> f64 {
+        match self {
+            Closeness::Company => standoff_m * REPLAN_FRACTION,
+            Closeness::Intimate => 0.5 * INTIMATE_SLACK_M,
+        }
+    }
+}
+
+impl From<lc_proto::Closeness> for Closeness {
+    fn from(closeness: lc_proto::Closeness) -> Self {
+        match closeness {
+            lc_proto::Closeness::Company => Closeness::Company,
+            lc_proto::Closeness::Intimate => Closeness::Intimate,
+        }
+    }
+}
+
+impl From<Closeness> for lc_proto::Closeness {
+    fn from(closeness: Closeness) -> Self {
+        match closeness {
+            Closeness::Company => lc_proto::Closeness::Company,
+            Closeness::Intimate => lc_proto::Closeness::Intimate,
+        }
+    }
+}
+
+/// Whether a plan ending at `to_ly` from its quarry is a plan for this standoff. A plan for the
+/// other closeness is not, which is how changing it gets a fresh one.
+pub fn aims_for(to_ly: DVec3, standoff_m: f64) -> bool {
+    (to_ly.length() * M_PER_LY - standoff_m).abs() <= standoff_m * ON_STATION_FRACTION
+}
+
 /// A craft as its pursuer currently sees it: a sighting, and therefore the past.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sighting {
@@ -331,29 +413,30 @@ impl Rendezvous {
     }
 }
 
-/// How far a craft of `mine` metres hangs back from one of `theirs`, metres.
+/// How far a craft of `mine` metres hangs back from one of `theirs` in company, metres.
 pub fn standoff_m(mine: f64, theirs: f64) -> f64 {
-    (mine + theirs) * STANDOFF_LENGTHS
+    Closeness::Company.standoff_m(mine, theirs)
 }
 
 /// Plan an approach, or say why there is not one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Refused {
-    /// Already on station. Nothing to fly; hold and watch the deadband.
+    /// Already on station, within [`ON_STATION_FRACTION`] of it. Nothing to fly; hold and watch
+    /// the deadband.
     AlreadyThere,
     /// The quarry is at or past `c`, where there is no frame to match with. Nothing a ship can
     /// do reaches this; a corrupt or hostile number can.
     TooFast,
 }
 
-/// Solve the approach from where the pursuer is to a standoff off the quarry.
+/// Solve the approach from where the pursuer is to `standoff_m` off the quarry.
 ///
 /// `now_s` is the world time the plan is made at, which is *later* than the sighting it is made
 /// from — the light took time to arrive. The gap is carried by the dead reckoning rather than
 /// ignored.
 pub fn approach(
     pursuer: &ShipState,
-    pursuer_length_m: f64,
+    standoff_m: f64,
     seen: &Sighting,
     now_s: f64,
     drive: Drive,
@@ -370,14 +453,15 @@ pub fn approach(
         },
         seen.beta,
     );
-    let standoff_ls = standoff_m(pursuer_length_m, seen.length_m) / C_M_S;
+    let standoff_ls = standoff_m / C_M_S;
     let range = here.x.length();
-    if range <= standoff_ls {
+    // Either side of it: a craft told to stand further off than it is has somewhere to go too.
+    if (range - standoff_ls).abs() <= standoff_ls * ON_STATION_FRACTION {
         return Err(Refused::AlreadyThere);
     }
     // Stopping short on the side the pursuer is already on. Aiming at the quarry itself is
     // aiming to collide, and aiming at any other side is a plan that crosses through it.
-    let to = here.x / range * standoff_ls;
+    let to = here.x.normalize_or(DVec3::X) * standoff_ls;
     Ok(Approach {
         from_ly: here.x / JULIAN_YEAR_S,
         beta0: boost::velocity_to_frame(pursuer.beta, seen.beta),
@@ -394,31 +478,44 @@ pub fn approach(
 
 /// Whether a standing plan is still worth flying, given the newest sighting.
 ///
-/// Three ways it stops being: the quarry is not where the plan said it would be, the plan has
-/// run out, or there is no plan.
-pub fn wants_replan(motive: &Motive, seen: &Sighting, pursuer_length_m: f64, now_s: f64) -> bool {
-    let standoff_ly = standoff_m(pursuer_length_m, seen.length_m) / M_PER_LY;
+/// Four ways it stops being: the quarry is not where the plan said it would be, the plan has
+/// run out, it is for a different standoff, or there is no plan. `replan_m` is
+/// [`Closeness::replan_m`].
+pub fn wants_replan(
+    motive: &Motive,
+    seen: &Sighting,
+    standoff_m: f64,
+    replan_m: f64,
+    now_s: f64,
+) -> bool {
+    let replan_ly = replan_m / M_PER_LY;
     // An escort does not run out: being alongside a burning quarry is somewhere to stay. Only
     // the quarry leaving the burn it was assumed to hold is a reason to plan again.
     if let Motive::Escort(plan) = motive {
-        return plan.target != seen.target || plan.divergence(seen) > standoff_ly * REPLAN_FRACTION;
+        return plan.target != seen.target
+            || !aims_for(plan.cruise.to_ly, standoff_m)
+            || plan.divergence(seen) > replan_ly;
     }
     let Motive::Rendezvous(plan) = motive else { return true };
-    if plan.target != seen.target || plan.has_arrived(now_s) {
+    if plan.target != seen.target
+        || plan.has_arrived(now_s)
+        || !aims_for(plan.cruise.to_ly, standoff_m)
+    {
         return true;
     }
-    plan.divergence(seen) > standoff_ly * REPLAN_FRACTION
+    plan.divergence(seen) > replan_ly
 }
 
-/// Whether a craft on station has wandered far enough to be worth closing again.
+/// Whether a craft on station has wandered out of its band, [`Closeness::band_m`], far enough
+/// to be worth closing again.
 ///
 /// Measured in the frame the pair share, because the standoff is a proper distance. Two ships
 /// running together at speed are closer in the world's reckoning than in their own, and a
 /// deadband applied to the world's number would let them converge as they accelerated.
-pub fn wants_closing(pursuer: &ShipState, pursuer_length_m: f64, seen: &Sighting, now_s: f64) -> bool {
-    let standoff_ls = standoff_m(pursuer_length_m, seen.length_m) / C_M_S;
+pub fn wants_closing(pursuer: &ShipState, band_m: (f64, f64), seen: &Sighting, now_s: f64) -> bool {
     let separation = (pursuer.position_ly - seen.reckoned_at(now_s)) * JULIAN_YEAR_S;
-    boost::separation_in_frame(separation, seen.beta) > standoff_ls * DRIFT_ALLOWANCE
+    let apart_m = boost::separation_in_frame(separation, seen.beta) * C_M_S;
+    apart_m < band_m.0 || apart_m > band_m.1
 }
 
 #[cfg(test)]
@@ -426,6 +523,8 @@ mod tests {
     use super::*;
 
     const KM: f64 = 1.0e3 / M_PER_LY;
+    /// Two five-hundred-metre hulls in company.
+    const STANDOFF: f64 = (500.0 + 500.0) * STANDOFF_LENGTHS;
 
     fn quarry(at_km: f64, beta: DVec3) -> Sighting {
         Sighting {
@@ -456,7 +555,7 @@ mod tests {
     fn an_approach_ends_alongside_and_moving_at_the_quarrys_speed() {
         let drifting = DVec3::Y * 1.0e-4;
         let seen = quarry(1_000.0, drifting);
-        let plan = approach(&pursuer(), 500.0, &seen, 0.0, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT).expect("a plan");
 
         let done = plan.since_t + plan.cruise.duration_s();
         let (at, beta) = plan.state_at(done);
@@ -481,7 +580,7 @@ mod tests {
         let seen = quarry(1_000.0, DVec3::Y * 1.0e-5);
         let mut me = pursuer();
         me.position_ly = DVec3::new(0.0, 3.0 * KM, -2.0 * KM);
-        let plan = approach(&me, 500.0, &seen, 0.0, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&me, STANDOFF, &seen, 0.0, Drive::DEFAULT).expect("a plan");
         let (at, beta) = plan.state_at(0.0);
         assert!(at.distance(me.position_ly) < 1.0e-12 * KM, "started at {at}, not {}", me.position_ly);
         // Not exactly at rest, and the residual is not this module's. `Cruise::plan_from`
@@ -504,7 +603,7 @@ mod tests {
         let beta = DVec3::Y * 1.0e-4;
         let seen = quarry(1_000.0, beta);
         let hour = 3_600.0;
-        let plan = approach(&pursuer(), 500.0, &seen, hour, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&pursuer(), STANDOFF, &seen, hour, Drive::DEFAULT).expect("a plan");
         let moved = beta.length() * hour / JULIAN_YEAR_S;
         assert!(moved > 0.0, "premise: the quarry went somewhere in an hour");
         let reckoned = seen.reckoned_at(hour);
@@ -519,13 +618,13 @@ mod tests {
     #[test]
     fn only_a_manoeuvre_throws_a_plan_away() {
         let held = quarry(1_000.0, DVec3::Y * 1.0e-5);
-        let plan = approach(&pursuer(), 500.0, &held, 0.0, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&pursuer(), STANDOFF, &held, 0.0, Drive::DEFAULT).expect("a plan");
         let motive = Motive::Rendezvous(plan.clone());
 
         // The same quarry, seen again later, still on its course.
         let later = Sighting { position_ly: held.reckoned_at(600.0), emitted_s: 600.0, ..held };
         assert_eq!(plan.divergence(&later), 0.0, "dead reckoning is exact for a held course");
-        assert!(!wants_replan(&motive, &later, 500.0, 300.0));
+        assert!(!wants_replan(&motive, &later, STANDOFF, STANDOFF * REPLAN_FRACTION, 300.0));
 
         // And one that has been under thrust since.
         let standoff_ly = standoff_m(500.0, 500.0) / M_PER_LY;
@@ -533,7 +632,7 @@ mod tests {
             position_ly: later.position_ly + DVec3::Z * standoff_ly,
             ..later
         };
-        assert!(wants_replan(&motive, &swerved, 500.0, 300.0));
+        assert!(wants_replan(&motive, &swerved, STANDOFF, STANDOFF * REPLAN_FRACTION, 300.0));
     }
 
     /// A plan put back from its arguments is the same plan, not one that agrees to a
@@ -547,7 +646,7 @@ mod tests {
     fn a_plan_survives_being_reduced_to_its_arguments() {
         let seen = quarry(1_000.0, DVec3::Y * 1.0e-4);
         let chaser = pursuer();
-        let plan = approach(&chaser, 500.0, &seen, 120.0, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&chaser, STANDOFF, &seen, 120.0, Drive::DEFAULT).expect("a plan");
         assert_eq!(plan.recipe().solve(chaser.attitude), plan);
     }
 
@@ -555,13 +654,13 @@ mod tests {
     #[test]
     fn a_finished_or_misaddressed_plan_is_replanned() {
         let seen = quarry(1_000.0, DVec3::ZERO);
-        let plan = approach(&pursuer(), 500.0, &seen, 0.0, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT).expect("a plan");
         let done = plan.since_t + plan.cruise.duration_s() + 1.0;
-        assert!(wants_replan(&Motive::Rendezvous(plan.clone()), &seen, 500.0, done));
+        assert!(wants_replan(&Motive::Rendezvous(plan.clone()), &seen, STANDOFF, STANDOFF * REPLAN_FRACTION, done));
 
         let elsewhere = Sighting { target: ShipId(9), ..seen };
-        assert!(wants_replan(&Motive::Rendezvous(plan), &elsewhere, 500.0, 0.0));
-        assert!(wants_replan(&Motive::Drifting { from_ly: DVec3::ZERO, since_t: 0.0 }, &seen, 500.0, 0.0));
+        assert!(wants_replan(&Motive::Rendezvous(plan), &elsewhere, STANDOFF, STANDOFF * REPLAN_FRACTION, 0.0));
+        assert!(wants_replan(&Motive::Drifting { from_ly: DVec3::ZERO, since_t: 0.0 }, &seen, STANDOFF, STANDOFF * REPLAN_FRACTION, 0.0));
     }
 
     /// The standoff is set by both hulls, so a big ship is given room by a small one and not
@@ -576,11 +675,54 @@ mod tests {
     /// Already on station is not a failure and not a flight: there is nowhere to go.
     #[test]
     fn a_pursuer_already_alongside_is_refused_a_plan() {
-        let seen = quarry(0.001, DVec3::ZERO);
+        let seen = quarry(STANDOFF * 1.0e-3, DVec3::ZERO);
         assert_eq!(
-            approach(&pursuer(), 500.0, &seen, 0.0, Drive::DEFAULT),
+            approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT),
             Err(Refused::AlreadyThere),
         );
+    }
+
+    /// Too close is somewhere to go as well as too far, or standing off again after closing in
+    /// would be an order with nothing to fly.
+    #[test]
+    fn a_pursuer_inside_its_standoff_backs_off_to_it() {
+        let seen = quarry(1.0, DVec3::ZERO);
+        let plan = approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT).expect("a plan");
+        let (at, _) = plan.state_at(plan.since_t + world_duration(&plan));
+        let gap_m = at.distance(seen.position_ly) * M_PER_LY;
+        assert!((gap_m - STANDOFF).abs() < 1.0, "ended {gap_m} m off, wanted {STANDOFF}");
+    }
+
+    /// **Intimate is a kilometre of clear space**, whatever the two hulls measure: the distance
+    /// between centres grows by half of each, and the slack does not grow at all.
+    #[test]
+    fn intimate_is_a_kilometre_between_hulls() {
+        let small = Closeness::Intimate.standoff_m(500.0, 500.0);
+        assert_eq!(small, 1_500.0);
+        let large = Closeness::Intimate.standoff_m(500.0, 50_000.0);
+        assert_eq!(large - 0.5 * (500.0 + 50_000.0), INTIMATE_CLEARANCE_M);
+        assert_eq!(Closeness::Intimate.band_m(large), (large - 250.0, large + 250.0));
+        assert!(small < Closeness::Company.standoff_m(500.0, 500.0), "intimate is closer than company");
+        // And the deadband is on both sides.
+        let band = Closeness::Intimate.band_m(small);
+        let at = |m: f64| {
+            let mut me = pursuer();
+            me.position_ly = DVec3::X * m / M_PER_LY;
+            wants_closing(&me, band, &quarry(0.0, DVec3::ZERO), 0.0)
+        };
+        assert!(!at(1_400.0) && !at(1_700.0), "inside the slack");
+        assert!(at(1_200.0) && at(1_800.0), "outside it");
+    }
+
+    /// A plan for company is not a plan for intimacy, which is what changing it hangs on.
+    #[test]
+    fn a_plan_for_another_standoff_is_replanned() {
+        let seen = quarry(1_000.0, DVec3::ZERO);
+        let plan = approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT).expect("a plan");
+        let motive = Motive::Rendezvous(plan);
+        assert!(!wants_replan(&motive, &seen, STANDOFF, STANDOFF * REPLAN_FRACTION, 0.0));
+        let close = Closeness::Intimate.standoff_m(500.0, 500.0);
+        assert!(wants_replan(&motive, &seen, close, Closeness::Intimate.replan_m(close), 0.0));
     }
 
     /// The deadband. A craft on station holds until it has genuinely wandered, or a pair would
@@ -592,9 +734,9 @@ mod tests {
         let mut me = pursuer();
 
         me.position_ly = DVec3::X * standoff_ly * 1.5;
-        assert!(!wants_closing(&me, 500.0, &seen, 0.0), "inside the deadband");
+        assert!(!wants_closing(&me, Closeness::Company.band_m(STANDOFF), &seen, 0.0), "inside the deadband");
         me.position_ly = DVec3::X * standoff_ly * (DRIFT_ALLOWANCE + 0.1);
-        assert!(wants_closing(&me, 500.0, &seen, 0.0), "outside it");
+        assert!(wants_closing(&me, Closeness::Company.band_m(STANDOFF), &seen, 0.0), "outside it");
     }
 
     /// **A chase at any speed, and the match still comes out exact.**
@@ -615,7 +757,7 @@ mod tests {
         for beta in [0.5, 0.9, 0.99, 0.999, 0.9999] {
             let running = DVec3::Y * beta;
             let seen = quarry(1_000.0, running);
-            let plan = approach(&pursuer(), 500.0, &seen, 0.0, Drive::DEFAULT)
+            let plan = approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT)
                 .unwrap_or_else(|why| panic!("{beta}c was refused: {why:?}"));
 
             // Flown to the end, in world time.
@@ -644,9 +786,9 @@ mod tests {
     #[test]
     fn only_a_quarry_at_c_has_no_frame_to_match() {
         let seen = quarry(1_000.0, DVec3::Y * 0.9999);
-        assert!(approach(&pursuer(), 500.0, &seen, 0.0, Drive::DEFAULT).is_ok());
+        assert!(approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT).is_ok());
         let past = quarry(1_000.0, DVec3::Y * 1.5);
-        assert_eq!(approach(&pursuer(), 500.0, &past, 0.0, Drive::DEFAULT), Err(Refused::TooFast));
+        assert_eq!(approach(&pursuer(), STANDOFF, &past, 0.0, Drive::DEFAULT), Err(Refused::TooFast));
     }
 
     /// The world clock and the frame's are inverses of each other, which is what everything
@@ -655,7 +797,7 @@ mod tests {
     fn the_two_clocks_invert_each_other() {
         let running = DVec3::new(0.0, 0.8, -0.2);
         let seen = quarry(1_000.0, running);
-        let plan = approach(&pursuer(), 500.0, &seen, 0.0, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT).expect("a plan");
         let gamma = boost::gamma_of(running);
         for step in 0..12 {
             let elapsed = world_duration(&plan) * step as f64 / 11.0;
@@ -675,7 +817,7 @@ mod tests {
     fn a_slow_chase_is_the_answer_the_old_arithmetic_gave() {
         let creeping = DVec3::Y * 1.0e-5;
         let seen = quarry(1_000.0, creeping);
-        let plan = approach(&pursuer(), 500.0, &seen, 0.0, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT).expect("a plan");
         // The frame's clock and the world's run together to within a part in 1e10.
         let elapsed = world_duration(&plan);
         assert!((plan.frame_time_at(elapsed) - elapsed).abs() < elapsed * 1.0e-9);

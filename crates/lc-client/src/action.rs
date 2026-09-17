@@ -75,9 +75,11 @@ pub enum Action {
     SetCourse(Course),
     /// Proper acceleration for the next crossing, in g.
     SetDriveAccel(f64),
-    /// Close on another ship, match its velocity, and hold station alongside it.
-    Intercept(lc_proto::ShipId),
-    /// Give up a standing intercept. The ship keeps flying whatever it was flying.
+    /// Close on another ship, match its velocity, and hold station alongside it at this
+    /// closeness. Sent again for the same ship, it closes in or stands off.
+    Intercept(lc_proto::ShipId, lc_proto::Closeness),
+    /// Give up a standing intercept, with no further corrections: the drive is cut and the ship
+    /// keeps whatever velocity it has.
     BreakOff,
 
     // --- appearance -------------------------------------------------------------------
@@ -269,9 +271,9 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         // what makes it stand is the authority re-solving it against sightings; a client
         // holding the policy itself would be a client steering by a quarry it can only see
         // the past of, which is the one thing the design will not have.
-        Action::Intercept(ship_id) => {
+        Action::Intercept(ship_id, closeness) => {
             if session.remote {
-                effects.push(Effect::Send(lc_proto::Order::Intercept { ship_id }));
+                effects.push(Effect::Send(lc_proto::Order::Intercept { ship_id, closeness }));
             } else {
                 effects.push(Effect::Notify("no server, so nobody to close on".into()));
             }
