@@ -24,6 +24,7 @@ pub fn bindings() -> Vec<(KeyCode, Action)> {
         (KeyCode::F3, Action::TogglePanel(Panel::Debug)),
         (KeyCode::KeyF, Action::TogglePanel(Panel::Flight)),
         (KeyCode::F4, Action::TogglePanel(Panel::Tuning)),
+        (KeyCode::KeyR, Action::TogglePanel(Panel::Chat)),
         (KeyCode::Digit1, Action::SetBandPreset(0)),
         (KeyCode::Digit2, Action::SetBandPreset(1)),
         (KeyCode::Digit3, Action::SetBandPreset(2)),
@@ -164,6 +165,7 @@ pub fn grab_transition(
 /// without a pointing device at all.
 pub fn look_around(
     keys: Res<ButtonInput<KeyCode>>,
+    egui: Res<EguiWantsInput>,
     looking: Res<Looking>,
     motion: Res<AccumulatedMouseMotion>,
     time: Res<Time>,
@@ -172,11 +174,16 @@ pub fn look_around(
     let mut yaw = 0.0;
     let mut pitch = 0.0;
 
+    // The arrows only. An arrow key in a text field moves the cursor, and turning the ship as
+    // well would make going back to fix a typo swing the whole view. The mouse below is
+    // unaffected, because holding the look button is not something a text field can mean.
     let step = LOOK_STEP * time.delta_secs_f64() * 60.0;
-    for (key, (y, p)) in held_bindings() {
-        if keys.pressed(key) {
-            yaw += y * step;
-            pitch += p * step;
+    if !egui.wants_any_keyboard_input() {
+        for (key, (y, p)) in held_bindings() {
+            if keys.pressed(key) {
+                yaw += y * step;
+                pitch += p * step;
+            }
         }
     }
     if looking.0 {
@@ -191,7 +198,19 @@ pub fn look_around(
 }
 
 /// Turn key presses into requests.
-pub fn read_keys(keys: Res<ButtonInput<KeyCode>>, mut out: MessageWriter<Requested>) {
+///
+/// **Silent while the interface is taking text.** Every binding here is a bare letter, so a
+/// player typing a message into the radio window would otherwise open the telescope, cut the
+/// drive and fly somewhere, one keystroke at a time. Nothing in the game had a text field until
+/// there was something to say into one, which is why this could be left out until now.
+pub fn read_keys(
+    keys: Res<ButtonInput<KeyCode>>,
+    egui: Res<EguiWantsInput>,
+    mut out: MessageWriter<Requested>,
+) {
+    if egui.wants_any_keyboard_input() {
+        return;
+    }
     for (key, action) in bindings() {
         if keys.just_pressed(key) {
             out.write(Requested(action));

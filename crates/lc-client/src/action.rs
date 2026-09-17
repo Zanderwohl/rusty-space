@@ -101,6 +101,17 @@ pub enum Action {
     StageDemo(String),
     /// Watch from another craft. `None` is back to one's own.
     WatchFrom(Option<lc_proto::ShipId>),
+
+    // --- radio ------------------------------------------------------------------------
+    /// Show this craft's conversation, opening the window if it is closed. What a green line
+    /// in the events box does when it is clicked.
+    OpenChat(lc_proto::ShipId),
+    /// Change which conversation the window is showing. `None` is none of them.
+    ChatWith(Option<lc_proto::ShipId>),
+    /// Put a message on the air.
+    Say { to: lc_proto::ShipId, aim: lc_proto::Aim, secrecy: lc_proto::Secrecy, body: String },
+    /// Put this ship's public key on the air, so `to` can seal messages back.
+    OfferKey { to: lc_proto::ShipId, aim: lc_proto::Aim },
 }
 
 /// What an action needs from outside: the few things the core cannot do itself.
@@ -281,6 +292,37 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::BreakOff => {
             if session.remote {
                 effects.push(Effect::Send(lc_proto::Order::BreakOff));
+            }
+        }
+
+        Action::OpenChat(ship_id) => {
+            ui.chat_with = Some(ship_id);
+            ui.open(Panel::Chat);
+        }
+        Action::ChatWith(ship_id) => ui.chat_with = ship_id,
+        // Sent and never applied locally, for the same reason a course is: what a transmission
+        // becomes is an event with an identifier, and the identifier is the server's to mint.
+        // The client learns of its own message when the acceptance comes back.
+        Action::Say { to, aim, secrecy, body } => {
+            let body = body.trim().to_string();
+            if body.is_empty() {
+                // Nothing to report. An empty field is a keystroke, not a mistake.
+            } else if !session.remote {
+                effects.push(Effect::Notify("no server, so nobody to talk to".into()));
+            } else if body.len() > lc_proto::MESSAGE_LIMIT {
+                effects.push(Effect::Notify(format!(
+                    "too long by {} characters",
+                    body.len() - lc_proto::MESSAGE_LIMIT
+                )));
+            } else {
+                effects.push(Effect::Send(lc_proto::Order::Say { to, aim, secrecy, body }));
+            }
+        }
+        Action::OfferKey { to, aim } => {
+            if session.remote {
+                effects.push(Effect::Send(lc_proto::Order::OfferKey { to, aim }));
+            } else {
+                effects.push(Effect::Notify("no server, so nobody to give a key to".into()));
             }
         }
         Action::SetCourse(course) => {

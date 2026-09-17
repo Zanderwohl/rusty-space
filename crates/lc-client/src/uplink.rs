@@ -233,6 +233,8 @@ pub struct Uplink {
     pub round_trip_s: Option<f64>,
     /// Drive events per craft, oldest first. Kept across statements, which replace contacts.
     drives: std::collections::HashMap<ShipId, Vec<DriveAt>>,
+    /// Every conversation this ship is in. See [`crate::chat`].
+    pub chat: crate::chat::Chat,
 }
 
 /// The rate a shard runs at, and what a server that says nothing is taken to mean.
@@ -500,6 +502,36 @@ fn fold(
         }
         Outbound::Sightings(cleared) => {
             let seen: Vec<Sighting> = cleared.into_iter().map(|c| c.into_inner()).collect();
+            for sighting in seen
+                .iter()
+                .filter(|s| matches!(s.kind, lc_proto::kind::MESSAGE | lc_proto::kind::KEY))
+            {
+                let Ok(spoken) = serde_json::from_str::<lc_proto::Spoken>(&sighting.payload)
+                else {
+                    continue;
+                };
+                let from = ShipId(sighting.source_id);
+                let name = uplink.contacts.iter().find(|c| c.ship_id == from).map(|c| c.name.clone());
+                let key = sighting.kind == lc_proto::kind::KEY;
+                // Said before it is folded, because what the box shows is what this craft can
+                // read — which for somebody else's sealed mail is the fact of it and no more.
+                let said = match (key, &spoken.body) {
+                    (true, _) => "sent you its key".to_string(),
+                    (false, Some(body)) => body.clone(),
+                    (false, None) => "(sealed, and not for you)".to_string(),
+                };
+                let who = name.clone().unwrap_or_else(|| format!("ship {}", from.0));
+                ui.0.heard(from, format!("{who}: {said}"), sighting.arrive_t as f64 * 1e-6);
+                uplink.chat.received(
+                    from,
+                    name.as_deref(),
+                    sighting.event_id,
+                    spoken,
+                    key,
+                    sighting.emitted_t as f64 * 1e-6,
+                    sighting.arrive_t as f64 * 1e-6,
+                );
+            }
             for sighting in seen.iter().filter(|s| s.kind == lc_proto::kind::DRIVE) {
                 let Ok(change) = serde_json::from_str::<lc_proto::DriveChange>(&sighting.payload) else {
                     continue;
@@ -515,7 +547,7 @@ fn fold(
             let excess = uplink.seen.len().saturating_sub(REMEMBERED);
             uplink.seen.drain(..excess);
         }
-        Outbound::Accepted { ship_id, at_t, order, .. } => {
+        Outbound::Accepted { ship_id, event_id, at_t, order } => {
             // **Applied at the server's time, with the server's numbers.** Both are clamped
             // and neither is what was sent, so folding what was sent instead is how a client
             // ends up somewhere the server does not have it.
@@ -593,6 +625,27 @@ fn fold(
                 // Nothing to fold into the ship's motion. A transmission is an event, and the
                 // client learns of it the same way anyone else does: when its light arrives.
                 Order::Transmit { .. } | Order::Burn { .. } => None,
+                // Recorded against the identifier the server minted, which is the only thing
+                // an acknowledgement will ever name it by. Not shown in the events box: that
+                // box is for what happened *to* this ship, and the chat window already has it.
+                Order::Say { to, secrecy, body, .. } => {
+                    let name = uplink.contacts.iter().find(|c| c.ship_id == *to).map(|c| c.name.clone());
+                    uplink.chat.sent(
+                        *to,
+                        name.as_deref(),
+                        event_id,
+                        Some(body.clone()),
+                        matches!(secrecy, lc_proto::Secrecy::Sealed),
+                        false,
+                        at_s,
+                    );
+                    None
+                }
+                Order::OfferKey { to, .. } => {
+                    let name = uplink.contacts.iter().find(|c| c.ship_id == *to).map(|c| c.name.clone());
+                    uplink.chat.sent(*to, name.as_deref(), event_id, None, false, true, at_s);
+                    None
+                }
             };
             info!(?ship_id, at_t, ?order, "accepted");
             uplink.applied = said;
@@ -623,6 +676,9 @@ fn fold(
                 Refusal::NotYours | Refusal::NotYou => "that is not your ship".into(),
                 Refusal::NotInSight => "there is nothing there to close on".into(),
                 Refusal::TooFast => "too fast to match; kill the closing speed first".into(),
+                // Their key has to arrive before it can be used, and asking for it is a
+                // message like any other — which is to say, it takes as long as the light does.
+                Refusal::NoKey => "no key for them yet; send yours and ask for theirs".into(),
             });
         }
         Outbound::Throttled { retry_after_ticks } => {
@@ -631,6 +687,17 @@ fn fold(
         Outbound::Pursuing { ship_id, pursuit } => {
             if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
                 uplink.chasing = Some(pursuit);
+            }
+        }
+        Outbound::Backlog { messages, keys } => {
+            // Nothing is announced. A transcript is what was *already* said, and a box of
+            // notifications about years-old messages on every sign-in would bury whatever is
+            // actually happening now.
+            let count = messages.len();
+            uplink.chat.restore(messages, keys);
+            if count > 0 {
+                let at = game.0.coordinate_time_s();
+                ui.0.notify(format!("{count} messages in the log"), at);
             }
         }
     }
@@ -1107,6 +1174,110 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn heard(event_id: i64, from: i64, spoken: lc_proto::Spoken, kind: i16) -> Outbound {
+        let sighting = Sighting {
+            event_id,
+            source_id: from,
+            arrive_t: 4_000_000,
+            emitted_t: 1_000_000,
+            direction: [1.0, 0.0, 0.0],
+            strength: 1.0,
+            kind,
+            payload: serde_json::to_string(&spoken).unwrap(),
+        };
+        Outbound::Sightings(vec![
+            lc_proto::Cleared::<Sighting>::clear(sighting, 4_000_000, 0.0).unwrap(),
+        ])
+    }
+
+    /// A message arriving is two things at once: a line in the transcript, and a green line in
+    /// the events box that opens it. The second is what makes the first findable.
+    #[test]
+    fn a_message_arriving_is_both_a_line_and_a_notice() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let spoken = lc_proto::Spoken {
+            to: 7,
+            sealed: false,
+            body: Some("are you there".into()),
+            acks: Vec::new(),
+        };
+        fold(&mut uplink, &mut game, &mut ui, heard(99, 2, spoken, lc_proto::kind::MESSAGE));
+
+        let conversation = uplink.chat.get(ShipId(2)).expect("a conversation with the sender");
+        assert_eq!(conversation.lines.len(), 1);
+        assert_eq!(conversation.lines[0].body.as_deref(), Some("are you there"));
+
+        let note = ui.0.notifications.last().expect("nothing in the events box");
+        assert_eq!(note.from, Some(ShipId(2)), "the notice does not open anything");
+        assert!(note.text.contains("are you there"));
+    }
+
+    /// Somebody else's sealed mail is heard and not read, and the box says exactly that rather
+    /// than staying silent — a signal falling on the antenna is a fact about the world.
+    #[test]
+    fn a_sealed_message_for_somebody_else_is_still_noticed() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let spoken = lc_proto::Spoken { to: 99, sealed: true, body: None, acks: Vec::new() };
+        fold(&mut uplink, &mut game, &mut ui, heard(98, 2, spoken, lc_proto::kind::MESSAGE));
+
+        let line = &uplink.chat.get(ShipId(2)).expect("a conversation").lines[0];
+        assert!(line.sealed);
+        assert_eq!(line.body, None);
+        assert!(ui.0.notifications.last().is_some_and(|n| n.from == Some(ShipId(2))));
+    }
+
+    /// Sending is not receiving. A message this ship sent is in the transcript against the
+    /// identifier the server minted — which is the only thing an acknowledgement can name — and
+    /// is not in the events box, which is for what happened *to* this ship.
+    #[test]
+    fn an_accepted_message_is_recorded_against_the_identifier_it_will_be_acknowledged_by() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let before = ui.0.notifications.len();
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Accepted {
+            ship_id: ShipId(7),
+            event_id: 4242,
+            at_t: 2_000_000,
+            order: Order::Say {
+                to: ShipId(2),
+                aim: lc_proto::Aim::Omni,
+                secrecy: lc_proto::Secrecy::Open,
+                body: "hello".into(),
+            },
+        });
+        let conversation = uplink.chat.get(ShipId(2)).expect("a conversation");
+        assert_eq!(conversation.lines[0].event_id, 4242);
+        assert!(conversation.lines[0].mine);
+        assert!(!conversation.delivered(4242), "unanswered, so not acknowledged");
+        assert_eq!(ui.0.notifications.len(), before, "a sent message reported itself as news");
+
+        // And the acknowledgement, when it comes back, names it.
+        let spoken = lc_proto::Spoken {
+            to: 7,
+            sealed: false,
+            body: Some("got it".into()),
+            acks: vec![4242],
+        };
+        fold(&mut uplink, &mut game, &mut ui, heard(43, 2, spoken, lc_proto::kind::MESSAGE));
+        assert!(uplink.chat.get(ShipId(2)).unwrap().delivered(4242));
+    }
+
+    /// A key offer arriving is what puts a key in the ring, and the ring is what the interface
+    /// reads to decide whether sealing can be offered at all.
+    #[test]
+    fn a_key_offer_arriving_is_what_lets_the_interface_offer_sealing() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        assert!(!uplink.chat.holds_key(ShipId(2)));
+        let spoken =
+            lc_proto::Spoken { to: 7, sealed: false, body: Some(String::new()), acks: Vec::new() };
+        fold(&mut uplink, &mut game, &mut ui, heard(50, 2, spoken, lc_proto::kind::KEY));
+        assert!(uplink.chat.holds_key(ShipId(2)));
+        assert!(uplink.chat.get(ShipId(2)).unwrap().lines[0].key, "it is in the transcript too");
     }
 
     /// A flight order ends a standing intercept on the server, so the interface stops showing

@@ -26,7 +26,13 @@ impl std::error::Error for JournalError {}
 
 impl From<tokio_postgres::Error> for JournalError {
     fn from(error: tokio_postgres::Error) -> Self {
-        Self(error.to_string())
+        // The source, not just the summary. `tokio_postgres::Error` renders as "db error" and
+        // nothing else; everything a person needs to act on -- the constraint, the table, the
+        // detail -- is one level down.
+        match std::error::Error::source(&error) {
+            Some(why) => Self(format!("{error}: {why}")),
+            None => Self(error.to_string()),
+        }
     }
 }
 
@@ -60,6 +66,60 @@ pub trait Journal {
         after_t: i64,
         until_t: i64,
     ) -> impl std::future::Future<Output = Result<Vec<(Scheduled, Event)>, JournalError>> + Send;
+
+    /// Append what was said, where it landed, and what keys that taught.
+    ///
+    /// Separate from [`Journal::write`] and deliberately so. An event and its deliveries are
+    /// swept away once their light has passed every observer; a conversation is read long after
+    /// that, by the two ships in it, whenever either signs in. Putting them through one call
+    /// would put them under one retention policy. See `lc_store::chat`.
+    ///
+    /// Receipts are written by the *flush*, not by the tick that wrote the message: a receipt
+    /// is the light landing, which is a different event from the light leaving and happens
+    /// years later.
+    fn record(
+        &mut self,
+        messages: &[lc_store::chat::Message],
+        receipts: &[lc_store::chat::Receipt],
+        keys: &[lc_store::chat::Held],
+    ) -> impl std::future::Future<Output = Result<(), JournalError>> + Send;
+
+    /// Everything this ship has said and been told.
+    ///
+    /// Asked once per sign-in, never in the tick's hot path. Keys are not here: the server
+    /// holds the whole keyring in memory because it has to answer "may this be sealed" inside
+    /// an order, which is synchronous. See [`Journal::keyring`].
+    fn transcript(
+        &self,
+        ship: ShipId,
+    ) -> impl std::future::Future<Output = Result<Transcript, JournalError>> + Send;
+
+    /// Every keyring row there is: who will hold whose key, and from when.
+    ///
+    /// Read once, when a shard comes back. Whole rather than per ship because the rule it feeds
+    /// is asked inside an order — synchronously, twenty times a second — and a query there would
+    /// be a database round trip in the tick.
+    fn keyring(
+        &self,
+    ) -> impl std::future::Future<Output = Result<Vec<lc_store::chat::Held>, JournalError>> + Send;
+
+    /// The last [`lc_proto::ACK_DEPTH`] messages each observer has from each sender.
+    ///
+    /// Read once, when a shard comes back, to refill the acknowledgement window. Without it the
+    /// first reply after a restart acknowledges nothing, which the far end cannot distinguish
+    /// from its messages never having arrived.
+    fn ack_window(
+        &self,
+    ) -> impl std::future::Future<Output = Result<Vec<(i64, i64, i64)>, JournalError>> + Send;
+}
+
+/// One ship's own copy of every conversation it is party to.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Transcript {
+    /// What it transmitted, oldest first.
+    pub sent: Vec<lc_store::chat::Message>,
+    /// What reached it, oldest arrival first, with when the light landed.
+    pub heard: Vec<(lc_store::chat::Message, i64)>,
 }
 
 /// Everything in vectors. No ordering guarantees from storage, so it sorts.
@@ -67,6 +127,9 @@ pub trait Journal {
 pub struct Memory {
     pub events: Vec<Event>,
     pub deliveries: Vec<Scheduled>,
+    pub messages: Vec<lc_store::chat::Message>,
+    pub receipts: Vec<lc_store::chat::Receipt>,
+    pub keys: Vec<lc_store::chat::Held>,
 }
 
 impl Journal for Memory {
@@ -101,6 +164,58 @@ impl Journal for Memory {
         out.sort_by_key(|(d, _)| d.arrive_t);
         Ok(out)
     }
+
+    async fn record(
+        &mut self,
+        messages: &[lc_store::chat::Message],
+        receipts: &[lc_store::chat::Receipt],
+        keys: &[lc_store::chat::Held],
+    ) -> Result<(), JournalError> {
+        self.messages.extend_from_slice(messages);
+        self.receipts.extend_from_slice(receipts);
+        // First offer wins, as the keyring's primary key makes it in the real one.
+        for key in keys {
+            if !self.keys.iter().any(|k| k.holder == key.holder && k.subject == key.subject) {
+                self.keys.push(*key);
+            }
+        }
+        Ok(())
+    }
+
+    async fn transcript(&self, ship: ShipId) -> Result<Transcript, JournalError> {
+        let find = |id: i64| self.messages.iter().find(|m| m.event_id == id).cloned();
+        let mut heard: Vec<(lc_store::chat::Message, i64)> = self
+            .receipts
+            .iter()
+            .filter(|r| r.observer == ship.0)
+            .filter_map(|r| Some((find(r.event_id)?, r.arrive_t)))
+            .collect();
+        heard.sort_by_key(|(_, arrive_t)| *arrive_t);
+        let mut sent: Vec<lc_store::chat::Message> =
+            self.messages.iter().filter(|m| m.sender == ship.0).cloned().collect();
+        sent.sort_by_key(|m| m.sent_t);
+        Ok(Transcript { sent, heard })
+    }
+
+    async fn keyring(&self) -> Result<Vec<lc_store::chat::Held>, JournalError> {
+        Ok(self.keys.clone())
+    }
+
+    async fn ack_window(&self) -> Result<Vec<(i64, i64, i64)>, JournalError> {
+        let mut out = Vec::new();
+        for receipt in &self.receipts {
+            let Some(message) = self.messages.iter().find(|m| m.event_id == receipt.event_id)
+            else {
+                continue;
+            };
+            if message.is_key {
+                continue;
+            }
+            out.push((receipt.observer, message.sender, receipt.event_id, receipt.arrive_t));
+        }
+        out.sort_by_key(|(observer, sender, _, arrive_t)| (*observer, *sender, *arrive_t));
+        Ok(out.into_iter().map(|(observer, sender, event, _)| (observer, sender, event)).collect())
+    }
 }
 
 /// How far ahead of `now` the tick keeps partitions made.
@@ -123,6 +238,11 @@ impl Postgres {
         let client = lc_store::connect().await?;
         lc_store::migrate::apply(&client).await?;
         Ok(Self { client, prepared: None })
+    }
+
+    /// The same, over a connection the caller already has.
+    pub fn with(client: tokio_postgres::Client) -> Self {
+        Self { client, prepared: None }
     }
 
     pub fn client(&self) -> &tokio_postgres::Client {
@@ -240,6 +360,102 @@ impl Journal for Postgres {
             ));
         }
         Ok(out)
+    }
+
+    async fn record(
+        &mut self,
+        messages: &[lc_store::chat::Message],
+        receipts: &[lc_store::chat::Receipt],
+        keys: &[lc_store::chat::Held],
+    ) -> Result<(), JournalError> {
+        // Messages before receipts: a receipt references the message it is about, so the other
+        // order fails the foreign key on the very first one.
+        lc_store::chat::save_messages(&self.client, messages).await?;
+        lc_store::chat::save_receipts(&self.client, receipts).await?;
+        lc_store::chat::save_keys(&self.client, keys).await?;
+        Ok(())
+    }
+
+    async fn transcript(&self, ship: ShipId) -> Result<Transcript, JournalError> {
+        Ok(Transcript {
+            sent: lc_store::chat::sent_by(&self.client, ship.0).await?,
+            heard: lc_store::chat::heard_by(&self.client, ship.0).await?,
+        })
+    }
+
+    async fn keyring(&self) -> Result<Vec<lc_store::chat::Held>, JournalError> {
+        Ok(lc_store::chat::all_keys(&self.client).await?)
+    }
+
+    async fn ack_window(&self) -> Result<Vec<(i64, i64, i64)>, JournalError> {
+        Ok(lc_store::chat::recent_heard(&self.client, lc_proto::ACK_DEPTH as i64).await?)
+    }
+}
+
+/// Whichever of the two a shard was started with.
+///
+/// `Server` is generic over its journal, so a binary that chooses one at run time would have to
+/// be generic all the way down or box a trait with async methods. This is the third option and
+/// the cheapest: one type, two arms, and the choice made once where the arguments are read.
+///
+/// A shard with no database is not a shard that keeps less. It is a shard that keeps **nothing**
+/// past the process, conversations included, and [`Store::Ephemeral`] is named so that reads
+/// like the warning it is.
+pub enum Store {
+    Ephemeral(Memory),
+    Durable(Postgres),
+}
+
+macro_rules! either {
+    ($self:expr, $method:ident ( $($arg:expr),* )) => {
+        match $self {
+            Store::Ephemeral(inner) => inner.$method($($arg),*).await,
+            Store::Durable(inner) => inner.$method($($arg),*).await,
+        }
+    };
+}
+
+impl Journal for Store {
+    async fn prepare(&mut self, from_t: i64, to_t: i64) -> Result<(), JournalError> {
+        either!(self, prepare(from_t, to_t))
+    }
+
+    async fn write(
+        &mut self,
+        events: &[Event],
+        deliveries: &[Scheduled],
+    ) -> Result<(), JournalError> {
+        either!(self, write(events, deliveries))
+    }
+
+    async fn due(
+        &self,
+        observer: ShipId,
+        after_t: i64,
+        until_t: i64,
+    ) -> Result<Vec<(Scheduled, Event)>, JournalError> {
+        either!(self, due(observer, after_t, until_t))
+    }
+
+    async fn record(
+        &mut self,
+        messages: &[lc_store::chat::Message],
+        receipts: &[lc_store::chat::Receipt],
+        keys: &[lc_store::chat::Held],
+    ) -> Result<(), JournalError> {
+        either!(self, record(messages, receipts, keys))
+    }
+
+    async fn transcript(&self, ship: ShipId) -> Result<Transcript, JournalError> {
+        either!(self, transcript(ship))
+    }
+
+    async fn keyring(&self) -> Result<Vec<lc_store::chat::Held>, JournalError> {
+        either!(self, keyring())
+    }
+
+    async fn ack_window(&self) -> Result<Vec<(i64, i64, i64)>, JournalError> {
+        either!(self, ack_window())
     }
 }
 

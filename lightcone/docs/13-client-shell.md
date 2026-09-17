@@ -118,11 +118,37 @@ with.
 | system | `Y` | bodies and populations of the selected system, at the retarded time |
 | sky | always | the all-sky map; selection happens here |
 | notifications | automatic | target out of range, observation returned nothing, instrument saturated |
+| radio | `R` | one conversation at a time, chosen from a list of everyone heard from and everyone in sight |
 | debug | `F3` | below |
 | scenarios | — | scenes to stage. Development only, and every button does nothing without a shard started for it |
 
 Panels are windows rather than menu pages because the clock never stops: a player has to be
 able to watch a curve and fly at the same time.
+
+### The radio window
+
+**One window and one selector, not a thread per craft.** Everything in it is minutes to years
+old and there is no typing indicator to be had, so the interface that suits it is a log with a
+dropdown rather than a messaging app pretending the far end is present. A message someone sent
+shows a dot until they acknowledge it, and then it shows `ack` — which is the only delivery
+report there is, for the reason in
+[05-observation.md](05-observation.md#acknowledgement-is-the-only-delivery-report).
+
+A transmission arriving is also a **green line in the notifications box**, and that line is a
+link. It is the one kind of event with somewhere to go: everything else in that box is the
+interface reporting on itself. Somebody else's sealed message is a line too, saying that it was
+heard and cannot be read — a signal falling on the antenna is a fact about the world, and hiding
+it would let a player learn that nothing was sent by not being told.
+
+Sealing is offered only for a craft whose key this ship holds, and the checkbox says why when it
+is not. The client's copy of that rule is an interface courtesy; the server refuses the order
+either way.
+
+**The radio window is why `read_keys` consults egui.** Every binding in the table below is a
+bare letter, and nothing in the game had a text field until there was something to say into one
+— so typing a message used to open the telescope, cut the drive and fly somewhere, one keystroke
+at a time. Held arrow keys are gated the same way: an arrow in a text field moves the cursor, and
+turning the ship as well would make going back to fix a typo swing the whole view.
 
 ## The debug window
 
@@ -263,6 +289,7 @@ seven hours twenty times a second having never drifted at all.
 | `--burst <n>` | photograph `n` consecutive frames, numbered. For flicker: two runs stopped at frame `n` and frame `n+1` have accumulated different wall time and are not consecutive at all |
 | `--demo <name>` | stage a scene, and bring a shard to run it in |
 | `--demo-cam <yaw:pitch:booms>` | pin the camera for the run |
+| `--say <words>` | say this to the first contact that appears, and open the conversation. The only way to photograph a transcript |
 
 These emit [`Action`]s rather than opening a second path into the client, so they can only do
 what the interface can do. `--shot` exists because WGSL cannot be asserted from a test and a

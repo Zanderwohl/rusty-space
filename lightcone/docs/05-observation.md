@@ -320,6 +320,55 @@ arrives, is missed. For a ship 4 ly away this means the aim is based on where th
 4 years ago, extrapolated 4 years forward — 8 years of prediction error. Stationary
 installations are easy to hit; ships under thrust are not.
 
+### Saying something
+
+A message is an event like any other: emitted at a coordinate, scheduled to everyone it
+reaches, released when its light lands. What makes it a mechanic rather than a text box is that
+the three choices behind it are **independent**, and the interface keeps them that way.
+
+| choice | decides | cost |
+|---|---|---|
+| addressed to | whose acknowledgements ride back with it, and who can decrypt | none |
+| aimed | who *hears* it | a beam must be aimed, and an aim can miss |
+| sealed | who can *read* it | you must already hold their key |
+
+A player who conflates them broadcasts a private message in clear across a system. The
+interface should let them: the mistake is the same one a real operator makes and it is legible
+afterwards, because everyone in earshot saw it.
+
+**Omnidirectional is the default and it is not free.** It reaches everyone in range and tells
+all of them where you are — that is the same fact, arriving at the same instant, and there is no
+version of a shout that only your friend hears. A beam of the same wattage carries the same
+energy through a smaller solid angle, so it is louder on axis by `4 pi / Omega` and silent off
+it. At a milliradian that is a gain of four million and a spot 250 AU wide at four light-years:
+efficient, and not remotely covert.
+
+### Keys, and why first contact is loud
+
+Sealing is a game mechanic wearing cryptography's clothes. There are no keys — there is only the
+fact of having been told one, and **a key is a message**. It travels at `c` like anything else,
+so a key sent across four light-years is usable four years later, and an omnidirectional offer
+hands it to everyone in range at once.
+
+Nobody starts holding anybody's key. That is not a balance decision; it falls out of the
+frequency argument above. A private channel has to be arranged, arranging it takes a message,
+and that message has nowhere to go but the open. The first thing anyone ever says is public.
+
+### Acknowledgement is the only delivery report
+
+Nothing at either end can observe a message landing. The light either fell on an antenna or went
+past it, and only the far end knows which. So a message carries the identifiers of the last ten
+it has received from its addressee, and that — a reply naming what it heard — is the whole of
+delivery confirmation. Silence is not a failure. It is a reply that has not been written yet, or
+one still crossing.
+
+By identifier rather than by count, because the two ends do not agree about how many messages
+exist: half of them are in flight. An identifier names one message and means the same thing to
+both.
+
+There is no retransmission and there cannot be. A message that did not arrive is light that went
+somewhere else.
+
 ## Interferometry
 
 Two instruments separated by a baseline `B` resolve `lambda / B`. At the scales available here

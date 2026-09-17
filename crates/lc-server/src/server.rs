@@ -17,6 +17,7 @@ use crate::world::{Event, Scheduled, World, schedule};
 use lc_world::craft::{Craft, CraftId, Fleet, Kind};
 use lc_world::motion::{Change, Event as Change_, Rejected};
 use lc_world::navigation::Course;
+use lc_world::signal::Beam;
 use crate::chase::{self, Pursuit};
 use lc_world::system::LocalSystem;
 use std::sync::Arc;
@@ -58,6 +59,12 @@ pub struct Connected {
     /// contact and stops hearing about it must be told; one that has never had any needs no
     /// message twenty times a second to say so again.
     pub had_contacts: bool,
+    /// Whether this connection has been handed the ship's transcript yet.
+    ///
+    /// Sent from the tick rather than from the sign-in, because reading it is a query and a
+    /// sign-in is not allowed to be. One per connection: a reconnection is a fresh client with
+    /// an empty log, and it needs the conversation back.
+    pub backlog_sent: bool,
 }
 
 pub struct Server<J: Journal> {
@@ -79,7 +86,7 @@ pub struct Server<J: Journal> {
     /// client, and a client is a connection rather than a thing in space.
     pub(crate) owners: HashMap<CraftId, ClientId>,
     clients: HashMap<ClientId, Connected>,
-    journal: J,
+    pub(crate) journal: J,
     minter: Minter,
     /// Written by this tick, and handed to the journal at the end of it.
     pending: Vec<Event>,
@@ -114,6 +121,31 @@ pub struct Server<J: Journal> {
     /// a tick became a rate times a constant: at any rate but one, `now_t` is no longer a
     /// clean multiple of anything and "about once a real second" came out as never.
     ticks: u64,
+    /// Who holds whose key, and **from when**.
+    ///
+    /// A schedule, not a set, and that is the whole mechanic. A key offer is written here the
+    /// instant it is transmitted, stamped with the coordinate time its light lands, and
+    /// [`Server::holds_key`] refuses to read one whose moment has not come. So a key sent four
+    /// light-years takes four years to become usable, and the rule that says so is the same
+    /// shape as the one the deliveries table uses: work it out at write time, gate it at read
+    /// time.
+    ///
+    /// Scheduling it rather than learning it on arrival is also what makes it work for a craft
+    /// nobody is flying. Arrivals are only walked for connected clients — there is nobody to
+    /// tell otherwise — and a key that only landed when its owner happened to be signed in
+    /// would be a mechanic that depended on who was watching.
+    pub(crate) keys: HashMap<CraftId, HashMap<ShipId, i64>>,
+    /// What each craft has been sent by each other craft, as `(arrival, event)`, oldest first.
+    ///
+    /// The acknowledgement window: what an outgoing message says it has received. Scheduled and
+    /// gated exactly as [`Server::keys`] is, and for the same two reasons.
+    pub(crate) heard: HashMap<(CraftId, ShipId), Vec<(i64, i64)>>,
+    /// Messages transmitted this tick, handed to the journal with the rest of it.
+    pub(crate) said: Vec<lc_store::chat::Message>,
+    /// Where those messages will land, worked out when they are written.
+    pub(crate) receipts: Vec<lc_store::chat::Receipt>,
+    /// Keys those messages will teach, with the time they teach them.
+    pub(crate) taught: Vec<lc_store::chat::Held>,
 }
 
 impl<J: Journal> Server<J> {
@@ -136,6 +168,11 @@ impl<J: Journal> Server<J> {
             open: false,
             blocked: HashMap::new(),
             pursuits: HashMap::new(),
+            keys: HashMap::new(),
+            heard: HashMap::new(),
+            said: Vec::new(),
+            receipts: Vec::new(),
+            taught: Vec::new(),
             rate: 1.0,
             directs: false,
             director: None,
@@ -265,6 +302,7 @@ impl<J: Journal> Server<J> {
             // the catch-up path run from the beginning.
             cursor_t: i64::MIN,
             had_contacts: false,
+            backlog_sent: false,
         });
     }
 
@@ -311,6 +349,7 @@ impl<J: Journal> Server<J> {
         self.steer_pursuits(wire, &mut events, &mut deliveries);
         self.announce_drives(self.now_t - self.tick_us(), &mut events, &mut deliveries);
         self.journal.write(&events, &deliveries).await?;
+        self.write_conversations().await?;
         self.pending = events;
         self.state_the_clock(wire);
         // 3 and 4. Everything that has arrived since the last tick, through the gate.
@@ -422,6 +461,11 @@ impl<J: Journal> Server<J> {
         // this floor implies the doc's and adds the part that keeps deliveries findable.
         let floor = state.cursor_t.saturating_add(1);
         let at = intent.issued_at_client_t.clamp(floor.min(self.now_t), self.now_t);
+
+        // Set by the two arms that transmit something aimed. Everything else a ship does is
+        // seen in every direction, because a plume and a hull are not pointed at anyone.
+        let mut beam = Beam::OMNI;
+        let mut utterance: Option<crate::radio::Utterance> = None;
 
         let (kind, power_w, payload, applied) = match &intent.order {
             Order::Transmit { power_w } => {
@@ -570,6 +614,15 @@ impl<J: Journal> Server<J> {
                 }
                 (KIND_CUT, 0.0, "{}".to_string(), Order::BreakOff)
             }
+            Order::Say { .. } | Order::OfferKey { .. } => {
+                // The whole of it in `crate::radio`, because everything a transmission needs
+                // to decide — the keyring, the aim, the acknowledgement window — is that
+                // module's and none of it is this one's.
+                let spoken = self.compose(id, intent.ship_id, &intent.order, at)?;
+                beam = spoken.beam;
+                utterance = Some(spoken.said);
+                (spoken.kind, crate::radio::SIGNAL_POWER_W, spoken.payload, spoken.applied)
+            }
         };
 
         // A flight order replaces whatever the ship was doing, the standing intercept included.
@@ -591,12 +644,25 @@ impl<J: Journal> Server<J> {
             power_w,
             payload,
         };
+        let mut landings = Vec::new();
         for observer in self.fleet.iter() {
-            if let Some(scheduled) = schedule(&event, observer) {
+            // A transmitter does not receive its own transmission. True of a real radio, which
+            // is not listening on the frequency it is shouting into — and load-bearing here,
+            // because a sender that heard itself would have every message twice in its own
+            // transcript: once as its own, and once as an arrival from a stranger with its
+            // own identifier. Everything else a ship does, it does go on seeing.
+            if utterance.is_some() && observer.id == id {
+                continue;
+            }
+            if let Some(scheduled) = schedule(&event, &beam, observer) {
+                landings.push((observer.id, scheduled.arrive_t));
                 deliveries.push(scheduled);
             }
         }
         let event_id = event.id;
+        if let Some(said) = utterance {
+            self.remember(event_id, id, at, &said, &landings);
+        }
         events.push(event);
         Ok(Applied { event_id, at_t: at, order: applied })
     }
@@ -658,6 +724,7 @@ impl<J: Journal> Server<J> {
             last_reception_t: i64::MIN,
             cursor_t: i64::MIN,
             had_contacts: false,
+            backlog_sent: false,
         });
         // Being welcomed is not the same fact as owning the craft, and `act` checks the
         // second. Without this a signed-in client is welcomed, given a ship, and then refused
@@ -792,7 +859,9 @@ impl<J: Journal> Server<J> {
             payload,
         };
         for observer in self.fleet.iter() {
-            if let Some(scheduled) = schedule(&event, observer) {
+            // Omnidirectional: everything that reaches here is a plume, a hull or an engine
+            // going out, and none of those are pointed at anybody.
+            if let Some(scheduled) = schedule(&event, &Beam::OMNI, observer) {
                 deliveries.push(scheduled);
             }
         }
@@ -828,6 +897,24 @@ impl<J: Journal> Server<J> {
             let Some(ship) = self.fleet.get(CraftId(state.ship.0)).cloned() else {
                 continue;
             };
+            // The transcript, once per connection. Here and not in the sign-in because reading
+            // it is a query and a sign-in is not allowed to be one.
+            if !state.backlog_sent {
+                if let Some(mine) = self.clients.get_mut(&id) {
+                    mine.backlog_sent = true;
+                }
+                match self.backlog(state.ship, now).await {
+                    // Nothing to say is said by not saying it, as an empty contact list is.
+                    // A client's log starts empty, so an empty backlog would be a message
+                    // whose only content is that there was no message.
+                    Ok(Some(backlog)) => wire.send(id, backlog),
+                    Ok(None) => {}
+                    // Not fatal and not retried. A shard with no store is the development
+                    // case, and a conversation nobody can read back is worth less than a
+                    // connection that works.
+                    Err(why) => eprintln!("could not read {:?}'s transcript: {why}", state.ship),
+                }
+            }
             // The proven read: one range scan over `(observer_id, arrive_t)`, already ordered.
             let due = self.journal.due(state.ship, state.cursor_t, now).await?;
 
@@ -844,7 +931,7 @@ impl<J: Journal> Server<J> {
                     direction: direction.to_array(),
                     strength: scheduled.strength,
                     kind: event.kind,
-                    payload: event.payload.clone(),
+                    payload: crate::radio::redact(event.kind, &event.payload, state.ship),
                 };
                 match Cleared::<Sighting>::clear(sighting, now, ship.noise_floor) {
                     Ok(pass) => {

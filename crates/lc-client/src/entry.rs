@@ -123,6 +123,7 @@ pub fn parse(args: &[String]) -> Entry {
         // The password form is the one egui surface in the menu, and it is opened by a button
         // rather than by a page, so it needs its own way in to be photographed.
         open_password_form: flag("--password"),
+        say: after("--say"),
         actions,
     };
     // The first argument only. Scanning for any non-flag token would pick up a flag's own
