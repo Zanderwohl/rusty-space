@@ -174,7 +174,7 @@ fn run(output: &str, catalogue: Option<&str>) -> Result<String, String> {
     let mut say = |x: f32, y: f32, s: String, size: f32, anchor, colour| {
         text.labels.push(Label { at: Point::new(x, y), text: s, size, anchor, colour });
     };
-    say(WIDTH as f32 / 2.0, 34.0, "LIGHTCONE - OBSERVER SNAPSHOT".into(), 20.0, Anchor::Middle, FG);
+    say(WIDTH as f32 / 2.0, 34.0, "LIGHTCONE FRONTIER - OBSERVER SNAPSHOT".into(), 20.0, Anchor::Middle, FG);
     say(90.0, 54.0, format!("SKY - {} STARS", sky.len()), 13.0, Anchor::Start, FG);
     say(
         WIDTH as f32 - 40.0,

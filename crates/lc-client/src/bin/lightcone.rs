@@ -34,7 +34,7 @@ fn main() {
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
-                    primary_window: Some(Window { title: "Lightcone".into(), ..default() }),
+                    primary_window: Some(Window { title: "Lightcone Frontier".into(), ..default() }),
                     ..default()
                 })
                 .set(AssetPlugin { file_path: asset_path(), ..default() }),

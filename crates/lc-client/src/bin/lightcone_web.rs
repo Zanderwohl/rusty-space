@@ -64,7 +64,7 @@ fn main() {
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "Lightcone".into(),
+                        title: "Lightcone Frontier".into(),
                         canvas: Some(CANVAS.into()),
                         // The canvas is sized by the page's CSS; let it drive.
                         fit_canvas_to_parent: true,

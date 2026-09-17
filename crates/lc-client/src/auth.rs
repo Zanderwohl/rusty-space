@@ -115,7 +115,7 @@ pub fn landing_page(worked: bool) -> String {
     };
     let body = format!(
         "<!doctype html><meta charset=utf-8><meta name=referrer content=no-referrer>\
-         <title>Lightcone</title><p>{said}</p>"
+         <title>Lightcone Frontier</title><p>{said}</p>"
     );
     format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\

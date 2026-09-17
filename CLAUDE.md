@@ -106,8 +106,8 @@ its pitfalls are in `docs/horizons-golden-vectors.md`, with scripts in `docs/scr
 
 ## The website
 
-`web/` is the Lightcone site: axum, maud, SCSS compiled by `grass` at boot. Two conventions
-that are easy to violate by habit:
+`web/` is the Lightcone Frontier site: axum, maud, SCSS compiled by `grass` at boot. Two
+conventions that are easy to violate by habit:
 
 - **Semantic classes only.** A class names what a thing *is* — `.post-meta`, `.tag-list` — never
   what it looks like. A class used once is a review item; most pages should add none, because
@@ -126,7 +126,10 @@ way; [15-runbook.md](lightcone/docs/15-runbook.md) is the commands.
 ## The other project
 
 `lightcone/` holds the design documents for a separate product — a relativistic sandbox MMO
-built on the same shared crates. Its code is `crates/lc-*`: `lc-spacetime`, `lc-world`,
+built on the same shared crates. Players know it as **Lightcone Frontier**, and every
+user-facing string says so: the site, the identity broker's pages, window titles, the menu.
+Inside the repo it is `lightcone` — crates, binaries, containers, directories, the keychain
+service and the config directory. Its code is `crates/lc-*`: `lc-spacetime`, `lc-world`,
 `lc-store` and the `lc-client` app. Exotic Matters must never depend on anything from it:
 
 ```bash

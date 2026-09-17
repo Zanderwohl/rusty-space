@@ -101,7 +101,7 @@ fn build(commands: &mut Commands, page: MenuPage, observe: Action) {
         return;
     }
     let panel = ui.panel(root);
-    ui.title(panel, "LIGHTCONE");
+    ui.title(panel, "LIGHTCONE FRONTIER");
     ui.message(panel, "Everything you see has already happened.");
 
     match page {

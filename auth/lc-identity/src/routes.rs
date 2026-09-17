@@ -748,13 +748,13 @@ fn shell(title: &str, body: Markup) -> Markup {
                 // Nothing here is a destination. A sign-in page in an index is a sign-in page
                 // reached without the query that makes it work.
                 meta name="robots" content="noindex, nofollow";
-                title { (title) " \u{2014} Lightcone" }
+                title { (title) " \u{2014} Lightcone Frontier" }
                 link rel="stylesheet" href=(crate::assets::url());
             }
             body {
                 // Text, not a link. Everywhere a browser goes from these pages is on the
                 // allowlist, and a masthead is one more place to be sent that is not.
-                p class="wordmark" { "Lightcone" }
+                p class="wordmark" { "Lightcone Frontier" }
                 main { (body) }
                 footer class="fine-print" {
                     "A relativistic sandbox in a volume of real stars."
