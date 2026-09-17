@@ -58,6 +58,8 @@ pub struct Connected {
     /// contact and stops hearing about it must be told; one that has never had any needs no
     /// message twenty times a second to say so again.
     pub had_contacts: bool,
+    /// What the account may do beyond playing, from its ticket. See [`crate::ticket::ADMIN`].
+    pub permission: i32,
 }
 
 pub struct Server<J: Journal> {
@@ -245,6 +247,13 @@ impl<J: Journal> Server<J> {
         self.clients.get(&client).map(|state| CraftId(state.ship.0))
     }
 
+    /// Whether a connection may issue development actions: anyone, on a server that directs,
+    /// and an admin's ticket anywhere.
+    pub(crate) fn may_develop(&self, client: ClientId) -> bool {
+        self.directs
+            || self.clients.get(&client).is_some_and(|c| c.permission >= crate::ticket::ADMIN)
+    }
+
     pub fn ship(&self, id: ShipId) -> Option<&Craft> {
         self.fleet.get(CraftId(id.0))
     }
@@ -276,6 +285,7 @@ impl<J: Journal> Server<J> {
             // the catch-up path run from the beginning.
             cursor_t: i64::MIN,
             had_contacts: false,
+            permission: 0,
         });
     }
 
@@ -675,6 +685,7 @@ impl<J: Journal> Server<J> {
                 name: format!("Traveller {}", from.0),
                 exp: i64::MAX,
                 jti: format!("anonymous:{}", from.0),
+                perm: 0,
             },
             Err(_) => return None,
         };
@@ -714,6 +725,7 @@ impl<J: Journal> Server<J> {
             last_reception_t: i64::MIN,
             cursor_t: i64::MIN,
             had_contacts: false,
+            permission: claims.perm,
         });
         // Being welcomed is not the same fact as owning the craft, and `act` checks the
         // second. Without this a signed-in client is welcomed, given a ship, and then refused

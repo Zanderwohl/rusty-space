@@ -124,11 +124,11 @@ impl<J: Journal> Server<J> {
         Ok(())
     }
 
-    /// **Development only.** Put energy into the asking client's ship.
+    /// **Development only.** Put energy into the asking client's ship, if it may develop.
     pub fn granted(&mut self, from: ClientId, joules: f64, wire: &mut impl Transport) {
         let now_s = self.now_t as f64 * 1.0e-6;
         let ship = self.owned_by(from);
-        let done = self.directs
+        let done = self.may_develop(from)
             && joules.is_finite()
             && joules > 0.0
             && ship.and_then(|id| self.fleet.get_mut(id)).is_some_and(|craft| {
@@ -326,6 +326,50 @@ mod tests {
         let said = replies(&mut wire);
         assert!(said.iter().any(|m| matches!(m, Outbound::Refused { .. })), "{said:?}");
         assert_eq!(free(&server), 0.0);
+    }
+
+    /// **Admins may develop on a real shard; players may not.** Signed in by ticket rather than
+    /// admitted, because the permission is the ticket's to carry.
+    #[tokio::test]
+    async fn only_an_admins_ticket_may_grant_on_a_shard() {
+        let broker = crate::testing::Broker::new([3u8; 32]);
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut trusted = crate::ticket::Trusted::new("shard-1");
+        trusted.learn(&broker.jwks());
+        server.trust(trusted);
+        let mut wire = Loopback::new();
+        let (player, admin, old) = (ClientId(1), ClientId(2), ClientId(3));
+        let hello = |ticket: String| Inbound::Hello { protocol: lc_proto::PROTOCOL_VERSION, ticket };
+        wire.client_says(player, hello(broker.mint_with("acct-player", "shard-1", "j1", 0)));
+        wire.client_says(admin, hello(broker.mint_with("acct-admin", "shard-1", "j2", crate::ticket::ADMIN)));
+        wire.client_says(old, hello(broker.mint("acct-old", "shard-1", 60, "j3")));
+        server.tick(&mut wire).await.unwrap();
+        for who in [player, admin, old] {
+            let _ = wire.take(who);
+        }
+
+        let stored = |server: &Server<Memory>, who: ClientId| {
+            let id = server.owned_by(who).unwrap();
+            let craft = server.fleet.get(id).unwrap();
+            let now_s = server.now_t() as f64 * 1.0e-6;
+            craft.fitting().unwrap().stored_j_at(&craft.motion, now_s)
+        };
+        for who in [player, admin, old] {
+            let id = server.owned_by(who).unwrap();
+            let craft = server.fleet.get_mut(id).unwrap();
+            let fitting = craft.fitting().unwrap().clone();
+            let empty = lc_world::fitting::Account { stored_j: 0.0, ..fitting.account() };
+            craft.fit(Some(Fitting::from_account(&empty, fitting.balance)));
+            wire.client_says(who, Inbound::Grant { joules: 1.0e26 });
+        }
+        server.tick(&mut wire).await.unwrap();
+
+        assert!(stored(&server, admin) > 0.9e26, "the admin was not granted anything");
+        assert!(wire.take(admin).iter().any(|m| matches!(m, Outbound::Fitted { .. })));
+        for who in [player, old] {
+            assert_eq!(stored(&server, who), 0.0, "{who:?} was granted energy");
+            assert!(wire.take(who).iter().any(|m| matches!(m, Outbound::Refused { .. })));
+        }
     }
 
     #[tokio::test]

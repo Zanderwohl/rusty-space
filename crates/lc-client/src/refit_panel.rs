@@ -185,7 +185,7 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
 }
 
 pub fn dev_actions(ui: &mut egui::Ui, game: &Session, out: &mut MessageWriter<Requested>) {
-    ui.label("Development only. A shard refuses all of these.");
+    ui.label("Development only. A shard takes these only from an admin.");
     ui.separator();
     let Some(fitting) = game.ship.fitting() else {
         ui.label("This ship has no modules, so nothing to fill.");

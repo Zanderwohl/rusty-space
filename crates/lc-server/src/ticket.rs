@@ -27,7 +27,14 @@ pub struct Claims {
     pub exp: i64,
     /// Recorded until it expires, so a ticket is worth one connection.
     pub jti: String,
+    /// The account's permission level, signed by the broker. Absent from a ticket minted before
+    /// the broker carried one, which reads as a player.
+    #[serde(default)]
+    pub perm: i32,
 }
+
+/// A [`Claims::perm`] that may issue development actions, such as granting energy.
+pub const ADMIN: i32 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rejected {

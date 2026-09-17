@@ -251,8 +251,9 @@ discriminant keeps its encoding.
   the motive's rapidity then, the outstanding commitment, and the refit under way as its recipe.
   Sent after `Welcome`, after every accepted order and every `Flying`, when a refit finishes, and
   after a grant. The client takes it whole.
-- `Inbound::Grant { joules }`: **development only**. Refused unless the server is directing, the
-  same gate `Inbound::Stage` has, so a shard never honours it.
+- `Inbound::Grant { joules }`: **development only**. Honoured on a server that is directing, as
+  `Inbound::Stage` is, and on a shard only from an **admin**: an account whose ticket carries
+  `perm` of at least 1. See [16-identity.md](16-identity.md).
 - `Refusal::NoEnergy`, `Refusal::NoRoom`, `Refusal::Refitting`, `Refusal::UnderWay`
 - `Order::SetCourse` and `Order::Cross` gain `max_beta`: asked for by the client, and returned in
   `Accepted` lowered to what the ship could pay for.
@@ -278,7 +279,7 @@ when the visuals should follow.
   - **Apply**, disabled *with the reason shown* when it cannot be done or the ship is under way
     ([18-ui-style.md](18-ui-style.md)); **Cancel** while a refit runs, with progress
 - **Dev actions panel** (`Panel::DevActions`, key `F5`, `--panel dev`): *+1 ME*, *+10 ME*, *fill
-  storage*. Development only, like Scenarios, and refused by a shard.
+  storage*. Development only, and a shard takes them only from an admin.
 - **Flight panel**: the acceleration buttons offer what the ship is rated for now, not fixed
   values up to `MAX_ACCEL_G`.
 
