@@ -190,12 +190,17 @@ fn public_log(
             };
             ui.horizontal_wrapped(|ui| {
                 speaker(ui, said_by, line.mine);
-                body_of(ui, line, line.mine);
-                // Who it was *to*, which a public log needs and a conversation does not: the
-                // same open message read here has no other way of saying who it was for.
+                // Who it went to, which a public log needs and a conversation does not: the
+                // same open message read here has no other way of saying who it was for. A
+                // broadcast went to nobody in particular, and saying so on every line would be
+                // repeating what the channel already is.
+                let addressed = with.map(|_| *name);
+                body_of(ui, line, line.mine, addressed);
                 match (line.mine, with) {
                     (true, _) => {
-                        ui.weak(format!("to {name}"));
+                        if let Some(to) = addressed.filter(|_| !line.key) {
+                            ui.weak(format!("to {to}"));
+                        }
                     }
                     (false, Some(with)) => {
                         if ui
@@ -235,7 +240,7 @@ fn conversation(
                     false => conversation.name.as_str(),
                 };
                 speaker(ui, said_by, line.mine);
-                body_of(ui, line, line.mine);
+                body_of(ui, line, line.mine, Some(conversation.name.as_str()));
                 if line.sealed {
                     ui.weak("encrypted");
                 }
@@ -323,13 +328,18 @@ fn reception(line: &crate::chat::Line) -> String {
     }
 }
 
-fn body_of(ui: &mut egui::Ui, line: &crate::chat::Line, mine: bool) {
+/// The message itself. `to` names who it went to, for a line this ship sent to somebody — a
+/// broadcast has nobody to name, and one that arrived came *from* the name already shown.
+fn body_of(ui: &mut egui::Ui, line: &crate::chat::Line, mine: bool, to: Option<&str>) {
     let colour = match mine {
         true => egui::Color32::from_rgb(170, 190, 200),
         false => RADIO,
     };
     match (&line.body, line.key) {
-        (_, true) if mine => ui.weak("sent them this ship's key"),
+        (_, true) if mine => ui.weak(match to {
+            Some(to) => format!("sent key to {to}"),
+            None => "sent key".to_string(),
+        }),
         (_, true) => ui.colored_label(RADIO, "sent this ship its key"),
         (Some(body), _) => ui.colored_label(colour, body),
         // Heard and unreadable, which is worth showing rather than hiding: a player can see

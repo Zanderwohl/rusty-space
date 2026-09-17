@@ -399,7 +399,8 @@ between is missed, and by more the further away it is.
 **A bare acknowledgement is never itself acknowledged.** Two ships each answering the other
 automatically would trade light for ever, at whatever the round trip between them is, with no
 pilot present at either end. Only a message with something in it earns an answer, and a resend
-earns one answer rather than one per attempt.
+earns one answer rather than one per attempt. One acknowledgement ends the exchange; there is no
+second round of it.
 
 It is off for every craft until it is asked for. A ship that answered everything it heard would
 announce its position to everything in range the moment anybody pinged it.

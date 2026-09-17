@@ -425,8 +425,11 @@ impl<J: Journal> Server<J> {
                 event_id: m.event_id,
                 idem: m.idem.unwrap_or_default() as MessageKey,
                 with: m.addressee.map(ShipId),
-                // A broadcast is in nobody's conversation, so there is nobody to name it with.
-                with_name: m.addressee.map(name_of).unwrap_or_else(|| "everyone".into()),
+                // A broadcast is in nobody's conversation, so there is no counterpart to name.
+                // Empty rather than a word like "everyone": `with` being `None` is what says
+                // that, and a name that is not a craft's is one the interface has to special
+                // case wherever it prints a name.
+                with_name: m.addressee.map(name_of).unwrap_or_default(),
                 mine: true,
                 key: m.is_key,
                 sealed: m.sealed,

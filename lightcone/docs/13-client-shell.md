@@ -119,7 +119,7 @@ with.
 | system | `Y` | bodies and populations of the selected system, at the retarded time |
 | sky | always | the all-sky map; selection happens here |
 | notifications | automatic | target out of range, observation returned nothing, instrument saturated |
-| radio | `R` | one conversation at a time, chosen from a list of everyone heard from and everyone in sight |
+| communications | `C` | one conversation at a time, chosen from a list of everyone heard from and everyone in sight |
 | debug | `F3` | below |
 | scenarios | — | scenes to stage. Development only, and every button does nothing without a shard started for it |
 | refit | `R` | module counts and hull slots as sliders, what applying them would cost and take, and the refit under way. See [19-ship-fitting.md](19-ship-fitting.md) |
@@ -128,7 +128,7 @@ with.
 Panels are windows rather than menu pages because the clock never stops: a player has to be
 able to watch a curve and fly at the same time.
 
-### The radio window
+### The communications window
 
 **A list of craft on the left, one log on the right.** Everything in it is minutes to years old
 and there is no typing indicator to be had, so the interface that suits it is a log with a
@@ -172,6 +172,14 @@ compared to another signal, which is how anybody reads a dB figure anyway. A mes
 from a transcript has no reading at all, because how loudly a signal landed is a fact about one
 receiver and what is written down is what was said.
 
+A message with **nothing in it** is an acknowledgement and nothing else, and it is not shown at
+either end — there is nothing to read, and a log of empty lines is one nobody can read either.
+What it acknowledges is kept on the conversation rather than on the line, because the message
+that carries an acknowledgement is usually the one about to be dropped for being empty; losing
+the evidence along with the clutter would make every message look unanswered for ever.
+
+An acknowledgement is also never answered. It is the end of an exchange, not the middle of one.
+
 **auto-ack** answers that craft automatically, in the mode it was spoken to in; see
 [05-observation.md](05-observation.md#answering-automatically-and-the-bearing-a-dish-answers-on)
 for the bearing a beam is answered on and for why an acknowledgement is never itself
@@ -195,7 +203,7 @@ Sealing is offered only for a craft whose key this ship holds, and the checkbox 
 is not. The client's copy of that rule is an interface courtesy; the server refuses the order
 either way.
 
-**The radio window is why `read_keys` consults egui.** Every binding in the table below is a
+**The communications window is why `read_keys` consults egui.** Every binding in the table below is a
 bare letter, and nothing in the game had a text field until there was something to say into one
 — so typing a message used to open the telescope, cut the drive and fly somewhere, one keystroke
 at a time. Held arrow keys are gated the same way: an arrow in a text field moves the cursor, and

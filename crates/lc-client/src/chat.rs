@@ -65,7 +65,18 @@ pub struct Conversation {
     pub name: String,
     /// In the order this ship learnt of them, which for a conversation across light delay is
     /// not the order they were sent in: a reply can be composed before the message it crosses.
+    ///
+    /// **Not everything that arrived.** A message with nothing in it is an acknowledgement and
+    /// nothing else, and it is absorbed into [`Conversation::acked`] rather than shown: there
+    /// is nothing to read, and a log of empty lines is a log nobody can read either.
     pub lines: Vec<Line>,
+    /// Every event identifier the other end has named, from any message they sent.
+    ///
+    /// Kept here rather than read back off the lines because the message that carries an
+    /// acknowledgement is usually one with nothing else in it — and that one is not a line.
+    /// Losing the evidence along with the clutter would make every message look unanswered for
+    /// ever.
+    acked: std::collections::BTreeSet<i64>,
 }
 
 impl Conversation {
@@ -78,10 +89,7 @@ impl Conversation {
     /// Any transmission of it counts. A resent message that is acknowledged by its second copy
     /// arrived, and which pulse of light got there is not a thing the sender needs to know.
     pub fn delivered(&self, line: &Line) -> bool {
-        self.lines
-            .iter()
-            .filter(|reply| !reply.mine)
-            .any(|reply| line.event_ids.iter().any(|id| reply.acks.contains(id)))
+        line.event_ids.iter().any(|id| self.acked.contains(id))
     }
 
     /// When this ship last learnt anything here, coordinate seconds. What the list sorts on.
@@ -152,7 +160,8 @@ impl Chat {
                     .filter(|line| !line.sealed)
                     .map(move |line| (Some(ShipId(*id)), c.name.as_str(), line))
             })
-            .chain(self.broadcasts.iter().map(|line| (None, "everyone", line)))
+            // No counterpart to name: `None` is what says so.
+            .chain(self.broadcasts.iter().map(|line| (None, "", line)))
             .collect();
         out.sort_by(|a, b| when(a.2).total_cmp(&when(b.2)));
         out
@@ -211,6 +220,12 @@ impl Chat {
             };
             let conversation = self.conversations.entry(with.0).or_default();
             conversation.name = said.with_name.clone();
+            // Only what the *other* end named. This ship's own acknowledgements say nothing
+            // about whether its own messages arrived, and folding them in would mark every
+            // message it ever sent as delivered.
+            if !said.mine {
+                conversation.acked.extend(said.acks.iter().copied());
+            }
             restore_into(&mut conversation.lines, said);
         }
     }
@@ -248,6 +263,10 @@ impl Chat {
         } else if conversation.name.is_empty() {
             conversation.name = format!("ship {}", from.0);
         }
+        // **What it acknowledges is kept whatever becomes of the message itself.** Absorbed
+        // first, because the usual carrier of an acknowledgement is a message that is about to
+        // be dropped for having nothing in it.
+        conversation.acked.extend(spoken.acks.iter().copied());
         // Idempotent twice over. A reconnection replays — `ResumeFrom` winds the delivery
         // cursor back and everything since arrives again — and a sender may have *resent*,
         // which is a genuinely different pulse of light carrying the same message.
@@ -258,14 +277,17 @@ impl Chat {
             && let Some(line) = same_message(&mut conversation.lines, spoken.idem, false)
         {
             line.event_ids.push(event_id);
-            if spoken.acks.len() > line.acks.len() {
-                line.acks = spoken.acks;
-            }
             // Already answered when the first copy landed. Answering a resend as well would
             // send one reply per attempt at reaching us.
             return None;
         }
         let worth_answering = !key && spoken.body.as_deref().is_some_and(|b| !b.is_empty());
+        if bare_acknowledgement(key, spoken.body.as_deref()) {
+            // Nothing to read, so nothing to show. Its acknowledgements are already kept, and
+            // it is not answered either: an acknowledgement is the end of the exchange, not
+            // the middle of one.
+            return None;
+        }
         conversation.lines.push(Line {
             event_ids: vec![event_id],
             idem: spoken.idem,
@@ -320,6 +342,11 @@ impl Chat {
         if lines.iter().any(|line| line.event_ids.contains(&event_id)) {
             return;
         }
+        // This ship's own acknowledgements are as empty as anybody's. Shown, a conversation
+        // with auto-ack on would be half blank lines from this end.
+        if bare_acknowledgement(key, body.as_deref()) {
+            return;
+        }
         // A resend joins the line it repeats. The line keeps the time it was *first* said,
         // because that is when the thing was said; the resends are how hard it was tried.
         if !key
@@ -349,6 +376,9 @@ impl Chat {
 /// several times and is one line with several events behind it — the same rule that applies
 /// when it is live, in the one other place a line can be made.
 fn restore_into(lines: &mut Vec<Line>, said: Said) {
+    if bare_acknowledgement(said.key, said.body.as_deref()) {
+        return;
+    }
     if let Some(line) = same_message(lines, said.idem, said.mine) {
         if !line.event_ids.contains(&said.event_id) {
             line.event_ids.push(said.event_id);
@@ -374,6 +404,19 @@ fn restore_into(lines: &mut Vec<Line>, said: Said) {
         // what is written down is what was said.
         strength: None,
     });
+}
+
+/// Whether a message is an acknowledgement and nothing else.
+///
+/// An empty body with no key offer behind it: its whole content is the identifiers riding in
+/// its payload, which are kept on the conversation. There is nothing to read, so there is
+/// nothing to show, and nothing to answer either — this is the end of an exchange rather than
+/// the middle of one.
+///
+/// A message this ship cannot read is **not** this. Its body is `None` rather than empty, and
+/// that somebody in earshot is talking in private is exactly the kind of thing worth showing.
+fn bare_acknowledgement(key: bool, body: Option<&str>) -> bool {
+    !key && body == Some("")
 }
 
 /// When this ship learnt of a line: the arrival for something heard, the sending for its own.
@@ -567,6 +610,75 @@ mod tests {
         chat.received(ShipId(7), Some("Ada"), 300, spoken(1, Some("back"), false, vec![]), false, 6.0, 9.0, 1.0, [1.0, 0.0, 0.0]);
         let order: Vec<ShipId> = chat.conversations().into_iter().map(|(id, _)| id).collect();
         assert_eq!(order, vec![ShipId(7), ShipId(8)]);
+    }
+
+    /// **The quiet half of an acknowledgement.** A message with nothing in it is not shown —
+    /// there is nothing to read — and what it acknowledges is kept anyway. Dropping both would
+    /// make every message look unanswered for ever, which is the failure worth guarding.
+    #[test]
+    fn a_bare_acknowledgement_is_not_shown_and_still_marks_the_message_delivered() {
+        let mut chat = Chat::default();
+        chat.sent(Some(ShipId(7)), Some("Ada"), 100, 1, Some("are you there".into()), false, false, 1.0);
+        let sent = line(&chat, 7, 0);
+        assert!(!chat.get(ShipId(7)).unwrap().delivered(&sent));
+
+        let bare = Spoken {
+            to: Some(1),
+            beamed: false,
+            idem: 5,
+            sealed: false,
+            body: Some(String::new()),
+            acks: vec![100],
+        };
+        chat.received(ShipId(7), Some("Ada"), 200, bare, false, 9.0, 12.0, 1.0, [1.0, 0.0, 0.0]);
+
+        let conversation = chat.get(ShipId(7)).unwrap();
+        assert_eq!(conversation.lines.len(), 1, "an empty acknowledgement was shown as a line");
+        assert!(conversation.delivered(&sent), "the acknowledgement was dropped with the line");
+    }
+
+    /// This ship's own empty acknowledgements are as quiet as anybody's. With auto-ack on, a
+    /// conversation would otherwise be half blank lines from this end.
+    #[test]
+    fn this_ships_own_bare_acknowledgements_are_not_shown_either() {
+        let mut chat = Chat::default();
+        chat.sent(Some(ShipId(7)), Some("Ada"), 300, 9, Some(String::new()), false, false, 1.0);
+        assert!(chat.get(ShipId(7)).is_none_or(|c| c.lines.is_empty()));
+    }
+
+    /// A message this ship cannot *read* is not a message with nothing in it. That somebody in
+    /// earshot is talking in private is exactly the kind of thing worth showing.
+    #[test]
+    fn an_unreadable_message_is_not_mistaken_for_an_acknowledgement() {
+        let mut chat = Chat::default();
+        let sealed = Spoken {
+            to: Some(99),
+            beamed: false,
+            idem: 3,
+            sealed: true,
+            body: None,
+            acks: vec![],
+        };
+        chat.received(ShipId(7), None, 400, sealed, false, 1.0, 3.0, 1.0, [1.0, 0.0, 0.0]);
+        assert_eq!(chat.get(ShipId(7)).unwrap().lines.len(), 1);
+    }
+
+    /// A key offer's body is empty too, and it is not an acknowledgement.
+    #[test]
+    fn a_key_offer_is_shown_despite_having_no_body() {
+        let mut chat = Chat::default();
+        let offer = Spoken {
+            to: Some(1),
+            beamed: false,
+            idem: 0,
+            sealed: false,
+            body: Some(String::new()),
+            acks: vec![],
+        };
+        chat.received(ShipId(7), None, 500, offer, true, 1.0, 3.0, 1.0, [1.0, 0.0, 0.0]);
+        let conversation = chat.get(ShipId(7)).unwrap();
+        assert_eq!(conversation.lines.len(), 1);
+        assert!(conversation.lines[0].key);
     }
 
     /// Off until it is asked for, and then it answers in the mode it was spoken to in.

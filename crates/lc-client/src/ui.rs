@@ -85,7 +85,7 @@ impl Panel {
             Panel::Scenarios => "Scenarios",
             Panel::Refit => "Refit",
             Panel::DevActions => "Dev actions",
-            Panel::Chat => "Radio",
+            Panel::Chat => "Communications",
         }
     }
 }
