@@ -542,11 +542,19 @@ pub fn report_place(
 const REPORT_EVERY_S: f32 = 5.0;
 
 /// Fetch the catalogue once, and keep it where everything can read it.
+///
+/// **Not in the browser**, where there is no file to fetch: `tools/build-wasm.sh` stages the
+/// fonts and the sky and not the shelf, because 43 MB of epub belongs on the CDN once rather
+/// than under every build id. A browser build is always told what to read by its shard, so
+/// asking anyway only bought an asset-server error in the console on every page load.
 pub fn read_catalogue(
     mut shelf: ResMut<Shelf>,
     assets: Res<AssetServer>,
     shelved: Res<Assets<Shelved>>,
 ) {
+    if cfg!(target_arch = "wasm32") {
+        return;
+    }
     match &shelf.catalogue_handle {
         None => shelf.catalogue_handle = Some(assets.load(CATALOGUE)),
         Some(handle) => {
