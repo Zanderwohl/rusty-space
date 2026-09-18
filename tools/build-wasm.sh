@@ -67,6 +67,11 @@ fi
 echo "==> assets"
 cp -R crates/lc-client/assets/shaders "$OUT/assets/shaders"
 tools/check-shaders.sh "$OUT/assets"
+# The reading faces, which the browser fetches the first time a book is opened. Named, like
+# everything else here: the asset directory also holds forty megabytes of epub that belong on
+# the CDN once rather than under every build id, so this must never become a `cp -R assets`.
+# See lightcone/docs/21-library.md.
+cp -R crates/lc-client/assets/fonts "$OUT/assets/fonts"
 
 WASM_BYTES=$(wc -c < "$OUT/${BIN}_bg.wasm" | tr -d ' ')
 JS_BYTES=$(wc -c < "$OUT/$BIN.js" | tr -d ' ')
