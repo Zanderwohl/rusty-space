@@ -142,23 +142,17 @@ pub fn hud(
             .anchor(egui::Align2::RIGHT_BOTTOM, [-12.0, -12.0])
             .resizable(false)
             .show(ctx, |ui| {
+                // A width of its own, so "the whole row" means something. Left to size itself
+                // the box is as wide as its widest notice, and a row that then asked for all of
+                // it would be asking the box how wide to be while the box asked the row.
+                ui.set_min_width(NOTICE_WIDTH);
                 for note in &ui_state.notifications {
                     // Everything else in this box is the interface reporting on itself and has
                     // nowhere to go. A transmission is the one kind of event with somewhere to
                     // go, so it is the one kind that is a link.
                     match note.from {
-                        // A button rather than a label that happens to take clicks: it has to
-                        // *look* pressable or nobody finds out that it is.
-                        //
-                        // `frame_when_inactive(false)` and **not** `frame(false)`. The latter
-                        // drops the frame's margin, and egui gates the hover paint on that
-                        // margin existing — so a frameless button is one that never lights up,
-                        // which is the affordance this exists to add. This one sits flat in the
-                        // list until the cursor is on it.
                         Some(from) => {
-                            let line = egui::RichText::new(&note.text).color(crate::radio_panel::RADIO);
-                            if ui
-                                .add(egui::Button::new(line).frame_when_inactive(false))
+                            if notice_link(ui, &note.text)
                                 .on_hover_text("open the conversation")
                                 .clicked()
                             {
@@ -174,6 +168,43 @@ pub fn hud(
     }
 }
 
+
+/// How wide the events box is. See [`notice_link`] for why it is stated rather than measured.
+const NOTICE_WIDTH: f32 = 300.0;
+
+/// One notice that goes somewhere: the whole row clickable, lit while the cursor is on it.
+///
+/// **Not a button**, and the whole row rather than the words. A button's frame in a list of
+/// notices makes the list read as a row of controls, and a click target the width of its own
+/// text is one a cursor slides off — these arrive unasked for, so hitting one should not need
+/// aim. What marks it out is the colour it is already drawn in and the background under it
+/// while it is hovered.
+///
+/// Laid out by hand rather than as a widget because the background has to be painted *under*
+/// the text, and anything added after a label paints over it.
+fn notice_link(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    let padding = ui.spacing().button_padding;
+    let width = ui.available_width();
+    let galley = ui.painter().layout(
+        text.to_string(),
+        egui::TextStyle::Body.resolve(ui.style()),
+        crate::radio_panel::RADIO,
+        (width - padding.x * 2.0).max(1.0),
+    );
+    let size = egui::vec2(width, galley.size().y + padding.y * 2.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        if response.hovered() {
+            ui.painter().rect_filled(
+                rect,
+                ui.visuals().widgets.hovered.corner_radius,
+                ui.visuals().widgets.hovered.weak_bg_fill,
+            );
+        }
+        ui.painter().galley(rect.min + padding, galley, crate::radio_panel::RADIO);
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
 
 /// The button that changes a pursuit's closeness: what it says, what it does, and what it asks
 /// for.

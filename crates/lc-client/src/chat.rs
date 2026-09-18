@@ -82,6 +82,21 @@ impl Line {
     }
 }
 
+/// Where a transmission belongs, decided by who it was addressed to.
+///
+/// One rule with two readers — what [`Chat::received`] files it as, and what the events box
+/// says about it — and it is a named answer rather than a predicate at each of them so the two
+/// cannot drift into disagreeing about what a message *is*.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Filing {
+    /// Addressed to this ship: a conversation with whoever sent it.
+    Conversation,
+    /// Addressed to nobody: a broadcast.
+    Broadcast,
+    /// Addressed to another craft, with this ship merely in earshot.
+    Overheard,
+}
+
 /// A transmission that belongs to no conversation.
 ///
 /// Two kinds, told apart by [`Loose::to`]: a **broadcast**, said to nobody in particular, and
@@ -192,6 +207,19 @@ impl Chat {
         self.me = Some(me);
     }
 
+    /// Where a transmission addressed to `to` belongs.
+    ///
+    /// Until a welcome says which craft this is, anything with an addressee is taken to be a
+    /// conversation: better to show a message in the wrong tab than to decide it was somebody
+    /// else's on no evidence.
+    pub fn filing(&self, to: Option<i64>) -> Filing {
+        match (to, self.me) {
+            (None, _) => Filing::Broadcast,
+            (Some(to), Some(me)) if to != me.0 => Filing::Overheard,
+            (Some(_), _) => Filing::Conversation,
+        }
+    }
+
     /// Everything said to nobody in particular, oldest first — sent and heard.
     ///
     /// **Broadcasts and nothing else.** A message addressed to one craft is not public however
@@ -265,11 +293,11 @@ impl Chat {
         for said in messages {
             // The same rule the live path uses, and it has to be: a transcript replayed into
             // different tabs from the ones it arrived in would be a different transcript.
-            let for_us = match (said.to, self.me) {
-                (Some(to), Some(me)) => to == me || said.mine,
-                (Some(_), None) => true,
-                (None, _) => false,
-            };
+            // A message this ship *sent* is its own conversation whoever it was for, which is
+            // the one way the replay differs from the live path: nothing this ship said is
+            // something it overheard.
+            let for_us =
+                said.mine || self.filing(said.to.map(|to| to.0)) == Filing::Conversation;
             let Some(with) = said.with.filter(|_| for_us) else {
                 if bare_acknowledgement(said.key, said.body.as_deref()) {
                     continue;
@@ -329,12 +357,7 @@ impl Chat {
         //
         // Until a welcome says which craft this is, everything is a conversation: better to
         // show a message in the wrong tab than to decide it was somebody else's on no evidence.
-        let for_us = match (spoken.to, self.me) {
-            (Some(to), Some(me)) => to == me.0,
-            (Some(_), None) => true,
-            (None, _) => false,
-        };
-        if !for_us {
+        if self.filing(spoken.to) != Filing::Conversation {
             return self.overhear(from, name, event_id, spoken, key, sent_s, arrive_s, strength);
         }
         let conversation = self.conversations.entry(from.0).or_default();
@@ -733,6 +756,21 @@ mod tests {
         chat.received(ShipId(7), Some("Ada"), 500, spoken(1, Some("here"), false, vec![]), false, 1.0, 2.0, 1.0, [1.0, 0.0, 0.0]);
         chat.received(ShipId(7), None, 501, spoken(1, Some("still here"), false, vec![]), false, 3.0, 9.0, 1.0, [1.0, 0.0, 0.0]);
         assert_eq!(chat.get(ShipId(7)).unwrap().name, "Ada");
+    }
+
+    /// The one rule that decides where everything goes, stated once so two readers cannot
+    /// drift apart about what a message is.
+    #[test]
+    fn where_a_message_belongs_is_decided_by_who_it_was_addressed_to() {
+        let mut chat = Chat::default();
+        // Before a welcome says which craft this is, anything addressed is a conversation.
+        assert_eq!(chat.filing(Some(9)), Filing::Conversation);
+        assert_eq!(chat.filing(None), Filing::Broadcast);
+
+        chat.i_am(ShipId(1));
+        assert_eq!(chat.filing(Some(1)), Filing::Conversation);
+        assert_eq!(chat.filing(Some(9)), Filing::Overheard);
+        assert_eq!(chat.filing(None), Filing::Broadcast);
     }
 
     /// **Public is broadcasts and nothing else.** A message addressed to one craft is not

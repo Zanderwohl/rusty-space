@@ -164,6 +164,10 @@ Nothing loose is ever answered automatically. Acknowledging a broadcast would an
 once, and acknowledging somebody else's mail would tell its sender that a craft they were not
 talking to is listening.
 
+In the public log a sender's **name is the link** to their conversation, rather than a reply
+button beside it. A log is prose and prose links are words; it underlines while the cursor is on
+it.
+
 Public can transmit, and what it offers is narrower than a conversation's. There is no craft to
 aim at, so "beam" is not shown at all rather than shown and disabled — an option that contradicts
 the channel is worse than a missing one. Omni and a beam at the selected star remain, and so does
@@ -211,10 +215,16 @@ the point of the button: the usual reason a message went unacknowledged is a bea
 craft turned out not to be, and the useful retry is the same words pointed somewhere else. A
 message sent encrypted must never become one sent in the open by a second click.
 
-A transmission arriving is also a **green line in the notifications box**, and that line is a
-button — it lights up under the cursor, because an affordance nobody can see is one nobody
-uses. (`Button::frame_when_inactive(false)`, not `frame(false)`: egui gates the hover paint on
-the frame's margin existing, so a frameless button is one that never lights up.) It is the one kind of event with somewhere to go: everything else in that box is the
+A transmission arriving is also a **green line in the notifications box**, and the whole row is
+clickable — lit while the cursor is on it, and not a button. A button's frame makes a list of
+notices read as a row of controls, and a click target the width of its own text is one a cursor
+slides off; these arrive unasked for, so hitting one should not need aim. The box has a width of
+its own for the same reason: left to size itself, a row asking for "all of it" would be asking
+the box how wide to be while the box asked the row.
+
+**Overheard traffic is announced, not quoted.** Its notice is the `from -> to` line and nothing
+else. That two other craft are talking is the news; what they said to each other is theirs, and
+repeating it into this ship's own events box reads as if it had been said here. It is the one kind of event with somewhere to go: everything else in that box is the
 interface reporting on itself. Somebody else's sealed message is a line too, saying that it was
 heard and cannot be read — a signal falling on the antenna is a fact about the world, and hiding
 it would let a player learn that nothing was sent by not being told.

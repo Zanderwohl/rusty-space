@@ -319,6 +319,20 @@ impl Uplink {
         }
     }
 
+    /// What a craft is called, from whatever this client knows of it.
+    ///
+    /// A contact's name first, because that is what the server last said; then the name a
+    /// conversation already holds, which outlives the contact going out of sight; then its
+    /// number, which is always true and never useful.
+    pub fn name_of(&self, who: ShipId) -> String {
+        self.contacts
+            .iter()
+            .find(|c| c.ship_id == who)
+            .map(|c| c.name.clone())
+            .or_else(|| self.chat.get(who).map(|c| c.name.clone()).filter(|n| !n.is_empty()))
+            .unwrap_or_else(|| format!("ship {}", who.0))
+    }
+
     /// Note that an order has just gone out, so its answer can be timed.
     pub fn asked(&mut self, at_s: f64) {
         self.asked_at = Some(at_s);
@@ -551,13 +565,25 @@ fn fold(
                 let key = sighting.kind == lc_proto::kind::KEY;
                 // Said before it is folded, because what the box shows is what this craft can
                 // read — which for somebody else's sealed mail is the fact of it and no more.
-                let said = match (key, &spoken.body) {
-                    (true, _) => "sent you its key".to_string(),
-                    (false, Some(body)) => body.clone(),
-                    (false, None) => "(sealed, and not for you)".to_string(),
+                let who = name.clone().unwrap_or_else(|| uplink.name_of(from));
+                // **Overheard traffic is announced and not quoted.** That two other craft are
+                // talking is the news; what they said to each other is theirs, and repeating
+                // it into this ship's own events box reads as if it had been said here.
+                let notice = match uplink.chat.filing(spoken.to) {
+                    crate::chat::Filing::Overheard => {
+                        let to = spoken.to.map(|to| uplink.name_of(ShipId(to)));
+                        format!("{who} -> {}", to.unwrap_or_else(|| "somebody".into()))
+                    }
+                    _ => {
+                        let said = match (key, &spoken.body) {
+                            (true, _) => "sent you its key".to_string(),
+                            (false, Some(body)) => body.clone(),
+                            (false, None) => "(encrypted, and not for you)".to_string(),
+                        };
+                        format!("{who}: {said}")
+                    }
                 };
-                let who = name.clone().unwrap_or_else(|| format!("ship {}", from.0));
-                ui.0.heard(from, format!("{who}: {said}"), sighting.arrive_t as f64 * 1e-6);
+                ui.0.heard(from, notice, sighting.arrive_t as f64 * 1e-6);
                 // The bearing the signal came in on, which is what a dish answers down. Not
                 // where they are now, and not where they will be: where the light left them.
                 if let Some(aim) = uplink.chat.received(
@@ -1303,6 +1329,30 @@ mod tests {
         assert_eq!(heard.to, Some(ShipId(99)), "it forgot who it was for");
         assert!(uplink.chat.get(ShipId(2)).is_none(), "it became a conversation with the sender");
         assert!(ui.0.notifications.last().is_some_and(|n| n.from == Some(ShipId(2))));
+    }
+
+    /// **Overheard traffic is announced, not quoted.** That two other craft are talking is the
+    /// news; what they said to each other is theirs, and repeating it into this ship's own
+    /// events box would read as if it had been said here.
+    #[test]
+    fn an_overheard_message_is_announced_without_its_contents() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let spoken = lc_proto::Spoken {
+            to: Some(99),
+            beamed: false,
+            idem: 21,
+            sealed: false,
+            body: Some("rendezvous at the third moon".into()),
+            acks: Vec::new(),
+        };
+        fold(&mut uplink, &mut game, &mut ui, heard(97, 2, spoken, lc_proto::kind::MESSAGE));
+
+        let note = ui.0.notifications.last().expect("nothing in the events box");
+        assert!(!note.text.contains("rendezvous"), "it quoted somebody else's mail: {}", note.text);
+        assert!(note.text.contains("->"), "it did not say who was talking to whom: {}", note.text);
+        // And it still opens somewhere: the craft that transmitted it.
+        assert_eq!(note.from, Some(ShipId(2)));
     }
 
     /// Sending is not receiving. A message this ship sent is in the transcript against the

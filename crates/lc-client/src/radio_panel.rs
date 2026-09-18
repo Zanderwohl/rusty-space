@@ -196,17 +196,20 @@ fn public_log(
         }
         for loose in &lines {
             ui.horizontal_wrapped(|ui| {
-                let said_by = match loose.line.mine {
-                    true => own,
-                    false => loose.from_name.as_str(),
-                };
-                speaker(ui, said_by, loose.line.mine);
-                body_of(ui, &loose.line, loose.line.mine, None);
-                if let Some(from) = loose.from.filter(|_| !loose.line.mine)
-                    && ui.small_button("reply").on_hover_text("open this conversation").clicked()
-                {
-                    ask(out, Action::ChatWith(Channel::With(from)));
+                match loose.from.filter(|_| !loose.line.mine) {
+                    // Somebody else's, so the name is the way to them. The name and not a
+                    // button beside it: a log is prose, and prose links are words.
+                    Some(from) => {
+                        if clickable_name(ui, &format!("{}:", loose.from_name), RADIO)
+                            .on_hover_text("open this conversation")
+                            .clicked()
+                        {
+                            ask(out, Action::ChatWith(Channel::With(from)));
+                        }
+                    }
+                    None => speaker(ui, own, true),
                 }
+                body_of(ui, &loose.line, loose.line.mine, None);
             });
         }
     });
@@ -234,7 +237,7 @@ fn overheard_log(
             // button either: the thing to reply to is the craft, not the remark, and the list
             // on the left is where a craft is chosen.
             let from = loose.from_name.as_str();
-            let to = loose.to.map(|to| name_for(uplink, to));
+            let to = loose.to.map(|to| uplink.name_of(to));
             ui.label(
                 egui::RichText::new(match &to {
                     Some(to) => format!("{from} -> {to}"),
@@ -271,16 +274,6 @@ fn overheard_log(
     });
 }
 
-/// What a craft is called, from whatever the interface knows of it.
-fn name_for(uplink: &crate::uplink::Uplink, who: lc_proto::ShipId) -> String {
-    uplink
-        .contacts
-        .iter()
-        .find(|c| c.ship_id == who)
-        .map(|c| c.name.clone())
-        .or_else(|| uplink.chat.get(who).map(|c| c.name.clone()).filter(|n| !n.is_empty()))
-        .unwrap_or_else(|| format!("ship {}", who.0))
-}
 
 /// One craft's conversation, both halves.
 fn conversation(
@@ -362,6 +355,28 @@ fn log_area(ui: &mut egui::Ui, id: &str, height: f32, add: impl FnOnce(&mut egui
                 add(ui);
             });
     });
+}
+
+/// A name that opens a conversation when it is clicked.
+///
+/// **Not a button.** A button's frame in the middle of a line of prose reads as a control that
+/// does something to the line, and a log is prose. This is the name itself, underlined while
+/// the cursor is on it — which is the oldest affordance there is for "this goes somewhere" and
+/// is the one thing a label can do without becoming a widget.
+pub(crate) fn clickable_name(ui: &mut egui::Ui, text: &str, colour: egui::Color32) -> egui::Response {
+    let response = ui.add(
+        egui::Label::new(egui::RichText::new(text).color(colour)).sense(egui::Sense::click()),
+    );
+    if response.hovered() {
+        // Painted after the text rather than under it: an underline is a line below the
+        // baseline, so there is nothing for it to cover.
+        let rect = response.rect;
+        ui.painter().line_segment(
+            [rect.left_bottom(), rect.right_bottom()],
+            egui::Stroke::new(1.0_f32, colour),
+        );
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// Who said it. Named rather than arrowed: the default font has no U+2192 and draws a tofu box
