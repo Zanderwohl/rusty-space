@@ -360,6 +360,19 @@ This is the one place the two coordinates touch, and finding it took six real bo
 a fixture — which is the argument for checking a paginator against Twain, who was not writing
 test data.
 
+**And it bit again, in the client, for the same reason.** The reader kept its live position as a
+character offset alone, so resolving it always landed on the first block sharing that offset —
+which meant a page after a plate resolved back to the plate. Huckleberry Finn opens with two
+plates in a row, both at character 76, and so does the paragraph after them: the plate drew for
+a frame, the position resolved backwards, and the book could not be read past it. Turning back
+and jumping to a chapter both worked, because neither goes through the offset.
+
+So the client carries the block index alongside the offset while a chapter is open. The index is
+a fact about the parsed document and survives a resize, where a row index would not; it is
+dropped on a jump or a fresh open, when the offset really is all there is. A saved bookmark is
+still just the offset, and still resolves to the first block that shares it — being shown a
+plate again on reopening is the smaller wrong, and the one that cannot trap anybody.
+
 ---
 
 # The reader window

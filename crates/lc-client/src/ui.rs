@@ -286,6 +286,17 @@ pub struct Reading {
     pub book: Option<String>,
     pub spine: usize,
     pub offset: usize,
+    /// Which block the offset means, while this chapter is open.
+    ///
+    /// **A character offset cannot say.** A plate is made of no characters, so it shares its
+    /// offset with the plate or the paragraph after it — and resolving the offset alone always
+    /// lands on the first of them, which is a page that can be turned to and never past. Two
+    /// plates in a row is not a rare shape: the first chapter of Huckleberry Finn opens with
+    /// exactly that.
+    ///
+    /// The index is a fact about the parsed document and survives a resize, where a row index
+    /// would not. `None` after a jump or a fresh open, when the offset is all there is.
+    pub block: Option<usize>,
     /// Pages asked for and not yet turned.
     ///
     /// An action cannot turn a page, because turning one means laying it out and only the

@@ -197,7 +197,7 @@ fn search(ui: &mut egui::Ui, setting: &Setting, query: &mut String) {
 
     let field = egui::TextEdit::singleline(query)
         .font(setting.body.clone())
-        .hint_text(egui::RichText::new("title, author, subject").color(FAINT))
+        .hint_text(egui::RichText::new("search").color(FAINT))
         .desired_width(f32::INFINITY)
         .frame(false);
     let response = ui.add(field);

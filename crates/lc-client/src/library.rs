@@ -222,6 +222,7 @@ pub fn keep_up(
     if let Some((spine, offset)) = state.reading.goto.take() {
         state.reading.spine = spine;
         state.reading.offset = offset;
+        state.reading.block = None;
         state.reading.asked = true;
     }
     let wanted = state.reading.book.clone();

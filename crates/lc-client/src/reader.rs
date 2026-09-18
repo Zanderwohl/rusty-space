@@ -522,7 +522,7 @@ fn page(
 
     // A page turn is spent here rather than in `action::apply`, because turning one means
     // laying it out and this is the only place with the fonts to do that.
-    let mut cursor = start_cursor(doc, &setter, frame, state.reading.offset);
+    let mut cursor = resume(doc, &setter, frame, state.reading.block, state.reading.offset);
     let mut current = paginate::page_at(doc, &setter, frame, cursor);
     let turns = std::mem::take(&mut state.reading.turn);
     // A turn is the player moving, and where they moved to is written down at once rather than
@@ -561,6 +561,9 @@ fn page(
     // backwards every time the window was dragged. Resizing is not reading.
     if state.reading.asked {
         state.reading.offset = current.start;
+        // And which block that offset means. Without it the next page after a plate resolves
+        // back to the plate, for ever.
+        state.reading.block = Some(current.cursor().block);
     }
 
     let key = (*spine, frame.width.to_bits(), frame.height.to_bits());
@@ -569,7 +572,7 @@ fn page(
         counted.pages = paginate::pages(doc, &setter, frame).count();
     }
     let folio_number = paginate::pages(doc, &setter, frame)
-        .position(|p| p.start >= current.start)
+        .position(|p| p.cursor() >= current.cursor())
         .map(|i| i + 1)
         .unwrap_or(1);
 
@@ -631,13 +634,38 @@ fn page(
     folio(ui, outer.with_max_y(rect.max.y), *spine, shelf, setting, folio_number, counted.pages);
 }
 
-/// The place a saved offset resumes at, and the end of the chapter when a page was turned back
-/// into it.
-fn start_cursor<M: Measure>(doc: &Document, measure: &M, frame: PageFrame, offset: usize) -> Cursor {
+/// Where the reader resumes: the block it was on if it still holds that place, and the offset
+/// alone when there is nothing else to go on.
+///
+/// The offset alone is not enough to page forward with. Blocks that carry no text — a plate, a
+/// rule — share the offset of whatever follows them, and resolving it always picks the first,
+/// so a page after a plate resolves back to the plate and the book cannot be read past it.
+pub(crate) fn resume<M: Measure>(
+    doc: &Document,
+    measure: &M,
+    frame: PageFrame,
+    block: Option<usize>,
+    offset: usize,
+) -> Cursor {
+    // The end of the chapter, which is what turning back into one asks for.
     if offset == usize::MAX {
         return Cursor { block: doc.blocks.len(), row: 0 };
     }
-    paginate::cursor_at(doc, measure, frame, offset)
+    let known = block.filter(|i| {
+        doc.blocks.get(*i).is_some_and(|located| {
+            let chars = located.block.text().map_or(0, |t| t.chars());
+            // The same block, still holding the same character. A chapter that changed under it
+            // — or a bookmark from another machine — falls back to the offset.
+            located.offset <= offset && offset <= located.offset + chars
+        })
+    });
+    let Some(block) = known else {
+        return paginate::cursor_at(doc, measure, frame, offset);
+    };
+    let within = offset - doc.blocks[block].offset;
+    let measured = measure.measure(&doc.blocks[block].block, frame.width);
+    let row = measured.rows.iter().rposition(|r| r.offset <= within).unwrap_or(0);
+    Cursor { block, row }
 }
 
 /// One plate, decoded on its way to the screen and kept for a while afterwards.
@@ -828,5 +856,86 @@ fn contents(
         && let Some((spine, offset)) = crate::library::chapter_start(books, shelf, &entry)
     {
         ask(out, Action::GoTo(spine, offset));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lc_books::Grid;
+    use lc_books::paginate::{self, Cursor};
+    use lc_books::text::parse;
+
+    use super::resume;
+
+    /// The opening of Huckleberry Finn, which is a heading, a line, and **two plates in a row**.
+    /// Every block from the first plate on begins at the same character, because a plate is made
+    /// of none.
+    const OPENING: &str = r#"<body>
+        <h2>HUCKLEBERRY FINN</h2>
+        <p>Scene: The Mississippi Valley Time: Forty to fifty years ago</p>
+        <img src="frontispiece.jpg"/>
+        <img src="c01-02.jpg"/>
+        <p>You don't know about me without you have read a book by the name of
+        The Adventures of Tom Sawyer; but that ain't no matter.</p>
+    </body>"#;
+
+    #[test]
+    fn a_page_can_be_turned_past_two_plates_that_share_an_offset() {
+        let doc = parse(OPENING, "c1.xhtml");
+        let frame = Grid::frame(40, 6);
+
+        // Read forward the way the window does: draw the page the stored place resolves to,
+        // turn it, write down where that left you, and resolve it again next frame.
+        let mut block = None;
+        let mut offset = 0;
+        let mut drawn: Vec<(usize, usize)> = Vec::new();
+        for turn in 0..12 {
+            let page = paginate::page_at(&doc, &Grid, frame, resume(&doc, &Grid, frame, block, offset));
+            drawn.extend(page.slices.iter().flat_map(|s| {
+                (s.first_row..s.first_row + s.rows).map(move |row| (s.block, row))
+            }));
+            if page.next.block >= doc.blocks.len() {
+                break;
+            }
+            let next = paginate::page_at(&doc, &Grid, frame, page.next);
+            offset = next.start;
+            block = Some(next.cursor().block);
+            assert!(turn < 11, "the book would not end");
+        }
+
+        // Every row of the chapter, once, in order. Before the block was carried alongside the
+        // offset this stopped at the first plate and drew it for ever: the plate, the plate
+        // after it and the paragraph after that all begin at the same character.
+        let every: Vec<(usize, usize)> = doc
+            .blocks
+            .iter()
+            .enumerate()
+            .flat_map(|(i, b)| {
+                (0..Grid.lines(&b.block, frame.width as usize).len()).map(move |row| (i, row))
+            })
+            .collect();
+        assert_eq!(drawn, every);
+    }
+
+    #[test]
+    fn without_the_block_an_offset_resolves_to_the_first_thing_that_shares_it() {
+        let doc = parse(OPENING, "c1.xhtml");
+        let frame = Grid::frame(40, 6);
+        // The plates and the paragraph after them all begin at the same character. This is why
+        // the block index exists, and what a saved bookmark is resolved against on its own.
+        let plate = doc.blocks.iter().position(|b| matches!(b.block, lc_books::Block::Image { .. }));
+        let at = doc.blocks[plate.unwrap()].offset;
+        assert_eq!(resume(&doc, &Grid, frame, None, at).block, plate.unwrap());
+        // With a block to go on, the same offset means the block it was taken from.
+        assert_eq!(resume(&doc, &Grid, frame, Some(plate.unwrap() + 1), at).block, plate.unwrap() + 1);
+    }
+
+    #[test]
+    fn a_block_that_no_longer_holds_the_place_is_not_believed() {
+        let doc = parse(OPENING, "c1.xhtml");
+        let frame = Grid::frame(40, 6);
+        // A bookmark from a chapter that has since changed shape, or from another machine.
+        let resolved = resume(&doc, &Grid, frame, Some(doc.blocks.len() + 5), 0);
+        assert_eq!(resolved, Cursor::default());
     }
 }
