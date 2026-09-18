@@ -1,6 +1,6 @@
 //! Bookmarks: which account is where in which book.
 //!
-//! The one table here that no rule depends on. See `lightcone/docs/19-library.md`.
+//! The one table here that no rule depends on. See `lightcone/docs/21-library.md`.
 
 use tokio_postgres::{Client, Error};
 

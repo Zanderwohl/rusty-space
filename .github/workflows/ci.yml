@@ -23,7 +23,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libudev-dev
+          sudo apt-get install -y libasound2-dev libudev-dev libdbus-1-dev
 
       - name: Test
         run: cargo test --workspace
@@ -58,6 +58,12 @@ jobs:
   # the bytes.
   wasm:
     runs-on: ubuntu-latest
+    # **An env `RUSTFLAGS` replaces `.cargo/config.toml`'s, it does not add to it.** The config
+    # names `getrandom`'s browser backend for this target alone, and the workspace's `-D warnings`
+    # was quietly dropping it — so every browser check failed on `getrandom` refusing to build for
+    # wasm, whatever the change. Both belong here, together, or neither reaches the compiler.
+    env:
+      RUSTFLAGS: -D warnings --cfg getrandom_backend="wasm_js"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

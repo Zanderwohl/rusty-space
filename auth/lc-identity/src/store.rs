@@ -11,12 +11,18 @@ use uuid::Uuid;
 
 use crate::providers::Provider;
 
-/// An account as anything outside the broker sees it: an opaque id and a name.
+/// An account as anything outside the broker sees it: an opaque id, a name, and what it may do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Account {
     pub id: Uuid,
     pub display_name: String,
+    /// [`PLAYER`] or [`ADMIN`]. An integer because it will grow into levels.
+    pub permission: i32,
 }
+
+pub const PLAYER: i32 = 0;
+/// May issue development actions on a game server.
+pub const ADMIN: i32 = 1;
 
 /// One way of signing in to one account.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -151,13 +157,40 @@ impl Store {
         match self {
             Store::Memory(m) => Ok(m.0.lock().unwrap().accounts.get(&id).cloned()),
             Store::Postgres(pool) => {
-                let row: Option<(Uuid, String)> =
-                    sqlx::query_as("select id, display_name from accounts where id = $1")
-                        .bind(id)
-                        .fetch_optional(pool)
-                        .await
-                        .map_err(|e| StoreError::Backend(e.to_string()))?;
-                Ok(row.map(|(id, display_name)| Account { id, display_name }))
+                let row: Option<(Uuid, String, i32)> = sqlx::query_as(
+                    "select id, display_name, permission from accounts where id = $1",
+                )
+                .bind(id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+                Ok(row.map(|(id, display_name, permission)| Account {
+                    id,
+                    display_name,
+                    permission,
+                }))
+            }
+        }
+    }
+
+    /// Set what an account may do. Nothing in the broker calls this: permissions are granted by
+    /// migration or by hand, and this exists so a test can make an admin.
+    pub async fn set_permission(&self, id: Uuid, permission: i32) -> Result<(), StoreError> {
+        match self {
+            Store::Memory(m) => {
+                if let Some(account) = m.0.lock().unwrap().accounts.get_mut(&id) {
+                    account.permission = permission;
+                }
+                Ok(())
+            }
+            Store::Postgres(pool) => {
+                sqlx::query("update accounts set permission = $2 where id = $1")
+                    .bind(id)
+                    .bind(permission)
+                    .execute(pool)
+                    .await
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                Ok(())
             }
         }
     }
@@ -181,6 +214,7 @@ impl Store {
         let account = Account {
             id,
             display_name: display_name.to_owned(),
+            permission: PLAYER,
         };
         let link = Link {
             account_id: id,

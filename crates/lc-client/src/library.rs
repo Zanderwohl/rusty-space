@@ -2,7 +2,7 @@
 //!
 //! Going through the asset server rather than reading a file is what makes the browser build
 //! and the desktop build the same code — and it is what will make the CDN a URL rather than a
-//! port, when `lightcone/docs/19-library.md`'s step 2 lands. Nothing here knows about HTTP.
+//! port, when `lightcone/docs/21-library.md`'s step 2 lands. Nothing here knows about HTTP.
 
 use bevy::asset::io::Reader;
 use bevy::asset::{AssetLoader, LoadContext, LoadState};

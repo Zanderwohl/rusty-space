@@ -6,7 +6,7 @@
 //! lost a colon, which is the whole reason this exists rather than a directory listing.
 //!
 //! The server owns the file and sends it; this crate owns its shape, so both ends agree by
-//! construction. See `lightcone/docs/19-library.md`.
+//! construction. See `lightcone/docs/21-library.md`.
 
 use serde::{Deserialize, Serialize};
 

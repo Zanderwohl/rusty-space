@@ -12,9 +12,11 @@
 pub mod chase;
 pub mod director;
 pub mod drive;
+pub mod fitting;
 pub mod journal;
 pub mod library;
 pub mod persist;
+pub mod radio;
 pub mod rate;
 pub mod server;
 #[cfg(test)]

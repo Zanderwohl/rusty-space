@@ -6,7 +6,7 @@
 --
 -- The locator is a character offset and **not a page**. A page is a fact about a window at a
 -- size; this survives a font change, a resize, and reading the same book on another machine.
--- See lightcone/docs/19-library.md.
+-- See lightcone/docs/21-library.md.
 
 CREATE TABLE IF NOT EXISTS reading (
     account     text NOT NULL,

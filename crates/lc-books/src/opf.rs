@@ -32,7 +32,7 @@ pub struct Metadata {
     pub authors: Vec<Author>,
     pub language: Option<String>,
     /// As written in the file, which is **not** the year of first publication: Gutenberg writes
-    /// the date it posted the transcription. See `lightcone/docs/19-library.md`.
+    /// the date it posted the transcription. See `lightcone/docs/21-library.md`.
     pub date: Option<String>,
     pub identifier: Option<String>,
     pub subjects: Vec<String>,

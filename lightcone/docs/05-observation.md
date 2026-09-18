@@ -320,6 +320,110 @@ arrives, is missed. For a ship 4 ly away this means the aim is based on where th
 4 years ago, extrapolated 4 years forward — 8 years of prediction error. Stationary
 installations are easy to hit; ships under thrust are not.
 
+### Saying something
+
+A message is an event like any other: emitted at a coordinate, scheduled to everyone it
+reaches, released when its light lands. What makes it a mechanic rather than a text box is that
+the three choices behind it are **independent**, and the interface keeps them that way.
+
+| choice | decides | cost |
+|---|---|---|
+| addressed to | whose acknowledgements ride back with it, and who can decrypt | none |
+| aimed | who *hears* it | a beam must be aimed, and an aim can miss |
+| sealed | who can *read* it | you must already hold their key |
+
+A player who conflates them broadcasts a private message in clear across a system. The
+interface should let them: the mistake is the same one a real operator makes and it is legible
+afterwards, because everyone in earshot saw it.
+
+**Omnidirectional is the default and it is not free.** It reaches everyone in range and tells
+all of them where you are — that is the same fact, arriving at the same instant, and there is no
+version of a shout that only your friend hears. A beam of the same wattage carries the same
+energy through a smaller solid angle, so it is louder on axis by `4 pi / Omega` and silent off
+it. At a milliradian that is a gain of four million and a spot 250 AU wide at four light-years:
+efficient, and not remotely covert.
+
+### Keys, and why first contact is loud
+
+Sealing is a game mechanic wearing cryptography's clothes. There are no keys — there is only the
+fact of having been told one, and **a key is a message**. It travels at `c` like anything else,
+so a key sent across four light-years is usable four years later, and an omnidirectional offer
+hands it to everyone in range at once.
+
+Nobody starts holding anybody's key. That is not a balance decision; it falls out of the
+frequency argument above. A private channel has to be arranged, arranging it takes a message,
+and that message has nowhere to go but the open. The first thing anyone ever says is public.
+
+### Acknowledgement is the only delivery report
+
+Nothing at either end can observe a message landing. The light either fell on an antenna or went
+past it, and only the far end knows which. So a message carries the identifiers of the last ten
+it has received from its addressee, and that — a reply naming what it heard — is the whole of
+delivery confirmation. Silence is not a failure. It is a reply that has not been written yet, or
+one still crossing.
+
+By identifier rather than by count, because the two ends do not agree about how many messages
+exist: half of them are in flight. An identifier names one message and means the same thing to
+both.
+
+There is no *automatic* retransmission and there cannot be: nothing at either end knows a
+message missed, so nothing can decide to send it again. What there is is a player deciding, and
+the interface marks an unacknowledged message so they can.
+
+A resend is a **second pulse of light**, not a retry. It is a real emission at its own
+coordinate and both are in the store, because both happened. What it is not is a second thing
+somebody said, so every message carries a key that says which message it is, and a receiver that
+already has that key shows one line rather than two. Acknowledging any transmission of a message
+acknowledges the message — which pulse got there is not something the sender needs to know.
+
+The key is a hash of who sent it, when, and what it said. Not a sequence number: the two ends do
+not agree about how many messages exist, because half of them are in flight, so a counter would
+need reconciling against something that is not there.
+
+### Answering automatically, and the bearing a dish answers on
+
+A ship can be set to acknowledge one craft automatically: anything that craft says comes back
+answered, with an empty body whose whole content is the identifiers riding in its payload. An
+empty message is a real message here, and this is what it is for.
+
+**In the mode it was spoken in.** Every transmission states whether it went out as a beam — one
+byte, set by the transmitter, because nothing downstream can work it out: a beam and a shout of
+the same power are the same light. A beam is answered down the **bearing it arrived on**, which
+a directional antenna knows without knowing who sent it or where they are. That aim needs no
+sighting and consults none, so a craft can answer something it cannot see.
+
+It is a bearing and not a target, and the difference is the mechanic: it points where the sender
+*was* when the light left, not where they will be when the answer lands. A craft under thrust in
+between is missed, and by more the further away it is.
+
+**A bare acknowledgement is never itself acknowledged.** Two ships each answering the other
+automatically would trade light for ever, at whatever the round trip between them is, with no
+pilot present at either end. Only a message with something in it earns an answer, and a resend
+earns one answer rather than one per attempt. One acknowledgement ends the exchange; there is no
+second round of it.
+
+It is off for every craft until it is asked for. A ship that answered everything it heard would
+announce its position to everything in range the moment anybody pinged it.
+
+### Saying it to nobody
+
+A message need not be addressed to anyone. A broadcast is something said to no one in
+particular: everyone in range hears it, anyone may answer, and it is in nobody's conversation
+because there is no conversation it is part of.
+
+**Being in earshot is not being spoken to.** An open message addressed to one craft can be read
+by anyone in range — that is what open means, and it is the cost of shouting — but it is still
+that craft's mail, and a receiver files it as something overheard rather than as a conversation
+with its sender. An encrypted one is overheard too: the fact of a signal is real whether or not
+it can be read, and a run of traffic between two craft says something even when none of it can be
+made out.
+
+A broadcast cannot be encrypted — there is nobody to encrypt it *to* — and the combination is
+refused rather than quietly sent in the open, which is the failure that would matter. What a
+broadcast *can* carry is a public key, offered to whoever hears it, and that is the only way
+somebody you have never spoken to can open a private channel with you. First contact is loud by
+necessity, and this is the shape of the loudness.
+
 ## Interferometry
 
 Two instruments separated by a baseline `B` resolve `lambda / B`. At the scales available here

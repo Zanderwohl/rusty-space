@@ -17,6 +17,7 @@ pub mod auth;
 pub mod broker;
 pub mod app;
 pub mod bookshelf;
+pub mod chat;
 pub mod curve;
 pub mod demos;
 pub mod entry;
@@ -33,7 +34,9 @@ pub mod panels;
 pub mod pick;
 pub mod plume;
 pub mod plot;
+pub mod radio_panel;
 pub mod reader;
+pub mod refit_panel;
 pub mod resolved;
 pub mod session;
 #[cfg(not(target_arch = "wasm32"))]

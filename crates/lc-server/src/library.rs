@@ -3,7 +3,7 @@
 //! The catalogue is a file the shard reads at boot and sends to every client; the bookmarks are
 //! rows it keeps in memory and checkpoints beside the ships. Neither is part of the world:
 //! nothing here is an event, nothing is cleared, and nothing a player does with a book changes
-//! anything anyone else can see. See `lightcone/docs/19-library.md`.
+//! anything anyone else can see. See `lightcone/docs/21-library.md`.
 
 use std::collections::HashMap;
 

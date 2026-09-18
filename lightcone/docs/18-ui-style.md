@@ -91,7 +91,7 @@ take the palette at all. `crate::reader` draws black serif on a gentle white, in
 because a player should know what it is before reading a word of it — and because prose over a
 drifting starfield is unreadable in a way a readout over one is not. The rule's own reason argues
 for the exception: a panel is translucent so it feels part of the scene, and a book is not part of
-the scene. See [19-library.md](19-library.md).
+the scene. See [21-library.md](21-library.md).
 
 What the exception does **not** licence is hiding the world behind it. The flight readout and the
 staleness figure stay visible, and notifications still draw on top; the whole premise of the

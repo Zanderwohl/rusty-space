@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 pub mod bvh;
+pub mod chat;
 pub mod cursor;
 pub mod id;
 pub mod migrate;

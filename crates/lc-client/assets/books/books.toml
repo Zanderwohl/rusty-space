@@ -8,7 +8,7 @@
 # `id` is stable and `file` is not. Two of the files below are named after a Gutenberg number
 # and two have lost a colon from their title; nothing reads a name to find out what a book is.
 #
-# Step 4 in lightcone/docs/19-library.md moves this file to the server, which sends it. Its
+# Step 4 in lightcone/docs/21-library.md moves this file to the server, which sends it. Its
 # shape does not change when it moves.
 
 [[book]]

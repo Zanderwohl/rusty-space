@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use lc_proto::ClientId;
 use tokio::signal::unix::{SignalKind, signal};
-use lc_server::journal::Memory;
+use lc_server::journal::{Memory, Postgres, Store};
 use lc_server::server::{Server, TICK_MS};
 use lc_server::ticket::Trusted;
 use lc_server::websocket::WebSocketServer;
@@ -28,10 +28,11 @@ lightcone-server — one shard
                        and an argument is visible to anything that can list processes)
   --open              admit connections with no valid ticket — DEVELOPMENT ONLY
 
-Without --db a shard is a sandcastle: it runs, and everything in it is gone when it stops.
-With one, craft are written every few seconds and on the way out, and read back at boot —
-including the world's clock, without which every saved craft reads as one whose crossing has
-not begun.
+Without --db a shard is a sandcastle: it runs, and everything in it is gone when it stops —
+craft, the world's clock, and every conversation anyone has had. With one, craft are written
+every few seconds and on the way out, events and conversations as they happen, and all of it is
+read back at boot — including the world's clock, without which every saved craft reads as one
+whose crossing has not begun.
 
 Point --sky at the **same chunk the promoted client downloads**, which is
 <cdn>/game/<build>/assets/sky/catalogue.lcsky. Both ends place craft into systems by position
@@ -57,7 +58,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bind = after("--bind").unwrap_or_else(|| "127.0.0.1:8080".into());
     let audience = after("--audience").unwrap_or_else(|| "shard-1".into());
     let shard_id: i64 = after("--shard").and_then(|s| s.parse().ok()).unwrap_or(1);
-    let mut server = Server::new(Memory::default(), 0, shard_id as u64);
+
+    // The journal is chosen here because it cannot be chosen later: everything below holds a
+    // `Server` and a server is generic over what it writes to. Its own connection, separate
+    // from the checkpoint's below — two cheap sockets rather than one handle two borrows of
+    // the same server have to share.
+    let db = after("--db").or_else(|| std::env::var("LC_SHARD_DB").ok());
+    let journal = match &db {
+        Some(url) => {
+            let client = connect(url).await?;
+            lc_store::migrate::apply(&client).await?;
+            Store::Durable(Postgres::with(client))
+        }
+        None => Store::Ephemeral(Memory::default()),
+    };
+    let mut server = Server::new(journal, 0, shard_id as u64);
 
     match after("--jwks") {
         Some(source) => {
@@ -123,10 +138,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // After the world, because a ballistic arc is re-solved against the system it is in and a
     // shard with no stars would bring every coasting craft back as a straight line.
-    let store = match after("--db").or_else(|| std::env::var("LC_SHARD_DB").ok()) {
+    let store = match db {
         Some(url) => {
             let client = connect(&url).await?;
-            lc_store::migrate::apply(&client).await?;
             match lc_store::ships::load_shard(&client, shard_id).await? {
                 Some(shard) => {
                     let rows = lc_store::ships::load_ships(&client).await?;
@@ -171,6 +185,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 None => eprintln!("shard {shard_id} has no saved state; starting a new world"),
             }
+            // After the clock is adopted, because the acknowledgement window is stamped
+            // against it: a shard that read these first would date every message it had ever
+            // been told to the instant before it knew what time it was.
+            server.resume_conversations().await?;
             Some(client)
         }
         None => {
@@ -239,7 +257,8 @@ const SAVE_EVERY_TICKS: u32 = 400;
 async fn checkpoint(
     client: &tokio_postgres::Client,
     shard_id: i64,
-    server: &mut Server<Memory>,
+    // `&mut` because a checkpoint drains the bookmarks written since the last one.
+    server: &mut Server<Store>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let taken = server.checkpoint();
     lc_store::ships::save_ships(client, &taken.ships).await?;

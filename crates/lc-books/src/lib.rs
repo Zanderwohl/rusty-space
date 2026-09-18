@@ -3,7 +3,7 @@
 //! No engine and no renderer: a zip, some XML, a document model and the coordinate a reader's
 //! place is kept in. What this crate deliberately does not do is lay anything out — only the
 //! client can measure the client's fonts, so pagination is a function over a `Measure` supplied
-//! by whoever is drawing. See `lightcone/docs/19-library.md`.
+//! by whoever is drawing. See `lightcone/docs/21-library.md`.
 
 #![forbid(unsafe_code)]
 

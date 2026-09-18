@@ -219,6 +219,39 @@ tick does not read fewer *sources*; it reads a narrower range out of each, which
 span: the same sources, an eighth of the events. Time pruning at the source level pays for bursty
 sources — a ship that burned once — and distance and strength pruning pay for the rest.
 
+## Conversations are not a light-cone query
+
+Transmissions are events and go in the tables above like everything else. What a player reads
+back is a different question, and `sql/0005_chat.sql` is a second, much smaller set of tables
+for it: `lc_messages`, `lc_message_receipts`, `lc_keyring`.
+
+Two reasons, and the second is the load-bearing one.
+
+**Retention runs the wrong way.** A partition is detached once its light cone has swept past
+every observer, because nothing can still be *learning* of it. A conversation is the opposite:
+it is read long after everything in it has arrived, by the two ships in it, whenever either of
+them signs in. The tiering below would take the transcript away at exactly the moment it became
+history.
+
+**A light cone is not a conversation.** "Every event that reached this ship" is a question about
+geometry. "Everything this ship has said and been told" is a question about who was talking, and
+the second has to be answerable without walking the first.
+
+Everything in those tables is stamped with the time the light **lands**, never the time it left,
+and every read is gated on the clock having reached it. That is the same bargain the deliveries
+table makes — work it out at write time, gate it at read time — in a place where it happens to
+be the whole of a game mechanic rather than an optimisation:
+
+| row | written | readable |
+|---|---|---|
+| `lc_message_receipts` | when the message is transmitted | `arrive_t <= now` |
+| `lc_keyring` | when the key offer is transmitted | `learnt_t <= now`, which is what makes a key take four years to cross four light-years |
+
+Writing them at transmission rather than at arrival is also what makes them work for a craft
+nobody is flying. Arrivals are only walked for connected clients, because there is nobody to tell
+otherwise — and a key that only landed when its owner happened to be signed in would be a
+mechanic that depended on who was watching.
+
 ## Retention
 
 The event table grows without bound and most of it is never read again. An event is

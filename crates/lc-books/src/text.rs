@@ -7,7 +7,7 @@
 //!
 //! Every block records the character offset it begins at, counted over the text this module
 //! emits. That one coordinate is the locator, the table of contents target and the search hit;
-//! see `lightcone/docs/19-library.md`.
+//! see `lightcone/docs/21-library.md`.
 
 use quick_xml::Reader;
 use quick_xml::events::Event;

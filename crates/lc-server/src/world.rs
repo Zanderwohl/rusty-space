@@ -16,6 +16,7 @@ use lc_proto::ShipId;
 use lc_spacetime::Worldline;
 use lc_world::craft::{Craft, CraftId, Kind};
 use lc_world::motion::LIGHT_US_PER_LY;
+use lc_world::signal::Beam;
 use lc_world::sky::{CatalogueStar, StarId};
 use lc_world::system::{LOCAL_SHELL_LY, LocalSystem};
 
@@ -154,21 +155,35 @@ pub fn strength(power_w: f64, distance: f64) -> f32 {
 
 /// When an event's light reaches a ship, and how strong it is when it does.
 ///
-/// `None` when it never does — the ship's worldline ends first, or the light already went past
-/// before it began.
-pub fn schedule(event: &Event, observer: &Craft) -> Option<Scheduled> {
+/// `None` when it never does — the ship's worldline ends first, the light already went past
+/// before it began, or the observer is **off the beam**. The third is why a beam is a parameter
+/// here rather than a strength multiplier applied afterwards: a receiver outside the cone gets
+/// no delivery row at all, which is what keeps a tight beam's fan-out smaller than a shout's
+/// rather than merely quieter.
+///
+/// The cone is tested against where the observer is when the light **arrives**, not where it
+/// was when the light left. Those differ by however far the receiver moved during the flight,
+/// which across a system is a great deal — and it is the arrival that decides whether the
+/// signal fell on them.
+pub fn schedule(event: &Event, beam: &Beam, observer: &Craft) -> Option<Scheduled> {
     let line = observer.worldline();
     let arrive = lc_spacetime::arrival_time_at(event.t as f64, event.at, &line)?;
     // Rounded up. Rounding down would put an arrival a microsecond before its true time, and
     // the gate would then release it a microsecond early -- which is the one error this whole
     // system exists to prevent, however small.
     let arrive_t = arrive.ceil() as i64;
-    let travelled = (line.position_at(arrive) - event.at).length();
+    let offset = line.position_at(arrive) - event.at;
+    if !beam.covers(offset) {
+        return None;
+    }
     Some(Scheduled {
         observer: ShipId(observer.id.0),
         event: event.id,
         arrive_t,
-        strength: strength(event.power_w, travelled),
+        // The same power, concentrated. A beam is not a bigger transmitter: it is the same
+        // watts through a smaller solid angle, which is why the gain is the *only* thing that
+        // changes and the inverse square underneath it does not.
+        strength: strength(event.power_w * beam.gain(), offset.length()),
     })
 }
 
@@ -190,7 +205,7 @@ mod tests {
     fn a_light_microsecond_of_distance_is_a_microsecond_of_delay() {
         let observer = ship(2, DVec3::new(1_000_000.0, 0.0, 0.0));
         let sent = pulse(5_000, DVec3::ZERO, 1.0);
-        let scheduled = schedule(&sent, &observer).expect("it arrives");
+        let scheduled = schedule(&sent, &Beam::OMNI, &observer).expect("it arrives");
         assert_eq!(scheduled.arrive_t, 1_005_000);
         assert_eq!(scheduled.observer, ShipId(2));
     }
@@ -199,7 +214,7 @@ mod tests {
     #[test]
     fn an_event_at_the_observer_arrives_at_once() {
         let observer = ship(2, DVec3::ZERO);
-        let scheduled = schedule(&pulse(7_777, DVec3::ZERO, 1.0), &observer).unwrap();
+        let scheduled = schedule(&pulse(7_777, DVec3::ZERO, 1.0), &Beam::OMNI, &observer).unwrap();
         assert_eq!(scheduled.arrive_t, 7_777);
     }
 
@@ -208,7 +223,7 @@ mod tests {
     #[test]
     fn an_arrival_is_never_rounded_earlier_than_it_is() {
         let observer = ship(2, DVec3::new(1_000.5, 0.0, 0.0));
-        let scheduled = schedule(&pulse(0, DVec3::ZERO, 1.0), &observer).unwrap();
+        let scheduled = schedule(&pulse(0, DVec3::ZERO, 1.0), &Beam::OMNI, &observer).unwrap();
         assert_eq!(scheduled.arrive_t, 1_001, "1000.5 became {}", scheduled.arrive_t);
         assert!(scheduled.arrive_t as f64 >= 1_000.5);
     }
@@ -223,8 +238,8 @@ mod tests {
         let closing = coasting(ShipId(3), at, DVec3::new(-0.1, 0.0, 0.0), 0);
 
         let sent = pulse(0, DVec3::ZERO, 1.0);
-        let a = schedule(&sent, &still).unwrap().arrive_t;
-        let b = schedule(&sent, &closing).unwrap().arrive_t;
+        let a = schedule(&sent, &Beam::OMNI, &still).unwrap().arrive_t;
+        let b = schedule(&sent, &Beam::OMNI, &closing).unwrap().arrive_t;
         assert!(b < a, "closing on the source should meet its light sooner: {b} against {a}");
         // Closing at beta, the meeting is at d/(1+beta).
         assert!((b as f64 - 1_000_000.0 / 1.1).abs() < 2.0, "{b}");
@@ -265,8 +280,8 @@ mod tests {
         // From far enough away that the delay is many orbits.
         let far = orbiting.position_at(0.0) + DVec3::new(5.0e9, 0.0, 0.0);
         let sent = pulse(0, far, 1.0);
-        let moving = schedule(&sent, &orbiting).expect("it arrives");
-        let still_there = schedule(&sent, &parked).expect("it arrives");
+        let moving = schedule(&sent, &Beam::OMNI, &orbiting).expect("it arrives");
+        let still_there = schedule(&sent, &Beam::OMNI, &parked).expect("it arrives");
 
         // Both are about the light-crossing time, and they are not the same instant.
         assert!(moving.arrive_t > 1.0e9 as i64, "{}", moving.arrive_t);
@@ -286,6 +301,56 @@ mod tests {
             "{gap} light-microseconds away at t = {}",
             moving.arrive_t,
         );
+    }
+
+    /// A beam is a cone, and a receiver off its axis gets no delivery row at all. Not a faint
+    /// one — none, which is the property that bounds a beam's fan-out.
+    #[test]
+    fn a_receiver_off_the_beam_is_not_scheduled_at_all() {
+        let sent = pulse(0, DVec3::ZERO, 1.0);
+        let beam = Beam::along(DVec3::X, 0.05);
+        let on_axis = ship(2, DVec3::new(1_000_000.0, 0.0, 0.0));
+        let beside = ship(3, DVec3::new(1_000_000.0, 200_000.0, 0.0));
+
+        assert!(schedule(&sent, &beam, &on_axis).is_some());
+        assert!(schedule(&sent, &beam, &beside).is_none(), "0.2 rad off a 0.05 rad beam");
+        // The same two, shouted at: both hear it. The beam is what excluded one of them.
+        assert!(schedule(&sent, &Beam::OMNI, &beside).is_some());
+    }
+
+    /// The gain is the same watts through a smaller solid angle, so on axis a beam is louder
+    /// by exactly the ratio of the sphere to the cone — and the inverse square underneath it
+    /// is untouched.
+    #[test]
+    fn a_beam_is_louder_on_axis_by_its_gain_and_no_more() {
+        let sent = pulse(0, DVec3::ZERO, 1.0);
+        let observer = ship(2, DVec3::new(1_000_000.0, 0.0, 0.0));
+        let beam = Beam::along(DVec3::X, 1.0e-3);
+        let loud = schedule(&sent, &beam, &observer).unwrap().strength;
+        let quiet = schedule(&sent, &Beam::OMNI, &observer).unwrap().strength;
+        assert!((f64::from(loud / quiet) - beam.gain()).abs() / beam.gain() < 1.0e-6);
+    }
+
+    /// Aimed at where the receiver *will be*, not where it was. A beam laid on the old position
+    /// of a ship that has been moving for the whole flight time misses it, and that is the
+    /// mechanic — so the test that the arrival position is what the cone is judged against has
+    /// to be the one that fails when the two are swapped.
+    #[test]
+    fn the_cone_is_judged_where_the_receiver_is_when_the_light_lands() {
+        let away = DVec3::new(1_000_000.0, 0.0, 0.0);
+        // Crossing the beam's path at a fifth of `c`: a light-second of flight moves it
+        // 200 000 light-microseconds sideways, far outside a milliradian.
+        let crossing = coasting(ShipId(2), away, DVec3::new(0.0, 0.2, 0.0), 0);
+        let sent = pulse(0, DVec3::ZERO, 1.0);
+
+        let at_it = Beam::along(away, 1.0e-3);
+        assert!(schedule(&sent, &at_it, &crossing).is_none(), "aimed where it was seen");
+
+        // Led: the advanced solve says where it will be, and that beam lands.
+        let axis =
+            lc_world::signal::aim_at(DVec3::ZERO, 0.0, away, DVec3::new(0.0, 0.2, 0.0), 0.0)
+                .unwrap();
+        assert!(schedule(&sent, &Beam::along(axis, 1.0e-3), &crossing).is_some(), "led");
     }
 
     #[test]

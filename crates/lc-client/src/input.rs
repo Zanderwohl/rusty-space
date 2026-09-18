@@ -25,6 +25,10 @@ pub fn bindings() -> Vec<(KeyCode, Action)> {
         (KeyCode::KeyF, Action::TogglePanel(Panel::Flight)),
         (KeyCode::KeyB, Action::TogglePanel(Panel::Reader)),
         (KeyCode::F4, Action::TogglePanel(Panel::Tuning)),
+        (KeyCode::KeyR, Action::TogglePanel(Panel::Refit)),
+        (KeyCode::F5, Action::TogglePanel(Panel::DevActions)),
+        // `R` is the refit window's. `C` for comms, which is what this is.
+        (KeyCode::KeyC, Action::TogglePanel(Panel::Chat)),
         (KeyCode::Digit1, Action::SetBandPreset(0)),
         (KeyCode::Digit2, Action::SetBandPreset(1)),
         (KeyCode::Digit3, Action::SetBandPreset(2)),
@@ -165,6 +169,7 @@ pub fn grab_transition(
 /// without a pointing device at all.
 pub fn look_around(
     keys: Res<ButtonInput<KeyCode>>,
+    egui: Res<EguiWantsInput>,
     looking: Res<Looking>,
     motion: Res<AccumulatedMouseMotion>,
     time: Res<Time>,
@@ -174,14 +179,18 @@ pub fn look_around(
     let mut yaw = 0.0;
     let mut pitch = 0.0;
 
-    // The arrows belong to the book while one is open. The mouse still turns the view, because
-    // nothing about reading stops the ship.
-    let turning = !state.is_open(Panel::Reader);
+    // The arrows only, and not when something else is using them. An arrow key in a text field
+    // moves the cursor, and turning the ship as well would make going back to fix a typo swing
+    // the whole view; an arrow key in an open book turns its page. The mouse below is unaffected
+    // by either, because holding the look button is not something a field or a page can mean.
     let step = LOOK_STEP * time.delta_secs_f64() * 60.0;
-    for (key, (y, p)) in held_bindings() {
-        if turning && keys.pressed(key) {
-            yaw += y * step;
-            pitch += p * step;
+    let paging = state.reading.book.is_some();
+    if !egui.wants_any_keyboard_input() && !paging {
+        for (key, (y, p)) in held_bindings() {
+            if keys.pressed(key) {
+                yaw += y * step;
+                pitch += p * step;
+            }
         }
     }
     if looking.0 {
@@ -201,15 +210,17 @@ pub fn look_around(
 /// An overlay rather than a second table. Swapping tables was the obvious shape and the wrong
 /// one: it took every other key with it, so opening a book turned off the telescope, the system
 /// window and the time controls — and every panel added afterwards would have had to be
-/// remembered here to keep working. What the reader needs is the paging keys and the way out;
-/// everything it does not name falls through to the cockpit.
+/// remembered here to keep working. What the reader needs is the paging keys and the way back to
+/// the shelf; everything it does not name falls through to the cockpit.
 ///
-/// `book` is whether one is actually open. With the shelf showing there are no pages to turn, so
-/// the arrows stay with the view and only the way out is claimed.
+/// **Nothing mnemonic is claimed.** The contents list wanted `C` and `C` is Communications, so
+/// the contents has a button and no key rather than a key that shadows a window. `Escape` is
+/// left alone for the same reason: it closes the top panel wherever you are.
+///
+/// `book` is whether one is actually open. With the shelf showing there is nothing to page and
+/// nothing to leave, so the table is exactly the cockpit's.
 pub fn reading_bindings(book: bool) -> Vec<(KeyCode, Action)> {
     if !book {
-        // The shelf has no pages to turn and no book to leave. `B` still puts the device away,
-        // because that is what `B` does everywhere else.
         return Vec::new();
     }
     vec![
@@ -217,10 +228,7 @@ pub fn reading_bindings(book: bool) -> Vec<(KeyCode, Action)> {
         (KeyCode::PageDown, Action::TurnPage(1)),
         (KeyCode::ArrowLeft, Action::TurnPage(-1)),
         (KeyCode::PageUp, Action::TurnPage(-1)),
-        (KeyCode::KeyC, Action::ToggleContents),
-        // Out of the book and back to the shelf. `Escape` is not claimed: it closes the top
-        // panel wherever you are, and a reader that made it mean something else would be the
-        // one window in the client where the key you already know does not work.
+        // Out of the book and back to the shelf, which is the key that opened the device.
         (KeyCode::KeyB, Action::CloseBook),
     ]
 }
@@ -237,15 +245,16 @@ pub fn bindings_in_force(reading: bool, book: bool) -> Vec<(KeyCode, Action)> {
     table
 }
 
+/// **Silent while the interface is taking text.** Every binding here is a bare letter, so a
+/// player typing a message into the radio window would otherwise open the telescope, cut the
+/// drive and fly somewhere, one keystroke at a time — and typing the name of a book into the
+/// shelf's filter would put the book away on `b`.
 pub fn read_keys(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<crate::app::Ui>,
     egui: Res<EguiWantsInput>,
     mut out: MessageWriter<Requested>,
 ) {
-    // A field being typed into owns the keyboard, all of it. The shelf's filter is the only one
-    // in this client, and without this, typing the name of a book closes the window on `b` and
-    // turns a page on the space bar.
     if egui.wants_any_keyboard_input() {
         return;
     }

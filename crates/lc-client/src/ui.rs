@@ -44,6 +44,13 @@ pub enum Panel {
     Tuning,
     /// Scenes to stage. Development only, and it does nothing without a shard started for it.
     Scenarios,
+    /// Rebuilding the ship: how many of each module, and the hull.
+    Refit,
+    /// Development only: things no player can do, such as being handed energy.
+    DevActions,
+    /// One conversation at a time, chosen from a list. Every ship this one has heard from is
+    /// in it, whether or not it is still in sight.
+    Chat,
     /// Something to read: the shelf, or a book off it. Drawn by [`crate::reader`] rather than
     /// with the others, because it is the one surface that is not a readout — it has its own
     /// frame, its own palette and its own keys.
@@ -51,7 +58,7 @@ pub enum Panel {
 }
 
 impl Panel {
-    pub const ALL: [Panel; 9] = [
+    pub const ALL: [Panel; 12] = [
         Panel::Escape,
         Panel::Settings,
         Panel::Debug,
@@ -60,6 +67,9 @@ impl Panel {
         Panel::Flight,
         Panel::Tuning,
         Panel::Scenarios,
+        Panel::Refit,
+        Panel::DevActions,
+        Panel::Chat,
         Panel::Reader,
     ];
 
@@ -78,6 +88,9 @@ impl Panel {
             Panel::Flight => "Flight",
             Panel::Tuning => "Starfield tuning",
             Panel::Scenarios => "Scenarios",
+            Panel::Refit => "Refit",
+            Panel::DevActions => "Dev actions",
+            Panel::Chat => "Communications",
             Panel::Reader => "Reader",
         }
     }
@@ -137,11 +150,35 @@ impl Look {
     }
 }
 
+/// What the radio window is showing.
+///
+/// [`Channel::Public`] is not a conversation and is deliberately not stored as one: it is a
+/// *view* over every other, answering "what has been going on" rather than "what did we two
+/// say". Sealed messages are absent from it whichever end they came from — including this
+/// ship's own, because a private message listed in a public log is a private message on a
+/// screen somebody can read over your shoulder.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Channel {
+    /// Everything said to nobody in particular: broadcasts, sent and heard.
+    #[default]
+    Public,
+    /// Traffic between other craft that this ship was in range of. Open ones can be read;
+    /// encrypted ones are shown as the noise they are.
+    Overheard,
+    /// One craft's conversation, both halves.
+    With(lc_proto::ShipId),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Notification {
     pub text: String,
     /// Coordinate seconds when it was raised.
     pub at: f64,
+    /// The craft this is about, when it is somebody talking.
+    ///
+    /// What makes the line green and clickable. Everything else in this box is the interface
+    /// reporting on itself — an order accepted, a clock corrected — and has nowhere to go.
+    pub from: Option<lc_proto::ShipId>,
 }
 
 /// How many notifications are kept. Older ones fall off rather than accumulating.
@@ -273,13 +310,20 @@ pub struct UiState {
     pub time_rate: f64,
     pub notifications: Vec<Notification>,
     pub reading: Reading,
+    /// The loadout the refit panel's sliders are set to, or `None` to follow the ship.
+    pub refit_draft: Option<lc_world::fitting::Loadout>,
+    /// Which conversation the radio window is showing.
+    ///
+    /// Here rather than local to the panel because a click in the events box has to be able to
+    /// change it, and that click is an [`crate::action::Action`] like any other.
+    pub chat_with: Channel,
 }
 
 /// Where the player is up to in a book.
 ///
 /// **A character offset, never a page.** A page is a fact about this window at this size; the
 /// offset is a fact about the book, and it is what gets written down. See
-/// `lightcone/docs/19-library.md`.
+/// `lightcone/docs/21-library.md`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Reading {
     /// The book being read, by the name its file has on the shelf.
@@ -340,6 +384,8 @@ impl Default for UiState {
             time_rate: TEST_TIME_RATE,
             notifications: Vec::new(),
             reading: Reading::default(),
+            refit_draft: None,
+            chat_with: Channel::default(),
         }
     }
 }
@@ -378,7 +424,17 @@ impl UiState {
     }
 
     pub fn notify(&mut self, text: impl Into<String>, at: f64) {
-        self.notifications.push(Notification { text: text.into(), at });
+        self.raise(Notification { text: text.into(), at, from: None });
+    }
+
+    /// Somebody said something. Shown in the events box in the colour the interface reserves
+    /// for it, and clicking it opens the conversation.
+    pub fn heard(&mut self, from: lc_proto::ShipId, text: impl Into<String>, at: f64) {
+        self.raise(Notification { text: text.into(), at, from: Some(from) });
+    }
+
+    fn raise(&mut self, note: Notification) {
+        self.notifications.push(note);
         let excess = self.notifications.len().saturating_sub(NOTIFICATION_LIMIT);
         self.notifications.drain(..excess);
     }

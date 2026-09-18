@@ -295,7 +295,7 @@ impl Rendezvous {
         boost::gamma_of(beta) * (frame_s + beta.dot(x))
     }
 
-    fn frame_time_at(&self, elapsed_s: f64) -> f64 {
+    pub(crate) fn frame_time_at(&self, elapsed_s: f64) -> f64 {
         let beta = self.frame_beta;
         if beta.length_squared() <= 0.0 {
             return elapsed_s;
