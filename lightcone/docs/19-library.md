@@ -65,19 +65,34 @@ header @epub Content-Type "application/epub+zip"
 CORS already allows the game's origin, and the fetch is the same cross-origin case the wasm and
 the sky are.
 
-## Git holds the catalogue, never the bytes
+## The books are in the repository
 
-Two scripts, both siblings of `tools/publish-build.sh` and both dull:
+`crates/lc-client/assets/books/`, bytes and all — six of them, 43 MB, most of it two Twain
+editions carrying a hundred and seventy-eight scanned plates each.
 
-- `tools/fetch-books.sh` reads `books.toml`, downloads each `source` into `target/library/`,
-  and checks it against the recorded `sha256`. A developer gets the shelf without the repo
-  carrying a hundred megabytes of epub forever.
-- `tools/publish-books.sh` uploads `target/library/` and refuses to publish over an existing
-  name, the way `publish-build.sh` refuses an existing build id.
+**The alternative was tried on paper and was worse.** The plan here used to say git holds the
+catalogue and never the bytes, with a `fetch-books.sh` that re-downloaded each book from its
+`source` and checked a `sha256`. It does not survive contact with the files: these six came
+through Apple Books, three of them arrived unpacked and were re-zipped locally, and a fresh
+Gutenberg download is a different arrangement of bytes with a different hash. The script would
+have fetched *a* copy of each book and failed the check on every one. A game's resources are
+heavy; a repository is where they live.
 
-The hash is the reason both of these are trustworthy: it is what makes the download
-reproducible, what catches a Gutenberg re-release changing under a stable URL, and what the
-client would check if it ever cached a book on disk.
+So there is one script, a sibling of `tools/publish-build.sh` and just as dull:
+`tools/publish-books.sh` uploads the directory and refuses to publish over an existing name, the
+way `publish-build.sh` refuses an existing build id.
+
+Two things this does **not** change:
+
+- **A book is still not a build asset.** `tools/build-wasm.sh` stages named directories —
+  the shaders, and a sky it generates — rather than copying the asset root, so the books do not
+  land under every build id on the CDN. If that ever becomes a `cp -R`, this is what breaks.
+- **`sha256` is still worth carrying**, and now it can be right: it is recorded from the file in
+  the repository, which is the file every player reads. `source` stays beside it as provenance
+  for a person, not as an input to a tool.
+
+The one thing in that directory that is *not* committed is the reading face, which is not ours
+to redistribute.
 
 ## Fetching: Bevy already has this
 
@@ -421,7 +436,7 @@ Each step is useful on its own, and the fun one does not wait for the server.
 | # | step | done when |
 |---|---|---|
 | 1 | **built.** `lc-books`: zip, OPF, spine, TOC, the block model, locations, the paginator over `Measure` | a headless test paginates a real Gutenberg epub and round-trips a locator |
-| 2 | the shelf on the CDN: `books.toml`, the two scripts, the Caddyfile header | `curl` returns an epub with the right type and an immutable cache header |
+| 2 | the shelf on the CDN: `publish-books.sh`, the Caddyfile header, the client's HTTP asset source | `curl` returns an epub with the right type and an immutable cache header |
 | 3 | **built, less the CDN.** the reader window: `EpubLoader`, plates, the serif, the panel, the mode | `--book <id> --shot` is a page of prose |
 | 4 | **built.** the catalogue and progress over the wire: three messages, `0005_reading.sql`, the debounce | signing in on a second machine opens to the same sentence |
 | 5 | **built, less the badges.** the shelf's sorts and filter, the TOC, jump to location | the controls above all exist |

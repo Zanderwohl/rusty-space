@@ -15,7 +15,6 @@ crates/lc-client/assets/sky/*.lcsky
 # See lightcone/docs/19-library.md.
 /assets/books/
 
-# The bytes are fetched, never committed; the catalogue beside them is the record.
+# The reading face is not ours to redistribute; the books beside it are.
 # See lightcone/docs/19-library.md.
-crates/lc-client/assets/books/*.epub
 crates/lc-client/assets/fonts/
