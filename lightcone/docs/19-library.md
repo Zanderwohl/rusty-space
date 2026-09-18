@@ -460,12 +460,14 @@ the world does this, and a shelf that does not has a third of its stock under T.
 the view, so a book has to take them — but the first cut of this swapped the whole table, which
 took the telescope, the system window and the time controls with it. Worse, every panel added
 afterwards would have had to be remembered in a second place to keep working. So the reading
-table is an *overlay*: the paging keys, `C` for the contents, and `Escape` and `B` for the way
-out. Anything it does not name falls through, and a test asserts exactly that — no key outside
-the overlay changes meaning while a book is open.
+table is an *overlay*: the paging keys, `C` for the contents, and `B` for the way back to the
+shelf. Anything it does not name falls through, and a test asserts exactly that — no key outside
+the overlay changes meaning while a book is open. `Escape` is deliberately not claimed: it closes
+the top panel wherever you are, and a reader that made it mean something else would be the one
+window in this client where the key you already know does not work.
 
-With the shelf showing rather than a book, only the way out is claimed: there are no pages to
-turn, so the arrows stay with the view.
+With the shelf showing rather than a book, **nothing** is claimed: there are no pages to turn and
+no book to leave, so the table is exactly the cockpit's.
 
 egui's `EguiWantsInput` cannot decide any of this, but it does decide one thing: while the
 filter field has focus the keyboard is entirely its own, or typing the name of a book closes the

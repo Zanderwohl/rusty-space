@@ -207,23 +207,22 @@ pub fn look_around(
 /// `book` is whether one is actually open. With the shelf showing there are no pages to turn, so
 /// the arrows stay with the view and only the way out is claimed.
 pub fn reading_bindings(book: bool) -> Vec<(KeyCode, Action)> {
-    // Out of a book is the shelf, out of the shelf is the device put away: one key, one step.
-    let mut table = vec![
-        (KeyCode::Escape, Action::CloseBook),
-        (KeyCode::KeyB, Action::CloseBook),
-    ];
-    if book {
-        table.extend([
-            (KeyCode::Space, Action::TurnPage(1)),
-            (KeyCode::ArrowRight, Action::TurnPage(1)),
-            (KeyCode::PageDown, Action::TurnPage(1)),
-            (KeyCode::Backspace, Action::TurnPage(-1)),
-            (KeyCode::ArrowLeft, Action::TurnPage(-1)),
-            (KeyCode::PageUp, Action::TurnPage(-1)),
-            (KeyCode::KeyC, Action::ToggleContents),
-        ]);
+    if !book {
+        // The shelf has no pages to turn and no book to leave. `B` still puts the device away,
+        // because that is what `B` does everywhere else.
+        return Vec::new();
     }
-    table
+    vec![
+        (KeyCode::ArrowRight, Action::TurnPage(1)),
+        (KeyCode::PageDown, Action::TurnPage(1)),
+        (KeyCode::ArrowLeft, Action::TurnPage(-1)),
+        (KeyCode::PageUp, Action::TurnPage(-1)),
+        (KeyCode::KeyC, Action::ToggleContents),
+        // Out of the book and back to the shelf. `Escape` is not claimed: it closes the top
+        // panel wherever you are, and a reader that made it mean something else would be the
+        // one window in the client where the key you already know does not work.
+        (KeyCode::KeyB, Action::CloseBook),
+    ]
 }
 
 /// The bindings in force: the cockpit's, with the reader's laid over them.
@@ -292,7 +291,9 @@ mod tests {
 
         // The keys a book needs are the book's.
         assert_eq!(acts(&reading, KeyCode::ArrowRight), Some(Action::TurnPage(1)));
-        assert_eq!(acts(&reading, KeyCode::Escape), Some(Action::CloseBook));
+        assert_eq!(acts(&reading, KeyCode::KeyB), Some(Action::CloseBook));
+        // And `Escape` is not one of them: it closes the top panel here as it does anywhere.
+        assert_eq!(acts(&reading, KeyCode::Escape), acts(&flying, KeyCode::Escape));
 
         // Every other panel still opens while one is being read. This is the whole point: a
         // panel added later must not have to be remembered in two places to keep working.
@@ -316,15 +317,9 @@ mod tests {
     }
 
     #[test]
-    fn the_shelf_leaves_the_arrows_to_the_view() {
-        let shelf = bindings_in_force(true, false);
-        let flying = bindings_in_force(false, false);
-        let acts = |table: &[(KeyCode, Action)], key: KeyCode| {
-            table.iter().find(|(k, _)| *k == key).map(|(_, a)| a.clone())
-        };
-        // With no book open there are no pages to turn, so the arrows stay where they were.
-        assert_eq!(acts(&shelf, KeyCode::ArrowRight), acts(&flying, KeyCode::ArrowRight));
-        assert_eq!(acts(&shelf, KeyCode::Escape), Some(Action::CloseBook));
+    fn the_shelf_claims_nothing_at_all() {
+        // No pages to turn and no book to leave, so every key means what it meant before.
+        assert_eq!(bindings_in_force(true, false), bindings_in_force(false, false));
     }
 
     #[test]
