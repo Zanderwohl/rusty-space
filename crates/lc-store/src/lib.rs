@@ -13,6 +13,7 @@ pub mod chat;
 pub mod cursor;
 pub mod id;
 pub mod migrate;
+pub mod reading;
 pub mod retention;
 pub mod ships;
 pub mod store;

@@ -158,6 +158,7 @@ impl Plugin for ClientPlugin {
             em_render::plume_material::PlumeMaterialPlugin,
             BodySurfaceMaterialPlugin,
             crate::sky_asset::SkyAssetPlugin,
+            crate::library::LibraryPlugin,
         ))
             .init_state::<AppState>()
             .add_message::<Requested>()
@@ -255,7 +256,8 @@ impl Plugin for ClientPlugin {
                 EguiPrimaryContextPass,
                 (
                     panels::loading.run_if(in_state(AppState::Loading)),
-                    (panels::hud, panels::open_panels).run_if(in_state(AppState::InGame)),
+                    (panels::hud, panels::open_panels, crate::reader::draw)
+                        .run_if(in_state(AppState::InGame)),
                     panels::unreachable.run_if(in_state(AppState::Unreachable)),
                 ),
             );

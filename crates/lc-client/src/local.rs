@@ -48,6 +48,23 @@ pub fn start(stars: Vec<CatalogueStar>, demo: Option<String>) -> Result<String, 
         .unwrap_or_else(|_| Err("the local server stopped before it started".into()))
 }
 
+/// The catalogue next to this build, if it ships one.
+///
+/// The base is the asset path the client already fetches books under, because a local shard
+/// lends the files in its own directory and there is no CDN in the box.
+fn shelf() -> Result<Option<lc_server::library::Library>, String> {
+    let path = crate::entry::asset_root().join("books").join("books.toml");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&path).map_err(|why| format!("{}: {why}", path.display()))?;
+    // `LC_SHELF_BASE` is the same variable a deployed shard is told its CDN with, so the server
+    // in the box can be pointed at one and the client then fetches over HTTP exactly as the
+    // browser build does. Unset, the shelf is the directory this catalogue was read from.
+    let base = std::env::var("LC_SHELF_BASE").unwrap_or_else(|_| crate::library::SHELF.to_owned());
+    lc_server::library::Library::from_toml(&base, &text).map(Some)
+}
+
 async fn serve(
     stars: Vec<CatalogueStar>,
     demo: Option<String>,
@@ -74,6 +91,15 @@ async fn serve(
     // that could stage a scene could put a craft wherever it liked, which is the one thing the
     // authority keeps for itself.
     server.directing(true);
+    // The books beside the client that started this. A shard is told its catalogue on the
+    // command line; the one in the box finds it the same way the asset server does, so
+    // single-player exercises the same wire path a deployment does rather than a shortcut
+    // around it.
+    match shelf() {
+        Ok(Some(library)) => server.library = library,
+        Ok(None) => {}
+        Err(why) => bevy::log::warn!("no shelf for the local shard: {why}"),
+    }
     if let Some(scene) = demo.as_deref().and_then(Scenario::named) {
         if let Err(why) = server.stage(scene) {
             bevy::log::error!("could not stage {}: {why:?}", scene.name);

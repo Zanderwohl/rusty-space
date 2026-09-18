@@ -51,10 +51,14 @@ pub enum Panel {
     /// One conversation at a time, chosen from a list. Every ship this one has heard from is
     /// in it, whether or not it is still in sight.
     Chat,
+    /// Something to read: the shelf, or a book off it. Drawn by [`crate::reader`] rather than
+    /// with the others, because it is the one surface that is not a readout — it has its own
+    /// frame, its own palette and its own keys.
+    Reader,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 11] = [
+    pub const ALL: [Panel; 12] = [
         Panel::Escape,
         Panel::Settings,
         Panel::Debug,
@@ -66,6 +70,7 @@ impl Panel {
         Panel::Refit,
         Panel::DevActions,
         Panel::Chat,
+        Panel::Reader,
     ];
 
     /// A panel by the name a development flag would use.
@@ -86,6 +91,7 @@ impl Panel {
             Panel::Refit => "Refit",
             Panel::DevActions => "Dev actions",
             Panel::Chat => "Communications",
+            Panel::Reader => "Reader",
         }
     }
 }
@@ -303,6 +309,7 @@ pub struct UiState {
     /// Development only; the server owns the rate.
     pub time_rate: f64,
     pub notifications: Vec<Notification>,
+    pub reading: Reading,
     /// The loadout the refit panel's sliders are set to, or `None` to follow the ship.
     pub refit_draft: Option<lc_world::fitting::Loadout>,
     /// Which conversation the radio window is showing.
@@ -310,6 +317,48 @@ pub struct UiState {
     /// Here rather than local to the panel because a click in the events box has to be able to
     /// change it, and that click is an [`crate::action::Action`] like any other.
     pub chat_with: Channel,
+}
+
+/// Where the player is up to in a book.
+///
+/// **A character offset, never a page.** A page is a fact about this window at this size; the
+/// offset is a fact about the book, and it is what gets written down. See
+/// `lightcone/docs/21-library.md`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Reading {
+    /// The book being read, by the name its file has on the shelf.
+    pub book: Option<String>,
+    pub spine: usize,
+    pub offset: usize,
+    /// Which block the offset means, while this chapter is open.
+    ///
+    /// **A character offset cannot say.** A plate is made of no characters, so it shares its
+    /// offset with the plate or the paragraph after it — and resolving the offset alone always
+    /// lands on the first of them, which is a page that can be turned to and never past. Two
+    /// plates in a row is not a rare shape: the first chapter of Huckleberry Finn opens with
+    /// exactly that.
+    ///
+    /// The index is a fact about the parsed document and survives a resize, where a row index
+    /// would not. `None` after a jump or a fresh open, when the offset is all there is.
+    pub block: Option<usize>,
+    /// Pages asked for and not yet turned.
+    ///
+    /// An action cannot turn a page, because turning one means laying it out and only the
+    /// surface with the fonts in it can do that. So the action records the request and the
+    /// reader spends it on the next frame, which is also what makes a page turn survive a
+    /// resize arriving in the same frame.
+    pub turn: i32,
+    /// A place to jump to, spent the same way.
+    pub goto: Option<(usize, usize)>,
+    /// Set when the player *moved*: a page turned, a chapter jumped to. Cleared once the place
+    /// has been written down.
+    ///
+    /// The offset moves for another reason too — a resize reflows the page and the same sentence
+    /// lands at a slightly different character — and a drag doing that sixty times a second
+    /// would spend a connection's whole message budget on bookmarks nobody asked to save. So the
+    /// deliberate move is flagged, and it is the one that does not wait.
+    pub asked: bool,
+    pub contents: bool,
 }
 
 impl Default for UiState {
@@ -334,6 +383,7 @@ impl Default for UiState {
             god_view: false,
             time_rate: TEST_TIME_RATE,
             notifications: Vec::new(),
+            reading: Reading::default(),
             refit_draft: None,
             chat_with: Channel::default(),
         }

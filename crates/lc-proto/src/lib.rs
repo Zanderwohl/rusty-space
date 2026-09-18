@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 26;
+pub const PROTOCOL_VERSION: u32 = 27;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -704,6 +704,46 @@ impl<T> Cleared<T> {
     }
 }
 
+/// A book on the shelf.
+///
+/// A mirror of the catalogue rather than the catalogue's own type, for the reason the rest of
+/// this crate is a mirror: `lc-books` is a zip and an XML parser, and a protocol that borrowed
+/// its types would put both in every client's wire layer and make every change to how a book is
+/// parsed a change to the protocol. The two agree by being converted at the edge.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Book {
+    pub id: String,
+    pub title: String,
+    pub authors: Vec<Writer>,
+    pub year: Option<i32>,
+    pub subjects: Vec<String>,
+    /// The file under the shelf's base, which the client composes a URL from and never receives
+    /// one for. A server that could send a URL could send any URL.
+    pub file: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Writer {
+    pub name: String,
+    pub sort: Option<String>,
+}
+
+/// Where a player is in a book.
+///
+/// **A character offset, not a page.** A page is a fact about a window at a size; this survives
+/// a font change, a resize and a different client. See `lightcone/docs/19-library.md`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Bookmark {
+    pub book: String,
+    pub spine: u32,
+    pub char_offset: u32,
+    /// How far through, in the book's own thousand-character locations. **Reported by the
+    /// client and not checked**, because the server does not have the book and there is nothing
+    /// to win by lying: the shelf reads "34%" and no rule anywhere depends on it.
+    pub location: u32,
+    pub locations: u32,
+}
+
 /// Everything the server says.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Outbound {
@@ -834,6 +874,28 @@ pub enum Outbound {
     /// landed on it, and a sealed one it is not the addressee of has no body, exactly as it had
     /// none when it arrived. Appended last.
     Backlog { messages: Vec<Said>, keys: Vec<ShipId> },
+    /// What there is to read, and where the shelf is.
+    ///
+    /// Appended last, like every variant added since: the discriminants above are what the
+    /// goldens are pinned at, and a version bump is not a licence to renumber them.
+    ///
+    /// **Not cleared, and deliberately.** Everything else the server says about the world goes
+    /// through [`Cleared`], because delivering an event before its light arrives would delete
+    /// the game. A book is not an event, nobody observes one across a light-hour, and the shelf
+    /// is the same for every player at every distance. Said here so the next reader takes it for
+    /// a decision rather than an omission.
+    Library {
+        /// What `file` hangs off: a CDN prefix, stated by the shard so the shelf can move
+        /// without a client release.
+        base: String,
+        books: Vec<Book>,
+    },
+    /// Where this account left off in each book it has opened.
+    ///
+    /// **Most recently read first.** That ordering is the only record of recency on the wire,
+    /// which is what lets the shelf offer "recently read" without either end having to agree
+    /// about whose clock a timestamp would be in.
+    Reading(Vec<Bookmark>),
 }
 
 /// Why an intent was not acted on.
@@ -952,6 +1014,9 @@ pub enum Inbound {
     /// Put energy in this client's ship. Development only, refused by a shard for the reason
     /// `Stage` is. Appended last.
     Grant { joules: f64 },
+    /// Where the player has got to. Debounced by the client: a page turn every few seconds must
+    /// not be a message every few seconds.
+    SetReading(Bookmark),
 }
 
 /// Encode anything the protocol carries.
@@ -1335,6 +1400,44 @@ mod tests {
             golden::SAY,
             "Order::Say changed shape at protocol version {PROTOCOL_VERSION}",
         );
+
+        // The shelf. Appended variants, so their discriminants are the only new numbers here.
+        let shelf = Outbound::Library {
+            base: "https://cdn.example/library/".to_owned(),
+            books: vec![Book {
+                id: "the-gilded-age".to_owned(),
+                title: "The Gilded Age: A Tale of Today".to_owned(),
+                authors: vec![Writer {
+                    name: "Mark Twain".to_owned(),
+                    sort: Some("Twain, Mark".to_owned()),
+                }],
+                year: Some(1873),
+                subjects: vec!["Satire".to_owned()],
+                file: "The Gilded Age A Tale of Today.epub".to_owned(),
+            }],
+        };
+        assert_eq!(
+            encode(&shelf),
+            golden::LIBRARY,
+            "Outbound::Library changed shape at protocol version {PROTOCOL_VERSION}",
+        );
+        let mark = Bookmark {
+            book: "the-gilded-age".to_owned(),
+            spine: 2,
+            char_offset: 41_580,
+            location: 41,
+            locations: 878,
+        };
+        assert_eq!(
+            encode(&Outbound::Reading(vec![mark.clone()])),
+            golden::READING,
+            "Outbound::Reading changed shape at protocol version {PROTOCOL_VERSION}",
+        );
+        assert_eq!(
+            encode(&Inbound::SetReading(mark)),
+            golden::SET_READING,
+            "Inbound::SetReading changed shape at protocol version {PROTOCOL_VERSION}",
+        );
     }
 
     #[test]
@@ -1497,3 +1600,4 @@ mod tests {
         );
     }
 }
+

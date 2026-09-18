@@ -8,6 +8,26 @@ use crate::action::Action;
 use lc_world::scenario;
 use crate::app::DevEntry;
 
+/// Where this build's assets are.
+///
+/// Bevy's default resolves `assets` against `CARGO_MANIFEST_DIR` when cargo set it and against
+/// the executable's directory otherwise, so a packaged build looked for `target/debug/assets`
+/// and found nothing. Checking beside the executable first keeps that working; the compile-time
+/// path is the development fallback.
+///
+/// Here rather than in the desktop binary because the server in the box wants it too: a local
+/// shard lends the books sitting next to the client that started it.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn asset_root() -> std::path::PathBuf {
+    let beside_exe = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("assets")))
+        .filter(|path| path.is_dir());
+    beside_exe.unwrap_or_else(|| {
+        std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/assets"))
+    })
+}
+
 /// What a request to start the client asked for.
 pub struct Entry {
     pub dev: DevEntry,
@@ -49,6 +69,18 @@ pub fn parse(args: &[String]) -> Entry {
     }
     if let Some(rate) = value::<f64>(args, "--rate") {
         actions.push(Action::SetTimeRate(rate));
+    }
+    // A book by the name of its file on the shelf, so a page can be photographed.
+    if let Some(book) = after("--book") {
+        actions.push(Action::OpenBook(book));
+    }
+    // Which spine document to open at, so a photograph can be of prose rather than of a cover.
+    if let Some(chapter) = value::<usize>(args, "--chapter") {
+        actions.push(Action::GoTo(chapter, 0));
+    }
+    // Pages in from wherever the book opened: the only way to photograph a turned page.
+    if let Some(pages) = value::<i32>(args, "--pages") {
+        actions.push(Action::TurnPage(pages));
     }
     if flag("--tune") {
         actions.push(Action::OpenPanel(crate::ui::Panel::Tuning));

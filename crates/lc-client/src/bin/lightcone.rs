@@ -3,28 +3,9 @@
 //! The browser build is `lightcone_web`; the two share everything but where their arguments
 //! and their assets come from.
 
-use std::path::PathBuf;
-
 use bevy::asset::AssetPlugin;
 use bevy::prelude::*;
 use lc_client::app::{Catalogue, ClientPlugin};
-
-/// Where the client's own assets are.
-///
-/// Bevy's default resolves `assets` against `CARGO_MANIFEST_DIR` when cargo set it and against
-/// the executable's directory otherwise, so running the built binary directly looked for
-/// `target/debug/assets` and found nothing. Checking next to the executable first keeps a
-/// packaged build working; the compile-time path is the development fallback.
-fn asset_path() -> String {
-    let beside_exe = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|d| d.join("assets")))
-        .filter(|p| p.is_dir());
-    beside_exe
-        .unwrap_or_else(|| PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/assets")))
-        .to_string_lossy()
-        .into_owned()
-}
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -33,11 +14,28 @@ fn main() {
     App::new()
         .add_plugins(
             DefaultPlugins
+                // `DefaultPlugins` already carries this once the `https` feature is on, so it
+                // is configured rather than added. It is what lets a book be fetched from the
+                // shelf's own CDN rather than from the build's asset directory.
+                //
+                // Its warning is about loading URLs from untrusted places, and the answer is that
+                // this client never receives one: it receives a base from its own shard and a
+                // bare file name, and `Shelf::where_to_fetch` puts them together.
+                .set(bevy::asset::io::web::WebAssetPlugin { silence_startup_warning: true })
                 .set(WindowPlugin {
                     primary_window: Some(Window { title: "Lightcone Frontier".into(), ..default() }),
                     ..default()
                 })
-                .set(AssetPlugin { file_path: asset_path(), ..default() }),
+                .set(AssetPlugin {
+                    file_path: lc_client::entry::asset_root().to_string_lossy().into_owned(),
+                    // No asset here has a `.meta` sidecar, and the default is to probe for one
+                    // beside every asset loaded. On a filesystem that is a wasted stat; a
+                    // desktop client fetching a book from the shelf's CDN makes it a round trip
+                    // and a cached 404, which is what the browser build already avoids. See
+                    // lightcone/docs/14-hosting.md.
+                    meta_check: bevy::asset::AssetMetaCheck::Never,
+                    ..default()
+                }),
         )
         .insert_resource(Catalogue(entry.catalogue))
         // `--local` wins over `--server`: asking for one in this process is the more specific

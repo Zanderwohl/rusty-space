@@ -40,6 +40,10 @@
 	header @wgsl Content-Type "text/plain; charset=utf-8"
 	@sky path *.lcsky
 	header @sky Content-Type "application/octet-stream"
+	# The shelf. Under `library/` rather than `game/<build-id>/`, because a book is not part of
+	# a build: see lightcone/docs/21-library.md.
+	@epub path *.epub
+	header @epub Content-Type "application/epub+zip"
 
 	# A build directory that does not exist is a 404, not a fallback to anything. A CDN that
 	# guesses is a CDN that serves last week's client to half the players.

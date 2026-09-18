@@ -23,6 +23,7 @@ pub fn bindings() -> Vec<(KeyCode, Action)> {
         (KeyCode::KeyY, Action::TogglePanel(Panel::System)),
         (KeyCode::F3, Action::TogglePanel(Panel::Debug)),
         (KeyCode::KeyF, Action::TogglePanel(Panel::Flight)),
+        (KeyCode::KeyB, Action::TogglePanel(Panel::Reader)),
         (KeyCode::F4, Action::TogglePanel(Panel::Tuning)),
         (KeyCode::KeyR, Action::TogglePanel(Panel::Refit)),
         (KeyCode::F5, Action::TogglePanel(Panel::DevActions)),
@@ -172,16 +173,19 @@ pub fn look_around(
     looking: Res<Looking>,
     motion: Res<AccumulatedMouseMotion>,
     time: Res<Time>,
+    state: Res<crate::app::Ui>,
     mut out: MessageWriter<Requested>,
 ) {
     let mut yaw = 0.0;
     let mut pitch = 0.0;
 
-    // The arrows only. An arrow key in a text field moves the cursor, and turning the ship as
-    // well would make going back to fix a typo swing the whole view. The mouse below is
-    // unaffected, because holding the look button is not something a text field can mean.
+    // The arrows only, and not when something else is using them. An arrow key in a text field
+    // moves the cursor, and turning the ship as well would make going back to fix a typo swing
+    // the whole view; an arrow key in an open book turns its page. The mouse below is unaffected
+    // by either, because holding the look button is not something a field or a page can mean.
     let step = LOOK_STEP * time.delta_secs_f64() * 60.0;
-    if !egui.wants_any_keyboard_input() {
+    let paging = state.reading.book.is_some();
+    if !egui.wants_any_keyboard_input() && !paging {
         for (key, (y, p)) in held_bindings() {
             if keys.pressed(key) {
                 yaw += y * step;
@@ -201,20 +205,61 @@ pub fn look_around(
 }
 
 /// Turn key presses into requests.
+/// The keys the reader claims, and **only** those.
 ///
+/// An overlay rather than a second table. Swapping tables was the obvious shape and the wrong
+/// one: it took every other key with it, so opening a book turned off the telescope, the system
+/// window and the time controls — and every panel added afterwards would have had to be
+/// remembered here to keep working. What the reader needs is the paging keys and the way back to
+/// the shelf; everything it does not name falls through to the cockpit.
+///
+/// **Nothing mnemonic is claimed.** The contents list wanted `C` and `C` is Communications, so
+/// the contents has a button and no key rather than a key that shadows a window. `Escape` is
+/// left alone for the same reason: it closes the top panel wherever you are.
+///
+/// `book` is whether one is actually open. With the shelf showing there is nothing to page and
+/// nothing to leave, so the table is exactly the cockpit's.
+pub fn reading_bindings(book: bool) -> Vec<(KeyCode, Action)> {
+    if !book {
+        return Vec::new();
+    }
+    vec![
+        (KeyCode::ArrowRight, Action::TurnPage(1)),
+        (KeyCode::PageDown, Action::TurnPage(1)),
+        (KeyCode::ArrowLeft, Action::TurnPage(-1)),
+        (KeyCode::PageUp, Action::TurnPage(-1)),
+        // Out of the book and back to the shelf, which is the key that opened the device.
+        (KeyCode::KeyB, Action::CloseBook),
+    ]
+}
+
+/// The bindings in force: the cockpit's, with the reader's laid over them.
+pub fn bindings_in_force(reading: bool, book: bool) -> Vec<(KeyCode, Action)> {
+    let mut table = bindings();
+    if !reading {
+        return table;
+    }
+    let overlay = reading_bindings(book);
+    table.retain(|(key, _)| !overlay.iter().any(|(claimed, _)| claimed == key));
+    table.extend(overlay);
+    table
+}
+
 /// **Silent while the interface is taking text.** Every binding here is a bare letter, so a
 /// player typing a message into the radio window would otherwise open the telescope, cut the
-/// drive and fly somewhere, one keystroke at a time. Nothing in the game had a text field until
-/// there was something to say into one, which is why this could be left out until now.
+/// drive and fly somewhere, one keystroke at a time — and typing the name of a book into the
+/// shelf's filter would put the book away on `b`.
 pub fn read_keys(
     keys: Res<ButtonInput<KeyCode>>,
+    state: Res<crate::app::Ui>,
     egui: Res<EguiWantsInput>,
     mut out: MessageWriter<Requested>,
 ) {
     if egui.wants_any_keyboard_input() {
         return;
     }
-    for (key, action) in bindings() {
+    let table = bindings_in_force(state.is_open(Panel::Reader), state.reading.book.is_some());
+    for (key, action) in table {
         if keys.just_pressed(key) {
             out.write(Requested(action));
         }
@@ -233,6 +278,69 @@ mod tests {
         keys.sort_by_key(|k| format!("{k:?}"));
         keys.dedup();
         assert_eq!(keys.len(), before, "a key is bound to two actions");
+    }
+
+    #[test]
+    fn no_reading_key_is_bound_twice() {
+        let b = reading_bindings(true);
+        let mut keys: Vec<KeyCode> = b.iter().map(|(k, _)| *k).collect();
+        let before = keys.len();
+        keys.sort_by_key(|k| format!("{k:?}"));
+        keys.dedup();
+        assert_eq!(keys.len(), before, "a key turns two pages at once");
+    }
+
+    #[test]
+    fn a_book_claims_the_paging_keys_and_leaves_the_rest_alone() {
+        let flying = bindings_in_force(false, false);
+        let reading = bindings_in_force(true, true);
+        let acts = |table: &[(KeyCode, Action)], key: KeyCode| {
+            table.iter().find(|(k, _)| *k == key).map(|(_, a)| a.clone())
+        };
+
+        // The keys a book needs are the book's.
+        assert_eq!(acts(&reading, KeyCode::ArrowRight), Some(Action::TurnPage(1)));
+        assert_eq!(acts(&reading, KeyCode::KeyB), Some(Action::CloseBook));
+        // And `Escape` is not one of them: it closes the top panel here as it does anywhere.
+        assert_eq!(acts(&reading, KeyCode::Escape), acts(&flying, KeyCode::Escape));
+
+        // Every other panel still opens while one is being read. This is the whole point: a
+        // panel added later must not have to be remembered in two places to keep working.
+        for key in [KeyCode::KeyT, KeyCode::KeyY, KeyCode::F3, KeyCode::KeyF, KeyCode::Digit1] {
+            assert_eq!(acts(&reading, key), acts(&flying, key), "{key:?} was eaten by the reader");
+        }
+        // Precisely: the only keys that behave differently are the ones the reader names.
+        let claimed: Vec<KeyCode> = reading_bindings(true).iter().map(|(k, _)| *k).collect();
+        for (key, action) in &flying {
+            if claimed.contains(key) {
+                continue;
+            }
+            assert_eq!(acts(&reading, *key).as_ref(), Some(action), "{key:?} changed meaning");
+        }
+        for (key, _) in &reading {
+            assert!(
+                claimed.contains(key) || flying.iter().any(|(k, _)| k == key),
+                "{key:?} appeared from nowhere",
+            );
+        }
+    }
+
+    #[test]
+    fn the_shelf_claims_nothing_at_all() {
+        // No pages to turn and no book to leave, so every key means what it meant before.
+        assert_eq!(bindings_in_force(true, false), bindings_in_force(false, false));
+    }
+
+    #[test]
+    fn nothing_in_force_is_bound_twice() {
+        for (reading, book) in [(false, false), (true, false), (true, true)] {
+            let table = bindings_in_force(reading, book);
+            let mut keys: Vec<KeyCode> = table.iter().map(|(k, _)| *k).collect();
+            let before = keys.len();
+            keys.sort_by_key(|k| format!("{k:?}"));
+            keys.dedup();
+            assert_eq!(keys.len(), before, "a key is bound twice at ({reading}, {book})");
+        }
     }
 
     #[test]
@@ -279,6 +387,9 @@ mod tests {
             .init_resource::<AccumulatedMouseMotion>()
             .init_resource::<EguiWantsInput>()
             .init_resource::<Looking>()
+            // The arrows belong to the view unless a book is open, so the systems under test
+            // need to be able to ask which it is.
+            .insert_resource(crate::app::Ui(crate::ui::UiState::default()))
             .add_systems(Update, (grab_cursor, look_around).chain());
         let window = app
             .world_mut()
@@ -374,5 +485,24 @@ mod tests {
         app.world_mut().resource_mut::<Messages<Requested>>().clear();
         app.update();
         assert_eq!(app.world_mut().resource_mut::<Messages<Requested>>().drain().count(), 1);
+    }
+
+    #[test]
+    fn a_book_takes_the_arrow_keys_from_the_view() {
+        let (mut app, _) = harness();
+        // An open book, not merely the device: the shelf has no pages, so there the arrows
+        // still belong to the view.
+        let mut state = app.world_mut().resource_mut::<crate::app::Ui>();
+        state.open(Panel::Reader);
+        state.reading.book = Some("something".to_owned());
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ArrowLeft);
+        app.update();
+        app.world_mut().resource_mut::<Messages<Requested>>().clear();
+        app.update();
+        assert_eq!(
+            app.world_mut().resource_mut::<Messages<Requested>>().drain().count(),
+            0,
+            "the view turned while a page was being read"
+        );
     }
 }

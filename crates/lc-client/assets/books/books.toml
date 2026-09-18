@@ -1,0 +1,67 @@
+# The shelf.
+#
+# Hand-maintained: `cargo run -p lc-books --example shelf -- <dir> --toml` writes a first draft
+# from the files themselves, and then a person fixes what the files cannot know. The `year` is
+# always one of those — an epub states the day its transcription was posted, which for this
+# shelf is between 1993 and 2008 for books written in the 1870s and 1880s.
+#
+# `id` is stable and `file` is not. Two of the files below are named after a Gutenberg number
+# and two have lost a colon from their title; nothing reads a name to find out what a book is.
+#
+# Step 4 in lightcone/docs/21-library.md moves this file to the server, which sends it. Its
+# shape does not change when it moves.
+
+[[book]]
+id      = "a-princess-of-mars"
+title   = "A Princess of Mars"
+authors = [{ name = "Edgar Rice Burroughs", sort = "Burroughs, Edgar Rice" }]
+year    = 1912
+subjects = ["Science fiction", "Mars (Planet) -- Fiction", "Princesses -- Fiction", "Carter, John (Fictitious character) -- Fiction", "Dejah Thoris (Fictitious character) -- Fiction"]
+file    = "A Princess of Mars.epub"
+sha256  = "6aacebcc8969ce4d79e59f05b326e10217c5211cda853a022f2c63978376075f"
+
+[[book]]
+id      = "adventures-of-huckleberry-finn"
+title   = "Adventures of Huckleberry Finn"
+authors = [{ name = "Mark Twain", sort = "Twain, Mark" }]
+year    = 1884
+subjects = ["Humorous stories", "Bildungsromans", "Boys -- Fiction", "Male friendship -- Fiction", "Adventure stories", "Missouri -- Fiction", "Race relations -- Fiction", "Runaway children -- Fiction", "Finn, Huckleberry (Fictitious character) -- Fiction", "Fugitive slaves -- Fiction", "Mississippi River -- Fiction"]
+file    = "Adventures of Huckleberry Finn.epub"
+sha256  = "9bd72754395f027b009be348252c7b3afc652683858c724f6ab30d7bb4d50607"
+
+[[book]]
+id      = "the-adventures-of-tom-sawyer-complete"
+title   = "The Adventures of Tom Sawyer, Complete"
+authors = [{ name = "Mark Twain", sort = "Twain, Mark" }]
+year    = 1876
+subjects = ["Humorous stories", "Bildungsromans", "Boys -- Fiction", "Male friendship -- Fiction", "Adventure stories", "Missouri -- Fiction", "Sawyer, Tom (Fictitious character) -- Fiction", "Child witnesses -- Fiction", "Runaway children -- Fiction", "Mississippi River Valley -- Fiction"]
+file    = "The Adventures of Tom Sawyer Complete.epub"
+sha256  = "2c55f3c156064d51b12f1fe9ee8c70ae4d7eaa58b24323490f649f7536778692"
+
+[[book]]
+id      = "the-gilded-age"
+title   = "The Gilded Age: A Tale of Today"
+authors = [{ name = "Mark Twain", sort = "Twain, Mark" }, { name = "Charles Dudley Warner", sort = "Warner, Charles Dudley" }]
+year    = 1873
+subjects = ["Satire", "Political fiction", "Washington (D.C.) -- Fiction", "Legislators -- Fiction", "Speculation -- Fiction", "Political corruption -- Fiction", "Businessmen -- Fiction"]
+file    = "The Gilded Age A Tale of Today.epub"
+sha256  = "27a0dd9b11d8030215fc2dd6c3b3665c638b231b0587bc66583f6a4f9ef2b73c"
+
+[[book]]
+id      = "twenty-thousand-leagues-under-the-seas"
+title   = "Twenty Thousand Leagues Under the Seas: An Underwater Tour of the World"
+authors = [{ name = "Jules Verne", sort = "Verne, Jules" }]
+year    = 1870
+subjects = ["Science fiction", "Submarines (Ships) -- Fiction", "Sea stories", "Adventure stories", "Underwater exploration -- Fiction"]
+file    = "pg2488-images-3.epub"
+sha256  = "0c84693fdf773c09222bc2fde37588a03a4f9705c3cd9343a19ed0b6d6b45f19"
+
+[[book]]
+id      = "the-strange-case-of-dr-jekyll-and-mr-hyde"
+title   = "The Strange Case of Dr. Jekyll and Mr. Hyde"
+authors = [{ name = "Robert Louis Stevenson", sort = "Stevenson, Robert Louis" }]
+year    = 1886
+subjects = ["Science fiction", "Horror tales", "London (England) -- Fiction", "Physicians -- Fiction", "Psychological fiction", "Self-experimentation in medicine -- Fiction", "Multiple personality -- Fiction"]
+file    = "pg43-images-3.epub"
+sha256  = "92bed7a8b91259585047c918e6c924fc8694057d0af7e969fa9a8f16bf8f14c1"
+

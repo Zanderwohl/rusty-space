@@ -16,6 +16,7 @@ pub mod auth;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod broker;
 pub mod app;
+pub mod bookshelf;
 pub mod chat;
 pub mod curve;
 pub mod demos;
@@ -24,6 +25,7 @@ pub mod envelope;
 pub mod hud;
 pub mod hull;
 pub mod input;
+pub mod library;
 pub mod link;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod local;
@@ -33,6 +35,7 @@ pub mod pick;
 pub mod plume;
 pub mod plot;
 pub mod radio_panel;
+pub mod reader;
 pub mod refit_panel;
 pub mod resolved;
 pub mod session;
