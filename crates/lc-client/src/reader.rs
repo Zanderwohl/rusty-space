@@ -108,6 +108,12 @@ impl Setting {
     pub fn title(&self) -> &FontId {
         &self.heading
     }
+
+    /// A title in a list of them, which wants the display face at the size of the page rather
+    /// than at the size of a chapter opening.
+    pub fn listing(&self) -> FontId {
+        FontId::new(BODY_SIZE, self.heading.family.clone())
+    }
 }
 
 /// The measurer the pagination runs over: egui's own layout, at the size it will be drawn.
@@ -297,6 +303,8 @@ pub fn draw(
     mut out: MessageWriter<Requested>,
     mut counted: Local<Counted>,
     mut plates: Local<Plates>,
+    mut query: Local<String>,
+    mut order: Local<lc_books::Order>,
 ) {
     if !state.is_open(Panel::Reader) {
         return;
@@ -306,8 +314,10 @@ pub fn draw(
     let setting = setting_for(ctx);
 
     let view = ctx.content_rect();
-    let width = 520.0_f32.min(view.width() - 48.0);
-    let height = 680.0_f32.min(view.height() - 48.0);
+    // The shape of a book rather than of a window: tall, narrow, and the player's to widen.
+    let width = 500.0_f32.min(view.width() - 48.0);
+    let height = 800.0_f32.min(view.height() - 48.0);
+    let reading = state.reading.book.is_some();
     let mut open = true;
     egui::Window::new("reader")
         .title_bar(false)
@@ -323,7 +333,7 @@ pub fn draw(
             // *inside* a window that grows to fit its content is a loop, and the loop's fixed
             // point is a window taller than the screen.
             let inside = ui.available_height();
-            head(ui, &shelf, &mut open, &mut out);
+            head(ui, &shelf, reading, &mut open, &mut out);
             let taken = ui.min_rect().height();
             let paper = (inside - taken - KEYS_HEIGHT - SCREEN_MARGIN.top as f32
                 - SCREEN_MARGIN.bottom as f32)
@@ -335,20 +345,47 @@ pub fn draw(
                 corner_radius: CornerRadius::same(3),
                 ..Default::default()
             };
-            screen.show(ui, |ui| {
-                ui.set_height(paper);
-                ui.set_width(ui.available_width());
-                if state.reading.contents {
-                    contents(ui, &shelf, &mut books, &setting, &mut out);
-                } else {
-                    page(ui, &mut state, &shelf, &mut books, &setting, &mut counted, &mut plates);
-                }
-            });
+            let found = screen
+                .show(ui, |ui| {
+                    ui.set_height(paper);
+                    ui.set_width(ui.available_width());
+                    match (reading, state.reading.contents) {
+                        (false, _) => crate::bookshelf::paper(
+                            ui,
+                            &shelf,
+                            &setting,
+                            &mut query,
+                            &mut order,
+                            &mut out,
+                        ),
+                        (true, true) => {
+                            contents(ui, &shelf, &mut books, &setting, &mut out);
+                            0
+                        }
+                        (true, false) => {
+                            page(
+                                ui,
+                                &mut state,
+                                &shelf,
+                                &mut books,
+                                &setting,
+                                &mut counted,
+                                &mut plates,
+                            );
+                            0
+                        }
+                    }
+                })
+                .inner;
             ui.add_space(6.0);
-            keys(ui, &state, &shelf, &mut out);
+            if reading {
+                keys(ui, &state, &shelf, &mut out);
+            } else {
+                crate::bookshelf::keys(ui, found, shelf.catalogue.books.len(), &mut order);
+            }
         });
     if !open {
-        ask(&mut out, Action::CloseBook);
+        ask(&mut out, Action::ClosePanel(Panel::Reader));
     }
 }
 
@@ -369,28 +406,30 @@ pub(crate) fn case() -> egui::Frame {
 }
 
 /// The top of the case: what is being read, and the way out.
-pub(crate) fn settle_face_for_shelf(
-    ctx: &egui::Context,
-    shelf: &mut Shelf,
-    assets: &AssetServer,
-    faces: &Assets<FontFace>,
+fn head(
+    ui: &mut egui::Ui,
+    shelf: &Shelf,
+    reading: bool,
+    open: &mut bool,
+    out: &mut MessageWriter<Requested>,
 ) {
-    settle_face(ctx, shelf, assets, faces);
-}
-
-fn head(ui: &mut egui::Ui, shelf: &Shelf, open: &mut bool, out: &mut MessageWriter<Requested>) {
     ui.horizontal(|ui| {
         ui.add_space(4.0);
-        ui.add(engraved(shelf.title.to_uppercase(), 10.0, LABEL));
+        let name = if reading { shelf.title.to_uppercase() } else { "BOOKSHELF".to_owned() };
+        ui.add(engraved(name, 10.0, LABEL));
         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-            if key(ui, "×", "close the book").clicked() {
+            if key(ui, "×", "put it away").clicked() {
                 *open = false;
             }
-            if key(ui, "contents", "the chapter list").clicked() {
-                ask(out, Action::ToggleContents);
-            }
-            if key(ui, "shelf", "the other books").clicked() {
-                ask(out, Action::TogglePanel(Panel::Bookshelf));
+            if reading {
+                if key(ui, "contents", "the chapter list").clicked() {
+                    ask(out, Action::ToggleContents);
+                }
+                // Back to the shelf, which is this window showing the other thing. The book is
+                // closed on the way, and closing a book is what writes down where it was left.
+                if key(ui, "shelf", "back to the other books").clicked() {
+                    ask(out, Action::CloseBook);
+                }
             }
         });
     });
@@ -486,6 +525,9 @@ fn page(
     let mut cursor = start_cursor(doc, &setter, frame, state.reading.offset);
     let mut current = paginate::page_at(doc, &setter, frame, cursor);
     let turns = std::mem::take(&mut state.reading.turn);
+    // A turn is the player moving, and where they moved to is written down at once rather than
+    // at the end of an interval: a page read and then lost to a crash is a page read twice.
+    state.reading.asked |= turns != 0;
     for _ in 0..turns.abs() {
         if turns > 0 {
             if current.next.block >= doc.blocks.len() {
@@ -513,9 +555,13 @@ fn page(
         cursor = current.cursor();
     }
     let _ = cursor;
-    // The reader writes down where it ended up. Nothing else can: the offset is a fact about a
-    // layout, and this is the only place that has one.
-    state.reading.offset = current.start;
+    // **Only when the player moved.** Where a page begins is a fact about a layout, and this is
+    // the only place that has one — but a narrower window reflows the same sentence onto a page
+    // that starts a few characters earlier, and writing that down would walk the bookmark
+    // backwards every time the window was dragged. Resizing is not reading.
+    if state.reading.asked {
+        state.reading.offset = current.start;
+    }
 
     let key = (*spine, frame.width.to_bits(), frame.height.to_bits());
     if counted.key != Some(key) {
@@ -533,7 +579,16 @@ fn page(
         Vec2::new(width, height),
     );
     let painter = ui.painter_at(outer);
+    // A plate with a page to itself sits in the middle of it, the way a printed one does. Only
+    // when it is alone: centring a plate that text follows would open a gap above the text.
+    let lone_plate = current.slices.len() == 1
+        && matches!(doc.blocks[current.slices[0].block].block, Block::Image { .. });
     let mut y = rect.top();
+    if lone_plate {
+        let drawn = setter.measure(&doc.blocks[current.slices[0].block].block, width);
+        let tall: f32 = drawn.rows.iter().map(|r| r.height).sum();
+        y += ((height - tall) / 2.0).max(0.0);
+    }
     for slice in &current.slices {
         let block = &doc.blocks[slice.block].block;
         if slice.lead {

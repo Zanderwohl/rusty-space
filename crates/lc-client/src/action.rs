@@ -187,9 +187,16 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             }
             ui.open(Panel::Reader);
         }
+        // A hierarchy rather than two actions: the device shows a book or it shows the shelf,
+        // and the way out of a book is the shelf. Closing the book is also what writes down
+        // where it was left — see `crate::library::report_place`.
         Action::CloseBook => {
             ui.reading.contents = false;
-            ui.close(Panel::Reader);
+            if ui.reading.book.is_some() {
+                ui.reading.book = None;
+            } else {
+                ui.close(Panel::Reader);
+            }
         }
         Action::TurnPage(by) => ui.reading.turn += by,
         Action::GoTo(spine, offset) => {

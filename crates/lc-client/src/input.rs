@@ -23,7 +23,7 @@ pub fn bindings() -> Vec<(KeyCode, Action)> {
         (KeyCode::KeyY, Action::TogglePanel(Panel::System)),
         (KeyCode::F3, Action::TogglePanel(Panel::Debug)),
         (KeyCode::KeyF, Action::TogglePanel(Panel::Flight)),
-        (KeyCode::KeyB, Action::TogglePanel(Panel::Bookshelf)),
+        (KeyCode::KeyB, Action::TogglePanel(Panel::Reader)),
         (KeyCode::F4, Action::TogglePanel(Panel::Tuning)),
         (KeyCode::Digit1, Action::SetBandPreset(0)),
         (KeyCode::Digit2, Action::SetBandPreset(1)),
@@ -211,15 +211,24 @@ pub fn reading_bindings() -> Vec<(KeyCode, Action)> {
         (KeyCode::ArrowLeft, Action::TurnPage(-1)),
         (KeyCode::PageUp, Action::TurnPage(-1)),
         (KeyCode::KeyC, Action::ToggleContents),
-        (KeyCode::KeyB, Action::TogglePanel(Panel::Bookshelf)),
+        // Out of the book and back to the shelf, which is the same key that opened the device
+        // and one step of the same hierarchy `Escape` walks.
+        (KeyCode::KeyB, Action::CloseBook),
     ]
 }
 
 pub fn read_keys(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<crate::app::Ui>,
+    egui: Res<EguiWantsInput>,
     mut out: MessageWriter<Requested>,
 ) {
+    // A field being typed into owns the keyboard, all of it. The shelf's filter is the only one
+    // in this client, and without this, typing the name of a book closes the window on `b` and
+    // turns a page on the space bar.
+    if egui.wants_any_keyboard_input() {
+        return;
+    }
     let reading = state.is_open(Panel::Reader);
     let table = if reading { reading_bindings() } else { bindings() };
     for (key, action) in table {

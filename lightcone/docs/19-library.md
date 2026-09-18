@@ -216,7 +216,7 @@ assumes the gate was forgotten rather than reasoned about.
 |---|---|---|
 | server → client | `Library` | the shelf's base, and the catalogue |
 | server → client | `Reading` | this account's locators, on connect, **most recently read first** |
-| client → server | `SetReading` | one book's locator, debounced |
+| client → server | `SetReading` | one book's locator, on every turn |
 
 That ordering is load-bearing: it is the only record of recency on the wire, and it is what lets
 the shelf offer "recently read" without either end having to agree about whose clock a timestamp
@@ -229,8 +229,30 @@ and the client already trusts its shard for everything else.
 
 Adding these bumps `PROTOCOL_VERSION` and re-pins `golden`.
 
-The write is debounced — a page turn every few seconds must not be a message every few seconds
-— and flushed on closing the book, on sign-out and on disconnect.
+**A page turn is written down the moment it happens.** Not on an interval: a page read and then
+lost to a crash is a page read twice, and the whole point of a bookmark is the case where nobody
+got to close anything cleanly. Putting a book down reports at once too, and so does the first
+sight of one — opening a book at chapter nine and dropping the connection four seconds later
+should not record chapter one.
+
+What does **not** report, and does not even move the bookmark, is a reflow. A narrower window
+puts the same sentence on a page that starts a few characters earlier, and writing that down
+would walk the mark backwards every time the window was dragged. Resizing is not reading.
+
+An interval survives as a backstop against something else moving the offset without asking:
+every inbound message is charged against a connection's budget — two a second sustained, thirty
+in a burst — so a change arriving every frame would spend the lot and then be throttled, which
+is how a bookmark gets lost by trying too hard to save it.
+
+The rule is a value rather than a system — `Reporter::tick` — because a system holding a socket
+cannot be tested and the rule is the part worth being sure of. Writing the tests found two faults
+in it: the first bookmark for a book waited out the interval, and opening a second book overwrote
+the first one's unsent place.
+
+Past the client, a bookmark has the same exposure as everything else: the shard holds it in
+memory and writes it at the next checkpoint, about twenty seconds out. A ship's position is no
+safer, and making a book safer than the ship it is being read on would be a strange place to
+spend a write.
 
 ---
 
@@ -386,8 +408,17 @@ being a 3% tax on every player.
 
 ## Controls
 
-Two panels. `Panel::Library` is the shelf and `Panel::Reader` is the book; the shelf is where
-sorting lives, and opening a book is the only thing it does.
+**One window.** It shows the shelf, or it shows a book off it — the same case, the same page,
+the same two bezels. A shelf and a book are one object a player picks up, and two windows for it
+was two things to arrange on a screen and two things to close. It opens at 500 by 800, the shape
+of a book rather than of a window, and the player can widen it.
+
+Closing walks that hierarchy: out of a book is back to the shelf, out of the shelf is the device
+put away. `Escape` and the shelf button are the same step.
+
+**A field being typed into owns the keyboard, all of it.** The shelf's filter is the only one in
+this client, and without that rule, typing the name of a book closes the window on `b` and turns
+a page on the space bar.
 
 | shelf | |
 |---|---|
@@ -453,7 +484,7 @@ Each step is useful on its own, and the fun one does not wait for the server.
 | 1 | **built.** `lc-books`: zip, OPF, spine, TOC, the block model, locations, the paginator over `Measure` | a headless test paginates a real Gutenberg epub and round-trips a locator |
 | 2 | **built.** the shelf on the CDN: `publish-books.sh`, the Caddyfile header, the client's HTTP asset source | `curl` returns an epub with the right type and an immutable cache header |
 | 3 | **built, less the CDN.** the reader window: `EpubLoader`, plates, the serif, the panel, the mode | `--book <id> --shot` is a page of prose |
-| 4 | **built.** the catalogue and progress over the wire: three messages, `0005_reading.sql`, the debounce | signing in on a second machine opens to the same sentence |
+| 4 | **built.** the catalogue and progress over the wire: three messages, `0005_reading.sql`, the reporting rule | signing in on a second machine opens to the same sentence |
 | 5 | **built, less the badges.** the shelf's sorts and filter, the TOC, jump to location | the controls above all exist |
 
 Step 4 is `lc_server::library`, `lc_store::reading` and the two client systems that take the

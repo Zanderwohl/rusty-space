@@ -222,6 +222,7 @@ pub fn keep_up(
     if let Some((spine, offset)) = state.reading.goto.take() {
         state.reading.spine = spine;
         state.reading.offset = offset;
+        state.reading.asked = true;
     }
     let wanted = state.reading.book.clone();
     if wanted != shelf.file {
@@ -438,49 +439,102 @@ pub fn take_from_shard(mut shelf: ResMut<Shelf>, mut uplink: ResMut<crate::uplin
     }
 }
 
-/// Tell the shard where the player has got to.
+/// When a place is written down: at once when the player moved, and on an interval otherwise.
 ///
-/// Debounced: a page turn every few seconds must not be a message every few seconds. A change is
-/// sent at once and then no more often than this, which means the common case — reading steadily
-/// — costs one small message a minute and stopping mid-page still records where you stopped.
+/// A function over state rather than a system, because the rule it encodes — *a page turn, a
+/// jump, the first sight of a book and putting one down all report immediately; a page that
+/// merely reflowed under a resize waits* — is the part worth being sure of, and a system
+/// carrying a socket is the part that cannot be tested.
+///
+/// The interval is a backstop rather than the rule. A place only moves when the player moves it
+/// — [`crate::reader`] does not write one down for a reflow — so in practice every change is a
+/// deliberate one and goes at once. What the interval stops is a future path that moves the
+/// offset without anybody asking: every inbound message is charged against a connection's budget,
+/// two a second sustained and thirty in a burst, and something changing it every frame would
+/// spend the lot and then be throttled, which is how a bookmark gets lost by trying too hard to
+/// save it.
+#[derive(Default)]
+pub struct Reporter {
+    pending: Option<lc_proto::Bookmark>,
+    sent: Option<lc_proto::Bookmark>,
+    quiet_for: f32,
+}
+
+impl Reporter {
+    /// Advance a frame. `here` is where the reader is now, when there is a book open and its
+    /// length is known; `open` is the book open at this instant, which is how putting one down
+    /// is told from reading it.
+    pub fn tick(
+        &mut self,
+        dt: f32,
+        open: Option<&str>,
+        here: Option<lc_proto::Bookmark>,
+        asked: bool,
+    ) -> Option<lc_proto::Bookmark> {
+        self.quiet_for += dt;
+        // A place held for a book that is no longer the open one goes now, and **before
+        // anything can take its place**: the book was closed or another was opened over it, no
+        // later position is coming, and the interval that exists to spare the shard a message a
+        // page turn must not be what loses the last one.
+        if let Some(mark) = self.pending.clone()
+            && open != Some(mark.book.as_str())
+        {
+            return Some(self.flush(mark));
+        }
+        if let Some(mark) = here
+            && self.sent.as_ref() != Some(&mark)
+        {
+            self.pending = Some(mark);
+        }
+        let mark = self.pending.clone()?;
+        // The first word about a book does not wait either: opening one at chapter nine and
+        // being disconnected four seconds later should not record chapter one.
+        let first = self.sent.as_ref().map(|s| s.book.as_str()) != Some(mark.book.as_str());
+        if !asked && !first && self.quiet_for < REPORT_EVERY_S {
+            return None;
+        }
+        Some(self.flush(mark))
+    }
+
+    fn flush(&mut self, mark: lc_proto::Bookmark) -> lc_proto::Bookmark {
+        self.sent = Some(mark.clone());
+        self.pending = None;
+        self.quiet_for = 0.0;
+        mark
+    }
+}
+
+/// Tell the shard where the player has got to.
 pub fn report_place(
-    state: Res<crate::app::Ui>,
+    mut state: ResMut<crate::app::Ui>,
     mut shelf: ResMut<Shelf>,
     mut uplink: ResMut<crate::uplink::Uplink>,
     time: Res<Time>,
-    mut sent: Local<Option<lc_proto::Bookmark>>,
-    mut quiet_for: Local<f32>,
+    mut reporter: Local<Reporter>,
 ) {
-    *quiet_for += time.delta_secs();
-    let Some(book) = shelf.open_id().map(str::to_owned) else { return };
-    let spine = state.reading.spine;
-    let offset = state.reading.offset;
+    let open = shelf.open_id().map(str::to_owned);
     // Until the book has been measured there is no honest location to report, and a bookmark
     // with the wrong one would be written down and shown as a percentage of nothing.
-    let Some((location, locations)) = shelf.location(spine, offset) else { return };
-
-    let mark = lc_proto::Bookmark {
-        book,
-        spine: spine as u32,
-        char_offset: offset as u32,
-        location,
-        locations,
+    let here = open.as_ref().and_then(|book| {
+        let (location, locations) = shelf.location(state.reading.spine, state.reading.offset)?;
+        Some(lc_proto::Bookmark {
+            book: book.clone(),
+            spine: state.reading.spine as u32,
+            char_offset: state.reading.offset as u32,
+            location,
+            locations,
+        })
+    });
+    let asked = std::mem::take(&mut state.reading.asked);
+    let Some(mark) = reporter.tick(time.delta_secs(), open.as_deref(), here, asked) else {
+        return;
     };
-    if sent.as_ref() == Some(&mark) {
-        return;
-    }
-    // A different book is a different fact and does not wait its turn.
-    let same_book = sent.as_ref().is_some_and(|s| s.book == mark.book);
-    if same_book && *quiet_for < REPORT_EVERY_S {
-        return;
-    }
+
     uplink.say(lc_proto::Inbound::SetReading(mark.clone()));
-    // Kept here as well as sent. The shard states bookmarks once, on connecting, so a shelf
-    // that waited to be told would show yesterday's place for the book being read right now.
+    // Kept here as well as sent. The shard states bookmarks once, on connecting, so a shelf that
+    // waited to be told would show yesterday's place for the book just put down.
     shelf.marks.retain(|m| m.book != mark.book);
-    shelf.marks.insert(0, mark.clone());
-    *sent = Some(mark);
-    *quiet_for = 0.0;
+    shelf.marks.insert(0, mark);
 }
 
 /// How often a place is reported while it keeps changing.
@@ -541,6 +595,86 @@ mod tests {
                 shelf_with(base).where_to_fetch("gilded.epub").as_deref(),
                 Some("https://cdn.example/library/gilded.epub"),
             );
+        }
+    }
+
+    fn at(book: &str, offset: u32) -> lc_proto::Bookmark {
+        lc_proto::Bookmark {
+            book: book.to_owned(),
+            spine: 1,
+            char_offset: offset,
+            location: offset / 1024 + 1,
+            locations: 400,
+        }
+    }
+
+    #[test]
+    fn a_steady_reader_costs_one_message_an_interval() {
+        let mut reporter = Reporter::default();
+        // The first change goes at once; the reader has said something new and nothing is owed.
+        assert_eq!(reporter.tick(0.016, Some("a"), Some(at("a", 10)), false), Some(at("a", 10)));
+        // Turning pages inside the interval says nothing.
+        for page in 1..20 {
+            assert_eq!(reporter.tick(0.2, Some("a"), Some(at("a", page * 1000)), false), None);
+        }
+        // And then the latest of them, once.
+        assert_eq!(reporter.tick(2.0, Some("a"), Some(at("a", 19_000)), false), Some(at("a", 19_000)));
+    }
+
+    #[test]
+    fn a_page_turn_is_written_down_the_moment_it_happens() {
+        let mut reporter = Reporter::default();
+        reporter.tick(0.016, Some("a"), Some(at("a", 10)), true);
+        // Three turns inside a second. A crash after any of them should cost nothing.
+        for page in 1..4 {
+            let at_page = at("a", page * 1_400);
+            assert_eq!(
+                reporter.tick(0.3, Some("a"), Some(at_page.clone()), true),
+                Some(at_page),
+                "a turned page waited for the interval",
+            );
+        }
+    }
+
+    #[test]
+    fn a_page_that_only_reflowed_waits() {
+        let mut reporter = Reporter::default();
+        reporter.tick(0.016, Some("a"), Some(at("a", 10)), true);
+        // A resize drag: the same sentence, landing a few characters along, every frame.
+        for frame in 1..60 {
+            assert_eq!(reporter.tick(0.016, Some("a"), Some(at("a", 10 + frame)), false), None);
+        }
+    }
+
+    #[test]
+    fn putting_a_book_down_does_not_wait_for_the_interval() {
+        let mut reporter = Reporter::default();
+        reporter.tick(0.016, Some("a"), Some(at("a", 10)), false);
+        // A page turn, then the shelf button, well inside the interval.
+        assert_eq!(reporter.tick(0.2, Some("a"), Some(at("a", 4_000)), false), None);
+        assert_eq!(
+            reporter.tick(0.2, None, None, false),
+            Some(at("a", 4_000)),
+            "the last page read was lost when the book was closed",
+        );
+        assert_eq!(reporter.tick(9.0, None, None, false), None, "and it is not sent twice");
+    }
+
+    #[test]
+    fn opening_another_book_flushes_the_one_before_it() {
+        let mut reporter = Reporter::default();
+        reporter.tick(0.016, Some("a"), Some(at("a", 10)), false);
+        reporter.tick(0.2, Some("a"), Some(at("a", 5_000)), false);
+        assert_eq!(reporter.tick(0.2, Some("b"), Some(at("b", 0)), false), Some(at("a", 5_000)));
+    }
+
+    #[test]
+    fn a_book_whose_length_is_not_known_yet_is_not_reported() {
+        let mut reporter = Reporter::default();
+        // Measuring takes a frame per chapter, and a location computed before it finishes would
+        // be a percentage of a book that is still being counted.
+        for _ in 0..40 {
+            assert_eq!(reporter.tick(0.2, Some("a"), None, false), None);
         }
     }
 
