@@ -425,6 +425,7 @@ impl<J: Journal> Server<J> {
                 event_id: m.event_id,
                 idem: m.idem.unwrap_or_default() as MessageKey,
                 with: m.addressee.map(ShipId),
+                to: m.addressee.map(ShipId),
                 // A broadcast is in nobody's conversation, so there is no counterpart to name.
                 // Empty rather than a word like "everyone": `with` being `None` is what says
                 // that, and a name that is not a craft's is one the interface has to special
@@ -448,6 +449,9 @@ impl<J: Journal> Server<J> {
                 event_id: m.event_id,
                 idem: m.idem.unwrap_or_default() as MessageKey,
                 with: Some(ShipId(m.sender)),
+                // Who it was *addressed* to, which for something this ship merely overheard is
+                // neither end of any conversation it is having.
+                to: m.addressee.map(ShipId),
                 with_name: name_of(m.sender),
                 mine: false,
                 key: m.is_key,

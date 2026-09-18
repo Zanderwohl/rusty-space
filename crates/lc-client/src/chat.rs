@@ -46,6 +46,29 @@ pub struct Line {
 }
 
 impl Line {
+    /// What an unreadable message looks like: fixed-length noise, and the same noise every
+    /// time this line is drawn.
+    ///
+    /// **Fixed length whatever the message was**, which is the point rather than a detail. A
+    /// run of gibberish whose length tracked the plaintext would leak the one thing about a
+    /// sealed message that is still readable — a long one is a long one — and a player could
+    /// read a conversation's shape without reading a word of it.
+    ///
+    /// Derived from when it was heard, so it is stable across frames and reconnections and
+    /// there is nothing in it to decode. It is not ciphertext and does not pretend to be; it is
+    /// what a receiver has instead of a message.
+    pub fn ciphertext(&self) -> String {
+        const GLYPHS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        const LENGTH: usize = 24;
+        let seed = self.event_ids.first().copied().unwrap_or_default() as u64;
+        (0..LENGTH)
+            .map(|k| {
+                let h = lc_world::rng::hash(&[seed, k as u64]);
+                GLYPHS[(h % GLYPHS.len() as u64) as usize] as char
+            })
+            .collect()
+    }
+
     /// The arrival strength as decibels, or `None` for a message this ship sent.
     ///
     /// Referred to one strength unit, which is the same arbitrary scale the noise floor is
@@ -57,6 +80,23 @@ impl Line {
             _ => None,
         }
     }
+}
+
+/// A transmission that belongs to no conversation.
+///
+/// Two kinds, told apart by [`Loose::to`]: a **broadcast**, said to nobody in particular, and
+/// something **overheard**, said by one craft to another with this ship merely in earshot.
+/// Neither is a conversation this ship is having, and filing them as one would put words in
+/// somebody's mouth — a log of "what Ada said to me" containing what Ada said to Bry.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Loose {
+    /// Who transmitted it, or `None` when this ship did.
+    pub from: Option<ShipId>,
+    /// What to call them. Empty for this ship's own.
+    pub from_name: String,
+    /// Who it was addressed to. `None` is a broadcast; anything else is overheard.
+    pub to: Option<ShipId>,
+    pub line: Line,
 }
 
 /// Everything said to and by one craft.
@@ -109,12 +149,18 @@ pub struct Chat {
     /// Keyed by the other craft's identifier. What order they are *shown* in is
     /// [`Chat::conversations`]'s business.
     conversations: BTreeMap<i64, Conversation>,
-    /// Open messages this ship broadcast, which are in nobody's conversation.
+    /// Everything in no conversation: broadcasts, and other people's mail.
     ///
-    /// Something said to no one in particular belongs to no one in particular. A *received*
-    /// broadcast is not here — it came from a craft, so it files under that craft and can be
-    /// answered — and appears in the public log the same way any other open message does.
-    broadcasts: Vec<Line>,
+    /// One list rather than two, because the only thing that separates them is who each was
+    /// addressed to, and that is a field on the row. See [`Loose`].
+    loose: Vec<Loose>,
+    /// Which craft this ship is, so a message addressed to it can be told from one that merely
+    /// reached it.
+    ///
+    /// `None` until a welcome says. Everything is filed as a conversation until then, which is
+    /// the offline case and the frame before the server answers: better to show a message in
+    /// the wrong tab than to decide it was somebody else's on no evidence.
+    me: Option<ShipId>,
     /// Craft this ship answers automatically. See [`Chat::auto_acks`].
     auto_ack: std::collections::BTreeSet<i64>,
     /// Whose public keys this ship holds, and can therefore encrypt a message to.
@@ -141,29 +187,33 @@ impl Chat {
         out
     }
 
-    /// Everything that was said in the open, from every conversation, oldest first.
+    /// Which craft this ship is. Stated by the welcome; see [`Chat::me`].
+    pub fn i_am(&mut self, me: ShipId) {
+        self.me = Some(me);
+    }
+
+    /// Everything said to nobody in particular, oldest first — sent and heard.
     ///
-    /// Not a conversation and deliberately not stored as one: it is a *view*, the answer to
-    /// "what has been going on" rather than "what did we two say". A sealed message is absent
-    /// whichever end it came from — including this ship's own, because a private message listed
-    /// in a public log is a private message on a screen somebody can read over your shoulder.
+    /// **Broadcasts and nothing else.** A message addressed to one craft is not public however
+    /// openly it was sent: anyone in range can read it, but it was still somebody's mail, and
+    /// [`Chat::overheard`] is where being in earshot of it belongs.
+    pub fn public(&self) -> Vec<&Loose> {
+        self.loose_where(|loose| loose.to.is_none())
+    }
+
+    /// Traffic between other craft that this ship happened to be in range of, oldest first.
     ///
-    /// Each entry carries the craft the line is with, because a public log mixes them and a
-    /// line with no name against it is a line nobody can answer.
-    pub fn public(&self) -> Vec<(Option<ShipId>, &str, &Line)> {
-        let mut out: Vec<(Option<ShipId>, &str, &Line)> = self
-            .conversations
-            .iter()
-            .flat_map(|(id, c)| {
-                c.lines
-                    .iter()
-                    .filter(|line| !line.sealed)
-                    .map(move |line| (Some(ShipId(*id)), c.name.as_str(), line))
-            })
-            // No counterpart to name: `None` is what says so.
-            .chain(self.broadcasts.iter().map(|line| (None, "", line)))
-            .collect();
-        out.sort_by(|a, b| when(a.2).total_cmp(&when(b.2)));
+    /// Open ones can be read, which is what "open" means and is the cost of shouting. Encrypted
+    /// ones cannot, and are shown as the noise they are — the fact of them is real and is worth
+    /// seeing, because a run of traffic between two craft says something even when none of it
+    /// can be read.
+    pub fn overheard(&self) -> Vec<&Loose> {
+        self.loose_where(|loose| loose.to.is_some())
+    }
+
+    fn loose_where(&self, keep: impl Fn(&Loose) -> bool) -> Vec<&Loose> {
+        let mut out: Vec<&Loose> = self.loose.iter().filter(|l| keep(l)).collect();
+        out.sort_by(|a, b| when(&a.line).total_cmp(&when(&b.line)));
         out
     }
 
@@ -210,12 +260,27 @@ impl Chat {
     /// about a line in both, which is a question with no interesting answer.
     pub fn restore(&mut self, messages: Vec<Said>, keys: Vec<ShipId>) {
         self.conversations.clear();
-        self.broadcasts.clear();
+        self.loose.clear();
         self.keys = keys.into_iter().map(|k| k.0).collect();
         for said in messages {
-            let Some(with) = said.with else {
-                // A broadcast this ship sent. Nobody's conversation, and the public log's.
-                restore_into(&mut self.broadcasts, said);
+            // The same rule the live path uses, and it has to be: a transcript replayed into
+            // different tabs from the ones it arrived in would be a different transcript.
+            let for_us = match (said.to, self.me) {
+                (Some(to), Some(me)) => to == me || said.mine,
+                (Some(_), None) => true,
+                (None, _) => false,
+            };
+            let Some(with) = said.with.filter(|_| for_us) else {
+                if bare_acknowledgement(said.key, said.body.as_deref()) {
+                    continue;
+                }
+                let from = said.with.filter(|_| !said.mine);
+                self.loose.push(Loose {
+                    from,
+                    from_name: from.map(|_| said.with_name.clone()).unwrap_or_default(),
+                    to: said.to,
+                    line: line_of(said),
+                });
                 continue;
             };
             let conversation = self.conversations.entry(with.0).or_default();
@@ -256,6 +321,21 @@ impl Chat {
     ) -> Option<lc_proto::Aim> {
         if key {
             self.keys.insert(from.0);
+        }
+        // **Who it was addressed to decides where it is filed**, not who sent it. Only a
+        // message addressed to this ship is a conversation with the craft that sent it; a
+        // broadcast was said to nobody, and traffic between two other craft merely reached
+        // this antenna. Filing either as a conversation would put words in somebody's mouth.
+        //
+        // Until a welcome says which craft this is, everything is a conversation: better to
+        // show a message in the wrong tab than to decide it was somebody else's on no evidence.
+        let for_us = match (spoken.to, self.me) {
+            (Some(to), Some(me)) => to == me.0,
+            (Some(_), None) => true,
+            (None, _) => false,
+        };
+        if !for_us {
+            return self.overhear(from, name, event_id, spoken, key, sent_s, arrive_s, strength);
         }
         let conversation = self.conversations.entry(from.0).or_default();
         if let Some(name) = name {
@@ -312,6 +392,65 @@ impl Chat {
         })
     }
 
+    /// File a transmission that is in no conversation: a broadcast, or somebody else's mail.
+    ///
+    /// Never answered automatically, whatever auto-ack is set to. Acknowledging a broadcast
+    /// would answer everybody at once, and acknowledging a message meant for a third craft
+    /// would tell its sender that somebody they were not talking to is listening.
+    #[allow(clippy::too_many_arguments)]
+    fn overhear(
+        &mut self,
+        from: ShipId,
+        name: Option<&str>,
+        event_id: i64,
+        spoken: Spoken,
+        key: bool,
+        sent_s: f64,
+        arrive_s: f64,
+        strength: f32,
+    ) -> Option<lc_proto::Aim> {
+        if self.loose.iter().any(|l| l.line.event_ids.contains(&event_id)) {
+            return None;
+        }
+        if !key
+            && let Some(loose) =
+                self.loose.iter_mut().find(|l| l.from == Some(from) && l.line.idem == spoken.idem)
+            && spoken.idem != 0
+        {
+            loose.line.event_ids.push(event_id);
+            return None;
+        }
+        if bare_acknowledgement(key, spoken.body.as_deref()) {
+            return None;
+        }
+        // The name it is known by, or its number. There may be no conversation to borrow one
+        // from — this is a craft that has never spoken to this ship.
+        let from_name = name
+            .map(str::to_string)
+            .or_else(|| {
+                self.conversations.get(&from.0).map(|c| c.name.clone()).filter(|n| !n.is_empty())
+            })
+            .unwrap_or_else(|| format!("ship {}", from.0));
+        self.loose.push(Loose {
+            from: Some(from),
+            from_name,
+            to: spoken.to.map(ShipId),
+            line: Line {
+                event_ids: vec![event_id],
+                idem: spoken.idem,
+                mine: false,
+                key,
+                sealed: spoken.sealed,
+                body: spoken.body,
+                acks: spoken.acks,
+                sent_s,
+                arrive_s: Some(arrive_s),
+                strength: Some(strength),
+            },
+        });
+        None
+    }
+
     /// A message this ship has just had accepted. Recorded against the identifier the server
     /// minted, which is the only thing an acknowledgement will ever name it by.
     #[allow(clippy::too_many_arguments)]
@@ -337,7 +476,29 @@ impl Chat {
                 }
                 &mut conversation.lines
             }
-            None => &mut self.broadcasts,
+            None => {
+                if self.loose.iter().any(|l| l.line.event_ids.contains(&event_id)) {
+                    return;
+                }
+                self.loose.push(Loose {
+                    from: None,
+                    from_name: String::new(),
+                    to: None,
+                    line: Line {
+                        event_ids: vec![event_id],
+                        idem,
+                        mine: true,
+                        key,
+                        sealed,
+                        body,
+                        acks: Vec::new(),
+                        sent_s,
+                        arrive_s: None,
+                        strength: None,
+                    },
+                });
+                return;
+            }
         };
         if lines.iter().any(|line| line.event_ids.contains(&event_id)) {
             return;
@@ -390,7 +551,12 @@ fn restore_into(lines: &mut Vec<Line>, said: Said) {
         }
         return;
     }
-    lines.push(Line {
+    lines.push(line_of(said));
+}
+
+/// One transcript entry as a line.
+fn line_of(said: Said) -> Line {
+    Line {
         event_ids: vec![said.event_id],
         idem: said.idem,
         mine: said.mine,
@@ -403,7 +569,7 @@ fn restore_into(lines: &mut Vec<Line>, said: Said) {
         // Not kept by the store: how loudly a signal landed is a fact about one receiver, and
         // what is written down is what was said.
         strength: None,
-    });
+    }
 }
 
 /// Whether a message is an acknowledgement and nothing else.
@@ -442,6 +608,10 @@ mod tests {
 
     fn spoken(to: i64, body: Option<&str>, sealed: bool, acks: Vec<i64>) -> Spoken {
         Spoken { to: Some(to), beamed: false, idem: 0, sealed, body: body.map(Into::into), acks }
+    }
+
+    fn broadcast(body: &str) -> Spoken {
+        Spoken { to: None, beamed: false, idem: 0, sealed: false, body: Some(body.into()), acks: vec![] }
     }
 
     fn keyed(to: i64, body: &str, idem: u64, acks: Vec<i64>) -> Spoken {
@@ -563,25 +733,89 @@ mod tests {
         assert_eq!(chat.get(ShipId(7)).unwrap().name, "Ada");
     }
 
-    /// **The public log is a view, and encryption is what keeps something out of it** — from
-    /// either end. This ship's own sealed message is as absent as anybody else's, because a
-    /// private message in a public log is one somebody can read over your shoulder.
+    /// **Public is broadcasts and nothing else.** A message addressed to one craft is not
+    /// public however openly it was sent: anyone in range can read it, but it was still
+    /// somebody's mail.
     #[test]
-    fn the_public_log_holds_what_was_said_in_the_open_and_nothing_else() {
+    fn the_public_log_holds_broadcasts_and_nothing_else() {
         let mut chat = Chat::default();
-        chat.received(ShipId(7), Some("Ada"), 200, spoken(1, Some("in the open"), false, vec![]), false, 1.0, 2.0, 1.0, [1.0, 0.0, 0.0]);
-        chat.received(ShipId(7), Some("Ada"), 201, spoken(99, None, true, vec![]), false, 3.0, 4.0, 1.0, [1.0, 0.0, 0.0]);
-        chat.sent(Some(ShipId(8)), Some("Bry"), 300, 5, Some("mine, open".into()), false, false, 5.0);
-        chat.sent(Some(ShipId(8)), Some("Bry"), 301, 6, Some("mine, private".into()), true, false, 6.0);
+        chat.i_am(ShipId(1));
+        // Heard, addressed to nobody: a broadcast.
+        chat.received(ShipId(7), Some("Ada"), 200, broadcast("to whoever"), false, 1.0, 2.0, 1.0, [1.0, 0.0, 0.0]);
+        // Heard, addressed to this ship: a conversation.
+        chat.received(ShipId(7), Some("Ada"), 201, spoken(1, Some("for you"), false, vec![]), false, 3.0, 4.0, 1.0, [1.0, 0.0, 0.0]);
+        // Heard, addressed to somebody else: overheard.
+        chat.received(ShipId(7), Some("Ada"), 202, spoken(9, Some("for Bry"), false, vec![]), false, 5.0, 6.0, 1.0, [1.0, 0.0, 0.0]);
+        // Sent by this ship, to one craft and to nobody.
+        chat.sent(Some(ShipId(8)), Some("Bry"), 300, 5, Some("mine, to Bry".into()), false, false, 7.0);
+        chat.sent(None, None, 301, 6, Some("mine, to nobody".into()), false, false, 8.0);
 
-        let public = chat.public();
-        let bodies: Vec<&str> =
-            public.iter().filter_map(|(_, _, l)| l.body.as_deref()).collect();
-        assert_eq!(bodies, vec!["in the open", "mine, open"]);
-        assert!(public.iter().all(|(_, _, l)| !l.sealed));
-        // And each line still says who it is with, which a mixed log needs to be answerable.
-        assert_eq!(public[0].0, Some(ShipId(7)));
-        assert_eq!(public[1].0, Some(ShipId(8)));
+        let bodies = |v: Vec<&Loose>| -> Vec<String> {
+            v.iter().filter_map(|l| l.line.body.clone()).collect()
+        };
+        assert_eq!(bodies(chat.public()), vec!["to whoever", "mine, to nobody"]);
+        assert_eq!(bodies(chat.overheard()), vec!["for Bry"]);
+        assert_eq!(
+            chat.get(ShipId(7)).unwrap().lines.len(),
+            1,
+            "the conversation held something that was not between us",
+        );
+        assert_eq!(chat.get(ShipId(7)).unwrap().lines[0].body.as_deref(), Some("for you"));
+    }
+
+    /// An encrypted message meant for somebody else is *heard* and cannot be read. Both halves
+    /// matter: it is in the log, and there is nothing in it.
+    #[test]
+    fn an_encrypted_message_for_somebody_else_is_overheard_as_noise() {
+        let mut chat = Chat::default();
+        chat.i_am(ShipId(1));
+        chat.received(ShipId(7), Some("Ada"), 400, spoken(9, None, true, vec![]), false, 1.0, 3.0, 1.0, [1.0, 0.0, 0.0]);
+
+        let overheard = chat.overheard();
+        assert_eq!(overheard.len(), 1);
+        assert_eq!(overheard[0].to, Some(ShipId(9)), "it kept who it was for");
+        assert_eq!(overheard[0].line.body, None);
+        assert!(chat.get(ShipId(7)).is_none(), "it became a conversation with the sender");
+    }
+
+    /// **Fixed length whatever was said**, or a player could read a conversation's shape
+    /// without reading a word of it. Stable, too: it is drawn every frame.
+    #[test]
+    fn unreadable_messages_are_the_same_length_and_the_same_noise_every_time() {
+        let mut chat = Chat::default();
+        chat.i_am(ShipId(1));
+        chat.received(ShipId(7), None, 400, spoken(9, None, true, vec![]), false, 1.0, 3.0, 1.0, [1.0, 0.0, 0.0]);
+        chat.received(ShipId(7), None, 401, spoken(9, None, true, vec![]), false, 4.0, 6.0, 1.0, [1.0, 0.0, 0.0]);
+
+        let overheard = chat.overheard();
+        let first = overheard[0].line.ciphertext();
+        let second = overheard[1].line.ciphertext();
+        assert_eq!(first.len(), second.len(), "the noise leaked a length");
+        assert_eq!(first, overheard[0].line.ciphertext(), "it changed between draws");
+        assert_ne!(first, second, "two messages produced the same noise");
+        assert!(first.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()));
+    }
+
+    /// Nothing loose is ever answered automatically. Acknowledging a broadcast would answer
+    /// everybody at once, and acknowledging somebody else's mail would tell its sender that a
+    /// craft they were not talking to is listening.
+    #[test]
+    fn nothing_overheard_is_ever_answered_automatically() {
+        let mut chat = Chat::default();
+        chat.i_am(ShipId(1));
+        chat.set_auto_ack(ShipId(7), true);
+        assert_eq!(
+            chat.received(ShipId(7), None, 200, broadcast("hello all"), false, 1.0, 2.0, 1.0, [1.0, 0.0, 0.0]),
+            None,
+            "a broadcast was answered",
+        );
+        assert_eq!(
+            chat.received(ShipId(7), None, 201, spoken(9, Some("hello Bry"), false, vec![]), false, 3.0, 4.0, 1.0, [1.0, 0.0, 0.0]),
+            None,
+            "somebody else's mail was answered",
+        );
+        // And one actually addressed here still is.
+        assert!(chat.received(ShipId(7), None, 202, spoken(1, Some("hello you"), false, vec![]), false, 5.0, 6.0, 1.0, [1.0, 0.0, 0.0]).is_some());
     }
 
     /// Oldest first, by when *this ship* learnt of each — which for a conversation across light
@@ -589,10 +823,12 @@ mod tests {
     #[test]
     fn the_public_log_is_ordered_by_when_this_ship_learnt_of_each() {
         let mut chat = Chat::default();
+        chat.i_am(ShipId(1));
         // Sent early, heard late: a long crossing.
-        chat.received(ShipId(7), Some("Ada"), 200, spoken(1, Some("slow"), false, vec![]), false, 1.0, 90.0, 1.0, [1.0, 0.0, 0.0]);
-        chat.sent(Some(ShipId(8)), Some("Bry"), 300, 5, Some("quick".into()), false, false, 50.0);
-        let order: Vec<&str> = chat.public().iter().filter_map(|(_, _, l)| l.body.as_deref()).collect();
+        chat.received(ShipId(7), Some("Ada"), 200, broadcast("slow"), false, 1.0, 90.0, 1.0, [1.0, 0.0, 0.0]);
+        chat.sent(None, None, 300, 5, Some("quick".into()), false, false, 50.0);
+        let order: Vec<String> =
+            chat.public().iter().filter_map(|l| l.line.body.clone()).collect();
         assert_eq!(order, vec!["quick", "slow"], "ordered by sending, not by learning");
     }
 
@@ -773,8 +1009,9 @@ mod tests {
         assert!(chat.conversations().is_empty(), "a broadcast opened a conversation");
         let public = chat.public();
         assert_eq!(public.len(), 1);
-        assert_eq!(public[0].0, None, "a broadcast named a counterpart");
-        assert_eq!(public[0].2.body.as_deref(), Some("to whoever is listening"));
+        assert_eq!(public[0].from, None, "a broadcast this ship sent named a transmitter");
+        assert_eq!(public[0].to, None, "a broadcast named an addressee");
+        assert_eq!(public[0].line.body.as_deref(), Some("to whoever is listening"));
     }
 
     /// The reading a tooltip shows, and the one case where there is none.
@@ -808,6 +1045,7 @@ mod tests {
                 event_id: 9,
                 idem: 4,
                 with: Some(ShipId(7)),
+                to: Some(ShipId(1)),
                 with_name: "Ada".into(),
                 mine: false,
                 key: false,
@@ -835,6 +1073,7 @@ mod tests {
             event_id,
             idem: 77,
             with: Some(ShipId(7)),
+            to: Some(ShipId(7)),
             with_name: "Ada".into(),
             mine: true,
             key: false,

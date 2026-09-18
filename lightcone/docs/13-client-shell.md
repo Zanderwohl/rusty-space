@@ -138,11 +138,31 @@ The list is ordered **most recently heard from first**, which is how a player fi
 conversation they are in the middle of. The cost is worth naming: a list that reorders itself can
 be misclicked, and it reorders exactly when a message lands.
 
-At the top of it is **Public** — every open message, sent and received, from every craft at once.
-It is a *view* and deliberately not a stored conversation: the answer to "what has been going on"
-rather than "what did we two say". Encrypted messages are absent from it whichever end they came
-from, this ship's own included, because a private message in a public log is one somebody can
-read over your shoulder.
+Two channels are pinned above the craft, and **which of the three a message lands in is decided
+by who it was addressed to, never by who sent it**:
+
+| addressed to | channel |
+|---|---|
+| nobody | **Public** — broadcasts, sent and heard |
+| this ship | that craft's conversation |
+| another craft | **Overheard** |
+
+A message addressed to one craft is not public however openly it was sent. Anyone in range can
+read it, but it was still somebody's mail, and being in earshot of it is what Overheard is.
+Filing it as a conversation with its sender would be worse still: a log of "what Ada said to me"
+containing what Ada said to Bry.
+
+**Encrypted traffic is in Overheard too**, shown as fixed-length noise. The fact of a signal is
+real whether or not it can be read, and a run of traffic between two craft says something even
+when none of it says anything. Fixed length is the point rather than a detail: noise that tracked
+the plaintext would leak the one thing about an encrypted message that is still readable — a long
+one is a long one — and a player could read a conversation's shape without reading a word of it.
+It is derived from when the message was heard, so it is stable across frames and reconnections,
+and there is nothing in it to decode.
+
+Nothing loose is ever answered automatically. Acknowledging a broadcast would answer everybody at
+once, and acknowledging somebody else's mail would tell its sender that a craft they were not
+talking to is listening.
 
 Public can transmit, and what it offers is narrower than a conversation's. There is no craft to
 aim at, so "beam" is not shown at all rather than shown and disabled — an option that contradicts

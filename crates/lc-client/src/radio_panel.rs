@@ -104,10 +104,20 @@ pub(crate) fn chat(
                 ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
                 if ui
                     .selectable_label(showing == Channel::Public, "Public")
-                    .on_hover_text("everything said in the open, to and from everyone")
+                    .on_hover_text("broadcasts: everything said to nobody in particular")
                     .clicked()
                 {
                     ask(out, Action::ChatWith(Channel::Public));
+                }
+                if ui
+                    .selectable_label(showing == Channel::Overheard, "Overheard")
+                    .on_hover_text(
+                        "traffic between other craft that this ship was in range of. Open ones \
+                         can be read; encrypted ones cannot",
+                    )
+                    .clicked()
+                {
+                    ask(out, Action::ChatWith(Channel::Overheard));
                 }
                 ui.separator();
                 for (id, name) in &parties {
@@ -136,6 +146,7 @@ pub(crate) fn chat(
         );
         ui.separator();
         ui.vertical(|ui| match showing {
+            Channel::Overheard => overheard_log(ui, uplink, out),
             Channel::Public => {
                 let star = state.0.selected;
                 // No craft to aim at, so that choice is not offered: a beam at one ship is not
@@ -170,7 +181,7 @@ pub(crate) fn chat(
     });
 }
 
-/// Everything said in the open, from every conversation at once.
+/// Broadcasts, sent and heard: everything said to nobody in particular.
 fn public_log(
     ui: &mut egui::Ui,
     uplink: &crate::uplink::Uplink,
@@ -180,42 +191,89 @@ fn public_log(
     let lines = uplink.chat.public();
     log_area(ui, "chat_public", BODY_HEIGHT - COMPOSER_HEIGHT, |ui| {
         if lines.is_empty() {
-            ui.weak("Nothing has been said in the open.");
+            ui.weak("Nothing has been broadcast.");
             return;
         }
-        for (with, name, line) in &lines {
-            let said_by = match line.mine {
-                true => own,
-                false => name,
-            };
+        for loose in &lines {
             ui.horizontal_wrapped(|ui| {
-                speaker(ui, said_by, line.mine);
-                // Who it went to, which a public log needs and a conversation does not: the
-                // same open message read here has no other way of saying who it was for. A
-                // broadcast went to nobody in particular, and saying so on every line would be
-                // repeating what the channel already is.
-                let addressed = with.map(|_| *name);
-                body_of(ui, line, line.mine, addressed);
-                match (line.mine, with) {
-                    (true, _) => {
-                        if let Some(to) = addressed.filter(|_| !line.key) {
-                            ui.weak(format!("to {to}"));
-                        }
-                    }
-                    (false, Some(with)) => {
-                        if ui
-                            .small_button("reply")
-                            .on_hover_text("open this conversation")
-                            .clicked()
-                        {
-                            ask(out, Action::ChatWith(Channel::With(*with)));
-                        }
-                    }
-                    (false, None) => {}
+                let said_by = match loose.line.mine {
+                    true => own,
+                    false => loose.from_name.as_str(),
+                };
+                speaker(ui, said_by, loose.line.mine);
+                body_of(ui, &loose.line, loose.line.mine, None);
+                if let Some(from) = loose.from.filter(|_| !loose.line.mine)
+                    && ui.small_button("reply").on_hover_text("open this conversation").clicked()
+                {
+                    ask(out, Action::ChatWith(Channel::With(from)));
                 }
             });
         }
     });
+}
+
+/// Other people's traffic, which this ship happened to be in range of.
+///
+/// **The encrypted ones are here too**, and that is deliberate: the fact of a signal is real
+/// whether or not it can be read, and a run of traffic between two craft says something even
+/// when none of it says anything.
+fn overheard_log(
+    ui: &mut egui::Ui,
+    uplink: &crate::uplink::Uplink,
+    out: &mut MessageWriter<Requested>,
+) {
+    let lines = uplink.chat.overheard();
+    log_area(ui, "chat_overheard", BODY_HEIGHT, |ui| {
+        if lines.is_empty() {
+            ui.weak("Nothing has been overheard.");
+            return;
+        }
+        for loose in &lines {
+            ui.horizontal_wrapped(|ui| {
+                speaker(ui, loose.from_name.as_str(), false);
+                let to = loose.to.map(|to| name_for(uplink, to));
+                if let Some(to) = &to {
+                    ui.weak(format!("to {to}:"));
+                }
+                match loose.line.body.as_deref() {
+                    Some(body) => {
+                        ui.colored_label(RADIO, body);
+                    }
+                    // Fixed-length noise, and the same noise every frame. There is nothing in
+                    // it to decode because there is nothing in it.
+                    None => {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(loose.line.ciphertext())
+                                    .monospace()
+                                    .color(egui::Color32::from_rgb(110, 120, 130)),
+                            )
+                            .truncate(),
+                        )
+                        .on_hover_text("encrypted, and not for this ship");
+                    }
+                }
+                if let Some(from) = loose.from
+                    && ui.small_button("reply").on_hover_text("open this conversation").clicked()
+                {
+                    ask(out, Action::ChatWith(Channel::With(from)));
+                }
+            })
+            .response
+            .on_hover_text(reception(&loose.line));
+        }
+    });
+}
+
+/// What a craft is called, from whatever the interface knows of it.
+fn name_for(uplink: &crate::uplink::Uplink, who: lc_proto::ShipId) -> String {
+    uplink
+        .contacts
+        .iter()
+        .find(|c| c.ship_id == who)
+        .map(|c| c.name.clone())
+        .or_else(|| uplink.chat.get(who).map(|c| c.name.clone()).filter(|n| !n.is_empty()))
+        .unwrap_or_else(|| format!("ship {}", who.0))
 }
 
 /// One craft's conversation, both halves.

@@ -411,6 +411,13 @@ A message need not be addressed to anyone. A broadcast is something said to no o
 particular: everyone in range hears it, anyone may answer, and it is in nobody's conversation
 because there is no conversation it is part of.
 
+**Being in earshot is not being spoken to.** An open message addressed to one craft can be read
+by anyone in range — that is what open means, and it is the cost of shouting — but it is still
+that craft's mail, and a receiver files it as something overheard rather than as a conversation
+with its sender. An encrypted one is overheard too: the fact of a signal is real whether or not
+it can be read, and a run of traffic between two craft says something even when none of it can be
+made out.
+
 A broadcast cannot be encrypted — there is nobody to encrypt it *to* — and the combination is
 refused rather than quietly sent in the open, which is the failure that would matter. What a
 broadcast *can* carry is a public key, offered to whoever hears it, and that is the only way

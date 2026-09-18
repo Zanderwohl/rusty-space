@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 24;
+pub const PROTOCOL_VERSION: u32 = 25;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -531,6 +531,13 @@ pub struct Said {
     /// The other craft in this conversation: who it went to, or who it came from. `None` for a
     /// broadcast this ship sent, which is in nobody's conversation and only in the public log.
     pub with: Option<ShipId>,
+    /// Who it was **addressed** to, which is not always who it reached. `None` is a broadcast.
+    ///
+    /// Distinct from [`Said::with`] and carried alongside it, because a transcript holds
+    /// everything that landed on this ship — traffic between two *other* craft included. For
+    /// that, `with` is the sender and this is somebody else entirely, and telling the two apart
+    /// is the difference between a conversation and something overheard. Appended last.
+    pub to: Option<ShipId>,
     /// What to call them. Carried because a backlog names craft that are nowhere in sight, and
     /// there is no contact to read a name off.
     pub with_name: String,
@@ -1352,6 +1359,7 @@ mod tests {
                     event_id: 9,
                     idem: 99,
                     with: Some(ShipId(7)),
+                    to: Some(ShipId(42)),
                     with_name: "Ada".into(),
                     mine: false,
                     key: false,

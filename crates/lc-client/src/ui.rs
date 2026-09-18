@@ -153,9 +153,12 @@ impl Look {
 /// screen somebody can read over your shoulder.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Channel {
-    /// Everything said in the open, from and to everyone.
+    /// Everything said to nobody in particular: broadcasts, sent and heard.
     #[default]
     Public,
+    /// Traffic between other craft that this ship was in range of. Open ones can be read;
+    /// encrypted ones are shown as the noise they are.
+    Overheard,
     /// One craft's conversation, both halves.
     With(lc_proto::ShipId),
 }

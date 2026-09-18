@@ -497,6 +497,9 @@ fn fold(
             // away from it at a hundred and forty coordinate hours a second without anybody
             // touching a key.
             ui.0.time_rate = rate;
+            // Which craft this is, so a message addressed to it can be told from one that
+            // merely reached it. See `crate::chat::Chat::me`.
+            uplink.chat.i_am(ship_id);
             uplink.state = State::Joined(Joined {
                 client_id,
                 ship_id,
@@ -1292,9 +1295,13 @@ mod tests {
             };
         fold(&mut uplink, &mut game, &mut ui, heard(98, 2, spoken, lc_proto::kind::MESSAGE));
 
-        let line = &uplink.chat.get(ShipId(2)).expect("a conversation").lines[0];
-        assert!(line.sealed);
-        assert_eq!(line.body, None);
+        // Somebody else's mail, so it is overheard rather than a conversation with the sender.
+        let overheard = uplink.chat.overheard();
+        let heard = overheard.first().expect("nothing was overheard");
+        assert!(heard.line.sealed);
+        assert_eq!(heard.line.body, None);
+        assert_eq!(heard.to, Some(ShipId(99)), "it forgot who it was for");
+        assert!(uplink.chat.get(ShipId(2)).is_none(), "it became a conversation with the sender");
         assert!(ui.0.notifications.last().is_some_and(|n| n.from == Some(ShipId(2))));
     }
 
