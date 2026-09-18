@@ -7,7 +7,7 @@
 # CI runs: a book edited in place, or added to the directory without being catalogued, is a
 # broken shelf whether or not anyone is publishing today.
 #
-# The books are in the repository — see lightcone/docs/19-library.md — so there is nothing to
+# The books are in the repository — see lightcone/docs/21-library.md — so there is nothing to
 # fetch and nothing to build. This copies them to `library/` on the CDN, beside `game/<build-id>`
 # and on a schedule of its own: a book is not part of a build and must not be re-uploaded with
 # every one.

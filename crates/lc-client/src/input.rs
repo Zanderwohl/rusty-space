@@ -490,7 +490,11 @@ mod tests {
     #[test]
     fn a_book_takes_the_arrow_keys_from_the_view() {
         let (mut app, _) = harness();
-        app.world_mut().resource_mut::<crate::app::Ui>().open(Panel::Reader);
+        // An open book, not merely the device: the shelf has no pages, so there the arrows
+        // still belong to the view.
+        let mut state = app.world_mut().resource_mut::<crate::app::Ui>();
+        state.open(Panel::Reader);
+        state.reading.book = Some("something".to_owned());
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ArrowLeft);
         app.update();
         app.world_mut().resource_mut::<Messages<Requested>>().clear();
