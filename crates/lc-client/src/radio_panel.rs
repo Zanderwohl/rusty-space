@@ -490,11 +490,13 @@ fn compose(
     ui.horizontal(|ui| {
         ui.add_enabled_ui(holds_key, |ui| {
             ui.checkbox(seal, "encrypt").on_hover_text(match (with, holds_key) {
-                (_, true) => "only they can read it",
-                (Some(_), false) => "this ship does not hold their key yet",
-                // There is nobody for a broadcast to be encrypted to, and the server refuses
+                (_, true) => "Encrypt message to prevent others from understanding message.",
+                (Some(_), false) => "Can't encrypt; don't have key",
+                // Kept apart from the missing-key wording, because on a broadcast it would be
+                // false: there is no key to be had, not a key this ship is short of. Nobody is
+                // the addressee, so there is nobody to encrypt it for — and the server refuses
                 // the combination rather than quietly sending it in the open.
-                (None, false) => "a broadcast is addressed to nobody, so there is nobody to encrypt it for",
+                (None, false) => "Can't encrypt a broadcast; it is addressed to nobody",
             });
         });
         if !holds_key {
@@ -518,10 +520,7 @@ fn compose(
             let mut on = uplink.chat.auto_acks(with);
             if ui
                 .checkbox(&mut on, "auto-ack")
-                .on_hover_text(
-                    "answer anything they say with an empty acknowledgement, in the mode it \
-                     arrived in. A beam is answered down the bearing it came in on",
-                )
+                .on_hover_text("Automatically acknowledge messages from this ship upon receipt")
                 .changed()
             {
                 ask(out, Action::AutoAck { with, on });
