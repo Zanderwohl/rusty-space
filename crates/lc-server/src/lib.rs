@@ -13,6 +13,7 @@ pub mod chase;
 pub mod director;
 pub mod drive;
 pub mod journal;
+pub mod library;
 pub mod persist;
 pub mod rate;
 pub mod server;

@@ -4597,6 +4597,7 @@ dependencies = [
  "futures-util",
  "glam",
  "jsonwebtoken",
+ "lc-books",
  "lc-proto",
  "lc-spacetime",
  "lc-store",

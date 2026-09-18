@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 19;
+pub const PROTOCOL_VERSION: u32 = 20;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -509,6 +509,46 @@ impl<T> Cleared<T> {
     }
 }
 
+/// A book on the shelf.
+///
+/// A mirror of the catalogue rather than the catalogue's own type, for the reason the rest of
+/// this crate is a mirror: `lc-books` is a zip and an XML parser, and a protocol that borrowed
+/// its types would put both in every client's wire layer and make every change to how a book is
+/// parsed a change to the protocol. The two agree by being converted at the edge.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Book {
+    pub id: String,
+    pub title: String,
+    pub authors: Vec<Writer>,
+    pub year: Option<i32>,
+    pub subjects: Vec<String>,
+    /// The file under the shelf's base, which the client composes a URL from and never receives
+    /// one for. A server that could send a URL could send any URL.
+    pub file: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Writer {
+    pub name: String,
+    pub sort: Option<String>,
+}
+
+/// Where a player is in a book.
+///
+/// **A character offset, not a page.** A page is a fact about a window at a size; this survives
+/// a font change, a resize and a different client. See `lightcone/docs/19-library.md`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Bookmark {
+    pub book: String,
+    pub spine: u32,
+    pub char_offset: u32,
+    /// How far through, in the book's own thousand-character locations. **Reported by the
+    /// client and not checked**, because the server does not have the book and there is nothing
+    /// to win by lying: the shelf reads "34%" and no rule anywhere depends on it.
+    pub location: u32,
+    pub locations: u32,
+}
+
 /// Everything the server says.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Outbound {
@@ -624,6 +664,28 @@ pub enum Outbound {
     /// while its pilot is away — so a client coming back has to be told there is one, or it
     /// has no way to break it off. Appended last.
     Pursuing { ship_id: ShipId, pursuit: Pursuit },
+    /// What there is to read, and where the shelf is.
+    ///
+    /// Appended last, like every variant added since: the discriminants above are what the
+    /// goldens are pinned at, and a version bump is not a licence to renumber them.
+    ///
+    /// **Not cleared, and deliberately.** Everything else the server says about the world goes
+    /// through [`Cleared`], because delivering an event before its light arrives would delete
+    /// the game. A book is not an event, nobody observes one across a light-hour, and the shelf
+    /// is the same for every player at every distance. Said here so the next reader takes it for
+    /// a decision rather than an omission.
+    Library {
+        /// What `file` hangs off: a CDN prefix, stated by the shard so the shelf can move
+        /// without a client release.
+        base: String,
+        books: Vec<Book>,
+    },
+    /// Where this account left off in each book it has opened.
+    ///
+    /// **Most recently read first.** That ordering is the only record of recency on the wire,
+    /// which is what lets the shelf offer "recently read" without either end having to agree
+    /// about whose clock a timestamp would be in.
+    Reading(Vec<Bookmark>),
 }
 
 /// Why an intent was not acted on.
@@ -666,6 +728,9 @@ pub enum Inbound {
     /// could stage a scene could put a craft wherever it liked, which is the one thing no
     /// client may do. See `lc_server::director`.
     Stage { scenario: String },
+    /// Where the player has got to. Debounced by the client: a page turn every few seconds must
+    /// not be a message every few seconds.
+    SetReading(Bookmark),
 }
 
 /// Encode anything the protocol carries.
@@ -689,7 +754,7 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 pub mod golden {
     /// `Outbound::Welcome { .., ship: Motion { at [4.2, 0, 0], holding a 12 Mm orbit of Earth } }`
     pub const WELCOME: &[u8] = &[
-        0, 7, 19, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        0, 7, 20, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
         204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -715,7 +780,7 @@ pub mod golden {
     /// Pinned because it is now the message that decides whether anyone gets in at all. A
     /// field moving here is a server reading someone else's ticket as this one's.
     pub const HELLO: &[u8] = &[
-        0, 19, 5, 97, 46, 98, 46, 99,
+        0, 20, 5, 97, 46, 98, 46, 99,
     ];
 
     pub const SET_COURSE: &[u8] = &[
@@ -762,7 +827,7 @@ pub mod golden {
     /// Pinned beside the rendezvous for the same reason, and one more: its acceleration is the
     /// only number on this wire that is a *measurement* of somebody else's burn.
     pub const ESCORT: &[u8] = &[
-        0, 7, 19, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        0, 7, 20, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
         204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -780,7 +845,7 @@ pub mod golden {
     ];
 
     pub const RENDEZVOUS: &[u8] = &[
-        0, 7, 19, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        0, 7, 20, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
         204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -799,7 +864,7 @@ pub mod golden {
     ///
     /// The rendezvous numbers in a falling frame, pinned for the rendezvous's reason.
     pub const CONSORT: &[u8] = &[
-        0, 7, 19, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+        0, 7, 20, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
         204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -822,6 +887,26 @@ pub mod golden {
     pub const INTERCEPT: &[u8] = &[
         1, 84, 5, 14, 1, 128, 137, 122,
     ];
+
+    /// `Outbound::Library` with one book on the shelf.
+    pub const LIBRARY: &[u8] = &[
+        11, 28, 104, 116, 116, 112, 115, 58, 47, 47, 99, 100, 110, 46, 101, 120, 97, 109, 112,
+        108, 101, 47, 108, 105, 98, 114, 97, 114, 121, 47, 1, 14, 116, 104, 101, 45, 103, 105,
+        108, 100, 101, 100, 45, 97, 103, 101, 31, 84, 104, 101, 32, 71, 105, 108, 100, 101, 100,
+        32, 65, 103, 101, 58, 32, 65, 32, 84, 97, 108, 101, 32, 111, 102, 32, 84, 111, 100, 97,
+        121, 1, 10, 77, 97, 114, 107, 32, 84, 119, 97, 105, 110, 1, 11, 84, 119, 97, 105, 110,
+        44, 32, 77, 97, 114, 107, 1, 162, 29, 1, 6, 83, 97, 116, 105, 114, 101, 35, 84, 104, 101,
+        32, 71, 105, 108, 100, 101, 100, 32, 65, 103, 101, 32, 65, 32, 84, 97, 108, 101, 32, 111,
+        102, 32, 84, 111, 100, 97, 121, 46, 101, 112, 117, 98,
+    ];
+
+    /// `Outbound::Reading` with one bookmark.
+    pub const READING: &[u8] =
+        &[12, 1, 14, 116, 104, 101, 45, 103, 105, 108, 100, 101, 100, 45, 97, 103, 101, 2, 236, 196, 2, 41, 238, 6];
+
+    /// `Inbound::SetReading` with the same bookmark.
+    pub const SET_READING: &[u8] =
+        &[4, 14, 116, 104, 101, 45, 103, 105, 108, 100, 101, 100, 45, 97, 103, 101, 2, 236, 196, 2, 41, 238, 6];
 
 }
 
@@ -1125,6 +1210,43 @@ mod tests {
             encode(&intercept()),
             golden::INTERCEPT,
             "Order::Intercept changed shape at protocol version {PROTOCOL_VERSION}",
+        );
+        // The shelf. Appended variants, so their discriminants are the only new numbers here.
+        let shelf = Outbound::Library {
+            base: "https://cdn.example/library/".to_owned(),
+            books: vec![Book {
+                id: "the-gilded-age".to_owned(),
+                title: "The Gilded Age: A Tale of Today".to_owned(),
+                authors: vec![Writer {
+                    name: "Mark Twain".to_owned(),
+                    sort: Some("Twain, Mark".to_owned()),
+                }],
+                year: Some(1873),
+                subjects: vec!["Satire".to_owned()],
+                file: "The Gilded Age A Tale of Today.epub".to_owned(),
+            }],
+        };
+        assert_eq!(
+            encode(&shelf),
+            golden::LIBRARY,
+            "Outbound::Library changed shape at protocol version {PROTOCOL_VERSION}",
+        );
+        let mark = Bookmark {
+            book: "the-gilded-age".to_owned(),
+            spine: 2,
+            char_offset: 41_580,
+            location: 41,
+            locations: 878,
+        };
+        assert_eq!(
+            encode(&Outbound::Reading(vec![mark.clone()])),
+            golden::READING,
+            "Outbound::Reading changed shape at protocol version {PROTOCOL_VERSION}",
+        );
+        assert_eq!(
+            encode(&Inbound::SetReading(mark)),
+            golden::SET_READING,
+            "Inbound::SetReading changed shape at protocol version {PROTOCOL_VERSION}",
         );
     }
 

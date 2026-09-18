@@ -12,6 +12,7 @@ pub const STEPS: &[(&str, &str)] =
         ("0002_schema", include_str!("../sql/0002_schema.sql")),
         ("0003_retention", include_str!("../sql/0003_retention.sql")),
         ("0004_ships", include_str!("../sql/0004_ships.sql")),
+        ("0005_reading", include_str!("../sql/0005_reading.sql")),
     ];
 
 /// The advisory lock every migrator takes before touching the schema.
@@ -111,12 +112,19 @@ mod tests {
         let Some(client) = store().await else { return };
         // `store` has already applied it, so a second pass must be empty.
         assert!(apply(&client).await.unwrap().is_empty(), "a step ran twice");
-        let recorded: i64 = client
-            .query_one("SELECT count(*) FROM lc_schema_steps", &[])
+        // Every step of *this* build is recorded. Not `count(*) == STEPS.len()`: a developer's
+        // database is one database and their branches are many, so a row from a branch that is
+        // not this one is an ordinary fact about a machine rather than a fault in the schema.
+        let recorded: Vec<String> = client
+            .query("SELECT name FROM lc_schema_steps", &[])
             .await
             .unwrap()
-            .get(0);
-        assert_eq!(recorded as usize, STEPS.len());
+            .iter()
+            .map(|row| row.get(0))
+            .collect();
+        for (name, _) in STEPS {
+            assert!(recorded.iter().any(|seen| seen == name), "{name} was not applied");
+        }
     }
 
     /// The test that keeps the two implementations of causality honest.

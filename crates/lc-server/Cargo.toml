@@ -7,6 +7,7 @@ license = "MIT"
 authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 
 [dependencies]
+lc-books = { path = "../lc-books" }
 lc-proto = { path = "../lc-proto" }
 lc-spacetime = { path = "../lc-spacetime" }
 lc-world = { path = "../lc-world", default-features = false }

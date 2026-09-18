@@ -154,7 +154,7 @@ fn paper_side(
         return 0;
     }
 
-    let found = shelve(&shelf.catalogue, query, *order);
+    let found = shelve(&shelf.catalogue, query, *order, &shelf.recent());
     if found.is_empty() {
         ui.add(
             egui::Label::new(
@@ -182,6 +182,12 @@ fn paper_side(
             }
             if book(ui, entry, setting, shelf).clicked() {
                 ask(out, Action::OpenBook(entry.id.clone()));
+                // Opened where it was left. Two messages rather than one, because where a book
+                // opens is a different fact from which book it is, and a client with no shard
+                // has the first and not the second.
+                if let Some(mark) = shelf.mark_for(&entry.id) {
+                    ask(out, Action::GoTo(mark.spine as usize, mark.char_offset as usize));
+                }
             }
         }
     });
@@ -213,7 +219,15 @@ fn book(ui: &mut egui::Ui, entry: &Entry, setting: &Setting, shelf: &Shelf) -> e
             }
             line.push_str(&year.to_string());
         }
-        if reading {
+        // How far in, when the shard has been keeping a place. A percentage rather than a
+        // location, because the shelf is where someone decides what to pick up and "34%" is
+        // what that decision wants.
+        if let Some(mark) = shelf.mark_for(&entry.id)
+            && mark.locations > 0
+        {
+            let through = (mark.location as f32 / mark.locations as f32 * 100.0).round();
+            line.push_str(&format!("  ·  {through:.0}%"));
+        } else if reading {
             line.push_str("  ·  open");
         }
         if !line.is_empty() {

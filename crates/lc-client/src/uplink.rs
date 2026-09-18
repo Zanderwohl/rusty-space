@@ -218,6 +218,10 @@ pub struct Uplink {
     /// is its motive, and the server drops the pursuit without saying so when the quarry goes
     /// out of sight — which is why this is cleared by a refusal and by losing the contact.
     pub chasing: Option<lc_proto::Pursuit>,
+    /// The shelf, as the shard last stated it: its base and its books. Taken once.
+    pub shelf: Option<(String, Vec<lc_proto::Book>)>,
+    /// This account's places, most recently read first. Taken once.
+    pub bookmarks: Option<Vec<lc_proto::Bookmark>>,
     /// What the server last said about an order, for the interface to show once and drop. The
     /// client cannot write its own here: an order's outcome is the server's to state.
     pub applied: Option<String>,
@@ -633,6 +637,10 @@ fn fold(
                 uplink.chasing = Some(pursuit);
             }
         }
+        // Held here and picked up by `crate::library`, which owns the shelf. The fold knows
+        // about the world and a book is not part of it.
+        Outbound::Library { base, books } => uplink.shelf = Some((base, books)),
+        Outbound::Reading(marks) => uplink.bookmarks = Some(marks),
     }
 }
 

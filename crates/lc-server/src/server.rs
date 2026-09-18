@@ -45,6 +45,9 @@ struct Applied {
 #[derive(Clone, Debug)]
 pub struct Connected {
     pub ship: ShipId,
+    /// The account this connection signed in as. Kept because a bookmark belongs to the player
+    /// and not to the craft: the same account reading on two machines is one place in one book.
+    pub account: String,
     /// The arrival time of the last sighting this client was actually sent.
     ///
     /// Not "the last thing that happened": what a client can prove it knows. An intent stamped
@@ -108,6 +111,11 @@ pub struct Server<J: Journal> {
     pub(crate) directs: bool,
     /// The scene being run, if one was staged. See [`crate::director`].
     pub(crate) director: Option<crate::director::Director>,
+    /// The shelf, and where everyone is on it. Not part of the world: see [`crate::library`].
+    ///
+    /// Public because the binary fills it from a file and drains its writes into the store; the
+    /// server itself only ever reads it and records what a client says.
+    pub library: crate::library::Library,
     /// Ticks since this server started.
     ///
     /// Counted rather than derived from `now_t / TICK_US`, which stopped meaning anything once
@@ -138,6 +146,7 @@ impl<J: Journal> Server<J> {
             pursuits: HashMap::new(),
             rate: 1.0,
             directs: false,
+            library: crate::library::Library::default(),
             director: None,
             ticks: 0,
         }
@@ -256,6 +265,9 @@ impl<J: Journal> Server<J> {
         self.fleet.insert(craft);
         self.clients.insert(owner, Connected {
             ship: ship_id,
+            // Admitted rather than signed in — a test, or a probe — so there is no account to
+            // keep a place in a book under.
+            account: String::new(),
             // Nothing received yet, so nothing is provable: an intent may be stamped anywhere
             // from the beginning of time up to now.
             last_reception_t: i64::MIN,
@@ -332,7 +344,7 @@ impl<J: Journal> Server<J> {
                     return;
                 }
                 match self.sign_in(from, &ticket) {
-                    Some((ship_id, name)) => {
+                    Some((ship_id, name, account)) => {
                         let pursuing = self.pursuits.get(&CraftId(ship_id.0)).map(|p| lc_proto::Pursuit {
                             quarry: p.quarry,
                             closeness: p.closeness.into(),
@@ -357,9 +369,29 @@ impl<J: Journal> Server<J> {
                         if let Some(pursuit) = pursuing {
                             wire.send(from, Outbound::Pursuing { ship_id, pursuit });
                         }
+                        // A shard with no shelf says nothing about one, and its clients show an
+                        // empty bookcase rather than a broken one.
+                        if !self.library.is_empty() {
+                            wire.send(from, Outbound::Library {
+                                base: self.library.base.clone(),
+                                books: self.library.books.clone(),
+                            });
+                            wire.send(from, Outbound::Reading(self.library.marks_for(&account)));
+                        }
                     }
                     None => wire.send(from, Outbound::Unauthenticated),
                 }
+            }
+            Inbound::SetReading(mark) => {
+                // Silently ignored from a connection with no account, which is every anonymous
+                // one: there is nowhere to keep a place for somebody who will not be back.
+                let account = self.clients.get(&from).map(|c| c.account.clone()).unwrap_or_default();
+                if account.is_empty() {
+                    return;
+                }
+                // Nothing is said back. A bookmark is not an order and there is no outcome to
+                // report; the client already knows where it is, because it is the one reading.
+                self.library.set(&account, mark);
             }
             Inbound::Act(intent) => {
                 let ship_id = intent.ship_id;
@@ -606,7 +638,7 @@ impl<J: Journal> Server<J> {
     /// The client never names its own ship: the identifier comes back in `Welcome` and is
     /// looked up from the ticket's subject. A client that could ask for a `ShipId` could ask
     /// for someone else's.
-    fn sign_in(&mut self, from: ClientId, ticket: &str) -> Option<(ShipId, String)> {
+    fn sign_in(&mut self, from: ClientId, ticket: &str) -> Option<(ShipId, String, String)> {
         let claims = match self.trusted.check(ticket) {
             Ok(claims) => {
                 // Spent only after it verifies, or an invalid ticket could burn a valid one's
@@ -655,6 +687,7 @@ impl<J: Journal> Server<J> {
         self.clients.retain(|_, state| state.ship != ship);
         self.clients.insert(from, Connected {
             ship,
+            account: claims.sub.clone(),
             last_reception_t: i64::MIN,
             cursor_t: i64::MIN,
             had_contacts: false,
@@ -664,7 +697,7 @@ impl<J: Journal> Server<J> {
         // `NotYours` on every order it sends — which no in-process test caught, because the
         // ones about orders call `admit` and the ones about tickets never send an order.
         self.owners.insert(CraftId(ship.0), from);
-        Some((ship, claims.name))
+        Some((ship, claims.name, claims.sub))
     }
 
     /// Put every craft in the system it is actually inside.
@@ -3096,6 +3129,86 @@ mod hello_tests {
                 ship_id: ship,
                 pursuit: lc_proto::Pursuit { quarry, closeness: lc_proto::Closeness::Intimate },
             }),
+        );
+    }
+
+    const SHELF: &str = r#"
+        [[book]]
+        id = "the-gilded-age"
+        title = "The Gilded Age"
+        file = "gilded.epub"
+    "#;
+
+    fn mark(book: &str, at: u32) -> lc_proto::Bookmark {
+        lc_proto::Bookmark {
+            book: book.to_owned(),
+            spine: 1,
+            char_offset: at,
+            location: at / 1024,
+            locations: 400,
+        }
+    }
+
+    #[tokio::test]
+    async fn signing_in_hands_over_the_shelf_and_this_account_s_place_on_it() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        server.library = crate::library::Library::from_toml("https://cdn/library/", SHELF).unwrap();
+        let mut wire = Loopback::new();
+
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let said = wire.take(ClientId(1));
+        let library = said.iter().find_map(|m| match m {
+            Outbound::Library { base, books } => Some((base.clone(), books.len())),
+            _ => None,
+        });
+        assert_eq!(library, Some(("https://cdn/library/".to_owned(), 1)), "{said:?}");
+        assert!(
+            said.iter().any(|m| matches!(m, Outbound::Reading(marks) if marks.is_empty())),
+            "a new account has read nothing, and is told so rather than left guessing: {said:?}"
+        );
+
+        wire.client_says(ClientId(1), Inbound::SetReading(mark("the-gilded-age", 4_096)));
+        server.tick(&mut wire).await.unwrap();
+        wire.take(ClientId(1));
+
+        // The same account, on another socket, opens to the same sentence.
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-1", SHARD, 60, "j2")).await;
+        let said = wire.take(ClientId(2));
+        let marks = said.iter().find_map(|m| match m {
+            Outbound::Reading(marks) => Some(marks.clone()),
+            _ => None,
+        });
+        assert_eq!(marks.as_deref(), Some([mark("the-gilded-age", 4_096)].as_slice()), "{said:?}");
+    }
+
+    #[tokio::test]
+    async fn a_shard_with_no_shelf_says_nothing_about_one() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        let mut wire = Loopback::new();
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let said = wire.take(ClientId(1));
+        assert!(!said.iter().any(|m| matches!(m, Outbound::Library { .. })), "{said:?}");
+    }
+
+    #[tokio::test]
+    async fn one_account_cannot_read_another_s_place() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        server.library = crate::library::Library::from_toml("https://cdn/library/", SHELF).unwrap();
+        let mut wire = Loopback::new();
+
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        wire.take(ClientId(1));
+        wire.client_says(ClientId(1), Inbound::SetReading(mark("the-gilded-age", 9_000)));
+        server.tick(&mut wire).await.unwrap();
+
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-2", SHARD, 60, "j2")).await;
+        let said = wire.take(ClientId(2));
+        assert!(
+            said.iter().any(|m| matches!(m, Outbound::Reading(marks) if marks.is_empty())),
+            "the second account was handed the first one's bookmark: {said:?}"
         );
     }
 

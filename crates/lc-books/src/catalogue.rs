@@ -147,16 +147,21 @@ pub enum Order {
     Title,
     Author,
     Year,
+    /// What was read most recently. Books never opened file after those that were, by title —
+    /// a shelf ordered by recency is still a shelf, and an unread half in arbitrary order is
+    /// not.
+    Recent,
 }
 
 impl Order {
-    pub const ALL: [Order; 3] = [Order::Title, Order::Author, Order::Year];
+    pub const ALL: [Order; 4] = [Order::Title, Order::Author, Order::Year, Order::Recent];
 
     pub fn label(&self) -> &'static str {
         match self {
             Order::Title => "title",
             Order::Author => "author",
             Order::Year => "year",
+            Order::Recent => "recent",
         }
     }
 }
@@ -165,7 +170,14 @@ impl Order {
 ///
 /// Sorting is case-insensitive and falls back to the filing title, so two books by one author
 /// are not in whatever order the file happened to list them.
-pub fn shelve<'a>(catalogue: &'a Catalogue, query: &str, order: Order) -> Vec<&'a Entry> {
+/// `recent` is the ids this reader has opened, most recently first — the order the shard sent
+/// them in, which is the only record of recency either end has. See `lc_proto::Outbound::Reading`.
+pub fn shelve<'a>(
+    catalogue: &'a Catalogue,
+    query: &str,
+    order: Order,
+    recent: &[String],
+) -> Vec<&'a Entry> {
     let mut found: Vec<&Entry> =
         catalogue.books.iter().filter(|b| matches(b, query)).collect();
     found.sort_by(|a, b| {
@@ -183,6 +195,12 @@ pub fn shelve<'a>(catalogue: &'a Catalogue, query: &str, order: Order) -> Vec<&'
                 .unwrap_or(i32::MAX)
                 .cmp(&b.year.unwrap_or(i32::MAX))
                 .then_with(|| title(a).cmp(&title(b))),
+            Order::Recent => {
+                let since = |e: &Entry| {
+                    recent.iter().position(|id| *id == e.id).unwrap_or(usize::MAX)
+                };
+                since(a).cmp(&since(b)).then_with(|| title(a).cmp(&title(b)))
+            }
         }
     });
     found
@@ -229,7 +247,7 @@ mod tests {
     fn a_title_files_under_its_first_real_word() {
         let shelf = shelf();
         let order: Vec<&str> =
-            shelve(&shelf, "", Order::Title).iter().map(|e| e.title.as_str()).collect();
+            shelve(&shelf, "", Order::Title, &[]).iter().map(|e| e.title.as_str()).collect();
         assert_eq!(
             order,
             [
@@ -245,7 +263,7 @@ mod tests {
     fn author_order_is_the_filing_name() {
         let shelf = shelf();
         let order: Vec<&str> =
-            shelve(&shelf, "", Order::Author).iter().map(|e| e.sort_author()).collect();
+            shelve(&shelf, "", Order::Author, &[]).iter().map(|e| e.sort_author()).collect();
         assert_eq!(order, ["Burroughs, Edgar Rice", "Twain, Mark", "Verne, Jules"]);
     }
 
@@ -253,7 +271,7 @@ mod tests {
     fn a_book_with_no_year_files_last_rather_than_first() {
         let shelf = shelf();
         let order: Vec<Option<i32>> =
-            shelve(&shelf, "", Order::Year).iter().map(|e| e.year).collect();
+            shelve(&shelf, "", Order::Year, &[]).iter().map(|e| e.year).collect();
         assert_eq!(order, [Some(1873), Some(1912), None]);
     }
 
@@ -261,7 +279,7 @@ mod tests {
     fn every_word_has_to_land_somewhere_and_case_does_not_count() {
         let shelf = shelf();
         let found = |q: &str| -> Vec<&str> {
-            shelve(&shelf, q, Order::Title).iter().map(|e| e.id.as_str()).collect()
+            shelve(&shelf, q, Order::Title, &[]).iter().map(|e| e.id.as_str()).collect()
         };
         assert_eq!(found("TWAIN"), ["the-gilded-age"], "case does not count");
         assert_eq!(found("sea"), ["twenty-thousand-leagues-under-the-seas"], "a subject");
@@ -277,6 +295,20 @@ mod tests {
         assert_eq!(shelf.find("pg2488-images-3").map(|e| e.id.as_str()), Some("twenty-thousand-leagues-under-the-seas"));
         assert_eq!(shelf.find("a-princess-of-mars").map(|e| e.title.as_str()), Some("A Princess of Mars"));
         assert!(shelf.find("nothing-like-this").is_none());
+    }
+
+    #[test]
+    fn what_was_read_last_is_at_the_top_and_the_unread_still_file_by_title() {
+        let shelf = shelf();
+        let recent =
+            vec!["twenty-thousand-leagues-under-the-seas".to_owned(), "the-gilded-age".to_owned()];
+        let order: Vec<&str> =
+            shelve(&shelf, "", Order::Recent, &recent).iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(order, [
+            "twenty-thousand-leagues-under-the-seas",
+            "the-gilded-age",
+            "a-princess-of-mars",
+        ]);
     }
 
     #[test]

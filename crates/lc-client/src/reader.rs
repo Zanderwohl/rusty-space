@@ -13,7 +13,7 @@ use bevy_egui::{EguiContexts, egui};
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
 use egui::{Align, Color32, CornerRadius, FontFamily, FontId, Margin, Rect, Stroke, Vec2};
 use lc_books::paginate::{self, Cursor, Frame as PageFrame, Measure, Measured, Row};
-use lc_books::{Block, Document, LOCATION_CHARS};
+use lc_books::{Block, Document};
 
 use crate::action::Action;
 use crate::app::Ui;
@@ -288,7 +288,7 @@ pub fn draw(
                 }
             });
             ui.add_space(6.0);
-            keys(ui, &state, &mut out);
+            keys(ui, &state, &shelf, &mut out);
         });
     if !open {
         ask(&mut out, Action::CloseBook);
@@ -341,7 +341,7 @@ fn head(ui: &mut egui::Ui, shelf: &Shelf, open: &mut bool, out: &mut MessageWrit
 }
 
 /// The buttons along the foot of the case, which are the only ones a reader needs.
-fn keys(ui: &mut egui::Ui, state: &Ui, out: &mut MessageWriter<Requested>) {
+fn keys(ui: &mut egui::Ui, state: &Ui, shelf: &Shelf, out: &mut MessageWriter<Requested>) {
     ui.horizontal(|ui| {
         ui.add_space(4.0);
         if key(ui, "‹  previous", "back a page").clicked() {
@@ -351,8 +351,13 @@ fn keys(ui: &mut egui::Ui, state: &Ui, out: &mut MessageWriter<Requested>) {
             if key(ui, "next  ›", "on a page").clicked() {
                 ask(out, Action::TurnPage(1));
             }
-            let at = state.reading.offset / LOCATION_CHARS + 1;
-            ui.add(engraved(format!("location {at}"), 10.0, FAINT));
+            // Of the whole book, not of this chapter: a location is what survives being told
+            // to someone else, and "location 41 of 878" means the same thing on every machine.
+            let words = match shelf.location(state.reading.spine, state.reading.offset) {
+                Some((at, of)) => format!("location {at} of {of}"),
+                None => "measuring".to_owned(),
+            };
+            ui.add(engraved(words, 10.0, FAINT));
         });
     });
 }

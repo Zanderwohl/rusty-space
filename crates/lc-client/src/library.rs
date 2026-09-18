@@ -154,6 +154,17 @@ pub struct Shelf {
     pub spine_count: usize,
     /// The parsed spine document, and which one it is.
     pub open: Option<(usize, Document)>,
+    /// Characters in each spine document, filled one per frame after a book opens.
+    ///
+    /// A location is a fact about the **book**, not the chapter, so saying where someone is
+    /// means knowing how long everything before them is. Parsing the whole book at once costs a
+    /// few hundred milliseconds on a long one, which is a visible hitch on opening it; a chapter
+    /// a frame is invisible and done inside a second.
+    pub spine_chars: Vec<Option<usize>>,
+    /// Where this account left off in each book, most recently read first. From the shard.
+    pub marks: Vec<lc_proto::Bookmark>,
+    /// What the shard says the shelf hangs off. Empty until it says.
+    pub base: String,
     /// How big each plate in the open chapter is, in its own pixels.
     ///
     /// Read when the chapter is, because **pagination needs it**: a plate's height on the page
@@ -194,6 +205,8 @@ pub fn keep_up(
             face: std::mem::take(&mut shelf.face),
             catalogue: std::mem::take(&mut shelf.catalogue),
             catalogue_handle: shelf.catalogue_handle.clone(),
+            marks: std::mem::take(&mut shelf.marks),
+            base: std::mem::take(&mut shelf.base),
             ..Default::default()
         };
         shelf.file = wanted.clone();
@@ -223,6 +236,7 @@ pub fn keep_up(
         shelf.title = book.epub.title().to_owned();
         shelf.chapters = book.epub.toc().to_vec();
         shelf.spine_count = book.epub.spine().len();
+        shelf.spine_chars = vec![None; shelf.spine_count];
     }
 
     let spine = state.reading.spine.min(shelf.spine_count.saturating_sub(1));
@@ -230,10 +244,22 @@ pub fn keep_up(
         match book.epub.document(spine) {
             Ok(doc) => {
                 shelf.plates = plate_sizes(book, &doc);
+                if let Some(slot) = shelf.spine_chars.get_mut(spine) {
+                    *slot = Some(doc.chars);
+                }
                 shelf.open = Some((spine, doc));
             }
             Err(why) => shelf.trouble = Some(why.to_string()),
         }
+        return;
+    }
+
+    // One chapter a frame until the book's length is known. Parsed and thrown away: what is
+    // wanted is the count, and keeping fifty chapters to save fifty parses would be tens of
+    // megabytes of `String` for a number.
+    if let Some(next) = shelf.spine_chars.iter().position(|c| c.is_none()) {
+        let chars = book.epub.document(next).map(|doc| doc.chars).unwrap_or(0);
+        shelf.spine_chars[next] = Some(chars);
     }
 }
 
@@ -267,6 +293,40 @@ pub fn dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 }
 
 impl Shelf {
+    /// Characters before a spine document, as far as the book has been measured.
+    pub fn chars_before(&self, spine: usize) -> usize {
+        self.spine_chars.iter().take(spine).filter_map(|c| *c).sum()
+    }
+
+    /// The whole book's length, once every chapter has been measured.
+    pub fn total_chars(&self) -> Option<usize> {
+        if self.spine_chars.is_empty() || self.spine_chars.iter().any(|c| c.is_none()) {
+            return None;
+        }
+        Some(self.spine_chars.iter().flatten().sum())
+    }
+
+    /// Where a place in a chapter falls in the book, in locations.
+    ///
+    /// Counted from one, because a reader on the first page is at location 1 and not at
+    /// location 0. `None` until the book has been measured.
+    pub fn location(&self, spine: usize, char_offset: usize) -> Option<(u32, u32)> {
+        let total = self.total_chars()?;
+        let at = self.chars_before(spine) + char_offset;
+        let of = total.div_ceil(lc_books::LOCATION_CHARS).max(1);
+        Some(((at / lc_books::LOCATION_CHARS + 1) as u32, of as u32))
+    }
+
+    /// This account's place in a book, if it has one.
+    pub fn mark_for(&self, book: &str) -> Option<&lc_proto::Bookmark> {
+        self.marks.iter().find(|m| m.book == book)
+    }
+
+    /// Books this account has read, most recently first.
+    pub fn recent(&self) -> Vec<String> {
+        self.marks.iter().map(|m| m.book.clone()).collect()
+    }
+
     /// The catalogue id of the open book, whatever name it was opened under.
     ///
     /// A development flag names a book by its file and the shelf names it by its id; both end
@@ -286,6 +346,87 @@ pub fn chapter_start(books: &mut Assets<Book>, shelf: &Shelf, entry: &TocEntry) 
     let book = books.get_mut(handle)?;
     book.epub.locate(entry).map(|at| (at.spine, at.char_offset))
 }
+
+/// Take the shelf the shard sent, and the places it kept for this account.
+///
+/// The shard's word replaces the file's. A shipped client is told what there is to read by the
+/// world it is reading in; the file is what a single-process build has instead of a shard.
+pub fn take_from_shard(mut shelf: ResMut<Shelf>, mut uplink: ResMut<crate::uplink::Uplink>) {
+    if let Some((base, books)) = uplink.shelf.take() {
+        shelf.base = base;
+        shelf.catalogue = lc_books::Catalogue {
+            books: books
+                .into_iter()
+                .map(|b| lc_books::catalogue::Entry {
+                    id: b.id,
+                    title: b.title,
+                    authors: b
+                        .authors
+                        .into_iter()
+                        .map(|a| lc_books::catalogue::Writer { name: a.name, sort: a.sort })
+                        .collect(),
+                    year: b.year,
+                    subjects: b.subjects,
+                    file: b.file,
+                    sha256: None,
+                    source: None,
+                })
+                .collect(),
+        };
+        info!("the shard lends {} books", shelf.catalogue.books.len());
+    }
+    if let Some(marks) = uplink.bookmarks.take() {
+        shelf.marks = marks;
+    }
+}
+
+/// Tell the shard where the player has got to.
+///
+/// Debounced: a page turn every few seconds must not be a message every few seconds. A change is
+/// sent at once and then no more often than this, which means the common case — reading steadily
+/// — costs one small message a minute and stopping mid-page still records where you stopped.
+pub fn report_place(
+    state: Res<crate::app::Ui>,
+    mut shelf: ResMut<Shelf>,
+    mut uplink: ResMut<crate::uplink::Uplink>,
+    time: Res<Time>,
+    mut sent: Local<Option<lc_proto::Bookmark>>,
+    mut quiet_for: Local<f32>,
+) {
+    *quiet_for += time.delta_secs();
+    let Some(book) = shelf.open_id().map(str::to_owned) else { return };
+    let spine = state.reading.spine;
+    let offset = state.reading.offset;
+    // Until the book has been measured there is no honest location to report, and a bookmark
+    // with the wrong one would be written down and shown as a percentage of nothing.
+    let Some((location, locations)) = shelf.location(spine, offset) else { return };
+
+    let mark = lc_proto::Bookmark {
+        book,
+        spine: spine as u32,
+        char_offset: offset as u32,
+        location,
+        locations,
+    };
+    if sent.as_ref() == Some(&mark) {
+        return;
+    }
+    // A different book is a different fact and does not wait its turn.
+    let same_book = sent.as_ref().is_some_and(|s| s.book == mark.book);
+    if same_book && *quiet_for < REPORT_EVERY_S {
+        return;
+    }
+    uplink.say(lc_proto::Inbound::SetReading(mark.clone()));
+    // Kept here as well as sent. The shard states bookmarks once, on connecting, so a shelf
+    // that waited to be told would show yesterday's place for the book being read right now.
+    shelf.marks.retain(|m| m.book != mark.book);
+    shelf.marks.insert(0, mark.clone());
+    *sent = Some(mark);
+    *quiet_for = 0.0;
+}
+
+/// How often a place is reported while it keeps changing.
+const REPORT_EVERY_S: f32 = 5.0;
 
 /// Fetch the catalogue once, and keep it where everything can read it.
 pub fn read_catalogue(
@@ -317,6 +458,6 @@ impl Plugin for LibraryPlugin {
             .init_asset_loader::<FontLoader>()
             .init_asset_loader::<CatalogueLoader>()
             .init_resource::<Shelf>()
-            .add_systems(Update, (read_catalogue, keep_up).chain());
+            .add_systems(Update, (read_catalogue, take_from_shard, keep_up, report_place).chain());
     }
 }

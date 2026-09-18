@@ -101,6 +101,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     server.load_world(World::new(stars));
 
+    // The shelf. A shard with no catalogue runs without one and says nothing about a library;
+    // a shard with a catalogue and no base would send files hanging off nothing, so both are
+    // required together or neither is taken.
+    match (
+        after("--library").or_else(|| std::env::var("LC_LIBRARY").ok()),
+        after("--shelf-base").or_else(|| std::env::var("LC_SHELF_BASE").ok()),
+    ) {
+        (Some(path), Some(base)) => {
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| format!("cannot read the catalogue at {path}: {e}"))?;
+            server.library = lc_server::library::Library::from_toml(&base, &text)?;
+            eprintln!("shelf: {} books from {path}, served from {base}", server.library.books.len());
+        }
+        (Some(_), None) => {
+            // Loudly: a shelf nobody can fetch from is a list of titles that do nothing.
+            return Err("--library needs --shelf-base, or the client has nowhere to fetch from".into());
+        }
+        (None, _) => eprintln!("no --library, so this shard has no books to lend"),
+    }
+
     // After the world, because a ballistic arc is re-solved against the system it is in and a
     // shard with no stars would bring every coasting craft back as a straight line.
     let store = match after("--db").or_else(|| std::env::var("LC_SHARD_DB").ok()) {
@@ -125,6 +145,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             craft.why,
                         );
                     }
+                    let marks = lc_store::reading::load(&client).await?;
+                    if !marks.is_empty() {
+                        eprintln!("resumed {} bookmarks", marks.len());
+                    }
+                    server.library.adopt(
+                        marks
+                            .into_iter()
+                            .map(|m| {
+                                (m.account, lc_proto::Bookmark {
+                                    book: m.book,
+                                    spine: m.spine.max(0) as u32,
+                                    char_offset: m.char_offset.max(0) as u32,
+                                    location: m.location.max(0) as u32,
+                                    locations: m.locations.max(0) as u32,
+                                })
+                            })
+                            .collect(),
+                    );
                     eprintln!(
                         "resumed shard {shard_id} at t={} with {} of {count} craft",
                         shard.now_t,
@@ -178,7 +216,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // A failed checkpoint is not a reason to stop the world. It is a reason to say so
             // every time, because a shard that has quietly stopped saving looks exactly like one
             // that is fine.
-            if let Err(why) = checkpoint(client, shard_id, &server).await {
+            if let Err(why) = checkpoint(client, shard_id, &mut server).await {
                 eprintln!("ERROR: checkpoint failed: {why}");
             }
         }
@@ -186,7 +224,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(client) = &store {
         eprintln!("stopping; writing a last checkpoint");
-        checkpoint(client, shard_id, &server).await?;
+        checkpoint(client, shard_id, &mut server).await?;
     }
     Ok(())
 }
@@ -201,7 +239,7 @@ const SAVE_EVERY_TICKS: u32 = 400;
 async fn checkpoint(
     client: &tokio_postgres::Client,
     shard_id: i64,
-    server: &Server<Memory>,
+    server: &mut Server<Memory>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let taken = server.checkpoint();
     lc_store::ships::save_ships(client, &taken.ships).await?;
@@ -210,6 +248,23 @@ async fn checkpoint(
         next_ship: taken.next_ship,
     })
     .await?;
+    // Only what changed since the last one. A page turn is a row and a reader turns a page a
+    // minute; writing every account's whole shelf every twenty seconds would be writing nothing
+    // new, forever.
+    let marks: Vec<lc_store::reading::Bookmark> = server
+        .library
+        .take_dirty()
+        .into_iter()
+        .map(|(account, mark)| lc_store::reading::Bookmark {
+            account,
+            book: mark.book,
+            spine: mark.spine as i32,
+            char_offset: mark.char_offset as i32,
+            location: mark.location as i32,
+            locations: mark.locations as i32,
+        })
+        .collect();
+    lc_store::reading::save(client, &marks).await?;
     Ok(())
 }
 

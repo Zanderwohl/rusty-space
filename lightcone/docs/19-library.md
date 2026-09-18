@@ -199,9 +199,14 @@ assumes the gate was forgotten rather than reasoned about.
 
 | direction | message | carries |
 |---|---|---|
-| server → client | `Library` | `library_base`, and the catalogue |
-| server → client | `Reading` | this account's locators, on connect |
+| server → client | `Library` | the shelf's base, and the catalogue |
+| server → client | `Reading` | this account's locators, on connect, **most recently read first** |
 | client → server | `SetReading` | one book's locator, debounced |
+
+That ordering is load-bearing: it is the only record of recency on the wire, and it is what lets
+the shelf offer "recently read" without either end having to agree about whose clock a timestamp
+would be in. All three are appended variants — the discriminants above them are what the goldens
+are pinned at, and a version bump is not a licence to renumber them.
 
 `library_base` comes from the shard rather than the client's own configuration, mirroring
 `cdn_base` on the site's `releases` row: it lets the shelf move CDNs without a client release,
@@ -418,8 +423,25 @@ Each step is useful on its own, and the fun one does not wait for the server.
 | 1 | **built.** `lc-books`: zip, OPF, spine, TOC, the block model, locations, the paginator over `Measure` | a headless test paginates a real Gutenberg epub and round-trips a locator |
 | 2 | the shelf on the CDN: `books.toml`, the two scripts, the Caddyfile header | `curl` returns an epub with the right type and an immutable cache header |
 | 3 | **built, less the CDN.** the reader window: `EpubLoader`, plates, the serif, the panel, the mode | `--book <id> --shot` is a page of prose |
-| 4 | the catalogue and progress over the wire: two messages, `0005_reading.sql`, the debounce | signing in on a second machine opens to the same sentence |
+| 4 | **built.** the catalogue and progress over the wire: three messages, `0005_reading.sql`, the debounce | signing in on a second machine opens to the same sentence |
 | 5 | **built, less the badges.** the shelf's sorts and filter, the TOC, jump to location | the controls above all exist |
+
+Step 4 is `lc_server::library`, `lc_store::reading` and the two client systems that take the
+shelf and report a place. Three things it taught:
+
+- **A location is a fact about the book, not the chapter.** Saying where someone is means
+  knowing how long everything before them is, and that means parsing every chapter. Doing it on
+  opening costs a few hundred milliseconds on a long book — a visible hitch — so the client
+  measures **one chapter a frame** and reports nothing until it has finished, which takes under a
+  second and shows as nothing at all.
+- **The shelf keeps its own copy of what it just sent.** The shard states bookmarks once, on
+  connecting, so a shelf that waited to be told would show yesterday's place for the book being
+  read right now.
+- **A developer's database is one database and their branches are many.** The migration test
+  asserted that the number of recorded steps matched the number this build ships, which fails
+  the moment another branch has touched the same local Postgres — as one has, with three steps
+  this branch has never heard of. It now asserts that *this build's* steps are all applied,
+  which is the thing that was meant.
 
 Step 3 is `crate::library` and `crate::reader` in the client. Three things it taught:
 
@@ -439,6 +461,11 @@ resource — so step 4 replaces where it comes from and nothing above it moves. 
 file in the client's asset directory with the shape this document already gave it, and the client
 resolves a name through it: a catalogue id from the shelf, a file stem from a development flag,
 and the same book either way.
+
+The client holds the shelf's `base` and does not yet use it: books are still fetched through the
+asset server from the client's own directory, because until step 2 lands there is no HTTP asset
+source to hang a base off. That is the one seam left between here and a browser build that can
+read.
 
 Still to do here: books are fetched from the asset directory rather than from the CDN, which is
 `WebAssetPlugin` and a base URL and changes nothing above it. And the first decode of a plate
