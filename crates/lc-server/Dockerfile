@@ -30,6 +30,10 @@ RUN cargo build --release -p lc-server --bin lightcone-server
 FROM gcr.io/distroless/cc-debian12
 WORKDIR /app
 COPY --from=builder /build/target/release/lightcone-server /app/lightcone-server
+# The catalogue, which a shard is told with `--library`. Not the books: those are on the CDN,
+# and a shard that carried forty megabytes of epub it never reads would be carrying them to
+# tell clients about files it does not serve. See lightcone/docs/21-library.md.
+COPY --from=builder /build/crates/lc-client/assets/books/books.toml /app/books.toml
 EXPOSE 8080
 USER nonroot
 ENTRYPOINT ["/app/lightcone-server"]
