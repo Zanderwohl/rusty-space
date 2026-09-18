@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 25;
+pub const PROTOCOL_VERSION: u32 = 26;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -553,6 +553,10 @@ pub struct Said {
     pub sent_t: i64,
     /// Coordinate microseconds the light landed. `None` for one this ship sent.
     pub arrive_t: Option<i64>,
+    /// How loud it was when it landed, in the units the noise floor is compared against.
+    /// `None` for one this ship sent, and for one recorded before the store kept the reading.
+    /// Appended last.
+    pub strength: Option<f32>,
 }
 
 /// One event arriving at one observer: what the client is actually told.
@@ -1368,6 +1372,7 @@ mod tests {
                     acks: vec![3, 5],
                     sent_t: 500_000,
                     arrive_t: Some(1_000_000),
+                    strength: Some(0.25),
                 }],
                 keys: vec![ShipId(7)],
             },

@@ -707,7 +707,7 @@ impl<J: Journal> Server<J> {
                 continue;
             }
             if let Some(scheduled) = schedule(&event, &beam, observer) {
-                landings.push((observer.id, scheduled.arrive_t));
+                landings.push((observer.id, scheduled.arrive_t, scheduled.strength));
                 deliveries.push(scheduled);
             }
         }

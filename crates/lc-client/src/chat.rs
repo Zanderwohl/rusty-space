@@ -40,8 +40,8 @@ pub struct Line {
     /// hears its own signal, and never learns when it arrived.
     pub arrive_s: Option<f64>,
     /// How loud it was on arrival, in the strength units the gate compares against a noise
-    /// floor. `None` for one this ship sent, and for one read back from a transcript: the store
-    /// keeps what was *said*, and how loudly it landed is a fact about one receiver.
+    /// floor. `None` for one this ship sent — it never heard it — and for one recorded before
+    /// the store kept the reading.
     pub strength: Option<f32>,
 }
 
@@ -566,9 +566,11 @@ fn line_of(said: Said) -> Line {
         acks: said.acks,
         sent_s: said.sent_t as f64 * 1.0e-6,
         arrive_s: said.arrive_t.map(|t| t as f64 * 1.0e-6),
-        // Not kept by the store: how loudly a signal landed is a fact about one receiver, and
-        // what is written down is what was said.
-        strength: None,
+        // Kept by the store now. It was not, on the reasoning that a transcript holds what was
+        // *said* — true, and it did not follow: the receipts table it is read from is the
+        // per-receiver one, and the arrival time beside this is the same kind of fact. Without
+        // it a reconnection, which is the normal case, lost the reading on everything.
+        strength: said.strength,
     }
 }
 
@@ -1054,6 +1056,7 @@ mod tests {
                 acks: vec![1],
                 sent_t: 1_000_000,
                 arrive_t: Some(4_000_000),
+                strength: Some(4.0),
             }],
             vec![ShipId(7)],
         );
@@ -1062,6 +1065,34 @@ mod tests {
         assert_eq!(conversation.name, "Ada");
         assert_eq!(conversation.lines[0].sent_s, 1.0);
         assert!(chat.holds_key(ShipId(7)));
+    }
+
+    /// **The reading survives a transcript.** It did not, and a reconnection is the normal
+    /// case — so in practice every message a client had came back with no strength at all.
+    #[test]
+    fn a_restored_message_keeps_how_loudly_it_landed() {
+        let mut chat = Chat::default();
+        chat.i_am(ShipId(1));
+        chat.restore(
+            vec![Said {
+                event_id: 9,
+                idem: 4,
+                with: Some(ShipId(7)),
+                to: Some(ShipId(1)),
+                with_name: "Ada".into(),
+                mine: false,
+                key: false,
+                sealed: false,
+                body: Some("from the store".into()),
+                acks: vec![],
+                sent_t: 1_000_000,
+                arrive_t: Some(4_000_000),
+                strength: Some(100.0),
+            }],
+            Vec::new(),
+        );
+        let line = &chat.get(ShipId(7)).unwrap().lines[0];
+        assert!((line.decibels().unwrap() - 20.0).abs() < 1.0e-4, "{:?}", line.decibels());
     }
 
     /// A backlog carries one entry per *transmission*, so a resent message comes back several
@@ -1082,6 +1113,7 @@ mod tests {
             acks: Vec::new(),
             sent_t,
             arrive_t: None,
+            strength: None,
         };
         chat.restore(vec![said(1, 1_000_000), said(2, 9_000_000)], Vec::new());
         let conversation = chat.get(ShipId(7)).unwrap();

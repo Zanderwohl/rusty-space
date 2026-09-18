@@ -118,8 +118,8 @@ pub trait Journal {
 pub struct Transcript {
     /// What it transmitted, oldest first.
     pub sent: Vec<lc_store::chat::Message>,
-    /// What reached it, oldest arrival first, with when the light landed.
-    pub heard: Vec<(lc_store::chat::Message, i64)>,
+    /// What reached it, oldest arrival first, with when the light landed and how loudly.
+    pub heard: Vec<(lc_store::chat::Message, i64, Option<f32>)>,
 }
 
 /// Everything in vectors. No ordering guarantees from storage, so it sorts.
@@ -184,13 +184,13 @@ impl Journal for Memory {
 
     async fn transcript(&self, ship: ShipId) -> Result<Transcript, JournalError> {
         let find = |id: i64| self.messages.iter().find(|m| m.event_id == id).cloned();
-        let mut heard: Vec<(lc_store::chat::Message, i64)> = self
+        let mut heard: Vec<(lc_store::chat::Message, i64, Option<f32>)> = self
             .receipts
             .iter()
             .filter(|r| r.observer == ship.0)
-            .filter_map(|r| Some((find(r.event_id)?, r.arrive_t)))
+            .filter_map(|r| Some((find(r.event_id)?, r.arrive_t, r.strength)))
             .collect();
-        heard.sort_by_key(|(_, arrive_t)| *arrive_t);
+        heard.sort_by_key(|(_, arrive_t, _)| *arrive_t);
         let mut sent: Vec<lc_store::chat::Message> =
             self.messages.iter().filter(|m| m.sender == ship.0).cloned().collect();
         sent.sort_by_key(|m| m.sent_t);

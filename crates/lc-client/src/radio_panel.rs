@@ -146,7 +146,7 @@ pub(crate) fn chat(
         );
         ui.separator();
         ui.vertical(|ui| match showing {
-            Channel::Overheard => overheard_log(ui, uplink, out),
+            Channel::Overheard => overheard_log(ui, uplink),
             Channel::Public => {
                 let star = state.0.selected;
                 // No craft to aim at, so that choice is not offered: a beam at one ship is not
@@ -220,7 +220,6 @@ fn public_log(
 fn overheard_log(
     ui: &mut egui::Ui,
     uplink: &crate::uplink::Uplink,
-    out: &mut MessageWriter<Requested>,
 ) {
     let lines = uplink.chat.overheard();
     log_area(ui, "chat_overheard", BODY_HEIGHT, |ui| {
@@ -229,15 +228,27 @@ fn overheard_log(
             return;
         }
         for loose in &lines {
+            // Two lines: who was talking to whom, and then what crossed. Not the conversation
+            // template, because this is not a conversation — there is no "you" in it, nothing
+            // here is addressed to this ship, and there is nothing to acknowledge. No reply
+            // button either: the thing to reply to is the craft, not the remark, and the list
+            // on the left is where a craft is chosen.
+            let from = loose.from_name.as_str();
+            let to = loose.to.map(|to| name_for(uplink, to));
+            ui.label(
+                egui::RichText::new(match &to {
+                    Some(to) => format!("{from} -> {to}"),
+                    // Unreachable while `overheard` means "addressed to somebody else", and
+                    // cheaper to render than to prove.
+                    None => from.to_string(),
+                })
+                .color(RADIO),
+            );
             ui.horizontal_wrapped(|ui| {
-                speaker(ui, loose.from_name.as_str(), false);
-                let to = loose.to.map(|to| name_for(uplink, to));
-                if let Some(to) = &to {
-                    ui.weak(format!("to {to}:"));
-                }
+                ui.add_space(12.0);
                 match loose.line.body.as_deref() {
                     Some(body) => {
-                        ui.colored_label(RADIO, body);
+                        ui.label(body);
                     }
                     // Fixed-length noise, and the same noise every frame. There is nothing in
                     // it to decode because there is nothing in it.
@@ -252,11 +263,6 @@ fn overheard_log(
                         )
                         .on_hover_text("encrypted, and not for this ship");
                     }
-                }
-                if let Some(from) = loose.from
-                    && ui.small_button("reply").on_hover_text("open this conversation").clicked()
-                {
-                    ask(out, Action::ChatWith(Channel::With(from)));
                 }
             })
             .response
@@ -380,8 +386,7 @@ fn reception(line: &crate::chat::Line) -> String {
     let when = format!("Received T + {:.2} years", arrived / crate::flight::JULIAN_YEAR_S);
     match line.decibels() {
         Some(db) => format!("{when}\n{db:.1} dB, after {} in flight", duration((arrived - line.sent_s).max(0.0))),
-        // A transcript read back from the store has no strength: how loudly a signal landed is
-        // a fact about one receiver, and what is written down is what was said.
+        // Only a message recorded before the store kept the reading, now that it does.
         None => format!("{when}\nsignal strength not recorded"),
     }
 }

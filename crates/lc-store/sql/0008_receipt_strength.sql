@@ -1,0 +1,17 @@
+-- How loudly a transmission landed, beside when it landed.
+--
+-- This column was left out on the reasoning that the store keeps what was *said*, and how loud
+-- a signal was is a fact about one receiver. The second half is true and the conclusion did not
+-- follow: `lc_message_receipts` is the per-receiver table, and the arrival time sitting next to
+-- this is exactly the same kind of fact.
+--
+-- Without it every message replayed to a client on sign-in came back with no reading, which in
+-- practice is almost all of them -- a reconnection is the normal case, not the exception.
+--
+-- `deliveries` has carried the same number all along, but it is swept away by retention and is
+-- keyed for the light-cone scan rather than for a transcript. Copying it here is cheap: it is
+-- written once, when the message is.
+--
+-- Nullable, because a row written before this column existed has no reading and inventing a
+-- zero would be claiming one -- and zero is a real strength, not an absent one.
+ALTER TABLE lc_message_receipts ADD COLUMN IF NOT EXISTS strength real;

@@ -208,7 +208,7 @@ impl<J: Journal> Server<J> {
         sender: CraftId,
         at: i64,
         said: &Utterance,
-        landings: &[(CraftId, i64)],
+        landings: &[(CraftId, i64, f32)],
     ) {
         self.said.push(lc_store::chat::Message {
             event_id,
@@ -221,7 +221,7 @@ impl<J: Journal> Server<J> {
             sent_t: at,
             idem: (!said.key).then_some(said.idem as i64),
         });
-        for (observer, arrive_t) in landings {
+        for (observer, arrive_t, strength) in landings {
             if *observer == sender {
                 continue;
             }
@@ -229,6 +229,10 @@ impl<J: Journal> Server<J> {
                 event_id,
                 observer: observer.0,
                 arrive_t: *arrive_t,
+                // Kept beside the arrival because it is the same kind of fact about the same
+                // reception, and because a transcript read back without it has no reading at
+                // all — which on a reconnection is every message a client has.
+                strength: Some(*strength),
             });
             if said.key {
                 // Anyone the offer reaches learns the key, addressee or not. That is what
@@ -438,9 +442,11 @@ impl<J: Journal> Server<J> {
                 acks: m.acks,
                 sent_t: m.sent_t,
                 arrive_t: None,
+                // A sender never hears its own signal, so there is no reading to have.
+                strength: None,
             });
         }
-        for (m, arrive_t) in transcript.heard {
+        for (m, arrive_t, strength) in transcript.heard {
             if arrive_t > now {
                 continue;
             }
@@ -460,6 +466,7 @@ impl<J: Journal> Server<J> {
                 acks: m.acks,
                 sent_t: m.sent_t,
                 arrive_t: Some(arrive_t),
+                strength,
             });
         }
         // By when this ship knew of each, which for a conversation across light delay is not

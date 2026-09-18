@@ -38,6 +38,9 @@ pub struct Receipt {
     pub event_id: i64,
     pub observer: i64,
     pub arrive_t: i64,
+    /// How loud it was when it got there. `None` for a row written before the column existed;
+    /// see `sql/0008_receipt_strength.sql` for why that is not a zero.
+    pub strength: Option<f32>,
 }
 
 /// One ship holding another's public key, as of the moment the offer's light arrived.
@@ -92,12 +95,13 @@ pub async fn save_receipts(client: &Client, receipts: &[Receipt]) -> Result<u64,
     let events: Vec<i64> = receipts.iter().map(|r| r.event_id).collect();
     let observers: Vec<i64> = receipts.iter().map(|r| r.observer).collect();
     let arrivals: Vec<i64> = receipts.iter().map(|r| r.arrive_t).collect();
+    let strengths: Vec<Option<f32>> = receipts.iter().map(|r| r.strength).collect();
     client
         .execute(
-            "INSERT INTO lc_message_receipts (event_id, observer, arrive_t)
-             SELECT * FROM unnest($1::bigint[], $2::bigint[], $3::bigint[])
+            "INSERT INTO lc_message_receipts (event_id, observer, arrive_t, strength)
+             SELECT * FROM unnest($1::bigint[], $2::bigint[], $3::bigint[], $4::real[])
              ON CONFLICT (observer, event_id) DO NOTHING",
-            &[&events, &observers, &arrivals],
+            &[&events, &observers, &arrivals, &strengths],
         )
         .await
 }
@@ -155,12 +159,15 @@ pub async fn sent_by(client: &Client, ship: i64) -> Result<Vec<Message>, Error> 
     Ok(out)
 }
 
-/// Everything that reached this ship, oldest arrival first, with when it landed.
-pub async fn heard_by(client: &Client, ship: i64) -> Result<Vec<(Message, i64)>, Error> {
+/// Everything that reached this ship, oldest arrival first, with when it landed and how loudly.
+pub async fn heard_by(
+    client: &Client,
+    ship: i64,
+) -> Result<Vec<(Message, i64, Option<f32>)>, Error> {
     let rows = client
         .query(
             &format!(
-                "SELECT {}, r.arrive_t
+                "SELECT {}, r.arrive_t, r.strength
                    FROM lc_message_receipts r JOIN lc_messages m USING (event_id)
                   WHERE r.observer = $1 ORDER BY r.arrive_t DESC LIMIT $2",
                 COLUMNS.split(", ").map(|c| format!("m.{c}")).collect::<Vec<_>>().join(", ")
@@ -168,8 +175,8 @@ pub async fn heard_by(client: &Client, ship: i64) -> Result<Vec<(Message, i64)>,
             &[&ship, &BACKLOG_LIMIT],
         )
         .await?;
-    let mut out: Vec<(Message, i64)> =
-        rows.iter().map(|row| (message_from(row), row.get(9))).collect();
+    let mut out: Vec<(Message, i64, Option<f32>)> =
+        rows.iter().map(|row| (message_from(row), row.get(9), row.get(10))).collect();
     out.reverse();
     Ok(out)
 }
@@ -272,8 +279,8 @@ mod tests {
         let back = Message { acks: vec![910_001], ..message(910_002, bry, ada, "here", 4_000) };
         save_messages(&client, &[out, back]).await.unwrap();
         save_receipts(&client, &[
-            Receipt { event_id: 910_001, observer: bry, arrive_t: 3_000 },
-            Receipt { event_id: 910_002, observer: ada, arrive_t: 6_000 },
+            Receipt { event_id: 910_001, observer: bry, arrive_t: 3_000, strength: Some(1.0) },
+            Receipt { event_id: 910_002, observer: ada, arrive_t: 6_000, strength: Some(1.0) },
         ])
         .await
         .unwrap();
@@ -303,8 +310,8 @@ mod tests {
 
         save_messages(&client, &[message(920_001, ada, bry, "in the open", 1_000)]).await.unwrap();
         save_receipts(&client, &[
-            Receipt { event_id: 920_001, observer: bry, arrive_t: 2_000 },
-            Receipt { event_id: 920_001, observer: nosy, arrive_t: 2_500 },
+            Receipt { event_id: 920_001, observer: bry, arrive_t: 2_000, strength: Some(1.0) },
+            Receipt { event_id: 920_001, observer: nosy, arrive_t: 2_500, strength: Some(1.0) },
         ])
         .await
         .unwrap();
@@ -326,11 +333,16 @@ mod tests {
         for k in 0..15i64 {
             let id = 930_000 + k;
             messages.push(message(id, bry, ada, "tick", 1_000 + k));
-            receipts.push(Receipt { event_id: id, observer: ada, arrive_t: 2_000 + k });
+            receipts.push(Receipt {
+                event_id: id,
+                observer: ada,
+                arrive_t: 2_000 + k,
+                strength: Some(1.0),
+            });
         }
         // A key offer in the middle: it is in the transcript and never in the ack window.
         messages.push(Message { is_key: true, ..message(930_100, bry, ada, "", 1_500) });
-        receipts.push(Receipt { event_id: 930_100, observer: ada, arrive_t: 2_500 });
+        receipts.push(Receipt { event_id: 930_100, observer: ada, arrive_t: 2_500, strength: Some(1.0) });
         save_messages(&client, &messages).await.unwrap();
         save_receipts(&client, &receipts).await.unwrap();
 
