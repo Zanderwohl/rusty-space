@@ -18,7 +18,9 @@ use lc_books::{Block, Document};
 use crate::action::Action;
 use crate::app::Ui;
 use crate::input::Requested;
-use crate::library::{Book, Face, FontFace, READING_FACE, Shelf};
+use crate::library::{
+    BODY, BODY_BOLD, BODY_BOLD_ITALIC, BODY_ITALIC, Book, DISPLAY, FACES, Face, FontFace, Shelf,
+};
 use crate::panels::ask;
 use crate::ui::Panel;
 
@@ -35,10 +37,14 @@ pub(crate) const KEY: Color32 = Color32::from_rgb(52, 55, 60);
 pub(crate) const KEY_HOT: Color32 = Color32::from_rgb(70, 74, 80);
 pub(crate) const LABEL: Color32 = Color32::from_rgb(198, 196, 190);
 
-/// What the reading face is called once it has been installed.
-pub const READING_FAMILY: &str = "reading";
-
-const BODY_SIZE: f32 = 17.0;
+const BODY_SIZE: f32 = 18.0;
+/// The widest the text column is allowed to get, whatever the window does.
+///
+/// A line of prose stops being readable somewhere past seventy characters — the eye loses the
+/// start of the next one — and a maximised window would otherwise set a book at a hundred and
+/// forty. Roughly thirty-four times the body size, because a lowercase letter in a text face
+/// averages about half its point size.
+const MAX_MEASURE: f32 = BODY_SIZE * 34.0;
 /// Air above and below a plate, so it does not touch the text it interrupts.
 const PLATE_GAP: f32 = 10.0;
 /// What a plate of unknown shape reserves, and the box drawn while it is being read.
@@ -56,19 +62,51 @@ pub(crate) const SCREEN_MARGIN: Margin = Margin { left: 30, right: 30, top: 26, 
 
 pub(crate) struct Setting {
     pub body: FontId,
+    pub italic: FontId,
+    pub bold: FontId,
+    pub bold_italic: FontId,
+    /// True when `italic` is the body face and egui has to shear it, because this build ships
+    /// no italic of its own.
+    pub sheared: bool,
     pub heading: FontId,
     pub small: FontId,
 }
 
 impl Setting {
-    fn new(serif: bool) -> Self {
-        let family =
-            if serif { FontFamily::Name(READING_FAMILY.into()) } else { FontFamily::Proportional };
+    fn new(ctx: &egui::Context) -> Self {
+        let interface = FontId::new(BODY_SIZE, FontFamily::Proportional);
+        let face = |name: &str, size: f32| {
+            let family = FontFamily::Name(name.into());
+            ctx.fonts(|f| f.families().contains(&family))
+                .then(|| FontId::new(size, family))
+        };
+        let body = face(BODY, BODY_SIZE).unwrap_or_else(|| interface.clone());
         Self {
-            body: FontId::new(BODY_SIZE, family.clone()),
-            heading: FontId::new(BODY_SIZE * 1.25, family),
+            italic: face(BODY_ITALIC, BODY_SIZE).unwrap_or_else(|| body.clone()),
+            bold: face(BODY_BOLD, BODY_SIZE).unwrap_or_else(|| body.clone()),
+            bold_italic: face(BODY_BOLD_ITALIC, BODY_SIZE).unwrap_or_else(|| body.clone()),
+            sheared: face(BODY_ITALIC, BODY_SIZE).is_none(),
+            // A title set in the face the body is set in is a title that does not look like one.
+            heading: face(DISPLAY, BODY_SIZE * 1.2)
+                .unwrap_or_else(|| FontId::new(BODY_SIZE * 1.25, body.family.clone())),
+            body,
             small: FontId::new(11.0, FontFamily::Proportional),
         }
+    }
+
+    /// The face one run of text is set in.
+    pub fn face_for(&self, style: lc_books::Style) -> &FontId {
+        match (style.bold, style.italic) {
+            (true, true) => &self.bold_italic,
+            (true, false) => &self.bold,
+            (false, true) => &self.italic,
+            (false, false) => &self.body,
+        }
+    }
+
+    /// The title face, for a shelf as well as for a heading.
+    pub fn title(&self) -> &FontId {
+        &self.heading
     }
 }
 
@@ -144,10 +182,6 @@ fn inset(block: &Block) -> f32 {
 }
 
 fn job(block: &Block, width: f32, setting: &Setting) -> LayoutJob {
-    let font = match block {
-        Block::Heading { .. } => setting.heading.clone(),
-        _ => setting.body.clone(),
-    };
     let mut job = LayoutJob {
         wrap: TextWrapping { max_width: (width - inset(block)).max(32.0), ..Default::default() },
         break_on_newline: true,
@@ -156,77 +190,100 @@ fn job(block: &Block, width: f32, setting: &Setting) -> LayoutJob {
     };
     if let Block::Item { ordered, .. } = block {
         let marker = if *ordered { "— " } else { "• " };
-        job.append(marker, 0.0, TextFormat { font_id: font.clone(), color: FAINT, ..Default::default() });
+        job.append(marker, 0.0, TextFormat {
+            font_id: setting.body.clone(),
+            color: FAINT,
+            ..Default::default()
+        });
     }
     if let Block::Rule = block {
-        job.append("* * *", 0.0, TextFormat { font_id: font, color: FAINT, ..Default::default() });
+        job.append("* * *", 0.0, TextFormat {
+            font_id: setting.body.clone(),
+            color: FAINT,
+            ..Default::default()
+        });
         return job;
     }
     let Some(text) = block.text() else { return job };
+    let quote = matches!(block, Block::Quote(_));
     for run in &text.runs {
-        job.append(
-            &run.text,
-            0.0,
-            TextFormat {
-                font_id: font.clone(),
-                color: if matches!(block, Block::Quote(_)) { FAINT } else { INK },
-                italics: run.style.italic || matches!(block, Block::Quote(_)),
-                ..Default::default()
-            },
-        );
+        // A heading is set in the display face whatever the markup says about it; a quotation is
+        // italic whether or not the transcription bothered to mark it so.
+        let (font, sheared) = match block {
+            Block::Heading { .. } => (setting.title().clone(), false),
+            _ if quote => (setting.italic.clone(), setting.sheared),
+            _ => {
+                let style = lc_books::Style { italic: run.style.italic, ..run.style };
+                (setting.face_for(style).clone(), setting.sheared && run.style.italic)
+            }
+        };
+        job.append(&run.text, 0.0, TextFormat {
+            font_id: font,
+            color: if quote { FAINT } else { INK },
+            // Only when there is no italic cut to use: shearing one that exists would slant it
+            // twice.
+            italics: sheared,
+            ..Default::default()
+        });
     }
     job
 }
 
-/// Install the reading face, or settle for the interface font.
+/// Install whatever faces this build ships, and settle for what it does not.
 ///
-/// Asked for only when a book is first opened, so a player who never reads never downloads it.
+/// Asked for only when a book is first opened, so a player who never reads never downloads one.
+/// All five are asked for at once and installed together: a page half in one face and half in
+/// another, for the second or so between them arriving, would reflow under the reader.
 fn settle_face(
     ctx: &egui::Context,
     shelf: &mut Shelf,
     assets: &AssetServer,
     faces: &Assets<FontFace>,
 ) {
+    use bevy::asset::LoadState;
     match &shelf.face {
         Face::Settled => {}
         Face::Unasked => {
-            shelf.face = Face::Waiting(assets.load(READING_FACE));
+            let asked = FACES.iter().map(|(name, path)| (*name, assets.load(*path))).collect();
+            shelf.face = Face::Waiting(asked);
         }
-        Face::Waiting(handle) => {
-            use bevy::asset::LoadState;
-            match assets.get_load_state(handle) {
-                Some(LoadState::Failed(_)) => {
-                    info!("no reading face at {READING_FACE}; setting the page in the interface font");
-                    shelf.face = Face::Settled;
-                }
-                Some(LoadState::Loaded) => {
-                    if let Some(face) = faces.get(handle) {
-                        let mut fonts = egui::FontDefinitions::default();
-                        fonts.font_data.insert(
-                            READING_FAMILY.to_owned(),
-                            std::sync::Arc::new(egui::FontData::from_owned(face.0.clone())),
-                        );
-                        fonts
-                            .families
-                            .insert(FontFamily::Name(READING_FAMILY.into()), vec![READING_FAMILY.to_owned()]);
-                        ctx.set_fonts(fonts);
-                        info!("the page is set in {READING_FACE}");
-                    }
-                    shelf.face = Face::Settled;
-                }
-                _ => {}
+        Face::Waiting(asked) => {
+            let settled = |handle| {
+                matches!(
+                    assets.get_load_state(handle),
+                    Some(LoadState::Loaded) | Some(LoadState::Failed(_)) | None
+                )
+            };
+            if !asked.iter().all(|(_, handle)| settled(handle)) {
+                return;
             }
+            let mut fonts = egui::FontDefinitions::default();
+            let mut installed = Vec::new();
+            for (name, handle) in asked {
+                let Some(face) = faces.get(handle) else { continue };
+                fonts.font_data.insert(
+                    (*name).to_owned(),
+                    std::sync::Arc::new(egui::FontData::from_owned(face.0.clone())),
+                );
+                fonts
+                    .families
+                    .insert(FontFamily::Name((*name).into()), vec![(*name).to_owned()]);
+                installed.push(*name);
+            }
+            if installed.is_empty() {
+                info!("no reading faces; setting the page in the interface font");
+            } else {
+                ctx.set_fonts(fonts);
+                info!("the page is set in {}", installed.join(", "));
+            }
+            shelf.face = Face::Settled;
         }
     }
 }
 
-/// The faces to set a surface in, serif if this build has one.
+/// The faces to set a surface in: whichever of them this build turned out to have.
 pub(crate) fn setting_for(ctx: &egui::Context) -> Setting {
-    Setting::new(has_serif(ctx))
-}
-
-fn has_serif(ctx: &egui::Context) -> bool {
-    ctx.fonts(|f| f.families().iter().any(|family| *family == FontFamily::Name(READING_FAMILY.into())))
+    Setting::new(ctx)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -413,7 +470,10 @@ fn page(
         waiting(ui, shelf, setting);
         return;
     }
-    let width = ui.available_width();
+    // Centred inside whatever the window gives, rather than filling it.
+    let full = ui.available_width();
+    let width = full.min(MAX_MEASURE);
+    let margin = (full - width) / 2.0;
     let height = (ui.available_height() - 22.0).max(60.0);
     let frame = PageFrame { width, height };
     // Cloned because it is an `Arc` inside and the alternative is holding a borrow of the `Ui`
@@ -467,8 +527,12 @@ fn page(
         .map(|i| i + 1)
         .unwrap_or(1);
 
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::hover());
-    let painter = ui.painter_at(rect);
+    let (outer, _) = ui.allocate_exact_size(Vec2::new(full, height), egui::Sense::hover());
+    let rect = Rect::from_min_size(
+        egui::pos2(outer.left() + margin, outer.top()),
+        Vec2::new(width, height),
+    );
+    let painter = ui.painter_at(outer);
     let mut y = rect.top();
     for slice in &current.slices {
         let block = &doc.blocks[slice.block].block;
@@ -507,7 +571,9 @@ fn page(
             .galley(egui::pos2(x, band.top() - top), galley, INK);
         y += band.height();
     }
-    folio(ui, rect, *spine, shelf, setting, folio_number, counted.pages);
+    // The folio is ruled across the page rather than across the column: it is furniture of the
+    // sheet, not of the text.
+    folio(ui, outer.with_max_y(rect.max.y), *spine, shelf, setting, folio_number, counted.pages);
 }
 
 /// The place a saved offset resumes at, and the end of the chapter when a page was turned back

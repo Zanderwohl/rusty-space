@@ -21,12 +21,32 @@ pub const SHELF: &str = "books";
 /// also what lets a title differ from a file name. Step 4 moves this to the server unchanged.
 pub const CATALOGUE: &str = "books/books.toml";
 
-/// The face the page is set in, if the build ships one.
+/// The faces a page is set in: the family egui will know each by, and the file it comes from.
 ///
 /// Loaded rather than compiled in, and only when a book is first opened: a player who never
-/// opens one never pays for it, which is what keeps the browser build's first-play download
-/// where [14-hosting.md](../../lightcone/docs/14-hosting.md) measured it.
-pub const READING_FACE: &str = "fonts/reader.ttf";
+/// opens one never pays for the 416 KB, which is what keeps the browser build's first-play
+/// download where [14-hosting.md](../../lightcone/docs/14-hosting.md) measured it.
+///
+/// **Static cuts, not the variable files.** `epaint::FontData` carries a file, a face index and
+/// a scale tweak, and nothing anywhere in egui calls `ab_glyph`'s `set_variation` — so a
+/// variable font renders at its default instance and costs half again as many bytes to do it.
+/// Real italics and a real bold are what these five buy; the alternative is a sheared regular.
+pub const FACES: &[(&str, &str)] = &[
+    (BODY, "fonts/Faustina-Regular.ttf"),
+    (BODY_ITALIC, "fonts/Faustina-Italic.ttf"),
+    (BODY_BOLD, "fonts/Faustina-Bold.ttf"),
+    (BODY_BOLD_ITALIC, "fonts/Faustina-BoldItalic.ttf"),
+    (DISPLAY, "fonts/LibreBaskerville-Regular.ttf"),
+];
+
+/// Faustina, for reading: a text face, and the one that has to hold up over forty minutes.
+pub const BODY: &str = "reading";
+pub const BODY_ITALIC: &str = "reading-italic";
+pub const BODY_BOLD: &str = "reading-bold";
+pub const BODY_BOLD_ITALIC: &str = "reading-bold-italic";
+/// Libre Baskerville, for titles and headings: wider and heavier, which is what a line you
+/// look at wants and what a page you read does not.
+pub const DISPLAY: &str = "display";
 
 #[derive(Asset, TypePath)]
 pub struct Book {
@@ -176,13 +196,17 @@ pub struct Shelf {
     pub face: Face,
 }
 
-/// How the reading face is getting on.
-#[derive(Default, PartialEq, Eq)]
+/// How the reading faces are getting on.
+///
+/// Every face is optional and asked for together. A build missing one falls back a step — no
+/// italic means the body sheared, no body at all means the interface font — so a shelf without
+/// fonts is plainer and never broken.
+#[derive(Default)]
 pub enum Face {
     #[default]
     Unasked,
-    Waiting(Handle<FontFace>),
-    /// Installed into egui, or absent and the interface font is standing in for it.
+    Waiting(Vec<(&'static str, Handle<FontFace>)>),
+    /// Whatever arrived has been installed into egui.
     Settled,
 }
 

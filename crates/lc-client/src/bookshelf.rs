@@ -207,7 +207,7 @@ fn book(ui: &mut egui::Ui, entry: &Entry, setting: &Setting, shelf: &Shelf) -> e
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.add(
                 egui::Label::new(
-                    egui::RichText::new(&entry.title).font(setting.body.clone()).color(INK),
+                    egui::RichText::new(&entry.title).font(setting.title().clone()).color(INK),
                 )
                 .selectable(false),
             );

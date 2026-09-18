@@ -359,11 +359,26 @@ because an illustrated edition can carry a few hundred.
 no fonts, so a first play is 6.4 MB and 94% of it is the binary. egui's built-in face is a UI
 font — correct for a readout, wrong for forty minutes of prose.
 
-So the reader ships one serif, OFL-licensed, subset to Latin-1 and the punctuation Gutenberg
-actually uses: roughly 200 KB, and its licence file ships beside it. **The build does not have
-one yet.** The client asks the asset server for `fonts/reader.ttf` when a book is first opened
-and sets the page in the interface font when it is not there, so the feature works without one
-and looks right with one; choosing the face and subsetting it is an errand, not a design. **It is loaded as an asset
+So the reader ships **two** faces, both OFL: **Faustina** for the page and **Libre Baskerville**
+for titles and headings. A title set in the face the body is set in is a title that does not look
+like one, and Baskerville is wider and heavier in exactly the way a line you look at wants and a
+page you read does not.
+
+Five files, 416 KB, asked for together when a book is first opened — a page half in one face and
+half in another, for the second between them arriving, would reflow under the reader. Each is
+optional and falls back a step: no italic means the body sheared, no body at all means the
+interface font, so a build without fonts is plainer and never broken.
+
+**Static cuts, not the variable files.** Both families ship a `VariableFont_wght` and neither is
+usable here: `epaint::FontData` carries a file, a face index and a scale tweak, and nothing in
+egui calls `ab_glyph`'s `set_variation`. A variable font renders at its default instance and
+costs half again as many bytes to do it. What the static cuts buy is **real italic and real
+bold** — the alternative, and what this had before them, is egui shearing the regular.
+
+Two numbers that go with them: the body is set at 18 points, and **the column is capped at
+thirty-four times that**, centred in whatever the window gives. A line of prose stops being
+readable somewhere past seventy characters, and a maximised window would otherwise set a book at
+a hundred and forty. **It is loaded as an asset
 when the reader is first opened, not embedded in the binary**, so a player who never opens a
 book never pays for it and the first-play figure above is unchanged. Installing a font into
 egui at runtime is one call against `FontDefinitions`; doing it lazily is what keeps this from
