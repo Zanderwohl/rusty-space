@@ -17,7 +17,11 @@ lc-books = { path = "../lc-books" }
 lc-proto = { path = "../lc-proto" }
 lc-spacetime = { path = "../lc-spacetime" }
 lc-world = { path = "../lc-world", default-features = false }
-bevy = "0.17.2"
+# The web asset source: `fetch` in a browser, `ureq` on a desktop. Both schemes, because they
+# register separately and the development CDN is plain HTTP — a browser could not load a book
+# over that from an HTTPS page anyway (mixed content), but a desktop client rehearsing against
+# `rocinante:3101` is exactly what it is for. See lightcone/docs/14-hosting.md.
+bevy = { version = "0.17.2", features = ["http", "https"] }
 bevy_egui = "0.38.0"
 bevy_mesh = "0.17"
 glam = { version = "0.30", features = ["serde"] }

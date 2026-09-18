@@ -132,6 +132,41 @@ Yanking the build a channel points at does not silently fall through to an older
 
 ---
 
+## Shipping the shelf
+
+```bash
+tools/publish-books.sh --check         # the shelf matches its catalogue; needs no CDN
+tools/publish-books.sh                 # uploads what the catalogue names, to library/
+```
+
+**On its own schedule, and not with a build.** Books live under `library/` rather than
+`game/<build-id>/` because a book is not part of a client: re-uploading forty megabytes of epub
+with every wasm build would put a copy of Huckleberry Finn under every build id forever, and a
+rollback would change which books exist. `tools/build-wasm.sh` stages named directories rather
+than the asset root, which is what keeps that true.
+
+Publishing skips a file already on the CDN rather than replacing it, for the reason a build id
+is never reused: the old bytes are what every cache and every reader part-way through that book
+already has. A title that needs different bytes gets a new file name and a new row in
+`crates/lc-client/assets/books/books.toml`.
+
+The check is worth running on its own. It hashes every file the catalogue names and compares it
+against the `sha256` recorded there, so a book edited in place — or dropped into the directory
+without being catalogued — is caught before anyone is reading it.
+
+A shard is told where the shelf is, and a client is told by its shard:
+
+```bash
+lightcone-server --library crates/lc-client/assets/books/books.toml \
+                 --shelf-base https://cdn.lightconefrontier.com/library/
+```
+
+`--library` without `--shelf-base` refuses to start: a catalogue nobody can fetch from is a list
+of titles that do nothing. Neither is a list of books a shard simply has none to lend, which is
+the state every test runs in.
+
+---
+
 ## Shipping the site
 
 Content and code roll back together, because both are baked into the image.

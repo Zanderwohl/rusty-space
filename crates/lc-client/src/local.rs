@@ -58,7 +58,11 @@ fn shelf() -> Result<Option<lc_server::library::Library>, String> {
         return Ok(None);
     }
     let text = std::fs::read_to_string(&path).map_err(|why| format!("{}: {why}", path.display()))?;
-    lc_server::library::Library::from_toml(crate::library::SHELF, &text).map(Some)
+    // `LC_SHELF_BASE` is the same variable a deployed shard is told its CDN with, so the server
+    // in the box can be pointed at one and the client then fetches over HTTP exactly as the
+    // browser build does. Unset, the shelf is the directory this catalogue was read from.
+    let base = std::env::var("LC_SHELF_BASE").unwrap_or_else(|_| crate::library::SHELF.to_owned());
+    lc_server::library::Library::from_toml(&base, &text).map(Some)
 }
 
 async fn serve(

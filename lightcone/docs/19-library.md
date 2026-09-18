@@ -436,7 +436,7 @@ Each step is useful on its own, and the fun one does not wait for the server.
 | # | step | done when |
 |---|---|---|
 | 1 | **built.** `lc-books`: zip, OPF, spine, TOC, the block model, locations, the paginator over `Measure` | a headless test paginates a real Gutenberg epub and round-trips a locator |
-| 2 | the shelf on the CDN: `publish-books.sh`, the Caddyfile header, the client's HTTP asset source | `curl` returns an epub with the right type and an immutable cache header |
+| 2 | **built.** the shelf on the CDN: `publish-books.sh`, the Caddyfile header, the client's HTTP asset source | `curl` returns an epub with the right type and an immutable cache header |
 | 3 | **built, less the CDN.** the reader window: `EpubLoader`, plates, the serif, the panel, the mode | `--book <id> --shot` is a page of prose |
 | 4 | **built.** the catalogue and progress over the wire: three messages, `0005_reading.sql`, the debounce | signing in on a second machine opens to the same sentence |
 | 5 | **built, less the badges.** the shelf's sorts and filter, the TOC, jump to location | the controls above all exist |
@@ -477,15 +477,23 @@ file in the client's asset directory with the shape this document already gave i
 resolves a name through it: a catalogue id from the shelf, a file stem from a development flag,
 and the same book either way.
 
-The client holds the shelf's `base` and does not yet use it: books are still fetched through the
-asset server from the client's own directory, because until step 2 lands there is no HTTP asset
-source to hang a base off. That is the one seam left between here and a browser build that can
-read.
+The client fetches a book from wherever its shard says the shelf is, and from its own asset
+directory when no shard has said. Three things that only showed up by running it:
 
-Still to do here: books are fetched from the asset directory rather than from the CDN, which is
-`WebAssetPlugin` and a base URL and changes nothing above it. And the first decode of a plate
-happens on the frame it appears, which is a hitch of tens of milliseconds on a page turn — worth
-moving to a task if it is ever felt, and not worth the machinery before then.
+- **`WebAssetPlugin` is already in `DefaultPlugins`** once the `https` feature is on, so it is
+  `.set()` and not `.add_plugins()` — adding it is a plugin-already-added panic at startup.
+- **`http` and `https` are separate features registering separate sources.** Production is
+  HTTPS, and the development CDN is plain HTTP on `rocinante:3101`, so a desktop client
+  rehearsing against it needs both. A browser could not load a book over plain HTTP from an
+  HTTPS page anyway — mixed content — which [14-hosting.md](14-hosting.md) already covers.
+- **`AssetMetaCheck::Never` is now needed in the desktop build too.** The browser build has
+  always set it; on a filesystem the probe is a wasted stat, but a desktop client fetching a
+  book over HTTP turns it into a round trip and a cached 404 per book. Running it against a
+  stand-in CDN is what showed the `GET …/pg43-images-3.epub.meta 404` in the log.
+
+Still to do here: the first decode of a plate happens on the frame it appears, which is a hitch
+of tens of milliseconds on a page turn — worth moving to a task if it is ever felt, and not
+worth the machinery before then.
 
 Step 1 is in `crates/lc-books`: about 1 600 lines, no engine and no renderer, and its checks run
 two ways. Twenty-two unit tests hold the invariants against a chapter written to break them, and

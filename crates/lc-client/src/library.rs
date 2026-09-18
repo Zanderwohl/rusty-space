@@ -214,10 +214,16 @@ pub fn keep_up(
             // The catalogue decides what a name means. Without one — a development build with
             // no shelf file — the name is taken for a file stem, which is what it used to be.
             let path = match shelf.catalogue.find(&name) {
-                Some(entry) => format!("{SHELF}/{}", entry.file),
-                None => format!("{SHELF}/{name}.epub"),
+                Some(entry) => shelf.where_to_fetch(&entry.file.clone()),
+                None => Some(format!("{SHELF}/{name}.epub")),
             };
-            shelf.handle = Some(assets.load(path));
+            match path {
+                Some(path) => {
+                    info!("opening {path}");
+                    shelf.handle = Some(assets.load(path));
+                }
+                None => shelf.trouble = Some("that book is not on this shelf".to_owned()),
+            }
         }
         return;
     }
@@ -263,6 +269,18 @@ pub fn keep_up(
     }
 }
 
+/// Whether a name is a file on the shelf rather than a way out of it.
+///
+/// One function and one test, which is the whole of what stands between a catalogue and an
+/// asset loader. See `bevy_asset`'s own warning about loading URLs from elsewhere.
+fn is_a_bare_name(file: &str) -> bool {
+    !file.is_empty()
+        && !file.contains('/')
+        && !file.contains('\\')
+        && !file.contains("..")
+        && !file.starts_with('.')
+}
+
 /// The shape of every plate in a chapter.
 ///
 /// A header read, not a decode: `into_dimensions` stops as soon as the format has told it how
@@ -293,6 +311,22 @@ pub fn dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 }
 
 impl Shelf {
+    /// Where to fetch a book from.
+    ///
+    /// **The client never receives a URL.** It receives a base from its own shard and a bare
+    /// file name from the catalogue, and composes them here — so a shard that tried to point a
+    /// client at somewhere else would have to do it with a file name, which this refuses. With
+    /// no base the shelf is the asset directory, which is what a build with no shard has.
+    pub fn where_to_fetch(&self, file: &str) -> Option<String> {
+        if !is_a_bare_name(file) {
+            return None;
+        }
+        if self.base.is_empty() {
+            return Some(format!("{SHELF}/{file}"));
+        }
+        Some(format!("{}/{file}", self.base.trim_end_matches('/')))
+    }
+
     /// Characters before a spine document, as far as the book has been measured.
     pub fn chars_before(&self, spine: usize) -> usize {
         self.spine_chars.iter().take(spine).filter_map(|c| *c).sum()
@@ -459,5 +493,38 @@ impl Plugin for LibraryPlugin {
             .init_asset_loader::<CatalogueLoader>()
             .init_resource::<Shelf>()
             .add_systems(Update, (read_catalogue, take_from_shard, keep_up, report_place).chain());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shelf_with(base: &str) -> Shelf {
+        Shelf { base: base.to_owned(), ..Default::default() }
+    }
+
+    #[test]
+    fn with_no_base_a_book_comes_from_the_asset_directory() {
+        let shelf = shelf_with("");
+        assert_eq!(shelf.where_to_fetch("A Princess of Mars.epub").as_deref(), Some("books/A Princess of Mars.epub"));
+    }
+
+    #[test]
+    fn a_base_is_a_prefix_whether_or_not_it_ends_in_a_slash() {
+        for base in ["https://cdn.example/library", "https://cdn.example/library/"] {
+            assert_eq!(
+                shelf_with(base).where_to_fetch("gilded.epub").as_deref(),
+                Some("https://cdn.example/library/gilded.epub"),
+            );
+        }
+    }
+
+    #[test]
+    fn a_file_name_that_is_not_a_file_name_fetches_nothing() {
+        let shelf = shelf_with("https://cdn.example/library/");
+        for name in ["../../etc/passwd", "sub/dir.epub", "https://elsewhere/x.epub", "", ".hidden"] {
+            assert_eq!(shelf.where_to_fetch(name), None, "{name} was let through");
+        }
     }
 }
