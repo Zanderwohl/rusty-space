@@ -133,6 +133,12 @@ pub struct DevEntry {
     pub menu_page: Option<crate::ui::MenuPage>,
     /// Open the password form on arrival, for the same reason.
     pub open_password_form: bool,
+    /// Say this to the first contact that appears, and show the conversation.
+    ///
+    /// The only way to photograph a transcript. Everything in the radio window arrives from a
+    /// shard, so an action run on entering the sky has nobody to talk to yet — this is polled,
+    /// like `--at` and the framing, until there is somebody in the contact list.
+    pub say: Option<String>,
     /// Run once on reaching the sky. Actions rather than flags, so a development entry can
     /// reach anything the interface can and needs no plumbing of its own.
     pub actions: Vec<Action>,
@@ -190,6 +196,7 @@ impl Plugin for ClientPlugin {
                     // overruling: a pin that ran before them would be undone by a hand on the
                     // mouse or by a crossing aiming itself, on the same frame.
                     frame_the_cast.run_if(in_state(AppState::InGame)),
+                    open_the_radio.run_if(in_state(AppState::InGame)),
                     // After the framing, because a pin overrules everything including that.
                     pin_camera.run_if(in_state(AppState::InGame)),
                     // The clock is deliberately not gated on any panel or overlay. See
@@ -552,6 +559,32 @@ fn frame_the_cast(
     *done = true;
 }
 
+/// Development entry: say something to the first contact, and open the conversation.
+///
+/// Polled rather than run on arrival, for the same reason the framing is: there is nobody in
+/// the contact list on the frame the sky appears, because the shard has not answered yet.
+fn open_the_radio(
+    dev: Res<DevEntry>,
+    uplink: Res<crate::uplink::Uplink>,
+    mut out: MessageWriter<crate::input::Requested>,
+    mut done: Local<bool>,
+) {
+    let Some(words) = dev.say.as_ref() else { return };
+    if *done {
+        return;
+    }
+    let Some(contact) = uplink.contacts.first() else { return };
+    *done = true;
+    out.write(crate::input::Requested(Action::OpenChat(contact.ship_id)));
+    out.write(crate::input::Requested(Action::Say {
+        to: Some(contact.ship_id),
+        aim: lc_proto::Aim::Omni,
+        secrecy: lc_proto::Secrecy::Open,
+        body: words.clone(),
+        idem: None,
+    }));
+}
+
 /// Development entry: hold the camera still, so two runs photograph the same view.
 ///
 /// Written every frame rather than once, which is the whole point: anything that aims the
@@ -706,6 +739,7 @@ fn dispatch(
                     let at = game.coordinate_time_s();
                     ui.notify(text, at);
                 }
+                Effect::AutoAck { with, on } => uplink.chat.set_auto_ack(with, on),
                 Effect::Stage(scenario) => {
                     uplink.say(lc_proto::Inbound::Stage { scenario });
                     uplink.asked(time.elapsed_secs_f64());

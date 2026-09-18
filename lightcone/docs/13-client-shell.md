@@ -119,6 +119,7 @@ with.
 | system | `Y` | bodies and populations of the selected system, at the retarded time |
 | sky | always | the all-sky map; selection happens here |
 | notifications | automatic | target out of range, observation returned nothing, instrument saturated |
+| communications | `C` | one conversation at a time, chosen from a list of everyone heard from and everyone in sight |
 | debug | `F3` | below |
 | scenarios | — | scenes to stage. Development only, and every button does nothing without a shard started for it |
 | refit | `R` | module counts and hull slots as sliders, what applying them would cost and take, and the refit under way. See [19-ship-fitting.md](19-ship-fitting.md) |
@@ -126,6 +127,117 @@ with.
 
 Panels are windows rather than menu pages because the clock never stops: a player has to be
 able to watch a curve and fly at the same time.
+
+### The communications window
+
+**A list of craft on the left, one log on the right.** Everything in it is minutes to years old
+and there is no typing indicator to be had, so the interface that suits it is a log with a
+selector rather than a messaging app pretending the far end is present.
+
+The list is ordered **most recently heard from first**, which is how a player finds the
+conversation they are in the middle of. The cost is worth naming: a list that reorders itself can
+be misclicked, and it reorders exactly when a message lands.
+
+Two channels are pinned above the craft, and **which of the three a message lands in is decided
+by who it was addressed to, never by who sent it**:
+
+| addressed to | channel |
+|---|---|
+| nobody | **Public** — broadcasts, sent and heard |
+| this ship | that craft's conversation |
+| another craft | **Overheard** |
+
+A message addressed to one craft is not public however openly it was sent. Anyone in range can
+read it, but it was still somebody's mail, and being in earshot of it is what Overheard is.
+Filing it as a conversation with its sender would be worse still: a log of "what Ada said to me"
+containing what Ada said to Bry.
+
+**Encrypted traffic is in Overheard too**, shown as fixed-length noise. The fact of a signal is
+real whether or not it can be read, and a run of traffic between two craft says something even
+when none of it says anything. Fixed length is the point rather than a detail: noise that tracked
+the plaintext would leak the one thing about an encrypted message that is still readable — a long
+one is a long one — and a player could read a conversation's shape without reading a word of it.
+It is derived from when the message was heard, so it is stable across frames and reconnections,
+and there is nothing in it to decode.
+
+Nothing loose is ever answered automatically. Acknowledging a broadcast would answer everybody at
+once, and acknowledging somebody else's mail would tell its sender that a craft they were not
+talking to is listening.
+
+In the public log a sender's **name is the link** to their conversation, rather than a reply
+button beside it. A log is prose and prose links are words; it underlines while the cursor is on
+it.
+
+Public can transmit, and what it offers is narrower than a conversation's. There is no craft to
+aim at, so "beam" is not shown at all rather than shown and disabled — an option that contradicts
+the channel is worse than a missing one. Omni and a beam at the selected star remain, and so does
+**send key**, which is the point of putting one out in the open: anyone in range can answer in
+private from then on.
+
+Every entry in the list is the width of the column rather than the width of its own name. A list
+whose click targets are each a different size reads as a pile of labels.
+
+Both halves scroll inside a **fixed body**, so the window is the same size with one message in it
+and with two hundred. That matters more here than in most panels, because what fills it arrives
+without being asked for.
+
+A message this ship sent shows `ack` once the far end names it, and an **amber warning triangle**
+until then — which is also the button that sends it again. See
+[05-observation.md](05-observation.md#acknowledgement-is-the-only-delivery-report) for why that
+is the only delivery report there is, and why a resend is a second pulse of light rather than a
+retry. The triangle is *painted* rather than typed: the obvious glyph is U+26A0 and the default
+font draws a tofu box for it, which is the trap that has already cost this interface a close
+button and a pair of arrows.
+
+Hovering a message gives two lines and no more, both about the *reception* rather than the
+message: when this ship learnt of it, and how loud it was in dB. The strength is referred to one
+strength unit — the same arbitrary scale the noise floor is quoted in — so it means something
+compared to another signal, which is how anybody reads a dB figure anyway. A message read back
+from a transcript has no reading at all, because how loudly a signal landed is a fact about one
+receiver and what is written down is what was said.
+
+A message with **nothing in it** is an acknowledgement and nothing else, and it is not shown at
+either end — there is nothing to read, and a log of empty lines is one nobody can read either.
+What it acknowledges is kept on the conversation rather than on the line, because the message
+that carries an acknowledgement is usually the one about to be dropped for being empty; losing
+the evidence along with the clutter would make every message look unanswered for ever.
+
+An acknowledgement is also never answered. It is the end of an exchange, not the middle of one.
+
+**auto-ack** answers that craft automatically, in the mode it was spoken to in; see
+[05-observation.md](05-observation.md#answering-automatically-and-the-bearing-a-dish-answers-on)
+for the bearing a beam is answered on and for why an acknowledgement is never itself
+acknowledged. It is per craft and never on the public channel: a ship that answered every
+broadcast it heard would announce its position to everything in range.
+
+A resend keeps the original's encryption and takes the panel's **current aim**. That asymmetry is
+the point of the button: the usual reason a message went unacknowledged is a beam aimed where a
+craft turned out not to be, and the useful retry is the same words pointed somewhere else. A
+message sent encrypted must never become one sent in the open by a second click.
+
+A transmission arriving is also a **green line in the notifications box**, and the whole row is
+clickable — lit while the cursor is on it, and not a button. A button's frame makes a list of
+notices read as a row of controls, and a click target the width of its own text is one a cursor
+slides off; these arrive unasked for, so hitting one should not need aim. The box has a width of
+its own for the same reason: left to size itself, a row asking for "all of it" would be asking
+the box how wide to be while the box asked the row.
+
+**Overheard traffic is announced, not quoted.** Its notice is the `from -> to` line and nothing
+else. That two other craft are talking is the news; what they said to each other is theirs, and
+repeating it into this ship's own events box reads as if it had been said here. It is the one kind of event with somewhere to go: everything else in that box is the
+interface reporting on itself. Somebody else's sealed message is a line too, saying that it was
+heard and cannot be read — a signal falling on the antenna is a fact about the world, and hiding
+it would let a player learn that nothing was sent by not being told.
+
+Sealing is offered only for a craft whose key this ship holds, and the checkbox says why when it
+is not. The client's copy of that rule is an interface courtesy; the server refuses the order
+either way.
+
+**The communications window is why `read_keys` consults egui.** Every binding in the table below is a
+bare letter, and nothing in the game had a text field until there was something to say into one
+— so typing a message used to open the telescope, cut the drive and fly somewhere, one keystroke
+at a time. Held arrow keys are gated the same way: an arrow in a text field moves the cursor, and
+turning the ship as well would make going back to fix a typo swing the whole view.
 
 ## The debug window
 
@@ -266,6 +378,7 @@ seven hours twenty times a second having never drifted at all.
 | `--burst <n>` | photograph `n` consecutive frames, numbered. For flicker: two runs stopped at frame `n` and frame `n+1` have accumulated different wall time and are not consecutive at all |
 | `--demo <name>` | stage a scene, and bring a shard to run it in |
 | `--demo-cam <yaw:pitch:booms>` | pin the camera for the run |
+| `--say <words>` | say this to the first contact that appears, and open the conversation. The only way to photograph a transcript |
 
 These emit [`Action`]s rather than opening a second path into the client, so they can only do
 what the interface can do. `--shot` exists because WGSL cannot be asserted from a test and a

@@ -113,6 +113,30 @@ pub enum Action {
     ResetRefitDraft,
     ApplyRefit,
     CancelRefit,
+
+    // --- radio ------------------------------------------------------------------------
+    /// Show this craft's conversation, opening the window if it is closed. What a green line
+    /// in the events box does when it is clicked.
+    OpenChat(lc_proto::ShipId),
+    /// Change what the window is showing: one craft, or the public log.
+    ChatWith(crate::ui::Channel),
+    /// Put a message on the air. `idem` is `None` for something newly typed, which mints one,
+    /// and `Some` for a resend, which repeats the message rather than saying a second thing.
+    Say {
+        /// `None` broadcasts: the public channel, addressed to nobody.
+        to: Option<lc_proto::ShipId>,
+        aim: lc_proto::Aim,
+        secrecy: lc_proto::Secrecy,
+        body: String,
+        idem: Option<lc_proto::MessageKey>,
+    },
+    /// Put this ship's public key on the air, so `to` — or anyone at all, for `None` — can
+    /// encrypt messages back.
+    OfferKey { to: Option<lc_proto::ShipId>, aim: lc_proto::Aim },
+    /// Answer this craft automatically, or stop.
+    AutoAck { with: lc_proto::ShipId, on: bool },
+    // A resend is [`Action::Say`] with the original's `idem`, not an action of its own: it is
+    // the same message, said again, and the only thing that makes it one is the key.
 }
 
 /// What an action needs from outside: the few things the core cannot do itself.
@@ -128,6 +152,9 @@ pub enum Effect {
     CancelSignIn,
     SignInWithPassword { email: String, password: String },
     SignOut,
+    /// Answer a craft automatically from now on, or stop. Reaches `crate::uplink`'s chat log,
+    /// which `apply` cannot see.
+    AutoAck { with: lc_proto::ShipId, on: bool },
     /// An order for the server. Emitted instead of a local change when a server is
     /// authoritative over the ship: see [`crate::session::Session::remote`].
     Send(lc_proto::Order),
@@ -295,6 +322,56 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::BreakOff => {
             if session.remote {
                 effects.push(Effect::Send(lc_proto::Order::BreakOff));
+            }
+        }
+
+        Action::OpenChat(ship_id) => {
+            ui.chat_with = crate::ui::Channel::With(ship_id);
+            ui.open(Panel::Chat);
+        }
+        Action::ChatWith(channel) => ui.chat_with = channel,
+        // Sent and never applied locally, for the same reason a course is: what a transmission
+        // becomes is an event with an identifier, and the identifier is the server's to mint.
+        // The client learns of its own message when the acceptance comes back.
+        Action::Say { to, aim, secrecy, body, idem } => {
+            let body = body.trim().to_string();
+            // An empty body is a *bare acknowledgement* and is a real message — but only one
+            // this client sends deliberately, by repeating a key. An empty draft with no key
+            // is somebody pressing send on an empty field, which is a keystroke, not a message.
+            if body.is_empty() && idem.is_none() {
+            } else if !session.remote {
+                effects.push(Effect::Notify("no server, so nobody to talk to".into()));
+            } else if body.len() > lc_proto::MESSAGE_LIMIT {
+                effects.push(Effect::Notify(format!(
+                    "too long by {} characters",
+                    body.len() - lc_proto::MESSAGE_LIMIT
+                )));
+            } else {
+                // Minted here and never by the server, because only the sender knows that a
+                // resend *is* one. A hash of who, when and what: unique to this ship without
+                // a counter either end would have to reconcile.
+                let idem = idem.unwrap_or_else(|| {
+                    lc_world::rng::hash(&[
+                        to.map_or(0, |t| t.0 as u64),
+                        (session.coordinate_time_s() * 1.0e6) as u64,
+                        body.len() as u64,
+                        body.bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64)),
+                    ])
+                    // Zero means "not keyed" to every reader, so it is the one value a real
+                    // key may not take.
+                    .max(1)
+                });
+                effects.push(Effect::Send(lc_proto::Order::Say { to, aim, secrecy, body, idem }));
+            }
+        }
+        // An effect rather than a change to `UiState`, because what it sets lives on the
+        // conversation — which is the connection's, not the interface's.
+        Action::AutoAck { with, on } => effects.push(Effect::AutoAck { with, on }),
+        Action::OfferKey { to, aim } => {
+            if session.remote {
+                effects.push(Effect::Send(lc_proto::Order::OfferKey { to, aim }));
+            } else {
+                effects.push(Effect::Notify("no server, so nobody to give a key to".into()));
             }
         }
         Action::SetCourse(course) => {

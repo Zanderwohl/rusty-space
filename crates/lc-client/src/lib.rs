@@ -16,6 +16,7 @@ pub mod auth;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod broker;
 pub mod app;
+pub mod chat;
 pub mod curve;
 pub mod demos;
 pub mod entry;
@@ -31,6 +32,7 @@ pub mod panels;
 pub mod pick;
 pub mod plume;
 pub mod plot;
+pub mod radio_panel;
 pub mod refit_panel;
 pub mod resolved;
 pub mod session;

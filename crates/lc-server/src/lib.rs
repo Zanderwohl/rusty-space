@@ -15,6 +15,7 @@ pub mod drive;
 pub mod fitting;
 pub mod journal;
 pub mod persist;
+pub mod radio;
 pub mod rate;
 pub mod server;
 #[cfg(test)]
