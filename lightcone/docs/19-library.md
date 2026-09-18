@@ -456,11 +456,20 @@ the world does this, and a shelf that does not has a third of its stock under T.
 | jump to location | a number field, against the stable location count |
 | close | `Esc` |
 
-**The binding table becomes mode-dependent, and that is a real change.** Arrow keys turn the
-view today, and `input.rs` is deliberately the only place that knows about keys. So `Reading`
-is a mode that selects a second table, entered when the reader takes focus and left when it
-closes. egui's `EguiWantsInput` cannot do this on its own: it reports keyboard interest only
-when a *text field* has focus, and a page of prose has none.
+**The reader lays a few bindings over the cockpit's, and claims nothing else.** Arrow keys turn
+the view, so a book has to take them — but the first cut of this swapped the whole table, which
+took the telescope, the system window and the time controls with it. Worse, every panel added
+afterwards would have had to be remembered in a second place to keep working. So the reading
+table is an *overlay*: the paging keys, `C` for the contents, and `Escape` and `B` for the way
+out. Anything it does not name falls through, and a test asserts exactly that — no key outside
+the overlay changes meaning while a book is open.
+
+With the shelf showing rather than a book, only the way out is claimed: there are no pages to
+turn, so the arrows stay with the view.
+
+egui's `EguiWantsInput` cannot decide any of this, but it does decide one thing: while the
+filter field has focus the keyboard is entirely its own, or typing the name of a book closes the
+window on `b` and turns a page on the space bar.
 
 Everything the surface does is an `Action` — `OpenBook`, `CloseBook`, `TurnPage(i32)`,
 `JumpToChapter(usize)`, `JumpToLocation(u32)`, `SetShelfSort(Sort)`. The filter text and the

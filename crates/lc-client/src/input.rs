@@ -196,25 +196,46 @@ pub fn look_around(
 }
 
 /// Turn key presses into requests.
-/// What the keyboard is doing, which is not the same thing in a book as in a cockpit.
+/// The keys the reader claims, and **only** those.
 ///
-/// Arrow keys turn the view and the reader needs them to turn pages, so the table is chosen by
-/// mode rather than merged. egui cannot decide this: `EguiWantsInput` reports keyboard interest
-/// only when a *text field* has focus, and a page of prose has none.
-pub fn reading_bindings() -> Vec<(KeyCode, Action)> {
-    vec![
+/// An overlay rather than a second table. Swapping tables was the obvious shape and the wrong
+/// one: it took every other key with it, so opening a book turned off the telescope, the system
+/// window and the time controls — and every panel added afterwards would have had to be
+/// remembered here to keep working. What the reader needs is the paging keys and the way out;
+/// everything it does not name falls through to the cockpit.
+///
+/// `book` is whether one is actually open. With the shelf showing there are no pages to turn, so
+/// the arrows stay with the view and only the way out is claimed.
+pub fn reading_bindings(book: bool) -> Vec<(KeyCode, Action)> {
+    // Out of a book is the shelf, out of the shelf is the device put away: one key, one step.
+    let mut table = vec![
         (KeyCode::Escape, Action::CloseBook),
-        (KeyCode::Space, Action::TurnPage(1)),
-        (KeyCode::ArrowRight, Action::TurnPage(1)),
-        (KeyCode::PageDown, Action::TurnPage(1)),
-        (KeyCode::Backspace, Action::TurnPage(-1)),
-        (KeyCode::ArrowLeft, Action::TurnPage(-1)),
-        (KeyCode::PageUp, Action::TurnPage(-1)),
-        (KeyCode::KeyC, Action::ToggleContents),
-        // Out of the book and back to the shelf, which is the same key that opened the device
-        // and one step of the same hierarchy `Escape` walks.
         (KeyCode::KeyB, Action::CloseBook),
-    ]
+    ];
+    if book {
+        table.extend([
+            (KeyCode::Space, Action::TurnPage(1)),
+            (KeyCode::ArrowRight, Action::TurnPage(1)),
+            (KeyCode::PageDown, Action::TurnPage(1)),
+            (KeyCode::Backspace, Action::TurnPage(-1)),
+            (KeyCode::ArrowLeft, Action::TurnPage(-1)),
+            (KeyCode::PageUp, Action::TurnPage(-1)),
+            (KeyCode::KeyC, Action::ToggleContents),
+        ]);
+    }
+    table
+}
+
+/// The bindings in force: the cockpit's, with the reader's laid over them.
+pub fn bindings_in_force(reading: bool, book: bool) -> Vec<(KeyCode, Action)> {
+    let mut table = bindings();
+    if !reading {
+        return table;
+    }
+    let overlay = reading_bindings(book);
+    table.retain(|(key, _)| !overlay.iter().any(|(claimed, _)| claimed == key));
+    table.extend(overlay);
+    table
 }
 
 pub fn read_keys(
@@ -229,8 +250,7 @@ pub fn read_keys(
     if egui.wants_any_keyboard_input() {
         return;
     }
-    let reading = state.is_open(Panel::Reader);
-    let table = if reading { reading_bindings() } else { bindings() };
+    let table = bindings_in_force(state.is_open(Panel::Reader), state.reading.book.is_some());
     for (key, action) in table {
         if keys.just_pressed(key) {
             out.write(Requested(action));
@@ -254,12 +274,69 @@ mod tests {
 
     #[test]
     fn no_reading_key_is_bound_twice() {
-        let b = reading_bindings();
+        let b = reading_bindings(true);
         let mut keys: Vec<KeyCode> = b.iter().map(|(k, _)| *k).collect();
         let before = keys.len();
         keys.sort_by_key(|k| format!("{k:?}"));
         keys.dedup();
         assert_eq!(keys.len(), before, "a key turns two pages at once");
+    }
+
+    #[test]
+    fn a_book_claims_the_paging_keys_and_leaves_the_rest_alone() {
+        let flying = bindings_in_force(false, false);
+        let reading = bindings_in_force(true, true);
+        let acts = |table: &[(KeyCode, Action)], key: KeyCode| {
+            table.iter().find(|(k, _)| *k == key).map(|(_, a)| a.clone())
+        };
+
+        // The keys a book needs are the book's.
+        assert_eq!(acts(&reading, KeyCode::ArrowRight), Some(Action::TurnPage(1)));
+        assert_eq!(acts(&reading, KeyCode::Escape), Some(Action::CloseBook));
+
+        // Every other panel still opens while one is being read. This is the whole point: a
+        // panel added later must not have to be remembered in two places to keep working.
+        for key in [KeyCode::KeyT, KeyCode::KeyY, KeyCode::F3, KeyCode::KeyF, KeyCode::Digit1] {
+            assert_eq!(acts(&reading, key), acts(&flying, key), "{key:?} was eaten by the reader");
+        }
+        // Precisely: the only keys that behave differently are the ones the reader names.
+        let claimed: Vec<KeyCode> = reading_bindings(true).iter().map(|(k, _)| *k).collect();
+        for (key, action) in &flying {
+            if claimed.contains(key) {
+                continue;
+            }
+            assert_eq!(acts(&reading, *key).as_ref(), Some(action), "{key:?} changed meaning");
+        }
+        for (key, _) in &reading {
+            assert!(
+                claimed.contains(key) || flying.iter().any(|(k, _)| k == key),
+                "{key:?} appeared from nowhere",
+            );
+        }
+    }
+
+    #[test]
+    fn the_shelf_leaves_the_arrows_to_the_view() {
+        let shelf = bindings_in_force(true, false);
+        let flying = bindings_in_force(false, false);
+        let acts = |table: &[(KeyCode, Action)], key: KeyCode| {
+            table.iter().find(|(k, _)| *k == key).map(|(_, a)| a.clone())
+        };
+        // With no book open there are no pages to turn, so the arrows stay where they were.
+        assert_eq!(acts(&shelf, KeyCode::ArrowRight), acts(&flying, KeyCode::ArrowRight));
+        assert_eq!(acts(&shelf, KeyCode::Escape), Some(Action::CloseBook));
+    }
+
+    #[test]
+    fn nothing_in_force_is_bound_twice() {
+        for (reading, book) in [(false, false), (true, false), (true, true)] {
+            let table = bindings_in_force(reading, book);
+            let mut keys: Vec<KeyCode> = table.iter().map(|(k, _)| *k).collect();
+            let before = keys.len();
+            keys.sort_by_key(|k| format!("{k:?}"));
+            keys.dedup();
+            assert_eq!(keys.len(), before, "a key is bound twice at ({reading}, {book})");
+        }
     }
 
     #[test]
