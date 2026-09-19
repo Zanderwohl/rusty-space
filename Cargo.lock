@@ -3197,6 +3197,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "em-map"
+version = "0.1.0"
+dependencies = [
+ "em-foundations",
+ "em-plot",
+ "glam",
+]
+
+[[package]]
 name = "em-plot"
 version = "0.1.0"
 dependencies = [

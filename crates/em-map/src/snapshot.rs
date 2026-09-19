@@ -1,0 +1,251 @@
+//! What there is to draw, and when it was true.
+
+use glam::DVec3;
+
+/// Metres in a light-year. The crate's interface is light-years and metres, so it names the
+/// conversion between them; `lc_world::system::M_PER_LY` is the same number for the same reason.
+pub const M_PER_LY: f64 = 9.460_730_472_580_8e15;
+
+/// Metres in an astronomical unit, by definition.
+pub const M_PER_AU: f64 = 1.495_978_707e11;
+
+/// How a whole snapshot was arrived at.
+///
+/// Per snapshot, not per item. A picture is one claim about what is where at one moment; a
+/// mixture of two kinds of knowledge with no label on the join is worse than either, because
+/// the reader has to audit it to know which half they are looking at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Provenance {
+    /// One observer's instruments. Everything is where its light says it was.
+    Observed,
+    /// Several sources folded together. Nobody ever saw this from one place at one time.
+    Aggregate,
+    /// Read off the coordinate clock, with no light delay. Development and replays.
+    Coordinate,
+}
+
+/// What a thing is, which is what decides how it is drawn and what colour it takes.
+///
+/// The colour is the host's: `em-map` names none, for the reason `em_ui::MenuTheme` carries
+/// its seven by value. A palette belongs to a product.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ItemKind {
+    Star,
+    Planet,
+    Moon,
+    /// Anything smaller that is still its own body: an asteroid, a comet.
+    Minor,
+    Station,
+    Ship,
+    /// A belt, a ring system, a cloud. Drawn from [`MapItem::annulus_m`] rather than a radius.
+    Population,
+    /// Whoever the snapshot was taken by.
+    Observer,
+}
+
+/// Stable across frames, so an item that has not moved keeps its entity and its selection.
+///
+/// A provider makes one from whatever it already has that is stable — a ship's id, a hash of a
+/// body's name. Not an index: a list that reorders would silently retarget every selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ItemKey(pub u64);
+
+impl ItemKey {
+    /// FNV-1a of a name, matching `em_sim::BodyId`'s construction so two things named alike
+    /// key alike.
+    pub const fn from_name(name: &str) -> Self {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        let bytes = name.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            hash ^= bytes[i] as u64;
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            i += 1;
+        }
+        Self(hash)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MapItem {
+    pub key: ItemKey,
+    pub label: String,
+    pub kind: ItemKind,
+    /// Light-years from the world origin, simulation axes.
+    pub position_ly: DVec3,
+    /// Metres. Zero for anything with no size worth drawing at any zoom.
+    pub radius_m: f64,
+    /// Spin axis, or the normal of a ring or belt. Ecliptic north where nothing says otherwise.
+    pub pole: DVec3,
+    /// Inner and outer radius in metres, for something shaped like a ring rather than a ball.
+    pub annulus_m: Option<(f64, f64)>,
+}
+
+impl MapItem {
+    /// A body: something with a size and a pole.
+    pub fn body(key: ItemKey, label: impl Into<String>, kind: ItemKind, position_ly: DVec3,
+        radius_m: f64, pole: DVec3) -> Self {
+        Self { key, label: label.into(), kind, position_ly, radius_m, pole, annulus_m: None }
+    }
+
+    /// A belt, a cloud or a ring system, about `position_ly` and in the plane of `pole`.
+    pub fn annulus(key: ItemKey, label: impl Into<String>, position_ly: DVec3, pole: DVec3,
+        inner_m: f64, outer_m: f64) -> Self {
+        Self {
+            key,
+            label: label.into(),
+            kind: ItemKind::Population,
+            position_ly,
+            radius_m: 0.0,
+            pole,
+            annulus_m: Some((inner_m.min(outer_m), inner_m.max(outer_m))),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MapSnapshot {
+    pub items: Vec<MapItem>,
+    /// Coordinate seconds since J2000 this snapshot is stated at.
+    pub epoch_s: f64,
+    pub provenance: Provenance,
+}
+
+impl MapSnapshot {
+    pub fn new(epoch_s: f64, provenance: Provenance, items: Vec<MapItem>) -> Self {
+        Self { items, epoch_s, provenance }
+    }
+
+    pub fn observed(epoch_s: f64, items: Vec<MapItem>) -> Self {
+        Self::new(epoch_s, Provenance::Observed, items)
+    }
+
+    pub fn coordinate(epoch_s: f64, items: Vec<MapItem>) -> Self {
+        Self::new(epoch_s, Provenance::Coordinate, items)
+    }
+
+    pub fn item(&self, key: ItemKey) -> Option<&MapItem> {
+        self.items.iter().find(|i| i.key == key)
+    }
+
+    pub fn observer(&self) -> Option<&MapItem> {
+        self.items.iter().find(|i| i.kind == ItemKind::Observer)
+    }
+
+    /// How far the nearest and furthest items sit from `focus_ly`, metres.
+    ///
+    /// What ring selection is given. The nearest is often zero — the focus is usually *on*
+    /// something — which is why [`crate::rings::decades`] has to survive a zero lower bound.
+    pub fn extent_m(&self, focus_ly: DVec3) -> (f64, f64) {
+        let mut near = f64::INFINITY;
+        let mut far: f64 = 0.0;
+        for item in &self.items {
+            let d = item.position_ly.distance(focus_ly) * M_PER_LY;
+            // An annulus is drawn out to its own edge, so it sets the extent even when its
+            // centre is the focus. Without this a system framed on its star is framed on
+            // nothing, because every belt's centre is the star.
+            let outer = d + item.annulus_m.map_or(item.radius_m, |(_, o)| o);
+            near = near.min(d);
+            far = far.max(outer);
+        }
+        if !near.is_finite() { near = 0.0 }
+        (near, far)
+    }
+
+    /// Fold several snapshots into one, newest wins.
+    ///
+    /// The result is [`Provenance::Aggregate`] whatever went in, because it is: no observer
+    /// saw it. Two sources naming the same key are the same thing seen twice, and the one
+    /// stated later is the better answer.
+    pub fn merge(parts: &[MapSnapshot]) -> MapSnapshot {
+        let epoch_s = parts.iter().map(|p| p.epoch_s).fold(f64::NEG_INFINITY, f64::max);
+        let mut items: Vec<MapItem> = Vec::new();
+        let mut epochs: Vec<f64> = Vec::new();
+        for part in parts {
+            for item in &part.items {
+                match items.iter().position(|held| held.key == item.key) {
+                    Some(i) if epochs[i] >= part.epoch_s => {}
+                    Some(i) => {
+                        items[i] = item.clone();
+                        epochs[i] = part.epoch_s;
+                    }
+                    None => {
+                        items.push(item.clone());
+                        epochs.push(part.epoch_s);
+                    }
+                }
+            }
+        }
+        MapSnapshot::new(if epoch_s.is_finite() { epoch_s } else { 0.0 },
+            Provenance::Aggregate, items)
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    pub(crate) fn item(key: u64, at: DVec3) -> MapItem {
+        MapItem::body(ItemKey(key), format!("body {key}"), ItemKind::Planet, at, 6.4e6, DVec3::Z)
+    }
+
+    #[test]
+    fn merging_keeps_the_newest_statement_of_a_thing() {
+        let old = MapSnapshot::observed(100.0, vec![item(7, DVec3::X)]);
+        let new = MapSnapshot::observed(200.0, vec![item(7, DVec3::Y)]);
+
+        // Either order, because a fold that depended on the argument order would be a fold
+        // that gave two answers.
+        for parts in [vec![old.clone(), new.clone()], vec![new.clone(), old.clone()]] {
+            let merged = MapSnapshot::merge(&parts);
+            assert_eq!(merged.items.len(), 1, "one thing seen twice is one thing");
+            assert_eq!(merged.items[0].position_ly, DVec3::Y, "the older statement won");
+            assert_eq!(merged.epoch_s, 200.0);
+            assert_eq!(merged.provenance, Provenance::Aggregate);
+        }
+    }
+
+    #[test]
+    fn merging_is_a_union_over_keys() {
+        let a = MapSnapshot::observed(1.0, vec![item(1, DVec3::X), item(2, DVec3::Y)]);
+        let b = MapSnapshot::observed(1.0, vec![item(2, DVec3::Y), item(3, DVec3::Z)]);
+        let merged = MapSnapshot::merge(&[a, b]);
+        let mut keys: Vec<u64> = merged.items.iter().map(|i| i.key.0).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, vec![1, 2, 3]);
+    }
+
+    /// Nothing at all is a snapshot too — a ship between systems has one.
+    #[test]
+    fn an_empty_merge_is_not_infinite() {
+        let merged = MapSnapshot::merge(&[]);
+        assert!(merged.items.is_empty());
+        assert_eq!(merged.epoch_s, 0.0);
+        let (near, far) = merged.extent_m(DVec3::ZERO);
+        assert!(near.is_finite() && far.is_finite(), "{near} {far}");
+    }
+
+    /// A belt centred on the focus still has an extent, because it is drawn out to its edge.
+    /// Without that, framing a system on its star frames it on nothing.
+    #[test]
+    fn an_annulus_sets_the_extent_from_its_edge() {
+        let belt = MapItem::annulus(ItemKey(1), "belt", DVec3::ZERO, DVec3::Z, 3.0e11, 5.0e11);
+        let snapshot = MapSnapshot::observed(0.0, vec![belt]);
+        let (near, far) = snapshot.extent_m(DVec3::ZERO);
+        assert_eq!(near, 0.0);
+        assert_eq!(far, 5.0e11);
+    }
+
+    /// The digest, not merely self-consistency.
+    ///
+    /// `em_sim::BodyId::from_name` is FNV-1a with the same basis and prime, so a body and its
+    /// map item key alike without either crate importing the other — and pinning the value is
+    /// what makes that a fact rather than a hope. A test that only compared this function to
+    /// itself would pass with any hash at all.
+    #[test]
+    fn a_key_is_the_digest_a_body_id_is() {
+        assert_eq!(ItemKey::from_name("Saturn"), ItemKey(0x2600_67d6_a62b_3a76));
+        assert_eq!(ItemKey::from_name("Titan"), ItemKey(0x9a1c_f7d2_7e55_c2f9));
+        assert_eq!(ItemKey::from_name(""), ItemKey(0xcbf2_9ce4_8422_2325), "the bare basis");
+    }
+}
