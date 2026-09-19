@@ -12,6 +12,8 @@ natively `linux/amd64`. Ports 3000–3999 are this project's; 3000 belongs to an
 | `lightcone-web` | 3100 | the site |
 | `lightcone-cdn` | 3101 | game builds |
 | `lightcone-db` | 3102 | the site's PostgreSQL |
+| `lightcone-identity` | 3200 | the identity broker |
+| `lightcone-admin` | 3300 | the administration console |
 
 They share a docker network called `lightcone` and address each other by container name. The
 published ports are for debugging; the addresses that matter are:
@@ -483,28 +485,64 @@ rand() { head -c 32 /dev/urandom | base64 | tr -d '\n=' | tr '+/' '-_'; }
 # identity.env      — DATABASE_URL, LC_IDENTITY_* (see config.rs for the full list)
 # site-identity.env — LC_IDENTITY_BASE, LC_IDENTITY_API, LC_IDENTITY_SECRET,
 #                     SITE_SESSION_KEY, LC_SHARD, LC_SHARD_URL
+# admin.env         — DATABASE_URL (the *broker's*), LC_ADMIN_* (see lc-admin/src/config.rs)
 ```
 
-`LC_IDENTITY_EXCHANGE_SECRET` on the broker and `LC_IDENTITY_SECRET` on the site are the **same
-value**. `LC_IDENTITY_SIGNING_SEED` must be set, or every restart publishes a new key and every
-ticket minted before it stops verifying.
+`LC_IDENTITY_EXCHANGE_SECRET` on the broker, `LC_IDENTITY_SECRET` on the site and
+`LC_ADMIN_IDENTITY_SECRET` on the console are the **same value**. `LC_IDENTITY_SIGNING_SEED`
+must be set, or every restart publishes a new key and every ticket minted before it stops
+verifying.
 
-Its own role and database, like the site's:
+Two things about the console are easy to get wrong and fail late rather than at boot:
+
+- `LC_ADMIN_PUBLIC_URL` builds its return URL, and that URL must appear **verbatim** in the
+  broker's `LC_IDENTITY_RETURN_TO`. Missing from the allowlist, it fails at the *end* of a
+  sign-in rather than at the start. The console logs the return URL it will use on startup so
+  the two can be compared without guessing.
+- `LC_ADMIN_SESSION_KEY` is its own secret, not the site's, and must be at least 32 characters
+  — refused at boot if it is shorter, because a forgeable cookie here is an administrator
+  account.
+
+Its own role and database, like the site's. **The console shares them** — it reads and writes
+the broker's tables and owns no schema of its own, so it gets the same `DATABASE_URL`:
 
 ```sql
 CREATE ROLE lc_identity LOGIN PASSWORD '...';
 CREATE DATABASE lc_identity OWNER lc_identity;
 ```
 
+### The first administrator
+
+`0003_permissions.sql` promoted one account by address, once, against data that existed. After
+that, levels are handed out from the console — and the console needs somebody to be an
+administrator before anyone can reach it, which is the chicken and egg. Break it by hand:
+
+```sql
+UPDATE accounts SET permission = 1 WHERE id = (
+  SELECT account_id FROM links WHERE email = '...' LIMIT 1);
+```
+
+This is also the only way to **remove** an owner. That is deliberate, not an oversight: nobody
+outranks a level 1, so the one irreversible administrative act is not reachable from a web
+page. See [16-identity.md](16-identity.md).
+
 ```bash
 docker --context rocinante build -f auth/Dockerfile -t lightcone-identity:<tag> auth
+# Same build context, different Dockerfile: the console shares the broker's workspace and
+# lockfile, and adds a node stage that compiles its TypeScript.
+docker --context rocinante build -f auth/Dockerfile.admin -t lightcone-admin:<tag> auth
 docker --context rocinante build -f crates/lc-server/Dockerfile -t lightcone-shard:<tag> .
 
 # Over ssh, because --env-file is read by the CLI you invoke and that file is on rocinante.
 ssh zandy@rocinante.local '
   docker rm -f lightcone-identity 2>/dev/null
   docker run -d --name lightcone-identity --restart unless-stopped --network lightcone \
-      --env-file ~/.config/lightcone/identity.env lightcone-identity:<tag>'
+      --env-file ~/.config/lightcone/identity.env lightcone-identity:<tag>
+  # After the broker, always: the console does not migrate, so it needs the schema the
+  # broker applies at its own boot to be there already.
+  docker rm -f lightcone-admin 2>/dev/null
+  docker run -d --name lightcone-admin --restart unless-stopped --network lightcone \
+      --env-file ~/.config/lightcone/admin.env lightcone-admin:<tag>'
 
 docker --context rocinante run -d --name lightcone-shard --restart unless-stopped \
     --network lightcone --env-file ~/.config/lightcone/shard.env lightcone-shard:<tag> \

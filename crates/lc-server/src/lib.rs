@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod ability;
 pub mod chase;
 pub mod director;
 pub mod drive;

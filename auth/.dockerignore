@@ -3,4 +3,10 @@
 # directory is uploaded to the docker host over ssh before the build starts.
 target
 Dockerfile
+Dockerfile.admin
 .dockerignore
+# The console's node_modules and its compiled bundle. Both are produced inside the image, by
+# the `ui` stage; shipping a laptop's copy of either would make the build depend on whatever
+# was last run locally.
+lc-admin/node_modules
+lc-admin/static/js

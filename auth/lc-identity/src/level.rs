@@ -1,0 +1,164 @@
+//! Where an account stands.
+//!
+//! **Lower is higher.** 0 is a player, and 1, 2 and 3 are administrators with 1 the most
+//! senior. The database stores the integer; nothing above it compares two of them with `<`,
+//! because the comparison that reads correctly is the one that is wrong. [`Level::outranks`]
+//! is the only ordering this type offers, and it is named after what it means rather than
+//! after which way the integers happen to run.
+//!
+//! There is deliberately no `Ord`. A derived one would sort a list of administrators from most
+//! junior to most senior while reading as though it did the opposite, and `a > b` would be a
+//! compiling, plausible, wrong authorisation check. Ordering for display is SQL's job.
+
+use std::fmt;
+
+/// An account's permission level.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Level(i32);
+
+impl Level {
+    /// Everybody. Plays the game and administers nothing.
+    pub const PLAYER: Level = Level(0);
+    /// The most senior. May act on every other level and, by the rules in [`crate::ability`],
+    /// may not be demoted by anyone — including another owner. See that module for why that
+    /// is the rule rather than an oversight.
+    pub const OWNER: Level = Level(1);
+    pub const ADMIN: Level = Level(2);
+    pub const MODERATOR: Level = Level(3);
+
+    /// Every level that administers something, most senior first. The order a picker offers.
+    pub const ADMINISTRATIVE: [Level; 3] = [Level::OWNER, Level::ADMIN, Level::MODERATOR];
+    /// And every level at all, for a filter that wants to name them.
+    pub const ALL: [Level; 4] = [Level::PLAYER, Level::OWNER, Level::ADMIN, Level::MODERATOR];
+
+    /// What the database holds. Anything outside the range is read as a player.
+    ///
+    /// A check constraint makes that unreachable through this application, so this is about
+    /// the row somebody edits by hand at three in the morning: an unrecognised level granting
+    /// nothing is the direction the failure should point.
+    pub fn from_stored(raw: i32) -> Level {
+        match raw {
+            1..=3 => Level(raw),
+            _ => Level::PLAYER,
+        }
+    }
+
+    pub fn as_i32(self) -> i32 {
+        self.0
+    }
+
+    pub fn is_admin(self) -> bool {
+        self.0 != 0
+    }
+
+    /// Whether `self` is strictly more senior than `other`.
+    ///
+    /// A player outranks nobody, including another player.
+    pub fn outranks(self, other: Level) -> bool {
+        self.is_admin() && (!other.is_admin() || self.0 < other.0)
+    }
+
+    /// Whether `self` is at least as senior as `other`, which for two administrators is the
+    /// test "may I hand out this level".
+    pub fn at_least(self, other: Level) -> bool {
+        self == other || self.outranks(other)
+    }
+
+    pub fn name(self) -> &'static str {
+        match self.0 {
+            1 => "Owner",
+            2 => "Administrator",
+            3 => "Moderator",
+            _ => "Player",
+        }
+    }
+
+    /// What a URL parameter calls it. Stable across a rename of [`Level::name`], which is why
+    /// the two are separate functions over the same match.
+    pub fn slug(self) -> &'static str {
+        match self.0 {
+            1 => "owner",
+            2 => "admin",
+            3 => "moderator",
+            _ => "player",
+        }
+    }
+
+    pub fn from_slug(slug: &str) -> Option<Level> {
+        Level::ALL.into_iter().find(|l| l.slug() == slug)
+    }
+}
+
+impl fmt::Display for Level {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seniority_runs_opposite_to_the_integer() {
+        assert!(Level::OWNER.outranks(Level::ADMIN));
+        assert!(Level::ADMIN.outranks(Level::MODERATOR));
+        assert!(Level::MODERATOR.outranks(Level::PLAYER));
+        assert!(Level::OWNER.outranks(Level::PLAYER));
+
+        assert!(!Level::ADMIN.outranks(Level::OWNER));
+        assert!(!Level::PLAYER.outranks(Level::MODERATOR));
+        // And the integers really do run the other way, which is the whole reason this type
+        // exists. If this ever fails the constants were renumbered and every call site that
+        // reads `outranks` now means something else.
+        assert!(Level::OWNER.as_i32() < Level::ADMIN.as_i32());
+    }
+
+    /// Nobody outranks themselves, at any level. The promote and demote rules both lean on
+    /// this: it is what stops an administrator acting on their own account by a path that
+    /// looks like acting on somebody else's.
+    #[test]
+    fn nobody_outranks_an_equal() {
+        for level in Level::ALL {
+            assert!(!level.outranks(level), "{level} outranked itself");
+            assert!(level.at_least(level));
+        }
+    }
+
+    /// A player is not a junior administrator. `0` is outside the ladder rather than at the
+    /// bottom of it, and `outranks` has to say so in both directions.
+    #[test]
+    fn a_player_is_not_on_the_ladder() {
+        assert!(!Level::PLAYER.is_admin());
+        assert!(!Level::PLAYER.outranks(Level::PLAYER));
+        assert!(!Level::PLAYER.at_least(Level::MODERATOR));
+        for admin in Level::ADMINISTRATIVE {
+            assert!(admin.is_admin());
+            assert!(admin.outranks(Level::PLAYER));
+            assert!(!Level::PLAYER.outranks(admin));
+        }
+    }
+
+    #[test]
+    fn an_unrecognised_level_grants_nothing() {
+        for raw in [-1, 4, 99, i32::MIN, i32::MAX] {
+            assert_eq!(Level::from_stored(raw), Level::PLAYER, "{raw} was admitted");
+        }
+        for level in Level::ALL {
+            assert_eq!(Level::from_stored(level.as_i32()), level);
+        }
+    }
+
+    #[test]
+    fn slugs_round_trip_and_are_distinct() {
+        for level in Level::ALL {
+            assert_eq!(Level::from_slug(level.slug()), Some(level));
+        }
+        assert_eq!(Level::from_slug("root"), None);
+        assert_eq!(Level::from_slug(""), None);
+        let mut slugs: Vec<&str> = Level::ALL.iter().map(|l| l.slug()).collect();
+        slugs.sort_unstable();
+        slugs.dedup();
+        assert_eq!(slugs.len(), Level::ALL.len(), "two levels share a slug");
+    }
+}

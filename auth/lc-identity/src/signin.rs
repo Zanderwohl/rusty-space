@@ -9,6 +9,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use crate::bans::Sanction;
 use crate::password;
 use crate::providers::Provider;
 use crate::store::{Link, Store, StoreError, normalise_email};
@@ -36,6 +37,9 @@ pub enum Refused {
     BadCredentials,
     Unacceptable(password::Unacceptable),
     Taken,
+    /// The account is banned. Carries what the person is told: how many bans are in force
+    /// and when the last of them ends. See [`admitted`].
+    Banned(Sanction),
     /// The player said no at the provider's consent screen. Not a failure — the one refusal
     /// here that is somebody exercising a choice.
     Declined,
@@ -97,6 +101,50 @@ pub fn mint_code() -> (String, Vec<u8>) {
 
 pub fn digest_of(code: &str) -> Vec<u8> {
     Sha256::digest(code.as_bytes()).to_vec()
+}
+
+/// Whether this account may sign in at all.
+///
+/// **The one place a ban is enforced**, and it is called on every path that turns an account
+/// id into something a person can use: both password forms, the end of an upstream dance, the
+/// code exchange the site makes, and ticket minting. Enforcing it at the last of those matters
+/// as much as at the first — a site session is a fortnight long, so a ban issued to somebody
+/// already signed in would otherwise not reach them until it had expired.
+///
+/// A store failure is *not* a refusal. A database that cannot be reached must not lock every
+/// account out of the game; it is reported as a backend error and the sign-in fails the way
+/// any other outage does.
+pub async fn admitted(
+    store: &Store,
+    account_id: Uuid,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(), Refused> {
+    match store.sanction(account_id, now).await? {
+        Some(sanction) => Err(Refused::Banned(sanction)),
+        None => Ok(()),
+    }
+}
+
+/// How long a banned person is told to wait, as a sentence.
+///
+/// Rounded up to the coarsest unit that still reads honestly: somebody told "about 2 months"
+/// does not come back in eight weeks and find four hours left. An exact timestamp is shown
+/// beside it, because a person who wants the minute should have it.
+pub fn how_long(sanction: &Sanction, now: chrono::DateTime<chrono::Utc>) -> String {
+    let Some(until) = sanction.until else {
+        return "This ban does not expire.".to_owned();
+    };
+    let left = until - now;
+    let said = if left.num_hours() < 1 {
+        format!("{} minutes", left.num_minutes().max(1))
+    } else if left.num_days() < 1 {
+        format!("{} hours", left.num_hours())
+    } else if left.num_days() < 60 {
+        format!("{} days", left.num_days())
+    } else {
+        format!("about {} months", left.num_days() / 30)
+    };
+    format!("It ends in {said}.")
 }
 
 /// Sign in with a password.

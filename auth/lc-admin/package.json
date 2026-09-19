@@ -1,0 +1,19 @@
+{
+  "name": "lc-admin-ui",
+  "private": true,
+  "version": "0.1.0",
+  "description": "The small amount of TypeScript the Lightcone administration console needs.",
+  "type": "module",
+  "scripts": {
+    "build": "npm run check && npm run bundle",
+    "check": "tsc --noEmit",
+    "bundle": "esbuild ts/admin.ts --bundle --format=esm --minify --target=es2022 --outfile=static/js/admin.js",
+    "watch": "esbuild ts/admin.ts --bundle --format=esm --target=es2022 --outfile=static/js/admin.js --watch",
+    "vendor": "cp node_modules/htmx.org/dist/htmx.min.js static/vendor/htmx.min.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "htmx.org": "4.0.0",
+    "typescript": "^5.7.0"
+  }
+}

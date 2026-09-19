@@ -1,0 +1,296 @@
+//! Reading accounts: the index query, and everything one user page needs.
+//!
+//! **Paging happens in the database.** The index asks for one page of rows and the total in a
+//! single statement — `limit`/`offset` for the rows, a `count(*) over ()` window for the
+//! total, which PostgreSQL computes after the filters and before the limit. Fetching the
+//! accounts table and slicing it in Rust would work today and stop working silently, at some
+//! account count nobody is watching for, by getting gradually slower rather than by failing.
+
+use chrono::{DateTime, Utc};
+use lc_identity::level::Level;
+use sqlx::PgPool;
+use uuid::Uuid;
+
+use crate::listing::{Listing, Rank, Standing};
+
+/// One line of the index.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Row {
+    pub id: Uuid,
+    pub display_name: String,
+    pub level: Level,
+    pub created_at: DateTime<Utc>,
+    /// One address, for recognising the account. Not every address it has: the index is a
+    /// list to find somebody in, and the user page is where the links are enumerated.
+    pub email: Option<String>,
+    /// Which ways of signing in this account has, by name.
+    pub providers: Vec<String>,
+    /// How many bans are in force right now.
+    pub in_force: i64,
+    pub permanent: bool,
+    /// The furthest expiry among them. `None` with `in_force > 0` and `permanent` means there
+    /// is a ban that does not end — see [`lc_identity::bans::Sanction`], which this mirrors.
+    pub until: Option<DateTime<Utc>>,
+}
+
+impl Row {
+    pub fn is_banned(&self) -> bool {
+        self.in_force > 0
+    }
+}
+
+/// One page of the index, and what it took to get here.
+#[derive(Clone, Debug)]
+pub struct Page {
+    pub rows: Vec<Row>,
+    /// Matching rows across every page, not the length of [`Page::rows`].
+    pub total: i64,
+    pub listing: Listing,
+}
+
+impl Page {
+    /// How many pages the filters produce. At least one, so an empty result still has a
+    /// page 1 to be on rather than a pager counting to zero.
+    pub fn pages(&self) -> u32 {
+        let per = i64::from(self.listing.per);
+        (((self.total + per - 1) / per).max(1)) as u32
+    }
+
+    /// The one-based index of the first row shown, for "showing 26–50 of 312".
+    pub fn first(&self) -> i64 {
+        if self.rows.is_empty() {
+            0
+        } else {
+            self.listing.offset() + 1
+        }
+    }
+
+    pub fn last(&self) -> i64 {
+        self.listing.offset() + self.rows.len() as i64
+    }
+}
+
+/// The shape every column of the index query comes back as.
+type IndexRow = (
+    Uuid,
+    String,
+    i32,
+    DateTime<Utc>,
+    Option<String>,
+    String,
+    i64,
+    bool,
+    Option<DateTime<Utc>>,
+    i64,
+);
+
+/// A `like` pattern that matches the term anywhere and treats its wildcards as text.
+///
+/// Without the escaping, a person searching for `100%` matches every account, and one
+/// searching for `_` matches every account with a name at all. The backslash is doubled first
+/// or escaping the wildcards would itself be escapable.
+fn contains(term: &str) -> String {
+    let escaped = term
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    format!("%{escaped}%")
+}
+
+/// One page of accounts.
+///
+/// Every filter is a bound parameter that is either null or a value, so this is **one static
+/// statement** whatever the filters are — only `order by` is assembled, and it is assembled
+/// from [`Listing::order_by`], which reads enums rather than request text.
+///
+/// The `($n is null or ...)` shape keeps that single statement at the price of a plan the
+/// planner cannot specialise per filter. That is the right trade at this table's size, where
+/// the whole thing fits in memory several times over; the search is `ilike` against two
+/// columns and would need a trigram index long before any of the equality filters became the
+/// expensive part.
+pub async fn page(pool: &PgPool, listing: &Listing, now: DateTime<Utc>) -> sqlx::Result<Page> {
+    let search = (!listing.q.is_empty()).then(|| contains(&listing.q));
+    let exactly = match listing.rank {
+        Rank::Exactly(level) => Some(level.as_i32()),
+        _ => None,
+    };
+    let administrators = matches!(listing.rank, Rank::Administrators);
+    let banned = match listing.standing {
+        Standing::Any => None,
+        Standing::Banned => Some(true),
+        Standing::Clear => Some(false),
+    };
+
+    let sql = format!(
+        "select a.id, \
+                a.display_name, \
+                a.permission, \
+                a.created_at, \
+                (select min(l.email) from links l \
+                  where l.account_id = a.id and l.email is not null) as email, \
+                coalesce((select string_agg(distinct l.provider, ',' order by l.provider) \
+                            from links l where l.account_id = a.id), '') as providers, \
+                live.in_force, \
+                live.permanent, \
+                live.until, \
+                count(*) over () as total \
+         from accounts a \
+         left join lateral ( \
+             select count(*) as in_force, \
+                    coalesce(bool_or(b.expires_at is null), false) as permanent, \
+                    max(b.expires_at) as until \
+             from bans b \
+             where b.account_id = a.id \
+               and b.lifted_at is null \
+               and (b.expires_at is null or b.expires_at > $1) \
+         ) live on true \
+         where ($2::text is null \
+                 or a.display_name ilike $2 escape '\\' \
+                 or exists (select 1 from links l \
+                             where l.account_id = a.id and l.email ilike $2 escape '\\')) \
+           and ($3::int is null or a.permission = $3) \
+           and (not $4::bool or a.permission > 0) \
+           and ($5::bool is null or (live.in_force > 0) = $5) \
+         {} \
+         limit $6 offset $7",
+        listing.order_by(),
+    );
+
+    let rows: Vec<IndexRow> = sqlx::query_as(&sql)
+        .bind(now)
+        .bind(search)
+        .bind(exactly)
+        .bind(administrators)
+        .bind(banned)
+        .bind(i64::from(listing.per))
+        .bind(listing.offset())
+        .fetch_all(pool)
+        .await?;
+
+    // Zero rows is zero rows, not zero accounts: the window function comes back with the
+    // rows, so an empty page carries no total and the count has to be read as such. A page
+    // past the end is the ordinary way to get here.
+    let total = rows.first().map_or(0, |r| r.9);
+    Ok(Page {
+        rows: rows
+            .into_iter()
+            .map(|r| Row {
+                id: r.0,
+                display_name: r.1,
+                level: Level::from_stored(r.2),
+                created_at: r.3,
+                email: r.4,
+                providers: r.5.split(',').filter(|s| !s.is_empty()).map(str::to_owned).collect(),
+                in_force: r.6,
+                permanent: r.7,
+                until: r.8,
+            })
+            .collect(),
+        total,
+        listing: listing.clone(),
+    })
+}
+
+/// A page past the end reports a total of zero because no row carried one. Ask again.
+///
+/// Only when the page is empty and is not the first, which is the one case where "no accounts
+/// match" and "you have paged past the end" are different answers and the interface has to
+/// tell them apart.
+pub async fn total_matching(
+    pool: &PgPool,
+    listing: &Listing,
+    now: DateTime<Utc>,
+) -> sqlx::Result<i64> {
+    let search = (!listing.q.is_empty()).then(|| contains(&listing.q));
+    let exactly = match listing.rank {
+        Rank::Exactly(level) => Some(level.as_i32()),
+        _ => None,
+    };
+    let administrators = matches!(listing.rank, Rank::Administrators);
+    let banned = match listing.standing {
+        Standing::Any => None,
+        Standing::Banned => Some(true),
+        Standing::Clear => Some(false),
+    };
+    let (total,): (i64,) = sqlx::query_as(
+        "select count(*) from accounts a \
+         left join lateral ( \
+             select count(*) as in_force from bans b \
+             where b.account_id = a.id and b.lifted_at is null \
+               and (b.expires_at is null or b.expires_at > $1) \
+         ) live on true \
+         where ($2::text is null \
+                 or a.display_name ilike $2 escape '\\' \
+                 or exists (select 1 from links l \
+                             where l.account_id = a.id and l.email ilike $2 escape '\\')) \
+           and ($3::int is null or a.permission = $3) \
+           and (not $4::bool or a.permission > 0) \
+           and ($5::bool is null or (live.in_force > 0) = $5)",
+    )
+    .bind(now)
+    .bind(search)
+    .bind(exactly)
+    .bind(administrators)
+    .bind(banned)
+    .fetch_one(pool)
+    .await?;
+    Ok(total)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::listing::DEFAULT_PER;
+
+    fn page_of(total: i64, rows: usize, listing: Listing) -> Page {
+        Page {
+            rows: (0..rows)
+                .map(|n| Row {
+                    id: Uuid::new_v4(),
+                    display_name: format!("account {n}"),
+                    level: Level::PLAYER,
+                    created_at: Utc::now(),
+                    email: None,
+                    providers: Vec::new(),
+                    in_force: 0,
+                    permanent: false,
+                    until: None,
+                })
+                .collect(),
+            total,
+            listing,
+        }
+    }
+
+    #[test]
+    fn a_wildcard_in_a_search_is_searched_for_rather_than_obeyed() {
+        assert_eq!(contains("100%"), "%100\\%%");
+        assert_eq!(contains("a_b"), "%a\\_b%");
+        assert_eq!(contains("ada"), "%ada%");
+        // The escape character itself, or the escaping would be escapable.
+        assert_eq!(contains("a\\%b"), "%a\\\\\\%b%");
+    }
+
+    #[test]
+    fn the_pager_counts_whole_pages_and_never_zero_of_them() {
+        let listing = Listing::default();
+        assert_eq!(page_of(0, 0, listing.clone()).pages(), 1);
+        assert_eq!(page_of(1, 1, listing.clone()).pages(), 1);
+        assert_eq!(page_of(i64::from(DEFAULT_PER), 25, listing.clone()).pages(), 1);
+        assert_eq!(
+            page_of(i64::from(DEFAULT_PER) + 1, 25, listing.clone()).pages(),
+            2,
+        );
+        assert_eq!(page_of(312, 25, listing).pages(), 13);
+    }
+
+    #[test]
+    fn the_range_shown_counts_from_the_offset() {
+        let listing = Listing::default();
+        let second = page_of(312, 25, listing.at_page(2));
+        assert_eq!(second.first(), 26);
+        assert_eq!(second.last(), 50);
+        // An empty page has no first row rather than a first row of one.
+        assert_eq!(page_of(0, 0, listing).first(), 0);
+    }
+}

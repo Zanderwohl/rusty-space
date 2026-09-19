@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use uuid::Uuid;
 
+use crate::level::Level;
 use crate::providers::Provider;
 
 /// An account as anything outside the broker sees it: an opaque id, a name, and what it may do.
@@ -16,12 +17,21 @@ use crate::providers::Provider;
 pub struct Account {
     pub id: Uuid,
     pub display_name: String,
-    /// [`PLAYER`] or [`ADMIN`]. An integer because it will grow into levels.
+    /// The raw column. Read it as a [`Level`], which carries the ordering — the integers run
+    /// the opposite way to seniority and comparing two of them directly is the mistake that
+    /// type exists to prevent.
     pub permission: i32,
 }
 
+impl Account {
+    pub fn level(&self) -> Level {
+        Level::from_stored(self.permission)
+    }
+}
+
+/// A player, kept as a name for the callers that were written before levels existed.
 pub const PLAYER: i32 = 0;
-/// May issue development actions on a game server.
+/// The most senior administrator. See [`Level`]: 1 is the *top* of the ladder, not the bottom.
 pub const ADMIN: i32 = 1;
 
 /// One way of signing in to one account.
@@ -62,19 +72,23 @@ impl std::fmt::Display for StoreError {
 impl std::error::Error for StoreError {}
 
 #[derive(Clone, Default)]
-struct Tables {
-    accounts: HashMap<Uuid, Account>,
-    links: HashMap<(Provider, String), Link>,
-    secrets: HashMap<(Provider, String), String>,
-    codes: HashMap<Vec<u8>, (Uuid, String, chrono::DateTime<chrono::Utc>)>,
-    grants: HashMap<Vec<u8>, (Uuid, chrono::DateTime<chrono::Utc>)>,
-    flows: HashMap<Vec<u8>, Flow>,
+pub(crate) struct Tables {
+    pub(crate) accounts: HashMap<Uuid, Account>,
+    pub(crate) links: HashMap<(Provider, String), Link>,
+    pub(crate) secrets: HashMap<(Provider, String), String>,
+    pub(crate) codes: HashMap<Vec<u8>, (Uuid, String, chrono::DateTime<chrono::Utc>)>,
+    pub(crate) grants: HashMap<Vec<u8>, (Uuid, chrono::DateTime<chrono::Utc>)>,
+    pub(crate) flows: HashMap<Vec<u8>, Flow>,
+    /// A list rather than a map by account: bans are served concurrently, so an account has
+    /// however many of these it has. See [`crate::bans`].
+    pub(crate) bans: Vec<crate::bans::Ban>,
+    pub(crate) actions: Vec<crate::actions::Entry>,
 }
 
 /// Accounts in memory, for tests. Every rule the schema enforces is enforced here too, or a
 /// test proves something the database would not allow.
 #[derive(Clone, Default)]
-pub struct Memory(Arc<Mutex<Tables>>);
+pub struct Memory(pub(crate) Arc<Mutex<Tables>>);
 
 #[derive(Clone)]
 pub enum Store {
@@ -173,8 +187,11 @@ impl Store {
         }
     }
 
-    /// Set what an account may do. Nothing in the broker calls this: permissions are granted by
-    /// migration or by hand, and this exists so a test can make an admin.
+    /// Set what an account may do.
+    ///
+    /// Unconditional: every rule about who may set what lives in [`crate::ability`], and this
+    /// is the write that happens once a caller has been through it. The administration site
+    /// is the caller; the broker itself never promotes anyone.
     pub async fn set_permission(&self, id: Uuid, permission: i32) -> Result<(), StoreError> {
         match self {
             Store::Memory(m) => {

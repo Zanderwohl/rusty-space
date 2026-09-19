@@ -33,9 +33,6 @@ pub struct Claims {
     pub perm: i32,
 }
 
-/// A [`Claims::perm`] that may issue development actions, such as granting energy.
-pub const ADMIN: i32 = 1;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rejected {
     /// Signature, audience, expiry, or an unknown key. **One variant on purpose** — telling a

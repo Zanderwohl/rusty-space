@@ -1,0 +1,13 @@
+// The administration console's sheet.
+//
+// `_tokens.scss` is the site's, byte for byte — `lc_admin::assets::tests` compares them, and
+// the answer to a failure is to copy the site's over this one rather than to edit either.
+// Everything this console needs and the site does not goes in `_base.scss` below it.
+//
+// Semantic classes throughout, as the site has it: a class names what a thing *is*. There are
+// more of them here than on the site because a console is an interface rather than a document,
+// and nothing in it renders from markdown.
+@use "tokens";
+@use "base";
+@use "index";
+@use "user";

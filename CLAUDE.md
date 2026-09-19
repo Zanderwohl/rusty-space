@@ -17,6 +17,10 @@ someone a day. This file is the conventions.
 The app is the workspace **root** package, so `assets/` resolves against `CARGO_MANIFEST_DIR`
 as Bevy's default `AssetPlugin` expects.
 
+`auth/` is a separate cargo workspace too, holding the two services that are neither product:
+`lc-identity`, the identity broker, and `lc-admin`, the administration console over its
+database. `lightcone/docs/16-identity.md` is both of them.
+
 `web/` is **a separate cargo workspace** with its own lockfile, and is not a member of this
 one — so `cargo test --workspace` does not reach it and `cargo update` here does not touch it.
 That is deliberate: the site shares no code with either product, and a second lockfile is what

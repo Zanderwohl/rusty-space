@@ -1,0 +1,49 @@
+# The administration console. Built on the `rocinante` context, from the same `auth` build
+# context the broker uses, because the two share a cargo workspace and a lockfile.
+#
+#   docker --context rocinante build -f auth/Dockerfile.admin -t lightcone-admin:<tag> auth
+#
+# Two toolchains, and that is the whole reason this file is not the broker's. The console has a
+# small TypeScript module; it is compiled here, by `tsc` for the types and `esbuild` for the
+# bundle, in a stage of its own. Nothing about the Rust build knows that node exists.
+
+FROM node:22-slim AS ui
+WORKDIR /ui
+# The manifests alone first, so a change to a `.ts` file does not reinstall node_modules.
+COPY lc-admin/package.json lc-admin/package-lock.json ./
+RUN npm ci
+COPY lc-admin/tsconfig.json ./
+COPY lc-admin/ts ./ts
+# `npm run build` is `tsc --noEmit && esbuild`. The typecheck is the point of the first half:
+# a type error here fails the image rather than reaching a browser as a runtime one.
+RUN npm run bundle && npm run check
+
+FROM rust:1-bookworm AS chef
+WORKDIR /build
+RUN cargo install cargo-chef --locked
+
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+COPY --from=planner /build/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+COPY . .
+RUN cargo build --release --bin lc-admin
+
+FROM gcr.io/distroless/cc-debian12
+WORKDIR /app
+COPY --from=builder /build/target/release/lc-admin /app/lc-admin
+# Unlike the broker, this image ships a `static/` tree. The stylesheet is compiled at boot
+# beside a script that was compiled by a different toolchain in a different stage — see
+# `lc_admin::assets` for why one answer to "where do assets come from" is worth the read.
+COPY lc-admin/static /app/static
+COPY --from=ui /ui/static/js/admin.js /app/static/js/admin.js
+# **No migrations.** `lc-identity` owns the schema and applies it at its own boot; this
+# service reads and writes tables it did not create. See `lc_admin`'s crate documentation.
+ENV BIND_ADDR=0.0.0.0:3300
+ENV LC_ADMIN_STATIC_DIR=/app/static
+EXPOSE 3300
+USER nonroot
+ENTRYPOINT ["/app/lc-admin"]

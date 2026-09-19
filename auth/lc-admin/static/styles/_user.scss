@@ -1,0 +1,161 @@
+// One account's page: the header, the two controls, and the panels of record.
+
+.person {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.person-badges {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.person-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin: 0;
+  font-size: var(--step--1);
+  color: var(--ink-dim);
+
+  dt {
+    &::after {
+      content: ":";
+    }
+  }
+
+  dd {
+    margin: 0;
+  }
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: var(--space-3);
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--ground-raised);
+}
+
+.act {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  // The notes want the whole row to themselves; everything else sits on one line.
+  .field-wide {
+    flex: 1 0 100%;
+  }
+
+  label {
+    font-size: var(--step--1);
+    color: var(--ink-dim);
+  }
+}
+
+.act-inline {
+  display: flex;
+  gap: var(--space-1);
+
+  input {
+    inline-size: 9rem;
+  }
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.records {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--step--1);
+
+  th,
+  td {
+    text-align: start;
+    vertical-align: top;
+    padding: var(--space-2);
+    border-block-end: 1px solid var(--rule);
+  }
+
+  thead th {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-dim);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  // A ban that is over is still on the page, and has to read as over at a glance.
+  .ban-expired,
+  .ban-lifted,
+  .lapsed {
+    color: var(--ink-dim);
+  }
+}
+
+.cell-notes {
+  max-inline-size: 26rem;
+
+  p + p {
+    margin-block-start: var(--space-1);
+  }
+}
+
+.lift-notes {
+  color: var(--ink-dim);
+}
+
+.by,
+.left {
+  display: block;
+  color: var(--ink-dim);
+}
+
+.subject {
+  word-break: break-all;
+}
+
+.log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--step--1);
+
+  li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-1) 0;
+    border-block-end: 1px solid var(--rule);
+  }
+}
+
+.log-when,
+.log-who {
+  color: var(--ink-dim);
+}
+
+.log-what {
+  font-weight: 600;
+}

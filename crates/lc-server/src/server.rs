@@ -62,8 +62,9 @@ pub struct Connected {
     /// contact and stops hearing about it must be told; one that has never had any needs no
     /// message twenty times a second to say so again.
     pub had_contacts: bool,
-    /// What the account may do beyond playing, from its ticket. See [`crate::ticket::ADMIN`].
-    pub permission: i32,
+    /// What the account may do beyond playing, read from its ticket. See [`crate::ability`],
+    /// which is where every rule about it lives; nothing compares these directly.
+    pub permission: crate::ability::Level,
     /// Whether this connection has been handed the ship's transcript yet.
     ///
     /// Sent from the tick rather than from the sign-in, because reading it is a query and a
@@ -280,11 +281,45 @@ impl<J: Journal> Server<J> {
         self.clients.get(&client).map(|state| CraftId(state.ship.0))
     }
 
-    /// Whether a connection may issue development actions: anyone, on a server that directs,
-    /// and an admin's ticket anywhere.
-    pub(crate) fn may_develop(&self, client: ClientId) -> bool {
-        self.directs
-            || self.clients.get(&client).is_some_and(|c| c.permission >= crate::ticket::ADMIN)
+    /// Whether `client` may do `act`, given what it stands in relation to its own craft.
+    ///
+    /// The single door on to [`crate::ability`], which holds the rules. Every gate in this
+    /// crate goes through here, so there is one place a client's level is read and one table
+    /// that says what it means.
+    pub(crate) fn may(
+        &self,
+        client: ClientId,
+        act: crate::ability::Act,
+        about: Option<CraftId>,
+    ) -> bool {
+        use crate::ability::{Asking, Directing, Standing};
+        crate::ability::allows(
+            act,
+            Asking {
+                level: self
+                    .clients
+                    .get(&client)
+                    .map_or(crate::ability::Level::PLAYER, |c| c.permission),
+                standing: match about {
+                    Some(id) if self.flies(client, id) => Standing::Flies,
+                    _ => Standing::Otherwise,
+                },
+            },
+            Directing(self.directs),
+        )
+    }
+
+    /// **The ownership structure**, in one place: whether `client` is the connection that
+    /// flies `craft`.
+    ///
+    /// Three facts, and all three are needed. The connection must be one this server has
+    /// welcomed, the craft it was welcomed with must be this one, and the craft must still be
+    /// in the fleet. Dropping the last was a real bug once — a reconnection replaces the old
+    /// connection's claim, and the entry that outlives a removed craft points at nothing.
+    fn flies(&self, client: ClientId, craft: CraftId) -> bool {
+        self.owners.get(&craft) == Some(&client)
+            && self.fleet.get(craft).is_some()
+            && self.clients.get(&client).is_some_and(|state| state.ship.0 == craft.0)
     }
 
     pub fn ship(&self, id: ShipId) -> Option<&Craft> {
@@ -321,7 +356,9 @@ impl<J: Journal> Server<J> {
             // the catch-up path run from the beginning.
             cursor_t: i64::MIN,
             had_contacts: false,
-            permission: 0,
+            // Admitted rather than ticketed, so there is no signed claim to read. A test's
+            // client is a player; what makes development work in a test is `directing`.
+            permission: crate::ability::Level::PLAYER,
             backlog_sent: false,
         });
     }
@@ -486,14 +523,15 @@ impl<J: Journal> Server<J> {
         events: &mut Vec<Event>,
         deliveries: &mut Vec<Scheduled>,
     ) -> Result<Applied, Refusal> {
-        let state = self.clients.get(&from).ok_or(Refusal::NotYours)?;
-        if state.ship != intent.ship_id {
-            return Err(Refusal::NotYours);
-        }
+        // **The gate.** Ownership and level together, through `crate::ability` — which is the
+        // one table that says what either is worth. `Refusal::NotYours` whichever of the two
+        // failed: a client that could tell "that is not your ship" from "your level is not
+        // enough" could probe for both.
         let id = CraftId(intent.ship_id.0);
-        if self.owners.get(&id) != Some(&from) || self.fleet.get(id).is_none() {
+        if !self.may(from, crate::ability::Act::of(&intent.order), Some(id)) {
             return Err(Refusal::NotYours);
         }
+        let state = self.clients.get(&from).ok_or(Refusal::NotYours)?;
 
         // The clamp. Not later than now, and not earlier than the moment this client's stream
         // has already been resolved to.
@@ -811,7 +849,7 @@ impl<J: Journal> Server<J> {
             last_reception_t: i64::MIN,
             cursor_t: i64::MIN,
             had_contacts: false,
-            permission: claims.perm,
+            permission: crate::ability::Level::from_claim(claims.perm),
             backlog_sent: false,
         });
         // Being welcomed is not the same fact as owning the craft, and `act` checks the

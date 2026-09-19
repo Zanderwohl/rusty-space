@@ -9,12 +9,18 @@
 
 #![forbid(unsafe_code)]
 
+pub mod ability;
+pub mod actions;
 pub mod assets;
 pub mod attempts;
+pub mod bans;
 pub mod config;
+pub mod level;
+pub mod pages;
 pub mod password;
 pub mod providers;
 pub mod routes;
+pub mod schema;
 pub mod signin;
 pub mod store;
 pub mod ticket;
