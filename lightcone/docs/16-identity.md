@@ -474,6 +474,12 @@ administrators, so a refusal without a link is a dead end — no menu, and nothi
 naming the address that would get you off it. `/signout` existed from the first commit and was
 linked from exactly one place, which was the page a refused visitor never sees.
 
+**Signing out is a POST.** The session cookie is `SameSite=Lax`, which sends it on a cross-site
+top-level navigation when the method is safe — so as a `GET` it was a link on any page anywhere
+that signed you out of the console, and anything that follows links on its own did the same.
+Lax never sends a cookie on a cross-site `POST`, so the method is the whole of the defence and
+no token is needed. The masthead offers a small form styled to read as the link it replaces.
+
 Its session is eight hours, not the site's fortnight: the revocation window of a signed cookie
 is its lifetime, and an administrative session is a working day at a desk.
 

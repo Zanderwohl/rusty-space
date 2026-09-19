@@ -314,6 +314,10 @@ pub async fn ret(
         .into_response()
 }
 
+/// End the session. **POST only** — see the route for why.
+///
+/// Idempotent: signing out when nobody is signed in clears a cookie that is not there and
+/// redirects, which is what a double submission and a stale tab both look like.
 pub async fn signout(State(state): State<AppState>) -> Response {
     (
         AppendHeaders([(header::SET_COOKIE, session::clear(state.secure_cookies))]),

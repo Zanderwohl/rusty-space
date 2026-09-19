@@ -208,7 +208,10 @@ Each of these cost real time. None of them are visible from the code that hits t
   `the_pages_partition_the_matches` does.
 - **A refusal page needs a link out.** The console has no navigation except a masthead that
   renders for administrators, so a refused visitor sees a page with nothing on it to click and
-  no way to guess the address of anything — including `/signout`, which existed the whole time.
+  no way to guess the address of anything — including `/signout`, which existed the whole time
+  and is a **POST**: `SameSite=Lax` sends the session on a cross-site top-level navigation when
+  the method is safe, and never on a cross-site POST, so the method is the whole of the
+  defence. A link to it would not work and is asserted against.
   `views::refusal` takes a way out; `views::wrong` is for store failures, where there is
   nothing useful to offer.
 - **A session that can only be refused should not exist.** Check the level before sealing one,

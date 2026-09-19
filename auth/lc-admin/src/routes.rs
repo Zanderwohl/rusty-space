@@ -62,7 +62,13 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(|| async { Redirect::to(USERS) }))
         .route(SIGNIN, get(crate::auth::signin))
         .route(RETURN, get(crate::auth::ret))
-        .route(SIGNOUT, get(crate::auth::signout))
+        // **POST, not GET.** The session cookie is `SameSite=Lax`, which sends it on a
+        // cross-site *top-level navigation* when the method is safe — so as a GET this was a
+        // link on any page anywhere that signed you out of the console. Lax never sends a
+        // cookie on a cross-site POST, so the method is the whole of the defence and no token
+        // is needed. It also puts the route out of reach of anything that follows links on
+        // its own: a prefetcher, a crawler, a scanner, a chat client unfurling a pasted URL.
+        .route(SIGNOUT, post(crate::auth::signout))
         .route(USERS, get(index))
         // A static path beats `{id}` in the router, so this and `/users/{id}` coexist. They
         // are only reachable by the same method, which makes the ordering rule load-bearing

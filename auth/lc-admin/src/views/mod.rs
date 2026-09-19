@@ -59,7 +59,12 @@ pub fn shell(assets: &Assets, head: Head<'_>, admin: Option<&Admin>, body: Marku
                         div class="whoami" {
                             span class="whoami-name" { (admin.name) }
                             (level_badge(admin.level))
-                            a class="signout" href=(crate::routes::SIGNOUT) { "Sign out" }
+                            // A form rather than a link, because the route is a POST. It
+                            // is styled to read as the link it replaces: this is navigation
+                            // to the person using it, whatever the method underneath.
+                            form class="signout" method="post" action=(crate::routes::SIGNOUT) {
+                                button type="submit" { "Sign out" }
+                            }
                         }
                     }
                 }

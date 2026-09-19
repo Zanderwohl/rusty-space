@@ -103,6 +103,30 @@ code {
   text-decoration: none;
 }
 
+// The sign-out control is a form, because the route is a POST. It should still read as the
+// link it sits beside — a button that looks like a button would be the only chrome in the
+// masthead shouting for attention, and signing out is not the thing to draw the eye.
+.signout {
+  margin: 0;
+
+  button {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    cursor: pointer;
+
+    &:hover {
+      border: 0;
+      color: var(--ink);
+    }
+  }
+}
+
 .wordmark-tag {
   color: var(--ink-dim);
   font-size: var(--step--1);

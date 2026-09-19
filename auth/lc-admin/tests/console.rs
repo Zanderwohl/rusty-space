@@ -310,7 +310,7 @@ async fn signing_out_ends_the_session() {
     let app = router(state(pool.clone()));
     let admin = account(&pool, "Owner", Level::OWNER).await;
 
-    let response = send(&app, get("/signout", Some(admin))).await;
+    let response = send(&app, post("/signout", admin, &[], false)).await;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers()[axum::http::header::LOCATION], "/signin");
     assert!(
@@ -319,10 +319,66 @@ async fn signing_out_ends_the_session() {
         cookies_set(&response)
     );
 
-    // Idempotent: signing out when nobody is signed in is not an error.
-    let again = send(&app, get("/signout", None)).await;
+    // Idempotent: signing out when nobody is signed in is not an error. A double submission
+    // and a stale tab both look like this.
+    let again = send(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/signout")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
     assert_eq!(again.status(), StatusCode::SEE_OTHER);
     assert!(clears_the_session(&again));
+}
+
+/// **Signing out is not reachable by navigation.**
+///
+/// The session cookie is `SameSite=Lax`, which sends it on a cross-site top-level navigation
+/// when the method is safe — so as a GET this was a link on any page anywhere that signed you
+/// out of the console, and anything that follows links on its own did the same. Lax never
+/// sends a cookie on a cross-site POST, so the method is the whole of the defence and no token
+/// is needed.
+#[tokio::test]
+async fn signing_out_refuses_a_get() {
+    let pool = with_pool!(signing_out_refuses_a_get);
+    let app = router(state(pool.clone()));
+    let admin = account(&pool, "Owner", Level::OWNER).await;
+
+    let response = send(&app, get("/signout", Some(admin))).await;
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert!(
+        !clears_the_session(&response),
+        "a GET ended the session: {:?}",
+        cookies_set(&response),
+    );
+
+    // And the session it did not end still works.
+    assert_eq!(
+        send(&app, get("/users", Some(admin))).await.status(),
+        StatusCode::OK,
+    );
+}
+
+/// The masthead offers a form, not a link, or the control cannot reach the route above.
+#[tokio::test]
+async fn the_masthead_signs_out_with_a_form() {
+    let pool = with_pool!(the_masthead_signs_out_with_a_form);
+    let app = router(state(pool.clone()));
+    let admin = account(&pool, "Owner", Level::OWNER).await;
+
+    let page = text(send(&app, get("/users", Some(admin))).await).await;
+    assert!(
+        page.contains(r#"method="post" action="/signout""#),
+        "the masthead does not post to sign out",
+    );
+    assert!(
+        !page.contains(r#"href="/signout""#),
+        "a link to a route that no longer answers a GET",
+    );
 }
 
 /// Nobody reaches anything without a session, and a player with one reaches nothing either.
