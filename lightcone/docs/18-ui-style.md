@@ -120,14 +120,14 @@ What an egui surface has to set, because its defaults are its own:
 Game panels drawn over the sky keep egui's own dark theme and that is fine: they sit on a
 rendered background, not inside the menu, and matching the menu there would be matching nothing.
 
-## Three faces, and where each one stops
+## Two faces, and where each one stops
 
-The interface is set in **Quantico**: every readout, label, button and window title, on both
-toolkits' surfaces. It is a squared technical sans, which is what a panel of numbers over a
-rendered sky should look like, and it is the default — a surface that wants a different face has
-to say why.
+The interface is egui's own face, on both toolkits' surfaces, and that is the default: a
+surface that wants a different one has to say why. Quantico was tried across the whole
+interface and taken back out — a squared technical sans reads as a costume at readout sizes,
+and the thing a panel of numbers most needs is to be unremarkable.
 
-Two say why.
+Two surfaces say why.
 
 **The title screen is Nabla**, and only the title screen. The game's name is a wordmark and the
 site sets it in the same face, so the menu and the front page are recognisably one thing. Nabla
@@ -142,8 +142,11 @@ composer, not the markers this client adds to a line: those are the ship talking
 and the log is another ship talking to this one. It is the same distinction the one green in the
 palette already makes, said a second way.
 
-Geo needs a fifth more point size than Quantico to read at the same size beside it — its
-capitals fill 0.56 of the em against Quantico's 0.70 — which is what `LOG_SCALE` is.
+Geo is set larger than the point size says, for two reasons kept apart because only one of them
+is a measurement. `LOG_SCALE` is the measurement: its capitals fill 0.56 of the em against
+egui's own face at 0.69, so the same number draws a visibly smaller line. `LOG_BUMP` is two
+points on top, and is a choice — a transmission is the one thing in the window that came from
+outside it.
 
 The reader is not an exception to any of this; it is not this interface. It is dressed as a
 thing you hold and sets its own page, its own headings and its own folio in its own two faces.
@@ -153,13 +156,13 @@ See [21-library.md](21-library.md).
 
 egui holds a single `FontDefinitions` and `set_fonts` replaces it whole, so two places
 installing a face means the second silently undoes the first. Everything that adds one goes
-through `faces::Faces::install`, which keeps the accumulated set and hands egui all of it — the
-interface faces at startup, the reader's five when a book is first opened.
+through `faces::Faces::install`, which keeps the accumulated set and hands egui all of it — Geo
+at startup, the reader's five when a book is first opened.
 
-A named family falls back through the interface family, so a glyph the face lacks is drawn
-rather than boxed. That matters: the tofu box has already cost this interface a close button and
-a pair of arrows. The reader's faces are the one exception and are installed alone, because a
-word in Quantico in the middle of a paragraph of Faustina is worse than a missing glyph.
+A named family falls back through egui's own, so a glyph the face lacks is drawn rather than
+boxed. That matters: the tofu box has already cost this interface a close button and a pair of
+arrows. The reader's faces are the one exception and are installed alone, because a word in the
+interface font in the middle of a paragraph of Faustina is worse than a missing glyph.
 
 ## Everything is a message
 

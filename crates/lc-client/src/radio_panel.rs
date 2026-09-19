@@ -29,23 +29,29 @@ pub(crate) const RADIO: egui::Color32 = egui::Color32::from_rgb(120, 220, 140);
 /// interface face, because those are this ship talking to its pilot rather than a ship talking
 /// to another ship.
 ///
-/// Falls back to the interface face, which is what a build whose assets did not load gets.
+/// Falls back to the interface face, which is what a build whose assets did not load gets. It
+/// takes neither the scale nor the bump: both are about Geo, and there is no Geo in that case.
 fn logged(ui: &egui::Ui) -> egui::FontId {
     let family = egui::FontFamily::Name(crate::faces::RADIO.into());
     let body = egui::TextStyle::Body.resolve(ui.style());
     match ui.fonts(|f| f.families().contains(&family)) {
-        true => egui::FontId::new(body.size * LOG_SCALE, family),
+        true => egui::FontId::new(body.size * LOG_SCALE + LOG_BUMP, family),
         false => body,
     }
 }
 
-/// What Geo needs to read at the size Quantico reads at beside it.
+/// What Geo needs to read at the size the interface reads at beside it.
 ///
 /// A point size is an em, and an em says nothing about how much of it the letters fill: Geo's
-/// capitals are 0.56 of theirs against Quantico's 0.70, so the same number draws a visibly
-/// smaller line. Between matching the capitals (1.25) and matching the x-height (1.14),
+/// capitals are 0.56 of theirs against egui's own face at 0.69, so the same number draws a
+/// visibly smaller line. Between matching the capitals (1.24) and matching the x-height (1.18),
 /// because a log is mostly lowercase and the names in it are not.
 const LOG_SCALE: f32 = 1.2;
+
+/// And two points on top of that, which is a choice rather than a measurement: a transmission
+/// is the one thing in this window that came from outside it, and it is read rather than
+/// scanned.
+const LOG_BUMP: f32 = 2.0;
 
 /// Where a transmission is pointed, as the window offers it.
 ///

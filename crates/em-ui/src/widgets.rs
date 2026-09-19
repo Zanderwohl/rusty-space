@@ -143,7 +143,9 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
             .spawn((
                 Text::new(text),
                 TextFont {
-                    font: font.unwrap_or_default(),
+                    // `FontSource::Handle` is the default variant, so `None` is still
+                    // Bevy's own font rather than nothing.
+                    font: font.map(FontSource::Handle).unwrap_or_default(),
                     font_size: FontSize::Px(font_size),
                     ..default()
                 },
