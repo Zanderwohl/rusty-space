@@ -1,15 +1,9 @@
 //! Who is signed in to the administration site.
 //!
-//! A signed cookie, the same shape the site uses, with two differences that both come from
-//! what this service is for.
-//!
-//! **It is short.** Eight hours rather than a fortnight: a session here is a working day at a
-//! desk, and the revocation window of a signed cookie is its lifetime.
-//!
-//! **It does not carry a level.** Only the account id and a name — the level is read from the
-//! database on every request. A level in the cookie would mean a demotion took effect whenever
-//! the demoted person next signed in, which is to say at a time of their choosing, and the
-//! whole point of being able to demote somebody is that it happens now.
+//! A signed cookie, as the site has, differing in two ways. **Eight hours**, because the
+//! revocation window of a signed cookie is its lifetime. And **no level in it**: that is read
+//! per request, or a demotion takes effect when the demoted person next signs in — which is to
+//! say at a time of their choosing.
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -19,17 +13,14 @@ use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
 pub const COOKIE: &str = "lc_admin";
-/// And the one holding a sign-in's nonce while it is in flight.
+/// Holds a sign-in's nonce while it is in flight.
 pub const STATE_COOKIE: &str = "lc_admin_state";
 
-/// Eight hours. See the module note.
 pub const LIFETIME_S: i64 = 8 * 60 * 60;
-/// How long a sign-in has to complete.
 pub const SIGNIN_WINDOW_S: i64 = 10 * 60;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Session {
-    /// The opaque account id.
     pub sub: String,
     pub name: String,
     pub exp: i64,
@@ -41,11 +32,8 @@ pub fn seal(key: &[u8], session: &Session) -> String {
     format!("{payload}.{mac}")
 }
 
-/// Read one back, if it is ours and still current.
-///
-/// `None` for anything wrong, without saying which. The signature is checked **before** the
-/// payload is parsed: deserialising something unauthenticated is running a parser on input an
-/// attacker chose.
+/// `None` for anything wrong. The signature is checked **before** the payload is parsed —
+/// deserialising unauthenticated input is running a parser on something an attacker chose.
 pub fn open(key: &[u8], value: &str, now: i64) -> Option<Session> {
     let (payload, mac) = value.split_once('.')?;
     let expected = sign(key, payload.as_bytes());
@@ -56,8 +44,8 @@ pub fn open(key: &[u8], value: &str, now: i64) -> Option<Session> {
     (session.exp > now).then_some(session)
 }
 
-/// `SameSite=Lax` rather than `Strict`, because the sign-in comes back as a top-level
-/// navigation from the broker and `Strict` withholds the cookie on exactly that request.
+/// `Lax` and not `Strict`: the sign-in returns as a top-level navigation from the broker, and
+/// `Strict` withholds the cookie on exactly that request.
 pub fn set(value: &str, max_age_s: i64, secure: bool) -> String {
     let secure = if secure { "; Secure" } else { "" };
     format!("{COOKIE}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age_s}{secure}")
@@ -79,7 +67,6 @@ pub fn clear_state(secure: bool) -> String {
     format!("{STATE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{secure}")
 }
 
-/// One cookie out of a `Cookie:` header.
 pub fn from_header(header: &str, name: &str) -> Option<String> {
     header.split(';').find_map(|pair| {
         let (key, value) = pair.split_once('=')?;

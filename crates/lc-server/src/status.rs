@@ -1,71 +1,51 @@
 //! What an administrator is told about one account's ship.
 //!
-//! **This is a contract with a service that cannot link this crate.** The administration
-//! console lives in `auth/`, a different cargo workspace, and must not depend on a game crate
-//! — so it holds its own copy of the types below and the two agree by shape, exactly as the
-//! ticket claims do. `lightcone/docs/16-identity.md` has the reasoning; what it means in
-//! practice is that **a field renamed here is a field that silently stops arriving there**.
-//! Renaming one is a change to both sides or it is a bug.
+//! **A contract with a service that cannot link this crate.** The console is another cargo
+//! workspace and holds its own copy of these types, agreeing by shape as the ticket claims do
+//! — so **a field renamed here silently stops arriving there**. RON rather than JSON because
+//! it is a format and not a type, and because it does not round f64s.
 //!
-//! Serialised as **RON**, which is the reason a console that cannot see `lc_proto::Motion` can
-//! still read this: RON is a format, not a type, so the far side deserialises into its own
-//! mirror structs. It is also what `serde_json` is not — exact about f64 — which matters less
-//! here than it does in `persist`, this being a page somebody reads rather than a checkpoint
-//! the world is rebuilt from, but there is no reason to use the format that rounds.
-//!
-//! It is read from the **checkpoint**, not from the tick loop. A shard saves every
-//! `SAVE_EVERY_TICKS`, so this is a few seconds stale, and that is the whole reason this
-//! module needs nothing from the running world: no channel into the tick, no lock on the
-//! fleet, and no way for an administrator refreshing a page to slow the simulation down.
+//! Read from the **checkpoint**, so it is seconds stale and needs nothing from the running
+//! world: no channel into the tick, no lock on the fleet, no page load that costs a frame.
 
 use lc_world::sky::CatalogueStar;
 use serde::{Deserialize, Serialize};
 
 use crate::persist::Saved;
 
-/// How near a star a craft has to be before it is *in* that system rather than between them.
-///
-/// The same shell `crate::world::system_at` uses to decide the same question, taken from the
-/// same place so the two cannot drift: a craft the tick loop considers inside a system and
-/// this module considers interstellar would be a console disagreeing with the game about
-/// where somebody is.
+/// From the same place `crate::world::system_at` takes it, or the console and the game
+/// disagree about where somebody is.
 pub use lc_world::system::LOCAL_SHELL_LY;
 
 /// Where a craft is.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Whereabouts {
-    /// Inside a system's local shell.
     In {
         star: u64,
         name: String,
-        /// Distance from the star itself, astronomical units. A craft on a station and one
-        /// at the shell's edge are both "in" the system and are not in the same place.
+        /// From the star, astronomical units.
         au: f64,
     },
-    /// Between the stars, with the nearest one named — which is what somebody reading this
-    /// actually wants to know, "nowhere" being true and useless.
+    /// The nearest is named because "nowhere" is true and useless.
     Interstellar { star: u64, near: String, ly: f64 },
-    /// Outside the catalogue entirely. Reachable only by a craft placed by hand.
+    /// Outside the catalogue; reachable only by a craft placed by hand.
     Nowhere,
 }
 
 /// What is fitted, and what it is doing.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Fit {
-    /// Module counts, by name, in the order the loadout declares them. Names rather than a
-    /// struct with a field per module: a module added on this side would otherwise be a field
-    /// the console's mirror does not have, and RON would refuse the whole payload.
+    /// By name, not a field per module: a new module would otherwise be a field the console's
+    /// mirror lacks, and RON would refuse the whole payload.
     pub modules: Vec<(String, u32)>,
     pub hull_slots: u32,
     pub used_slots: u32,
-    /// Joules in store as of `saved_t`. Not extrapolated: this is a checkpoint, and a number
-    /// grown forward from one would be a guess wearing a measurement's clothes.
+    /// Joules as of `saved_t`, not extrapolated forward from it.
     pub stored_j: f64,
-    /// Watts of starlight it was collecting.
+    /// Watts of starlight.
     pub solar_w: f64,
-    /// Joules already promised to a plan in flight.
+    /// Joules promised to a plan in flight.
     pub committed_j: f64,
-    /// Set while a refit is running.
     pub refitting: bool,
 }
 
@@ -76,12 +56,10 @@ pub struct Status {
     pub name: Option<String>,
     /// Hull length, metres.
     pub length_m: f64,
-    /// Coordinate microseconds the checkpoint was taken at. **The freshness of everything
-    /// here**, and rendered as such rather than hidden: a page that shows a stale number
-    /// without saying it is stale is a page that lies once a shard stops saving.
+    /// Coordinate microseconds; the freshness of everything else here.
     pub saved_t: i64,
     pub whereabouts: Whereabouts,
-    /// Absent for a craft saved before fittings existed, or one with no fitting at all.
+    /// Absent for a craft saved before fittings existed, or one with none.
     pub fit: Option<Fit>,
 }
 
@@ -89,12 +67,8 @@ pub struct Status {
 const AU_LY: f64 = 1.495_978_707e11 / 9.460_730_472_580_8e15;
 
 impl Status {
-    /// Read a checkpoint into the answer.
-    ///
-    /// `stars` is the catalogue the shard was started with. A linear scan over it, which is
-    /// what `world::system_at` does too: this runs once per page view of one account, and a
-    /// hundred thousand distance comparisons is nothing beside the database round trip that
-    /// fetched the row.
+    /// A linear scan over `stars`, as `world::system_at` does: once per page view, and
+    /// cheaper than the round trip that fetched the row.
     pub fn of(ship_id: i64, saved_t: i64, saved: &Saved, stars: &[CatalogueStar]) -> Status {
         Status {
             ship_id,
@@ -107,11 +81,8 @@ impl Status {
     }
 }
 
-/// The star nearest a point, and how far away it is.
-///
-/// `total_cmp` rather than `partial_cmp().unwrap()`: a NaN here is a craft at a coordinate
-/// nothing should have produced, and panicking on a page load is a worse answer than an
-/// arbitrary ordering.
+/// `total_cmp`, not `partial_cmp().unwrap()`: a NaN is a coordinate nothing should have
+/// produced, and an arbitrary ordering beats panicking on a page load.
 pub(crate) fn nearest(at: glam::DVec3, stars: &[CatalogueStar]) -> Option<(&CatalogueStar, f64)> {
     stars
         .iter()
@@ -122,10 +93,8 @@ pub(crate) fn nearest(at: glam::DVec3, stars: &[CatalogueStar]) -> Option<(&Cata
         .map(|star| (star, star.position_ly.distance(at)))
 }
 
-/// The system a craft is **in**, if it is in one at all.
-///
-/// Inside the shell, not merely nearest: a craft between the stars belongs to no system, and
-/// counting it toward the nearest one would put craft in systems they are light-years from.
+/// Inside the shell, not merely nearest — otherwise craft count toward systems they are
+/// light-years from.
 pub(crate) fn nearest_within_shell(
     at: glam::DVec3,
     stars: &[CatalogueStar],

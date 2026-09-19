@@ -1,14 +1,11 @@
 //! Where an account stands.
 //!
-//! **Lower is higher.** 0 is a player, and 1, 2 and 3 are administrators with 1 the most
-//! senior. The database stores the integer; nothing above it compares two of them with `<`,
-//! because the comparison that reads correctly is the one that is wrong. [`Level::outranks`]
-//! is the only ordering this type offers, and it is named after what it means rather than
-//! after which way the integers happen to run.
+//! **Lower is higher**: 0 is a player, 1 the most senior of 1..3. The database stores the
+//! integer; nothing above it compares two with `<`, because the comparison that reads
+//! correctly is the one that is wrong. [`Level::outranks`] is the only ordering offered.
 //!
-//! There is deliberately no `Ord`. A derived one would sort a list of administrators from most
-//! junior to most senior while reading as though it did the opposite, and `a > b` would be a
-//! compiling, plausible, wrong authorisation check. Ordering for display is SQL's job.
+//! Deliberately no `Ord`. A derived one would sort administrators most-junior-first while
+//! reading as the opposite, and make `a > b` a compiling, plausible, wrong check.
 
 use std::fmt;
 
@@ -19,26 +16,19 @@ pub struct Level(i32);
 impl Level {
     /// Everybody. Plays the game and administers nothing.
     pub const PLAYER: Level = Level(0);
-    /// The most senior. May act on every other level and, by the rules in [`crate::ability`],
-    /// may not be demoted by anyone — including another superadmin. See that module for why
-    /// that is the rule rather than an oversight.
+    /// May not be demoted by anyone, including another superadmin — see [`crate::ability`].
     pub const SUPERADMIN: Level = Level(1);
     pub const ADMIN: Level = Level(2);
-    /// Administers accounts like the two above it, and is the tier the development actions on
-    /// a shard are named for — see `lc_server::ability`, where every administrative level may
-    /// grant energy and stage a scene.
+    /// Administers accounts, and is the tier `lc_server::ability`'s development actions are
+    /// named for.
     pub const DEBUG: Level = Level(3);
 
-    /// Every level that administers something, most senior first. The order a picker offers.
+    /// Most senior first: the order a picker offers.
     pub const ADMINISTRATIVE: [Level; 3] = [Level::SUPERADMIN, Level::ADMIN, Level::DEBUG];
-    /// And every level at all, for a filter that wants to name them.
     pub const ALL: [Level; 4] = [Level::PLAYER, Level::SUPERADMIN, Level::ADMIN, Level::DEBUG];
 
-    /// What the database holds. Anything outside the range is read as a player.
-    ///
-    /// A check constraint makes that unreachable through this application, so this is about
-    /// the row somebody edits by hand at three in the morning: an unrecognised level granting
-    /// nothing is the direction the failure should point.
+    /// Anything outside the range reads as a player. A check constraint makes that unreachable
+    /// through this application, so this is about the row edited by hand at three in the morning.
     pub fn from_stored(raw: i32) -> Level {
         match raw {
             1..=3 => Level(raw),
@@ -54,15 +44,12 @@ impl Level {
         self.0 != 0
     }
 
-    /// Whether `self` is strictly more senior than `other`.
-    ///
-    /// A player outranks nobody, including another player.
+    /// Strictly. A player outranks nobody, including another player.
     pub fn outranks(self, other: Level) -> bool {
         self.is_admin() && (!other.is_admin() || self.0 < other.0)
     }
 
-    /// Whether `self` is at least as senior as `other`, which for two administrators is the
-    /// test "may I hand out this level".
+    /// For two administrators, the test "may I hand out this level".
     pub fn at_least(self, other: Level) -> bool {
         self == other || self.outranks(other)
     }
@@ -76,8 +63,7 @@ impl Level {
         }
     }
 
-    /// What a URL parameter calls it. Stable across a rename of [`Level::name`], which is why
-    /// the two are separate functions over the same match.
+    /// Stable across a rename of [`Level::name`], which is why they are two functions.
     pub fn slug(self) -> &'static str {
         match self.0 {
             1 => "superadmin",

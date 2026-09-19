@@ -1,18 +1,15 @@
 //! What the systems index is showing, as it travels in the URL.
 //!
-//! The same idea as [`crate::listing`] and deliberately not the same type: the two indexes
-//! filter on different things, and one struct with the union of their parameters would put
-//! `?standing=` on a page that has no standing to filter by. What they do share is the
-//! contract with `ts/params.ts`, which reads whichever of them the page renders into
-//! `data-listing` and needs to know nothing else.
+//! [`crate::listing`]'s idea, deliberately not its type: one struct with the union of both
+//! indexes' parameters would put `?standing=` on a page with no standing to filter by. They
+//! share only the `data-listing` contract with `ts/params.ts`.
 //!
-//! Unlike the user index, **the paging is not this service's to do**. The systems live on the
-//! shard; this turns a query string into the query string the shard is asked, and renders what
-//! comes back.
+//! **The paging is not this service's**: the systems live on the shard, and this turns one
+//! query string into the one the shard is asked.
 
 use serde::Deserialize;
 
-/// Which column the systems index is ordered by. One per column, as there.
+/// One per column, as in [`crate::listing`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Sort {
     #[default]
@@ -67,8 +64,7 @@ impl Dir {
 pub const PER_PAGE: [u32; 3] = [25, 50, 100];
 pub const DEFAULT_PER: u32 = 25;
 
-/// The query string as it arrives. Every field a string, including the numbers — see
-/// [`crate::listing::Params`] for why a typed one would be a 400 for an edited URL.
+/// Every field a string; see [`crate::listing::Params`].
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Params {
@@ -137,8 +133,6 @@ impl Listing {
         }
     }
 
-    /// The canonical query string: every parameter that differs from its default, in a fixed
-    /// order, and nothing else.
     pub fn query_string(&self) -> String {
         let fallback = Listing::default();
         let mut pairs: Vec<(&str, String)> = Vec::new();
@@ -162,9 +156,8 @@ impl Listing {
             .finish()
     }
 
-    /// What the shard is asked. **Not** the same string: the console counts in pages and the
-    /// shard counts in rows, and the translation belongs on this side because the page size is
-    /// a thing the interface chose.
+    /// **Not** the same string: the console counts in pages, the shard in rows, and the page
+    /// size is the interface's choice.
     pub fn shard_query(&self) -> String {
         url::form_urlencoded::Serializer::new(String::new())
             .append_pair("q", &self.q)
@@ -203,8 +196,6 @@ impl Listing {
         }
     }
 
-    /// Clicking the column already sorted on flips it; clicking another sorts by it afresh.
-    /// Either way the page resets to the first.
     pub fn sorted_by(&self, sort: Sort) -> Listing {
         let dir = if self.sort == sort {
             self.dir.flipped()
@@ -219,13 +210,12 @@ impl Listing {
         }
     }
 
-    /// How many pages `total` matching systems make. At least one.
+    /// At least one.
     pub fn pages(&self, total: u64) -> u32 {
         let per = u64::from(self.per);
         (total.div_ceil(per).max(1)) as u32
     }
 
-    /// The defaults, as `ts/params.ts` reads them.
     pub fn defaults_json() -> serde_json::Value {
         let fallback = Listing::default();
         serde_json::json!({

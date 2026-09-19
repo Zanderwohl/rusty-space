@@ -1,17 +1,12 @@
 /**
- * A confirmation that looks like the rest of the console.
+ * A confirmation that looks like the rest of the console, in place of `window.confirm` — which
+ * is browser chrome with the origin in it and no room for the name of the account being banned.
  *
- * `hx-confirm` opens `window.confirm` by default, which is a browser chrome dialog with the
- * origin in it and no room for the name of the account being banned. htmx 4 hands out an
- * asynchronous escape hatch — `htmx:confirm` carries `issueRequest` and `dropRequest` — so
- * this replaces the dialog and nothing else about the mechanism.
- *
- * **Exactly one of the two callbacks must be called.** Neither leaves the request pending for
- * the life of the page, which is why the dialog's close handler resolves it whatever the
- * closing was: the Escape key, the backdrop, or a button.
+ * **Exactly one of `issueRequest`/`dropRequest` must be called**, or the request hangs for the
+ * life of the page — hence resolving on `close`, however the dialog was closed.
  */
 
-/** The dialog, made once and reused. A dialog per request leaks one element per click. */
+/** Reused: a dialog per request leaks one element per click. */
 let dialog: HTMLDialogElement | null = null;
 
 function ensureDialog(): HTMLDialogElement {
@@ -31,7 +26,7 @@ function ensureDialog(): HTMLDialogElement {
   return made;
 }
 
-/** Ask, and answer with what was chosen. */
+
 function ask(said: string, confirmLabel: string): Promise<boolean> {
   const made = ensureDialog();
   const text = made.querySelector<HTMLParagraphElement>(".confirm-said");
@@ -42,14 +37,13 @@ function ask(said: string, confirmLabel: string): Promise<boolean> {
   return new Promise((resolve) => {
     const settle = () => {
       made.removeEventListener("close", settle);
-      // `returnValue` is empty for Escape and for a backdrop dismissal, which are both "no".
+      // Empty for Escape and for a backdrop dismissal, both of which are "no".
       resolve(made.returnValue === "yes");
     };
     made.addEventListener("close", settle);
     made.returnValue = "";
     made.showModal();
-    // Focus the safe choice. A dialog that opens with the destructive button focused is one
-    // that a held-down Return key answers for you.
+    // The safe choice, or a held-down Return answers for you.
     made.querySelector<HTMLButtonElement>('button[value="no"]')?.focus();
   });
 }
@@ -59,10 +53,10 @@ export function install(): void {
     const detail = event.detail;
     const said = detail.ctx.sourceElement?.getAttribute("hx-confirm");
     if (!said) return;
-    // Taking the question means taking responsibility for answering it.
+
     event.preventDefault();
 
-    // The submit button's own words, so "Ban" is confirmed with "Ban" rather than with "OK".
+    // So "Ban" is confirmed with "Ban" rather than "OK".
     const button = detail.ctx.sourceElement?.querySelector<HTMLButtonElement>(
       'button[type="submit"]',
     );

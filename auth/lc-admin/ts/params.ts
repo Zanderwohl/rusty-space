@@ -1,21 +1,14 @@
 /**
  * The address bar.
  *
- * The console's state — every filter, the sort, the page — lives in the URL and nowhere else.
- * The server renders from it and builds every link with it; what it cannot do is *write* it,
- * because after an htmx swap the document did not navigate. That is this module's whole job,
- * and it is the reason there is any TypeScript here at all.
+ * The console's state lives in the URL. The server renders from it and builds every link with
+ * it; what it cannot do is *write* it, because an htmx swap does not navigate. That is this
+ * module's whole job and the reason any TypeScript is here at all.
  *
- * Three things follow from taking that job:
+ * **Canonical is the server's to define** — the defaults arrive in `data-listing`, written by
+ * the same table `query_string` drops parameters against, so there is one copy of them.
  *
- * - **What "canonical" means is the server's to decide.** The defaults come down in
- *   `data-listing` on the filter form, written by `Listing::defaults_json` — the same table
- *   `Listing::query_string` drops parameters against. Two copies of "the default sort is name"
- *   is two places to change it and one place to forget.
- * - **Back and forward have to work.** A filter change that pushes history and then cannot
- *   restore it is worse than one that never touched history at all.
- * - **Nothing here is required.** With scripting off, every control is a real link or a real
- *   GET form pointed at the same URLs, and the console works a page load at a time.
+ * **Nothing here is required.** Scripting off, every control is a real link or GET form.
  */
 
 import type { Htmx } from "htmx.org";
@@ -28,25 +21,16 @@ declare global {
 
 /** What the server tells the browser about this listing. */
 interface Listing {
-  /** Where the address bar should read. */
   page: string;
-  /** Where the swappable part is fetched from. */
   partial: string;
-  /** The id of the element the partial replaces. */
+  /** Id of the element the partial replaces. */
   target: string;
-  /** Parameter names, in the order the canonical string writes them. */
+  /** In the order the canonical string writes them. */
   order: string[];
-  /** The value each parameter has when it is absent. */
   defaults: Record<string, string>;
 }
 
-/**
- * True while a history entry is being restored.
- *
- * The restore issues a request, the request lands a swap, and the swap handler pushes
- * history — so without this, going back adds an entry instead of consuming one and the back
- * button never reaches the page before the console.
- */
+/** Without this, restoring pushes a new entry instead of consuming one and Back never exits. */
 let restoring = false;
 
 function listingForm(): HTMLFormElement | null {
@@ -66,14 +50,7 @@ function listingOf(form: HTMLFormElement): Listing | null {
   }
 }
 
-/**
- * The canonical query string for `params`: every value that differs from its default, in the
- * configured order, and nothing else.
- *
- * The same rule `Listing::query_string` applies on the server, which is what lets the two
- * produce the same bytes — and why the defaults are read from the page rather than written
- * out again here.
- */
+/** The rule `Listing::query_string` applies on the server, so the two produce the same bytes. */
 export function canonical(params: URLSearchParams, listing: Listing): string {
   const out = new URLSearchParams();
   for (const key of listing.order) {
@@ -89,7 +66,7 @@ function withQuery(path: string, query: string): string {
   return query ? `${path}?${query}` : path;
 }
 
-/** The controls' current values, as parameters. */
+
 function harvest(form: HTMLFormElement, listing: Listing): URLSearchParams {
   const params = new URLSearchParams();
   const data = new FormData(form);
@@ -101,13 +78,8 @@ function harvest(form: HTMLFormElement, listing: Listing): URLSearchParams {
 }
 
 /**
- * Put the URL's values into the controls.
- *
- * Needed after a swap — the pager and the column headings change `sort`, `dir` and `page`
- * without touching the form, so the hidden fields that carry them would otherwise go stale and
- * the next filter change would undo the sort. Needed again on a back/forward restore, and on a
- * page restored from the back/forward cache, where the browser may have kept the values the
- * controls had rather than the ones the URL asks for.
+ * The pager and the headings change `sort`, `dir` and `page` without touching the form, so its
+ * hidden fields go stale and the next filter change would undo the sort.
  */
 function hydrate(form: HTMLFormElement, params: URLSearchParams, listing: Listing): void {
   for (const key of listing.order) {
@@ -115,15 +87,13 @@ function hydrate(form: HTMLFormElement, params: URLSearchParams, listing: Listin
     for (const field of form.elements) {
       if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement)) continue;
       if (field.name !== key) continue;
-      // Assigning an unchanged value still fires nothing, but it does move a text caret to
-      // the end in some browsers. The guard is what keeps typing in the search box smooth
-      // while its own results land.
+      // Assigning an unchanged value moves the caret to the end in some browsers.
       if (field.value !== wanted) field.value = wanted;
     }
   }
 }
 
-/** Write `url` to the address bar without navigating. */
+
 function remember(url: string, push: boolean): void {
   const at = location.pathname + location.search;
   if (url === at) return;
@@ -137,25 +107,19 @@ export function install(): void {
   const listing = listingOf(form);
   if (!listing) return;
 
-  // A deep link, or a reload. The server has already rendered the controls from these, so
-  // this is only insurance against a browser restoring its own idea of what they held.
+  // Insurance against a browser restoring its own idea of what the controls held.
   hydrate(form, new URLSearchParams(location.search), listing);
 
   document.body.addEventListener("htmx:after:swap", (event) => {
-    // **`event.target` is the element that issued the request**, not the element that was
-    // replaced: the filter form for a filter change, the link for a pager click. The swapped
-    // element is `detail.ctx.target`. Keying on `event.target` compiles, type-checks, and
-    // leaves the address bar untouched for every interaction that came from the form — which
-    // is to say for the ones this module exists for.
+    // **`event.target` is the element that issued the request**, not the one replaced —
+    // that is `detail.ctx.target`. Keying on the former type-checks and silently does nothing
+    // for every interaction that came from the form.
     const swapped = event.detail?.ctx?.target;
     if (!(swapped instanceof Element) || swapped.id !== listing.target) return;
 
-    // Read the attribute off the document rather than off the node the event handed over.
-    // With `outerHTML` the two are not reliably the same node, and the one in the event may
-    // be the element as it was *before* the swap — which carries the previous URL.
+    // Off the document, not the node the event handed over: with `outerHTML` they are not
+    // reliably the same, and the event's may carry the previous URL.
     const live = document.getElementById(listing.target);
-    // The server says where the address bar should point: it owns what canonical means, and
-    // the swap it just answered may have come from a link rather than from these controls.
     const canonicalUrl = live?.getAttribute("data-canonical");
     if (!canonicalUrl) return;
 
@@ -164,14 +128,11 @@ export function install(): void {
     hydrate(form, new URL(canonicalUrl, location.origin).searchParams, listing);
   });
 
-  // The controls write the address bar as soon as they are touched, before the request that
-  // they triggered has come back. A URL copied mid-request is then the URL of what was asked
-  // for rather than of what is still on screen.
+  // Written before the request comes back, so a URL copied mid-flight names what was asked
+  // for rather than what is still on screen.
   form.addEventListener("change", () => {
     const params = harvest(form, listing);
-    // Any filter change starts again at the first page, which is also what the server does
-    // with the absent parameter. Saying it here keeps the address bar from claiming page 7 of
-    // a list that has just been narrowed to two rows.
+    // A new filter starts at the first page, as the absent parameter does on the server.
     params.delete("page");
     remember(withQuery(listing.page, canonical(params, listing)), false);
   });
@@ -181,7 +142,7 @@ export function install(): void {
     hydrate(form, params, listing);
     const htmx = window.htmx;
     if (!htmx) {
-      // No htmx, no swap: the honest answer is the page the URL names.
+      // No htmx, no swap.
       location.reload();
       return;
     }
@@ -196,8 +157,7 @@ export function install(): void {
       });
   });
 
-  // Restored from the back/forward cache. The document was never re-rendered, so the controls
-  // hold whatever the browser decided to put back in them.
+  // Back/forward cache: never re-rendered, so the controls hold whatever the browser put back.
   addEventListener("pageshow", (event) => {
     if (event.persisted) hydrate(form, new URLSearchParams(location.search), listing);
   });

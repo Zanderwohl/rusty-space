@@ -1,25 +1,12 @@
 //! Who may do what, on this shard.
 //!
-//! Every gate on a client's action is one table, read from one function, rather than a
-//! condition written at each call site. The reason is the one the identity broker's
-//! `lc_identity::ability` gives for its half: a rule spread over six call sites is a rule
-//! nobody can state, and an authorisation rule nobody can state is one nobody can check.
+//! One table in one function rather than a condition at each call site: a rule spread over six
+//! of them is one nobody can state, and so one nobody can check.
 //!
-//! An answer is a function of three things and nothing else — what is being asked, what the
-//! asker stands in relation to the subject, and what level the ticket says they hold — so the
-//! whole of it is asserted exhaustively below.
-//!
-//! ## Levels are a contract, not a shared type
-//!
-//! [`Level`] mirrors `lc_identity::level::Level`: the same integers, the same inversion, the
-//! same names. It is duplicated deliberately. This crate must not depend on the broker — the
-//! two are separate cargo workspaces and separate deployments, and `lightcone/docs/16-identity.md`
-//! says why the ticket's claim set is a document rather than a crate. This is the same
-//! agreement about the same column, and it is written down in the same place.
-//!
-//! **Lower is higher.** 0 is a player; 1, 2 and 3 administer, with 1 the most senior.
-//! [`Level::outranks`] is the only ordering, for the reason the broker's copy gives: `a > b`
-//! reads as "outranks" and is exactly backwards.
+//! [`Level`] mirrors `lc_identity::level::Level` and is duplicated deliberately — this crate
+//! must not depend on the broker, so the two agree by `lightcone/docs/16-identity.md` as the
+//! ticket claims do. **Lower is higher**: 0 is a player, 1 is the most senior. `a > b` reads
+//! as "outranks" and is backwards, which is why [`Level::outranks`] is the only ordering.
 
 use lc_proto::Order;
 
@@ -75,31 +62,24 @@ impl Level {
     }
 }
 
-/// What a connection is trying to do.
-///
-/// Coarser than [`lc_proto::Order`] on purpose. What the gate cares about is the *kind* of
-/// authority an act needs, and a burn, a course and a refit all need the same one: the right
-/// to fly a particular craft. Splitting them would be four identical rows that can drift.
+/// Coarser than [`lc_proto::Order`]: a burn, a course and a refit all need the same authority,
+/// and four identical rows would be four rows that can drift.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Act {
     /// Fly a craft: burn, set a course, cross, intercept, cut the drive, refit.
     Command,
-    /// Transmit as a craft: speak, offer a key.
     Speak,
-    /// Put energy into a craft out of nothing.
+    /// Out of nothing.
     GrantEnergy,
-    /// Replace what is in the sky with a staged scene.
     Stage,
 }
 
 impl Act {
     pub const ALL: [Act; 4] = [Act::Command, Act::Speak, Act::GrantEnergy, Act::Stage];
 
-    /// What authority an order needs.
-    ///
-    /// **Exhaustive on purpose, with no `_` arm.** A new [`Order`] variant is then a compile
-    /// error here rather than an order that quietly falls through to whatever the catch-all
-    /// said — which is how an ungated action ships.
+    /// **No `_` arm, on purpose**: a new [`Order`] is then a compile error rather than an
+    /// order falling through to whatever the catch-all said, which is how an ungated action
+    /// ships.
     pub fn of(order: &Order) -> Act {
         match order {
             Order::Transmit { .. }
@@ -111,65 +91,41 @@ impl Act {
             | Order::BreakOff
             | Order::Refit { .. }
             | Order::CancelRefit => Act::Command,
-            // Speaking is separated from flying because the two will not always want the same
-            // answer: a shard that silences somebody without grounding them is a thing an
-            // administration wants, and a table with one row for both cannot express it.
+            // Separate from flying so a shard can silence somebody without grounding them.
             Order::Say { .. } | Order::OfferKey { .. } => Act::Speak,
         }
     }
 }
 
-/// What the asker is to the craft they are asking about.
+/// What the asker is to the craft in question, if there is one.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Standing {
-    /// This connection flies that craft.
     Flies,
-    /// It does not, or there is no craft in question.
     Otherwise,
 }
 
-/// Who is asking.
 #[derive(Clone, Copy, Debug)]
 pub struct Asking {
     pub level: Level,
     pub standing: Standing,
 }
 
-/// Whether this shard is one that stages scenes.
-///
-/// A development and demonstration shard, set by the process that starts it rather than by
-/// anything a client sends. On one of those, development actions are open to everybody,
-/// because the whole population is whoever ran `cargo run`.
+/// A development shard, set by the process that starts it and never by a client. On one, the
+/// whole population is whoever ran `cargo run`, so development actions are open to all of it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Directing(pub bool);
 
-/// **The table.** Whether `who` may `act`, on a shard that is or is not directing.
+/// **The table.**
 ///
-/// ## Commanding a craft is ownership, at every level
+/// **Commanding is ownership at every level**, deliberately. A craft's acts become events
+/// attributed to that craft and nothing downstream carries who caused them, so an
+/// administrator flying a player's ship would put a burn in the record under the player's
+/// name, unfalsifiably. The remedy for a player who should not be flying is a ban.
 ///
-/// An administrator may not fly somebody else's ship, and that is a rule rather than a gap.
-/// Every act a craft performs becomes an **event** — a point in spacetime attributed to that
-/// craft, released to whoever the light reaches — and nothing downstream carries who at a
-/// keyboard caused it. An administrator flying a player's ship would put a burn in the record
-/// that the record says the player made, and there is no way for anyone, including the
-/// administration, to tell afterwards that it was not. A moderation tool that falsifies the
-/// evidence is not a moderation tool.
-///
-/// The remedy for a player who should not be flying is at the broker: they are banned, and the
-/// ticket that would have let them connect is refused. That path leaves a row, a reason and a
-/// name.
-///
-/// ## Development actions need a level, and every administrative level has it
-///
-/// Granting energy and staging a scene are open to [`Level::SUPERADMIN`], [`Level::ADMIN`] and
-/// [`Level::DEBUG`] alike — which is to say to anyone who is not a player. `DEBUG` is the
-/// junior tier and is named for exactly these two acts, so gating them above it would be a
-/// tier that cannot do the thing it is called after.
-///
-/// What that costs is worth saying plainly: **the most junior administrative level can conjure
-/// energy on a live shard.** The containment is that it cannot do so to somebody else's ship —
-/// `GrantEnergy` reaches only the asker's own craft — and that promoting anyone to `DEBUG` is
-/// an act with a name against it in `admin_actions`.
+/// **Every administrative level may develop**, `DEBUG` included — it is named for these two
+/// acts. So the most junior level can conjure energy on a live shard, contained only by
+/// `GrantEnergy` reaching the asker's own craft and by the promotion leaving a row in
+/// `admin_actions`.
 pub fn allows(act: Act, who: Asking, directing: Directing) -> bool {
     match act {
         Act::Command | Act::Speak => who.standing == Standing::Flies,

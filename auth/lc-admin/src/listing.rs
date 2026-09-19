@@ -1,34 +1,20 @@
 //! What the user index is showing, as it travels in the URL.
 //!
-//! **The URL is the state.** Every filter, every sort and the page number live in the query
-//! string, and nothing about the index is held anywhere else — not in a cookie, not in a
-//! session, not in the DOM. A link pasted into a chat window reproduces exactly what the
-//! person who sent it was looking at, the back button works, and a reload is not a surprise.
+//! **The URL is the state** — nothing about the index lives in a cookie, a session or the DOM.
+//! One type serves the page handler, the partial handler and, through
+//! [`Listing::defaults_json`], `ts/params.ts`, so the three cannot disagree about whether
+//! `?page=1` is worth writing down.
 //!
-//! One type serves three readers, which is the point of putting it here rather than in a
-//! handler:
-//!
-//! - the **page** handler, which renders a full document from it;
-//! - the **partial** handler, which renders the table alone for an htmx swap;
-//! - the **browser**, through [`Listing::defaults_json`] — the TypeScript in `ts/params.ts`
-//!   canonicalises the address bar against the very same defaults, so the two cannot disagree
-//!   about whether `?page=1` is worth writing down.
-//!
-//! Parsing never fails. A hand-edited `?sort=nonsense` falls back to the default rather than
-//! answering 400: a person fixing a URL by hand is the one case where being unhelpful costs
-//! the most, and there is nothing dangerous to admit — every value below is an enum, and the
-//! SQL is built from the enum rather than from the text.
+//! **Parsing never fails.** A hand-edited `?sort=nonsense` falls back rather than answering
+//! 400, and admits nothing: every value here is an enum and the SQL is built from the enum.
 
 use lc_identity::level::Level;
 use serde::Deserialize;
 
 /// Which column the index is ordered by.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-/// One per column, and there are only three columns.
-///
-/// Sorting is done by clicking a heading, so an ordering with no heading would be reachable
-/// only by editing the URL — a feature with no way in. `created` was one of these when the
-/// joined date left the table; it is on the user page now instead.
+/// One per column. Sorting is by clicking a heading, so an ordering without one is a feature
+/// with no way in — which is why `created` left with the Joined column.
 pub enum Sort {
     #[default]
     Name,
@@ -55,23 +41,14 @@ impl Sort {
         }
     }
 
-    /// The ordering this column means, as SQL.
-    ///
-    /// **Never interpolated from a request.** The text comes from this match and nowhere else,
-    /// which is what makes an `order by` built by string concatenation safe here — the only
-    /// path from a query parameter to this function is [`Sort::from_slug`], which answers with
-    /// a variant or with nothing.
-    ///
-    /// `level` sorts by seniority rather than by the stored integer, which run opposite ways:
-    /// ascending by level puts the owner first, which is what "sort by level, ascending" means
-    /// to somebody reading a list of administrators.
+    /// **Never interpolated from a request**: the text comes from this match alone, which is
+    /// what makes a concatenated `order by` safe.
     fn column(self) -> &'static str {
         match self {
             Sort::Name => "lower(a.display_name)",
-            // 0 is a player, which belongs at the bottom of a seniority sort rather than at
-            // the top of it. `nullif` turns it into a null and `nulls last` puts it there.
+            // 0 is a player and belongs at the bottom of a seniority sort, not the top.
             Sort::Level => "nullif(a.permission, 0)",
-            // In force first, then by how long is left.
+
             Sort::Status => "(live.in_force > 0)",
         }
     }
@@ -136,13 +113,11 @@ impl Standing {
     }
 }
 
-/// Whether the index is narrowed to a permission level.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Rank {
     #[default]
     Any,
-    /// Every level that administers something, which is the filter actually wanted most of
-    /// the time and is not expressible as one level.
+    /// The filter wanted most often, and not expressible as one level.
     Administrators,
     Exactly(Level),
 }
@@ -179,20 +154,13 @@ impl Rank {
     }
 }
 
-/// How many rows a page holds.
-///
-/// A closed set, so the SQL `limit` can never be handed a number somebody put in the URL. The
-/// cost of an unbounded one is not a parse error — it is a query that reads every account.
+/// Closed, so `limit` is never handed a number from a URL: unbounded is a query that reads
+/// every account.
 pub const PER_PAGE: [u32; 3] = [25, 50, 100];
 pub const DEFAULT_PER: u32 = 25;
 
-/// The query string as it arrives. Every field optional, nothing validated.
-///
-/// **Every field is a string, including the two numbers.** A `page: Option<u32>` would make
-/// `?page=-4` a *deserialisation* failure, and axum answers one of those with a bare
-/// plain-text 400 before any code here runs — so the promise above about nonsense falling back
-/// would be broken by the extractor rather than by this module. `lc_identity::routes::
-/// Destination` carries the same note for the same reason.
+/// **Every field a string**, including the numbers: a `page: Option<u32>` makes `?page=-4` an
+/// axum rejection — a bare 400 — before the fallback above can run.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Params {
@@ -232,11 +200,8 @@ impl Default for Listing {
     }
 }
 
-/// Longest search term accepted.
-///
-/// A search is a `like` against two columns; a megabyte of it is a way to make the database do
-/// work on request. Truncated rather than refused, for the same reason nothing else here
-/// refuses.
+/// A `like` against two columns, so a megabyte of it is work on request. Truncated, not
+/// refused.
 const MAX_SEARCH: usize = 100;
 
 impl Listing {
@@ -283,13 +248,8 @@ impl Listing {
         }
     }
 
-    /// The canonical query string: every parameter that differs from its default, in a fixed
-    /// order, and nothing else.
-    ///
-    /// Fixed order so that two ways of reaching the same view produce the same URL, which is
-    /// what makes the address bar worth comparing and a cache key worth keeping. Defaults
-    /// omitted so that the common view has a short, plain URL — `/users` rather than
-    /// `/users?q=&level=any&standing=any&sort=name&dir=asc&per=25&page=1`.
+    /// Every parameter that differs from its default, in a fixed order — so two ways to the
+    /// same view give the same URL, and the common view is `/users`.
     pub fn query_string(&self) -> String {
         let fallback = Listing::default();
         let mut pairs: Vec<(&str, String)> = Vec::new();
@@ -311,8 +271,7 @@ impl Listing {
         if self.per != fallback.per {
             pairs.push(("per", self.per.to_string()));
         }
-        // Last, because it is the parameter a reader cares least about and the one that
-        // changes most often.
+
         if self.page != fallback.page {
             pairs.push(("page", self.page.to_string()));
         }
@@ -330,12 +289,10 @@ impl Listing {
         }
     }
 
-    /// Where a browser's address bar should read.
     pub fn page_url(&self) -> String {
         self.url(crate::routes::USERS)
     }
 
-    /// Where htmx fetches the table alone.
     pub fn partial_url(&self) -> String {
         self.url(crate::routes::USER_ROWS)
     }
@@ -347,11 +304,8 @@ impl Listing {
         }
     }
 
-    /// The listing this column heading links to.
-    ///
-    /// Clicking the column already sorted on flips the direction; clicking another sorts by it
-    /// afresh, ascending. Either way the page resets to the first — staying on page 7 of a
-    /// list that has just been reordered shows a slice of rows nobody asked for.
+    /// Clicking the current column flips it, another sorts afresh. Either way back to page
+    /// one: page 7 of a list just reordered is a slice nobody asked for.
     pub fn sorted_by(&self, sort: Sort) -> Listing {
         let dir = if self.sort == sort {
             self.dir.flipped()
@@ -366,19 +320,14 @@ impl Listing {
         }
     }
 
-    /// The defaults, as the browser reads them.
-    ///
-    /// Rendered into the page so `ts/params.ts` canonicalises against the same table this
-    /// module does. Two copies of "the default sort is name, ascending" is two places to
-    /// change it and one place to forget.
+    /// Rendered into the page so `ts/params.ts` canonicalises against this same table.
     pub fn defaults_json() -> serde_json::Value {
         let fallback = Listing::default();
         serde_json::json!({
             "page": crate::routes::USERS,
             "partial": crate::routes::USER_ROWS,
             "target": "user-index",
-            // In the order `query_string` writes them, so the browser's canonical form is the
-            // server's byte for byte.
+
             "order": ["q", "level", "standing", "sort", "dir", "per", "page"],
             "defaults": {
                 "q": "",
@@ -392,13 +341,8 @@ impl Listing {
         })
     }
 
-    /// `order by`, built from the enums and never from a request.
-    ///
-    /// The trailing `a.id` is not decoration. Without a total order the database is free to
-    /// return rows in any order that satisfies the one given, and two accounts created in the
-    /// same second can swap places between the query for page 1 and the query for page 2 —
-    /// which shows one of them twice and the other not at all. Every paged query needs a
-    /// tie-break on something unique, and this is it.
+    /// The trailing `a.id` is load-bearing: without a total order, two accounts created in
+    /// the same second can swap places between the query for page 1 and the query for page 2.
     pub(crate) fn order_by(&self) -> String {
         let nulls = match self.dir {
             Dir::Asc => "nulls last",

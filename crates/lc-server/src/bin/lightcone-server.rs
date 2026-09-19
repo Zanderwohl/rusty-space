@@ -89,9 +89,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Err(format!("{source} published no key this server can use").into());
             }
             eprintln!("trusting {learned} key(s) from {source} for audience {audience}");
-            // Cloned before the server takes it: the administration surface verifies the same
-            // tickets against the same keys, and a second `Trusted` fetched separately would
-            // be a second thing to keep in step through a key rotation.
+            // Cloned before the server takes it: a second `Trusted` would be a second thing to keep
+            // in step through a key rotation.
             admin_keys = Some(trusted.clone());
             server.trust(trusted);
         }
@@ -123,15 +122,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             AuthoredStars::sample().stars().to_vec()
         }
     };
-    // Shared with the administration surface below rather than handed over, so the process
-    // holds one catalogue however many readers it has.
+    // Shared with the administration surface below.
     let catalogue = std::sync::Arc::new(stars);
     server.load_world(World::from_shared(catalogue.clone()));
 
-    // The administration console's read-only surface, on its own port and its own database
-    // connection. Spawned here because it needs the catalogue, and refused rather than
-    // silently skipped when it cannot be built: a console pointed at a shard that quietly
-    // declined to listen is a card that says "unavailable" forever with nothing to explain it.
+    // Refused rather than silently skipped: a console pointed at a shard that quietly declined
+    // to listen is a card reading "unavailable" with nothing to explain it.
     if let Some(addr) = &admin_bind {
         let (Some(url), Some(keys)) = (db.as_ref(), admin_keys) else {
             return Err("--admin-bind needs both --db and --jwks".into());

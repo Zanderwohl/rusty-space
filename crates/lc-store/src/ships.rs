@@ -76,11 +76,8 @@ pub async fn load_ships(client: &Client) -> Result<Vec<Ship>, Error> {
         .collect())
 }
 
-/// The craft one account flies, if it has one.
-///
-/// `account` is unique, so this is at most one row. A query rather than `load_ships` filtered
-/// in Rust: the caller is the administration console asking about one person, and reading
-/// every ship in the world to answer that works perfectly until the world has ships in it.
+/// A query rather than `load_ships` filtered in Rust: reading every ship in the world to
+/// answer about one person works until the world has ships in it.
 pub async fn ship_for_account(client: &Client, account: &str) -> Result<Option<Ship>, Error> {
     let row = client
         .query_opt(

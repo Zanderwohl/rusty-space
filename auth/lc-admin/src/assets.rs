@@ -1,18 +1,11 @@
-//! The three files this service serves that are not pages: a stylesheet, a script of its own,
-//! and htmx.
+//! A stylesheet, a script, and htmx.
 //!
-//! All three are read once at boot and served from memory, so the container runs with a
-//! read-only root filesystem and a request touches no disk. The URL carries a digest of all
-//! three together, which is what makes the one-year `immutable` header unconditionally true:
-//! changing any of them changes every asset URL, and there is no deploy-time coordination to
-//! get wrong.
+//! Read once at boot and served from memory, so the container runs read-only. One digest over
+//! all three makes the one-year `immutable` header unconditionally true.
 //!
-//! The stylesheet is compiled here rather than in `build.rs`, which is where the broker
-//! compiles its. The reason is the script beside it: `admin.js` is TypeScript compiled by a
-//! stage of the container build, so it does not exist when `cargo build` runs. A service that
-//! baked one asset into the binary and read the other off disk would have two answers to
-//! "where do assets come from", and the one it gave you would depend on which asset you asked
-//! about.
+//! Compiled here and not in `build.rs` as the broker does it, because `admin.js` is built by a
+//! stage of the container and does not exist when `cargo build` runs — and one answer to
+//! "where do assets come from" beats two.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -21,9 +14,8 @@ use axum::extract::State;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
-/// Where the compiled sheet, the script and htmx are served. The `{version}` segment is not
-/// checked: this handler can only answer with the bytes this process loaded, so a request
-/// carrying an older digest is correctly given the current ones.
+/// `{version}` is not checked: this can only answer with the bytes it loaded, so an older
+/// digest is correctly given the current ones.
 pub const ROUTE: &str = "/v/{version}/{kind}/{name}";
 
 pub const STYLESHEET: &str = "styles/admin.css";
@@ -43,11 +35,8 @@ pub struct Assets {
 }
 
 impl Assets {
-    /// Compile the sheet and read the scripts.
-    ///
-    /// A failure here fails the boot. A site that came up without its stylesheet is an outage
-    /// that returns 200, and one that came up without its script is an administration console
-    /// whose filters silently stop writing the address bar.
+    /// A failure fails the boot: a console that came up without its stylesheet is an outage
+    /// that returns 200.
     pub fn load(root: &Path) -> anyhow::Result<Self> {
         let entry = root.join(SCSS_ENTRY);
         let css = grass::from_path(&entry, &grass::Options::default())
@@ -61,9 +50,8 @@ impl Assets {
         })?;
         let htmx = read(root, HTMX_BUNDLE)?;
 
-        // One digest over all three, so any change to any of them changes every URL. A
-        // per-file digest would be three cache keys and a window in which a page is served
-        // with last deploy's script and this deploy's stylesheet.
+        // Per-file digests would leave a window serving last deploy's script with this
+        // deploy's stylesheet.
         let version = digest(&[css.as_bytes(), script.as_bytes(), htmx.as_bytes()]);
         tracing::info!(
             css = css.len(),
@@ -90,8 +78,7 @@ fn read(root: &Path, path: &str) -> anyhow::Result<String> {
     std::fs::read_to_string(&full).map_err(|e| anyhow::anyhow!("reading {}: {e}", full.display()))
 }
 
-/// FNV-1a, as hex. A cache key and not a security boundary: it only has to change when the
-/// bytes do, which a 64-bit non-cryptographic hash does without a dependency.
+/// FNV-1a. A cache key, not a security boundary.
 fn digest(parts: &[&[u8]]) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for bytes in parts {
@@ -99,8 +86,7 @@ fn digest(parts: &[&[u8]]) -> String {
             hash ^= u64::from(*byte);
             hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
         }
-        // A separator, so moving a byte from the end of one file to the start of the next is
-        // not the same digest.
+        // Or moving a byte across a file boundary is the same digest.
         hash ^= 0xff;
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }

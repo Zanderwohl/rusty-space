@@ -17,10 +17,8 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env()?;
-    // The line that answers "is this deployment pointed at the right broker" from a log rather
-    // than from somebody's memory. The secret is not in it; the return URL is, because a
-    // return URL missing from the broker's allowlist is the one misconfiguration that fails
-    // only at the end of a sign-in.
+    // The return URL is here because a return URL missing from the broker's allowlist is the one
+    // misconfiguration that fails only at the end of a sign-in.
     tracing::info!(
         identity = %config.identity_base,
         return_to = %config.return_url(),
@@ -36,9 +34,7 @@ async fn main() -> anyhow::Result<()> {
         .acquire_timeout(std::time::Duration::from_secs(5))
         .connect(&config.database_url)
         .await?;
-    // **No migrations here.** `lc-identity` owns the schema and applies it at its own boot;
-    // see the crate documentation. A console that ran them too would be a second writer to the
-    // migration table and a race between two containers starting at once.
+    // **No migrations**: `lc_identity::schema` owns them.
     sqlx::query("select 1").execute(&pool).await?;
     tracing::info!("database ready");
 
@@ -67,8 +63,7 @@ async fn main() -> anyhow::Result<()> {
             axum::http::HeaderName::from_static("x-content-type-options"),
             axum::http::HeaderValue::from_static("nosniff"),
         ))
-        // Nothing here should ever be framed, and nothing here should ever be a referrer:
-        // a user page's URL carries an account identifier.
+        // A user page's URL carries an account identifier.
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
             axum::http::HeaderName::from_static("x-frame-options"),
             axum::http::HeaderValue::from_static("DENY"),

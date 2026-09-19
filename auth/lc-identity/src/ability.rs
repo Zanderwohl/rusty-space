@@ -1,40 +1,25 @@
 //! Who may do what to whom.
 //!
-//! Every rule about one account acting on another is here, as a pure function of two levels
-//! and nothing else — no pool, no request, no session. That is what lets the whole table below
-//! be asserted exhaustively in a unit test, which is the only way anyone can be sure that
-//! `2` may not quietly promote `2` to `1`.
+//! Every rule as a pure function of two levels — no pool, no request, no session — which is
+//! what lets the whole table be asserted exhaustively.
 //!
-//! The rules themselves, in the words they were asked for:
+//! - promote **up to your own level**, so a 2 hands out 2 and 3 and never 1;
+//! - demote anyone **below** your level, so a 2 may not touch another 2 or a 1;
+//! - an administrator cannot be banned. De-admin first.
 //!
-//! - an administrator may promote anyone **up to their own level**, so a level 2 may hand out
-//!   2 and 3 and never 1;
-//! - an administrator may demote anyone **below** their level, so a level 2 may demote a 3 and
-//!   may not touch another 2 or a 1;
-//! - an administrator may not be banned. De-admin first, which is a separate act by somebody
-//!   who outranks them and leaves a line in the log.
+//! Two consequences, both intended. **Nobody changes their own level**, demotion needing an
+//! actor who outranks the subject. And **a superadmin cannot be demoted by anyone**, there
+//! being nobody above 1 — so the one irreversible act is a row changed by hand, not a web
+//! page.
 //!
-//! Two consequences fall out of those, and both are intended:
-//!
-//! - **Nobody may change their own level**, because demotion needs an actor who outranks the
-//!   subject and nobody outranks themselves. An administrator who wants to step down asks
-//!   somebody senior, and a stray click cannot strand a shard with no owner.
-//! - **An owner may not be demoted by anyone**, for the same reason: there is nobody above 1.
-//!   Removing an owner is a row change made by hand against the database, deliberately, so
-//!   that the one irreversible administrative act is not reachable from a web page.
-//!
-//! The game server keeps the same idea over its own vocabulary — see `lc_server::ability` —
-//! and the two agree by contract rather than by sharing a crate, on exactly the reasoning
-//! `lightcone/docs/16-identity.md` gives for the ticket claims.
+//! `lc_server::ability` keeps the same idea over its own vocabulary, agreeing by contract
+//! rather than by a shared crate; see `lightcone/docs/16-identity.md`.
 
 use uuid::Uuid;
 
 use crate::level::Level;
 
-/// Why an act was not allowed.
-///
-/// A refusal a person reads, not a status code. Every one of these is an administrator being
-/// told the shape of the rules, so none of them is a secret.
+/// Each is an administrator being told the shape of the rules, so none is a secret.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Denied {
     /// The actor administers nothing.
@@ -61,7 +46,6 @@ impl Denied {
         Denied::NoChange,
     ];
 
-    /// A name a URL can carry, so a refusal survives a redirect.
     pub fn slug(self) -> &'static str {
         match self {
             Denied::NotAnAdmin => "not-an-admin",
@@ -77,7 +61,6 @@ impl Denied {
         Denied::ALL.into_iter().find(|d| d.slug() == slug)
     }
 
-    /// The sentence shown in the interface.
     pub fn said(self) -> &'static str {
         match self {
             Denied::NotAnAdmin => "You do not administer anything.",
@@ -100,15 +83,12 @@ impl std::fmt::Display for Denied {
 
 impl std::error::Error for Denied {}
 
-/// Whether the administration pages are open to this level at all.
 pub fn may_administer(actor: Level) -> bool {
     actor.is_admin()
 }
 
-/// Whether `actor` may move `subject` from the level they hold to `proposed`.
-///
-/// The subject is named by id as well as by level so that acting on your own account is
-/// refused as itself rather than falling out of the demotion rule with a misleading message.
+/// The subject is named by id as well as by level so acting on your own account is refused
+/// as itself rather than falling out of the demotion rule with a misleading message.
 pub fn may_set_level(
     actor: Level,
     actor_id: Uuid,
@@ -126,14 +106,13 @@ pub fn may_set_level(
         return Err(Denied::NoChange);
     }
     if proposed.outranks(subject) {
-        // A promotion. The ceiling is the actor's own level, which `at_least` states in the
-        // direction the rule is written in: "up to their own level" includes their own level.
+        // The ceiling is the actor's own level; `at_least` states it in the rule's direction.
         return actor
             .at_least(proposed)
             .then_some(())
             .ok_or(Denied::AboveYou);
     }
-    // A demotion, including down to player. Strictly below, so an equal is refused.
+    // Strictly below, so an equal is refused.
     actor
         .outranks(subject)
         .then_some(())
@@ -145,26 +124,21 @@ pub fn may_ban(actor: Level, subject: Level) -> Result<(), Denied> {
     if !actor.is_admin() {
         return Err(Denied::NotAnAdmin);
     }
-    // No id comparison: an administrator's own level is administrative, so this catches the
-    // self case on the way past and says the useful thing about it.
+    // Catches the self case on the way past, and says the useful thing about it.
     if subject.is_admin() {
         return Err(Denied::SubjectIsAnAdmin);
     }
     Ok(())
 }
 
-/// Whether `actor` may lift a ban.
-///
-/// Any administrator may lift any ban, including one they did not issue and one issued by
-/// somebody senior. Mercy is not ranked; the log records who granted it.
+/// Any administrator, including one who did not issue it. Mercy is not ranked; the log
+/// records who granted it.
 pub fn may_lift(actor: Level) -> Result<(), Denied> {
     actor.is_admin().then_some(()).ok_or(Denied::NotAnAdmin)
 }
 
-/// Every level `actor` may hand to `subject`, most senior first.
-///
-/// What a level picker offers. Derived from [`may_set_level`] rather than written beside it,
-/// so a rule change cannot leave the interface offering something the act will refuse.
+/// Derived from [`may_set_level`] rather than written beside it, so a rule change cannot
+/// leave the interface offering something the act refuses.
 pub fn levels_offerable(
     actor: Level,
     actor_id: Uuid,

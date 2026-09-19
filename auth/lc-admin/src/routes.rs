@@ -1,13 +1,10 @@
-//! The HTTP surface: two pages, one partial, and three acts.
+//! The HTTP surface: two indexes, their partials, and three acts.
 //!
-//! Every act is a POST that changes one thing and then re-renders the region it changed. It
-//! answers two kinds of caller from one handler: an htmx request gets the region back and
-//! swaps it in place, and a plain form submission gets a redirect — the post/redirect/get that
-//! stops a refresh from banning somebody twice.
+//! An act answers two callers from one handler: htmx gets the region back, a plain form gets
+//! a redirect — the post/redirect/get that stops a refresh banning somebody twice.
 //!
-//! A **refusal** does not redirect. Nothing was changed, so there is nothing a refresh could
-//! do twice, and rendering the page with the refusal on it keeps the words next to the control
-//! that produced them.
+//! A **refusal** does not redirect. Nothing changed, so nothing can happen twice, and the
+//! words stay next to the control that produced them.
 
 use axum::Router;
 use axum::extract::{Form, Path, Query, State};
@@ -72,13 +69,10 @@ pub fn router(state: AppState) -> Router {
         // its own: a prefetcher, a crawler, a scanner, a chat client unfurling a pasted URL.
         .route(SIGNOUT, post(crate::auth::signout))
         .route(USERS, get(index))
-        // A static path beats `{id}` in the router, so this and `/users/{id}` coexist. They
-        // are only reachable by the same method, which makes the ordering rule load-bearing
-        // rather than incidental — see the note in `AGENTS.md`.
+        // A static path beats `{id}`, which is what lets `/users/rows` and `/users/{id}` coexist.
         .route(USER_ROWS, get(rows))
         .route(USER, get(person))
-        // The same pair as the user index: a page and the region it swaps. No detail route —
-        // there is not enough about one system yet to be worth a page of its own.
+        // No detail route: there is not enough about one system to be worth a page.
         .route(SYSTEMS, get(system_index))
         .route(SYSTEM_ROWS, get(system_rows))
         .route(USER_LEVEL, post(set_level))
@@ -91,11 +85,8 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// What a completed act tells the page it redirected to.
-///
-/// A closed set carried in a query parameter, because the alternative to post/redirect/get is
-/// a refresh that repeats the act. Unrecognised values render nothing, so an edited URL is
-/// merely ineffective.
+/// A closed set in a query parameter, because the alternative to post/redirect/get is a
+/// refresh that repeats the act. Unrecognised renders nothing.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Done {
     LevelSet,
@@ -151,11 +142,8 @@ async fn index(
     }
 }
 
-/// The index's table alone, for an htmx swap.
-///
-/// The same function the page renders, so the two cannot drift apart. It is reachable
-/// directly, which is deliberate: a partial that only works as part of a swap is a partial
-/// that cannot be looked at when it goes wrong.
+/// Reachable directly on purpose: a partial that only works inside a swap cannot be looked
+/// at when it goes wrong.
 async fn rows(
     State(state): State<AppState>,
     admin: Admin,
@@ -213,10 +201,8 @@ async fn system_rows(
     views::systems::region(&listing, &found).into_response()
 }
 
-/// One page of systems, or why there is not one.
-///
-/// A shard that is down makes this index say so, the way it makes the Status section say so.
-/// It is not an error page: the console is administering accounts perfectly well without it.
+/// A shard that is down makes this index say so. It is not an error page: the console is
+/// administering accounts perfectly well without it.
 async fn load_systems(
     state: &AppState,
     admin: &Admin,
@@ -312,10 +298,7 @@ async fn load_detail(state: &AppState, id: Uuid, acting: &Admin) -> Result<Detai
     })
 }
 
-/// How much history a user page shows.
-///
-/// Enough to read the shape of an account's dealings with the administration, bounded so a
-/// long-running argument does not render a page megabytes long.
+/// Bounded, or a long-running argument renders a page megabytes long.
 const LOG_DEPTH: i64 = 50;
 
 fn page_for(state: &AppState, admin: &Admin, detail: &Detail, notice: Option<&Notice>) -> Response {
@@ -330,11 +313,7 @@ fn page_for(state: &AppState, admin: &Admin, detail: &Detail, notice: Option<&No
     .into_response()
 }
 
-/// How an act answers.
-///
-/// htmx gets the region; a browser gets a redirect, so a refresh does not repeat the act. A
-/// refusal is neither — see the module note — and comes back as the page it was refused on,
-/// with the status that says so.
+/// htmx gets the region, a browser gets a redirect. A refusal is neither — see the module.
 async fn answered(
     state: &AppState,
     admin: &Admin,
@@ -357,10 +336,9 @@ async fn answered(
                 Err(notice) => (StatusCode::UNPROCESSABLE_ENTITY, notice),
             };
             if htmx {
-                // htmx 4 swaps every status but 204 and 304, so a refusal's body lands where
-                // the success would have. That is the behaviour wanted here and it is a change
-                // from htmx 2, where a 422 would have been dropped and the page would have sat
-                // there saying nothing.
+                // htmx 4 swaps every status but 204 and 304, so a refusal's body lands where the
+                // success would have. A change from htmx 2, where a 422 was dropped and the page
+                // said nothing.
                 return (
                     status,
                     render(views::user::region(
@@ -415,9 +393,8 @@ async fn set_level(
     };
 
     let was = account.level();
-    // **The check, and the only one.** Re-read here rather than trusted from the form that
-    // offered it: the page was rendered at some earlier moment, and the acting administrator
-    // may have been demoted since.
+    // Re-read here rather than trusted from the form that offered it: the acting administrator
+    // may have been demoted since the page was rendered.
     let outcome = match ability::may_set_level(admin.level, admin.id, was, id, proposed) {
         Err(denied) => Err(Notice::refused(denied.said())),
         Ok(()) => match store.set_permission(id, proposed.as_i32()).await {
@@ -433,8 +410,8 @@ async fn set_level(
                 } else {
                     Action::Demoted
                 };
-                // Best effort. The change happened; reporting it as failed because the log
-                // write did would leave an administrator retrying an act that already took.
+                // Best effort: the change happened, and reporting it failed would have somebody
+                // retry an act that already took.
                 if let Err(why) = store
                     .record(
                         admin.id,
@@ -463,8 +440,7 @@ struct BanForm {
     notes: String,
 }
 
-/// Longest private note kept. Long enough for a case, bounded because it is a text column
-/// somebody can paste a log file into.
+/// Bounded: it is a text column somebody can paste a log file into.
 const MAX_NOTES: usize = 4000;
 
 async fn issue_ban(
@@ -557,8 +533,8 @@ async fn lift_ban(
     let now = Utc::now();
     let outcome = match ability::may_lift(admin.level) {
         Err(denied) => Err(Notice::refused(denied.said())),
-        // The account id goes to the store with the ban id, so a ban belonging to somebody
-        // else cannot be lifted by putting its identifier in this form.
+        // The account id goes with the ban id, so a ban guessed from another account is not
+        // liftable through this page.
         Ok(()) => match store
             .lift_ban(
                 form.ban,
@@ -593,8 +569,7 @@ async fn lift_ban(
     answered(&state, &admin, &headers, id, outcome).await
 }
 
-/// Readiness. This service has no degraded mode: without the database there is nothing to
-/// administer and nothing to sign in against.
+/// No degraded mode: without the database there is nothing to administer.
 async fn readyz(State(state): State<AppState>) -> Response {
     match sqlx::query("select 1").execute(&state.pool).await {
         Ok(_) => "ready".into_response(),

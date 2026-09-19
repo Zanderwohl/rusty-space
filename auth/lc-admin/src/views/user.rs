@@ -1,14 +1,10 @@
 //! One account, as an administrator sees it.
 //!
-//! Visible to administrators and to nobody else — there is no "profile" here that the account
-//! itself can reach, and several things on this page are the reason: the private notes on a
-//! ban, every address the account has ever linked, and the labels of the machines it is signed
-//! in from.
+//! Administrators only, and several things here are why: a ban's private notes, every address
+//! the account has linked, and the labels of the machines it is signed in from.
 //!
-//! The mutable half of the page is one region, `#user-detail`, and every act replaces the
-//! whole of it. That is more bytes than swapping the one row that changed and it is worth it:
-//! banning somebody changes their standing, their ban list, the action log and which controls
-//! are offered, and a page that updates three of those four is a page that lies.
+//! Every act replaces **one region**. Banning somebody changes their standing, their ban
+//! list, the log and which controls are offered; a page that updates three of those lies.
 
 use chrono::{DateTime, Utc};
 use lc_identity::actions::Entry;
@@ -21,24 +17,20 @@ use crate::auth::Admin;
 use crate::detail::{Grant, Link};
 use crate::shard::{Fit, Missing, Status, Whereabouts};
 
-/// Everything one user page reads.
 pub struct Detail {
     pub account: Account,
-    /// When the account was made. Off the index since it went to three columns, and here
-    /// instead — a date that is worth having somewhere and worth a column nowhere.
+    /// Off the index since it went to three columns. Worth having somewhere, worth a column
+    /// nowhere.
     pub joined: Option<DateTime<Utc>>,
     pub links: Vec<Link>,
     pub grants: Vec<Grant>,
     pub bans: Vec<Ban>,
     pub log: Vec<Entry>,
     pub sanction: Option<Sanction>,
-    /// What the shard says about this account's ship, or why it says nothing. Fetched
-    /// best-effort: a shard that is down makes this section say so and leaves every other
-    /// section on the page working.
+    /// Best effort: a shard that is down makes this section say so and leaves the rest working.
     pub status: Result<Status, Missing>,
 }
 
-/// What just happened, if anything did.
 pub struct Notice {
     pub kind: &'static str,
     pub said: String,
@@ -130,12 +122,8 @@ fn standing(detail: &Detail, now: DateTime<Utc>) -> Markup {
     }
 }
 
-/// The two acts: setting a level, and issuing a ban.
-///
-/// What is offered comes from `lc_identity::ability` rather than from a rule written again
-/// here. An administrator is never shown a control whose only possible outcome is a refusal —
-/// and, more to the point, never shown one the rules would in fact allow but this page forgot
-/// about.
+/// What is offered comes from `lc_identity::ability`, so a control is never shown whose only
+/// outcome is a refusal — nor withheld where the rules would in fact allow it.
 fn controls(admin: &Admin, detail: &Detail, now: DateTime<Utc>) -> Markup {
     let account = &detail.account;
     let level = account.level();
@@ -148,8 +136,7 @@ fn controls(admin: &Admin, detail: &Detail, now: DateTime<Utc>) -> Markup {
                 h2 { "Level" }
                 @if offerable.is_empty() {
                     p class="nothing" {
-                        // The reason, from the rules themselves, so it is right by
-                        // construction rather than by a matching sentence written here.
+                        // From the rules themselves, so it is right by construction.
                         (ability::may_set_level(
                             admin.level, admin.id, level, account.id,
                             if level == Level::PLAYER { Level::DEBUG } else { Level::PLAYER },
@@ -176,9 +163,8 @@ fn controls(admin: &Admin, detail: &Detail, now: DateTime<Utc>) -> Markup {
                     Ok(()) => form class="act act-ban" method="post"
                         action=(crate::routes::user_ban_url(account.id))
                         hx-post=(crate::routes::user_ban_url(account.id))
-                        // Irreversible enough to be worth asking about. `ts/confirm.ts`
-                        // answers this with a dialog; with scripting off htmx falls back to
-                        // the browser's own confirm, and with htmx off the form just submits.
+                        // `ts/confirm.ts` answers this; with scripting off htmx falls back to
+                        // `window.confirm`.
                         hx-confirm={ "Ban " (account.display_name) "?" }
                     {
                         div class="field" {
@@ -206,9 +192,8 @@ fn controls(admin: &Admin, detail: &Detail, now: DateTime<Utc>) -> Markup {
                         }
                         button type="submit" class="danger" { "Ban" }
                         @if detail.sanction.is_some() {
-                            // Bans are served concurrently, so this adds one rather than
-                            // replacing what is there. Said out loud, because "ban" on a page
-                            // that already says "banned" reads like an edit.
+                            // Said out loud: "ban" on a page that already says "banned" reads like
+                            // an edit.
                             p class="fine-print" {
                                 "This account already has "
                                 (detail.sanction.as_ref().map_or(0, |s| s.count))
@@ -219,8 +204,6 @@ fn controls(admin: &Admin, detail: &Detail, now: DateTime<Utc>) -> Markup {
                 }
             }
         }
-        // Not a control: a note about the one rule that has no control at all, said where
-        // somebody would otherwise go looking for the button.
         @if detail.sanction.is_some() && detail.bans.iter().all(|b| !b.in_force(now)) {
             (super::note("done", "Every ban on this account has run out."))
         }
@@ -286,8 +269,7 @@ fn ban_row(admin: &Admin, ban: &Ban, now: DateTime<Utc>) -> Markup {
                 }
             }
             td class="cell-notes" {
-                // Private. The page they are on is behind the `Admin` extractor, which is the
-                // only thing keeping them so.
+                // Private. The `Admin` extractor is the only thing keeping them so.
                 @if !ban.notes.is_empty() { p { (ban.notes) } }
                 @if !ban.lift_notes.is_empty() {
                     p class="lift-notes" { "Lifted: " (ban.lift_notes) }
@@ -334,9 +316,8 @@ fn links(detail: &Detail) -> Markup {
                                         None => span class="nothing" { "—" },
                                         Some(email) => {
                                             (email)
-                                            // Whether the *provider* verified it. An
-                                            // unverified address aligns no accounts, which is
-                                            // the rule this column exists to make visible.
+                                            // The *provider*'s verdict. An unverified address
+                                            // aligns no accounts.
                                             @if link.email_verified {
                                                 span class="badge badge-verified" { "verified" }
                                             } @else {
@@ -394,8 +375,8 @@ fn grants(detail: &Detail, now: DateTime<Utc>) -> Markup {
                     }
                 }
                 p class="fine-print" {
-                    // Worth saying on this page, because "revoke their device" is the thing
-                    // an administrator will reach for next and it is not here.
+                    // "Revoke their device" is what an administrator reaches for next, and is not
+                    // here.
                     "A grant is not a way past a ban: every ticket is checked against the \
                      account's bans when it is minted."
                 }
@@ -404,15 +385,11 @@ fn grants(detail: &Detail, now: DateTime<Utc>) -> Markup {
     }
 }
 
-/// Where the ship is, and what it is made of.
+/// Both cards are as of the shard's last checkpoint, seconds behind the world. Not written on
+/// the page: it is a console, the numbers move, and a caption on every view earns less than
+/// the room it takes.
 ///
-/// Two cards side by side, both as of the shard's last checkpoint — a few seconds behind the
-/// world. That is not written on the page: it is a console, the numbers move, and a caption
-/// saying so on every view earns less than the room it takes.
-///
-/// The system card is deliberately thin. It names the system and how far into it the craft
-/// is, and that is the hook: more about the system itself goes here later, and the card is
-/// the shape that waits for it.
+/// The system card is deliberately thin — more about the system goes here later.
 fn status_section(detail: &Detail) -> Markup {
     html! {
         section class="panel" {
@@ -444,8 +421,7 @@ fn where_card(status: &Status) -> Markup {
                 Whereabouts::Nowhere => {
                     p class="card-headline" { "Off the catalogue" }
                     p class="card-detail" {
-                        // Only reachable by a craft placed by hand, so it is worth saying
-                        // rather than rendering as a blank.
+                        // Reachable only by a craft placed by hand.
                         "No star in this shard's sky is near this craft."
                     }
                 }
@@ -478,13 +454,11 @@ fn fit_card(status: &Status) -> Markup {
 fn fitted(fit: &Fit) -> Markup {
     html! {
         @if fit.refitting {
-            // A `span` inside a `p`, not a `p` with the badge class on it: the card is a flex
-            // column, so a block-level badge is stretched the full width of it and stops
-            // reading as a badge at all.
+            // A `span`, not a `p.badge`: the card is a flex column and a block badge stretches to
+            // its full width.
             p { span class="badge badge-in-force" { "Refitting" } }
         }
-        // The slot count is not here: it belongs with the modules that fill the slots, as
-        // the last row of the table below.
+        // The slot count is the table's last row: the slots are what the modules fill.
         dl class="card-facts" {
             dt { "Stored" }
             dd { (joules(fit.stored_j)) }
@@ -495,22 +469,18 @@ fn fitted(fit: &Fit) -> Markup {
             dt { "Collecting" }
             dd { (watts(fit.solar_w)) }
         }
-        // A table rather than a run of "name × n": two columns line the counts up, and a
-        // loadout is read by comparing them.
+        // Two columns line the counts up, and a loadout is read by comparing them.
         table class="loadout" {
             tbody {
                 @for (name, count) in &fit.modules {
-                    // Every module, including the ones at zero: a fitting is read to find out
-                    // what is missing at least as often as to find out what is there.
+                    // Including the ones at zero: a fitting is read to find what is missing.
                     tr class=[(*count == 0).then_some("none")] {
                         th scope="row" { (name) }
                         td { (count) }
                     }
                 }
             }
-            // `tfoot` because the total is a summary of the rows above it, which is what the
-            // element is for — and because it keeps the total out of `tbody`, where a future
-            // sort or filter over the modules would otherwise catch it.
+            // `tfoot`, so a future sort over the modules does not catch the total.
             tfoot {
                 tr {
                     th scope="row" { "Total" }
@@ -521,10 +491,8 @@ fn fitted(fit: &Fit) -> Markup {
     }
 }
 
-/// An energy, in whichever unit keeps it to three or four digits.
-///
-/// A ship's store runs from kilojoules to petajoules, and `1500000000000 J` is a number
-/// nobody reads — they count the digits, get it wrong, and move on.
+/// A ship's store runs from kilojoules to beyond yottajoules, and nobody reads
+/// `6984095838507.07 PJ` — they count the digits, get it wrong, and move on.
 fn joules(j: f64) -> String {
     scaled(j, "J")
 }
@@ -549,10 +517,8 @@ fn scaled(value: f64, unit: &str) -> String {
         return format!("— {unit}");
     }
     let magnitude = value.abs();
-    // **The ladder has to reach the numbers this game actually produces.** It stopped at peta
-    // first, and a ship's store came out as `6984095838507.07 PJ` — seven thousand billion
-    // petajoules, which is a correct number and is not a readable one. A relativistic drive
-    // deals in zettajoules without trying.
+    // The ladder stopped at peta once, and a real ship's store came out as
+    // `6984095838507.07 PJ`.
     if magnitude >= 1e27 {
         return format!("{value:.2e} {unit}");
     }
@@ -582,8 +548,8 @@ fn log(detail: &Detail) -> Markup {
                             span class="log-who" {
                                 @match &entry.actor_name {
                                     Some(name) => { "by " (name) },
-                                    // The account was deleted. The line stays: somebody acted,
-                                    // and that they are gone does not unmake it.
+                                    // Deleted. The line stays: somebody acted, and their being gone
+                                    // does not unmake it.
                                     None => "by a deleted account",
                                 }
                             }

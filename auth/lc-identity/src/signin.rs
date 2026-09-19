@@ -37,8 +37,7 @@ pub enum Refused {
     BadCredentials,
     Unacceptable(password::Unacceptable),
     Taken,
-    /// The account is banned. Carries what the person is told: how many bans are in force
-    /// and when the last of them ends. See [`admitted`].
+    /// Carries what the person is told; see [`admitted`].
     Banned(Sanction),
     /// The player said no at the provider's consent screen. Not a failure — the one refusal
     /// here that is somebody exercising a choice.
@@ -103,17 +102,12 @@ pub fn digest_of(code: &str) -> Vec<u8> {
     Sha256::digest(code.as_bytes()).to_vec()
 }
 
-/// Whether this account may sign in at all.
+/// **The one place a ban is enforced**, and called on every path that turns an account id
+/// into something usable — including ticket minting, without which a ban would not reach
+/// somebody already signed in until after it expired.
 ///
-/// **The one place a ban is enforced**, and it is called on every path that turns an account
-/// id into something a person can use: both password forms, the end of an upstream dance, the
-/// code exchange the site makes, and ticket minting. Enforcing it at the last of those matters
-/// as much as at the first — a site session is a fortnight long, so a ban issued to somebody
-/// already signed in would otherwise not reach them until it had expired.
-///
-/// A store failure is *not* a refusal. A database that cannot be reached must not lock every
-/// account out of the game; it is reported as a backend error and the sign-in fails the way
-/// any other outage does.
+/// A store failure is not a refusal: a database that cannot be reached must not lock every
+/// account out of the game.
 pub async fn admitted(
     store: &Store,
     account_id: Uuid,
@@ -125,11 +119,7 @@ pub async fn admitted(
     }
 }
 
-/// How long a banned person is told to wait, as a sentence.
-///
-/// Rounded up to the coarsest unit that still reads honestly: somebody told "about 2 months"
-/// does not come back in eight weeks and find four hours left. An exact timestamp is shown
-/// beside it, because a person who wants the minute should have it.
+/// Rounded to the coarsest unit that still reads honestly.
 pub fn how_long(sanction: &Sanction, now: chrono::DateTime<chrono::Utc>) -> String {
     let Some(until) = sanction.until else {
         return "This ban does not expire.".to_owned();

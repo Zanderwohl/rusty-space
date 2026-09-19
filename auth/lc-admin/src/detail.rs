@@ -1,18 +1,16 @@
-//! What a user page shows beyond the account row: where the account can be signed in from.
+//! Where an account can be signed in from.
 //!
-//! Administrative reads, which is why they are here rather than in `lc_identity::store`. The
-//! broker's store holds what the broker itself needs on a request path; these two queries
-//! exist only to be looked at by a person.
+//! Here and not in `lc_identity::store` because these exist only to be looked at by a person;
+//! that store holds what the broker needs on a request path.
 
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// One way of signing in to the account.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Link {
     pub provider: String,
-    /// What the provider calls them. Google's `sub`, or the address for a password account.
+    /// Google's `sub`, or the address for a password account.
     pub subject: String,
     pub email: Option<String>,
     pub email_verified: bool,
@@ -22,7 +20,7 @@ pub struct Link {
 /// What a desktop client is holding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Grant {
-    /// What a revocation list shows a person: "Ada's laptop", not a hex string.
+    /// "Ada's laptop", not a hex string.
     pub label: String,
     pub created_at: DateTime<Utc>,
     pub last_used: Option<DateTime<Utc>>,
@@ -37,10 +35,8 @@ impl Grant {
 
 type LinkRow = (String, String, Option<String>, bool, DateTime<Utc>);
 
-/// The facts about the account row itself that `lc_identity::store::Account` does not carry.
-///
-/// Its own query because `Account` is the broker's type and the broker has no use for these:
-/// widening it would put a column on the sign-in path that only a console reads.
+/// Its own query: widening the broker's `Account` would put a column on the sign-in path that
+/// only a console reads.
 pub async fn joined(pool: &PgPool, account_id: Uuid) -> sqlx::Result<Option<DateTime<Utc>>> {
     let row: Option<(DateTime<Utc>,)> =
         sqlx::query_as("select created_at from accounts where id = $1")
@@ -70,11 +66,8 @@ pub async fn links_for(pool: &PgPool, account_id: Uuid) -> sqlx::Result<Vec<Link
         .collect())
 }
 
-/// Device grants, live and lapsed, newest first.
-///
-/// **The digest is not selected.** It is the longest-lived credential in the system, and a
-/// page that put it on screen would be a page that puts it in a screenshot. What an
-/// administrator needs is the label and the dates.
+/// **The digest is not selected**: it is the longest-lived credential here, and a page that
+/// shows it is a page that puts it in a screenshot.
 type GrantRow = (String, DateTime<Utc>, Option<DateTime<Utc>>, DateTime<Utc>);
 
 pub async fn grants_for(pool: &PgPool, account_id: Uuid) -> sqlx::Result<Vec<Grant>> {

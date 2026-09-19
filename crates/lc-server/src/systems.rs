@@ -1,18 +1,11 @@
-//! The systems this shard holds, as the administration console lists them.
+//! The systems this shard holds, as the console lists them.
 //!
-//! **Where the systems come from is this module's business and nothing else's.** Today they
-//! are the star catalogue the shard was started with, which is test data loaded from a packed
-//! file. They will be rows in this shard's own `systems` table, once the shard is authoritative
-//! for them and there is a way to edit one. The console is on the far side of a RON contract
-//! that says nothing about either — it asks for systems and gets systems — so that change is
-//! a change to this file and to nothing the console ships.
+//! **Where they come from is this module's business.** Today, the star catalogue the shard was
+//! started with; later, its own `systems` table. The console asks for systems and gets systems,
+//! so that move changes this file and nothing it ships — hence `id` and not `star`.
 //!
-//! That is why the identifier here is `id` and not `star`: a star is what a system happens to
-//! be built around at the moment, and the console must not come to depend on it.
-//!
-//! Paging, filtering and ordering all happen **here**, against the whole set, for the reason
-//! the user index pages in SQL: handing the console eight thousand systems so it can show
-//! twenty-five works today and stops working at some size nobody is watching for.
+//! Paged, filtered and ordered **here**: handing the console eight thousand systems so it can
+//! show twenty-five works today and stops at a size nobody is watching for.
 
 use std::collections::HashMap;
 
@@ -23,17 +16,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Row {
     pub id: u64,
-    /// `None` where the system has no name. Most of a catalogue does not.
+    /// Most of a catalogue has none.
     pub name: Option<String>,
-    /// Craft in the system as of the last checkpoint.
+    /// As of the last checkpoint.
     pub ships: u64,
-    /// Things players have built that are not craft. **None exist yet** — there is nothing in
-    /// the game that makes one. The column is here because the index is about what is in a
-    /// system, and a column that appears later moves every other column when it does.
+    /// **None exist yet**; nothing makes one. Here so the column does not appear later and
+    /// move every other one.
     pub objects: u64,
 }
 
-/// One page of them, and how many there are in total.
+/// `total` counts matches, not the page.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Page {
     pub total: u64,
@@ -50,8 +42,8 @@ pub enum Sort {
 }
 
 impl Sort {
-    /// Anything unrecognised is the default, never an error: the far side of this is a URL
-    /// somebody can edit, and a 400 for a typo is the wrong answer there.
+    /// Unrecognised is the default, never an error: a 400 is the wrong answer to a typo in a
+    /// URL somebody edited.
     pub fn from_slug(slug: &str) -> Sort {
         match slug {
             "ships" => Sort::Ships,
@@ -64,8 +56,7 @@ impl Sort {
 /// What the console asked for.
 #[derive(Clone, Debug)]
 pub struct Query {
-    /// Matched against the name, case-insensitively, and against the id as text — an
-    /// administrator with an identifier in hand should be able to paste it in.
+    /// Name, case-insensitively, or the id as text so an identifier can be pasted in.
     pub q: String,
     pub sort: Sort,
     pub descending: bool,
@@ -73,12 +64,9 @@ pub struct Query {
     pub limit: u64,
 }
 
-/// How many craft are in each system, keyed by system id.
-///
-/// **O(craft × systems)**, because finding a craft's system is a linear scan for the nearest
-/// star. That is nothing at three craft and eight thousand systems, and it is the first thing
-/// to change when a shard holds thousands of craft: the fix is an index on the catalogue, not
-/// a different shape here, so the signature does not need to move.
+/// **O(craft × systems)** — a linear nearest-star scan per craft. Nothing at three craft, and
+/// the first thing to change at thousands; the fix is an index on the catalogue, not a
+/// different signature here.
 pub fn tally(at: &[glam::DVec3], stars: &[CatalogueStar]) -> HashMap<u64, u64> {
     let mut counts = HashMap::new();
     for position in at {
@@ -100,8 +88,6 @@ pub fn page(stars: &[CatalogueStar], ships: &HashMap<u64, u64>, query: &Query) -
                 id,
                 name: star.name.clone(),
                 ships: ships.get(&id).copied().unwrap_or(0),
-                // Nothing makes one yet. Written as a zero rather than left out, so the shape
-                // the console reads does not change on the day something does.
                 objects: 0,
             }
         })
@@ -116,24 +102,17 @@ pub fn page(stars: &[CatalogueStar], ships: &HashMap<u64, u64>, query: &Query) -
         })
         .collect();
 
-    // **One comparator, and it ends in the id.** Every column here has ties — most systems
-    // have no name and almost none have a craft — and an ordering with ties leaves the result
-    // at the mercy of the order the systems came in.
-    //
-    // A stable sort over a `Vec` that is the same every call would paper over that, which is
-    // why the tie-break is not obviously load-bearing today. It becomes load-bearing the
-    // moment these are rows from a `SELECT`, which is where they are going: a query with no
-    // total order may hand them back differently each time, and then a system lands on two
-    // pages and another on none. The same trap the user index has in SQL, and the same fix.
+    // **Ends in the id.** Every column here is nearly all ties. A stable sort over the same
+    // `Vec` every call hides that; a `SELECT` with no total order, which is where these are
+    // going, does not — and then a system lands on two pages and another on none.
     //
     // The direction applies to the primary key only. Reversing the whole list afterwards
     // would reverse the tie-break with it, which is still total and still correct, but it
     // makes two pages of identical rows swap order for no reason a reader could explain.
     rows.sort_by(|a, b| {
         let primary = match query.sort {
-            // Unnamed systems sort after named ones **whichever way the list runs**: they are
-            // the bulk of a catalogue, and a page of bare identifiers at the top is a page
-            // nobody asked for. So the named-ness is compared outside the direction flip.
+            // Unnamed last **whichever way the list runs** — they are the bulk of a
+            // catalogue — so named-ness is compared outside the direction flip.
             Sort::Name => {
                 return match (a.name.is_some(), b.name.is_some()) {
                     (true, false) => std::cmp::Ordering::Less,

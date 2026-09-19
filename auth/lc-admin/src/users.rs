@@ -1,10 +1,8 @@
-//! Reading accounts: the index query, and everything one user page needs.
+//! The user index query.
 //!
-//! **Paging happens in the database.** The index asks for one page of rows and the total in a
-//! single statement — `limit`/`offset` for the rows, a `count(*) over ()` window for the
-//! total, which PostgreSQL computes after the filters and before the limit. Fetching the
-//! accounts table and slicing it in Rust would work today and stop working silently, at some
-//! account count nobody is watching for, by getting gradually slower rather than by failing.
+//! **Paging happens in the database**: `limit`/`offset` plus a `count(*) over ()` window for
+//! the total, in one statement. Slicing the table in Rust would work today and get gradually
+//! slower rather than failing.
 
 use chrono::{DateTime, Utc};
 use lc_identity::level::Level;
@@ -19,14 +17,12 @@ pub struct Row {
     pub id: Uuid,
     pub display_name: String,
     pub level: Level,
-    /// One address, for recognising the account. Not every address it has: the index is a
-    /// list to find somebody in, and the user page is where the links are enumerated.
+    /// One, to recognise the account by. The user page enumerates them.
     pub email: Option<String>,
     /// How many bans are in force right now.
     pub in_force: i64,
     pub permanent: bool,
-    /// The furthest expiry among them. `None` with `in_force > 0` and `permanent` means there
-    /// is a ban that does not end — see [`lc_identity::bans::Sanction`], which this mirrors.
+    /// The **furthest** expiry. `None` with `permanent` is a ban that does not end.
     pub until: Option<DateTime<Utc>>,
 }
 
@@ -40,20 +36,18 @@ impl Row {
 #[derive(Clone, Debug)]
 pub struct Page {
     pub rows: Vec<Row>,
-    /// Matching rows across every page, not the length of [`Page::rows`].
+    /// Across every page, not the length of `rows`.
     pub total: i64,
     pub listing: Listing,
 }
 
 impl Page {
-    /// How many pages the filters produce. At least one, so an empty result still has a
-    /// page 1 to be on rather than a pager counting to zero.
+    /// At least one, or an empty result has no page to be on.
     pub fn pages(&self) -> u32 {
         let per = i64::from(self.listing.per);
         (((self.total + per - 1) / per).max(1)) as u32
     }
 
-    /// The one-based index of the first row shown, for "showing 26–50 of 312".
     pub fn first(&self) -> i64 {
         if self.rows.is_empty() {
             0
@@ -67,7 +61,6 @@ impl Page {
     }
 }
 
-/// The shape every column of the index query comes back as.
 type IndexRow = (
     Uuid,
     String,
@@ -79,11 +72,8 @@ type IndexRow = (
     i64,
 );
 
-/// A `like` pattern that matches the term anywhere and treats its wildcards as text.
-///
-/// Without the escaping, a person searching for `100%` matches every account, and one
-/// searching for `_` matches every account with a name at all. The backslash is doubled first
-/// or escaping the wildcards would itself be escapable.
+/// Escaped, or a search for `100%` matches every account. The backslash is doubled first or
+/// the escaping is itself escapable.
 fn contains(term: &str) -> String {
     let escaped = term
         .replace('\\', "\\\\")
@@ -92,17 +82,11 @@ fn contains(term: &str) -> String {
     format!("%{escaped}%")
 }
 
-/// One page of accounts.
+/// **One static statement** whatever the filters: each is a bound parameter that is null or a
+/// value, and only `order by` is assembled — from enums, never from request text.
 ///
-/// Every filter is a bound parameter that is either null or a value, so this is **one static
-/// statement** whatever the filters are — only `order by` is assembled, and it is assembled
-/// from [`Listing::order_by`], which reads enums rather than request text.
-///
-/// The `($n is null or ...)` shape keeps that single statement at the price of a plan the
-/// planner cannot specialise per filter. That is the right trade at this table's size, where
-/// the whole thing fits in memory several times over; the search is `ilike` against two
-/// columns and would need a trigram index long before any of the equality filters became the
-/// expensive part.
+/// The `($n is null or ...)` shape costs a plan the planner cannot specialise per filter,
+/// which is the right trade until the `ilike` search needs a trigram index anyway.
 pub async fn page(pool: &PgPool, listing: &Listing, now: DateTime<Utc>) -> sqlx::Result<Page> {
     let search = (!listing.q.is_empty()).then(|| contains(&listing.q));
     let exactly = match listing.rank {
@@ -159,9 +143,8 @@ pub async fn page(pool: &PgPool, listing: &Listing, now: DateTime<Utc>) -> sqlx:
         .fetch_all(pool)
         .await?;
 
-    // Zero rows is zero rows, not zero accounts: the window function comes back with the
-    // rows, so an empty page carries no total and the count has to be read as such. A page
-    // past the end is the ordinary way to get here.
+    // The window comes back *with* the rows, so an empty page carries no total. Paging past
+    // the end is the ordinary way here.
     let total = rows.first().map_or(0, |r| r.7);
     Ok(Page {
         rows: rows
@@ -181,11 +164,7 @@ pub async fn page(pool: &PgPool, listing: &Listing, now: DateTime<Utc>) -> sqlx:
     })
 }
 
-/// A page past the end reports a total of zero because no row carried one. Ask again.
-///
-/// Only when the page is empty and is not the first, which is the one case where "no accounts
-/// match" and "you have paged past the end" are different answers and the interface has to
-/// tell them apart.
+/// For the one case where "nothing matches" and "you paged past the end" differ.
 pub async fn total_matching(
     pool: &PgPool,
     listing: &Listing,

@@ -1,10 +1,8 @@
 //! The chrome, and the small things every page renders the same way.
 //!
-//! Server-rendered HTML throughout. htmx swaps fragments of it; nothing here builds a page in
-//! the browser, and the two handlers that answer a swap render the same function the full page
-//! does. A partial that drifts from the page it lives in is the failure mode of this whole
-//! approach, and rendering both from one function is what prevents it rather than a convention
-//! about remembering to.
+//! A page and the partial that replaces part of it render from **one function**. A partial
+//! that drifts from its page is the failure mode of this approach, and sharing the function
+//! prevents it where a convention about remembering would not.
 
 pub mod index;
 pub mod systems;
@@ -23,7 +21,6 @@ pub struct Head<'a> {
     pub title: &'a str,
 }
 
-/// The document. Every page goes through this and nothing else emits a `<!DOCTYPE>`.
 pub fn shell(assets: &Assets, head: Head<'_>, admin: Option<&Admin>, body: Markup) -> Markup {
     html! {
         (DOCTYPE)
@@ -32,20 +29,12 @@ pub fn shell(assets: &Assets, head: Head<'_>, admin: Option<&Admin>, body: Marku
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 title { (head.title) " — Lightcone Frontier administration" }
-                // Nothing here is for anyone but an administrator, and an administration
-                // console in somebody's search results is an administration console being
-                // probed.
+                // A console in somebody's search results is a console being probed.
                 meta name="robots" content="noindex, nofollow";
-                // htmx 4 stopped inheriting attributes implicitly, and this service leans on
-                // that: `:inherited` is written where inheritance is wanted, so nothing
-                // inherits a target by accident. Stated rather than left to the default in
-                // case the default ever moves.
+                // Stated rather than left to htmx 4's default, in case it moves.
                 meta name="htmx-config" content="implicitInheritance:false, defaultSwap:innerHTML";
                 link rel="stylesheet" href=(assets.url(crate::assets::STYLESHEET));
-                // Deferred, both of them. htmx processes the document on load and the module
-                // listens for its events; neither needs to run before the body exists, and a
-                // console that renders only once two scripts have parsed is a console that
-                // looks broken on a slow connection.
+                // Neither needs to run before the body exists.
                 script src=(assets.url(crate::assets::HTMX)) defer {}
                 script src=(assets.url(crate::assets::SCRIPT)) type="module" {}
             }
@@ -76,22 +65,14 @@ pub fn shell(assets: &Assets, head: Head<'_>, admin: Option<&Admin>, body: Marku
     }
 }
 
-/// A page that is only a message: a refusal, or something that went wrong.
-///
-/// Not behind the [`Admin`] extractor, so it renders without a stylesheet URL that needs
-/// state. The chrome is the plain one on purpose — somebody seeing this is not somebody the
-/// console should be offering navigation to.
+/// A page that is only a message.
 pub fn wrong(assets: &Assets, status: StatusCode, heading: &str, said: &str) -> Response {
     message(assets, status, heading, said, None)
 }
 
-/// The same, with a link.
-///
-/// **Any page a person can land on and stay on needs one of these.** The console's only
-/// navigation is a masthead that renders when you are an administrator, so a refusal without
-/// a link is a dead end: no menu, no back button that helps, and nothing on screen naming the
-/// address that would get you out. That is not a theoretical failure — "Not for you" shipped
-/// without one and stranded the first account that met it.
+/// **Any page a person can land on and stay on needs one of these.** The only navigation is
+/// a masthead administrators see, so a refusal without a link is a dead end — which is what
+/// "Not for you" shipped as, stranding the first account that met it.
 pub fn refusal(
     assets: &Assets,
     status: StatusCode,
@@ -102,12 +83,8 @@ pub fn refusal(
     message(assets, status, heading, said, Some(way_out))
 }
 
-/// The chrome a message page gets: the stylesheet and the wordmark, and **no navigation**.
-///
-/// Not [`shell`], which renders a nav bar — half of these pages are seen by somebody who may
-/// not have the pages that bar links to, and a link that leads to another refusal is worse
-/// than no link. The way out, where there is one, is named by the caller, because only the
-/// caller knows what it is.
+/// **No navigation**: half of these are seen by somebody who cannot open the pages a nav bar
+/// links to, and a link to another refusal is worse than none.
 fn message(
     assets: &Assets,
     status: StatusCode,
@@ -148,33 +125,27 @@ fn message(
         .into_response()
 }
 
-/// A level, as a badge. One rendering, so the index and the user page cannot disagree about
-/// what an administrator looks like.
+/// One rendering, so the index and the user page cannot disagree.
 pub fn level_badge(level: Level) -> Markup {
     html! {
         span class={ "badge badge-level badge-" (level.slug()) } { (level.name()) }
     }
 }
 
-/// A timestamp a person reads, with the machine-readable one alongside.
 pub fn when(at: DateTime<Utc>) -> Markup {
     html! {
         time datetime=(at.to_rfc3339()) { (at.format("%Y-%m-%d")) }
     }
 }
 
-/// The same, to the minute, for things where the minute matters.
 pub fn when_exact(at: DateTime<Utc>) -> Markup {
     html! {
         time datetime=(at.to_rfc3339()) { (at.format("%Y-%m-%d %H:%M")) " UTC" }
     }
 }
 
-/// How long until `at`, in the coarsest unit that is still honest.
-///
-/// The counterpart of `lc_identity::signin::how_long`, which says the same thing to the person
-/// being refused. Two renderings because the audiences differ: this one is terse and sits in a
-/// table cell, that one is a sentence on a page somebody is reading in dismay.
+/// Terse, for a table cell. `lc_identity::signin::how_long` says the same as a sentence to
+/// the person being refused.
 pub fn how_long(at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     let left = at - now;
     if left.num_seconds() <= 0 {
@@ -190,7 +161,6 @@ pub fn how_long(at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     }
 }
 
-/// A message at the top of a region, after something was done or refused.
 pub fn note(kind: &str, said: &str) -> Markup {
     html! {
         p class={ "note note-" (kind) } role="status" { (said) }

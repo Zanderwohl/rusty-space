@@ -1,12 +1,10 @@
 //! The administrative log: who changed what about whom.
 //!
-//! Append-only, and written in the same request as the change it describes. A promotion with
-//! nothing recording it is a power that appeared from nowhere, and a demotion with nothing
-//! recording it is one that vanished — neither is recoverable from the accounts table, which
+//! Append-only. A promotion with nothing recording it is a power that appeared from nowhere
+//! and a demotion one that vanished; neither is recoverable from the accounts table, which
 //! only ever holds the present.
 //!
-//! `detail` is rendered when the act happens rather than reconstructed from ids later, so
-//! renaming a level or retiring a ban reason does not rewrite history.
+//! `detail` is rendered when the act happens, so renaming a level does not rewrite history.
 
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -47,8 +45,7 @@ impl Action {
         }
     }
 
-    /// Unrecognised names render as themselves rather than failing the page. See
-    /// [`crate::bans::Reason::from_stored`] for the same argument.
+    /// Unrecognised names render as themselves; see [`crate::bans::Reason::from_stored`].
     pub fn from_stored(stored: &str) -> Option<Action> {
         Action::ALL.into_iter().find(|a| a.slug() == stored)
     }
@@ -61,7 +58,7 @@ pub struct Entry {
     pub actor_name: Option<String>,
     pub subject_id: Option<Uuid>,
     pub subject_name: Option<String>,
-    /// `None` for a name this build does not know. The raw name is kept in [`Entry::raw`].
+    /// `None` for a name this build does not know; [`Entry::raw`] keeps it.
     pub action: Option<Action>,
     pub raw: String,
     pub detail: String,
@@ -78,8 +75,8 @@ impl Entry {
 }
 
 impl Store {
-    /// Record an act. Best effort by design at the call site: an administrative change that
-    /// succeeded must not be reported as failed because the log write did.
+    /// Best effort at the call site: an administrative change that succeeded must not be reported
+    /// as failed because the log write did.
     pub async fn record(
         &self,
         actor: Uuid,
@@ -123,7 +120,6 @@ impl Store {
         }
     }
 
-    /// What has been done to one account, newest first.
     pub async fn actions_for(&self, subject: Uuid, limit: i64) -> Result<Vec<Entry>, StoreError> {
         match self {
             Store::Memory(m) => {

@@ -199,10 +199,8 @@ async fn complete(
         }
     };
     broker.attempts.cleared(&by_account);
-    // The credentials were right and the account is still refused. After the budget is
-    // cleared, because a banned account typing its own password correctly is not an attack on
-    // itself, and leaving the failure on the budget would lock the address out of every other
-    // account on the machine.
+    // After the budget is cleared: a banned account typing its own password correctly is not an
+    // attack on itself, and the failure would lock the address out of every other account.
     if let Err(refused) = signin::admitted(&broker.store, account_id, Utc::now()).await {
         return refusal(refused).into_response();
     }
@@ -378,9 +376,7 @@ async fn exchange(
     };
     match account {
         Ok(Some(account)) => {
-            // The code was minted before the ban, or the ban arrived in the sixty seconds
-            // between. Either way the site is about to build a fortnight-long session out of
-            // this answer, so it is checked here too rather than only where the code was made.
+            // The site is about to build a fortnight-long session out of this answer.
             if let Err(refused) = signin::admitted(&broker.store, account.id, Utc::now()).await {
                 return native_refusal(refused);
             }
@@ -460,9 +456,7 @@ async fn ticket(
     let Ok(Some(account)) = broker.store.account(account_id).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    // **The load-bearing one.** A site session and a device grant both outlive a ban being
-    // issued — a fortnight and ninety days respectively — so this is the check that actually
-    // puts a banned player out of the game rather than merely off the sign-in form.
+    // **The load-bearing one.** A session and a grant both outlive a ban being issued.
     if let Err(refused) = signin::admitted(&broker.store, account.id, Utc::now()).await {
         return native_refusal(refused);
     }

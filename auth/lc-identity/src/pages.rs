@@ -1,9 +1,7 @@
 //! The pages the broker draws.
 //!
-//! Split out of `routes` when it went past the file-size cap, and split here rather than
-//! anywhere else because the seam is real: everything below renders HTML and touches no
-//! request, and everything left behind is the HTTP surface. `CLAUDE.md` has the cap; the
-//! reason to obey it is that a module doing two things is a module nobody reads to the end of.
+//! Split from `routes` at the file-size cap, and here because the seam is real: this renders
+//! and touches no request; that is the HTTP surface.
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -14,12 +12,8 @@ use crate::providers::Provider;
 use crate::routes::{Broker, Destination};
 use crate::signin::{self, Refused};
 
-/// What a banned account is told, wherever it is told it.
-///
-/// The reason is deliberately **not** here. A ban's reason belongs on a page an administrator
-/// reads and in whatever is said to the person out of band; putting it on the sign-in form
-/// turns a login screen into somewhere to read case notes, and the private notes sit one
-/// column away from it.
+/// The reason is deliberately **not** here: it belongs on a page an administrator reads, and
+/// the private notes sit one column from it.
 pub(crate) fn banned_page(sanction: &crate::bans::Sanction) -> (StatusCode, Markup) {
     let now = Utc::now();
     let how_long = signin::how_long(sanction, now);
@@ -37,8 +31,8 @@ pub(crate) fn banned_page(sanction: &crate::bans::Sanction) -> (StatusCode, Mark
                     }
                 }
                 @if sanction.count > 1 {
-                    // Said plainly, because somebody who waits out the one they know about and
-                    // is refused again will assume the service is broken.
+                    // Or somebody waits out the one they know about and assumes the service is
+                    // broken.
                     p class="fine-print" {
                         (sanction.count) " suspensions are in force. The date above is when the last of them ends."
                     }
@@ -48,12 +42,8 @@ pub(crate) fn banned_page(sanction: &crate::bans::Sanction) -> (StatusCode, Mark
     )
 }
 
-/// A refusal for a caller that reads JSON rather than HTML: the desktop client, the site's
-/// server-to-server calls, and ticket minting.
-///
-/// A ban is the one refusal here with something worth saying in the body. Everything else keeps
-/// the bare status it had, because explaining a failure to an unauthenticated caller is helping
-/// them.
+/// A ban is the one refusal with something worth saying in the body. The rest keep their bare
+/// status, because explaining a failure to an unauthenticated caller is helping them.
 pub(crate) fn native_refusal(refused: Refused) -> Response {
     match refused {
         Refused::Banned(sanction) => (
@@ -75,7 +65,7 @@ pub(crate) fn native_refusal(refused: Refused) -> Response {
 }
 
 pub(crate) fn refusal(refused: Refused) -> Response {
-    // Out of the table below because it is the one refusal whose text depends on the request.
+    // The one refusal whose text depends on the request.
     if let Refused::Banned(sanction) = &refused {
         return banned_page(sanction).into_response();
     }

@@ -27,9 +27,8 @@
   }
 }
 
-// The index is a table and a table has a width. Rather than hiding columns at a breakpoint —
-// which on an administration console means hiding the column somebody came to read — the
-// region scrolls sideways on a narrow screen and keeps every column.
+// Scrolls sideways rather than hiding columns at a breakpoint: on a console that means
+// hiding the column somebody came to read.
 #user-index {
   overflow-x: auto;
 }
@@ -64,19 +63,14 @@
     background: var(--ground-raised);
   }
 
-  // **The whole row is the link.** One anchor in the name cell, stretched over the row by a
-  // pseudo-element — so the row has one tab stop and one thing for a screen reader to
-  // announce, and a click anywhere on it follows the same link.
+  // **The whole row is the link**, by stretching the name cell's anchor over it.
   //
-  // `position: relative` on a `<tr>` is what makes the containing block the row rather than
-  // the page. It was unreliable for years and is not any more; if a row ever stretches its
-  // link across the whole viewport, this is the line that stopped working.
+  // `position: relative` on the `<tr>` is what makes the containing block the row; if a link
+  // ever stretches across the viewport, that is the line that stopped working.
   //
-  // **Text in the row cannot be selected**, which is the known cost of this pattern and is
-  // not worth working around: giving the cells `position: relative` to let them take a drag
-  // raises them above the overlay, and then only the name is clickable — which is the bug
-  // this pattern was adopted to fix. An address that needs copying is on the user page, one
-  // click away, where it is selectable.
+  // **Text in the row cannot be selected**, the known cost: giving the cells `position:
+  // relative` to take a drag raises them above the overlay, and then only the name is
+  // clickable — the bug this pattern fixes.
   .row-link {
     position: relative;
 
@@ -93,8 +87,7 @@
     }
   }
 
-  // A banned row is marked by more than its badge, so a list is scannable without reading
-  // every cell.
+  // More than a badge, so the list is scannable without reading every cell.
   .is-banned th[scope="row"] {
     box-shadow: inset 3px 0 0 var(--danger);
   }
@@ -180,8 +173,7 @@
   }
 }
 
-// A count column: narrow, right-aligned, and figures that line up so two rows can be
-// compared by eye down the column rather than read.
+// Figures line up so rows can be compared down the column rather than read.
 .cell-count {
   text-align: end;
   inline-size: 8rem;

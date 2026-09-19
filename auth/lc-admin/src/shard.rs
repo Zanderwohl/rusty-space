@@ -1,22 +1,16 @@
 //! Asking the game where somebody's ship is.
 //!
-//! **These types are a copy, and they are supposed to be.** The originals are
-//! `lc_server::status`, in the game's cargo workspace, which this service may not depend on —
-//! `auth/` is separate from the products and CI refuses a path dependency across the line.
-//! What crosses instead is **RON**: a format, not a type, so the shard serialises its structs
-//! and this deserialises into these.
+//! **These types are a copy on purpose.** The originals are `lc_server::status`, which this
+//! service may not depend on — CI refuses a path dependency across the workspace line. RON
+//! crosses instead, being a format and not a type.
 //!
-//! The cost is stated plainly because it is real: **a field renamed on the far side stops
-//! arriving here**, and nothing in either build will say so. What catches it is
-//! `parses_what_the_shard_sends`, which holds a captured payload — change the shape over
-//! there and that test is where it surfaces.
-//!
-//! The same trade as the ticket claims, for the same reason, and
-//! `lightcone/docs/16-identity.md` is where the reason is written down.
+//! So **a field renamed over there stops arriving here** and nothing in either build says so.
+//! The captured payloads in the tests below are what catches it. Same trade as the ticket
+//! claims; see `lightcone/docs/16-identity.md`.
 
 use serde::Deserialize;
 
-/// Where a craft is. Mirrors `lc_server::status::Whereabouts`.
+/// Mirrors `lc_server::status::Whereabouts`.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub enum Whereabouts {
     In { star: u64, name: String, au: f64 },
@@ -47,39 +41,32 @@ pub struct Status {
     pub fit: Option<Fit>,
 }
 
-/// One system. Mirrors `lc_server::systems::Row`.
-///
-/// `id` and not `star`: what a system is built around is the shard's business, and today it
-/// is a catalogue star only because the shard is not yet authoritative for systems of its own.
+/// Mirrors `lc_server::systems::Row`. `id` and not `star`: what a system is built around is
+/// the shard's business.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct System {
     pub id: u64,
-    /// `None` where the system has no name. Most of a catalogue does not.
+    /// Most of a catalogue has none.
     pub name: Option<String>,
     pub ships: u64,
-    /// Player-built things that are not craft. Always zero today; nothing makes one.
+    /// Always zero today; nothing makes one.
     pub objects: u64,
 }
 
-/// One page of them. Mirrors `lc_server::systems::Page`.
+/// Mirrors `lc_server::systems::Page`.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Systems {
-    /// Matching systems across every page, not the length of `systems`.
+    /// Across every page, not the length of `systems`.
     pub total: u64,
     pub systems: Vec<System>,
 }
 
-/// Why there is nothing to show.
-///
-/// A card that says which of these is a card somebody can act on; one that says "unavailable"
-/// for all four is a card that trains people to ignore it.
+/// Why there is nothing to show. Distinct, because a card that says "unavailable" for every
+/// cause is one people learn to ignore.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Missing {
-    /// No shard is configured. The console runs without one.
     NotConfigured,
-    /// The account has never been in the world.
     NoShip,
-    /// The shard did not answer, or answered with something unreadable.
     Unreachable(String),
 }
 
@@ -93,14 +80,10 @@ impl Missing {
     }
 }
 
-/// What it takes to ask.
 pub struct Shard<'a> {
-    /// Where the shard's administration surface is, on the container network.
+    /// On the container network.
     pub api: &'a str,
-    /// The audience its tickets must name.
     pub audience: &'a str,
-    /// The broker, and the secret that lets this service mint a ticket on an administrator's
-    /// behalf.
     pub identity_api: &'a str,
     pub identity_secret: &'a str,
     pub http: &'a reqwest::Client,
@@ -112,11 +95,8 @@ struct Minted {
 }
 
 impl Shard<'_> {
-    /// One account's ship, as the shard last checkpointed it.
-    ///
-    /// Two calls: mint a ticket for the **acting administrator**, then present it. Minting per
-    /// request rather than holding one is not waste — a ticket is sixty seconds and single
-    /// use, so there is nothing to hold, and it means the shard's log says who was looking.
+    /// Minted per request rather than held: a ticket is sixty seconds and single use, and
+    /// this way the shard's log says who was looking.
     pub async fn status(&self, acting: &str, about: &str) -> Result<Status, Missing> {
         let ticket = self.ticket_for(acting).await?;
         let response = self
@@ -137,17 +117,13 @@ impl Shard<'_> {
             .await
             .map_err(|why| Missing::Unreachable(why.to_string()))?;
         ron::from_str(&body).map_err(|why| {
-            // The shape changed on the far side, most likely. Logged with the body so the
-            // next person does not have to reproduce it to find out what arrived.
+            // Logged with the body, or the next person has to reproduce it to see what came.
             tracing::error!(%why, %body, "the shard's status did not parse");
             Missing::Unreachable("it answered in a shape this build does not read".to_owned())
         })
     }
 
-    /// One page of the shard's systems.
-    ///
-    /// The query goes to the shard verbatim — it is the one that knows how many there are and
-    /// can order them without sending them all here first.
+    /// The query goes verbatim: the shard can order them without sending them all here.
     pub async fn systems(&self, acting: &str, query: &str) -> Result<Systems, Missing> {
         let ticket = self.ticket_for(acting).await?;
         let response = self
@@ -173,11 +149,8 @@ impl Shard<'_> {
         })
     }
 
-    /// A ticket for the administrator whose page this is.
-    ///
-    /// The broker's `/ticket`, the same endpoint the website calls to put a player into the
-    /// game, taking the same shared secret. The ticket carries that administrator's level,
-    /// which is what the shard gates on.
+    /// The same `/ticket` the website calls to put a player into the game. It carries the
+    /// administrator's level, which is what the shard gates on.
     async fn ticket_for(&self, account: &str) -> Result<String, Missing> {
         let response = self
             .http

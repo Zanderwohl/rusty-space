@@ -1,12 +1,10 @@
 //! The systems index: every system this shard holds.
 //!
-//! The same shape as [`super::index`] — a filter form outside the swapped region, a sortable
-//! table inside it, a pager — and for the same reasons, which are written down there. What
-//! differs is where the rows come from: the shard, over RON, already paged. So this renders
-//! what it was handed and does no counting of its own.
+//! [`super::index`]'s shape, and its reasons. What differs is that the rows arrive from the
+//! shard already paged, so this renders what it was handed and counts nothing.
 //!
-//! **There is no view for one system.** There is not enough about one yet to fill a page, and
-//! a row that links to somewhere with nothing on it is worse than a row that does not link.
+//! **There is no view for one system**: a row that links somewhere empty is worse than one
+//! that does not link.
 
 use maud::{Markup, html};
 
@@ -32,8 +30,7 @@ pub fn region(listing: &Listing, found: &Result<Systems, Missing>) -> Markup {
             hx-swap:inherited="outerHTML"
         {
             @match found {
-                // A shard that is down says so here rather than anywhere alarming: the
-                // console administers accounts perfectly well without one.
+                // A shard that is down says so here: the console administers accounts without one.
                 Err(missing) => p class="empty" { (missing.said()) },
                 Ok(systems) => {
                     (summary(listing, systems))
@@ -135,15 +132,13 @@ fn heading(listing: &Listing, sort: Sort) -> Markup {
     }
 }
 
-/// One system. **Not a link**: there is nowhere to go yet.
+/// **Not a link**: there is nowhere to go yet.
 fn line(system: &System) -> Markup {
     html! {
         tr {
             th scope="row" class="cell-name" {
                 @match &system.name {
-                    // An unnamed system is most of a catalogue. Its identifier is its name,
-                    // and putting it in the headline rather than leaving the cell blank is
-                    // what makes the list scannable at all.
+                    // Its identifier is its name. A blank cell would not be scannable.
                     Some(name) => (name),
                     None => span class="nothing" { "Unnamed" },
                 }
@@ -182,8 +177,7 @@ fn empty(listing: &Listing, systems: &Systems) -> Markup {
     }
 }
 
-/// Previous, next, and where you are — bounded, as the user index's is. A catalogue is
-/// thousands of systems, so one link per page is thousands of links.
+/// Bounded, as the user index's is: a catalogue is thousands of systems.
 fn pager(listing: &Listing, total: u64) -> Markup {
     let pages = listing.pages(total);
     if pages <= 1 {

@@ -1,24 +1,18 @@
 //! Bans: what one is, and what a banned sign-in is told.
 //!
-//! **Bans are served concurrently.** An account can hold several at once and every one of them
-//! runs on its own clock, so the state of an account is a list rather than a date. What the
-//! sign-in path asks for is the summary — [`Sanction`] — and what the summary says is the
-//! furthest expiry among the bans in force, because that is the one that has to elapse before
-//! anything changes for the person waiting.
+//! **Served concurrently**, so the state of an account is a list and not a date. What a
+//! refusal reports is the **furthest** expiry among those in force — the nearest would be a
+//! lie discovered three hours later.
 //!
-//! An administrator cannot be banned. That rule is in [`crate::ability`] with the others, not
-//! here: this module is what a ban *is*, and that module is who may issue one.
+//! Who may issue one is [`crate::ability`]; this is what one *is*.
 
 use chrono::{DateTime, Duration, Months, Utc};
 use uuid::Uuid;
 
 use crate::store::{Store, StoreError};
 
-/// Why an account was banned.
-///
-/// A closed set stored by name. The text is shown to the banned account, so each variant is
-/// written to be read by the person it is about — which is also why the case notes are a
-/// separate, private field.
+/// Stored by name. The text is shown to the banned account, which is why the case notes are
+/// a separate, private field.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Reason {
     Cheating,
@@ -43,7 +37,6 @@ impl Reason {
         Reason::Other,
     ];
 
-    /// The stored name, and the one a URL carries.
     pub fn slug(self) -> &'static str {
         match self {
             Reason::Cheating => "cheating",
@@ -57,7 +50,6 @@ impl Reason {
         }
     }
 
-    /// What the banned account is told.
     pub fn said(self) -> &'static str {
         match self {
             Reason::Cheating => "Cheating",
@@ -66,9 +58,7 @@ impl Reason {
             Reason::Exploit => "Abusing a bug",
             Reason::Fraud => "A payment dispute",
             Reason::Evasion => "Evading a ban",
-            // Not punitive. An account locked because somebody else got into it, which reads
-            // as a ban to whoever is holding the stolen password and as an explanation to the
-            // owner when they get it back.
+            // Not punitive: an account locked after somebody else got into it.
             Reason::Compromised => "This account was locked after a security problem",
             Reason::Other => "A breach of the rules",
         }
@@ -78,20 +68,15 @@ impl Reason {
         Reason::ALL.into_iter().find(|r| r.slug() == slug)
     }
 
-    /// Anything unrecognised in the column reads as [`Reason::Other`].
-    ///
-    /// A row written by a future version, or by hand. Failing to render a user page because
-    /// one ban has a name this build does not know is worse than showing it vaguely.
+    /// A row written by a future version, or by hand. Failing a page because one ban has an
+    /// unknown name is worse than showing it vaguely.
     pub fn from_stored(stored: &str) -> Reason {
         Reason::from_slug(stored).unwrap_or(Reason::Other)
     }
 }
 
-/// How long a ban runs, as the form offers it.
-///
-/// A closed list rather than a free-text duration: an administrator picking "2 months" from a
-/// menu cannot typo it into two minutes, and the stored value is an absolute instant either
-/// way, so nothing downstream has to parse this back.
+/// A closed list: picking "2 months" from a menu cannot be typoed into two minutes, and the
+/// stored value is an absolute instant either way.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Term {
     Hours3,
@@ -158,13 +143,11 @@ impl Term {
         Term::ALL.into_iter().find(|t| t.slug() == slug)
     }
 
-    /// When a ban issued `now` for this term runs out. `None` is permanent.
+    /// `None` is permanent.
     pub fn until(self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
         let months = |n: u32, approx_days: i64| {
-            // Calendar months, so "2 months" lands on the same day of the month. The fallback
-            // is unreachable with any real clock — `checked_add_months` only fails near the
-            // end of representable time — and exists so that an overflow can never be mistaken
-            // for `None`, which would silently turn a two-month ban into a permanent one.
+            // Calendar months. The fallback is unreachable with a real clock and exists so an
+            // overflow can never be mistaken for `None`, turning a two-month ban permanent.
             now.checked_add_months(Months::new(n))
                 .unwrap_or_else(|| now + Duration::days(approx_days))
         };
@@ -184,16 +167,15 @@ impl Term {
     }
 }
 
-/// One ban, as a user page shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ban {
     pub id: Uuid,
     pub account_id: Uuid,
     pub reason: Reason,
-    /// **Private.** Never rendered on anything a banned account can reach.
+    /// **Private.** Never rendered where the banned account can reach it.
     pub notes: String,
     pub issued_by: Option<Uuid>,
-    /// Resolved for display. `None` where the issuing account has since been deleted.
+    /// `None` where the issuing account has been deleted.
     pub issued_by_name: Option<String>,
     pub issued_at: DateTime<Utc>,
     /// `None` is permanent.
@@ -205,12 +187,10 @@ pub struct Ban {
 }
 
 impl Ban {
-    /// Whether this one is stopping anybody from signing in at `now`.
     pub fn in_force(&self, now: DateTime<Utc>) -> bool {
         self.lifted_at.is_none() && self.expires_at.is_none_or(|end| end > now)
     }
 
-    /// Lifted, expired, or running.
     pub fn state(&self, now: DateTime<Utc>) -> State {
         if self.lifted_at.is_some() {
             State::Lifted
@@ -247,18 +227,14 @@ impl State {
     }
 }
 
-/// What a refused sign-in is told: how many bans are in force, and when the last of them ends.
-///
-/// The *furthest* expiry, not the nearest. Telling somebody their ban ends in three hours when
-/// a two-month one is also running would be a lie they discover three hours later.
+/// The **furthest** expiry, not the nearest.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Sanction {
     pub count: i64,
-    /// `None` when at least one ban in force is permanent.
+    /// `None` when a ban in force is permanent.
     pub until: Option<DateTime<Utc>>,
 }
 
-/// A ban about to be issued.
 #[derive(Clone, Debug)]
 pub struct Issue {
     pub account_id: Uuid,
@@ -269,12 +245,8 @@ pub struct Issue {
 }
 
 impl Store {
-    /// What is stopping this account signing in, if anything.
-    ///
-    /// The one ban query on the sign-in path, and the only one that has to be quick. It is a
-    /// single aggregate over the partial index rather than a list the caller folds, because
-    /// the caller does not want the list and fetching one would put a ban's private notes on a
-    /// code path that has no business holding them.
+    /// The one ban query on the sign-in path. A single aggregate rather than a list the caller
+    /// folds, so a ban's private notes never reach a code path with no business holding them.
     pub async fn sanction(
         &self,
         account_id: Uuid,
@@ -295,9 +267,8 @@ impl Store {
                 )
             }
             Store::Postgres(pool) => {
-                // `max` skips nulls, so a permanent ban has to be asked about separately —
-                // otherwise a permanent ban alongside a three-hour one would report three
-                // hours, which is the exact mistake this summary exists to prevent.
+                // `max` skips nulls, so a permanent ban alongside a three-hour one would report
+                // three hours.
                 let row: (i64, Option<bool>, Option<DateTime<Utc>>) = sqlx::query_as(
                     "select count(*), bool_or(expires_at is null), max(expires_at) \
                      from bans \
@@ -321,7 +292,6 @@ impl Store {
         }))
     }
 
-    /// Every ban an account has ever had, newest first. The user page.
     pub async fn bans_for(&self, account_id: Uuid) -> Result<Vec<Ban>, StoreError> {
         match self {
             Store::Memory(m) => {
@@ -385,10 +355,7 @@ impl Store {
         }
     }
 
-    /// Write a ban. Returns its id.
-    ///
-    /// Nothing is checked here. [`crate::ability::may_ban`] is the check, and it runs against
-    /// the subject's level read in the same request.
+    /// Nothing is checked here; [`crate::ability::may_ban`] is the check.
     pub async fn issue_ban(&self, issue: &Issue, now: DateTime<Utc>) -> Result<Uuid, StoreError> {
         let id = Uuid::new_v4();
         match self {
@@ -428,10 +395,8 @@ impl Store {
         Ok(id)
     }
 
-    /// Lift one. `false` when it was already lifted, or is not this account's.
-    ///
-    /// The account id is a parameter rather than something the caller trusts the ban to carry,
-    /// so a ban id guessed from another account cannot be lifted through a user page.
+    /// The account id is a parameter, so a ban id guessed from another account cannot be lifted
+    /// through this one's page.
     pub async fn lift_ban(
         &self,
         id: Uuid,

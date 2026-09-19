@@ -1,16 +1,12 @@
 //! The user index: a filter form, a sortable table, and a pager.
 //!
-//! Two handlers render this — the page and the partial — and they call the same function for
-//! everything below the filter form, so the two cannot drift. What the partial is, exactly, is
-//! the `<section id="user-index">` element: it replaces itself, `outerHTML`, which is what
-//! lets it carry its own htmx attributes and its own canonical URL back with it.
+//! The partial is the `<section id="user-index">` element, replacing itself `outerHTML` — so
+//! it carries its own htmx attributes and canonical URL back with it.
 //!
-//! **The filter form sits outside the swapped region.** If it were inside, every keystroke
-//! would replace the input being typed into and take the caret with it.
+//! **The filter form sits outside the swapped region**, or every keystroke would replace the
+//! input being typed into and take the caret with it.
 //!
-//! The links and the form work with no JavaScript at all: the form is a plain `method="get"`
-//! form pointed at this page, and every heading and pager link is a real `href`. htmx makes
-//! those same URLs into swaps, and `ts/params.ts` keeps the address bar in step with them.
+//! Every control is a real `href` or a `method="get"` form; htmx makes the same URLs swaps.
 
 use chrono::{DateTime, Utc};
 use maud::{Markup, html};
@@ -18,7 +14,6 @@ use maud::{Markup, html};
 use crate::listing::{Dir, Listing, PER_PAGE, Rank, Sort, Standing};
 use crate::users::{Page, Row};
 
-/// The whole page.
 pub fn page(page: &Page, now: DateTime<Utc>) -> Markup {
     html! {
         section class="stack" {
@@ -29,19 +24,16 @@ pub fn page(page: &Page, now: DateTime<Utc>) -> Markup {
     }
 }
 
-/// The part htmx replaces. Rendered by both handlers.
+/// The part htmx replaces.
 pub fn region(page: &Page, now: DateTime<Utc>) -> Markup {
     let listing = &page.listing;
     html! {
         section id="user-index"
-            // Where the browser's address bar should read once this has landed. The server
-            // computes it because the server owns what "canonical" means — see
-            // `Listing::query_string` — and `ts/params.ts` applies it, because history is the
+            // The server owns what canonical means; `ts/params.ts` applies it, history being the
             // one thing a server cannot reach.
             data-canonical=(listing.page_url())
-            // Inherited by the headings and the pager below, so neither has to repeat it. In
-            // htmx 4 this is explicit: without `:inherited` the children would target
-            // themselves and a pager link would replace itself with a whole table.
+            // Explicit in htmx 4: without `:inherited` a pager link replaces itself with a whole
+            // table.
             hx-target:inherited="#user-index"
             hx-swap:inherited="outerHTML"
         {
@@ -75,29 +67,21 @@ fn filters(listing: &Listing) -> Markup {
             // the escaping maud correctly applies would arrive at `JSON.parse` as `&quot;`.
             // An attribute value is decoded by the parser, so the escaping round-trips.
             data-listing=(Listing::defaults_json().to_string())
-            // A real GET form first. Without JavaScript this submits to the page and reloads
-            // it, which is the whole feature working slowly rather than not working.
+            // Without JavaScript this submits and reloads: slow, not broken.
             method="get" action=(crate::routes::USERS)
             hx-get=(crate::routes::USER_ROWS)
-            // htmx 4 does not send enclosing form values on a GET, so the form says to
-            // include its own. This is the line that makes the filters reach the server.
+            // htmx 4 sends no enclosing form values on a GET. This line is what makes the filters
+            // work.
             hx-include="this"
             hx-target="#user-index"
             hx-swap="outerHTML"
-            // `change` for the menus, debounced `input` for the search box.
+            // **Two spellings are silently wrong and both were written first.** `input
+            // changed` never fires: `changed` compares the value of the element the trigger
+            // is on, and a form has none. And `target:(#q)` — the parenthesised form the docs
+            // give for selectors with whitespace — matches nothing, the parentheses not being
+            // stripped. Both look like a search box that does nothing.
             //
-            // The `target:` modifier is what confines the second to the search box. Without
-            // it every menu fires twice, because a `<select>` emits `input` as well as
-            // `change`.
-            //
-            // **Two ways to write this are silently wrong** and both were written here first.
-            // `input changed delay:300ms` never fires at all: `changed` compares the value of
-            // the element the trigger is on, and a `<form>` has no value. And
-            // `target:(#q)` — the parenthesised form the documentation gives for selectors
-            // containing whitespace — matches nothing, because the parentheses are not
-            // stripped; `target:#q` is the form that works. Neither mistake is visible in the
-            // markup, in the console or in the network log. What they look like is a search
-            // box that does nothing.
+            // `target:` at all, because a `<select>` emits `input` beside `change`.
             hx-trigger="change, input target:#q delay:300ms, submit"
             hx-sync="this:replace"
             hx-indicator="#index-working"
@@ -135,12 +119,10 @@ fn filters(listing: &Listing) -> Markup {
                     }
                 }
             }
-            // The ordering rides along, so changing a filter keeps the column you sorted by.
-            // The page number deliberately does not: a new filter starts at the first page,
-            // and the absent parameter is what says so.
+            // The ordering rides along; the page number does not, because a new filter starts at
+            // the first page and the absent parameter is what says so.
             input type="hidden" name="sort" value=(listing.sort.slug());
             input type="hidden" name="dir" value=(listing.dir.slug());
-            // Only reached without JavaScript; htmx submits on change.
             noscript { button type="submit" { "Apply" } }
             span id="index-working" class="htmx-indicator" aria-live="polite" { "Working…" }
         }
@@ -165,7 +147,6 @@ fn summary(page: &Page) -> Markup {
     }
 }
 
-/// A column heading that is also the control for sorting by it.
 fn heading(listing: &Listing, sort: Sort) -> Markup {
     let next = listing.sorted_by(sort);
     let current = listing.sort == sort;
@@ -174,8 +155,7 @@ fn heading(listing: &Listing, sort: Sort) -> Markup {
         (true, Dir::Desc) => "↓",
         (false, _) => "",
     };
-    // `aria-sort` is what tells a screen reader the table is ordered and which way. Without
-    // it the arrow is decoration only sighted people can read.
+    // Without `aria-sort` the arrow is decoration only sighted people can read.
     let sorted = match (current, listing.dir) {
         (true, Dir::Asc) => Some("ascending"),
         (true, Dir::Desc) => Some("descending"),
@@ -192,12 +172,9 @@ fn heading(listing: &Listing, sort: Sort) -> Markup {
     }
 }
 
-/// One row, and **the whole of it is the link**.
-///
-/// One anchor, in the name cell, stretched over the row by `.row-link a::after` — not an
-/// anchor per cell. A row of three links is three tab stops and three announcements to a
-/// screen reader, all naming the same account; this way the row holds exactly one link, with
-/// the account's name as its text, and a click anywhere on the row follows it.
+/// **The whole row is the link** — one anchor in the name cell, stretched over the row by
+/// CSS. Three cells each wrapping their own would be three tab stops and three announcements
+/// naming one account.
 fn line(row: &Row, now: DateTime<Utc>) -> Markup {
     html! {
         tr class={ "row-link" @if row.is_banned() { " is-banned" } } {
@@ -225,8 +202,7 @@ fn standing_of(row: &Row, now: DateTime<Utc>) -> Markup {
             span class="standing-until" { (super::how_long(until, now)) " left" }
         }
         @if row.in_force > 1 {
-            // Said, because one of several bans expiring changes nothing and somebody reading
-            // "3 d left" would otherwise expect it to.
+            // Or somebody waits out the one expiry shown and is refused again.
             span class="standing-count" { "×" (row.in_force) }
         }
     }
@@ -236,8 +212,7 @@ fn empty(page: &Page) -> Markup {
     let listing = &page.listing;
     html! {
         p class="empty" {
-            // Two different situations that look identical without being told apart: no
-            // account matches, and there are matches but not on this page.
+            // "Nothing matches" and "you paged past the end" are different answers.
             @if page.total == 0 && listing.page > 1 {
                 "There is nothing on page " (listing.page) "."
                 " "
@@ -250,10 +225,8 @@ fn empty(page: &Page) -> Markup {
     }
 }
 
-/// Previous, next, and where you are.
-///
-/// Numbered links stop at a handful either side. A pager that renders one link per page is a
-/// pager that renders four hundred of them the day the game has ten thousand accounts.
+/// Numbered links stop a few either side: one per page is four hundred of them at ten
+/// thousand accounts.
 fn pager(page: &Page) -> Markup {
     let listing = &page.listing;
     let pages = page.pages();

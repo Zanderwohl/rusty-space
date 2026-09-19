@@ -84,12 +84,9 @@
   flex-direction: column;
   gap: var(--space-2);
 
-  // The gap above the heading, so a panel does not run into the bottom of the one before it.
-  //
-  // On the heading rather than on the panel, and **not** on every `h2`: the cards above
-  // carry their own padding, and a margin inside one would push its heading off its own top
-  // edge. `#user-detail` is a plain block with no gap of its own, which is why this is the
-  // only thing holding these sections apart.
+  // Not on every `h2`: the cards carry their own padding, and a margin inside one pushes its
+  // heading off its own top edge. `#user-detail` has no gap, so this is all that holds the
+  // panels apart.
   > h2 {
     margin-block-start: var(--space-4);
   }
@@ -116,7 +113,7 @@
     white-space: nowrap;
   }
 
-  // A ban that is over is still on the page, and has to read as over at a glance.
+  // Over, and has to read as over at a glance.
   .ban-expired,
   .ban-lifted,
   .lapsed {
@@ -170,11 +167,8 @@
   font-weight: 600;
 }
 
-// The Status section: two cards side by side, stacking on a narrow screen.
-//
-// A card rather than another `.records` table because neither half is a list — one names a
-// place and the other describes a ship — and because the left one is a placeholder for more
-// about the system, which will not be tabular either.
+// Cards rather than a table: neither half is a list, and the left one is a placeholder for
+// more about the system.
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
@@ -213,8 +207,7 @@
 
 .card-facts {
   display: grid;
-  // The label column sizes to its longest label and the value takes the rest, so the values
-  // line up without a magic width that a longer word would break.
+  // Sizes to the longest label, so no magic width a longer word would break.
   grid-template-columns: auto 1fr;
   gap: var(--space-1) var(--space-2);
   margin: 0;
@@ -242,14 +235,13 @@
     font-weight: inherit;
   }
 
-  // The counts, lined up and monospaced-by-figure so the digits form a column.
+  // Tabular figures, so the digits form a column.
   td {
     text-align: end;
     font-variant-numeric: tabular-nums;
   }
 
-  // A module that is not fitted is still listed, and reads as absent rather than as present
-  // and zero.
+  // Listed but absent, rather than present and zero.
   .none {
     color: var(--ink-dim);
     text-decoration: line-through;

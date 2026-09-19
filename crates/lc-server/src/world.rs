@@ -28,10 +28,8 @@ use lc_world::system::{LOCAL_SHELL_LY, LocalSystem};
 /// never disagree about whether a ship is in a system.
 #[derive(Default)]
 pub struct World {
-    /// Shared rather than owned, so the administration surface can read the same catalogue
-    /// without a second copy of it. It is the largest thing in the process — a hundred
-    /// thousand stars — and it never changes once loaded, which is exactly what an `Arc` is
-    /// for. See `crate::admin`.
+    /// Shared so `crate::admin` reads the same catalogue: it is the largest thing in the process
+    /// and never changes once loaded.
     stars: Arc<Vec<CatalogueStar>>,
     /// Loaded on first arrival and shared thereafter. Building one is a couple of hundred
     /// bodies out of a preset, and every craft in the same system points at the same copy —
@@ -44,15 +42,11 @@ impl World {
         Self { stars: Arc::new(stars), loaded: HashMap::new() }
     }
 
-    /// Over a catalogue somebody else is also holding.
-    ///
-    /// The administration surface reads the same stars; this is what lets both have them
-    /// without the process carrying two copies of a hundred thousand entries.
+    /// So the process carries one catalogue however many readers it has.
     pub fn from_shared(stars: Arc<Vec<CatalogueStar>>) -> Self {
         Self { stars, loaded: HashMap::new() }
     }
 
-    /// A handle on the catalogue, for a reader that is not the tick loop.
     pub fn stars(&self) -> Arc<Vec<CatalogueStar>> {
         Arc::clone(&self.stars)
     }

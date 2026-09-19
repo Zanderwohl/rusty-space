@@ -1,9 +1,7 @@
 // The console's own vocabulary, and the elements every page uses.
 
 :root {
-  // Status colours the site has no use for. Not in `_tokens.scss`, which is the site's file:
-  // a copy that gains a line is a copy that has drifted, and the test that compares them says
-  // so. `lc_identity`'s `_status.scss` exists for exactly this reason.
+  // Not in `_tokens.scss`: that is the site's file, and a copy that gains a line has drifted.
   --danger: #e2685f;
   --danger-dim: #6d2f2b;
   --warn: #d9a441;
@@ -34,8 +32,7 @@ body {
   margin: 0;
   background: var(--ground);
   color: var(--ink);
-  // The console is an interface. The site's serif belongs to its prose and nothing here is
-  // prose, so this is the one place the two deliberately differ.
+  // The site's serif belongs to its prose, and nothing here is prose.
   font-family: var(--font-ui);
   font-size: var(--step-0);
   line-height: 1.5;
@@ -103,9 +100,7 @@ code {
   text-decoration: none;
 }
 
-// The sign-out control is a form, because the route is a POST. It should still read as the
-// link it sits beside — a button that looks like a button would be the only chrome in the
-// masthead shouting for attention, and signing out is not the thing to draw the eye.
+// A form, because the route is a POST; it should still read as the link it sits beside.
 .signout {
   margin: 0;
 
@@ -251,17 +246,14 @@ button.danger {
   color: var(--danger);
 }
 
-// Chrome paints an autofilled input itself and ignores `background` and `color` outright,
-// which on a dark panel is a pale box with invisible text. Only a tall inset shadow plus
-// `-webkit-text-fill-color` reaches it. See AGENTS.md; the console has no password field, but
-// a browser will offer to fill the search box on a page it has seen a form on.
+// Chrome paints an autofilled input itself and ignores `background` and `color`, which on a
+// dark panel is a pale box with invisible text. See AGENTS.md.
 input:-webkit-autofill {
   -webkit-box-shadow: 0 0 0 40px var(--ground) inset;
   -webkit-text-fill-color: var(--ink);
 }
 
-// htmx ships its own rule for this; these two are the delay that keeps a spinner from
-// flashing on a request that takes 40ms. If the request finishes first it never appears.
+// The delay keeps a spinner off a request that takes 40ms.
 .htmx-indicator {
   opacity: 0;
   transition: opacity 120ms ease-in 250ms;
@@ -283,7 +275,7 @@ input:-webkit-autofill {
   white-space: nowrap;
 }
 
-// The confirmation dialog `ts/confirm.ts` opens in place of `window.confirm`.
+// `ts/confirm.ts`, in place of `window.confirm`.
 .confirm {
   border: 1px solid var(--rule);
   border-radius: 4px;
@@ -307,8 +299,7 @@ input:-webkit-autofill {
   }
 }
 
-// A message page's link out. Bigger than a body link, because on those pages it is the only
-// thing to do and a refused visitor should not have to hunt for it.
+// On a message page it is the only thing to do, so it should not have to be hunted for.
 .way-out {
   display: inline-block;
   margin-block-start: var(--space-2);
