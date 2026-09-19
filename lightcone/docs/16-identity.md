@@ -462,6 +462,18 @@ is read from the database on **every request** rather than carried in the sessio
 level in the cookie would mean a demotion took effect when the demoted person next signed in,
 which is to say at a time of their choosing.
 
+**A player who signs in is never given a session.** The level is read before anything is
+sealed, so somebody who is not an administrator is told so and left holding nothing — rather
+than holding a cookie whose only use is to be rejected by every page. The other door is an
+administrator demoted mid-session: the extractor refuses them *and clears the session*, because
+reading the level per request exists to make a demotion take effect now, and that has to
+include ending the session it just invalidated.
+
+Both refusals name a way out. The console's only navigation is a masthead that renders for
+administrators, so a refusal without a link is a dead end — no menu, and nothing on screen
+naming the address that would get you off it. `/signout` existed from the first commit and was
+linked from exactly one place, which was the page a refused visitor never sees.
+
 Its session is eight hours, not the site's fortnight: the revocation window of a signed cookie
 is its lifetime, and an administrative session is a working day at a desk.
 

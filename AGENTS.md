@@ -206,6 +206,14 @@ Each of these cost real time. None of them are visible from the code that hits t
   have accumulated to fill a page — which looks like a regression in the thing it is named
   after and is not. Narrow to accounts the test made, by a name carrying a uuid, as
   `the_pages_partition_the_matches` does.
+- **A refusal page needs a link out.** The console has no navigation except a masthead that
+  renders for administrators, so a refused visitor sees a page with nothing on it to click and
+  no way to guess the address of anything — including `/signout`, which existed the whole time.
+  `views::refusal` takes a way out; `views::wrong` is for store failures, where there is
+  nothing useful to offer.
+- **A session that can only be refused should not exist.** Check the level before sealing one,
+  and clear it on the path that refuses an existing one. Otherwise the two combine into a
+  cookie its holder cannot get rid of.
 - htmx is **vendored**, and `npm run build` refuses when the committed copy is not the one
   `package-lock.json` pins. To take a new htmx: bump the dependency, `npm run vendor`, commit
   both.

@@ -61,13 +61,17 @@ macro_rules! with_pool {
 }
 
 fn state(pool: PgPool) -> AppState {
+    state_against(pool, "https://accounts.example")
+}
+
+fn state_against(pool: PgPool, identity_api: &str) -> AppState {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("static");
     AppState {
         assets: Assets::load(&root).expect("the assets load; run `npm run build`"),
         pool,
         session_key: KEY.into(),
         identity_base: "https://accounts.example".into(),
-        identity_api: "https://accounts.example".into(),
+        identity_api: identity_api.into(),
         identity_secret: "shared".into(),
         return_url: "https://admin.example/auth/return".into(),
         secure_cookies: true,
@@ -139,6 +143,186 @@ async fn level_of(pool: &PgPool, id: Uuid) -> Level {
         .await
         .expect("the account");
     Level::from_stored(permission)
+}
+
+/// A broker that answers one endpoint: swap a code for an account.
+///
+/// Enough to drive `/auth/return`, which is the half of the sign-in this service owns and the
+/// only place it can decide whether to hand out a session at all.
+async fn stub_broker(account_id: Uuid) -> String {
+    use axum::routing::post;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let app = axum::Router::new().route(
+        "/exchange",
+        post(move || async move {
+            axum::Json(serde_json::json!({
+                "account_id": account_id.to_string(),
+                "display_name": "Whoever",
+            }))
+        }),
+    );
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://127.0.0.1:{port}")
+}
+
+/// Every `Set-Cookie` on a response, as strings.
+fn cookies_set(response: &Response) -> Vec<String> {
+    response
+        .headers()
+        .get_all(axum::http::header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Whether the response ends the console session rather than issuing one.
+fn clears_the_session(response: &Response) -> bool {
+    cookies_set(response)
+        .iter()
+        .any(|c| c.starts_with("lc_admin=") && c.contains("Max-Age=0"))
+}
+
+/// **A player signing in is never given a session.**
+///
+/// The complaint this is about: a non-administrator who signed in got a cookie, then a
+/// refusal on every page, and the refusal had no link on it — so there was no way to sign out
+/// and no way to reach anything. Two separate mistakes, and this is the first: the level is
+/// checked before anything is sealed.
+#[tokio::test]
+async fn a_player_signing_in_is_refused_without_being_given_a_session() {
+    let pool = with_pool!(a_player_signing_in_is_refused_without_being_given_a_session);
+    let player = account(&pool, "Player", Level::PLAYER).await;
+    let broker = stub_broker(player).await;
+    let app = router(state_against(pool.clone(), &broker));
+
+    let nonce = "a-nonce";
+    let response = send(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/auth/return?code=a-code&state={nonce}"))
+            .header("cookie", format!("lc_admin_state={nonce}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    // Nothing was sealed. A cookie whose only use is to be rejected is one more credential to
+    // lose and one more way to be stuck.
+    let issued: Vec<String> = cookies_set(&response)
+        .into_iter()
+        .filter(|c| c.starts_with("lc_admin=") && !c.contains("Max-Age=0"))
+        .collect();
+    assert!(
+        issued.is_empty(),
+        "a player was given a session: {issued:?}"
+    );
+
+    let page = text(response).await;
+    assert!(page.contains("Not an administrator"), "{page}");
+    // And a way off the page, which is the second half of the complaint.
+    assert!(page.contains(r#"href="/signin""#), "no way out: {page}");
+}
+
+/// An administrator who signs in *is* given one, so the refusal above is about the level and
+/// not about the endpoint being broken.
+#[tokio::test]
+async fn an_administrator_signing_in_is_given_a_session() {
+    let pool = with_pool!(an_administrator_signing_in_is_given_a_session);
+    let admin = account(&pool, "Owner", Level::OWNER).await;
+    let broker = stub_broker(admin).await;
+    let app = router(state_against(pool.clone(), &broker));
+
+    let nonce = "a-nonce";
+    let response = send(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/auth/return?code=a-code&state={nonce}"))
+            .header("cookie", format!("lc_admin_state={nonce}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[axum::http::header::LOCATION], "/users");
+    let issued = cookies_set(&response);
+    assert!(
+        issued
+            .iter()
+            .any(|c| c.starts_with("lc_admin=") && !c.contains("Max-Age=0")),
+        "no session was issued: {issued:?}",
+    );
+    // And the nonce is cleared in the same response. Two `Set-Cookie` headers, appended
+    // rather than inserted — an array of header pairs would leave only the last of them and
+    // silently drop the session.
+    assert!(
+        issued
+            .iter()
+            .any(|c| c.starts_with("lc_admin_state=") && c.contains("Max-Age=0")),
+        "the sign-in nonce outlived the sign-in: {issued:?}",
+    );
+}
+
+/// The other door: an administrator demoted while signed in.
+///
+/// The level is read from the database on every request so that a demotion takes effect at
+/// once — and "takes effect" has to include ending the session it just invalidated, or the
+/// demoted administrator is left holding a cookie that only ever produces a refusal.
+#[tokio::test]
+async fn a_demoted_administrator_is_signed_out_rather_than_stranded() {
+    let pool = with_pool!(a_demoted_administrator_is_signed_out_rather_than_stranded);
+    let app = router(state(pool.clone()));
+    let demoted = account(&pool, "Was an admin", Level::ADMIN).await;
+
+    // It works while they hold the level, so the refusal below is the demotion.
+    assert_eq!(
+        send(&app, get("/users", Some(demoted))).await.status(),
+        StatusCode::OK
+    );
+
+    sqlx::query("update accounts set permission = 0 where id = $1")
+        .bind(demoted)
+        .execute(&pool)
+        .await
+        .expect("demoted");
+
+    let response = send(&app, get("/users", Some(demoted))).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(
+        clears_the_session(&response),
+        "the session survived the demotion: {:?}",
+        cookies_set(&response),
+    );
+    let page = text(response).await;
+    assert!(page.contains("Not an administrator"), "{page}");
+    assert!(page.contains(r#"href="/signin""#), "no way out: {page}");
+}
+
+/// There is a sign-out route, and it works whether or not anyone is signed in.
+#[tokio::test]
+async fn signing_out_ends_the_session() {
+    let pool = with_pool!(signing_out_ends_the_session);
+    let app = router(state(pool.clone()));
+    let admin = account(&pool, "Owner", Level::OWNER).await;
+
+    let response = send(&app, get("/signout", Some(admin))).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[axum::http::header::LOCATION], "/signin");
+    assert!(
+        clears_the_session(&response),
+        "{:?}",
+        cookies_set(&response)
+    );
+
+    // Idempotent: signing out when nobody is signed in is not an error.
+    let again = send(&app, get("/signout", None)).await;
+    assert_eq!(again.status(), StatusCode::SEE_OTHER);
+    assert!(clears_the_session(&again));
 }
 
 /// Nobody reaches anything without a session, and a player with one reaches nothing either.

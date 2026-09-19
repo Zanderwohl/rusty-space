@@ -282,3 +282,18 @@ input:-webkit-autofill {
     justify-content: flex-end;
   }
 }
+
+// A message page's link out. Bigger than a body link, because on those pages it is the only
+// thing to do and a refused visitor should not have to hunt for it.
+.way-out {
+  display: inline-block;
+  margin-block-start: var(--space-2);
+  padding: 0.4em 0.9em;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  text-decoration: none;
+
+  &:hover {
+    border-color: var(--accent-dim);
+  }
+}

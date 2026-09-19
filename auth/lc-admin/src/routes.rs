@@ -167,6 +167,7 @@ async fn load_page(state: &AppState, listing: &Listing) -> Result<users::Page, R
         .map_err(|why| {
             tracing::error!(%why, "the user index query failed");
             views::wrong(
+                &state.assets,
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Something went wrong",
                 "The account store did not answer.",
@@ -198,6 +199,7 @@ async fn load_detail(state: &AppState, id: Uuid) -> Result<Detail, Response> {
     let failed = |why: String| {
         tracing::error!(%why, "could not assemble a user page");
         views::wrong(
+            &state.assets,
             StatusCode::INTERNAL_SERVER_ERROR,
             "Something went wrong",
             "The account store did not answer.",
@@ -207,10 +209,12 @@ async fn load_detail(state: &AppState, id: Uuid) -> Result<Detail, Response> {
     let account = match store.account(id).await {
         Ok(Some(account)) => account,
         Ok(None) => {
-            return Err(views::wrong(
+            return Err(views::refusal(
+                &state.assets,
                 StatusCode::NOT_FOUND,
                 "No such account",
                 "There is no account with that identifier.",
+                (USERS, "← All users"),
             ));
         }
         Err(why) => return Err(failed(why.to_string())),
@@ -322,10 +326,12 @@ async fn set_level(
 ) -> Response {
     let store = state.store();
     let Ok(Some(account)) = store.account(id).await else {
-        return views::wrong(
+        return views::refusal(
+            &state.assets,
             StatusCode::NOT_FOUND,
             "No such account",
             "There is no account with that identifier.",
+            (USERS, "← All users"),
         );
     };
     let Some(proposed) = Level::from_slug(&form.level) else {
@@ -401,10 +407,12 @@ async fn issue_ban(
 ) -> Response {
     let store = state.store();
     let Ok(Some(account)) = store.account(id).await else {
-        return views::wrong(
+        return views::refusal(
+            &state.assets,
             StatusCode::NOT_FOUND,
             "No such account",
             "There is no account with that identifier.",
+            (USERS, "← All users"),
         );
     };
     let (Some(reason), Some(term)) = (Reason::from_slug(&form.reason), Term::from_slug(&form.term))
@@ -528,11 +536,13 @@ async fn readyz(State(state): State<AppState>) -> Response {
     }
 }
 
-async fn not_found() -> Response {
-    views::wrong(
+async fn not_found(State(state): State<AppState>) -> Response {
+    views::refusal(
+        &state.assets,
         StatusCode::NOT_FOUND,
         "No page here",
         "The address is wrong, or the page has moved.",
+        (USERS, "← All users"),
     )
 }
 

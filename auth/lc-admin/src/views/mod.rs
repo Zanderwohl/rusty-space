@@ -74,7 +74,40 @@ pub fn shell(assets: &Assets, head: Head<'_>, admin: Option<&Admin>, body: Marku
 /// Not behind the [`Admin`] extractor, so it renders without a stylesheet URL that needs
 /// state. The chrome is the plain one on purpose — somebody seeing this is not somebody the
 /// console should be offering navigation to.
-pub fn wrong(status: StatusCode, heading: &str, said: &str) -> Response {
+pub fn wrong(assets: &Assets, status: StatusCode, heading: &str, said: &str) -> Response {
+    message(assets, status, heading, said, None)
+}
+
+/// The same, with a link.
+///
+/// **Any page a person can land on and stay on needs one of these.** The console's only
+/// navigation is a masthead that renders when you are an administrator, so a refusal without
+/// a link is a dead end: no menu, no back button that helps, and nothing on screen naming the
+/// address that would get you out. That is not a theoretical failure — "Not for you" shipped
+/// without one and stranded the first account that met it.
+pub fn refusal(
+    assets: &Assets,
+    status: StatusCode,
+    heading: &str,
+    said: &str,
+    way_out: (&str, &str),
+) -> Response {
+    message(assets, status, heading, said, Some(way_out))
+}
+
+/// The chrome a message page gets: the stylesheet and the wordmark, and **no navigation**.
+///
+/// Not [`shell`], which renders a nav bar — half of these pages are seen by somebody who may
+/// not have the pages that bar links to, and a link that leads to another refusal is worse
+/// than no link. The way out, where there is one, is named by the caller, because only the
+/// caller knows what it is.
+fn message(
+    assets: &Assets,
+    status: StatusCode,
+    heading: &str,
+    said: &str,
+    way_out: Option<(&str, &str)>,
+) -> Response {
     (
         status,
         maud::html! {
@@ -84,10 +117,23 @@ pub fn wrong(status: StatusCode, heading: &str, said: &str) -> Response {
                     meta charset="utf-8";
                     meta name="viewport" content="width=device-width, initial-scale=1";
                     meta name="robots" content="noindex, nofollow";
-                    title { (heading) }
+                    title { (heading) " — Lightcone Frontier administration" }
+                    link rel="stylesheet" href=(assets.url(crate::assets::STYLESHEET));
                 }
                 body {
-                    main { h1 { (heading) } p { (said) } }
+                    header class="masthead" {
+                        span class="wordmark" { "Lightcone" }
+                        span class="wordmark-tag" { "administration" }
+                    }
+                    main class="page" {
+                        section class="stack" {
+                            h1 { (heading) }
+                            p { (said) }
+                            @if let Some((href, label)) = way_out {
+                                p { a class="way-out" href=(href) { (label) } }
+                            }
+                        }
+                    }
                 }
             }
         },
@@ -147,6 +193,35 @@ pub fn note(kind: &str, said: &str) -> Markup {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A refusal is somewhere a person stops. Without a link they stop there permanently:
+    /// this console has no navigation except a masthead that only administrators are shown.
+    #[test]
+    fn a_refusal_names_a_way_out_and_a_plain_error_does_not_have_to() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("static");
+        let Ok(assets) = Assets::load(&root) else {
+            // A checkout where `npm run build` has not run. `assets::tests` is the test that
+            // is about that; this one is about the markup.
+            return;
+        };
+
+        let refused = refusal(
+            &assets,
+            StatusCode::FORBIDDEN,
+            "Not for you",
+            "This account administers nothing.",
+            (crate::routes::SIGNIN, "Sign in as another account"),
+        );
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+
+        let plain = wrong(
+            &assets,
+            StatusCode::NOT_FOUND,
+            "No page here",
+            "The address is wrong.",
+        );
+        assert_eq!(plain.status(), StatusCode::NOT_FOUND);
+    }
 
     #[test]
     fn a_time_that_has_passed_does_not_read_as_time_remaining() {

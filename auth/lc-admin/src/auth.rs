@@ -55,6 +55,7 @@ impl FromRequestParts<AppState> for Admin {
             Err(why) => {
                 tracing::error!(%why, "could not read the acting account");
                 return Err(views::wrong(
+                    &state.assets,
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Something went wrong",
                     "The account store did not answer. Nothing was changed.",
@@ -64,13 +65,15 @@ impl FromRequestParts<AppState> for Admin {
 
         let level = account.level();
         if !ability::may_administer(level) {
-            // Signed in, and not for here. A redirect to the sign-in page would loop, because
-            // signing in again is exactly what they just did.
-            return Err(views::wrong(
-                StatusCode::FORBIDDEN,
-                "Not for you",
-                "This account does not administer anything.",
-            ));
+            // **Reached only by an administrator who has since been demoted.** A sign-in by a
+            // player never gets this far: `ret` checks the level before it seals anything, so
+            // there is no session to arrive with. This is the other door — the level is read
+            // from the database on every request precisely so that a demotion takes effect
+            // now, and "takes effect" has to include ending the session it just invalidated.
+            //
+            // A redirect to the sign-in page would loop, because signing in again is exactly
+            // what they would have just done.
+            return Err(not_an_administrator(state));
         }
         Ok(Admin {
             id,
@@ -78,6 +81,34 @@ impl FromRequestParts<AppState> for Admin {
             level,
         })
     }
+}
+
+/// Signed in, and not somebody this console is for.
+///
+/// **The session is cleared.** A session that only ever produces a refusal is worth nothing to
+/// its holder and is one more credential to lose, and leaving it in place is what turns this
+/// page into a trap: the console's only navigation is a masthead that renders for
+/// administrators, so a refused visitor with a live cookie has no link to anything, including
+/// to signing out. That shipped once.
+fn not_an_administrator(state: &AppState) -> Response {
+    (
+        AppendHeaders([
+            (header::SET_COOKIE, session::clear(state.secure_cookies)),
+            (
+                header::SET_COOKIE,
+                session::clear_state(state.secure_cookies),
+            ),
+        ]),
+        views::refusal(
+            &state.assets,
+            StatusCode::FORBIDDEN,
+            "Not an administrator",
+            "That account does not administer anything, so there is nothing here for it. \
+             You have been signed out of this console.",
+            (crate::routes::SIGNIN, "Sign in as another account"),
+        ),
+    )
+        .into_response()
 }
 
 /// Send an unauthenticated request to the sign-in page.
@@ -172,10 +203,12 @@ pub async fn ret(
         .as_deref()
         .is_some_and(|nonce| !nonce.is_empty() && nonce == returned.state);
     if !matched || returned.code.is_empty() {
-        return views::wrong(
+        return views::refusal(
+            &state.assets,
             StatusCode::BAD_REQUEST,
             "That sign-in expired",
-            "It was already used, or it sat too long. Start again.",
+            "It was already used, or it sat too long.",
+            (crate::routes::SIGNIN, "Start again"),
         );
     }
 
@@ -197,28 +230,61 @@ pub async fn ret(
             // account is not an administrator — but it is also what a mistyped secret looks
             // like, so it is logged with its status rather than swallowed.
             tracing::warn!(status = %response.status(), "the broker refused the exchange");
-            return views::wrong(
+            return views::refusal(
+                &state.assets,
                 StatusCode::FORBIDDEN,
                 "Not signed in",
                 "The identity service would not complete that sign-in.",
+                (crate::routes::SIGNIN, "Try again"),
             );
         }
         Err(why) => {
             tracing::error!(%why, "could not reach the broker");
-            return views::wrong(
+            return views::refusal(
+                &state.assets,
                 StatusCode::BAD_GATEWAY,
                 "The identity service is not answering",
                 "Try again shortly.",
+                (crate::routes::SIGNIN, "Try again"),
             );
         }
     };
     let Ok(identity) = identity else {
         return views::wrong(
+            &state.assets,
             StatusCode::BAD_GATEWAY,
             "The identity service is not answering",
             "It replied with something this service could not read.",
         );
     };
+
+    // **The level is checked before anything is sealed.** A player who signs in here is not
+    // given a session that every page would then refuse — they are told, and left holding
+    // nothing. The alternative is a cookie whose only use is to be rejected, and a person
+    // stuck on a page with no link off it.
+    let Ok(id) = identity.account_id.parse::<Uuid>() else {
+        return views::wrong(
+            &state.assets,
+            StatusCode::BAD_GATEWAY,
+            "The identity service is not answering",
+            "It named an account this service could not read.",
+        );
+    };
+    match state.store().account(id).await {
+        Ok(Some(account)) if ability::may_administer(account.level()) => {}
+        Ok(_) => return not_an_administrator(&state),
+        Err(why) => {
+            // Cannot tell whether they may be here, so do not let them. A store that is down
+            // is not a reason to hand out a session and find out later.
+            tracing::error!(%why, "could not read the signing-in account");
+            return views::wrong(
+                &state.assets,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Something went wrong",
+                "The account store did not answer. You have not been signed in.",
+            );
+        }
+    }
 
     let session = Session {
         sub: identity.account_id,
