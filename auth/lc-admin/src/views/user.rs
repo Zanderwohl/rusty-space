@@ -486,9 +486,9 @@ fn fitted(fit: &Fit) -> Markup {
         @if fit.refitting {
             p class="badge badge-in-force" { "Refitting" }
         }
+        // The slot count is not here: it belongs with the modules that fill the slots, as
+        // the last row of the table below.
         dl class="card-facts" {
-            dt { "Slots" }
-            dd { (fit.used_slots) " of " (fit.hull_slots) }
             dt { "Stored" }
             dd { (joules(fit.stored_j)) }
             @if fit.committed_j > 0.0 {
@@ -498,11 +498,27 @@ fn fitted(fit: &Fit) -> Markup {
             dt { "Collecting" }
             dd { (watts(fit.solar_w)) }
         }
-        ul class="modules" {
-            @for (name, count) in &fit.modules {
-                // Every module, including the ones at zero: a fitting is read to find out
-                // what is missing at least as often as to find out what is there.
-                li class=[(*count == 0).then_some("none")] { (name) " × " (count) }
+        // A table rather than a run of "name × n": two columns line the counts up, and a
+        // loadout is read by comparing them.
+        table class="loadout" {
+            tbody {
+                @for (name, count) in &fit.modules {
+                    // Every module, including the ones at zero: a fitting is read to find out
+                    // what is missing at least as often as to find out what is there.
+                    tr class=[(*count == 0).then_some("none")] {
+                        th scope="row" { (name) }
+                        td { (count) }
+                    }
+                }
+            }
+            // `tfoot` because the total is a summary of the rows above it, which is what the
+            // element is for — and because it keeps the total out of `tbody`, where a future
+            // sort or filter over the modules would otherwise catch it.
+            tfoot {
+                tr {
+                    th scope="row" { "Total" }
+                    td { (fit.used_slots) "/" (fit.hull_slots) }
+                }
             }
         }
     }
@@ -728,6 +744,52 @@ mod tests {
             // a lifted ban.
             assert!(markup.contains("the private case notes"), "{markup}");
         }
+    }
+
+    /// The loadout is a table, and the slot total is its last row rather than a fact above
+    /// it — the slots are what the modules fill, so the count belongs with them.
+    #[test]
+    fn the_loadout_is_a_table_ending_in_the_total() {
+        let fit = Fit {
+            modules: vec![
+                ("Engines".into(), 700),
+                ("Storage".into(), 100),
+                ("Drone bays".into(), 0),
+                ("Living".into(), 2),
+            ],
+            hull_slots: 12844,
+            used_slots: 802,
+            stored_j: 1.0e12,
+            solar_w: 1.0e3,
+            committed_j: 0.0,
+            refitting: false,
+        };
+        let markup = fitted(&fit).into_string();
+
+        // One row per module, and the total in the foot rather than among them.
+        assert_eq!(
+            markup.matches("<tr").count(),
+            fit.modules.len() + 1,
+            "{markup}"
+        );
+        assert!(markup.contains("<tfoot>"), "{markup}");
+        assert!(
+            markup.contains(r#"<th scope="row">Total</th><td>802/12844</td>"#),
+            "{markup}",
+        );
+        // The slot count left the facts list, so it is not said twice.
+        let facts = markup.split("<table").next().expect("the facts");
+        assert!(
+            !facts.contains("Slots"),
+            "the slots are in two places: {facts}"
+        );
+
+        // A module at zero is listed and marked, not omitted: a fitting is read to find out
+        // what is missing as much as what is there.
+        assert!(
+            markup.contains(r#"<tr class="none"><th scope="row">Drone bays</th>"#),
+            "{markup}"
+        );
     }
 
     /// An energy is readable at every size this game produces, which is a wider range than
