@@ -531,6 +531,41 @@ nothing watching it drifts and nobody finds out until it matters.
 The argument would change if a second service wanted htmx. Three copies of it is the same
 problem again, and that is the point at which a shared origin starts paying for itself.
 
+### The console asks the game one question
+
+A user page shows where the account's ship is and what it is made of. That is game data, in
+the shard's database, as **postcard bytes only a game crate can decode** — and the console may
+not depend on a game crate. So the shard answers instead:
+
+```
+GET /admin/status/{account}   →  application/ron
+```
+
+Three things about it are the design rather than the implementation.
+
+**RON, not JSON, and not a shared type.** A format crosses the workspace boundary where a type
+cannot: the shard serialises `lc_server::status::Status` and the console deserialises into
+`lc_admin::shard::Status`, its own mirror. The same trade as the ticket claims. What it costs
+is that a field renamed on one side silently stops arriving on the other, with no compiler in
+between — so the console's test holds a payload **printed by the shard's own serialiser**, not
+one written by hand, and that test is the only place in either build that will notice.
+
+**A game ticket authorises it.** The same object a client presents to open a socket: signed by
+the broker, audience-scoped to the shard, sixty seconds, carrying the level. No shared secret
+between the console and the shard, no second key to rotate, and the gate is
+`lc_server::ability`. The console mints one per request through `/ticket` on behalf of the
+administrator reading the page, so the shard's log says who asked about whom. Single use
+there as everywhere: the second presentation of a ticket is a 401.
+
+**It never touches the tick loop.** It reads the checkpoint from the database and the
+catalogue from an `Arc` — no lock the simulation wants, nothing down a channel the tick reads.
+A console refreshing a page cannot cost the world a frame, and that is the property to keep if
+it ever grows a second route. The cost is that the answer is a few seconds stale, which the
+page says out loud.
+
+It listens on its **own port**, with no proxy route to it. It is reached by container name
+from inside the network and by nothing from outside.
+
 ### On the game side
 
 `lc_server::ability` is the same idea over the game's vocabulary: one table, read from one

@@ -14,6 +14,7 @@ natively `linux/amd64`. Ports 3000–3999 are this project's; 3000 belongs to an
 | `lightcone-db` | 3102 | the site's PostgreSQL |
 | `lightcone-identity` | 3200 | the identity broker |
 | `lightcone-admin` | 3300 | the administration console |
+| `lightcone-shard` | 8080, 3400 | the game; 3400 is the console's read-only surface |
 
 They share a docker network called `lightcone` and address each other by container name. The
 published ports are for debugging; the addresses that matter are:
@@ -540,6 +541,14 @@ configuration file plainly lists the address.
 `http://lightcone-identity:3200` — **not** the public name, for the hairpin reason above.
 
 **3. The proxy last**, once there is something behind the route to answer.
+
+For the Status section on a user page, the shard needs `--admin-bind 0.0.0.0:3400` and the
+console needs `LC_ADMIN_SHARD_API=http://lightcone-shard:3400` — the container name, never the
+public one, and **no proxy route**: that port is reached from inside the network and from
+nowhere else. `LC_ADMIN_SHARD_AUDIENCE` must match the shard's `--audience` and must be on the
+broker's `LC_IDENTITY_AUDIENCES`, or no ticket can be minted for it and every card reads "the
+shard did not answer". The shard refuses `--admin-bind` without both `--db` and `--jwks`
+rather than listening and turning every request away.
 
 Then check the whole path rather than the container: `/users` signed out must be a 303 to the
 console's own `/signin`, and that must be a 303 to the broker carrying `return_to` — and the
