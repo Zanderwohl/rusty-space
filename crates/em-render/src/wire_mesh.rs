@@ -321,6 +321,103 @@ pub fn generate_great_circle_tube(normal: Vec3, tube_radius: f32, tube_sides: u3
 }
 
 
+// ---------------------------------------------------------------------------------------
+// Map geometry.
+//
+// All three are **unit-sized** and scaled per entity. A map spans fifteen orders of
+// magnitude, so a mesh built at a world size is one mesh per ring per frame; built at unit
+// size it is one asset and a transform. The tubes go elliptical under a non-uniform scale,
+// which on a four-sided tube is a fraction of a pixel and is the trade being made.
+// ---------------------------------------------------------------------------------------
+
+/// A unit-radius ring in the XZ plane, so its normal is `+Y` — Bevy's up, and what a map's
+/// reference plane is rotated from.
+pub fn ring_tube(segments: u32, tube_radius: f32, tube_sides: u32, brightness: f32) -> Mesh {
+    let segments = segments.max(3);
+    let points: Vec<Vec3> = (0..segments)
+        .map(|i| {
+            let angle = (i as f32 / segments as f32) * 2.0 * PI;
+            let (sin_a, cos_a) = angle.sin_cos();
+            Vec3::new(cos_a, 0.0, sin_a)
+        })
+        .collect();
+    let (positions, normals, colors, indices) =
+        build_tube_from_points(&points, brightness, tube_radius, tube_sides, true, 0);
+    assemble(positions, normals, colors, indices)
+}
+
+/// Radial spokes from the origin out to unit radius, in the XZ plane.
+///
+/// What makes an edge-on plane read as a plane. Seen from within it the rings are a single
+/// line and carry no depth at all; the spokes are what still converge.
+pub fn plane_spokes(spokes: u32, tube_radius: f32, tube_sides: u32, brightness: f32) -> Mesh {
+    let mut buffers = Buffers::default();
+    for i in 0..spokes {
+        let angle = (i as f32 / spokes.max(1) as f32) * 2.0 * PI;
+        let (sin_a, cos_a) = angle.sin_cos();
+        let out = Vec3::new(cos_a, 0.0, sin_a);
+        // From a little way out rather than from the centre, where every spoke would meet
+        // every other one inside a tube's own radius and read as a blob.
+        buffers.add(&[out * 0.02, out], brightness, tube_radius, tube_sides, false);
+    }
+    buffers.into_mesh()
+}
+
+/// A dashed line of unit height along `+Y`, from the plane up to what hangs above it.
+///
+/// A fixed dash **count** rather than a fixed length, because the mesh is scaled: a dash
+/// measured in world units is a solid line at one zoom and a single dash at another, and this
+/// one line is drawn from a planet's orbit down to the ecliptic and from a star's height down
+/// to the galactic disc in the same session.
+pub fn drop_line(dashes: u32, tube_radius: f32, tube_sides: u32, brightness: f32) -> Mesh {
+    let dashes = dashes.max(1);
+    // `dashes` dashes and `dashes - 1` gaps, all the same length, so the line starts and ends
+    // on a dash — an object with a gap under it looks detached from its own marker.
+    let step = 1.0 / (2 * dashes - 1) as f32;
+    let mut buffers = Buffers::default();
+    for i in 0..dashes {
+        let from = Vec3::Y * (2 * i) as f32 * step;
+        buffers.add(&[from, from + Vec3::Y * step], brightness, tube_radius, tube_sides, false);
+    }
+    buffers.into_mesh()
+}
+
+/// Several tubes accumulating into one mesh, keeping the index offset right.
+#[derive(Default)]
+struct Buffers {
+    positions: Vec<[f32; 3]>,
+    normals: Vec<[f32; 3]>,
+    colors: Vec<[f32; 4]>,
+    indices: Vec<u32>,
+}
+
+impl Buffers {
+    fn add(&mut self, points: &[Vec3], brightness: f32, tube_radius: f32, tube_sides: u32,
+        closed: bool) {
+        let offset = self.positions.len() as u32;
+        let (pos, norm, col, idx) =
+            build_tube_from_points(points, brightness, tube_radius, tube_sides, closed, offset);
+        self.positions.extend(pos);
+        self.normals.extend(norm);
+        self.colors.extend(col);
+        self.indices.extend(idx);
+    }
+
+    fn into_mesh(self) -> Mesh {
+        assemble(self.positions, self.normals, self.colors, self.indices)
+    }
+}
+
+fn assemble(positions: Vec<[f32; 3]>, normals: Vec<[f32; 3]>, colors: Vec<[f32; 4]>,
+    indices: Vec<u32>) -> Mesh {
+    let mut mesh = empty_wireframe_mesh();
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, VertexAttributeValues::Float32x4(colors));
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -444,6 +541,78 @@ mod tests {
         let (_, _, _, moved) = build_tube_from_points(&points, 1.0, 0.01, 4, false, 100);
         assert_eq!(base.len(), moved.len());
         assert!(base.iter().zip(&moved).all(|(a, b)| b - a == 100));
+    }
+
+    /// A ring lies in the plane a map's reference plane is rotated from, at unit radius.
+    #[test]
+    fn a_ring_is_a_unit_circle_in_the_xz_plane() {
+        let mesh = ring_tube(64, 0.01, 4, 1.0);
+        for p in positions(&mesh) {
+            assert!(p.y.abs() < 0.02, "{p:?} is off the XZ plane");
+            assert!((Vec2::new(p.x, p.z).length() - 1.0).abs() < 0.02, "{p:?} is off the circle");
+        }
+    }
+
+    /// And it closes. An open ring has a seam, which at a decade boundary is a gap in the one
+    /// thing on screen that is claiming to be a circle.
+    #[test]
+    fn a_ring_closes_on_itself() {
+        let open = build_tube_from_points(
+            &(0..64).map(|i| {
+                let a = (i as f32 / 64.0) * 2.0 * PI;
+                Vec3::new(a.cos(), 0.0, a.sin())
+            }).collect::<Vec<_>>(), 1.0, 0.01, 4, false, 0);
+        assert_eq!(index_count(&ring_tube(64, 0.01, 4, 1.0)) - open.3.len(), 4 * 6);
+    }
+
+    /// Spokes reach the rim and start clear of the middle, where a dozen tubes meeting inside
+    /// one tube's radius reads as a blob rather than as a centre.
+    #[test]
+    fn spokes_reach_the_rim_without_piling_up_in_the_middle() {
+        let mesh = plane_spokes(12, 0.01, 4, 0.5);
+        let radii: Vec<f32> = positions(&mesh).iter().map(|p| Vec2::new(p.x, p.z).length())
+            .collect();
+        assert!(radii.iter().any(|r| *r > 0.97), "no spoke reached the rim");
+        assert!(radii.iter().all(|r| *r > 0.005), "a spoke ran through the centre");
+        assert!(positions(&mesh).iter().all(|p| p.y.abs() < 0.02), "a spoke left the plane");
+    }
+
+    /// A drop-line starts and ends on a dash. An object with a gap under it looks detached
+    /// from its own marker, and the plane end looks like it is not quite touching.
+    #[test]
+    fn a_drop_line_starts_and_ends_on_a_dash() {
+        for dashes in [1, 2, 5, 9] {
+            let heights: Vec<f32> = positions(&drop_line(dashes, 0.01, 4, 1.0))
+                .iter().map(|p| p.y).collect();
+            let low = heights.iter().copied().fold(f32::INFINITY, f32::min);
+            let high = heights.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            assert!(low.abs() < 1e-5, "{dashes} dashes start at {low}, not the plane");
+            assert!((high - 1.0).abs() < 1e-5, "{dashes} dashes end at {high}, not the top");
+        }
+    }
+
+    /// It is dashed, which is to say it is more than one tube and they do not touch.
+    #[test]
+    fn a_drop_line_has_gaps_in_it() {
+        let solid = index_count(&drop_line(1, 0.01, 4, 1.0));
+        let dashed = index_count(&drop_line(6, 0.01, 4, 1.0));
+        assert_eq!(dashed, solid * 6, "six dashes should be six tubes");
+
+        let mut heights: Vec<f32> = positions(&drop_line(6, 0.01, 4, 1.0))
+            .iter().map(|p| p.y).collect();
+        heights.sort_by(f32::total_cmp);
+        heights.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+        assert_eq!(heights.len(), 12, "six dashes have twelve ends");
+    }
+
+    /// Asking for nothing must not produce a mesh that divides by zero or wraps.
+    #[test]
+    fn degenerate_requests_are_still_meshes() {
+        for mesh in [ring_tube(0, 0.01, 4, 1.0), plane_spokes(0, 0.01, 4, 1.0),
+            drop_line(0, 0.01, 4, 1.0)] {
+            assert!(positions(&mesh).iter().all(|p| p.is_finite()), "a NaN got into a buffer");
+            assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
+        }
     }
 
     #[test]
