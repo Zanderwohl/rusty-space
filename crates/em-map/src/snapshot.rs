@@ -54,16 +54,29 @@ impl ItemKey {
     /// FNV-1a of a name, matching `em_sim::BodyId`'s construction so two things named alike
     /// key alike.
     pub const fn from_name(name: &str) -> Self {
-        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-        let bytes = name.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            hash ^= bytes[i] as u64;
-            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-            i += 1;
-        }
-        Self(hash)
+        Self(fnv(0xcbf2_9ce4_8422_2325, name.as_bytes()))
     }
+
+    /// A key for an id that is only unique inside its own domain.
+    ///
+    /// A star's catalogue id and a ship's id are both small integers counted from different
+    /// places, so used raw they collide — and a collision here is two unrelated things sharing
+    /// one entity and one selection, which looks like a rendering bug a long way from its
+    /// cause. The domain name is hashed in first, so `from_id("star", 7)` and
+    /// `from_id("ship", 7)` are unrelated.
+    pub const fn from_id(domain: &str, id: u64) -> Self {
+        Self(fnv(fnv(0xcbf2_9ce4_8422_2325, domain.as_bytes()), &id.to_le_bytes()))
+    }
+}
+
+const fn fnv(mut hash: u64, bytes: &[u8]) -> u64 {
+    let mut i = 0;
+    while i < bytes.len() {
+        hash ^= bytes[i] as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        i += 1;
+    }
+    hash
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -247,5 +260,16 @@ pub(crate) mod tests {
         assert_eq!(ItemKey::from_name("Saturn"), ItemKey(0x2600_67d6_a62b_3a76));
         assert_eq!(ItemKey::from_name("Titan"), ItemKey(0x9a1c_f7d2_7e55_c2f9));
         assert_eq!(ItemKey::from_name(""), ItemKey(0xcbf2_9ce4_8422_2325), "the bare basis");
+    }
+
+    /// Two small integers counted from different places must not land on one key. Used raw
+    /// they would collide constantly, and a collision is a star and a ship sharing one entity.
+    #[test]
+    fn a_domain_keeps_two_id_spaces_apart() {
+        for id in 0..64u64 {
+            assert_ne!(ItemKey::from_id("star", id), ItemKey::from_id("ship", id));
+            assert_ne!(ItemKey::from_id("star", id), ItemKey::from_id("star", id + 1));
+        }
+        assert_eq!(ItemKey::from_id("star", 7), ItemKey::from_id("star", 7), "not stable");
     }
 }

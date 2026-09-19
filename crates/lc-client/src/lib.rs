@@ -28,6 +28,7 @@ pub mod hull;
 pub mod input;
 pub mod library;
 pub mod link;
+pub mod map_source;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod local;
 pub mod menu;

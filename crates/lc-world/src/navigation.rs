@@ -613,6 +613,19 @@ impl Kind {
     }
 }
 
+/// What a belt or a cloud is called: what it is, and how far out it sits.
+///
+/// Derived from the population rather than stored, because a population has no name of its
+/// own — and in one place rather than two, because the map and the inventory list the same
+/// bands and a second copy of this format string is a second answer waiting to happen.
+pub fn band_designation(population: &crate::population::Population) -> String {
+    format!(
+        "{} at {:.1} AU",
+        if is_flat(population) { "belt" } else { "cloud" },
+        population.thermal_radius() / AU
+    )
+}
+
 /// What a destination is, as little as the interface needs to name one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {

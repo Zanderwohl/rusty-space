@@ -4988,6 +4988,7 @@ dependencies = [
  "console_error_panic_hook",
  "directories",
  "em-foundations",
+ "em-map",
  "em-plot",
  "em-render",
  "em-sim",

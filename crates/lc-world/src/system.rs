@@ -516,15 +516,10 @@ fn build_inventory(
 
     for (index, population) in populations.iter().enumerate() {
         let radius = population.thermal_radius();
-        let flat = crate::navigation::is_flat(population);
         entries.push((
             radius,
             Entry {
-                designation: format!(
-                    "{} at {:.1} AU",
-                    if flat { "belt" } else { "cloud" },
-                    radius / crate::navigation::AU
-                ),
+                designation: crate::navigation::band_designation(population),
                 kind: Kind::Band,
                 orbit_radius_m: radius,
                 depth: 0,
