@@ -734,7 +734,7 @@ pub fn update_envelopes(
     for (shell, population) in
         envelopes.shells.iter().zip(system.populations.iter().filter(|p| visible(p)))
     {
-        if let Some(material) = materials.get_mut(&shell.material) {
+        if let Some(mut material) = materials.get_mut(&shell.material) {
             let inside = eye.at_ly.distance(system.origin_ly) * M_PER_LY
                 < population.thermal_radius();
             let next = uniforms(

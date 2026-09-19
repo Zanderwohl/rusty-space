@@ -494,7 +494,7 @@ fn draw(mut contexts: EguiContexts, picked: Res<Picked>, windows: Query<&Window,
 
     // The part of the window the sky is visible through, less the border. Not the whole window:
     // with a panel open, an edge arrow drawn against the window edge sits behind the panel.
-    let available = context.available_rect();
+    let available = context.viewport_rect();
     let inset = reticle::EDGE_INSET_PX;
     let safe = bevy::math::Rect::from_corners(
         Vec2::new(available.min.x + inset, available.min.y + inset),

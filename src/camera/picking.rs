@@ -162,7 +162,7 @@ fn pick_hover_target(
     egui_ctx: &mut EguiContexts,
 ) -> HoverPickResult {
     let egui_wants_pointer = egui_ctx.ctx_mut()
-        .map_or(false, |ctx| ctx.wants_pointer_input());
+        .map_or(false, |ctx| ctx.egui_wants_pointer_input());
     if egui_wants_pointer {
         return HoverPickResult::default();
     }

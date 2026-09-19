@@ -16,7 +16,7 @@ lc-proto = { path = "../lc-proto" }
 # No default features: em-sim pulls in bevy_ecs behind its `bevy` feature and the server
 # must not link an engine.
 em-sim = { path = "../em-sim", default-features = false }
-glam = { version = "0.30", features = ["serde"] }
+glam = { version = "0.32", features = ["serde"] }
 serde = { version = "1.0.215", features = ["derive"] }
 csv = { version = "1", optional = true }
 

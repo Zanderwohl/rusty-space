@@ -145,7 +145,7 @@ pub fn update_starfield_brightness(
             })
             .unwrap_or(false);
         if needs_update {
-            if let Some(material) = materials.get_mut(&material_handle.0) {
+            if let Some(mut material) = materials.get_mut(&material_handle.0) {
                 material.uniforms.brightness = brightness;
                 material.uniforms.star_radius_min = radius_min;
                 material.uniforms.star_radius_max = radius_max;

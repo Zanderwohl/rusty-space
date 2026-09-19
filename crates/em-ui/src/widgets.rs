@@ -109,7 +109,7 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
             .commands
             .spawn((
                 Text::new(text),
-                TextFont { font_size, ..default() },
+                TextFont { font_size: FontSize::Px(font_size), ..default() },
                 TextColor(color),
                 Node { margin: UiRect::bottom(Val::Px(10.0)), ..default() },
             ))
@@ -142,7 +142,7 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
             .with_children(|parent| {
                 parent.spawn((
                     Text::new(text),
-                    TextFont { font_size: 18.0, ..default() },
+                    TextFont { font_size: FontSize::Px(18.0), ..default() },
                     TextColor(theme.text),
                 ));
             })

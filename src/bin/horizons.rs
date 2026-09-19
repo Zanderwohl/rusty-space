@@ -143,7 +143,9 @@ fn parse_horizons_json(body: &str) -> (Option<String>, Option<String>) {
 }
 
 impl eframe::App for Horizons {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Cloned rather than borrowed: `ui` is handed to the panel mutably further down.
+        let ctx = ui.ctx().clone();
         // Poll body list fetch
         if let Some(rx) = &self.body_list_receiver {
             if let Ok(result) = rx.try_recv() {
@@ -197,7 +199,7 @@ impl eframe::App for Horizons {
             }
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             request_ui(
                 ui,
                 &mut self.request,

@@ -83,7 +83,7 @@ impl From<std::io::Error> for LoadError {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, TypePath)]
 pub struct BookLoader;
 
 impl AssetLoader for BookLoader {
@@ -107,7 +107,7 @@ impl AssetLoader for BookLoader {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, TypePath)]
 pub struct CatalogueLoader;
 
 impl AssetLoader for CatalogueLoader {
@@ -132,7 +132,7 @@ impl AssetLoader for CatalogueLoader {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, TypePath)]
 pub struct FontLoader;
 
 impl AssetLoader for FontLoader {
@@ -261,7 +261,7 @@ pub fn keep_up(
         shelf.trouble = Some("that book is not on the shelf".to_owned());
         return;
     }
-    let Some(book) = books.get_mut(&handle) else { return };
+    let Some(mut book) = books.get_mut(&handle) else { return };
 
     // The catalogue's title wins over the book's own: it is the one a person checked.
     if shelf.title.is_empty() {
@@ -275,7 +275,7 @@ pub fn keep_up(
     if shelf.open.as_ref().map(|(at, _)| *at) != Some(spine) {
         match book.epub.document(spine) {
             Ok(doc) => {
-                shelf.plates = plate_sizes(book, &doc);
+                shelf.plates = plate_sizes(&mut book, &doc);
                 if let Some(slot) = shelf.spine_chars.get_mut(spine) {
                     *slot = Some(doc.chars);
                 }
@@ -403,7 +403,7 @@ impl Shelf {
 /// on the first shelf has seventy-three of them.
 pub fn chapter_start(books: &mut Assets<Book>, shelf: &Shelf, entry: &TocEntry) -> Option<(usize, usize)> {
     let handle = shelf.handle.as_ref()?;
-    let book = books.get_mut(handle)?;
+    let mut book = books.get_mut(handle)?;
     book.epub.locate(entry).map(|at| (at.spine, at.char_offset))
 }
 

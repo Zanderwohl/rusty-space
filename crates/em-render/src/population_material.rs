@@ -147,7 +147,7 @@ impl Material for PopulationMaterial {
         // than here because one pipeline serves both.
         descriptor.primitive.cull_mode = None;
         if let Some(depth_stencil) = descriptor.depth_stencil.as_mut() {
-            depth_stencil.depth_write_enabled = false;
+            depth_stencil.depth_write_enabled = Some(false);
         }
         Ok(())
     }

@@ -51,7 +51,7 @@ impl From<std::io::Error> for SkyLoadError {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, TypePath)]
 pub struct SkyLoader;
 
 impl AssetLoader for SkyLoader {

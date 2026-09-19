@@ -191,7 +191,7 @@ pub fn update_celestial_markers(
             brightness,
         );
 
-        if let Some(mesh_asset) = meshes.get_mut(&mesh3d.0) {
+        if let Some(mut mesh_asset) = meshes.get_mut(&mesh3d.0) {
             *mesh_asset = mesh;
         }
 

@@ -3,7 +3,8 @@
 use std::path::PathBuf;
 use bevy::prelude::*;
 use bevy_egui::EguiContexts;
-use bevy_ui_text_input::{TextInputNode, TextInputPlugin, TextInputBuffer};
+use bevy::input_focus::AutoFocus;
+use bevy::text::{EditableText, TextCursorStyle};
 
 use crate::sim::world::SimSystem;
 use crate::body::universe::save::{
@@ -161,7 +162,7 @@ pub fn handle_escape_key(
     }
 
     if let Ok(ctx) = contexts.ctx_mut() {
-        if ctx.wants_keyboard_input() {
+        if ctx.egui_wants_keyboard_input() {
             return;
         }
     }
@@ -422,7 +423,14 @@ pub fn setup_naming(mut commands: Commands, mut context: ResMut<EscMenuContext>)
 
     let input = commands
         .spawn((
-            TextInputNode::default(),
+            // A file name, so newlines are meaningless and wrapping would hide the tail.
+            EditableText { allow_newlines: false, ..default() },
+            TextCursorStyle::default(),
+            TextLayout::no_wrap(),
+            TextFont { font_size: FontSize::Px(18.0), ..default() },
+            TextColor(vfd::TEXT),
+            // The naming screen exists only to be typed into.
+            AutoFocus,
             Node {
                 width: Val::Px(300.0),
                 height: Val::Px(40.0),
@@ -456,7 +464,7 @@ pub fn cleanup_naming(
 
 pub fn handle_naming_buttons(
     interaction_query: Query<(&Interaction, &MenuAction), (Changed<Interaction>, With<Button>)>,
-    text_input_query: Query<&TextInputBuffer, With<FileNameInput>>,
+    text_input_query: Query<&EditableText, With<FileNameInput>>,
     mut next_esc_state: ResMut<NextState<EscMenuState>>,
     mut next_app_state: ResMut<NextState<AppState>>,
     mut next_menu_state: ResMut<NextState<MenuState>>,
@@ -476,11 +484,14 @@ pub fn handle_naming_buttons(
 
         match action {
             MenuAction::ConfirmSave => {
+                // `value()` is split around any in-flight IME preedit, so it arrives in pieces.
                 let name = text_input_query
                     .iter()
                     .next()
-                    .map(|buf| buf.get_text().trim().to_string())
-                    .unwrap_or_default();
+                    .map(|buf| buf.value().into_iter().collect::<String>())
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
 
                 if name.is_empty() {
                     continue;
@@ -642,8 +653,8 @@ pub struct EscapeMenuPlugin;
 
 impl Plugin for EscapeMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(TextInputPlugin)
-            .insert_state(EscMenuState::Closed)
+        // `EditableTextInputPlugin` arrives with `DefaultPlugins`; nothing to register here.
+        app.insert_state(EscMenuState::Closed)
             .init_resource::<EscMenuContext>()
             .init_resource::<UnsavedChanges>()
             .add_systems(

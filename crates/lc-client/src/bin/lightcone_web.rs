@@ -97,10 +97,10 @@ fn main() {
                     ..default()
                 })
                 .set(RenderPlugin {
-                    render_creation: RenderCreation::Automatic(WgpuSettings {
+                    render_creation: RenderCreation::Automatic(Box::new(WgpuSettings {
                         backends: Some(Backends::BROWSER_WEBGPU),
                         ..default()
-                    }),
+                    })),
                     ..default()
                 }),
         )

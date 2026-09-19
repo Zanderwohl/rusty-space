@@ -47,11 +47,9 @@ em-ui = { path = "crates/em-ui" }
 num-traits = "0.2.18"
 scilib = "1.0.0"
 
-bevy = "0.17.2"
-bevy_mesh = "0.17"
-bevy_egui = "0.38.0"
-bevy_ui_text_input = "0.6"
-iyes_perf_ui = { git = "https://github.com/mgi388/iyes_perf_ui.git", branch = "bevy-0.17" }
+bevy = "0.19.1"
+bevy_mesh = "0.19"
+bevy_egui = "0.42.0"
 serde = { version = "1.0.215", features = ["derive"] }
 toml = "0.8.20"
 lazy_static = "1.4.0"
@@ -68,7 +66,7 @@ bitflags = "2"
 chrono = "0.4.45"
 
 [dependencies.eframe]
-version = "0.33.3"
+version = "0.36.2"
 features = [
     "persistence",
 ]

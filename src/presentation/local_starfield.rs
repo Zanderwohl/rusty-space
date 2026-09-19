@@ -146,7 +146,7 @@ pub fn update_local_starfield(
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 
-    if let Some(mesh_asset) = meshes.get_mut(&mesh3d.0) {
+    if let Some(mut mesh_asset) = meshes.get_mut(&mesh3d.0) {
         let mut mesh = Mesh::new(
             PrimitiveTopology::TriangleList,
             RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
@@ -168,7 +168,7 @@ pub fn update_local_starfield(
         *mesh_asset = mesh;
     }
 
-    if let Some(material) = materials.get_mut(material_handle.id()) {
+    if let Some(mut material) = materials.get_mut(material_handle.id()) {
         material.uniforms.brightness_min = settings.display.local_star_brightness_min;
         material.uniforms.brightness_max = settings.display.local_star_brightness_max;
         material.uniforms.min_angular_radius_rad = min_angular_radius_rad;
@@ -185,13 +185,13 @@ pub fn clear_local_starfield(
     material_handles: Query<&MeshMaterial3d<LocalStarfieldMaterial>, With<LocalStarfield>>,
 ) {
     for mesh3d in &local_starfield {
-        if let Some(mesh_asset) = meshes.get_mut(&mesh3d.0) {
+        if let Some(mut mesh_asset) = meshes.get_mut(&mesh3d.0) {
             *mesh_asset = empty_local_starfield_mesh();
         }
     }
 
     for handle in &material_handles {
-        if let Some(material) = materials.get_mut(handle.id()) {
+        if let Some(mut material) = materials.get_mut(handle.id()) {
             material.uniforms.max_intensity = 0.0;
         }
     }

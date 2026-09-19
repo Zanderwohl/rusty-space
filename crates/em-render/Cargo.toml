@@ -9,5 +9,5 @@ authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 [dependencies]
 em-foundations = { path = "../em-foundations" }
 em-sim = { path = "../em-sim", features = ["bevy"] }
-bevy = "0.17.2"
-bevy_mesh = "0.17"
+bevy = "0.19.1"
+bevy_mesh = "0.19"

@@ -276,7 +276,7 @@ pub fn star_ball_bundle(star: &StarBall,
             intensity: star.intensity() * (1e-9f32 * 1e-9f32),
             range: 1e14 * 1e-9,
             radius: 0.1,
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..Default::default()
         };
 

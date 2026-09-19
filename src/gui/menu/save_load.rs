@@ -24,7 +24,8 @@ pub fn planetarium_menu(
         UiTheme::Dark => ctx.set_visuals(egui::Visuals::dark()),
     }
 
-    egui::CentralPanel::default().show(ctx, |ui| {
+    let mut root = crate::gui::common::viewport_ui(ctx);
+    egui::CentralPanel::default().show(&mut root, |ui| {
         // Top button bar
         ui.horizontal(|ui| {
             let button_height = 40.0;
@@ -50,7 +51,7 @@ pub fn planetarium_menu(
         ui.columns(2, |columns| {
             // Left column - Templates
             egui::Frame::new()
-                .fill(if ctx.style().visuals.dark_mode {
+                .fill(if ctx.theme() == egui::Theme::Dark {
                     egui::Color32::from_gray(40)
                 } else {
                     egui::Color32::from_gray(240)
@@ -71,7 +72,7 @@ pub fn planetarium_menu(
 
             // Right column - Saves
             egui::Frame::new()
-                .fill(if ctx.style().visuals.dark_mode {
+                .fill(if ctx.theme() == egui::Theme::Dark {
                     egui::Color32::from_gray(40)
                 } else {
                     egui::Color32::from_gray(240)

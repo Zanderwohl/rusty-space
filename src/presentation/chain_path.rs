@@ -187,8 +187,8 @@ pub fn update_chain_legs(
 
             leg.extent = points.iter().map(|p| p.length()).fold(0.0f32, f32::max) as f64;
 
-            let Some(mesh) = meshes.get_mut(&mesh.0) else { continue };
-            write_tube(mesh, &points);
+            let Some(mut mesh) = meshes.get_mut(&mesh.0) else { continue };
+            write_tube(&mut mesh, &points);
             leg.built = Some(key);
             leg.baked_start = Some(start);
         }
@@ -218,7 +218,7 @@ pub fn update_chain_leg_thickness(
         let wanted = calculate_tube_radius(transform.translation.length());
         let Some(current) = materials.get(handle.id()) else { continue };
         if (current.target_tube_radius - wanted).abs() > 1.0e-9 {
-            if let Some(material) = materials.get_mut(handle.id()) {
+            if let Some(mut material) = materials.get_mut(handle.id()) {
                 material.target_tube_radius = wanted;
             }
         }

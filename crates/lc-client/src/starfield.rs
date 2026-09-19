@@ -537,7 +537,7 @@ pub fn update_bodies(
     if points.len() == sky.bodies.count && points.is_empty() {
         return;
     }
-    if let Some(mesh) = meshes.get_mut(&sky.bodies.mesh) {
+    if let Some(mut mesh) = meshes.get_mut(&sky.bodies.mesh) {
         *mesh = build_mesh(&points, origin);
     }
     sky.bodies.count = points.len();
@@ -564,7 +564,7 @@ pub fn update_sky(
         for (handle, stars) in
             [(sky.distant.mesh.clone(), &distant_stars), (sky.local.mesh.clone(), &local_stars)]
         {
-            if let Some(mesh) = meshes.get_mut(&handle) {
+            if let Some(mut mesh) = meshes.get_mut(&handle) {
                 *mesh = build_mesh(stars, sky.origin_ly);
             }
         }
@@ -578,7 +578,7 @@ pub fn update_sky(
         if next == pass.sent {
             continue;
         }
-        if let Some(material) = materials.get_mut(&pass.material) {
+        if let Some(mut material) = materials.get_mut(&pass.material) {
             material.uniforms = next.clone();
             pass.sent = next;
         }

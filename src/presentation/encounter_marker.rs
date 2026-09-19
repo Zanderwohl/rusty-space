@@ -256,7 +256,7 @@ pub fn update_encounter_markers(
                 || (current.uniform.plane_y - plane_y).length() > 1.0e-4;
             if moved {
                 // `get_mut` flags a GPU re-upload, so only take it when something changed.
-                if let Some(material) = materials.get_mut(handle.id()) {
+                if let Some(mut material) = materials.get_mut(handle.id()) {
                     material.uniform.plane_x = plane_x;
                     material.uniform.plane_y = plane_y;
                 }

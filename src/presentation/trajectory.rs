@@ -391,7 +391,7 @@ pub fn build_trajectory_meshes(
             .get(&material_handle.0)
             .map(|m| (m.phase_now - phase_now).abs() > 1e-7 || m.phase_wrap != phase_wrap)
             .unwrap_or(false);
-        if phase_changed && let Some(material) = materials.get_mut(&material_handle.0) {
+        if phase_changed && let Some(mut material) = materials.get_mut(&material_handle.0) {
             material.phase_now = phase_now;
             material.phase_wrap = phase_wrap;
         }
@@ -430,7 +430,7 @@ pub fn build_trajectory_meshes(
             })
             .collect();
 
-        if let Some(mesh_asset) = meshes.get_mut(&mesh3d.0) {
+        if let Some(mut mesh_asset) = meshes.get_mut(&mesh3d.0) {
             // The samples are in perifocal space, so the orbit's plane normal is the
             // render image of simulation +Z.
             *mesh_asset = generate_tube_mesh(&vertices, TUBE_SIDES, Some(DVec3::Z.to_render()));
@@ -471,7 +471,7 @@ pub fn update_trajectory_material_brightness(
             })
             .unwrap_or(false);
         if needs_update {
-            if let Some(material) = materials.get_mut(&handle.0) {
+            if let Some(mut material) = materials.get_mut(&handle.0) {
                 material.front = front;
                 material.back = back;
                 material.exposure = exposure;
