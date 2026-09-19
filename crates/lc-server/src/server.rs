@@ -62,8 +62,9 @@ pub struct Connected {
     /// contact and stops hearing about it must be told; one that has never had any needs no
     /// message twenty times a second to say so again.
     pub had_contacts: bool,
-    /// What the account may do beyond playing, from its ticket. See [`crate::ticket::ADMIN`].
-    pub permission: i32,
+    /// What the account may do beyond playing, read from its ticket. See [`crate::ability`],
+    /// which is where every rule about it lives; nothing compares these directly.
+    pub permission: crate::ability::Level,
     /// Whether this connection has been handed the ship's transcript yet.
     ///
     /// Sent from the tick rather than from the sign-in, because reading it is a query and a
@@ -280,11 +281,37 @@ impl<J: Journal> Server<J> {
         self.clients.get(&client).map(|state| CraftId(state.ship.0))
     }
 
-    /// Whether a connection may issue development actions: anyone, on a server that directs,
-    /// and an admin's ticket anywhere.
-    pub(crate) fn may_develop(&self, client: ClientId) -> bool {
-        self.directs
-            || self.clients.get(&client).is_some_and(|c| c.permission >= crate::ticket::ADMIN)
+    /// The single door on to [`crate::ability`]: one place a level is read, one table saying what
+    /// it means.
+    pub(crate) fn may(
+        &self,
+        client: ClientId,
+        act: crate::ability::Act,
+        about: Option<CraftId>,
+    ) -> bool {
+        use crate::ability::{Asking, Directing, Standing};
+        crate::ability::allows(
+            act,
+            Asking {
+                level: self
+                    .clients
+                    .get(&client)
+                    .map_or(crate::ability::Level::PLAYER, |c| c.permission),
+                standing: match about {
+                    Some(id) if self.flies(client, id) => Standing::Flies,
+                    _ => Standing::Otherwise,
+                },
+            },
+            Directing(self.directs),
+        )
+    }
+
+    /// **The ownership structure.** Three facts, all needed — dropping the last was a real bug,
+    /// a reconnection replacing the old claim while the entry outlived a removed craft.
+    fn flies(&self, client: ClientId, craft: CraftId) -> bool {
+        self.owners.get(&craft) == Some(&client)
+            && self.fleet.get(craft).is_some()
+            && self.clients.get(&client).is_some_and(|state| state.ship.0 == craft.0)
     }
 
     pub fn ship(&self, id: ShipId) -> Option<&Craft> {
@@ -321,7 +348,9 @@ impl<J: Journal> Server<J> {
             // the catch-up path run from the beginning.
             cursor_t: i64::MIN,
             had_contacts: false,
-            permission: 0,
+            // Admitted, not ticketed: a test's client is a player, and `directing` is what lets it
+            // develop.
+            permission: crate::ability::Level::PLAYER,
             backlog_sent: false,
         });
     }
@@ -486,14 +515,13 @@ impl<J: Journal> Server<J> {
         events: &mut Vec<Event>,
         deliveries: &mut Vec<Scheduled>,
     ) -> Result<Applied, Refusal> {
-        let state = self.clients.get(&from).ok_or(Refusal::NotYours)?;
-        if state.ship != intent.ship_id {
-            return Err(Refusal::NotYours);
-        }
+        // **The gate.** `NotYours` whichever half failed: a client that could tell them apart could
+        // probe for both.
         let id = CraftId(intent.ship_id.0);
-        if self.owners.get(&id) != Some(&from) || self.fleet.get(id).is_none() {
+        if !self.may(from, crate::ability::Act::of(&intent.order), Some(id)) {
             return Err(Refusal::NotYours);
         }
+        let state = self.clients.get(&from).ok_or(Refusal::NotYours)?;
 
         // The clamp. Not later than now, and not earlier than the moment this client's stream
         // has already been resolved to.
@@ -811,7 +839,7 @@ impl<J: Journal> Server<J> {
             last_reception_t: i64::MIN,
             cursor_t: i64::MIN,
             had_contacts: false,
-            permission: claims.perm,
+            permission: crate::ability::Level::from_claim(claims.perm),
             backlog_sent: false,
         });
         // Being welcomed is not the same fact as owning the craft, and `act` checks the

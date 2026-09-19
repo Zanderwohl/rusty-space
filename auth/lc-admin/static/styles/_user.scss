@@ -1,0 +1,258 @@
+// One account's page: the header, the two controls, and the panels of record.
+
+.person {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.person-badges {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.person-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin: 0;
+  font-size: var(--step--1);
+  color: var(--ink-dim);
+
+  dt {
+    &::after {
+      content: ":";
+    }
+  }
+
+  dd {
+    margin: 0;
+  }
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: var(--space-3);
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--ground-raised);
+}
+
+.act {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  // The notes want the whole row to themselves; everything else sits on one line.
+  .field-wide {
+    flex: 1 0 100%;
+  }
+
+  label {
+    font-size: var(--step--1);
+    color: var(--ink-dim);
+  }
+}
+
+.act-inline {
+  display: flex;
+  gap: var(--space-1);
+
+  input {
+    inline-size: 9rem;
+  }
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+
+  // Not on every `h2`: the cards carry their own padding, and a margin inside one pushes its
+  // heading off its own top edge. `#user-detail` has no gap, so this is all that holds the
+  // panels apart.
+  > h2 {
+    margin-block-start: var(--space-4);
+  }
+}
+
+.records {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--step--1);
+
+  th,
+  td {
+    text-align: start;
+    vertical-align: top;
+    padding: var(--space-2);
+    border-block-end: 1px solid var(--rule);
+  }
+
+  thead th {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-dim);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  // Over, and has to read as over at a glance.
+  .ban-expired,
+  .ban-lifted,
+  .lapsed {
+    color: var(--ink-dim);
+  }
+}
+
+.cell-notes {
+  max-inline-size: 26rem;
+
+  p + p {
+    margin-block-start: var(--space-1);
+  }
+}
+
+.lift-notes {
+  color: var(--ink-dim);
+}
+
+.by,
+.left {
+  display: block;
+  color: var(--ink-dim);
+}
+
+.subject {
+  word-break: break-all;
+}
+
+.log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--step--1);
+
+  li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-1) 0;
+    border-block-end: 1px solid var(--rule);
+  }
+}
+
+.log-when,
+.log-who {
+  color: var(--ink-dim);
+}
+
+.log-what {
+  font-weight: 600;
+}
+
+// Cards rather than a table: neither half is a list, and the left one is a placeholder for
+// more about the system.
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: var(--space-3);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--ground-raised);
+
+  h3 {
+    margin: 0;
+    font-size: var(--step--1);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+  }
+}
+
+.card-headline {
+  font-size: var(--step-1);
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.card-detail {
+  color: var(--ink-dim);
+  font-size: var(--step--1);
+}
+
+.card-facts {
+  display: grid;
+  // Sizes to the longest label, so no magic width a longer word would break.
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-2);
+  margin: 0;
+  font-size: var(--step--1);
+
+  dt {
+    color: var(--ink-dim);
+  }
+
+  dd {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.loadout {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--step--1);
+
+  th,
+  td {
+    padding: var(--space-1) 0;
+    text-align: start;
+    font-weight: inherit;
+  }
+
+  // Tabular figures, so the digits form a column.
+  td {
+    text-align: end;
+    font-variant-numeric: tabular-nums;
+  }
+
+  // Listed but absent, rather than present and zero.
+  .none {
+    color: var(--ink-dim);
+    text-decoration: line-through;
+  }
+
+  tfoot {
+    th,
+    td {
+      border-block-start: 1px solid var(--rule);
+      padding-block-start: var(--space-2);
+      font-weight: 700;
+    }
+  }
+}

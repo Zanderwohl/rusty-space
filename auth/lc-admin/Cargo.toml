@@ -1,0 +1,55 @@
+[package]
+name = "lc-admin"
+version = "0.1.0"
+edition = "2024"
+description = "The Lightcone administration site: accounts, levels and bans."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[dependencies]
+# **The schema and the rules come from the broker**, as a path dependency inside this
+# workspace. Two services write the same tables, and a second copy of `Level`, `Reason` or the
+# promotion rules is a copy with nothing watching it — `lc_identity::assets`'s note about the
+# stylesheet is the same argument, and there the answer had to be a test because a workspace
+# boundary was in the way. Here there is no boundary, so it can be a dependency instead.
+#
+# What this does *not* share is migrations: `lc-identity` owns every one of them and applies
+# them at its own boot. This service never migrates. See `lightcone/docs/16-identity.md`.
+lc-identity = { path = "../lc-identity" }
+
+axum = { version = "0.8", features = ["form"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["trace", "timeout", "set-header", "fs"] }
+maud = { version = "0.27", features = ["axum"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio", "tls-rustls", "postgres", "macros", "chrono", "uuid",
+] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+# The stylesheet, compiled at boot rather than in `build.rs`. Unlike the broker's, this sheet
+# sits beside a compiled TypeScript bundle in the same `static/` tree, and a service that reads
+# one of the two from disk and bakes the other in has two answers to "where do assets live".
+grass = { version = "0.13", default-features = false }
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+url = "2"
+# The shard answers in RON. A format rather than a shared crate: see src/shard.rs.
+ron = "0.10"
+subtle = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# Parsing a query string the way axum's `Query` extractor does, so the round-trip tests in
+# `listing` exercise the real path rather than a hand-rolled parser that agrees with itself.
+serde_urlencoded = "0.7"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

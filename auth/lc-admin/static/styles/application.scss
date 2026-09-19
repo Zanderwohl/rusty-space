@@ -1,0 +1,8 @@
+// `_tokens.scss` is the site's byte for byte; a test compares them, and the fix for a failure
+// is to copy the site's over this one. Console-only additions go in `_base.scss`.
+//
+// Semantic classes: a class names what a thing *is*.
+@use "tokens";
+@use "base";
+@use "index";
+@use "user";

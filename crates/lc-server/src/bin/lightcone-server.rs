@@ -26,6 +26,9 @@ lightcone-server — one shard
   --db <url>          where craft are kept, so the world outlives this process
                       (or LC_SHARD_DB, which is where it belongs: it is a password,
                        and an argument is visible to anything that can list processes)
+  --admin-bind <addr> a read-only surface for the administration console, on its own port.
+                      Needs --db and --jwks. Never publish a route to it: it is reached
+                      over the container network by name and by nothing else.
   --open              admit connections with no valid ticket — DEVELOPMENT ONLY
 
 Without --db a shard is a sandcastle: it runs, and everything in it is gone when it stops —
@@ -56,6 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let flag = |name: &str| args.iter().any(|a| a == name);
 
     let bind = after("--bind").unwrap_or_else(|| "127.0.0.1:8080".into());
+    let admin_bind = after("--admin-bind");
     let audience = after("--audience").unwrap_or_else(|| "shard-1".into());
     let shard_id: i64 = after("--shard").and_then(|s| s.parse().ok()).unwrap_or(1);
 
@@ -74,6 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut server = Server::new(journal, 0, shard_id as u64);
 
+    let mut admin_keys: Option<Trusted> = None;
     match after("--jwks") {
         Some(source) => {
             let mut trusted = Trusted::new(&audience);
@@ -84,6 +89,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Err(format!("{source} published no key this server can use").into());
             }
             eprintln!("trusting {learned} key(s) from {source} for audience {audience}");
+            // Cloned before the server takes it: a second `Trusted` would be a second thing to keep
+            // in step through a key rotation.
+            admin_keys = Some(trusted.clone());
             server.trust(trusted);
         }
         None if flag("--open") => {}
@@ -114,7 +122,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             AuthoredStars::sample().stars().to_vec()
         }
     };
-    server.load_world(World::new(stars));
+    // Shared with the administration surface below.
+    let catalogue = std::sync::Arc::new(stars);
+    server.load_world(World::from_shared(catalogue.clone()));
+
+    // Refused rather than silently skipped: a console pointed at a shard that quietly declined
+    // to listen is a card reading "unavailable" with nothing to explain it.
+    if let Some(addr) = &admin_bind {
+        let (Some(url), Some(keys)) = (db.as_ref(), admin_keys) else {
+            return Err("--admin-bind needs both --db and --jwks".into());
+        };
+        let api = lc_server::admin::Api::new(
+            std::sync::Arc::new(connect(url).await?),
+            catalogue.clone(),
+            std::sync::Arc::new(keys),
+        );
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        eprintln!("administration surface on {addr}, for audience {audience}");
+        tokio::spawn(async move {
+            if let Err(why) = axum::serve(listener, lc_server::admin::router(api)).await {
+                eprintln!("administration surface stopped: {why}");
+            }
+        });
+    }
 
     // The shelf. A shard with no catalogue runs without one and says nothing about a library;
     // a shard with a catalogue and no base would send files hanging off nothing, so both are

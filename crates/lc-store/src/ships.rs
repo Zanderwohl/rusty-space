@@ -76,6 +76,24 @@ pub async fn load_ships(client: &Client) -> Result<Vec<Ship>, Error> {
         .collect())
 }
 
+/// A query rather than `load_ships` filtered in Rust: reading every ship in the world to
+/// answer about one person works until the world has ships in it.
+pub async fn ship_for_account(client: &Client, account: &str) -> Result<Option<Ship>, Error> {
+    let row = client
+        .query_opt(
+            "SELECT ship_id, account, saved_t, state, format FROM ships WHERE account = $1",
+            &[&account],
+        )
+        .await?;
+    Ok(row.map(|row| Ship {
+        ship_id: row.get(0),
+        account: row.get(1),
+        saved_t: row.get(2),
+        state: row.get(3),
+        format: row.get(4),
+    }))
+}
+
 /// Forget a craft. Nothing calls this yet; a ship that exists goes on existing.
 pub async fn delete_ship(client: &Client, ship_id: i64) -> Result<u64, Error> {
     client.execute("DELETE FROM ships WHERE ship_id = $1", &[&ship_id]).await

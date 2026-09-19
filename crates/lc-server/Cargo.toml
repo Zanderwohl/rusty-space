@@ -21,6 +21,11 @@ serde_json = "1"
 tokio-postgres = "0.7"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "sync", "macros", "time", "signal"] }
 tokio-tungstenite = "0.24"
+# The administration console reads  over this. A format rather than a shared crate:
+# the console is in another workspace and may not link a game crate. See src/status.rs.
+ron = "0.10"
+# One read-only route for the administration console, on its own port. See src/admin.rs.
+axum = "0.8"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 # One GET at boot, for the broker's published keys. Blocking, before the runtime matters, and
 # not worth an async HTTP stack.

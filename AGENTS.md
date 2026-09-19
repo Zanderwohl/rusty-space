@@ -172,6 +172,55 @@ Each of these cost real time. None of them are visible from the code that hits t
   files and 22 000 lines, burying a change in churn. Format the files you write to match their
   neighbours and leave the rest alone.
 
+**The administration console**
+
+- `auth/lc-admin` **runs no migrations.** `lc-identity` owns every one of them and applies them
+  at its own boot; the console reads and writes tables it did not create. Start the broker first
+  or the console comes up against a schema that is not there.
+- Its TypeScript is compiled by a **stage of the container build**, not by cargo. `cargo build`
+  succeeds without it and the *boot* fails, with a message naming `npm run build` — which is
+  where you will meet it, because `Assets::load` reads `static/js/admin.js` off disk.
+- **htmx 4, not 2.** Attributes no longer inherit implicitly (`hx-target:inherited`), events are
+  colon-separated (`htmx:after:swap`), a GET does **not** send its enclosing form's values
+  (`hx-include="this"` on the filter form is what makes the filters work), and every status but
+  204 and 304 is swapped — which is why a refusal returns 422 with a body rather than being
+  dropped. `npx htmx.org upgrade-check` catches htmx 2 habits.
+- **Three htmx mistakes here failed silently and looked entirely correct.** All three were found
+  by driving a browser and none by a test:
+  - `hx-trigger="input changed ..."` on a `<form>` **never fires**. `changed` compares the value
+    of the element the trigger is on and a form has no value. The search box did nothing.
+  - `target:(#q)` — the parenthesised selector form the documentation gives for selectors
+    *containing whitespace* — matches nothing; the parentheses are not stripped. `target:#q`
+    works.
+  - `htmx:after:swap`'s `event.target` is the element that **issued** the request, not the one
+    that was replaced. The swapped element is `event.detail.ctx.target`. Keying on `event.target`
+    type-checks and quietly skips every swap that came from a form.
+
+  The lesson is the one the renderer section already draws: a page nobody has opened proves
+  nothing. Serve the console, set the session cookie by hand, and click.
+- A paged query without a **unique tie-break** in its `order by` shows a row on two pages and
+  another on none. `Listing::order_by` appends `a.id` for this, and a test asserts it for every
+  column.
+- **The console's tests share one database and never drop it.** An assertion that reads page
+  one of an unfiltered index passes on a fresh database and starts failing once enough runs
+  have accumulated to fill a page — which looks like a regression in the thing it is named
+  after and is not. Narrow to accounts the test made, by a name carrying a uuid, as
+  `the_pages_partition_the_matches` does.
+- **A refusal page needs a link out.** The console has no navigation except a masthead that
+  renders for administrators, so a refused visitor sees a page with nothing on it to click and
+  no way to guess the address of anything — including `/signout`, which existed the whole time
+  and is a **POST**: `SameSite=Lax` sends the session on a cross-site top-level navigation when
+  the method is safe, and never on a cross-site POST, so the method is the whole of the
+  defence. A link to it would not work and is asserted against.
+  `views::refusal` takes a way out; `views::wrong` is for store failures, where there is
+  nothing useful to offer.
+- **A session that can only be refused should not exist.** Check the level before sealing one,
+  and clear it on the path that refuses an existing one. Otherwise the two combine into a
+  cookie its holder cannot get rid of.
+- htmx is **vendored**, and `npm run build` refuses when the committed copy is not the one
+  `package-lock.json` pins. To take a new htmx: bump the dependency, `npm run vendor`, commit
+  both.
+
 **axum**
 
 - An array of header pairs in a response **inserts**, which replaces any header of the same
@@ -182,10 +231,13 @@ Each of these cost real time. None of them are visible from the code that hits t
 
 **Stylesheets**
 
-- The broker's `_tokens.scss` is a **copy** of the site's, and
-  `assets::tests::the_tokens_are_the_sites_tokens` compares them byte for byte. If it fails, one
-  of the two was edited — copy the site's over the broker's rather than making them "close
-  enough". Broker-only additions go in `auth/lc-identity/static/styles/_status.scss`.
+- `_tokens.scss` exists **three times**: the site's is the original, and the broker and the
+  administration console each hold a copy. Both copies are compared to the site's byte for byte
+  by a `the_tokens_are_the_sites_tokens` test. If one fails, a file was edited — copy the site's
+  over it rather than making them "close enough". They are copies because the three are separate
+  docker build contexts and the file cannot be shared. Service-only additions go elsewhere:
+  `auth/lc-identity/static/styles/_status.scss` for the broker,
+  `auth/lc-admin/static/styles/_base.scss` for the console.
 - The broker compiles its sheet in `build.rs`, so a SCSS error is a failed build. The site
   compiles at boot and needs `cargo run --bin lc-web -- --check-styles` to catch one earlier.
   They are different on purpose; `lightcone/docs/16-identity.md` says why.

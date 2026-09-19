@@ -38,7 +38,7 @@ pub struct Claims {
     /// Recorded by the game server until it expires, so a ticket in a log or a screenshot is
     /// worth nothing a second time.
     pub jti: String,
-    /// What the account may do beyond playing: `store::PLAYER` or `store::ADMIN`. Signed like
+    /// What the account may do beyond playing: see `level::Level`, 0..=3. Signed like
     /// everything else here, which is what lets a game server take its word.
     pub perm: i32,
 }

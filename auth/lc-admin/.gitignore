@@ -1,0 +1,5 @@
+node_modules/
+# Built by `npm run build`, and by its own stage of the container build. A compiled artefact
+# in the repository is one that goes stale the first time somebody edits the source and does
+# not rebuild it.
+static/js/

@@ -9,6 +9,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod ability;
+pub mod admin;
 pub mod chase;
 pub mod director;
 pub mod drive;
@@ -19,6 +21,8 @@ pub mod persist;
 pub mod radio;
 pub mod rate;
 pub mod server;
+pub mod status;
+pub mod systems;
 #[cfg(test)]
 pub mod testing;
 pub mod ticket;

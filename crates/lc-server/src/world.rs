@@ -28,7 +28,9 @@ use lc_world::system::{LOCAL_SHELL_LY, LocalSystem};
 /// never disagree about whether a ship is in a system.
 #[derive(Default)]
 pub struct World {
-    stars: Vec<CatalogueStar>,
+    /// Shared so `crate::admin` reads the same catalogue: it is the largest thing in the process
+    /// and never changes once loaded.
+    stars: Arc<Vec<CatalogueStar>>,
     /// Loaded on first arrival and shared thereafter. Building one is a couple of hundred
     /// bodies out of a preset, and every craft in the same system points at the same copy —
     /// which is only possible because a system is never propagated.
@@ -37,7 +39,16 @@ pub struct World {
 
 impl World {
     pub fn new(stars: Vec<CatalogueStar>) -> Self {
+        Self { stars: Arc::new(stars), loaded: HashMap::new() }
+    }
+
+    /// So the process carries one catalogue however many readers it has.
+    pub fn from_shared(stars: Arc<Vec<CatalogueStar>>) -> Self {
         Self { stars, loaded: HashMap::new() }
+    }
+
+    pub fn stars(&self) -> Arc<Vec<CatalogueStar>> {
+        Arc::clone(&self.stars)
     }
 
     pub fn is_empty(&self) -> bool {

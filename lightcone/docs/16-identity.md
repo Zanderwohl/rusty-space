@@ -348,8 +348,6 @@ Named so they are decisions rather than omissions:
 
 - **Entitlements.** Whether an account may play at all, or on which shard, is a game question
   and belongs in the game's database keyed by account id. The broker answers who, not what.
-- **Bans.** A ban is the game refusing a valid identity, which is the right layering — the
-  broker should not learn what a player did in a world it knows nothing about.
 - **Multiple characters.** [09-open-questions.md](09-open-questions.md) has not settled whether
   a player ever inhabits more than one ship. `Welcome` returning a single `ship_id` assumes not;
   if that changes it becomes a list and the client picks, which is a protocol change and a
@@ -370,6 +368,221 @@ Named so they are decisions rather than omissions:
   that phishing exploits. The first is work; the second is a decision about what the game
   teaches, and it is the harder of the two.
 
+## Levels, bans, and the console that works them
+
+This section reverses a decision the "what this does not do yet" list above used to hold.
+**Bans were going to be the game's**, on the reasoning that a ban is the game refusing a valid
+identity and the broker should not learn what a player did in a world it knows nothing about.
+That reasoning is sound about *entitlement* and wrong about what was actually wanted. What is
+wanted is that a banned account **cannot sign in** — not to a shard, and not to the website
+either — and is told how long that lasts. Nothing but the broker can refuse a sign-in. So the
+ban lives here, and the layering is preserved in a different place: the broker stores a ban's
+**reason** as one of a closed set of eight names, and never learns what happened in the world
+beyond that.
+
+### The level is a ladder, and lower is higher
+
+`accounts.permission` was 0 or 1. It is now 0 to 3, with a check constraint:
+
+| | | |
+|---|---|---|
+| 0 | Player | administers nothing |
+| 1 | Owner | the most senior |
+| 2 | Administrator | |
+| 3 | Moderator | trusted with people, not with the sky |
+
+**The integers run opposite to seniority**, which is the one thing about this column that is
+easy to get wrong: `permission >= 1` reads as "is an administrator" and is right, while
+`permission > other` reads as "outranks" and is exactly backwards. Nothing above the schema
+compares them directly. `lc_identity::level::Level` carries the ordering and offers
+`outranks` as its only comparison — deliberately no `Ord`, because a derived one would make
+`a > b` a compiling, plausible, wrong authorisation check.
+
+`lc_server::ability::Level` is the same type again, on the far side of the workspace boundary.
+It is duplicated for the reason the ticket's claim set is duplicated: the game server must not
+depend on the broker. The two agree by this document and by a test on each side.
+
+### Who may do what
+
+Three rules, all of them in `lc_identity::ability` as pure functions of two levels, and all of
+them asserted exhaustively rather than argued about:
+
+- an administrator may **promote** anyone up to their own level, so a 2 hands out 2 and 3 and
+  never 1;
+- an administrator may **demote** anyone strictly below their level, so a 2 may demote a 3 and
+  may not touch another 2;
+- an administrator **cannot be banned**. De-admin first, which is a separate act by somebody
+  senior and leaves a line in the log.
+
+Two consequences fall out, and both are intended. **Nobody changes their own level**, because
+demotion needs an actor who outranks the subject and nobody outranks themselves — so a stray
+click cannot strand a shard with no owner. And **an owner cannot be demoted by anyone**,
+including another owner, because there is nobody above 1: removing an owner is a row changed by
+hand against the database, deliberately, so that the one irreversible administrative act is not
+reachable from a web page.
+
+### A ban is a row, and they are served concurrently
+
+An account can hold several at once, each on its own clock. Three weeks for one thing and two
+months for another are two facts, both true, and a single `banned_until` column would lose the
+reason the longer one was issued.
+
+What a refused sign-in is told is the **furthest** expiry among the bans in force — the nearest
+would be a lie the person discovers three hours later — together with how many there are, so
+somebody who waits one out and is refused again does not conclude the service is broken. What
+they are **not** told is the reason: a ban's public reason belongs in whatever is said to them
+out of band, and its private case notes sit one column away from it.
+
+The check runs at every point that turns an account id into something usable:
+`lc_identity::signin::admitted`. Both password forms, the end of an upstream dance, the site's
+code exchange, the device-grant exchange, and **ticket minting**. The last matters most and is
+the one a sign-in-only check would miss: a site session is a fortnight and a device grant is
+ninety days, so without it a ban issued to somebody already signed in would not reach them
+until after it had expired.
+
+A store failure is not a refusal. A database that cannot be reached must not lock every account
+out of the game.
+
+### The console is a second service
+
+`auth/lc-admin`, in the broker's cargo workspace, sharing its database and its lockfile and
+deploying as its own container on its own hostname. Not `/admin` on the broker, because the
+broker is the service every player reaches to sign in and an administration console should not
+share an origin, a process or a dependency tree with it.
+
+**`lc-identity` owns the schema.** It holds every migration and applies them at its own boot;
+the console reads and writes tables it did not create and runs no migrations. Two services
+migrating one database is two advisory locks and a race between whichever container starts
+first.
+
+The console is an ordinary first-party client of the broker, exactly as the website is: it
+sends a browser to `/signin`, gets a code, and spends it for an account id. There is no separate
+administrator login. What makes somebody an administrator is a column — which is why the level
+is read from the database on **every request** rather than carried in the session cookie. A
+level in the cookie would mean a demotion took effect when the demoted person next signed in,
+which is to say at a time of their choosing.
+
+**A player who signs in is never given a session.** The level is read before anything is
+sealed, so somebody who is not an administrator is told so and left holding nothing — rather
+than holding a cookie whose only use is to be rejected by every page. The other door is an
+administrator demoted mid-session: the extractor refuses them *and clears the session*, because
+reading the level per request exists to make a demotion take effect now, and that has to
+include ending the session it just invalidated.
+
+Both refusals name a way out. The console's only navigation is a masthead that renders for
+administrators, so a refusal without a link is a dead end — no menu, and nothing on screen
+naming the address that would get you off it. `/signout` existed from the first commit and was
+linked from exactly one place, which was the page a refused visitor never sees.
+
+**Signing out is a POST.** The session cookie is `SameSite=Lax`, which sends it on a cross-site
+top-level navigation when the method is safe — so as a `GET` it was a link on any page anywhere
+that signed you out of the console, and anything that follows links on its own did the same.
+Lax never sends a cookie on a cross-site `POST`, so the method is the whole of the defence and
+no token is needed. The masthead offers a small form styled to read as the link it replaces.
+
+Its session is eight hours, not the site's fortnight: the revocation window of a signed cookie
+is its lifetime, and an administrative session is a working day at a desk.
+
+### The pages
+
+Server-rendered HTML, SCSS, and htmx 4. One TypeScript module and one small component, compiled
+by a stage of the container build; nothing renders in the browser.
+
+**The URL is the state.** Every filter, the sort and the page number live in the query string
+and nowhere else, so a link pasted into a chat window reproduces what the sender was looking at.
+`lc_admin::listing::Listing` is the one definition of what that query string means — the page
+handler, the partial handler and the browser all read it, the last through a `data-listing`
+attribute carrying the same defaults the canonical form drops parameters against.
+
+Paging is **`limit`/`offset` with a `count(*) over ()` window**, one statement for the rows and
+the total. Every ordering ends in a tie-break on `accounts.id`, without which two accounts
+created in the same second can swap places between the query for page 1 and the query for page
+2 — which shows one twice and the other never.
+
+Everything works with scripting off: every heading and pager link is a real `href`, the filter
+form is a real `method="get"` form, and every act is a real `method="post"` form that ends in a
+redirect. htmx makes those same URLs into swaps, and the TypeScript keeps the address bar in
+step with them, which is the one thing neither the server nor htmx can do.
+
+### htmx is in the image, not on the CDN
+
+Vendored: 36 KB of `htmx.min.js` committed under `lc-admin/static/vendor`, served by the
+console itself at `/v/<digest>/scripts/htmx.js` with a one-year `immutable` header. No page
+here references an origin this project does not run.
+
+Not on `cdn.<domain>`, and that was asked about rather than assumed. The CDN is for **game
+builds** — `cdn.<domain>/game/<build-id>/…`, never overwritten, promoted by a row in the site's
+database ([14-hosting.md](14-hosting.md)). htmx is not versioned on that axis and is not
+promoted, and putting it there would cost the property that makes the current arrangement worth
+having: htmx ships in the same image as the binary that needs it, behind a **single digest
+computed over the stylesheet, the script and htmx together**. Deploying the console deploys the
+exact htmx it was built against, and rolling back rolls back all three. Served from the CDN it
+would be a second container, a second volume and a second publish step, with a new state in
+which the console is up and its script is a 404 — and a cross-origin fetch on the one surface
+most worth keeping same-origin.
+
+**The committed copy is checked against `package-lock.json`.** `npm run build` refuses when the
+two differ, the container's ui stage runs the same check, and the runtime stage then takes htmx
+out of `node_modules` rather than out of the repository — so "the image ships what the lockfile
+pins" holds by construction. To take a new htmx: bump the dependency, `npm run vendor`, commit
+both. This exists because the alternative is the `_tokens.scss` situation, where a copy with
+nothing watching it drifts and nobody finds out until it matters.
+
+The argument would change if a second service wanted htmx. Three copies of it is the same
+problem again, and that is the point at which a shared origin starts paying for itself.
+
+### The console asks the game one question
+
+A user page shows where the account's ship is and what it is made of. That is game data, in
+the shard's database, as **postcard bytes only a game crate can decode** — and the console may
+not depend on a game crate. So the shard answers instead:
+
+```
+GET /admin/status/{account}   →  application/ron
+```
+
+Three things about it are the design rather than the implementation.
+
+**RON, not JSON, and not a shared type.** A format crosses the workspace boundary where a type
+cannot: the shard serialises `lc_server::status::Status` and the console deserialises into
+`lc_admin::shard::Status`, its own mirror. The same trade as the ticket claims. What it costs
+is that a field renamed on one side silently stops arriving on the other, with no compiler in
+between — so the console's test holds a payload **printed by the shard's own serialiser**, not
+one written by hand, and that test is the only place in either build that will notice.
+
+**A game ticket authorises it.** The same object a client presents to open a socket: signed by
+the broker, audience-scoped to the shard, sixty seconds, carrying the level. No shared secret
+between the console and the shard, no second key to rotate, and the gate is
+`lc_server::ability`. The console mints one per request through `/ticket` on behalf of the
+administrator reading the page, so the shard's log says who asked about whom. Single use
+there as everywhere: the second presentation of a ticket is a 401.
+
+**It never touches the tick loop.** It reads the checkpoint from the database and the
+catalogue from an `Arc` — no lock the simulation wants, nothing down a channel the tick reads.
+A console refreshing a page cannot cost the world a frame, and that is the property to keep if
+it ever grows a second route. The cost is that the answer is a few seconds stale.
+
+It listens on its **own port**, with no proxy route to it. It is reached by container name
+from inside the network and by nothing from outside.
+
+### On the game side
+
+`lc_server::ability` is the same idea over the game's vocabulary: one table, read from one
+function, saying whether a connection may command a craft, speak as one, grant it energy or
+stage a scene. `Act::of` maps every `Order` variant to one of those with an exhaustive match
+and no catch-all arm, so a new order is a compile error rather than an ungated action.
+
+Two rules there are worth stating here:
+
+- **Commanding a craft is ownership at every level.** An administrator may not fly somebody
+  else's ship. Every act a craft performs becomes an event attributed to that craft, and
+  nothing downstream carries who at a keyboard caused it — so an administrator flying a
+  player's ship would put a burn in the record that the record says the player made. A
+  moderation tool that falsifies the evidence is not a moderation tool. The remedy for a player
+  who should not be flying is the ban above, which leaves a row, a reason and a name.
+- **Development actions are ranked.** Granting energy and staging a scene need level 2 or
+  better, which a moderator does not hold.
+
 ## Where it lives
 
 Its own cargo workspace, beside `web/`, for the reason `web/` has one: a second lockfile is what
@@ -381,3 +594,11 @@ cargo tree -p lc-server | grep -i identity     # must be empty
 ```
 
 The game server depends on a **public key and a JWT library**, not on the broker.
+
+The administration console is the one thing that *does* depend on `lc-identity`, as a path
+dependency inside the same workspace. That is deliberate and is the opposite trade from the one
+above: the two write the same tables, so a second copy of `Level`, of a ban's reasons or of the
+promotion rules would be a copy with nothing watching it. Where a workspace boundary forces a
+copy — the ticket claims, and `lc_server::ability::Level` — this document and a test on each
+side are what hold them together. Where there is no boundary, a dependency is cheaper and
+truer.

@@ -102,7 +102,7 @@ impl<J: Journal> Server<J> {
 
     /// A client asking for a scene.
     pub fn staged(&mut self, from: ClientId, name: &str, wire: &mut impl Transport) {
-        let staged = self.directs
+        let staged = self.may(from, crate::ability::Act::Stage, None)
             && Scenario::named(name).is_some_and(|scene| self.stage(scene).is_ok());
         if !staged {
             // One answer for "this shard does not do that", "no scene by that name" and "no

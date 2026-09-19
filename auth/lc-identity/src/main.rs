@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     // Applied at boot, from the copy that shipped in the image: the schema and the code that
     // assumes it are one artifact, which is the only way a rollback rolls back both.
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    lc_identity::schema::apply(&pool).await?;
 
     // A seed in the environment in production; a fresh key otherwise. A generated key is said
     // out loud because it means every restart publishes a different one, and anything caching

@@ -128,7 +128,7 @@ impl<J: Journal> Server<J> {
     pub fn granted(&mut self, from: ClientId, joules: f64, wire: &mut impl Transport) {
         let now_s = self.now_t as f64 * 1.0e-6;
         let ship = self.owned_by(from);
-        let done = self.may_develop(from)
+        let done = self.may(from, crate::ability::Act::GrantEnergy, ship)
             && joules.is_finite()
             && joules > 0.0
             && ship.and_then(|id| self.fleet.get_mut(id)).is_some_and(|craft| {
@@ -328,23 +328,37 @@ mod tests {
         assert_eq!(free(&server), 0.0);
     }
 
-    /// **Admins may develop on a real shard; players may not.** Signed in by ticket rather than
-    /// admitted, because the permission is the ticket's to carry.
+    /// **Granting is levelled.** Every administrative level may do it on a real shard —
+    /// `DEBUG` included, which is the tier named for exactly this. A player may not, and
+    /// neither may a ticket minted before the broker carried a level at all. Signed in by
+    /// ticket rather than admitted, because the level is the ticket's to carry — see
+    /// `crate::ability`.
     #[tokio::test]
-    async fn only_an_admins_ticket_may_grant_on_a_shard() {
+    async fn only_an_administrators_ticket_may_grant_on_a_shard() {
         let broker = crate::testing::Broker::new([3u8; 32]);
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut trusted = crate::ticket::Trusted::new("shard-1");
         trusted.learn(&broker.jwks());
         server.trust(trusted);
         let mut wire = Loopback::new();
-        let (player, admin, old) = (ClientId(1), ClientId(2), ClientId(3));
+        use crate::ability::Level;
+        let (player, admin, old, debug) = (ClientId(1), ClientId(2), ClientId(3), ClientId(4));
         let hello = |ticket: String| Inbound::Hello { protocol: lc_proto::PROTOCOL_VERSION, ticket };
         wire.client_says(player, hello(broker.mint_with("acct-player", "shard-1", "j1", 0)));
-        wire.client_says(admin, hello(broker.mint_with("acct-admin", "shard-1", "j2", crate::ticket::ADMIN)));
+        wire.client_says(
+            admin,
+            hello(broker.mint_with("acct-admin", "shard-1", "j2", Level::ADMIN.as_i32())),
+        );
+        // No `perm` claim at all, as a broker from before levels minted one.
         wire.client_says(old, hello(broker.mint("acct-old", "shard-1", 60, "j3")));
+        // The junior administrative level, which may develop like the others. It is here so
+        // the loop below covers all three rather than only the top two.
+        wire.client_says(
+            debug,
+            hello(broker.mint_with("acct-debug", "shard-1", "j4", Level::DEBUG.as_i32())),
+        );
         server.tick(&mut wire).await.unwrap();
-        for who in [player, admin, old] {
+        for who in [player, admin, old, debug] {
             let _ = wire.take(who);
         }
 
@@ -354,7 +368,7 @@ mod tests {
             let now_s = server.now_t() as f64 * 1.0e-6;
             craft.fitting().unwrap().stored_j_at(&craft.motion, now_s)
         };
-        for who in [player, admin, old] {
+        for who in [player, admin, old, debug] {
             let id = server.owned_by(who).unwrap();
             let craft = server.fleet.get_mut(id).unwrap();
             let fitting = craft.fitting().unwrap().clone();
@@ -364,8 +378,15 @@ mod tests {
         }
         server.tick(&mut wire).await.unwrap();
 
-        assert!(stored(&server, admin) > 0.9e26, "the admin was not granted anything");
-        assert!(wire.take(admin).iter().any(|m| matches!(m, Outbound::Fitted { .. })));
+        for (who, level) in [(admin, Level::ADMIN), (debug, Level::DEBUG)] {
+            assert!(
+                stored(&server, who) > 0.9e26,
+                "{} was not granted anything",
+                level.name(),
+            );
+            assert!(wire.take(who).iter().any(|m| matches!(m, Outbound::Fitted { .. })));
+        }
+        // A player, and a ticket from a broker that had no levels yet.
         for who in [player, old] {
             assert_eq!(stored(&server, who), 0.0, "{who:?} was granted energy");
             assert!(wire.take(who).iter().any(|m| matches!(m, Outbound::Refused { .. })));

@@ -9,6 +9,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use crate::bans::Sanction;
 use crate::password;
 use crate::providers::Provider;
 use crate::store::{Link, Store, StoreError, normalise_email};
@@ -36,6 +37,8 @@ pub enum Refused {
     BadCredentials,
     Unacceptable(password::Unacceptable),
     Taken,
+    /// Carries what the person is told; see [`admitted`].
+    Banned(Sanction),
     /// The player said no at the provider's consent screen. Not a failure — the one refusal
     /// here that is somebody exercising a choice.
     Declined,
@@ -97,6 +100,41 @@ pub fn mint_code() -> (String, Vec<u8>) {
 
 pub fn digest_of(code: &str) -> Vec<u8> {
     Sha256::digest(code.as_bytes()).to_vec()
+}
+
+/// **The one place a ban is enforced**, and called on every path that turns an account id
+/// into something usable — including ticket minting, without which a ban would not reach
+/// somebody already signed in until after it expired.
+///
+/// A store failure is not a refusal: a database that cannot be reached must not lock every
+/// account out of the game.
+pub async fn admitted(
+    store: &Store,
+    account_id: Uuid,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(), Refused> {
+    match store.sanction(account_id, now).await? {
+        Some(sanction) => Err(Refused::Banned(sanction)),
+        None => Ok(()),
+    }
+}
+
+/// Rounded to the coarsest unit that still reads honestly.
+pub fn how_long(sanction: &Sanction, now: chrono::DateTime<chrono::Utc>) -> String {
+    let Some(until) = sanction.until else {
+        return "This ban does not expire.".to_owned();
+    };
+    let left = until - now;
+    let said = if left.num_hours() < 1 {
+        format!("{} minutes", left.num_minutes().max(1))
+    } else if left.num_days() < 1 {
+        format!("{} hours", left.num_hours())
+    } else if left.num_days() < 60 {
+        format!("{} days", left.num_days())
+    } else {
+        format!("about {} months", left.num_days() / 30)
+    };
+    format!("It ends in {said}.")
 }
 
 /// Sign in with a password.

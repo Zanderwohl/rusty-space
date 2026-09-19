@@ -12,6 +12,9 @@ natively `linux/amd64`. Ports 3000–3999 are this project's; 3000 belongs to an
 | `lightcone-web` | 3100 | the site |
 | `lightcone-cdn` | 3101 | game builds |
 | `lightcone-db` | 3102 | the site's PostgreSQL |
+| `lightcone-identity` | 3200 | the identity broker |
+| `lightcone-admin` | 3300 | the administration console |
+| `lightcone-shard` | 8080, 3400 | the game; 3400 is the console's read-only surface |
 
 They share a docker network called `lightcone` and address each other by container name. The
 published ports are for debugging; the addresses that matter are:
@@ -483,28 +486,107 @@ rand() { head -c 32 /dev/urandom | base64 | tr -d '\n=' | tr '+/' '-_'; }
 # identity.env      — DATABASE_URL, LC_IDENTITY_* (see config.rs for the full list)
 # site-identity.env — LC_IDENTITY_BASE, LC_IDENTITY_API, LC_IDENTITY_SECRET,
 #                     SITE_SESSION_KEY, LC_SHARD, LC_SHARD_URL
+# admin.env         — DATABASE_URL (the *broker's*), LC_ADMIN_* (see lc-admin/src/config.rs)
 ```
 
-`LC_IDENTITY_EXCHANGE_SECRET` on the broker and `LC_IDENTITY_SECRET` on the site are the **same
-value**. `LC_IDENTITY_SIGNING_SEED` must be set, or every restart publishes a new key and every
-ticket minted before it stops verifying.
+`LC_IDENTITY_EXCHANGE_SECRET` on the broker, `LC_IDENTITY_SECRET` on the site and
+`LC_ADMIN_IDENTITY_SECRET` on the console are the **same value**. `LC_IDENTITY_SIGNING_SEED`
+must be set, or every restart publishes a new key and every ticket minted before it stops
+verifying.
 
-Its own role and database, like the site's:
+Two things about the console are easy to get wrong and fail late rather than at boot:
+
+- `LC_ADMIN_PUBLIC_URL` builds its return URL, and that URL must appear **verbatim** in the
+  broker's `LC_IDENTITY_RETURN_TO`. Missing from the allowlist, it fails at the *end* of a
+  sign-in rather than at the start. The console logs the return URL it will use on startup so
+  the two can be compared without guessing.
+- `LC_ADMIN_SESSION_KEY` is its own secret, not the site's, and must be at least 32 characters
+  — refused at boot if it is shorter, because a forgeable cookie here is an administrator
+  account.
+
+Its own role and database, like the site's. **The console shares them** — it reads and writes
+the broker's tables and owns no schema of its own, so it gets the same `DATABASE_URL`:
 
 ```sql
 CREATE ROLE lc_identity LOGIN PASSWORD '...';
 CREATE DATABASE lc_identity OWNER lc_identity;
 ```
 
+### Deploying the console over an existing stack
+
+Three things in this order, and the order is the whole of it.
+
+**1. The broker first, and with the console's return URL already on its allowlist.** The
+console does not migrate; `lc-identity` applies the schema at its own boot. Deploying the
+console against a broker that predates `0005_bans.sql` gives a console whose every page is a
+500, because `bans` does not exist. Back the database up first — the migrations are forward
+only, and `0004` adds a check constraint that a hand-written `permission` outside 0–3 would
+fail on:
+
+```bash
+ssh zandy@rocinante.local '
+  url=$(grep -m1 ^DATABASE_URL= ~/.config/lightcone/identity.env | cut -d= -f2-)
+  docker run --rm --network lightcone -e PGURL="$url" postgres:17-bookworm \
+    sh -c '"'"'pg_dump "$PGURL"'"'"' > ~/backups/lc_identity-$(date +%Y%m%d-%H%M%S).sql'
+```
+
+`--env-file` is read at `docker run` and baked into the container, so an edit to
+`identity.env` needs the container **recreated**. A `docker restart` silently keeps the old
+values, and the symptom is a sign-in refused as `Bad sign-in request` from a broker whose
+configuration file plainly lists the address.
+
+**2. `admin.env`, written on the host.** `LC_ADMIN_IDENTITY_SECRET` is the broker's
+`LC_IDENTITY_EXCHANGE_SECRET` and `DATABASE_URL` is the broker's, so both are copied out of
+`identity.env` rather than retyped. `LC_ADMIN_IDENTITY_API` is
+`http://lightcone-identity:3200` — **not** the public name, for the hairpin reason above.
+
+**3. The proxy last**, once there is something behind the route to answer.
+
+For the Status section on a user page, the shard needs `--admin-bind 0.0.0.0:3400` and the
+console needs `LC_ADMIN_SHARD_API=http://lightcone-shard:3400` — the container name, never the
+public one, and **no proxy route**: that port is reached from inside the network and from
+nowhere else. `LC_ADMIN_SHARD_AUDIENCE` must match the shard's `--audience` and must be on the
+broker's `LC_IDENTITY_AUDIENCES`, or no ticket can be minted for it and every card reads "the
+shard did not answer". The shard refuses `--admin-bind` without both `--db` and `--jwks`
+rather than listening and turning every request away.
+
+Then check the whole path rather than the container: `/users` signed out must be a 303 to the
+console's own `/signin`, and that must be a 303 to the broker carrying `return_to` — and the
+broker must render a form for it rather than `Bad sign-in request`, which is what an address
+missing from the allowlist looks like.
+
+### The first administrator
+
+`0003_permissions.sql` promoted one account by address, once, against data that existed. After
+that, levels are handed out from the console — and the console needs somebody to be an
+administrator before anyone can reach it, which is the chicken and egg. Break it by hand:
+
+```sql
+UPDATE accounts SET permission = 1 WHERE id = (
+  SELECT account_id FROM links WHERE email = '...' LIMIT 1);
+```
+
+This is also the only way to **remove** an owner. That is deliberate, not an oversight: nobody
+outranks a level 1, so the one irreversible administrative act is not reachable from a web
+page. See [16-identity.md](16-identity.md).
+
 ```bash
 docker --context rocinante build -f auth/Dockerfile -t lightcone-identity:<tag> auth
+# Same build context, different Dockerfile: the console shares the broker's workspace and
+# lockfile, and adds a node stage that compiles its TypeScript.
+docker --context rocinante build -f auth/Dockerfile.admin -t lightcone-admin:<tag> auth
 docker --context rocinante build -f crates/lc-server/Dockerfile -t lightcone-shard:<tag> .
 
 # Over ssh, because --env-file is read by the CLI you invoke and that file is on rocinante.
 ssh zandy@rocinante.local '
   docker rm -f lightcone-identity 2>/dev/null
   docker run -d --name lightcone-identity --restart unless-stopped --network lightcone \
-      --env-file ~/.config/lightcone/identity.env lightcone-identity:<tag>'
+      --env-file ~/.config/lightcone/identity.env lightcone-identity:<tag>
+  # After the broker, always: the console does not migrate, so it needs the schema the
+  # broker applies at its own boot to be there already.
+  docker rm -f lightcone-admin 2>/dev/null
+  docker run -d --name lightcone-admin --restart unless-stopped --network lightcone \
+      --env-file ~/.config/lightcone/admin.env lightcone-admin:<tag>'
 
 docker --context rocinante run -d --name lightcone-shard --restart unless-stopped \
     --network lightcone --env-file ~/.config/lightcone/shard.env lightcone-shard:<tag> \
@@ -572,7 +654,7 @@ else and falls back to the public name.
 
 ### Routes
 
-The proxy gains two. Reload rather than recreate — the container holds the ACME account and
+The proxy gains three. Reload rather than recreate — the container holds the ACME account and
 the certificates, and a restart it did not need is a restart that can go wrong:
 
 ```bash
@@ -581,7 +663,19 @@ ssh zandy@rocinante.local \
   'docker exec lightcone-proxy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile'
 ```
 
-`accounts.` is a host route and needs its own A record. The shard is a **path** — `/ws` — which
+`accounts.` and `admin.` are host routes and each needs its own A record, pointed at the same
+LAN address as everything else. Neither needs a certificate of its own: the block asks for
+`*.{$LC_DOMAIN}`, so a new service here is a DNS record and a `handle` and nothing more, which
+is what the wildcard was chosen for. Validate before reloading, because a reload of a bad file
+is a proxy that stops answering for every name at once:
+
+```bash
+docker --context rocinante cp tools/proxy/Caddyfile lightcone-proxy:/tmp/Caddyfile.candidate
+ssh zandy@rocinante.local 'docker exec -e LC_DOMAIN=dev.lightconefrontier.com lightcone-proxy \
+  caddy validate --config /tmp/Caddyfile.candidate --adapter caddyfile'
+```
+
+The shard is a **path** — `/ws` — which
 needs none, and a WebSocket upgrade proxies cleanly either way. It must be `wss://`: a page
 served over TLS may only open a secure socket, and a browser refuses the other outright.
 

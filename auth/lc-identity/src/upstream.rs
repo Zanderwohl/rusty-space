@@ -16,8 +16,9 @@ use uuid::Uuid;
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
 
+use crate::pages::{refusal, sign_in_page};
 use crate::providers::{Provider, Upstream};
-use crate::routes::{Broker, Destination, refusal, sign_in_page};
+use crate::routes::{Broker, Destination};
 use crate::signin::{self, Refused};
 use crate::store::{Flow, Link, Store, normalise_email};
 
@@ -388,6 +389,13 @@ pub async fn finish(
             return sign_in_page(&broker, &to, Some(&refused)).into_response();
         }
     };
+
+    // Including the ban check: an account reached through Google is the same account, and a
+    // provider that will happily authenticate somebody is not a provider that gets to decide
+    // whether they may play.
+    if let Err(refused) = signin::admitted(&broker.store, account_id, Utc::now()).await {
+        return refusal(refused).into_response();
+    }
 
     // From here it is the same tail as a password sign-in: one code, spent once, carried back.
     let (code, digest) = signin::mint_code();

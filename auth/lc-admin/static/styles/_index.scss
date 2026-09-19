@@ -1,0 +1,181 @@
+// The user index: the filter bar, the table, the pager.
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--ground-raised);
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  // The one control that should take whatever room is left.
+  .field-search {
+    flex: 1 1 16rem;
+  }
+
+  label {
+    font-size: var(--step--1);
+    color: var(--ink-dim);
+  }
+}
+
+// Scrolls sideways rather than hiding columns at a breakpoint: on a console that means
+// hiding the column somebody came to read.
+#user-index {
+  overflow-x: auto;
+}
+
+.index-summary {
+  color: var(--ink-dim);
+  font-size: var(--step--1);
+}
+
+.index {
+  inline-size: 100%;
+  border-collapse: collapse;
+
+  th,
+  td {
+    text-align: start;
+    vertical-align: baseline;
+    padding: var(--space-2);
+    border-block-end: 1px solid var(--rule);
+  }
+
+  thead th {
+    font-size: var(--step--1);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-dim);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  tbody tr:hover {
+    background: var(--ground-raised);
+  }
+
+  // **The whole row is the link**, by stretching the name cell's anchor over it.
+  //
+  // `position: relative` on the `<tr>` is what makes the containing block the row; if a link
+  // ever stretches across the viewport, that is the line that stopped working.
+  //
+  // **Text in the row cannot be selected**, the known cost: giving the cells `position:
+  // relative` to take a drag raises them above the overlay, and then only the name is
+  // clickable — the bug this pattern fixes.
+  .row-link {
+    position: relative;
+
+    a::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+    }
+
+    &:focus-within {
+      background: var(--ground-raised);
+      outline: 1px solid var(--accent-dim);
+      outline-offset: -1px;
+    }
+  }
+
+  // More than a badge, so the list is scannable without reading every cell.
+  .is-banned th[scope="row"] {
+    box-shadow: inset 3px 0 0 var(--danger);
+  }
+}
+
+.sort {
+  color: inherit;
+  text-decoration: none;
+
+  &:hover {
+    color: var(--accent);
+  }
+}
+
+.sort-on {
+  color: var(--ink);
+}
+
+.cell-name {
+  font-weight: 500;
+
+  a {
+    text-decoration: none;
+  }
+}
+
+.cell-email {
+  display: block;
+  font-size: var(--step--1);
+  color: var(--ink-dim);
+  font-weight: 400;
+}
+
+.cell-standing {
+  white-space: nowrap;
+}
+
+.standing-until,
+.standing-count {
+  display: block;
+  font-size: var(--step--1);
+  color: var(--ink-dim);
+}
+
+.empty {
+  padding: var(--space-4);
+  text-align: center;
+  color: var(--ink-dim);
+  border: 1px dashed var(--rule);
+  border-radius: 4px;
+}
+
+.pager {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+
+  a,
+  .page-here,
+  .step-off {
+    padding: 0.2em 0.6em;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    text-decoration: none;
+  }
+
+  a:hover {
+    border-color: var(--rule);
+  }
+
+  .page-here {
+    border-color: var(--accent-dim);
+    color: var(--ink);
+  }
+
+  .step-off {
+    color: var(--ink-dim);
+  }
+
+  .gap {
+    color: var(--ink-dim);
+  }
+}
+
+// Figures line up so rows can be compared down the column rather than read.
+.cell-count {
+  text-align: end;
+  inline-size: 8rem;
+  font-variant-numeric: tabular-nums;
+}
