@@ -525,7 +525,6 @@ mod tests {
     use crate::journal::Memory;
     use crate::server::TICK_US;
     use crate::transport::Loopback;
-    use crate::world::still;
 
     /// Two light-hours, in light-microseconds. Far enough that the delay is many ticks.
     const TWO_LIGHT_HOURS: f64 = 7_200.0 * 1_000_000.0;
