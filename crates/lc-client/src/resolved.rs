@@ -419,6 +419,7 @@ mod tests {
     fn body(radius_m: f64, at: DVec3) -> Drawable {
         Drawable {
             name: "test".into(),
+            kind: lc_world::navigation::Kind::Planet,
             rings: None,
             surface: Surface::Rock,
             pole: DVec3::Z,

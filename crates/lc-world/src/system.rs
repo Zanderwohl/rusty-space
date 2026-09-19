@@ -51,6 +51,12 @@ pub struct Rings {
 #[derive(Clone, Debug)]
 pub struct Drawable {
     pub name: String,
+    /// Planet, moon or minor body, from `em-sim`'s own tags.
+    ///
+    /// Carried rather than looked up against [`crate::navigation::Entry`] by name: `designate`
+    /// invents a designation for an unnamed body and this name comes from the arena, so the
+    /// two strings can disagree and the join would silently classify a moon as a minor body.
+    pub kind: crate::navigation::Kind,
     pub rings: Option<Rings>,
     /// What it looks like, from what it is.
     pub surface: crate::surface::Surface,
@@ -185,6 +191,7 @@ impl LocalSystem {
                 // The rings are found by the body's `em-sim` id, and their plane is that body's
                 // own pole out of the preset's IAU rotation. A second copy of a pole here would
                 // be a second chance to have it wrong.
+                let kind = crate::navigation::Kind::of(&self.sim.info(i).tags);
                 let pole = self.sim.rotation(i).and_then(pole_of).unwrap_or(DVec3::Z);
                 let rings = crate::rings::for_body(self.sim.name(i))
                     .map(|system| Rings { system, pole });
@@ -217,6 +224,7 @@ impl LocalSystem {
 
                 Some(Drawable {
                     name: self.sim.info(i).name.clone().unwrap_or_else(|| self.sim.name(i).into()),
+                    kind,
                     rings,
                     surface,
                     pole,
@@ -542,6 +550,36 @@ mod tests {
 
     fn catalogue() -> Option<crate::sky::hyg::HygProvider> {
         crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv").ok()
+    }
+
+    /// A drawable's kind is the same answer the inventory gives, for every body in the solar
+    /// system that appears in both.
+    ///
+    /// The point of carrying the field rather than joining on the name: `designate` invents a
+    /// designation for an unnamed body and `Drawable::name` comes from the arena, so a join
+    /// would quietly classify whatever it failed to match as a minor body. Titan and the Moon
+    /// are the ones to watch, and this asserts all two hundred.
+    #[test]
+    fn a_drawable_is_the_kind_the_inventory_says_it_is() {
+        let Some(provider) = catalogue() else { return };
+        let Some(sun) = provider.stars().iter().find(|s| s.name.as_deref() == Some(SOL)) else {
+            panic!("the catalogue should carry Sol")
+        };
+        let system = LocalSystem::for_star(sun).expect("Sol loads");
+        let drawn = system.drawables_at(system.origin_ly, 0.0);
+        assert!(drawn.len() > 100, "only {} bodies", drawn.len());
+
+        let mut checked = 0;
+        for body in &drawn {
+            let Some(entry) = system.inventory().iter()
+                .find(|e| e.designation == body.name) else { continue };
+            assert_eq!(body.kind, entry.kind, "{} is a {:?} in one place and a {:?} in the other",
+                body.name, body.kind, entry.kind);
+            checked += 1;
+        }
+        assert!(checked > 50, "only {checked} bodies matched by name at all");
+        assert!(drawn.iter().any(|b| b.kind == crate::navigation::Kind::Moon), "no moons");
+        assert!(drawn.iter().any(|b| b.kind == crate::navigation::Kind::Planet), "no planets");
     }
 
     #[test]
