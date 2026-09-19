@@ -159,6 +159,7 @@ impl Plugin for ClientPlugin {
             BodySurfaceMaterialPlugin,
             crate::sky_asset::SkyAssetPlugin,
             crate::library::LibraryPlugin,
+            crate::faces::FacesPlugin,
         ))
             .init_state::<AppState>()
             .add_message::<Requested>()
@@ -255,11 +256,15 @@ impl Plugin for ClientPlugin {
             .add_systems(
                 EguiPrimaryContextPass,
                 (
+                    // First, so a frame that has the faces is drawn in them rather than the
+                    // frame after it.
+                    crate::faces::settle,
                     panels::loading.run_if(in_state(AppState::Loading)),
                     (panels::hud, panels::open_panels, crate::reader::draw)
                         .run_if(in_state(AppState::InGame)),
                     panels::unreachable.run_if(in_state(AppState::Unreachable)),
-                ),
+                )
+                    .chain(),
             );
         if HAS_MAIN_MENU {
             app.add_plugins(crate::menu::MainMenuPlugin);

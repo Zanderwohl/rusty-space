@@ -120,6 +120,47 @@ What an egui surface has to set, because its defaults are its own:
 Game panels drawn over the sky keep egui's own dark theme and that is fine: they sit on a
 rendered background, not inside the menu, and matching the menu there would be matching nothing.
 
+## Three faces, and where each one stops
+
+The interface is set in **Quantico**: every readout, label, button and window title, on both
+toolkits' surfaces. It is a squared technical sans, which is what a panel of numbers over a
+rendered sky should look like, and it is the default — a surface that wants a different face has
+to say why.
+
+Two say why.
+
+**The title screen is Nabla**, and only the title screen. The game's name is a wordmark and the
+site sets it in the same face, so the menu and the front page are recognisably one thing. Nabla
+is a colour font whose depth lives inside the glyph: it is unreadable at the size a heading is
+set at, so `MenuUi::title_font` takes a size with the handle and the menu asks for 44. Bevy
+flattens its layers into one colour, which on the VFD palette is exactly the extruded green a
+title wants. It costs 1.6 MB and is asked for on the one screen that draws it.
+
+**A radio log is Geo**, and only a radio log — the speaker's name and what was said, in
+[`radio_panel`](../../crates/lc-client/src/radio_panel.rs). Not the list of craft, not the
+composer, not the markers this client adds to a line: those are the ship talking to its pilot,
+and the log is another ship talking to this one. It is the same distinction the one green in the
+palette already makes, said a second way.
+
+Geo needs a fifth more point size than Quantico to read at the same size beside it — its
+capitals fill 0.56 of the em against Quantico's 0.70 — which is what `LOG_SCALE` is.
+
+The reader is not an exception to any of this; it is not this interface. It is dressed as a
+thing you hold and sets its own page, its own headings and its own folio in its own two faces.
+See [21-library.md](21-library.md).
+
+### One font set, one owner
+
+egui holds a single `FontDefinitions` and `set_fonts` replaces it whole, so two places
+installing a face means the second silently undoes the first. Everything that adds one goes
+through `faces::Faces::install`, which keeps the accumulated set and hands egui all of it — the
+interface faces at startup, the reader's five when a book is first opened.
+
+A named family falls back through the interface family, so a glyph the face lacks is drawn
+rather than boxed. That matters: the tofu box has already cost this interface a close button and
+a pair of arrows. The reader's faces are the one exception and are installed alone, because a
+word in Quantico in the middle of a paragraph of Faustina is worse than a missing glyph.
+
 ## Everything is a message
 
 A button emits an [`Action`](13-client-shell.md#every-action-is-a-message). No surface mutates

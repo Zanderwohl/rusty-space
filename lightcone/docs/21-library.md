@@ -404,6 +404,13 @@ half in another, for the second between them arriving, would reflow under the re
 optional and falls back a step: no italic means the body sheared, no body at all means the
 interface font, so a build without fonts is plainer and never broken.
 
+They go in through `faces::Faces::install`, which is the one owner of egui's font set: the
+client sets its own interface in Quantico and its radio logs in Geo, and a `set_fonts` here that
+started from `FontDefinitions::default()` would quietly undo both. Alone, though, unlike those
+two — a reading face falls back to nothing, because a word in the interface font in the middle
+of a paragraph of Faustina is worse than a glyph that is missing. See
+[18-ui-style.md](18-ui-style.md).
+
 **Static cuts, not the variable files.** Both families ship a `VariableFont_wght` and neither is
 usable here: `epaint::FontData` carries a file, a face index and a scale tweak, and nothing in
 egui calls `ab_glyph`'s `set_variation`. A variable font renders at its default instance and

@@ -23,17 +23,38 @@ pub struct MenuUi<'a, 'w, 's> {
     commands: &'a mut Commands<'w, 's>,
     theme: MenuTheme,
     panel_width: f32,
+    /// The face the title is set in, for a product whose name is a wordmark. `None` is Bevy's
+    /// own font, which is what every other label uses: a display face is worth loading for one
+    /// line on one screen and is not worth it for a button.
+    title_font: Option<Handle<Font>>,
+    title_size: f32,
 }
 
 impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
     pub const DEFAULT_PANEL_WIDTH: f32 = 400.0;
+    pub const DEFAULT_TITLE_SIZE: f32 = 28.0;
 
     pub fn new(commands: &'a mut Commands<'w, 's>, theme: MenuTheme) -> Self {
-        Self { commands, theme, panel_width: Self::DEFAULT_PANEL_WIDTH }
+        Self {
+            commands,
+            theme,
+            panel_width: Self::DEFAULT_PANEL_WIDTH,
+            title_font: None,
+            title_size: Self::DEFAULT_TITLE_SIZE,
+        }
     }
 
     pub fn panel_width(mut self, width: f32) -> Self {
         self.panel_width = width;
+        self
+    }
+
+    /// Sets the title in a face of the caller's own, at a size that face wants. A display face
+    /// is drawn at its own size or not at all — most of them are unreadable at the size a
+    /// heading in the interface font is set at.
+    pub fn title_font(mut self, font: Handle<Font>, size: f32) -> Self {
+        self.title_font = Some(font);
+        self.title_size = size;
         self
     }
 
@@ -97,7 +118,8 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
     }
 
     pub fn title(&mut self, panel: Entity, text: &str) -> Entity {
-        self.label(panel, text, 28.0, self.theme.text)
+        let font = self.title_font.clone();
+        self.faced(panel, text, self.title_size, self.theme.text, font)
     }
 
     pub fn message(&mut self, panel: Entity, text: &str) -> Entity {
@@ -105,11 +127,26 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
     }
 
     pub fn label(&mut self, panel: Entity, text: &str, font_size: f32, color: Color) -> Entity {
+        self.faced(panel, text, font_size, color, None)
+    }
+
+    fn faced(
+        &mut self,
+        panel: Entity,
+        text: &str,
+        font_size: f32,
+        color: Color,
+        font: Option<Handle<Font>>,
+    ) -> Entity {
         let label = self
             .commands
             .spawn((
                 Text::new(text),
-                TextFont { font_size: FontSize::Px(font_size), ..default() },
+                TextFont {
+                    font: font.unwrap_or_default(),
+                    font_size: FontSize::Px(font_size),
+                    ..default()
+                },
                 TextColor(color),
                 Node { margin: UiRect::bottom(Val::Px(10.0)), ..default() },
             ))

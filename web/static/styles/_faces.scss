@@ -1,0 +1,34 @@
+// The one face this site loads. Everything else is the reader's own: a system stack costs
+// nothing and renders on arrival, which is what the rest of these pages are for.
+//
+// Converted from the upstream TTF to WOFF2 and otherwise untouched — 1.6 MB becomes 184 KB and
+// nothing about the font changes. `static/fonts/OFL_Nabla.txt` is the licence; Nabla carries no
+// reserved font name.
+//
+// The URL is relative to this stylesheet, which is served from `/v/<build>/styles/`, so it
+// resolves to `/v/<build>/fonts/` and carries the same build id without anything having to
+// interpolate one in. See `assets.rs`.
+@font-face {
+  font-family: "Nabla";
+  font-display: swap;
+  font-style: normal;
+  font-weight: 400;
+  src: url("../fonts/Nabla.woff2") format("woff2");
+}
+
+// Nabla paints its own colours: it is a COLRv1 face whose glyphs are stacked layers, so `color`
+// does not reach it and the default palette is a hot orange that belongs to somebody else's
+// site. Its author shipped two neutral palettes, and these are them — light letters for the
+// dark page, dark letters for the light one.
+//
+// A browser too old for `font-palette` draws the default palette, and one too old for COLRv1
+// draws the layers flattened into `color`. Both are legible, which is the whole requirement.
+@font-palette-values --wordmark-on-dark {
+  font-family: "Nabla";
+  base-palette: 4;
+}
+
+@font-palette-values --wordmark-on-light {
+  font-family: "Nabla";
+  base-palette: 3;
+}

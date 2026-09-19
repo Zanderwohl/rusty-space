@@ -102,7 +102,7 @@ cp tools/wasm-index.html "$OUT/index.html"
 echo "==> pre-compress"
 compressible() {
   find "$OUT" -type f \( -name '*.wasm' -o -name '*.js' -o -name '*.wgsl' \
-    -o -name '*.lcsky' -o -name '*.json' -o -name '*.html' \) -print0
+    -o -name '*.lcsky' -o -name '*.json' -o -name '*.html' -o -name '*.ttf' \) -print0
 }
 if command -v brotli >/dev/null; then
   compressible | while IFS= read -r -d '' f; do brotli -q 11 -f -k "$f" -o "$f.br"; done
