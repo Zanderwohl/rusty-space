@@ -22,6 +22,7 @@ pub mod radio;
 pub mod rate;
 pub mod server;
 pub mod status;
+pub mod systems;
 #[cfg(test)]
 pub mod testing;
 pub mod ticket;

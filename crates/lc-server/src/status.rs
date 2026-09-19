@@ -107,18 +107,36 @@ impl Status {
     }
 }
 
+/// The star nearest a point, and how far away it is.
+///
+/// `total_cmp` rather than `partial_cmp().unwrap()`: a NaN here is a craft at a coordinate
+/// nothing should have produced, and panicking on a page load is a worse answer than an
+/// arbitrary ordering.
+pub(crate) fn nearest(at: glam::DVec3, stars: &[CatalogueStar]) -> Option<(&CatalogueStar, f64)> {
+    stars
+        .iter()
+        .min_by(|a, b| {
+            let (x, y) = (a.position_ly.distance(at), b.position_ly.distance(at));
+            x.total_cmp(&y)
+        })
+        .map(|star| (star, star.position_ly.distance(at)))
+}
+
+/// The system a craft is **in**, if it is in one at all.
+///
+/// Inside the shell, not merely nearest: a craft between the stars belongs to no system, and
+/// counting it toward the nearest one would put craft in systems they are light-years from.
+pub(crate) fn nearest_within_shell(
+    at: glam::DVec3,
+    stars: &[CatalogueStar],
+) -> Option<&CatalogueStar> {
+    nearest(at, stars).filter(|(_, ly)| *ly < LOCAL_SHELL_LY).map(|(star, _)| star)
+}
+
 fn whereabouts(at: glam::DVec3, stars: &[CatalogueStar]) -> Whereabouts {
-    let nearest = stars.iter().min_by(|a, b| {
-        let (x, y) = (a.position_ly.distance(at), b.position_ly.distance(at));
-        // `total_cmp` rather than `partial_cmp().unwrap()`: a NaN here is a craft at a
-        // coordinate nothing should have produced, and panicking on a page load is a worse
-        // answer than an arbitrary ordering.
-        x.total_cmp(&y)
-    });
-    let Some(star) = nearest else {
+    let Some((star, ly)) = nearest(at, stars) else {
         return Whereabouts::Nowhere;
     };
-    let ly = star.position_ly.distance(at);
     let name = star
         .name
         .clone()

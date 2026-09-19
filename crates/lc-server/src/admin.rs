@@ -43,6 +43,11 @@ use crate::ticket::{Spent, Trusted};
 /// crosses a product boundary.
 pub const STATUS: &str = "/admin/status/{account}";
 
+/// Where the console lists systems. Paged, filtered and ordered **here** rather than in the
+/// console, for the reason the user index pages in SQL: handing over eight thousand systems
+/// so twenty-five can be shown works today and stops working at a size nobody is watching.
+pub const SYSTEMS: &str = "/admin/systems";
+
 #[derive(Clone)]
 pub struct Api {
     pub db: Arc<tokio_postgres::Client>,
@@ -71,6 +76,7 @@ impl Api {
 pub fn router(api: Api) -> Router {
     Router::new()
         .route(STATUS, get(status))
+        .route(SYSTEMS, get(systems))
         .route("/admin/health", get(|| async { "ok" }))
         .with_state(api)
 }
@@ -103,6 +109,85 @@ fn chrono_now() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// What the console asked for, exactly as it arrives.
+///
+/// **Every field is a string**, including the two numbers. A typed `u64` would make
+/// `?limit=-1` a deserialisation failure, and axum answers one of those with a bare 400
+/// before any code here runs — so an edited URL would be refused by the extractor rather than
+/// falling back to something sensible. The console's own `Params` carries the same note for
+/// the same reason.
+#[derive(serde::Deserialize, Default)]
+struct Asked {
+    q: Option<String>,
+    sort: Option<String>,
+    dir: Option<String>,
+    offset: Option<String>,
+    limit: Option<String>,
+}
+
+/// Most systems a page may hold.
+///
+/// A ceiling rather than a suggestion: the limit arrives in a URL, and an unbounded one is a
+/// request to serialise the whole catalogue into one response.
+const MOST_PER_PAGE: u64 = 200;
+
+async fn systems(
+    State(api): State<Api>,
+    headers: HeaderMap,
+    axum::extract::Query(asked): axum::extract::Query<Asked>,
+) -> Response {
+    if admitted(&api, &headers).await.is_none() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    // Every craft, to count them by system. The whole table because a tally is over all of
+    // them — the first thing to change when a shard holds thousands, and the shape that
+    // changes is this read, not the tally.
+    let ships = match lc_store::ships::load_ships(&api.db).await {
+        Ok(ships) => ships,
+        Err(why) => {
+            eprintln!("admin systems: the store did not answer: {why}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let at: Vec<glam::DVec3> = ships
+        .iter()
+        // A craft whose checkpoint this build cannot read is left out of the tally rather
+        // than counted somewhere arbitrary. It is logged where it is decoded, not here.
+        .filter_map(|ship| crate::persist::decode(ship).ok())
+        .map(|saved| saved.motion.at_ly.into())
+        .collect();
+
+    let tally = crate::systems::tally(&at, &api.stars);
+    let query = crate::systems::Query {
+        q: asked.q.unwrap_or_default(),
+        sort: crate::systems::Sort::from_slug(asked.sort.as_deref().unwrap_or("")),
+        descending: asked.dir.as_deref() == Some("desc"),
+        offset: asked.offset.and_then(|n| n.parse().ok()).unwrap_or(0),
+        limit: asked
+            .limit
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(25)
+            .clamp(1, MOST_PER_PAGE),
+    };
+    let page = crate::systems::page(&api.stars, &tally, &query);
+
+    match ron::to_string(&page) {
+        Ok(body) => (
+            [(
+                header::CONTENT_TYPE,
+                "application/ron; charset=utf-8".to_owned(),
+            )],
+            body,
+        )
+            .into_response(),
+        Err(why) => {
+            eprintln!("admin systems: could not serialise: {why}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 async fn status(
