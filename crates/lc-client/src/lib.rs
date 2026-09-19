@@ -22,6 +22,7 @@ pub mod curve;
 pub mod demos;
 pub mod entry;
 pub mod envelope;
+pub mod faces;
 pub mod hud;
 pub mod hull;
 pub mod input;

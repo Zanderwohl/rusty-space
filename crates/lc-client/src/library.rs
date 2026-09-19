@@ -27,10 +27,11 @@ pub const CATALOGUE: &str = "books/books.toml";
 /// opens one never pays for the 416 KB, which is what keeps the browser build's first-play
 /// download where [14-hosting.md](../../lightcone/docs/14-hosting.md) measured it.
 ///
-/// **Static cuts, not the variable files.** `epaint::FontData` carries a file, a face index and
-/// a scale tweak, and nothing anywhere in egui calls `ab_glyph`'s `set_variation` — so a
-/// variable font renders at its default instance and costs half again as many bytes to do it.
-/// Real italics and a real bold are what these five buy; the alternative is a sheared regular.
+/// **Static cuts, not the variable files** — but no longer because egui cannot do better.
+/// egui 0.36 rasterises through `skrifa` and shapes through `harfrust`, and both heed a
+/// variation location; the `ab_glyph` limit this note used to cite went away with Bevy 0.19.
+/// What the static cuts still buy is real italics and a real bold, against one file that would
+/// have to be shipped at `wght` and shaped per run. See `lightcone/docs/21-library.md`.
 pub const FACES: &[(&str, &str)] = &[
     (BODY, "fonts/Faustina-Regular.ttf"),
     (BODY_ITALIC, "fonts/Faustina-Italic.ttf"),

@@ -17,6 +17,7 @@ use lc_books::{Block, Document};
 
 use crate::action::Action;
 use crate::app::Ui;
+use crate::faces::{As, Faces};
 use crate::input::Requested;
 use crate::library::{
     BODY, BODY_BOLD, BODY_BOLD_ITALIC, BODY_ITALIC, Book, DISPLAY, FACES, Face, FontFace, Shelf,
@@ -89,8 +90,10 @@ impl Setting {
             // A title set in the face the body is set in is a title that does not look like one.
             heading: face(DISPLAY, BODY_SIZE * 1.2)
                 .unwrap_or_else(|| FontId::new(BODY_SIZE * 1.25, body.family.clone())),
+            // The reading face, not the interface one: a folio is furniture on the page and
+            // belongs to the book rather than to the window around it.
+            small: FontId::new(11.0, body.family.clone()),
             body,
-            small: FontId::new(11.0, FontFamily::Proportional),
         }
     }
 
@@ -244,7 +247,8 @@ fn settle_face(
     ctx: &egui::Context,
     shelf: &mut Shelf,
     assets: &AssetServer,
-    faces: &Assets<FontFace>,
+    loaded: &Assets<FontFace>,
+    set: &mut Faces,
 ) {
     use bevy::asset::LoadState;
     match &shelf.face {
@@ -263,24 +267,21 @@ fn settle_face(
             if !asked.iter().all(|(_, handle)| settled(handle)) {
                 return;
             }
-            let mut fonts = egui::FontDefinitions::default();
-            let mut installed = Vec::new();
-            for (name, handle) in asked {
-                let Some(face) = faces.get(handle) else { continue };
-                fonts.font_data.insert(
-                    (*name).to_owned(),
-                    std::sync::Arc::new(egui::FontData::from_owned(face.0.clone())),
-                );
-                fonts
-                    .families
-                    .insert(FontFamily::Name((*name).into()), vec![(*name).to_owned()]);
-                installed.push(*name);
-            }
-            if installed.is_empty() {
+            // [`As::Alone`], unlike everything else in the interface: the page is one face
+            // throughout, and a glyph fetched from the interface font would be a word in
+            // Quantico in the middle of a paragraph of Faustina.
+            let installed: Vec<(String, Vec<u8>, As)> = asked
+                .iter()
+                .filter_map(|(name, handle)| {
+                    loaded.get(handle).map(|face| ((*name).to_owned(), face.0.clone(), As::Alone))
+                })
+                .collect();
+            let names: Vec<String> = installed.iter().map(|(name, ..)| name.clone()).collect();
+            if names.is_empty() {
                 info!("no reading faces; setting the page in the interface font");
             } else {
-                ctx.set_fonts(fonts);
-                info!("the page is set in {}", installed.join(", "));
+                set.install(ctx, installed);
+                info!("the page is set in {}", names.join(", "));
             }
             shelf.face = Face::Settled;
         }
@@ -298,7 +299,8 @@ pub fn draw(
     mut state: ResMut<Ui>,
     mut shelf: ResMut<Shelf>,
     mut books: ResMut<Assets<Book>>,
-    faces: Res<Assets<FontFace>>,
+    loaded: Res<Assets<FontFace>>,
+    mut set: ResMut<Faces>,
     assets: Res<AssetServer>,
     mut out: MessageWriter<Requested>,
     mut counted: Local<Counted>,
@@ -310,7 +312,7 @@ pub fn draw(
         return;
     }
     let Ok(ctx) = contexts.ctx_mut() else { return };
-    settle_face(ctx, &mut shelf, &assets, &faces);
+    settle_face(ctx, &mut shelf, &assets, &loaded, &mut set);
     let setting = setting_for(ctx);
 
     let view = ctx.content_rect();

@@ -1,6 +1,8 @@
 // The only entry point. Order matters: tokens define the custom properties every later rule
-// reads, base sets element defaults, and layout and components override them.
+// reads, faces declare what `--font-display` names, base sets element defaults, and layout and
+// components override them.
 @use "tokens";
+@use "faces";
 @use "base";
 @use "layout";
 @use "components";

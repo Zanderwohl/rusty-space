@@ -153,6 +153,25 @@ Three rules that keep it from rotting:
 - **Write selector names out; no `&__` concatenation.** A name you cannot grep for is a name
   nobody will find when they need to change it.
 
+### One downloaded face
+
+`_faces.scss` declares it and `--font-display` names it: **Nabla**, for the wordmark and for
+nothing else. Body and interface text stay on a system stack, which costs nothing and renders on
+arrival — the point of these pages.
+
+It is worth the one exception because the game's title screen is set in the same face, so the
+site and the client are recognisably one product. 184 KB of WOFF2 converted from the upstream
+TTF and otherwise untouched, `font-display: swap`, and behind the immutable `/v/<build>/` header
+it is fetched once a year.
+
+Nabla is a colour font and paints its own palette, so `color` does not reach it.
+`@font-palette-values` picks one of its author's two neutral palettes per colour scheme. A
+browser too old for that draws the default palette; one too old for COLRv1 draws the layers
+flattened into `color`. Both are legible, which is the whole requirement.
+
+The `@font-face` URL is **relative**: the sheet is served from `/v/<build>/styles/`, so
+`../fonts/Nabla.woff2` carries the same build id without anything interpolating one in.
+
 ### Compilation
 
 `grass` — a Sass implementation in Rust, so the toolchain stays `cargo` and the container needs
@@ -450,10 +469,14 @@ room. Two of the numbers moved a long way from the guess and both are worth keep
 exception to `CLAUDE.md`'s "do not build release": there the rule protects a dev loop, and
 here the artifact *is* the product.
 
-The client has no textures, no skybox and no fonts — the starfield is generated from the
-catalogue and body appearance is derived, per [07-rendering.md](07-rendering.md). So the
-download is the binary, and the lever that matters is `opt-level = "s"` plus `wasm-opt -Oz`,
-not asset compression.
+The client has no textures and no skybox — the starfield is generated from the catalogue and
+body appearance is derived, per [07-rendering.md](07-rendering.md). So the download is the
+binary, and the lever that matters is `opt-level = "s"` plus `wasm-opt -Oz`, not asset
+compression.
+
+Faces are the one asset it does fetch, and each is fetched only by the screen that draws it: the
+reader's five when a book is first opened, Nabla when the menu is built. `build-wasm.sh`
+pre-compresses `.ttf` alongside the wasm, so Nabla's 1.6 MB is about 180 KB over the wire.
 
 At 10 MB and 10 000 plays a month that is 100 GB of egress. Storage is nothing: a few hundred
 megabytes per build, fifty builds retained, under 20 GB.

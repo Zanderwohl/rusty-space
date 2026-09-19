@@ -22,6 +22,37 @@ use crate::ui::Channel;
 /// Somebody talking. The one colour in the interface that means a person rather than a reading.
 pub(crate) const RADIO: egui::Color32 = egui::Color32::from_rgb(120, 220, 140);
 
+/// The face a log is set in: Geo, and only here.
+///
+/// What crossed the gap is set apart from the window showing it, the way a colour already sets
+/// it apart — the list on the left, the composer and every marker the client adds stay in the
+/// interface face, because those are this ship talking to its pilot rather than a ship talking
+/// to another ship.
+///
+/// Falls back to the interface face, which is what a build whose assets did not load gets. It
+/// takes neither the scale nor the bump: both are about Geo, and there is no Geo in that case.
+fn logged(ui: &egui::Ui) -> egui::FontId {
+    let family = egui::FontFamily::Name(crate::faces::RADIO.into());
+    let body = egui::TextStyle::Body.resolve(ui.style());
+    match ui.fonts(|f| f.families().contains(&family)) {
+        true => egui::FontId::new(body.size * LOG_SCALE + LOG_BUMP, family),
+        false => body,
+    }
+}
+
+/// What Geo needs to read at the size the interface reads at beside it.
+///
+/// A point size is an em, and an em says nothing about how much of it the letters fill: Geo's
+/// capitals are 0.56 of theirs against Quantico's 0.70, so the same number draws a visibly
+/// smaller line. Between matching the capitals (1.25) and matching the x-height (1.14),
+/// because a log is mostly lowercase and the names in it are not.
+const LOG_SCALE: f32 = 1.2;
+
+/// And four points on top of that, which is a choice rather than a measurement: a transmission
+/// is the one thing in this window that came from outside it, and it is read rather than
+/// scanned.
+const LOG_BUMP: f32 = 4.0;
+
 /// Where a transmission is pointed, as the window offers it.
 ///
 /// A mirror of [`lc_proto::Aim`] and not the type itself, because the third choice is "at
@@ -238,6 +269,7 @@ fn overheard_log(
             // on the left is where a craft is chosen.
             let from = loose.from_name.as_str();
             let to = loose.to.map(|to| uplink.name_of(to));
+            let face = logged(ui);
             ui.label(
                 egui::RichText::new(match &to {
                     Some(to) => format!("{from} -> {to}"),
@@ -245,13 +277,14 @@ fn overheard_log(
                     // cheaper to render than to prove.
                     None => from.to_string(),
                 })
-                .color(RADIO),
+                .color(RADIO)
+                .font(face.clone()),
             );
             ui.horizontal_wrapped(|ui| {
                 ui.add_space(12.0);
                 match loose.line.body.as_deref() {
                     Some(body) => {
-                        ui.label(body);
+                        ui.label(egui::RichText::new(body).font(face.clone()));
                     }
                     // Fixed-length noise, and the same noise every frame. There is nothing in
                     // it to decode because there is nothing in it.
@@ -364,8 +397,10 @@ fn log_area(ui: &mut egui::Ui, id: &str, height: f32, add: impl FnOnce(&mut egui
 /// the cursor is on it — which is the oldest affordance there is for "this goes somewhere" and
 /// is the one thing a label can do without becoming a widget.
 pub(crate) fn clickable_name(ui: &mut egui::Ui, text: &str, colour: egui::Color32) -> egui::Response {
+    let face = logged(ui);
     let response = ui.add(
-        egui::Label::new(egui::RichText::new(text).color(colour)).sense(egui::Sense::click()),
+        egui::Label::new(egui::RichText::new(text).color(colour).font(face))
+            .sense(egui::Sense::click()),
     );
     if response.hovered() {
         // Painted after the text rather than under it: an underline is a line below the
@@ -386,7 +421,8 @@ fn speaker(ui: &mut egui::Ui, name: &str, mine: bool) {
         true => egui::Color32::from_rgb(170, 190, 200),
         false => RADIO,
     };
-    ui.colored_label(colour, format!("{name}:"));
+    let face = logged(ui);
+    ui.label(egui::RichText::new(format!("{name}:")).color(colour).font(face));
 }
 
 /// What a message's tooltip says: when this ship learnt of it, and how loud it was.
@@ -413,16 +449,21 @@ fn body_of(ui: &mut egui::Ui, line: &crate::chat::Line, mine: bool, to: Option<&
         true => egui::Color32::from_rgb(170, 190, 200),
         false => RADIO,
     };
+    let face = logged(ui);
+    let said = |text: String| egui::RichText::new(text).font(face.clone());
     match (&line.body, line.key) {
-        (_, true) if mine => ui.weak(match to {
-            Some(to) => format!("sent key to {to}"),
-            None => "sent key".to_string(),
-        }),
-        (_, true) => ui.colored_label(RADIO, "sent this ship its key"),
-        (Some(body), _) => ui.colored_label(colour, body),
+        (_, true) if mine => ui.label(
+            said(match to {
+                Some(to) => format!("sent key to {to}"),
+                None => "sent key".to_string(),
+            })
+            .weak(),
+        ),
+        (_, true) => ui.label(said("sent this ship its key".to_string()).color(RADIO)),
+        (Some(body), _) => ui.label(said(body.clone()).color(colour)),
         // Heard and unreadable, which is worth showing rather than hiding: a player can see
         // that somebody in earshot is talking in private.
-        (None, _) => ui.weak("(encrypted, and not for this ship)"),
+        (None, _) => ui.label(said("(encrypted, and not for this ship)".to_string()).weak()),
     }
     .on_hover_text(reception(line));
 }

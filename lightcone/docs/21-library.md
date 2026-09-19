@@ -404,11 +404,23 @@ half in another, for the second between them arriving, would reflow under the re
 optional and falls back a step: no italic means the body sheared, no body at all means the
 interface font, so a build without fonts is plainer and never broken.
 
-**Static cuts, not the variable files.** Both families ship a `VariableFont_wght` and neither is
-usable here: `epaint::FontData` carries a file, a face index and a scale tweak, and nothing in
-egui calls `ab_glyph`'s `set_variation`. A variable font renders at its default instance and
-costs half again as many bytes to do it. What the static cuts buy is **real italic and real
-bold** — the alternative, and what this had before them, is egui shearing the regular.
+They go in through `faces::Faces::install`, which is the one owner of egui's font set: the
+client sets its own interface in Quantico and its radio logs in Geo, and a `set_fonts` here that
+started from `FontDefinitions::default()` would quietly undo both. Alone, though, unlike those
+two — a reading face falls back to nothing, because a word in the interface font in the middle
+of a paragraph of Faustina is worse than a glyph that is missing. See
+[18-ui-style.md](18-ui-style.md).
+
+**Static cuts, not the variable files.** Both families ship a `VariableFont_wght`, and the
+reason for not using one has changed under this note: it used to be that nothing in egui called
+`ab_glyph`'s `set_variation`, so a variable font could only render at its default instance.
+Bevy 0.19 brought egui 0.36, which rasterises through `skrifa` and shapes through `harfrust`,
+and a variation location is settable per face (`FontTweak::coords`) or per run (`TextFormat`).
+So the door is open and nobody has walked through it.
+
+What the static cuts still buy is **real italic and real bold** — the alternative, and what
+this had before them, is egui shearing the regular — against one file per family, shaped per
+run. Worth revisiting; not yet measured.
 
 Two numbers that go with them: the body is set at 18 points, and **the column is capped at
 thirty-four times that**, centred in whatever the window gives. A line of prose stops being

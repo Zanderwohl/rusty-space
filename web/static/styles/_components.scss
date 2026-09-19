@@ -2,11 +2,22 @@
 
 .wordmark {
   color: var(--ink);
-  font-family: var(--font-ui);
-  font-size: var(--step-1);
-  font-weight: 640;
-  letter-spacing: -0.02em;
+  font-family: var(--font-display);
+  font-palette: --wordmark-on-dark;
+  // A step above the heading scale's second rung, because Nabla's depth lives inside the
+  // glyph: at the size a heading is set at the extrusion closes up and the letters go muddy.
+  font-size: var(--step-2);
+  // Nabla carries one weight and its own depth. A synthesised bold and a tightened track both
+  // fight the extrusion, which is the shape doing the work here; the colour and the weight
+  // below are what the fallback stack gets when the face has not arrived.
+  font-weight: 400;
   text-decoration: none;
+}
+
+@media (prefers-color-scheme: light) {
+  .wordmark {
+    font-palette: --wordmark-on-light;
+  }
 }
 
 // The opening paragraph of a page or a post: larger, and carrying the claim.

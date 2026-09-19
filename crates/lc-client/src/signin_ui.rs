@@ -450,7 +450,13 @@ impl Shown {
 }
 
 /// The modal.
-fn draw(mut commands: Commands, ui: Res<Ui>, signin: Res<Signin>, drawn: Query<(Entity, &Modal)>) {
+fn draw(
+    mut commands: Commands,
+    ui: Res<Ui>,
+    signin: Res<Signin>,
+    assets: Res<AssetServer>,
+    drawn: Query<(Entity, &Modal)>,
+) {
     let wanted = (ui.menu_page == MenuPage::SignIn)
         .then(|| Shown::of(&signin.session, signin.form.is_some()));
 
@@ -468,7 +474,11 @@ fn draw(mut commands: Commands, ui: Res<Ui>, signin: Res<Signin>, drawn: Query<(
     // translucent panels of the same size at the same place read as one muddled thing rather
     // than as one in front of the other.
     let theme = MenuTheme { panel_bg: MenuTheme::VFD.panel_bg.with_alpha(1.0), ..MenuTheme::VFD };
-    let mut menu = MenuUi::new(&mut commands, theme).panel_width(460.0);
+    // No wordmark: the heading here is "SIGN IN", not the game's name, so the title falls
+    // back to the interface face like every other line on the screen.
+    let mut menu = MenuUi::new(&mut commands, theme)
+        .panel_width(460.0)
+        .font(assets.load(crate::faces::UI_FILE));
     let screen = menu.overlay(Modal(wanted.clone()));
     // The form owns the screen while it is up, for the reason the menu stands down for this
     // modal: one surface at a time. The backdrop stays, so the sky is still dimmed behind it.

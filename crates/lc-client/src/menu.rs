@@ -42,6 +42,14 @@ impl Plugin for MainMenuPlugin {
     }
 }
 
+/// Nabla, and the title screen only: the game's name as a wordmark, the same face the site
+/// sets it in. A display face on a button or a readout would be illegible and costs a megabyte
+/// and a half, so it is loaded here, on the one screen that draws it.
+const WORDMARK: &str = "fonts/Nabla.ttf";
+/// What that face wants. Nabla is an extruded three-dimensional design and its depth is inside
+/// the glyph, so at the size a heading is set at there is nothing left to read.
+const WORDMARK_SIZE: f32 = 44.0;
+
 /// The page currently on screen, so a change of [`MenuPage`] can be noticed without a second
 /// copy of it: the interface state stays the only place the page is recorded.
 #[derive(Component)]
@@ -54,6 +62,7 @@ struct Emit(Action);
 fn sync_screen(
     mut commands: Commands,
     ui: Res<Ui>,
+    assets: Res<AssetServer>,
     existing: Query<(Entity, &MenuScreen)>,
     observe: ObserveEmits,
 ) {
@@ -64,7 +73,13 @@ fn sync_screen(
         }
         commands.entity(entity).despawn();
     }
-    build(&mut commands, page, observe_action(&observe));
+    build(
+        &mut commands,
+        page,
+        observe_action(&observe),
+        assets.load(WORDMARK),
+        assets.load(crate::faces::UI_FILE),
+    );
 }
 
 /// What the Observe button asks for.
@@ -91,8 +106,17 @@ fn observe_action(_: &ObserveEmits) -> Action {
     Action::StartGame
 }
 
-fn build(commands: &mut Commands, page: MenuPage, observe: Action) {
-    let mut ui = MenuUi::new(commands, MenuTheme::VFD).panel_width(520.0);
+fn build(
+    commands: &mut Commands,
+    page: MenuPage,
+    observe: Action,
+    wordmark: Handle<Font>,
+    interface: Handle<Font>,
+) {
+    let mut ui = MenuUi::new(commands, MenuTheme::VFD)
+        .panel_width(520.0)
+        .font(interface)
+        .title_font(wordmark, WORDMARK_SIZE);
     let root = ui.screen(MenuScreen(page));
     // **One surface at a time.** The sign-in draws its own, and a menu behind it is a second
     // thing to read and a second set of buttons to try. The screen is still spawned, because
