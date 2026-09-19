@@ -27,6 +27,13 @@
   }
 }
 
+// The index is a table and a table has a width. Rather than hiding columns at a breakpoint —
+// which on an administration console means hiding the column somebody came to read — the
+// region scrolls sideways on a narrow screen and keeps every column.
+#user-index {
+  overflow-x: auto;
+}
+
 .index-summary {
   color: var(--ink-dim);
   font-size: var(--step--1);

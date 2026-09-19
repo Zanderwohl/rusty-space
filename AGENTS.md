@@ -185,6 +185,19 @@ Each of these cost real time. None of them are visible from the code that hits t
   (`hx-include="this"` on the filter form is what makes the filters work), and every status but
   204 and 304 is swapped — which is why a refusal returns 422 with a body rather than being
   dropped. `npx htmx.org upgrade-check` catches htmx 2 habits.
+- **Three htmx mistakes here failed silently and looked entirely correct.** All three were found
+  by driving a browser and none by a test:
+  - `hx-trigger="input changed ..."` on a `<form>` **never fires**. `changed` compares the value
+    of the element the trigger is on and a form has no value. The search box did nothing.
+  - `target:(#q)` — the parenthesised selector form the documentation gives for selectors
+    *containing whitespace* — matches nothing; the parentheses are not stripped. `target:#q`
+    works.
+  - `htmx:after:swap`'s `event.target` is the element that **issued** the request, not the one
+    that was replaced. The swapped element is `event.detail.ctx.target`. Keying on `event.target`
+    type-checks and quietly skips every swap that came from a form.
+
+  The lesson is the one the renderer section already draws: a page nobody has opened proves
+  nothing. Serve the console, set the session cookie by hand, and click.
 - A paged query without a **unique tie-break** in its `order by` shows a row on two pages and
   another on none. `Listing::order_by` appends `a.id` for this, and a test asserts it for every
   column.

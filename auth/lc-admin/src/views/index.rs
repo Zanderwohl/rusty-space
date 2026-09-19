@@ -88,10 +88,21 @@ fn filters(listing: &Listing) -> Markup {
             hx-include="this"
             hx-target="#user-index"
             hx-swap="outerHTML"
-            // `change` for the menus, debounced `input` for the search box. `hx-sync` drops
-            // an in-flight request when a newer one starts, so a blur landing a `change` on
-            // top of a settled `input` does not race its own answer into the table.
-            hx-trigger="change, input changed delay:300ms, submit"
+            // `change` for the menus, debounced `input` for the search box.
+            //
+            // The `target:` modifier is what confines the second to the search box. Without
+            // it every menu fires twice, because a `<select>` emits `input` as well as
+            // `change`.
+            //
+            // **Two ways to write this are silently wrong** and both were written here first.
+            // `input changed delay:300ms` never fires at all: `changed` compares the value of
+            // the element the trigger is on, and a `<form>` has no value. And
+            // `target:(#q)` — the parenthesised form the documentation gives for selectors
+            // containing whitespace — matches nothing, because the parentheses are not
+            // stripped; `target:#q` is the form that works. Neither mistake is visible in the
+            // markup, in the console or in the network log. What they look like is a search
+            // box that does nothing.
+            hx-trigger="change, input target:#q delay:300ms, submit"
             hx-sync="this:replace"
             hx-indicator="#index-working"
         {
@@ -394,6 +405,28 @@ mod tests {
             .replace("&gt;", ">");
         let parsed: serde_json::Value = serde_json::from_str(&decoded).expect("valid JSON");
         assert_eq!(parsed, Listing::defaults_json());
+    }
+
+    /// Two things about the trigger, both of which fail silently and look right.
+    ///
+    /// `changed` on a form is never satisfied, because a form has no value to have changed —
+    /// so nothing typed into the search box would ever be sent. And an `input` trigger that is
+    /// not confined to the search box fires for every menu as well, because a `<select>` emits
+    /// `input` beside `change`.
+    #[test]
+    fn the_search_box_debounces_and_the_menus_do_not_fire_twice() {
+        let form = filters(&Listing::default()).into_string();
+        assert!(form.contains("input target:#q delay:300ms"), "{form}");
+        assert!(
+            !form.contains("input changed"),
+            "`changed` on a form is never true: {form}",
+        );
+        assert!(
+            !form.contains("target:("),
+            "a parenthesised trigger selector matches nothing: {form}",
+        );
+        // And the selector has something to find.
+        assert!(form.contains(r#"id="q""#), "{form}");
     }
 
     /// The filter form has to tell htmx 4 to send its own values. Without it every filter

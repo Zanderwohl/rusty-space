@@ -142,12 +142,21 @@ export function install(): void {
   hydrate(form, new URLSearchParams(location.search), listing);
 
   document.body.addEventListener("htmx:after:swap", (event) => {
-    const swapped = event.target;
+    // **`event.target` is the element that issued the request**, not the element that was
+    // replaced: the filter form for a filter change, the link for a pager click. The swapped
+    // element is `detail.ctx.target`. Keying on `event.target` compiles, type-checks, and
+    // leaves the address bar untouched for every interaction that came from the form — which
+    // is to say for the ones this module exists for.
+    const swapped = event.detail?.ctx?.target;
     if (!(swapped instanceof Element) || swapped.id !== listing.target) return;
 
+    // Read the attribute off the document rather than off the node the event handed over.
+    // With `outerHTML` the two are not reliably the same node, and the one in the event may
+    // be the element as it was *before* the swap — which carries the previous URL.
+    const live = document.getElementById(listing.target);
     // The server says where the address bar should point: it owns what canonical means, and
     // the swap it just answered may have come from a link rather than from these controls.
-    const canonicalUrl = swapped.getAttribute("data-canonical");
+    const canonicalUrl = live?.getAttribute("data-canonical");
     if (!canonicalUrl) return;
 
     remember(canonicalUrl, !restoring);
