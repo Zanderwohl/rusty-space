@@ -142,6 +142,8 @@ advance. Each is local to one component.
 | Identity on a socket | **Designed:** [16-identity.md](16-identity.md). A broker neither product owns, a sixty-second single-use ticket, verified locally against JWKS. |
 | Does the password provider ship? | Open. It exists so development can make accounts without an upstream. Its deferred list — delivery, reset, captcha, breach lists — is the condition: empty, or it stays a development provider. |
 | Reconciliation | **Designed:** [17-reconciliation.md](17-reconciliation.md). Three tiers chosen by cause, not size. |
+| What owns the systems | Open, and now visible. The shard lists its systems to the administration console ([16-identity.md](16-identity.md)) but is **not authoritative** for them: they are the star catalogue it was loaded with, and its own `systems` table is empty. Becoming authoritative means a way to edit one, which means deciding what a system *is* apart from the star it is named for. |
+| More than one galaxy | Open. Every system today is a row in one flat list, which the console pages through and the shard scans linearly for the nearest star. Neither survives a second galaxy — a list needs something to group by, and a nearest-star scan across galaxies is both slow and wrong. Worth settling before the systems move into the database, because whatever groups them is a column in that table. |
 
 ## Blocking the client/server seam
 
