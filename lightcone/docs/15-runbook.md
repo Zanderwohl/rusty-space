@@ -511,6 +511,41 @@ CREATE ROLE lc_identity LOGIN PASSWORD '...';
 CREATE DATABASE lc_identity OWNER lc_identity;
 ```
 
+### Deploying the console over an existing stack
+
+Three things in this order, and the order is the whole of it.
+
+**1. The broker first, and with the console's return URL already on its allowlist.** The
+console does not migrate; `lc-identity` applies the schema at its own boot. Deploying the
+console against a broker that predates `0005_bans.sql` gives a console whose every page is a
+500, because `bans` does not exist. Back the database up first — the migrations are forward
+only, and `0004` adds a check constraint that a hand-written `permission` outside 0–3 would
+fail on:
+
+```bash
+ssh zandy@rocinante.local '
+  url=$(grep -m1 ^DATABASE_URL= ~/.config/lightcone/identity.env | cut -d= -f2-)
+  docker run --rm --network lightcone -e PGURL="$url" postgres:17-bookworm \
+    sh -c '"'"'pg_dump "$PGURL"'"'"' > ~/backups/lc_identity-$(date +%Y%m%d-%H%M%S).sql'
+```
+
+`--env-file` is read at `docker run` and baked into the container, so an edit to
+`identity.env` needs the container **recreated**. A `docker restart` silently keeps the old
+values, and the symptom is a sign-in refused as `Bad sign-in request` from a broker whose
+configuration file plainly lists the address.
+
+**2. `admin.env`, written on the host.** `LC_ADMIN_IDENTITY_SECRET` is the broker's
+`LC_IDENTITY_EXCHANGE_SECRET` and `DATABASE_URL` is the broker's, so both are copied out of
+`identity.env` rather than retyped. `LC_ADMIN_IDENTITY_API` is
+`http://lightcone-identity:3200` — **not** the public name, for the hairpin reason above.
+
+**3. The proxy last**, once there is something behind the route to answer.
+
+Then check the whole path rather than the container: `/users` signed out must be a 303 to the
+console's own `/signin`, and that must be a 303 to the broker carrying `return_to` — and the
+broker must render a form for it rather than `Bad sign-in request`, which is what an address
+missing from the allowlist looks like.
+
 ### The first administrator
 
 `0003_permissions.sql` promoted one account by address, once, against data that existed. After
@@ -610,7 +645,7 @@ else and falls back to the public name.
 
 ### Routes
 
-The proxy gains two. Reload rather than recreate — the container holds the ACME account and
+The proxy gains three. Reload rather than recreate — the container holds the ACME account and
 the certificates, and a restart it did not need is a restart that can go wrong:
 
 ```bash
@@ -619,7 +654,19 @@ ssh zandy@rocinante.local \
   'docker exec lightcone-proxy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile'
 ```
 
-`accounts.` is a host route and needs its own A record. The shard is a **path** — `/ws` — which
+`accounts.` and `admin.` are host routes and each needs its own A record, pointed at the same
+LAN address as everything else. Neither needs a certificate of its own: the block asks for
+`*.{$LC_DOMAIN}`, so a new service here is a DNS record and a `handle` and nothing more, which
+is what the wildcard was chosen for. Validate before reloading, because a reload of a bad file
+is a proxy that stops answering for every name at once:
+
+```bash
+docker --context rocinante cp tools/proxy/Caddyfile lightcone-proxy:/tmp/Caddyfile.candidate
+ssh zandy@rocinante.local 'docker exec -e LC_DOMAIN=dev.lightconefrontier.com lightcone-proxy \
+  caddy validate --config /tmp/Caddyfile.candidate --adapter caddyfile'
+```
+
+The shard is a **path** — `/ws` — which
 needs none, and a WebSocket upgrade proxies cleanly either way. It must be `wss://`: a page
 served over TLS may only open a secure socket, and a browser refuses the other outright.
 
