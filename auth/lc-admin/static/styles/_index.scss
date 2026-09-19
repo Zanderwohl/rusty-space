@@ -179,3 +179,11 @@
     color: var(--ink-dim);
   }
 }
+
+// A count column: narrow, right-aligned, and figures that line up so two rows can be
+// compared by eye down the column rather than read.
+.cell-count {
+  text-align: end;
+  inline-size: 8rem;
+  font-variant-numeric: tabular-nums;
+}

@@ -17,6 +17,7 @@
 
 pub mod assets;
 pub mod auth;
+pub mod catalogue;
 pub mod config;
 pub mod detail;
 pub mod listing;

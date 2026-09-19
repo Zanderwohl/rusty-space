@@ -47,6 +47,28 @@ pub struct Status {
     pub fit: Option<Fit>,
 }
 
+/// One system. Mirrors `lc_server::systems::Row`.
+///
+/// `id` and not `star`: what a system is built around is the shard's business, and today it
+/// is a catalogue star only because the shard is not yet authoritative for systems of its own.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct System {
+    pub id: u64,
+    /// `None` where the system has no name. Most of a catalogue does not.
+    pub name: Option<String>,
+    pub ships: u64,
+    /// Player-built things that are not craft. Always zero today; nothing makes one.
+    pub objects: u64,
+}
+
+/// One page of them. Mirrors `lc_server::systems::Page`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct Systems {
+    /// Matching systems across every page, not the length of `systems`.
+    pub total: u64,
+    pub systems: Vec<System>,
+}
+
 /// Why there is nothing to show.
 ///
 /// A card that says which of these is a card somebody can act on; one that says "unavailable"
@@ -122,6 +144,35 @@ impl Shard<'_> {
         })
     }
 
+    /// One page of the shard's systems.
+    ///
+    /// The query goes to the shard verbatim — it is the one that knows how many there are and
+    /// can order them without sending them all here first.
+    pub async fn systems(&self, acting: &str, query: &str) -> Result<Systems, Missing> {
+        let ticket = self.ticket_for(acting).await?;
+        let response = self
+            .http
+            .get(format!("{}/admin/systems?{query}", self.api))
+            .bearer_auth(&ticket)
+            .send()
+            .await
+            .map_err(|why| Missing::Unreachable(why.to_string()))?;
+        if !response.status().is_success() {
+            return Err(Missing::Unreachable(format!(
+                "it answered {}",
+                response.status()
+            )));
+        }
+        let body = response
+            .text()
+            .await
+            .map_err(|why| Missing::Unreachable(why.to_string()))?;
+        ron::from_str(&body).map_err(|why| {
+            tracing::error!(%why, %body, "the shard's systems did not parse");
+            Missing::Unreachable("it answered in a shape this build does not read".to_owned())
+        })
+    }
+
     /// A ticket for the administrator whose page this is.
     ///
     /// The broker's `/ticket`, the same endpoint the website calls to put a player into the
@@ -186,6 +237,22 @@ mod tests {
         assert_eq!(fit.modules[0], ("Engines".to_owned(), 2));
         // Exactly, which is half the reason this is RON rather than JSON.
         assert_eq!(fit.stored_j, 1.5e12);
+    }
+
+    /// **Captured from the shard's own serialiser**, like the one above.
+    const SYSTEMS_FROM_THE_SHARD: &str = r#"(total:7973,systems:[(id:1,name:Some("Sol"),ships:3,objects:0),(id:8472,name:None,ships:0,objects:0)])"#;
+
+    #[test]
+    fn parses_the_systems_the_shard_sends() {
+        let page: Systems = ron::from_str(SYSTEMS_FROM_THE_SHARD).expect("the shard's shape");
+        // The total is the whole catalogue, not the length of this page. A console that read
+        // it as the latter would render a pager with one page in it.
+        assert_eq!(page.total, 7973);
+        assert_eq!(page.systems.len(), 2);
+        assert_eq!(page.systems[0].name.as_deref(), Some("Sol"));
+        assert_eq!(page.systems[0].ships, 3);
+        assert_eq!(page.systems[1].name, None);
+        assert!(page.systems.iter().all(|s| s.objects == 0));
     }
 
     /// The other two shapes the shard can send.

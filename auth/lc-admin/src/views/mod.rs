@@ -7,6 +7,7 @@
 //! about remembering to.
 
 pub mod index;
+pub mod systems;
 pub mod user;
 
 use axum::http::StatusCode;
@@ -54,6 +55,7 @@ pub fn shell(assets: &Assets, head: Head<'_>, admin: Option<&Admin>, body: Marku
                     span class="wordmark-tag" { "administration" }
                     nav {
                         a href=(crate::routes::USERS) { "Users" }
+                        a href=(crate::routes::SYSTEMS) { "Systems" }
                     }
                     @if let Some(admin) = admin {
                         div class="whoami" {

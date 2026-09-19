@@ -36,6 +36,8 @@ pub const RETURN: &str = "/auth/return";
 pub const SIGNOUT: &str = "/signout";
 pub const USERS: &str = "/users";
 pub const USER_ROWS: &str = "/users/rows";
+pub const SYSTEMS: &str = "/systems";
+pub const SYSTEM_ROWS: &str = "/systems/rows";
 const USER: &str = "/users/{id}";
 const USER_LEVEL: &str = "/users/{id}/level";
 const USER_BAN: &str = "/users/{id}/ban";
@@ -75,6 +77,10 @@ pub fn router(state: AppState) -> Router {
         // rather than incidental — see the note in `AGENTS.md`.
         .route(USER_ROWS, get(rows))
         .route(USER, get(person))
+        // The same pair as the user index: a page and the region it swaps. No detail route —
+        // there is not enough about one system yet to be worth a page of its own.
+        .route(SYSTEMS, get(system_index))
+        .route(SYSTEM_ROWS, get(system_rows))
         .route(USER_LEVEL, post(set_level))
         .route(USER_BAN, post(issue_ban))
         .route(USER_LIFT, post(lift_ban))
@@ -179,6 +185,51 @@ async fn load_page(state: &AppState, listing: &Listing) -> Result<users::Page, R
                 "The account store did not answer.",
             )
         })
+}
+
+async fn system_index(
+    State(state): State<AppState>,
+    admin: Admin,
+    Query(params): Query<crate::catalogue::Params>,
+) -> Response {
+    let listing = crate::catalogue::Listing::from_params(params);
+    let found = load_systems(&state, &admin, &listing).await;
+    views::shell(
+        &state.assets,
+        Head { title: "Systems" },
+        Some(&admin),
+        views::systems::page(&listing, &found),
+    )
+    .into_response()
+}
+
+async fn system_rows(
+    State(state): State<AppState>,
+    admin: Admin,
+    Query(params): Query<crate::catalogue::Params>,
+) -> Response {
+    let listing = crate::catalogue::Listing::from_params(params);
+    let found = load_systems(&state, &admin, &listing).await;
+    views::systems::region(&listing, &found).into_response()
+}
+
+/// One page of systems, or why there is not one.
+///
+/// A shard that is down makes this index say so, the way it makes the Status section say so.
+/// It is not an error page: the console is administering accounts perfectly well without it.
+async fn load_systems(
+    state: &AppState,
+    admin: &Admin,
+    listing: &crate::catalogue::Listing,
+) -> Result<crate::shard::Systems, crate::shard::Missing> {
+    match state.shard() {
+        None => Err(crate::shard::Missing::NotConfigured),
+        Some(shard) => {
+            shard
+                .systems(&admin.id.to_string(), &listing.shard_query())
+                .await
+        }
+    }
 }
 
 async fn person(
