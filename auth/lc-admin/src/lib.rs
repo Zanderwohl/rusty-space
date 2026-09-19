@@ -22,6 +22,7 @@ pub mod detail;
 pub mod listing;
 pub mod routes;
 pub mod session;
+pub mod shard;
 pub mod users;
 pub mod views;
 
@@ -46,7 +47,23 @@ pub struct AppState {
     /// This service's own return URL, which must be on the broker's allowlist verbatim.
     pub return_url: Arc<str>,
     pub secure_cookies: bool,
+    /// Where the shard answers about ships. `None` runs the console without a Status section.
+    pub shard_api: Option<Arc<str>>,
+    pub shard_audience: Arc<str>,
     pub http: reqwest::Client,
+}
+
+impl AppState {
+    /// What it takes to ask the shard, when there is one to ask.
+    pub fn shard(&self) -> Option<crate::shard::Shard<'_>> {
+        Some(crate::shard::Shard {
+            api: self.shard_api.as_deref()?,
+            audience: &self.shard_audience,
+            identity_api: &self.identity_api,
+            identity_secret: &self.identity_secret,
+            http: &self.http,
+        })
+    }
 }
 
 impl AppState {

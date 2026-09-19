@@ -19,6 +19,7 @@ use maud::{Markup, html};
 
 use crate::auth::Admin;
 use crate::detail::{Grant, Link};
+use crate::shard::{Fit, Missing, Status, Whereabouts};
 
 /// Everything one user page reads.
 pub struct Detail {
@@ -31,6 +32,10 @@ pub struct Detail {
     pub bans: Vec<Ban>,
     pub log: Vec<Entry>,
     pub sanction: Option<Sanction>,
+    /// What the shard says about this account's ship, or why it says nothing. Fetched
+    /// best-effort: a shard that is down makes this section say so and leaves every other
+    /// section on the page working.
+    pub status: Result<Status, Missing>,
 }
 
 /// What just happened, if anything did.
@@ -99,6 +104,7 @@ pub fn region(
             (bans(admin, detail, now))
             (links(detail))
             (grants(detail, now))
+            (status_section(detail))
             (log(detail))
         }
     }
@@ -398,6 +404,143 @@ fn grants(detail: &Detail, now: DateTime<Utc>) -> Markup {
     }
 }
 
+/// Where the ship is, and what it is made of.
+///
+/// Two cards side by side, and both are **as of the shard's last checkpoint** — said on the
+/// section rather than on each card, because a number that is a few seconds old and does not
+/// admit it is a number somebody will eventually act on as though it were live.
+///
+/// The system card is deliberately thin. It names the system and how far into it the craft
+/// is, and that is the hook: more about the system itself goes here later, and the card is
+/// the shape that waits for it.
+fn status_section(detail: &Detail) -> Markup {
+    html! {
+        section class="panel" {
+            h2 { "Status" }
+            @match &detail.status {
+                Err(missing) => p class="nothing" { (missing.said()) },
+                Ok(status) => {
+                    div class="cards" {
+                        (where_card(status))
+                        (fit_card(status))
+                    }
+                    p class="fine-print" {
+                        "As the shard last saved it, at coordinate time " (status.saved_t)
+                        " — a few seconds behind the world, and not live."
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn where_card(status: &Status) -> Markup {
+    html! {
+        article class="card" {
+            h3 { "Whereabouts" }
+            @match &status.whereabouts {
+                Whereabouts::In { name, au, .. } => {
+                    p class="card-headline" { (name) }
+                    p class="card-detail" { (format!("{au:.2}")) " AU from the star" }
+                }
+                Whereabouts::Interstellar { near, ly, .. } => {
+                    p class="card-headline" { "Interstellar space near " (near) }
+                    p class="card-detail" { (format!("{ly:.2}")) " ly out" }
+                }
+                Whereabouts::Nowhere => {
+                    p class="card-headline" { "Off the catalogue" }
+                    p class="card-detail" {
+                        // Only reachable by a craft placed by hand, so it is worth saying
+                        // rather than rendering as a blank.
+                        "No star in this shard's sky is near this craft."
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn fit_card(status: &Status) -> Markup {
+    html! {
+        article class="card" {
+            h3 { "Ship" }
+            p class="card-headline" {
+                @match &status.name {
+                    Some(name) => (name),
+                    None => "Unnamed",
+                }
+            }
+            p class="card-detail" {
+                (format!("{:.0} m", status.length_m)) " · hull " (status.ship_id)
+            }
+            @match &status.fit {
+                None => p class="nothing" { "Nothing fitted." },
+                Some(fit) => (fitted(fit)),
+            }
+        }
+    }
+}
+
+fn fitted(fit: &Fit) -> Markup {
+    html! {
+        @if fit.refitting {
+            p class="badge badge-in-force" { "Refitting" }
+        }
+        dl class="card-facts" {
+            dt { "Slots" }
+            dd { (fit.used_slots) " of " (fit.hull_slots) }
+            dt { "Stored" }
+            dd { (joules(fit.stored_j)) }
+            @if fit.committed_j > 0.0 {
+                dt { "Committed" }
+                dd { (joules(fit.committed_j)) }
+            }
+            dt { "Collecting" }
+            dd { (watts(fit.solar_w)) }
+        }
+        ul class="modules" {
+            @for (name, count) in &fit.modules {
+                // Every module, including the ones at zero: a fitting is read to find out
+                // what is missing at least as often as to find out what is there.
+                li class=[(*count == 0).then_some("none")] { (name) " × " (count) }
+            }
+        }
+    }
+}
+
+/// An energy, in whichever unit keeps it to three or four digits.
+///
+/// A ship's store runs from kilojoules to petajoules, and `1500000000000 J` is a number
+/// nobody reads — they count the digits, get it wrong, and move on.
+fn joules(j: f64) -> String {
+    scaled(j, "J")
+}
+
+fn watts(w: f64) -> String {
+    scaled(w, "W")
+}
+
+fn scaled(value: f64, unit: &str) -> String {
+    const STEPS: [(f64, &str); 6] = [
+        (1e15, "P"),
+        (1e12, "T"),
+        (1e9, "G"),
+        (1e6, "M"),
+        (1e3, "k"),
+        (1.0, ""),
+    ];
+    if !value.is_finite() {
+        return format!("— {unit}");
+    }
+    let magnitude = value.abs();
+    for (step, prefix) in STEPS {
+        if magnitude >= step {
+            return format!("{:.2} {prefix}{unit}", value / step);
+        }
+    }
+    format!("{value:.2} {unit}")
+}
+
 fn log(detail: &Detail) -> Markup {
     html! {
         section class="panel" {
@@ -455,6 +598,7 @@ mod tests {
             bans,
             log: Vec::new(),
             sanction,
+            status: Err(Missing::NotConfigured),
         }
     }
 

@@ -187,7 +187,7 @@ async fn person(
     Path(id): Path<Uuid>,
     Query(query): Query<PageQuery>,
 ) -> Response {
-    let detail = match load_detail(&state, id).await {
+    let detail = match load_detail(&state, id, &admin).await {
         Ok(detail) => detail,
         Err(response) => return response,
     };
@@ -200,7 +200,7 @@ async fn person(
 }
 
 #[allow(clippy::result_large_err)]
-async fn load_detail(state: &AppState, id: Uuid) -> Result<Detail, Response> {
+async fn load_detail(state: &AppState, id: Uuid, acting: &Admin) -> Result<Detail, Response> {
     let store = state.store();
     let failed = |why: String| {
         tracing::error!(%why, "could not assemble a user page");
@@ -225,8 +225,17 @@ async fn load_detail(state: &AppState, id: Uuid) -> Result<Detail, Response> {
         }
         Err(why) => return Err(failed(why.to_string())),
     };
+    // **Best effort, and last.** A shard that is down, slow or not configured makes the
+    // Status section say so; every other section on this page is answered by a database this
+    // service owns and is not held up by a network call to another one.
+    let status = match state.shard() {
+        None => Err(crate::shard::Missing::NotConfigured),
+        Some(shard) => shard.status(&acting.id.to_string(), &id.to_string()).await,
+    };
+
     let now = Utc::now();
     Ok(Detail {
+        status,
         sanction: store
             .sanction(id, now)
             .await
@@ -288,7 +297,7 @@ async fn answered(
             Redirect::to(&format!("{}?done={}", user_url(id), done.slug())).into_response()
         }
         outcome => {
-            let detail = match load_detail(state, id).await {
+            let detail = match load_detail(state, id, admin).await {
                 Ok(detail) => detail,
                 Err(response) => return response,
             };

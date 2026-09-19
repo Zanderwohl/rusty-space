@@ -25,6 +25,7 @@ async fn main() -> anyhow::Result<()> {
         identity = %config.identity_base,
         return_to = %config.return_url(),
         secure_cookies = config.secure_cookies,
+        shard = config.shard_api.as_deref().unwrap_or("none"),
         "administration site starting",
     );
 
@@ -50,6 +51,8 @@ async fn main() -> anyhow::Result<()> {
         identity_secret: config.identity_secret.clone().into(),
         return_url: config.return_url().into(),
         secure_cookies: config.secure_cookies,
+        shard_api: config.shard_api.clone().map(Into::into),
+        shard_audience: config.shard_audience.clone().into(),
         http: lc_admin::http_client(),
     };
 

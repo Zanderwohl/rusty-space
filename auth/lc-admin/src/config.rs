@@ -25,6 +25,13 @@ pub struct Config {
     pub public_url: String,
     /// What the session cookie is signed with.
     pub session_key: String,
+    /// The shard's administration surface, on the container network — `http://lightcone-shard:3400`
+    /// and never the public name. Absent runs the console without a Status section rather than
+    /// refusing to start: a shard being down is not a reason nobody can administer accounts.
+    pub shard_api: Option<String>,
+    /// The audience its tickets must name, which must also be on the broker's
+    /// `LC_IDENTITY_AUDIENCES` or no ticket can be minted for it.
+    pub shard_audience: String,
     pub static_dir: PathBuf,
     /// Whether cookies are marked `Secure`. Off only where the site is reached over plain
     /// HTTP, which is development and nowhere else.
@@ -60,6 +67,8 @@ impl Config {
             identity_secret: required("LC_ADMIN_IDENTITY_SECRET")?,
             public_url,
             session_key,
+            shard_api: var("LC_ADMIN_SHARD_API").map(|u| u.trim_end_matches('/').to_owned()),
+            shard_audience: var("LC_ADMIN_SHARD_AUDIENCE").unwrap_or_else(|| "shard-1".into()),
             static_dir: var("LC_ADMIN_STATIC_DIR")
                 .unwrap_or_else(|| "static".into())
                 .into(),

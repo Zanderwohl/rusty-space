@@ -42,6 +42,8 @@ base64 = "0.22"
 getrandom = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 url = "2"
+# The shard answers in RON. A format rather than a shared crate: see src/shard.rs.
+ron = "0.10"
 subtle = "2"
 
 [dev-dependencies]

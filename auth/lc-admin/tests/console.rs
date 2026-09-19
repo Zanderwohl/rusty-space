@@ -75,6 +75,10 @@ fn state_against(pool: PgPool, identity_api: &str) -> AppState {
         identity_secret: "shared".into(),
         return_url: "https://admin.example/auth/return".into(),
         secure_cookies: true,
+        // No shard: the Status section says so, and every other section works. That is the
+        // state a console runs in when the game is down, so it is the one the tests run in.
+        shard_api: None,
+        shard_audience: "shard-1".into(),
         http: lc_admin::http_client(),
     }
 }
