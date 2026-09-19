@@ -46,6 +46,18 @@
 		reverse_proxy lightcone-identity:3200
 	}
 
+	# The administration console. A name of its own for the reason `accounts.` has one, and for
+	# one more: its session cookie is scoped to this origin, so it is never sent to the site,
+	# to the CDN or to anything a player reaches. Sharing an origin would undo that with no
+	# way to get it back.
+	#
+	# Covered by the wildcard certificate above, so adding it needed a DNS record and this
+	# block and nothing else — which is what the wildcard is for.
+	@admin host admin.{$LC_DOMAIN}
+	handle @admin {
+		reverse_proxy lightcone-admin:3300
+	}
+
 	@cdn host cdn.{$LC_DOMAIN}
 	handle @cdn {
 		# The CDN keeps its own header policy -- content types, immutability, pre-compressed
