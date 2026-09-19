@@ -127,7 +127,7 @@ impl Material for PlumeMaterial {
         descriptor.primitive.cull_mode = Some(Face::Front);
         // Gas does not hide what is behind it.
         if let Some(depth_stencil) = descriptor.depth_stencil.as_mut() {
-            depth_stencil.depth_write_enabled = false;
+            depth_stencil.depth_write_enabled = Some(false);
         }
         Ok(())
     }

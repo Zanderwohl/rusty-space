@@ -246,7 +246,7 @@ pub fn update_body_points(
             let new_brightness = total_brightness * fade_factor * aa_energy_compensation;
             if let Some(material) = materials.get(point_material_handle.id()) {
                 if (material.brightness - new_brightness).abs() > 0.001 {
-                    if let Some(material) = materials.get_mut(point_material_handle.id()) {
+                    if let Some(mut material) = materials.get_mut(point_material_handle.id()) {
                         material.brightness = new_brightness;
                     }
                 }
@@ -266,7 +266,7 @@ pub fn update_body_points(
                     let new_emission = WIREFRAME_EMISSION_STRENGTH * model_fade;
                     if let Some(material) = wireframe_materials.get(wf_material_handle.id()) {
                         if (material.emission_strength - new_emission).abs() > 0.001 {
-                            if let Some(material) = wireframe_materials.get_mut(wf_material_handle.id()) {
+                            if let Some(mut material) = wireframe_materials.get_mut(wf_material_handle.id()) {
                                 material.emission_strength = new_emission;
                             }
                         }
@@ -285,7 +285,7 @@ pub fn update_body_points(
                     if let Some(material) = occluder_materials.get(occ_material_handle.id()) {
                         let new_alpha = model_fade;
                         if (material.base_color.alpha - new_alpha).abs() > 0.001 {
-                            if let Some(material) = occluder_materials.get_mut(occ_material_handle.id()) {
+                            if let Some(mut material) = occluder_materials.get_mut(occ_material_handle.id()) {
                                 material.base_color.alpha = new_alpha;
                             }
                         }
@@ -301,7 +301,7 @@ pub fn update_body_points(
                     *wf_vis = Visibility::Visible;
                     if let Some(material) = wireframe_materials.get(wf_material_handle.id()) {
                         if (material.emission_strength - WIREFRAME_EMISSION_STRENGTH).abs() > 0.001 {
-                            if let Some(material) = wireframe_materials.get_mut(wf_material_handle.id()) {
+                            if let Some(mut material) = wireframe_materials.get_mut(wf_material_handle.id()) {
                                 material.emission_strength = WIREFRAME_EMISSION_STRENGTH;
                             }
                         }
@@ -315,7 +315,7 @@ pub fn update_body_points(
                     *occ_vis = Visibility::Visible;
                     if let Some(material) = occluder_materials.get(occ_material_handle.id()) {
                         if (material.base_color.alpha - 1.0).abs() > 0.001 {
-                            if let Some(material) = occluder_materials.get_mut(occ_material_handle.id()) {
+                            if let Some(mut material) = occluder_materials.get_mut(occ_material_handle.id()) {
                                 material.base_color.alpha = 1.0;
                             }
                         }

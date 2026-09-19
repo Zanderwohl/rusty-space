@@ -154,7 +154,7 @@ impl Measure for Setter<'_> {
                 None => galley.rect.height(),
             };
             rows.push(Row { height: bottom - placed.pos.y, offset: at });
-            at += placed.row.char_count_including_newline();
+            at += placed.row.char_count_excluding_newline().0 + placed.ends_with_newline as usize;
         }
         Measured { lead, rows }
     }

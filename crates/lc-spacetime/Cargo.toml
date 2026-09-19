@@ -11,6 +11,6 @@ authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 # It is here for exactly one reason: the conversion in `frame` is the only place that knows
 # how coordinate time relates to the time em-sim propagates against.
 em-foundations = { path = "../em-foundations" }
-glam = { version = "0.30", features = ["serde"] }
+glam = { version = "0.32", features = ["serde"] }
 serde = { version = "1.0.215", features = ["derive"] }
 smallvec = { version = "1", features = ["serde", "union"] }

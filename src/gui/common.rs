@@ -1,6 +1,20 @@
 use bevy_egui::egui;
 use crate::util::format;
 
+/// A root `Ui` covering the whole viewport.
+///
+/// egui 0.36 shows panels inside a `Ui` rather than straight onto the `Context`, so a
+/// top-level `CentralPanel` needs one of these to sit in.
+pub fn viewport_ui(ctx: &egui::Context) -> egui::Ui {
+    egui::Ui::new(
+        ctx.clone(),
+        "viewport".into(),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(ctx.viewport_rect()),
+    )
+}
+
 pub fn stepper<S: AsRef<str>>(ui: &mut egui::Ui, label: S, value: &mut f64) {
     ui.horizontal(|ui| {
        ui.label(label.as_ref());

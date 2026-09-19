@@ -408,7 +408,7 @@ pub fn update_plumes(
             (wall / UNIT_M) as f32,
         );
 
-        let Some(asset) = materials.get_mut(&material.0) else { continue };
+        let Some(mut asset) = materials.get_mut(&material.0) else { continue };
         // The eye is at the render origin, so where it sits in the proxy's own space is the
         // transform undone. The march needs it there and nowhere else.
         let eye_local = transform.to_matrix().inverse().transform_point3(Vec3::ZERO);

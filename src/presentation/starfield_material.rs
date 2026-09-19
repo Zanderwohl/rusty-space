@@ -86,7 +86,7 @@ impl Material for StarfieldMaterial {
 
         // Don't write depth so scene geometry renders on top.
         if let Some(depth_stencil) = descriptor.depth_stencil.as_mut() {
-            depth_stencil.depth_write_enabled = false;
+            depth_stencil.depth_write_enabled = Some(false);
         }
 
         Ok(())

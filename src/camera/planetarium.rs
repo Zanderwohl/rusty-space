@@ -437,7 +437,7 @@ fn revolve_around(
                             };
 
                             let egui_wants_pointer = egui_ctx.ctx_mut()
-                                .map_or(false, |ctx| ctx.wants_pointer_input());
+                                .map_or(false, |ctx| ctx.egui_wants_pointer_input());
 
                             let min_distance = ORBIT_ZOOM_MIN_RADIUS_MULT * scaled_radius;
                             let max_distance = ORBIT_ZOOM_MAX_LY * LIGHT_YEAR_M * view_settings.distance_factor();

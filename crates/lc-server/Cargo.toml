@@ -12,7 +12,7 @@ lc-proto = { path = "../lc-proto" }
 lc-spacetime = { path = "../lc-spacetime" }
 lc-world = { path = "../lc-world", default-features = false }
 lc-store = { path = "../lc-store" }
-glam = "0.30"
+glam = "0.32"
 # Verifying game tickets. The server depends on a JWT library and a public key, never on the
 # identity broker: see lightcone/docs/16-identity.md.
 jsonwebtoken = "9"

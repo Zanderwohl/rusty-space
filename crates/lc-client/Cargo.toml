@@ -21,10 +21,10 @@ lc-world = { path = "../lc-world", default-features = false }
 # register separately and the development CDN is plain HTTP — a browser could not load a book
 # over that from an HTTPS page anyway (mixed content), but a desktop client rehearsing against
 # `rocinante:3101` is exactly what it is for. See lightcone/docs/14-hosting.md.
-bevy = { version = "0.17.2", features = ["http", "https"] }
-bevy_egui = "0.38.0"
-bevy_mesh = "0.17"
-glam = { version = "0.30", features = ["serde"] }
+bevy = { version = "0.19.1", features = ["http", "https"] }
+bevy_egui = "0.42.0"
+bevy_mesh = "0.19"
+glam = { version = "0.32", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Plates. Every image on the first shelf is a JPEG; the other two are insurance, and the
@@ -60,7 +60,7 @@ tokio = { version = "1", features = ["rt", "macros", "time"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 wasm-bindgen = "0.2"
 # WebGPU. Bevy's wasm default is WebGL2, which this renderer does not target.
-bevy = { version = "0.17.2", features = ["webgpu"] }
+bevy = { version = "0.19.1", features = ["webgpu"] }
 web-sys = { version = "0.3", features = [
     "Window", "Location", "UrlSearchParams", "Document", "Element", "HtmlCanvasElement",
     "WebSocket", "MessageEvent", "CloseEvent", "Event", "BinaryType",

@@ -141,7 +141,7 @@ impl Material for SoiPointsMaterial {
         descriptor.primitive.cull_mode = None;
 
         if let Some(depth_stencil) = descriptor.depth_stencil.as_mut() {
-            depth_stencil.depth_write_enabled = false;
+            depth_stencil.depth_write_enabled = Some(false);
         }
 
         Ok(())
@@ -217,7 +217,7 @@ impl Material for SoiRingMaterial {
         descriptor.primitive.cull_mode = None;
 
         if let Some(depth_stencil) = descriptor.depth_stencil.as_mut() {
-            depth_stencil.depth_write_enabled = false;
+            depth_stencil.depth_write_enabled = Some(false);
         }
 
         Ok(())

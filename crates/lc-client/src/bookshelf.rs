@@ -199,7 +199,7 @@ fn search(ui: &mut egui::Ui, setting: &Setting, query: &mut String) {
         .font(setting.body.clone())
         .hint_text(egui::RichText::new("search").color(FAINT))
         .desired_width(f32::INFINITY)
-        .frame(false);
+        .frame(egui::Frame::NONE);
     let response = ui.add(field);
     let y = response.rect.bottom() + 3.0;
     ui.painter().line_segment(

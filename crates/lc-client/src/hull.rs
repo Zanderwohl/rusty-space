@@ -396,7 +396,7 @@ pub fn update_hulls(
         transform.rotation = attitude(at.facing, star.map(|(star_ly, _, _)| star_ly - at.at_ly));
         transform.scale = half_extents(at.length_m);
 
-        let Some(asset) = materials.get_mut(&material.0) else { continue };
+        let Some(mut asset) = materials.get_mut(&material.0) else { continue };
         let next = match star {
             Some((star_ly, radius, teff)) => {
                 let distance = star_ly.distance(at.at_ly) * M_PER_LY;

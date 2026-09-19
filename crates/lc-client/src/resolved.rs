@@ -393,7 +393,7 @@ pub fn update_resolved(
             Quat::from_rotation_arc(Vec3::Y, sim_to_render(body.pole).as_vec3().normalize());
         transform.scale = Vec3::splat((body.radius_m / UNIT_M) as f32);
 
-        if let Some(asset) = materials.get_mut(&material.0) {
+        if let Some(mut asset) = materials.get_mut(&material.0) {
             let star_distance = star_ly.distance(body.position_ly) * M_PER_LY;
             let (reflected, emitted) =
                 surface_shading(&session.0, body, star_radius, star_teff, star_distance);

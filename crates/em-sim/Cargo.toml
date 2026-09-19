@@ -18,10 +18,10 @@ bevy = ["dep:bevy_ecs"]
 
 [dependencies]
 em-foundations = { path = "../em-foundations" }
-glam = { version = "0.30", features = ["serde"] }
+glam = { version = "0.32", features = ["serde"] }
 serde = { version = "1.0.215", features = ["derive"] }
 
-bevy_ecs = { version = "0.17", optional = true }
+bevy_ecs = { version = "0.19", optional = true }
 
 [dev-dependencies]
 toml = "0.8.20"

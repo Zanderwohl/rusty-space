@@ -7,7 +7,7 @@ use bevy::diagnostic::FrameCount;
 use bevy::math::DVec3;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
-use bevy::render::view::Hdr;
+use bevy::camera::Hdr;
 use bevy::window::{ExitCondition, PresentMode};
 use bevy_egui::EguiPlugin;
 use crate::body::universe::solar_system::{write_temp_system_file, write_earth_moon_file, write_soi_test_file};
@@ -106,7 +106,7 @@ pub fn make_visible(mut window: Single<&mut Window>, frames: Res<FrameCount>) {
 
 pub fn common_setup(
     mut commands: Commands,
-    mut ambient_light: ResMut<AmbientLight>
+    mut ambient_light: ResMut<GlobalAmbientLight>
 ) {
     ambient_light.brightness = 1.0;
 
@@ -124,6 +124,7 @@ pub fn common_setup(
             aspect_ratio: 1.0,
             near: 0.001,
             far: 1e8,
+            ..default()
         }),
         Transform::from_rotation(rotation),
         Freecam { bevy_pos: DVec3::new(20., 2., 0.) },

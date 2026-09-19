@@ -48,7 +48,7 @@ pub fn draw_reticle(
     };
     let Some(viewport) = camera.logical_viewport_size() else { return };
 
-    let available = context.available_rect();
+    let available = context.viewport_rect();
     let inset = reticle::EDGE_INSET_PX;
     let safe = bevy::math::Rect::from_corners(
         Vec2::new(available.min.x + inset, available.min.y + inset),

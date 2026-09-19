@@ -54,8 +54,8 @@ impl Plugin for MenuPlugin {
             .add_systems(OnEnter(MenuState::Planetarium), load_planetarium_files)
             .add_systems(OnEnter(AppState::MainMenu), load_planetarium_files.run_if(in_state(MenuState::Planetarium)))
             .add_systems(EguiPrimaryContextPass, (
-                (save_load::planetarium_menu,).run_if(in_state(AppState::MainMenu).and(in_state(MenuState::Planetarium))),
-                (settings_menu,).run_if(in_state(AppState::MainMenu).and(in_state(MenuState::Settings))),
+                (save_load::planetarium_menu,).run_if(in_state(AppState::MainMenu).and_then(in_state(MenuState::Planetarium))),
+                (settings_menu,).run_if(in_state(AppState::MainMenu).and_then(in_state(MenuState::Settings))),
             ))
             .add_systems(Update, quit_system)
         ;
@@ -131,7 +131,8 @@ pub fn settings_menu(
         UiTheme::Dark => ctx.set_visuals(egui::Visuals::dark()),
     }
 
-    egui::CentralPanel::default().show(ctx, |ui| {
+    let mut root = crate::gui::common::viewport_ui(ctx);
+    egui::CentralPanel::default().show(&mut root, |ui| {
         if ui.button("Back").clicked() {
             next_menu.set(MenuState::Home)
         }

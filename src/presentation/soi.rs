@@ -311,7 +311,7 @@ pub fn update_soi_shells(
                 if shape_changed(&current.uniform.shape, &shape)
                     || (current.uniform.interior_alpha - interior_alpha).abs() > 0.001
                 {
-                    if let Some(material) = materials.get_mut(handle.id()) {
+                    if let Some(mut material) = materials.get_mut(handle.id()) {
                         material.uniform.shape = shape.clone();
                         material.uniform.interior_alpha = interior_alpha;
                     }
@@ -333,7 +333,7 @@ pub fn update_soi_shells(
                 if shape_changed(&current.uniform.shape, &shape)
                     || (current.uniform.tube_radius - tube_radius).abs() > 0.000001
                 {
-                    if let Some(material) = ring_materials.get_mut(handle.id()) {
+                    if let Some(mut material) = ring_materials.get_mut(handle.id()) {
                         material.uniform.shape = shape.clone();
                         material.uniform.tube_radius = tube_radius;
                     }

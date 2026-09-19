@@ -17,9 +17,24 @@ pub(crate) fn ask(out: &mut MessageWriter<Requested>, action: Action) {
     out.write(Requested(action));
 }
 
+/// A root `Ui` covering the whole viewport.
+///
+/// egui 0.36 shows panels inside a `Ui` rather than straight onto the `Context`, so a
+/// top-level panel needs one of these to sit in.
+fn viewport_ui(ctx: &egui::Context) -> egui::Ui {
+    egui::Ui::new(
+        ctx.clone(),
+        "viewport".into(),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(ctx.viewport_rect()),
+    )
+}
+
 pub fn loading(mut contexts: EguiContexts) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
-    egui::CentralPanel::default().show(ctx, |ui| {
+    let mut root = viewport_ui(ctx);
+    egui::CentralPanel::default().show(&mut root, |ui| {
         ui.vertical_centered(|ui| {
             ui.add_space(120.0);
             ui.heading("Loading the sky");
@@ -37,7 +52,8 @@ pub fn unreachable(
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
     let why = crate::uplink::out_of_reach(&uplink.state, address.0.as_deref());
-    egui::CentralPanel::default().show(ctx, |ui| {
+    let mut root = viewport_ui(ctx);
+    egui::CentralPanel::default().show(&mut root, |ui| {
         ui.vertical_centered(|ui| {
             ui.add_space(120.0);
             ui.heading("Not connected to the server");
@@ -70,7 +86,8 @@ pub fn hud(
     let Ok(ctx) = contexts.ctx_mut() else { return };
     let lines = hud::lines(&game.0, &ui_state.0);
 
-    egui::TopBottomPanel::top("hud").show(ctx, |ui| {
+    let mut root = viewport_ui(ctx);
+    egui::Panel::top("hud").show(&mut root, |ui| {
         ui.horizontal(|ui| {
             ui.strong(&lines.clock);
             ui.separator();
