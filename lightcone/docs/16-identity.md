@@ -560,8 +560,7 @@ there as everywhere: the second presentation of a ticket is a 401.
 **It never touches the tick loop.** It reads the checkpoint from the database and the
 catalogue from an `Arc` — no lock the simulation wants, nothing down a channel the tick reads.
 A console refreshing a page cannot cost the world a frame, and that is the property to keep if
-it ever grows a second route. The cost is that the answer is a few seconds stale, which the
-page says out loud.
+it ever grows a second route. The cost is that the answer is a few seconds stale.
 
 It listens on its **own port**, with no proxy route to it. It is reached by container name
 from inside the network and by nothing from outside.

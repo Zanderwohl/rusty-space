@@ -406,9 +406,9 @@ fn grants(detail: &Detail, now: DateTime<Utc>) -> Markup {
 
 /// Where the ship is, and what it is made of.
 ///
-/// Two cards side by side, and both are **as of the shard's last checkpoint** — said on the
-/// section rather than on each card, because a number that is a few seconds old and does not
-/// admit it is a number somebody will eventually act on as though it were live.
+/// Two cards side by side, both as of the shard's last checkpoint — a few seconds behind the
+/// world. That is not written on the page: it is a console, the numbers move, and a caption
+/// saying so on every view earns less than the room it takes.
 ///
 /// The system card is deliberately thin. It names the system and how far into it the craft
 /// is, and that is the hook: more about the system itself goes here later, and the card is
@@ -419,16 +419,10 @@ fn status_section(detail: &Detail) -> Markup {
             h2 { "Status" }
             @match &detail.status {
                 Err(missing) => p class="nothing" { (missing.said()) },
-                Ok(status) => {
-                    div class="cards" {
-                        (where_card(status))
-                        (fit_card(status))
-                    }
-                    p class="fine-print" {
-                        "As the shard last saved it, at coordinate time " (status.saved_t)
-                        " — a few seconds behind the world, and not live."
-                    }
-                }
+                Ok(status) => div class="cards" {
+                    (where_card(status))
+                    (fit_card(status))
+                },
             }
         }
     }
