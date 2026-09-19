@@ -486,6 +486,33 @@ form is a real `method="get"` form, and every act is a real `method="post"` form
 redirect. htmx makes those same URLs into swaps, and the TypeScript keeps the address bar in
 step with them, which is the one thing neither the server nor htmx can do.
 
+### htmx is in the image, not on the CDN
+
+Vendored: 36 KB of `htmx.min.js` committed under `lc-admin/static/vendor`, served by the
+console itself at `/v/<digest>/scripts/htmx.js` with a one-year `immutable` header. No page
+here references an origin this project does not run.
+
+Not on `cdn.<domain>`, and that was asked about rather than assumed. The CDN is for **game
+builds** — `cdn.<domain>/game/<build-id>/…`, never overwritten, promoted by a row in the site's
+database ([14-hosting.md](14-hosting.md)). htmx is not versioned on that axis and is not
+promoted, and putting it there would cost the property that makes the current arrangement worth
+having: htmx ships in the same image as the binary that needs it, behind a **single digest
+computed over the stylesheet, the script and htmx together**. Deploying the console deploys the
+exact htmx it was built against, and rolling back rolls back all three. Served from the CDN it
+would be a second container, a second volume and a second publish step, with a new state in
+which the console is up and its script is a 404 — and a cross-origin fetch on the one surface
+most worth keeping same-origin.
+
+**The committed copy is checked against `package-lock.json`.** `npm run build` refuses when the
+two differ, the container's ui stage runs the same check, and the runtime stage then takes htmx
+out of `node_modules` rather than out of the repository — so "the image ships what the lockfile
+pins" holds by construction. To take a new htmx: bump the dependency, `npm run vendor`, commit
+both. This exists because the alternative is the `_tokens.scss` situation, where a copy with
+nothing watching it drifts and nobody finds out until it matters.
+
+The argument would change if a second service wanted htmx. Three copies of it is the same
+problem again, and that is the point at which a shared origin starts paying for itself.
+
 ### On the game side
 
 `lc_server::ability` is the same idea over the game's vocabulary: one table, read from one
