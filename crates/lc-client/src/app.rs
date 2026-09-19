@@ -289,6 +289,14 @@ impl Plugin for ClientPlugin {
 /// HDR with bloom is not decoration here: the tone map deliberately pushes anything above the
 /// displayed window past the knee, so overflow has to become a halo somewhere. `min_radius`
 /// keeps a faint star to a couple of pixels rather than letting bloom eat the field.
+///
+/// Named, rather than found by `With<Camera3d>`, because the map draws with a second one. Every
+/// query for the eye takes `.single()`, which returns `Err` on two matches and is handled with
+/// an early return — so an unnamed second camera does not produce a wrong picture, it produces
+/// no picture, with nothing in the build to say why.
+#[derive(Component)]
+pub struct SkyCamera;
+
 /// Camera near plane, in render units of one astronomical unit. Fifteen metres.
 ///
 /// Anything nearer than this is clipped, so it is the closest a ship can come to a surface.
@@ -297,6 +305,7 @@ pub const NEAR_PLANE: f32 = 1.0e-10;
 fn spawn_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
+        SkyCamera,
         // A system spans a hundred thousand astronomical units and the render unit is one, so
         // the default thousand-unit far plane would clip everything past Saturn.
         //
@@ -322,7 +331,7 @@ fn spawn_camera(mut commands: Commands) {
 /// The camera never translates. Distance to a star is tens of trillions of kilometres and no
 /// float holds that next to a render unit, so the ship stays at the render origin and the sky
 /// moves around it; what changes when the ship flies is the direction to each star.
-fn aim_camera(ui: Res<Ui>, mut camera: Query<&mut Transform, With<Camera3d>>) {
+fn aim_camera(ui: Res<Ui>, mut camera: Query<&mut Transform, With<SkyCamera>>) {
     let Ok(mut transform) = camera.single_mut() else { return };
     let forward = sim_to_render(ui.look.forward()).as_vec3();
     let up = sim_to_render(DVec3::Z).as_vec3();
@@ -923,7 +932,7 @@ mod tests {
     fn the_camera_only_ever_rotates() {
         let mut app = harness();
         app.add_systems(Update, aim_camera);
-        let camera = app.world_mut().spawn((Camera3d::default(), Transform::default())).id();
+        let camera = app.world_mut().spawn((Camera3d::default(), SkyCamera, Transform::default())).id();
         app.world_mut().write_message(Requested(Action::Look { yaw: 1.0, pitch: 0.4 }));
         app.update();
         let transform = *app.world().entity(camera).get::<Transform>().unwrap();
@@ -931,11 +940,35 @@ mod tests {
         assert!(transform.rotation.is_finite() && transform.rotation.length() > 0.5);
     }
 
+    /// A second camera must not be able to stop the sky.
+    ///
+    /// Every system that wants the eye takes `.single()`, which returns `Err` on two matches —
+    /// and every one of them handles that with an early return. So before [`SkyCamera`] existed,
+    /// adding the map's camera did not draw a wrong picture, it drew no picture: the view froze,
+    /// the stars sized to zero and nothing was pickable, with nothing in the build to say why.
+    ///
+    /// The map camera is stood in for by a bare `Camera3d`, because what is being asserted is
+    /// that the marker is what disambiguates and not anything the map happens to carry.
+    #[test]
+    fn a_second_camera_does_not_stop_the_sky_turning() {
+        let mut app = harness();
+        app.add_systems(Update, aim_camera);
+        let sky = app.world_mut().spawn((Camera3d::default(), SkyCamera, Transform::default())).id();
+        app.world_mut().spawn((Camera3d::default(), Transform::default()));
+
+        let before = *app.world().entity(sky).get::<Transform>().unwrap();
+        app.world_mut().write_message(Requested(Action::Look { yaw: 1.0, pitch: 0.4 }));
+        app.update();
+
+        let after = *app.world().entity(sky).get::<Transform>().unwrap();
+        assert_ne!(after.rotation, before.rotation, "the turn never reached the sky camera");
+    }
+
     /// Where a mark placed in [`Stage::Mark`] found the camera.
     #[derive(Resource, Default)]
     struct Seen(Option<Vec3>);
 
-    fn probe(camera: Query<&Transform, With<Camera3d>>, mut seen: ResMut<Seen>) {
+    fn probe(camera: Query<&Transform, With<SkyCamera>>, mut seen: ResMut<Seen>) {
         seen.0 = camera.single().ok().map(|t| *t.forward());
     }
 
@@ -961,7 +994,7 @@ mod tests {
             .add_systems(Update, aim_camera.in_set(Stage::Scene))
             .add_systems(Update, probe.in_set(Stage::Mark));
         app.insert_state(AppState::InGame);
-        let camera = app.world_mut().spawn((Camera3d::default(), Transform::default())).id();
+        let camera = app.world_mut().spawn((Camera3d::default(), SkyCamera, Transform::default())).id();
         app.update();
         let before = app.world().resource::<Seen>().0.expect("the mark stage should have run");
 

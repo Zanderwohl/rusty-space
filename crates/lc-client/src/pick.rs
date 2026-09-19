@@ -23,7 +23,7 @@ use lc_world::navigation::Target;
 use lc_world::sky::StarId;
 
 use crate::action::Action;
-use crate::app::{Game, Ui};
+use crate::app::{Game, SkyCamera, Ui};
 use crate::input::Requested;
 use crate::starfield::{Bodies, radians_per_pixel};
 use crate::system::M_PER_LY;
@@ -166,7 +166,7 @@ fn survey(
     eye: Res<crate::hull::Eye>,
     uplink: Res<crate::uplink::Uplink>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    camera: Query<(&Projection, &Transform), With<Camera3d>>,
+    camera: Query<(&Projection, &Transform), With<SkyCamera>>,
     buttons: Res<ButtonInput<MouseButton>>,
     egui: Res<EguiWantsInput>,
     mut picked: ResMut<Picked>,

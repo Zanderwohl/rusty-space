@@ -443,7 +443,7 @@ pub fn lut_scale() -> f32 {
 }
 
 /// Radians per pixel for the camera the sky is drawn for.
-pub fn camera_scale(camera: &Query<(&Projection, &Camera), With<Camera3d>>) -> f32 {
+pub fn camera_scale(camera: &Query<(&Projection, &Camera), With<crate::app::SkyCamera>>) -> f32 {
     let Ok((projection, camera)) = camera.single() else { return 0.0 };
     let Projection::Perspective(perspective) = projection else { return 0.0 };
     let height = camera.logical_viewport_size().map(|s| s.y).unwrap_or(0.0);
@@ -457,7 +457,7 @@ pub fn spawn_sky(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<RelativisticStarfieldMaterial>>,
     mut images: ResMut<Assets<Image>>,
-    camera: Query<(&Projection, &Camera), With<Camera3d>>,
+    camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     existing: Query<Entity, With<SkyMesh>>,
 ) {
     for entity in &existing {
@@ -551,7 +551,7 @@ pub fn update_sky(
     mut sky: ResMut<Starfield>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<RelativisticStarfieldMaterial>>,
-    camera: Query<(&Projection, &Camera), With<Camera3d>>,
+    camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
 ) {
     let (distant_stars, local_stars) = partition(&session.0);
     // Membership as well as distance: crossing into a system moves a star from one pass to the

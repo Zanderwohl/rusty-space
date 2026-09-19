@@ -149,7 +149,7 @@ pub fn sample_scene(
     bodies: Res<crate::starfield::Bodies>,
     eye: Res<crate::hull::Eye>,
     uplink: Res<crate::uplink::Uplink>,
-    camera: Query<(&Projection, &Camera), With<Camera3d>>,
+    camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     mut last: Local<Option<(usize, f32)>>,
 ) {
     let rad_per_px = crate::starfield::camera_scale(&camera);
@@ -337,7 +337,7 @@ pub fn update_resolved(
     mut resolved: ResMut<Resolved>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodySurfaceMaterial>>,
-    camera: Query<(&Projection, &Camera), With<Camera3d>>,
+    camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     existing: Query<(Entity, &ResolvedBody)>,
     mut placed: Query<(&mut Transform, &MeshMaterial3d<BodySurfaceMaterial>, &ResolvedBody)>,
 ) {

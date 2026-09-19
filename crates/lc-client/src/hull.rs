@@ -184,7 +184,7 @@ pub fn place_eye(
     mut ui: ResMut<crate::app::Ui>,
     game: Res<crate::app::Game>,
     uplink: Res<Uplink>,
-    camera: Query<(&Projection, &Camera), With<Camera3d>>,
+    camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     mut eye: ResMut<Eye>,
 ) {
     let (near, far) = match camera.single() {
