@@ -14,9 +14,12 @@ COPY lc-admin/package.json lc-admin/package-lock.json ./
 RUN npm ci
 COPY lc-admin/tsconfig.json ./
 COPY lc-admin/ts ./ts
-# `npm run build` is `tsc --noEmit && esbuild`. The typecheck is the point of the first half:
-# a type error here fails the image rather than reaching a browser as a runtime one.
-RUN npm run bundle && npm run check
+# The vendored htmx, so `check:vendor` below has something to compare against.
+COPY lc-admin/static/vendor ./static/vendor
+# `npm run build` is three things, and each of them is a way for this image to fail rather
+# than for a browser to: `tsc --noEmit` catches a type error, `check:vendor` catches a
+# committed htmx that is not the one `package-lock.json` pins, and `esbuild` bundles.
+RUN npm run build
 
 FROM rust:1-bookworm AS chef
 WORKDIR /build
@@ -40,6 +43,11 @@ COPY --from=builder /build/target/release/lc-admin /app/lc-admin
 # `lc_admin::assets` for why one answer to "where do assets come from" is worth the read.
 COPY lc-admin/static /app/static
 COPY --from=ui /ui/static/js/admin.js /app/static/js/admin.js
+# **htmx comes from the lockfile, not from the committed copy.** Both are checked to be the
+# same bytes by the stage above, so this is belt and braces rather than a second source of
+# truth — but it is the belt that makes "the image ships what package-lock.json pins" true by
+# construction instead of by somebody having remembered to run `npm run vendor`.
+COPY --from=ui /ui/node_modules/htmx.org/dist/htmx.min.js /app/static/vendor/htmx.min.js
 # **No migrations.** `lc-identity` owns the schema and applies it at its own boot; this
 # service reads and writes tables it did not create. See `lc_admin`'s crate documentation.
 ENV BIND_ADDR=0.0.0.0:3300

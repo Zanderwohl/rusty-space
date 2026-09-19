@@ -201,6 +201,14 @@ Each of these cost real time. None of them are visible from the code that hits t
 - A paged query without a **unique tie-break** in its `order by` shows a row on two pages and
   another on none. `Listing::order_by` appends `a.id` for this, and a test asserts it for every
   column.
+- **The console's tests share one database and never drop it.** An assertion that reads page
+  one of an unfiltered index passes on a fresh database and starts failing once enough runs
+  have accumulated to fill a page — which looks like a regression in the thing it is named
+  after and is not. Narrow to accounts the test made, by a name carrying a uuid, as
+  `the_pages_partition_the_matches` does.
+- htmx is **vendored**, and `npm run build` refuses when the committed copy is not the one
+  `package-lock.json` pins. To take a new htmx: bump the dependency, `npm run vendor`, commit
+  both.
 
 **axum**
 

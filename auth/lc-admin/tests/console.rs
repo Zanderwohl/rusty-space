@@ -334,7 +334,13 @@ async fn a_ban_issued_here_is_a_ban_the_broker_enforces() {
     let pool = with_pool!(a_ban_issued_here_is_a_ban_the_broker_enforces);
     let app = router(state(pool.clone()));
     let admin = account(&pool, "Admin", Level::ADMIN).await;
-    let subject = account(&pool, "Subject", Level::PLAYER).await;
+    // A name nothing else shares, so the index assertions below can narrow to this account.
+    // Without that they ask page one of every banned account in the database and pass only
+    // while that page is short — which is to say they pass on a fresh database and start
+    // failing, for no reason connected to what they are about, once the suite has run enough
+    // times to fill a page.
+    let name = format!("Subject {}", Uuid::new_v4());
+    let subject = account(&pool, &name, Level::PLAYER).await;
     let store = lc_identity::store::Store::Postgres(pool.clone());
 
     assert_eq!(store.sanction(subject, Utc::now()).await.unwrap(), None);
@@ -385,12 +391,18 @@ async fn a_ban_issued_here_is_a_ban_the_broker_enforces() {
     );
 
     // And the index knows. `standing=clear` must not find them.
-    let banned = text(send(&app, get("/users/rows?standing=banned", Some(admin))).await).await;
+    let only_this = |standing: &str| {
+        format!(
+            "/users/rows?standing={standing}&q={}",
+            url::form_urlencoded::byte_serialize(name.as_bytes()).collect::<String>(),
+        )
+    };
+    let banned = text(send(&app, get(&only_this("banned"), Some(admin))).await).await;
     assert!(
         banned.contains(&subject.to_string()),
         "not in the banned list"
     );
-    let clear = text(send(&app, get("/users/rows?standing=clear", Some(admin))).await).await;
+    let clear = text(send(&app, get(&only_this("clear"), Some(admin))).await).await;
     assert!(
         !clear.contains(&subject.to_string()),
         "banned and also clear"

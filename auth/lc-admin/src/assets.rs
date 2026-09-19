@@ -161,7 +161,15 @@ mod tests {
             Ok(assets) => {
                 assert!(assets.css.contains("--accent"), "the tokens are missing");
                 assert!(!assets.css.contains("@use"), "this is SCSS, not CSS");
+                // htmx is **vendored**, not fetched: the bytes are in the repository, in the
+                // image, and served by this process under a digest of its own. A page that
+                // pulled its script from somewhere else would put an administration console's
+                // availability in a third party's hands, and its integrity too.
                 assert!(assets.htmx.contains("htmx"), "that is not htmx");
+                assert!(
+                    assets.htmx.starts_with("var htmx=(()=>{"),
+                    "that is not the minified htmx bundle",
+                );
             }
             Err(why) => {
                 let why = why.to_string();
