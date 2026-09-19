@@ -521,7 +521,10 @@ fn watts(w: f64) -> String {
 }
 
 fn scaled(value: f64, unit: &str) -> String {
-    const STEPS: [(f64, &str); 6] = [
+    const STEPS: [(f64, &str); 9] = [
+        (1e24, "Y"),
+        (1e21, "Z"),
+        (1e18, "E"),
         (1e15, "P"),
         (1e12, "T"),
         (1e9, "G"),
@@ -533,6 +536,13 @@ fn scaled(value: f64, unit: &str) -> String {
         return format!("— {unit}");
     }
     let magnitude = value.abs();
+    // **The ladder has to reach the numbers this game actually produces.** It stopped at peta
+    // first, and a ship's store came out as `6984095838507.07 PJ` — seven thousand billion
+    // petajoules, which is a correct number and is not a readable one. A relativistic drive
+    // deals in zettajoules without trying.
+    if magnitude >= 1e27 {
+        return format!("{value:.2e} {unit}");
+    }
     for (step, prefix) in STEPS {
         if magnitude >= step {
             return format!("{:.2} {prefix}{unit}", value / step);
@@ -718,6 +728,29 @@ mod tests {
             // a lifted ban.
             assert!(markup.contains("the private case notes"), "{markup}");
         }
+    }
+
+    /// An energy is readable at every size this game produces, which is a wider range than
+    /// the SI prefixes most code needs. The first version stopped at peta and rendered a real
+    /// ship's store as `6984095838507.07 PJ`.
+    #[test]
+    fn an_energy_reads_at_every_size() {
+        assert_eq!(joules(0.0), "0.00 J");
+        assert_eq!(joules(950.0), "950.00 J");
+        assert_eq!(joules(1.5e3), "1.50 kJ");
+        assert_eq!(joules(1.5e12), "1.50 TJ");
+        assert_eq!(joules(6.98e27), "6.98e27 J");
+        // The one from the real ship that started this.
+        let said = joules(6.984e27);
+        assert!(said.len() < 14, "still unreadable: {said}");
+        assert!(!said.contains("PJ"), "{said}");
+        // Watts share the ladder and not the unit.
+        assert_eq!(watts(4.2e3), "4.20 kW");
+        assert!(watts(1.037e21).ends_with("ZW"), "{}", watts(1.037e21));
+        // Nothing that could arrive over the wire makes this panic.
+        assert!(joules(f64::NAN).contains('—'));
+        assert!(joules(f64::INFINITY).contains('—'));
+        assert!(joules(-1.5e12).starts_with("-1.50 T"));
     }
 
     /// Every act goes through one region, so a ban that changes four things changes all four.
