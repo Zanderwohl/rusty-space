@@ -48,10 +48,10 @@ fn logged(ui: &egui::Ui) -> egui::FontId {
 /// because a log is mostly lowercase and the names in it are not.
 const LOG_SCALE: f32 = 1.2;
 
-/// And two points on top of that, which is a choice rather than a measurement: a transmission
+/// And four points on top of that, which is a choice rather than a measurement: a transmission
 /// is the one thing in this window that came from outside it, and it is read rather than
 /// scanned.
-const LOG_BUMP: f32 = 2.0;
+const LOG_BUMP: f32 = 4.0;
 
 /// Where a transmission is pointed, as the window offers it.
 ///
