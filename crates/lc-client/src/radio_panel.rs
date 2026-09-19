@@ -43,8 +43,8 @@ fn logged(ui: &egui::Ui) -> egui::FontId {
 /// What Geo needs to read at the size the interface reads at beside it.
 ///
 /// A point size is an em, and an em says nothing about how much of it the letters fill: Geo's
-/// capitals are 0.56 of theirs against egui's own face at 0.69, so the same number draws a
-/// visibly smaller line. Between matching the capitals (1.24) and matching the x-height (1.18),
+/// capitals are 0.56 of theirs against Quantico's 0.70, so the same number draws a visibly
+/// smaller line. Between matching the capitals (1.25) and matching the x-height (1.14),
 /// because a log is mostly lowercase and the names in it are not.
 const LOG_SCALE: f32 = 1.2;
 

@@ -267,9 +267,9 @@ fn settle_face(
             if !asked.iter().all(|(_, handle)| settled(handle)) {
                 return;
             }
-            // [`As::Alone`], unlike the radio: the page is one face throughout, and a glyph
-            // fetched from the interface font would be a word in egui's own sans in the
-            // middle of a paragraph of Faustina.
+            // [`As::Alone`], unlike everything else in the interface: the page is one face
+            // throughout, and a glyph fetched from the interface font would be a word in
+            // Quantico in the middle of a paragraph of Faustina.
             let installed: Vec<(String, Vec<u8>, As)> = asked
                 .iter()
                 .filter_map(|(name, handle)| {

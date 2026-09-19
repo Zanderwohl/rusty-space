@@ -256,8 +256,11 @@ impl Plugin for ClientPlugin {
             .add_systems(
                 EguiPrimaryContextPass,
                 (
-                    // First, so a frame that has the faces is drawn in them rather than the
-                    // frame after it.
+                    // Before anything is laid out: it changes how every glyph is
+                    // rasterised, and a pass that ran first would be measured hinted.
+                    crate::faces::unhint,
+                    // First of the drawing, so a frame that has the faces is drawn in them
+                    // rather than the frame after it.
                     crate::faces::settle,
                     panels::loading.run_if(in_state(AppState::Loading)),
                     (panels::hud, panels::open_panels, crate::reader::draw)
