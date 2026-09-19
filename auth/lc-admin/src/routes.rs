@@ -239,6 +239,9 @@ async fn load_detail(state: &AppState, id: Uuid) -> Result<Detail, Response> {
             .actions_for(id, LOG_DEPTH)
             .await
             .map_err(|e| failed(e.to_string()))?,
+        joined: detail::joined(&state.pool, id)
+            .await
+            .map_err(|e| failed(e.to_string()))?,
         links: detail::links_for(&state.pool, id)
             .await
             .map_err(|e| failed(e.to_string()))?,

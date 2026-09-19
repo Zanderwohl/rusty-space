@@ -232,7 +232,7 @@ async fn a_player_signing_in_is_refused_without_being_given_a_session() {
 #[tokio::test]
 async fn an_administrator_signing_in_is_given_a_session() {
     let pool = with_pool!(an_administrator_signing_in_is_given_a_session);
-    let admin = account(&pool, "Owner", Level::OWNER).await;
+    let admin = account(&pool, "Owner", Level::SUPERADMIN).await;
     let broker = stub_broker(admin).await;
     let app = router(state_against(pool.clone(), &broker));
 
@@ -308,7 +308,7 @@ async fn a_demoted_administrator_is_signed_out_rather_than_stranded() {
 async fn signing_out_ends_the_session() {
     let pool = with_pool!(signing_out_ends_the_session);
     let app = router(state(pool.clone()));
-    let admin = account(&pool, "Owner", Level::OWNER).await;
+    let admin = account(&pool, "Owner", Level::SUPERADMIN).await;
 
     let response = send(&app, post("/signout", admin, &[], false)).await;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
@@ -346,7 +346,7 @@ async fn signing_out_ends_the_session() {
 async fn signing_out_refuses_a_get() {
     let pool = with_pool!(signing_out_refuses_a_get);
     let app = router(state(pool.clone()));
-    let admin = account(&pool, "Owner", Level::OWNER).await;
+    let admin = account(&pool, "Owner", Level::SUPERADMIN).await;
 
     let response = send(&app, get("/signout", Some(admin))).await;
     assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
@@ -368,7 +368,7 @@ async fn signing_out_refuses_a_get() {
 async fn the_masthead_signs_out_with_a_form() {
     let pool = with_pool!(the_masthead_signs_out_with_a_form);
     let app = router(state(pool.clone()));
-    let admin = account(&pool, "Owner", Level::OWNER).await;
+    let admin = account(&pool, "Owner", Level::SUPERADMIN).await;
 
     let page = text(send(&app, get("/users", Some(admin))).await).await;
     assert!(
@@ -434,7 +434,7 @@ async fn an_expired_htmx_request_is_told_to_navigate() {
 async fn the_partial_is_the_region_and_the_page_contains_it() {
     let pool = with_pool!(the_partial_is_the_region_and_the_page_contains_it);
     let app = router(state(pool.clone()));
-    let admin = account(&pool, "Owner", Level::OWNER).await;
+    let admin = account(&pool, "Owner", Level::SUPERADMIN).await;
     let needle = format!("Findable {}", Uuid::new_v4());
     account(&pool, &needle, Level::PLAYER).await;
 
@@ -469,7 +469,7 @@ async fn the_partial_is_the_region_and_the_page_contains_it() {
 async fn the_pages_partition_the_matches() {
     let pool = with_pool!(the_pages_partition_the_matches);
     let app = router(state(pool.clone()));
-    let admin = account(&pool, "Owner", Level::OWNER).await;
+    let admin = account(&pool, "Owner", Level::SUPERADMIN).await;
 
     // A batch that shares a name prefix and a creation instant, which is the case a
     // tie-break-free ordering gets wrong.
@@ -525,7 +525,7 @@ async fn the_level_rules_hold_through_the_router() {
         post(
             &format!("/users/{subject}/level"),
             admin,
-            &[("level", "owner")],
+            &[("level", "superadmin")],
             true,
         ),
     )
@@ -541,7 +541,7 @@ async fn the_level_rules_hold_through_the_router() {
         post(
             &format!("/users/{subject}/level"),
             admin,
-            &[("level", "moderator")],
+            &[("level", "debug")],
             true,
         ),
     )
@@ -556,7 +556,7 @@ async fn the_level_rules_hold_through_the_router() {
         post(
             &format!("/users/{admin}/level"),
             admin,
-            &[("level", "moderator")],
+            &[("level", "debug")],
             true,
         ),
     )
@@ -655,13 +655,13 @@ async fn a_ban_issued_here_is_a_ban_the_broker_enforces() {
 async fn an_administrator_cannot_be_banned_even_by_posting_the_form() {
     let pool = with_pool!(an_administrator_cannot_be_banned_even_by_posting_the_form);
     let app = router(state(pool.clone()));
-    let owner = account(&pool, "Owner", Level::OWNER).await;
-    let moderator = account(&pool, "Moderator", Level::MODERATOR).await;
+    let owner = account(&pool, "Owner", Level::SUPERADMIN).await;
+    let debug_level = account(&pool, "Debug tier", Level::DEBUG).await;
 
     let response = send(
         &app,
         post(
-            &format!("/users/{moderator}/ban"),
+            &format!("/users/{debug_level}/ban"),
             owner,
             &[("reason", "spam"), ("term", "1w"), ("notes", "")],
             true,
@@ -672,13 +672,13 @@ async fn an_administrator_cannot_be_banned_even_by_posting_the_form() {
     assert!(text(response).await.contains("Remove their level first"));
 
     let store = lc_identity::store::Store::Postgres(pool.clone());
-    assert_eq!(store.sanction(moderator, Utc::now()).await.unwrap(), None);
+    assert_eq!(store.sanction(debug_level, Utc::now()).await.unwrap(), None);
 
     // De-admin first, and then it works. The rule is an ordering, not a prohibition.
     send(
         &app,
         post(
-            &format!("/users/{moderator}/level"),
+            &format!("/users/{debug_level}/level"),
             owner,
             &[("level", "player")],
             true,
@@ -688,7 +688,7 @@ async fn an_administrator_cannot_be_banned_even_by_posting_the_form() {
     let response = send(
         &app,
         post(
-            &format!("/users/{moderator}/ban"),
+            &format!("/users/{debug_level}/ban"),
             owner,
             &[("reason", "spam"), ("term", "1w"), ("notes", "")],
             true,
@@ -698,7 +698,7 @@ async fn an_administrator_cannot_be_banned_even_by_posting_the_form() {
     assert_eq!(response.status(), StatusCode::OK);
     assert!(
         store
-            .sanction(moderator, Utc::now())
+            .sanction(debug_level, Utc::now())
             .await
             .unwrap()
             .is_some()
@@ -763,10 +763,10 @@ async fn a_ban_cannot_be_lifted_through_somebody_elses_page() {
 async fn every_act_is_logged_on_the_user_page() {
     let pool = with_pool!(every_act_is_logged_on_the_user_page);
     let app = router(state(pool.clone()));
-    let owner = account(&pool, "Owner", Level::OWNER).await;
+    let owner = account(&pool, "Owner", Level::SUPERADMIN).await;
     let subject = account(&pool, "Subject", Level::PLAYER).await;
 
-    for fields in [vec![("level", "moderator")], vec![("level", "player")]] {
+    for fields in [vec![("level", "debug")], vec![("level", "player")]] {
         send(
             &app,
             post(&format!("/users/{subject}/level"), owner, &fields, true),
@@ -786,7 +786,7 @@ async fn every_act_is_logged_on_the_user_page() {
 
     let page = text(send(&app, get(&format!("/users/{subject}"), Some(owner))).await).await;
     assert!(page.contains("Promoted"), "{page}");
-    assert!(page.contains("Player to Moderator"), "{page}");
+    assert!(page.contains("Player to Debug"), "{page}");
     assert!(page.contains("Demoted"), "{page}");
     assert!(page.contains("Banned"), "{page}");
     assert!(page.contains("1 day"), "{page}");
@@ -837,7 +837,7 @@ async fn ban_notes_reach_the_console_and_no_unauthenticated_caller() {
 async fn a_hand_edited_query_string_is_answered() {
     let pool = with_pool!(a_hand_edited_query_string_is_answered);
     let app = router(state(pool.clone()));
-    let admin = account(&pool, "Owner", Level::OWNER).await;
+    let admin = account(&pool, "Owner", Level::SUPERADMIN).await;
 
     // Encoded as a browser would encode them, so what is being tested is what the handler
     // does with the values rather than what `http::Uri` does with the characters.

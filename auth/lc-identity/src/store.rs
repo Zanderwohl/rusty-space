@@ -32,7 +32,7 @@ impl Account {
 /// A player, kept as a name for the callers that were written before levels existed.
 pub const PLAYER: i32 = 0;
 /// The most senior administrator. See [`Level`]: 1 is the *top* of the ladder, not the bottom.
-pub const ADMIN: i32 = 1;
+pub const SUPERADMIN: i32 = 1;
 
 /// One way of signing in to one account.
 #[derive(Clone, Debug, PartialEq, Eq)]

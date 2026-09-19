@@ -24,21 +24,24 @@ use serde::Deserialize;
 
 /// Which column the index is ordered by.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+/// One per column, and there are only three columns.
+///
+/// Sorting is done by clicking a heading, so an ordering with no heading would be reachable
+/// only by editing the URL — a feature with no way in. `created` was one of these when the
+/// joined date left the table; it is on the user page now instead.
 pub enum Sort {
     #[default]
     Name,
-    Created,
     Level,
     Status,
 }
 
 impl Sort {
-    pub const ALL: [Sort; 4] = [Sort::Name, Sort::Created, Sort::Level, Sort::Status];
+    pub const ALL: [Sort; 3] = [Sort::Name, Sort::Level, Sort::Status];
 
     pub fn slug(self) -> &'static str {
         match self {
             Sort::Name => "name",
-            Sort::Created => "created",
             Sort::Level => "level",
             Sort::Status => "status",
         }
@@ -47,7 +50,6 @@ impl Sort {
     pub fn heading(self) -> &'static str {
         match self {
             Sort::Name => "Account",
-            Sort::Created => "Joined",
             Sort::Level => "Level",
             Sort::Status => "Standing",
         }
@@ -66,7 +68,6 @@ impl Sort {
     fn column(self) -> &'static str {
         match self {
             Sort::Name => "lower(a.display_name)",
-            Sort::Created => "a.created_at",
             // 0 is a player, which belongs at the bottom of a seniority sort rather than at
             // the top of it. `nullif` turns it into a null and `nulls last` puts it there.
             Sort::Level => "nullif(a.permission, 0)",
@@ -437,9 +438,9 @@ mod tests {
     fn a_listing_survives_its_own_url() {
         let listing = Listing {
             q: "ada".into(),
-            rank: Rank::Exactly(Level::MODERATOR),
+            rank: Rank::Exactly(Level::DEBUG),
             standing: Standing::Banned,
-            sort: Sort::Created,
+            sort: Sort::Status,
             dir: Dir::Desc,
             page: 3,
             per: 50,
@@ -448,7 +449,7 @@ mod tests {
         // And the order is fixed, so two routes to the same view give the same string.
         assert_eq!(
             listing.query_string(),
-            "q=ada&level=moderator&standing=banned&sort=created&dir=desc&per=50&page=3",
+            "q=ada&level=debug&standing=banned&sort=status&dir=desc&per=50&page=3",
         );
     }
 
@@ -506,15 +507,15 @@ mod tests {
         assert_eq!(flipped.dir, Dir::Desc);
         assert_eq!(flipped.page, 1, "a reorder kept the old page");
 
-        let other = flipped.sorted_by(Sort::Created);
-        assert_eq!(other.sort, Sort::Created);
+        let other = flipped.sorted_by(Sort::Level);
+        assert_eq!(other.sort, Sort::Level);
         assert_eq!(
             other.dir,
             Dir::Asc,
             "a fresh column did not start ascending"
         );
         // Flipping twice comes back.
-        assert_eq!(other.sorted_by(Sort::Created).dir, Dir::Desc);
+        assert_eq!(other.sorted_by(Sort::Level).dir, Dir::Desc);
     }
 
     /// Every paged query needs a unique tie-break or page 2 repeats rows from page 1.

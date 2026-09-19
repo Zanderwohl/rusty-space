@@ -19,12 +19,9 @@ pub struct Row {
     pub id: Uuid,
     pub display_name: String,
     pub level: Level,
-    pub created_at: DateTime<Utc>,
     /// One address, for recognising the account. Not every address it has: the index is a
     /// list to find somebody in, and the user page is where the links are enumerated.
     pub email: Option<String>,
-    /// Which ways of signing in this account has, by name.
-    pub providers: Vec<String>,
     /// How many bans are in force right now.
     pub in_force: i64,
     pub permanent: bool,
@@ -75,9 +72,7 @@ type IndexRow = (
     Uuid,
     String,
     i32,
-    DateTime<Utc>,
     Option<String>,
-    String,
     i64,
     bool,
     Option<DateTime<Utc>>,
@@ -125,11 +120,8 @@ pub async fn page(pool: &PgPool, listing: &Listing, now: DateTime<Utc>) -> sqlx:
         "select a.id, \
                 a.display_name, \
                 a.permission, \
-                a.created_at, \
                 (select min(l.email) from links l \
                   where l.account_id = a.id and l.email is not null) as email, \
-                coalesce((select string_agg(distinct l.provider, ',' order by l.provider) \
-                            from links l where l.account_id = a.id), '') as providers, \
                 live.in_force, \
                 live.permanent, \
                 live.until, \
@@ -170,7 +162,7 @@ pub async fn page(pool: &PgPool, listing: &Listing, now: DateTime<Utc>) -> sqlx:
     // Zero rows is zero rows, not zero accounts: the window function comes back with the
     // rows, so an empty page carries no total and the count has to be read as such. A page
     // past the end is the ordinary way to get here.
-    let total = rows.first().map_or(0, |r| r.9);
+    let total = rows.first().map_or(0, |r| r.7);
     Ok(Page {
         rows: rows
             .into_iter()
@@ -178,17 +170,10 @@ pub async fn page(pool: &PgPool, listing: &Listing, now: DateTime<Utc>) -> sqlx:
                 id: r.0,
                 display_name: r.1,
                 level: Level::from_stored(r.2),
-                created_at: r.3,
-                email: r.4,
-                providers: r
-                    .5
-                    .split(',')
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_owned)
-                    .collect(),
-                in_force: r.6,
-                permanent: r.7,
-                until: r.8,
+                email: r.3,
+                in_force: r.4,
+                permanent: r.5,
+                until: r.6,
             })
             .collect(),
         total,
@@ -254,9 +239,7 @@ mod tests {
                     id: Uuid::new_v4(),
                     display_name: format!("account {n}"),
                     level: Level::PLAYER,
-                    created_at: Utc::now(),
                     email: None,
-                    providers: Vec::new(),
                     in_force: 0,
                     permanent: false,
                     until: None,

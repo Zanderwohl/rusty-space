@@ -228,33 +228,36 @@ mod tests {
     #[test]
     fn an_administrator_promotes_up_to_their_own_level_and_no_further() {
         assert_eq!(set(Level::ADMIN, Level::PLAYER, Level::ADMIN), Ok(()));
-        assert_eq!(set(Level::ADMIN, Level::PLAYER, Level::MODERATOR), Ok(()));
-        assert_eq!(set(Level::ADMIN, Level::MODERATOR, Level::ADMIN), Ok(()));
+        assert_eq!(set(Level::ADMIN, Level::PLAYER, Level::DEBUG), Ok(()));
+        assert_eq!(set(Level::ADMIN, Level::DEBUG, Level::ADMIN), Ok(()));
 
         assert_eq!(
-            set(Level::ADMIN, Level::PLAYER, Level::OWNER),
+            set(Level::ADMIN, Level::PLAYER, Level::SUPERADMIN),
             Err(Denied::AboveYou)
         );
         assert_eq!(
-            set(Level::MODERATOR, Level::PLAYER, Level::ADMIN),
+            set(Level::DEBUG, Level::PLAYER, Level::ADMIN),
             Err(Denied::AboveYou)
         );
         // An owner may hand out their own level. There is no higher one to be refused.
-        assert_eq!(set(Level::OWNER, Level::PLAYER, Level::OWNER), Ok(()));
+        assert_eq!(
+            set(Level::SUPERADMIN, Level::PLAYER, Level::SUPERADMIN),
+            Ok(())
+        );
     }
 
     #[test]
     fn an_administrator_demotes_only_those_below_them() {
-        assert_eq!(set(Level::OWNER, Level::ADMIN, Level::PLAYER), Ok(()));
-        assert_eq!(set(Level::ADMIN, Level::MODERATOR, Level::PLAYER), Ok(()));
+        assert_eq!(set(Level::SUPERADMIN, Level::ADMIN, Level::PLAYER), Ok(()));
+        assert_eq!(set(Level::ADMIN, Level::DEBUG, Level::PLAYER), Ok(()));
 
         assert_eq!(
-            set(Level::ADMIN, Level::ADMIN, Level::MODERATOR),
+            set(Level::ADMIN, Level::ADMIN, Level::DEBUG),
             Err(Denied::NotBelowYou),
             "an equal was demoted"
         );
         assert_eq!(
-            set(Level::MODERATOR, Level::ADMIN, Level::PLAYER),
+            set(Level::DEBUG, Level::ADMIN, Level::PLAYER),
             Err(Denied::NotBelowYou),
         );
     }
@@ -276,9 +279,9 @@ mod tests {
             }
         }
         for actor in Level::ADMINISTRATIVE {
-            for proposed in [Level::PLAYER, Level::MODERATOR, Level::ADMIN] {
+            for proposed in [Level::PLAYER, Level::DEBUG, Level::ADMIN] {
                 assert_eq!(
-                    set(actor, Level::OWNER, proposed),
+                    set(actor, Level::SUPERADMIN, proposed),
                     Err(Denied::NotBelowYou),
                     "{actor} demoted an owner",
                 );
@@ -331,19 +334,19 @@ mod tests {
         let (a, s) = them();
         assert_eq!(
             levels_offerable(Level::ADMIN, a, Level::PLAYER, s),
-            vec![Level::ADMIN, Level::MODERATOR],
+            vec![Level::ADMIN, Level::DEBUG],
             "an administrator was offered a level they cannot grant",
         );
         assert_eq!(
-            levels_offerable(Level::MODERATOR, a, Level::PLAYER, s),
-            vec![Level::MODERATOR],
+            levels_offerable(Level::DEBUG, a, Level::PLAYER, s),
+            vec![Level::DEBUG],
         );
         assert_eq!(
-            levels_offerable(Level::ADMIN, a, Level::MODERATOR, s),
+            levels_offerable(Level::ADMIN, a, Level::DEBUG, s),
             vec![Level::PLAYER, Level::ADMIN],
         );
         // Their own account offers nothing at all, rather than offering and then refusing.
-        assert!(levels_offerable(Level::OWNER, a, Level::OWNER, a).is_empty());
+        assert!(levels_offerable(Level::SUPERADMIN, a, Level::SUPERADMIN, a).is_empty());
         assert!(levels_offerable(Level::PLAYER, a, Level::PLAYER, s).is_empty());
     }
 }

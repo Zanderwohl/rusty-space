@@ -37,6 +37,19 @@ impl Grant {
 
 type LinkRow = (String, String, Option<String>, bool, DateTime<Utc>);
 
+/// The facts about the account row itself that `lc_identity::store::Account` does not carry.
+///
+/// Its own query because `Account` is the broker's type and the broker has no use for these:
+/// widening it would put a column on the sign-in path that only a console reads.
+pub async fn joined(pool: &PgPool, account_id: Uuid) -> sqlx::Result<Option<DateTime<Utc>>> {
+    let row: Option<(DateTime<Utc>,)> =
+        sqlx::query_as("select created_at from accounts where id = $1")
+            .bind(account_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.map(|r| r.0))
+}
+
 pub async fn links_for(pool: &PgPool, account_id: Uuid) -> sqlx::Result<Vec<Link>> {
     let rows: Vec<LinkRow> = sqlx::query_as(
         "select provider, subject, email, email_verified, created_at \

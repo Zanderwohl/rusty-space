@@ -20,16 +20,19 @@ impl Level {
     /// Everybody. Plays the game and administers nothing.
     pub const PLAYER: Level = Level(0);
     /// The most senior. May act on every other level and, by the rules in [`crate::ability`],
-    /// may not be demoted by anyone — including another owner. See that module for why that
-    /// is the rule rather than an oversight.
-    pub const OWNER: Level = Level(1);
+    /// may not be demoted by anyone — including another superadmin. See that module for why
+    /// that is the rule rather than an oversight.
+    pub const SUPERADMIN: Level = Level(1);
     pub const ADMIN: Level = Level(2);
-    pub const MODERATOR: Level = Level(3);
+    /// Administers accounts like the two above it, and is the tier the development actions on
+    /// a shard are named for — see `lc_server::ability`, where every administrative level may
+    /// grant energy and stage a scene.
+    pub const DEBUG: Level = Level(3);
 
     /// Every level that administers something, most senior first. The order a picker offers.
-    pub const ADMINISTRATIVE: [Level; 3] = [Level::OWNER, Level::ADMIN, Level::MODERATOR];
+    pub const ADMINISTRATIVE: [Level; 3] = [Level::SUPERADMIN, Level::ADMIN, Level::DEBUG];
     /// And every level at all, for a filter that wants to name them.
-    pub const ALL: [Level; 4] = [Level::PLAYER, Level::OWNER, Level::ADMIN, Level::MODERATOR];
+    pub const ALL: [Level; 4] = [Level::PLAYER, Level::SUPERADMIN, Level::ADMIN, Level::DEBUG];
 
     /// What the database holds. Anything outside the range is read as a player.
     ///
@@ -66,9 +69,9 @@ impl Level {
 
     pub fn name(self) -> &'static str {
         match self.0 {
-            1 => "Owner",
-            2 => "Administrator",
-            3 => "Moderator",
+            1 => "Superadmin",
+            2 => "Admin",
+            3 => "Debug",
             _ => "Player",
         }
     }
@@ -77,9 +80,9 @@ impl Level {
     /// the two are separate functions over the same match.
     pub fn slug(self) -> &'static str {
         match self.0 {
-            1 => "owner",
+            1 => "superadmin",
             2 => "admin",
-            3 => "moderator",
+            3 => "debug",
             _ => "player",
         }
     }
@@ -101,17 +104,17 @@ mod tests {
 
     #[test]
     fn seniority_runs_opposite_to_the_integer() {
-        assert!(Level::OWNER.outranks(Level::ADMIN));
-        assert!(Level::ADMIN.outranks(Level::MODERATOR));
-        assert!(Level::MODERATOR.outranks(Level::PLAYER));
-        assert!(Level::OWNER.outranks(Level::PLAYER));
+        assert!(Level::SUPERADMIN.outranks(Level::ADMIN));
+        assert!(Level::ADMIN.outranks(Level::DEBUG));
+        assert!(Level::DEBUG.outranks(Level::PLAYER));
+        assert!(Level::SUPERADMIN.outranks(Level::PLAYER));
 
-        assert!(!Level::ADMIN.outranks(Level::OWNER));
-        assert!(!Level::PLAYER.outranks(Level::MODERATOR));
+        assert!(!Level::ADMIN.outranks(Level::SUPERADMIN));
+        assert!(!Level::PLAYER.outranks(Level::DEBUG));
         // And the integers really do run the other way, which is the whole reason this type
         // exists. If this ever fails the constants were renumbered and every call site that
         // reads `outranks` now means something else.
-        assert!(Level::OWNER.as_i32() < Level::ADMIN.as_i32());
+        assert!(Level::SUPERADMIN.as_i32() < Level::ADMIN.as_i32());
     }
 
     /// Nobody outranks themselves, at any level. The promote and demote rules both lean on
@@ -131,7 +134,7 @@ mod tests {
     fn a_player_is_not_on_the_ladder() {
         assert!(!Level::PLAYER.is_admin());
         assert!(!Level::PLAYER.outranks(Level::PLAYER));
-        assert!(!Level::PLAYER.at_least(Level::MODERATOR));
+        assert!(!Level::PLAYER.at_least(Level::DEBUG));
         for admin in Level::ADMINISTRATIVE {
             assert!(admin.is_admin());
             assert!(admin.outranks(Level::PLAYER));

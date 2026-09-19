@@ -52,11 +52,7 @@ pub fn region(page: &Page, now: DateTime<Utc>) -> Markup {
                 table class="index" {
                     thead {
                         tr {
-                            (heading(listing, Sort::Name))
-                            th scope="col" { "Sign-in" }
-                            (heading(listing, Sort::Level))
-                            (heading(listing, Sort::Status))
-                            (heading(listing, Sort::Created))
+                            @for sort in Sort::ALL { (heading(listing, sort)) }
                         }
                     }
                     tbody {
@@ -196,27 +192,23 @@ fn heading(listing: &Listing, sort: Sort) -> Markup {
     }
 }
 
+/// One row, and **the whole of it is the link**.
+///
+/// One anchor, in the name cell, stretched over the row by `.row-link a::after` — not an
+/// anchor per cell. A row of three links is three tab stops and three announcements to a
+/// screen reader, all naming the same account; this way the row holds exactly one link, with
+/// the account's name as its text, and a click anywhere on the row follows it.
 fn line(row: &Row, now: DateTime<Utc>) -> Markup {
     html! {
-        tr class=[row.is_banned().then_some("is-banned")] {
+        tr class={ "row-link" @if row.is_banned() { " is-banned" } } {
             th scope="row" class="cell-name" {
                 a href=(crate::routes::user_url(row.id)) { (row.display_name) }
                 @if let Some(email) = &row.email {
                     span class="cell-email" { (email) }
                 }
             }
-            td class="cell-providers" {
-                @if row.providers.is_empty() {
-                    span class="nothing" { "—" }
-                } @else {
-                    @for provider in &row.providers {
-                        span class="badge badge-provider" { (provider) }
-                    }
-                }
-            }
             td { (super::level_badge(row.level)) }
             td class="cell-standing" { (standing_of(row, now)) }
-            td { (super::when(row.created_at)) }
         }
     }
 }
@@ -323,9 +315,7 @@ mod tests {
                 id: Uuid::new_v4(),
                 display_name: format!("Account {i}"),
                 level: Level::PLAYER,
-                created_at: Utc::now(),
                 email: Some(format!("a{i}@example.test")),
-                providers: vec!["password".into()],
                 in_force: 0,
                 permanent: false,
                 until: None,
@@ -358,6 +348,45 @@ mod tests {
             markup.contains(r#"hx-swap:inherited="outerHTML""#),
             "{markup}"
         );
+    }
+
+    /// Three columns, and every one of them sorts. A column with no heading would be an
+    /// ordering reachable only by editing the URL.
+    #[test]
+    fn the_table_has_a_heading_for_every_ordering_and_no_others() {
+        let markup = region(&a_page(Listing::default(), 100, 3), Utc::now()).into_string();
+        assert_eq!(
+            markup.matches("<th scope=\"col\"").count(),
+            Sort::ALL.len(),
+            "{markup}",
+        );
+        for sort in Sort::ALL {
+            assert!(
+                markup.contains(sort.heading()),
+                "no {} column",
+                sort.heading()
+            );
+        }
+        // The two that left. Neither is lost: the addresses sit under each name, and the
+        // providers and the joined date are on the user page.
+        assert!(!markup.contains("Sign-in"), "{markup}");
+        assert!(!markup.contains("Joined"), "{markup}");
+    }
+
+    /// The whole row is the link, and it is **one** link: three cells each wrapping their own
+    /// anchor would be three tab stops and three announcements naming one account.
+    #[test]
+    fn a_row_is_one_link_over_the_whole_row() {
+        let markup = region(&a_page(Listing::default(), 1, 1), Utc::now()).into_string();
+        let row = markup
+            .split("<tbody>")
+            .nth(1)
+            .and_then(|t| t.split("</tbody>").next())
+            .expect("a body");
+        assert_eq!(row.matches("<a ").count(), 1, "not one link per row: {row}");
+        assert!(row.contains(r#"class="row-link"#), "{row}");
+        // And the link's text is the account's name, not "view" or an identifier.
+        assert!(row.contains(">Account 0</a>"), "{row}");
     }
 
     /// Every control is a real link or a real form as well as an htmx one. With scripting off
@@ -458,9 +487,9 @@ mod tests {
         assert!(name.contains(r#"aria-sort="ascending""#), "{name}");
         assert!(name.contains("dir=desc"), "clicking did not flip: {name}");
 
-        let other = heading(&listing, Sort::Created).into_string();
+        let other = heading(&listing, Sort::Level).into_string();
         assert!(!other.contains("aria-sort"), "{other}");
-        assert!(other.contains("sort=created"), "{other}");
+        assert!(other.contains("sort=level"), "{other}");
         assert!(
             !other.contains("dir="),
             "a fresh column asked for a direction: {other}"

@@ -64,6 +64,35 @@
     background: var(--ground-raised);
   }
 
+  // **The whole row is the link.** One anchor in the name cell, stretched over the row by a
+  // pseudo-element — so the row has one tab stop and one thing for a screen reader to
+  // announce, and a click anywhere on it follows the same link.
+  //
+  // `position: relative` on a `<tr>` is what makes the containing block the row rather than
+  // the page. It was unreliable for years and is not any more; if a row ever stretches its
+  // link across the whole viewport, this is the line that stopped working.
+  //
+  // **Text in the row cannot be selected**, which is the known cost of this pattern and is
+  // not worth working around: giving the cells `position: relative` to let them take a drag
+  // raises them above the overlay, and then only the name is clickable — which is the bug
+  // this pattern was adopted to fix. An address that needs copying is on the user page, one
+  // click away, where it is selectable.
+  .row-link {
+    position: relative;
+
+    a::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+    }
+
+    &:focus-within {
+      background: var(--ground-raised);
+      outline: 1px solid var(--accent-dim);
+      outline-offset: -1px;
+    }
+  }
+
   // A banned row is marked by more than its badge, so a list is scannable without reading
   // every cell.
   .is-banned th[scope="row"] {

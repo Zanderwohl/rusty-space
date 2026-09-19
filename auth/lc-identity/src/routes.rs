@@ -769,7 +769,7 @@ mod endpoint_tests {
 
         broker
             .store
-            .set_permission(id, crate::store::ADMIN)
+            .set_permission(id, crate::store::SUPERADMIN)
             .await
             .unwrap();
         let (_, promoted) = call(

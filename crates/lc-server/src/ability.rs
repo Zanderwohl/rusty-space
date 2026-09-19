@@ -29,11 +29,11 @@ pub struct Level(i32);
 
 impl Level {
     pub const PLAYER: Level = Level(0);
-    pub const OWNER: Level = Level(1);
+    pub const SUPERADMIN: Level = Level(1);
     pub const ADMIN: Level = Level(2);
-    pub const MODERATOR: Level = Level(3);
+    pub const DEBUG: Level = Level(3);
 
-    pub const ALL: [Level; 4] = [Level::PLAYER, Level::OWNER, Level::ADMIN, Level::MODERATOR];
+    pub const ALL: [Level; 4] = [Level::PLAYER, Level::SUPERADMIN, Level::ADMIN, Level::DEBUG];
 
     /// What a ticket carries. Anything outside the range is read as a player.
     ///
@@ -67,9 +67,9 @@ impl Level {
 
     pub fn name(self) -> &'static str {
         match self.0 {
-            1 => "Owner",
-            2 => "Administrator",
-            3 => "Moderator",
+            1 => "Superadmin",
+            2 => "Admin",
+            3 => "Debug",
             _ => "Player",
         }
     }
@@ -159,16 +159,23 @@ pub struct Directing(pub bool);
 /// ticket that would have let them connect is refused. That path leaves a row, a reason and a
 /// name.
 ///
-/// ## Development actions are ranked
+/// ## Development actions need a level, and every administrative level has it
 ///
-/// Granting energy and staging a scene are levelled at [`Level::ADMIN`], which a moderator does
-/// not hold. A moderator is somebody trusted with people, not with the sky.
+/// Granting energy and staging a scene are open to [`Level::SUPERADMIN`], [`Level::ADMIN`] and
+/// [`Level::DEBUG`] alike — which is to say to anyone who is not a player. `DEBUG` is the
+/// junior tier and is named for exactly these two acts, so gating them above it would be a
+/// tier that cannot do the thing it is called after.
+///
+/// What that costs is worth saying plainly: **the most junior administrative level can conjure
+/// energy on a live shard.** The containment is that it cannot do so to somebody else's ship —
+/// `GrantEnergy` reaches only the asker's own craft — and that promoting anyone to `DEBUG` is
+/// an act with a name against it in `admin_actions`.
 pub fn allows(act: Act, who: Asking, directing: Directing) -> bool {
     match act {
         Act::Command | Act::Speak => who.standing == Standing::Flies,
         // A directing shard is a development one and open to whoever reached it; elsewhere
         // this is the level, from a ticket the broker signed.
-        Act::GrantEnergy | Act::Stage => directing.0 || who.level.at_least(Level::ADMIN),
+        Act::GrantEnergy | Act::Stage => directing.0 || who.level.is_admin(),
     }
 }
 
@@ -191,9 +198,7 @@ mod tests {
                         let got = allows(act, asking(level, standing), directing);
                         let want = match act {
                             Act::Command | Act::Speak => standing == Standing::Flies,
-                            Act::GrantEnergy | Act::Stage => {
-                                directing.0 || level == Level::OWNER || level == Level::ADMIN
-                            }
+                            Act::GrantEnergy | Act::Stage => directing.0 || level.is_admin(),
                         };
                         assert_eq!(
                             got, want,
@@ -226,22 +231,24 @@ mod tests {
         }
     }
 
-    /// A moderator is trusted with people, not with the sky.
+    /// Every administrative level may develop, and no player may. `DEBUG` is named for these
+    /// two acts, so a gate above it would be a tier that cannot do what it is called after.
     #[test]
-    fn development_actions_stop_at_administrator() {
+    fn development_actions_are_open_to_every_administrative_level() {
         for act in [Act::GrantEnergy, Act::Stage] {
-            for level in [Level::OWNER, Level::ADMIN] {
-                assert!(allows(act, asking(level, Standing::Flies), Directing(false)));
-            }
-            for level in [Level::MODERATOR, Level::PLAYER] {
+            for level in [Level::SUPERADMIN, Level::ADMIN, Level::DEBUG] {
                 assert!(
-                    !allows(act, asking(level, Standing::Flies), Directing(false)),
-                    "{} granted themselves {act:?}",
+                    allows(act, asking(level, Standing::Flies), Directing(false)),
+                    "{} could not {act:?}",
                     level.name(),
                 );
-                // Except on a shard that stages, where the population is whoever ran it.
-                assert!(allows(act, asking(level, Standing::Flies), Directing(true)));
             }
+            assert!(
+                !allows(act, asking(Level::PLAYER, Standing::Flies), Directing(false)),
+                "a player granted themselves {act:?}",
+            );
+            // Except on a shard that stages, where the population is whoever ran it.
+            assert!(allows(act, asking(Level::PLAYER, Standing::Flies), Directing(true)));
         }
     }
 
@@ -249,18 +256,18 @@ mod tests {
     /// silently. `lc_identity::level::tests` is the other half of this.
     #[test]
     fn seniority_runs_opposite_to_the_integer() {
-        assert_eq!(Level::OWNER.as_i32(), 1);
+        assert_eq!(Level::SUPERADMIN.as_i32(), 1);
         assert_eq!(Level::ADMIN.as_i32(), 2);
-        assert_eq!(Level::MODERATOR.as_i32(), 3);
-        assert!(Level::OWNER.outranks(Level::ADMIN));
-        assert!(Level::ADMIN.outranks(Level::MODERATOR));
-        assert!(!Level::MODERATOR.outranks(Level::ADMIN));
+        assert_eq!(Level::DEBUG.as_i32(), 3);
+        assert!(Level::SUPERADMIN.outranks(Level::ADMIN));
+        assert!(Level::ADMIN.outranks(Level::DEBUG));
+        assert!(!Level::DEBUG.outranks(Level::ADMIN));
         for level in Level::ALL {
             assert!(!level.outranks(level));
             assert!(level.at_least(level));
         }
         assert!(!Level::PLAYER.is_admin());
-        assert!(!Level::PLAYER.at_least(Level::MODERATOR));
+        assert!(!Level::PLAYER.at_least(Level::DEBUG));
     }
 
     /// Every order needs an authority, and the two kinds are told apart. This is here so the
@@ -302,7 +309,7 @@ mod tests {
             let act = Act::of(order);
             assert!(act == Act::Command || act == Act::Speak);
             assert!(
-                !allows(act, asking(Level::OWNER, Standing::Otherwise), Directing(true)),
+                !allows(act, asking(Level::SUPERADMIN, Standing::Otherwise), Directing(true)),
                 "{order:?} was allowed on somebody else's craft",
             );
         }

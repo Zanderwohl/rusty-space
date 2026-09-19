@@ -23,6 +23,9 @@ use crate::detail::{Grant, Link};
 /// Everything one user page reads.
 pub struct Detail {
     pub account: Account,
+    /// When the account was made. Off the index since it went to three columns, and here
+    /// instead — a date that is worth having somewhere and worth a column nowhere.
+    pub joined: Option<DateTime<Utc>>,
     pub links: Vec<Link>,
     pub grants: Vec<Grant>,
     pub bans: Vec<Ban>,
@@ -85,6 +88,10 @@ pub fn region(
                 dl class="person-facts" {
                     dt { "Account" }
                     dd { code { (account.id) } }
+                    @if let Some(joined) = detail.joined {
+                        dt { "Joined" }
+                        dd { (super::when(joined)) }
+                    }
                 }
             }
 
@@ -139,7 +146,7 @@ fn controls(admin: &Admin, detail: &Detail, now: DateTime<Utc>) -> Markup {
                         // construction rather than by a matching sentence written here.
                         (ability::may_set_level(
                             admin.level, admin.id, level, account.id,
-                            if level == Level::PLAYER { Level::MODERATOR } else { Level::PLAYER },
+                            if level == Level::PLAYER { Level::DEBUG } else { Level::PLAYER },
                         ).err().map_or("No change is available.", |denied| denied.said()))
                     }
                 } @else {
@@ -442,6 +449,7 @@ mod tests {
                 display_name: "Grace".into(),
                 permission: level.as_i32(),
             },
+            joined: Some(Utc::now()),
             links: Vec::new(),
             grants: Vec::new(),
             bans,
@@ -487,9 +495,9 @@ mod tests {
         )
         .into_string();
         assert!(markup.contains(r#"value="admin""#), "{markup}");
-        assert!(markup.contains(r#"value="moderator""#), "{markup}");
+        assert!(markup.contains(r#"value="debug""#), "{markup}");
         assert!(
-            !markup.contains(r#"value="owner""#),
+            !markup.contains(r#"value="superadmin""#),
             "an administrator was offered the level above their own:\n{markup}",
         );
 
@@ -508,7 +516,7 @@ mod tests {
     fn an_administrator_shows_no_ban_form() {
         let now = Utc::now();
         let markup = controls(
-            &admin_at(Level::OWNER),
+            &admin_at(Level::SUPERADMIN),
             &detail_at(Level::ADMIN, vec![], None),
             now,
         )
@@ -518,7 +526,7 @@ mod tests {
 
         // And a player does show one.
         let markup = controls(
-            &admin_at(Level::MODERATOR),
+            &admin_at(Level::DEBUG),
             &detail_at(Level::PLAYER, vec![], None),
             now,
         )
@@ -550,7 +558,7 @@ mod tests {
     #[test]
     fn lifting_is_offered_only_where_there_is_something_to_lift() {
         let now = Utc::now();
-        let admin = admin_at(Level::MODERATOR);
+        let admin = admin_at(Level::DEBUG);
         for (state, offered) in [
             (State::InForce, true),
             (State::Expired, false),
@@ -573,7 +581,7 @@ mod tests {
     fn the_region_is_one_swap_target() {
         let now = Utc::now();
         let markup = region(
-            &admin_at(Level::OWNER),
+            &admin_at(Level::SUPERADMIN),
             &detail_at(Level::PLAYER, vec![a_ban(State::InForce, now)], None),
             Some(&Notice::refused("no")),
             now,

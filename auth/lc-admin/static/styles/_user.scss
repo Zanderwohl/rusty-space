@@ -83,6 +83,16 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+
+  // The gap above the heading, so a panel does not run into the bottom of the one before it.
+  //
+  // On the heading rather than on the panel, and **not** on every `h2`: the cards above
+  // carry their own padding, and a margin inside one would push its heading off its own top
+  // edge. `#user-detail` is a plain block with no gap of its own, which is why this is the
+  // only thing holding these sections apart.
+  > h2 {
+    margin-block-start: var(--space-4);
+  }
 }
 
 .records {
