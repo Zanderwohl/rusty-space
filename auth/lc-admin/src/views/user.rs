@@ -484,7 +484,10 @@ fn fit_card(status: &Status) -> Markup {
 fn fitted(fit: &Fit) -> Markup {
     html! {
         @if fit.refitting {
-            p class="badge badge-in-force" { "Refitting" }
+            // A `span` inside a `p`, not a `p` with the badge class on it: the card is a flex
+            // column, so a block-level badge is stretched the full width of it and stops
+            // reading as a badge at all.
+            p { span class="badge badge-in-force" { "Refitting" } }
         }
         // The slot count is not here: it belongs with the modules that fill the slots, as
         // the last row of the table below.
