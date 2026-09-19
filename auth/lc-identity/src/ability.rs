@@ -128,7 +128,10 @@ pub fn may_set_level(
     if proposed.outranks(subject) {
         // A promotion. The ceiling is the actor's own level, which `at_least` states in the
         // direction the rule is written in: "up to their own level" includes their own level.
-        return actor.at_least(proposed).then_some(()).ok_or(Denied::AboveYou);
+        return actor
+            .at_least(proposed)
+            .then_some(())
+            .ok_or(Denied::AboveYou);
     }
     // A demotion, including down to player. Strictly below, so an equal is refused.
     actor
@@ -170,9 +173,7 @@ pub fn levels_offerable(
 ) -> Vec<Level> {
     Level::ALL
         .into_iter()
-        .filter(|proposed| {
-            may_set_level(actor, actor_id, subject, subject_id, *proposed).is_ok()
-        })
+        .filter(|proposed| may_set_level(actor, actor_id, subject, subject_id, *proposed).is_ok())
         .collect()
 }
 
@@ -316,7 +317,10 @@ mod tests {
                 );
             }
         }
-        assert_eq!(may_ban(Level::PLAYER, Level::PLAYER), Err(Denied::NotAnAdmin));
+        assert_eq!(
+            may_ban(Level::PLAYER, Level::PLAYER),
+            Err(Denied::NotAnAdmin)
+        );
         assert_eq!(may_lift(Level::PLAYER), Err(Denied::NotAnAdmin));
         assert!(!may_administer(Level::PLAYER));
     }

@@ -354,7 +354,10 @@ mod tests {
             markup.contains(r##"hx-target:inherited="#user-index""##),
             "htmx 4 needs the modifier or nothing inherits: {markup}",
         );
-        assert!(markup.contains(r#"hx-swap:inherited="outerHTML""#), "{markup}");
+        assert!(
+            markup.contains(r#"hx-swap:inherited="outerHTML""#),
+            "{markup}"
+        );
     }
 
     /// Every control is a real link or a real form as well as an htmx one. With scripting off
@@ -378,7 +381,10 @@ mod tests {
             swapping += 1;
             assert!(tag.contains("href="), "an htmx-only control: <a {tag}>");
         }
-        assert!(swapping > 0, "nothing in the region swaps at all:\n{markup}");
+        assert!(
+            swapping > 0,
+            "nothing in the region swaps at all:\n{markup}"
+        );
 
         let form = filters(&Listing::default()).into_string();
         assert!(form.contains(r#"method="get""#), "{form}");
@@ -395,7 +401,10 @@ mod tests {
         let start = form.find("data-listing=\"").expect("the attribute") + 14;
         let end = start + form[start..].find('"').expect("the closing quote");
         let escaped = &form[start..end];
-        assert!(escaped.contains("&quot;"), "maud stopped escaping: {escaped}");
+        assert!(
+            escaped.contains("&quot;"),
+            "maud stopped escaping: {escaped}"
+        );
 
         // What a browser's HTML parser hands to `dataset.listing`.
         let decoded = escaped
@@ -452,7 +461,10 @@ mod tests {
         let other = heading(&listing, Sort::Created).into_string();
         assert!(!other.contains("aria-sort"), "{other}");
         assert!(other.contains("sort=created"), "{other}");
-        assert!(!other.contains("dir="), "a fresh column asked for a direction: {other}");
+        assert!(
+            !other.contains("dir="),
+            "a fresh column asked for a direction: {other}"
+        );
     }
 
     /// A pager that renders one link per page renders four hundred of them eventually.
@@ -491,7 +503,11 @@ mod tests {
         assert!(markup.contains("Back to the first page"), "{markup}");
 
         let no_matches = a_page(Listing::default(), 0, 0);
-        assert!(empty(&no_matches).into_string().contains("No account matches"));
+        assert!(
+            empty(&no_matches)
+                .into_string()
+                .contains("No account matches")
+        );
     }
 
     /// Several bans at once must be visible in the list, or an administrator lifts one and is

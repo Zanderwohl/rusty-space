@@ -238,7 +238,10 @@ pub async fn ret(
                     state.secure_cookies,
                 ),
             ),
-            (header::SET_COOKIE, session::clear_state(state.secure_cookies)),
+            (
+                header::SET_COOKIE,
+                session::clear_state(state.secure_cookies),
+            ),
         ]),
         Redirect::to(crate::routes::USERS),
     )

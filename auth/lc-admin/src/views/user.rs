@@ -467,7 +467,11 @@ mod tests {
             lifted_at: (state == State::Lifted).then_some(now),
             lifted_by: None,
             lifted_by_name: Some("Ada".into()),
-            lift_notes: if state == State::Lifted { "appealed".into() } else { String::new() },
+            lift_notes: if state == State::Lifted {
+                "appealed".into()
+            } else {
+                String::new()
+            },
         }
     }
 
@@ -476,9 +480,12 @@ mod tests {
     #[test]
     fn the_level_control_offers_exactly_what_the_rules_allow() {
         let now = Utc::now();
-        let markup =
-            controls(&admin_at(Level::ADMIN), &detail_at(Level::PLAYER, vec![], None), now)
-                .into_string();
+        let markup = controls(
+            &admin_at(Level::ADMIN),
+            &detail_at(Level::PLAYER, vec![], None),
+            now,
+        )
+        .into_string();
         assert!(markup.contains(r#"value="admin""#), "{markup}");
         assert!(markup.contains(r#"value="moderator""#), "{markup}");
         assert!(
@@ -500,16 +507,22 @@ mod tests {
     #[test]
     fn an_administrator_shows_no_ban_form() {
         let now = Utc::now();
-        let markup =
-            controls(&admin_at(Level::OWNER), &detail_at(Level::ADMIN, vec![], None), now)
-                .into_string();
+        let markup = controls(
+            &admin_at(Level::OWNER),
+            &detail_at(Level::ADMIN, vec![], None),
+            now,
+        )
+        .into_string();
         assert!(!markup.contains(r#"name="reason""#), "{markup}");
         assert!(markup.contains("Remove their level first"), "{markup}");
 
         // And a player does show one.
-        let markup =
-            controls(&admin_at(Level::MODERATOR), &detail_at(Level::PLAYER, vec![], None), now)
-                .into_string();
+        let markup = controls(
+            &admin_at(Level::MODERATOR),
+            &detail_at(Level::PLAYER, vec![], None),
+            now,
+        )
+        .into_string();
         assert!(markup.contains(r#"name="reason""#), "{markup}");
         assert!(markup.contains(r#"name="term""#), "{markup}");
         assert!(markup.contains(r#"name="notes""#), "{markup}");
@@ -567,7 +580,10 @@ mod tests {
         )
         .into_string();
         assert_eq!(markup.matches(r#"id="user-detail""#).count(), 1, "{markup}");
-        assert!(markup.contains(r##"hx-target:inherited="#user-detail""##), "{markup}");
+        assert!(
+            markup.contains(r##"hx-target:inherited="#user-detail""##),
+            "{markup}"
+        );
         assert!(markup.contains("note-refused"), "{markup}");
         // Every form posts, and every form is also a plain form.
         assert_eq!(

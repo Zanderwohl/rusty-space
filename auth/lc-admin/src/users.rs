@@ -180,7 +180,12 @@ pub async fn page(pool: &PgPool, listing: &Listing, now: DateTime<Utc>) -> sqlx:
                 level: Level::from_stored(r.2),
                 created_at: r.3,
                 email: r.4,
-                providers: r.5.split(',').filter(|s| !s.is_empty()).map(str::to_owned).collect(),
+                providers: r
+                    .5
+                    .split(',')
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
                 in_force: r.6,
                 permanent: r.7,
                 until: r.8,
@@ -276,7 +281,10 @@ mod tests {
         let listing = Listing::default();
         assert_eq!(page_of(0, 0, listing.clone()).pages(), 1);
         assert_eq!(page_of(1, 1, listing.clone()).pages(), 1);
-        assert_eq!(page_of(i64::from(DEFAULT_PER), 25, listing.clone()).pages(), 1);
+        assert_eq!(
+            page_of(i64::from(DEFAULT_PER), 25, listing.clone()).pages(),
+            1
+        );
         assert_eq!(
             page_of(i64::from(DEFAULT_PER) + 1, 25, listing.clone()).pages(),
             2,

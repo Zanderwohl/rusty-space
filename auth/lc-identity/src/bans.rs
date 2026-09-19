@@ -332,7 +332,7 @@ impl Store {
                     .filter(|b| b.account_id == account_id)
                     .cloned()
                     .collect();
-                bans.sort_by(|a, b| b.issued_at.cmp(&a.issued_at));
+                bans.sort_by_key(|b| std::cmp::Reverse(b.issued_at));
                 Ok(bans)
             }
             Store::Postgres(pool) => {
@@ -389,11 +389,7 @@ impl Store {
     ///
     /// Nothing is checked here. [`crate::ability::may_ban`] is the check, and it runs against
     /// the subject's level read in the same request.
-    pub async fn issue_ban(
-        &self,
-        issue: &Issue,
-        now: DateTime<Utc>,
-    ) -> Result<Uuid, StoreError> {
+    pub async fn issue_ban(&self, issue: &Issue, now: DateTime<Utc>) -> Result<Uuid, StoreError> {
         let id = Uuid::new_v4();
         match self {
             Store::Memory(m) => {
@@ -586,7 +582,10 @@ mod tests {
                 .await
                 .unwrap()
         );
-        assert_eq!(store.bans_for(account()).await.unwrap()[0].lift_notes, "appealed");
+        assert_eq!(
+            store.bans_for(account()).await.unwrap()[0].lift_notes,
+            "appealed"
+        );
     }
 
     /// A ban id belonging to somebody else is not liftable through this account's page.

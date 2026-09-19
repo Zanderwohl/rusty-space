@@ -89,11 +89,14 @@ async fn account(pool: &PgPool, name: &str, level: Level) -> Uuid {
 
 /// A signed cookie for `id`, as a completed sign-in would leave.
 fn cookie(id: Uuid) -> String {
-    let sealed = session::seal(KEY.as_bytes(), &Session {
-        sub: id.to_string(),
-        name: "Tester".into(),
-        exp: Utc::now().timestamp() + session::LIFETIME_S,
-    });
+    let sealed = session::seal(
+        KEY.as_bytes(),
+        &Session {
+            sub: id.to_string(),
+            name: "Tester".into(),
+            exp: Utc::now().timestamp() + session::LIFETIME_S,
+        },
+    );
     format!("{}={sealed}", session::COOKIE)
 }
 
@@ -201,12 +204,21 @@ async fn the_partial_is_the_region_and_the_page_contains_it() {
     );
     let partial = text(send(&app, get(&query, Some(admin))).await).await;
     assert!(partial.contains(&needle), "{partial}");
-    assert!(partial.starts_with("<section id=\"user-index\""), "{partial}");
-    assert!(!partial.contains("<!DOCTYPE"), "the partial is a whole page");
+    assert!(
+        partial.starts_with("<section id=\"user-index\""),
+        "{partial}"
+    );
+    assert!(
+        !partial.contains("<!DOCTYPE"),
+        "the partial is a whole page"
+    );
 
     let page = text(send(&app, get(&query.replace("/rows", ""), Some(admin))).await).await;
     assert!(page.contains("<!DOCTYPE"), "the page is not a document");
-    assert!(page.contains("data-listing="), "the browser has no configuration");
+    assert!(
+        page.contains("data-listing="),
+        "the browser has no configuration"
+    );
     // The same region, rendered by the same function.
     assert!(page.contains(&partial), "the page and the partial disagree");
 }
@@ -256,7 +268,12 @@ async fn the_level_rules_hold_through_the_router() {
     // Up to their own level: allowed, and it takes.
     let response = send(
         &app,
-        post(&format!("/users/{subject}/level"), admin, &[("level", "admin")], false),
+        post(
+            &format!("/users/{subject}/level"),
+            admin,
+            &[("level", "admin")],
+            false,
+        ),
     )
     .await;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
@@ -265,7 +282,12 @@ async fn the_level_rules_hold_through_the_router() {
     // Above their own level: refused, and nothing changed.
     let response = send(
         &app,
-        post(&format!("/users/{subject}/level"), admin, &[("level", "owner")], true),
+        post(
+            &format!("/users/{subject}/level"),
+            admin,
+            &[("level", "owner")],
+            true,
+        ),
     )
     .await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -276,7 +298,12 @@ async fn the_level_rules_hold_through_the_router() {
     // An equal: refused. This is the one a careless `>=` gets wrong.
     let response = send(
         &app,
-        post(&format!("/users/{subject}/level"), admin, &[("level", "moderator")], true),
+        post(
+            &format!("/users/{subject}/level"),
+            admin,
+            &[("level", "moderator")],
+            true,
+        ),
     )
     .await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -286,7 +313,12 @@ async fn the_level_rules_hold_through_the_router() {
     // Their own account: refused.
     let response = send(
         &app,
-        post(&format!("/users/{admin}/level"), admin, &[("level", "moderator")], true),
+        post(
+            &format!("/users/{admin}/level"),
+            admin,
+            &[("level", "moderator")],
+            true,
+        ),
     )
     .await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -329,7 +361,10 @@ async fn a_ban_issued_here_is_a_ban_the_broker_enforces() {
         .unwrap()
         .expect("the broker sees the ban");
     assert_eq!(sanction.count, 1);
-    assert!(sanction.until.is_some(), "a two-month ban reads as permanent");
+    assert!(
+        sanction.until.is_some(),
+        "a two-month ban reads as permanent"
+    );
 
     // A second, concurrent. The furthest expiry is what the broker will report.
     send(
@@ -344,13 +379,22 @@ async fn a_ban_issued_here_is_a_ban_the_broker_enforces() {
     .await;
     let both = store.sanction(subject, Utc::now()).await.unwrap().unwrap();
     assert_eq!(both.count, 2);
-    assert_eq!(both.until, sanction.until, "the shorter ban shortened the longer");
+    assert_eq!(
+        both.until, sanction.until,
+        "the shorter ban shortened the longer"
+    );
 
     // And the index knows. `standing=clear` must not find them.
     let banned = text(send(&app, get("/users/rows?standing=banned", Some(admin))).await).await;
-    assert!(banned.contains(&subject.to_string()), "not in the banned list");
+    assert!(
+        banned.contains(&subject.to_string()),
+        "not in the banned list"
+    );
     let clear = text(send(&app, get("/users/rows?standing=clear", Some(admin))).await).await;
-    assert!(!clear.contains(&subject.to_string()), "banned and also clear");
+    assert!(
+        !clear.contains(&subject.to_string()),
+        "banned and also clear"
+    );
 }
 
 /// An administrator cannot be banned, and the refusal happens at the act rather than only at
@@ -381,7 +425,12 @@ async fn an_administrator_cannot_be_banned_even_by_posting_the_form() {
     // De-admin first, and then it works. The rule is an ordering, not a prohibition.
     send(
         &app,
-        post(&format!("/users/{moderator}/level"), owner, &[("level", "player")], true),
+        post(
+            &format!("/users/{moderator}/level"),
+            owner,
+            &[("level", "player")],
+            true,
+        ),
     )
     .await;
     let response = send(
@@ -395,7 +444,13 @@ async fn an_administrator_cannot_be_banned_even_by_posting_the_form() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
-    assert!(store.sanction(moderator, Utc::now()).await.unwrap().is_some());
+    assert!(
+        store
+            .sanction(moderator, Utc::now())
+            .await
+            .unwrap()
+            .is_some()
+    );
 }
 
 /// Lifting takes a ban id, and a ban id belonging to another account must not be liftable
@@ -459,10 +514,7 @@ async fn every_act_is_logged_on_the_user_page() {
     let owner = account(&pool, "Owner", Level::OWNER).await;
     let subject = account(&pool, "Subject", Level::PLAYER).await;
 
-    for fields in [
-        vec![("level", "moderator")],
-        vec![("level", "player")],
-    ] {
+    for fields in [vec![("level", "moderator")], vec![("level", "player")]] {
         send(
             &app,
             post(&format!("/users/{subject}/level"), owner, &fields, true),
@@ -512,7 +564,10 @@ async fn ban_notes_reach_the_console_and_no_unauthenticated_caller() {
     .await;
 
     let page = text(send(&app, get(&format!("/users/{subject}"), Some(admin))).await).await;
-    assert!(page.contains(&secret), "an administrator cannot read the notes");
+    assert!(
+        page.contains(&secret),
+        "an administrator cannot read the notes"
+    );
 
     // Signed out, and signed in as the account itself.
     let out = send(&app, get(&format!("/users/{subject}"), None)).await;

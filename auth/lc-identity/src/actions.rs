@@ -216,7 +216,13 @@ mod tests {
         assert_eq!(log[0].label(), "Demoted");
 
         // Somebody else's account shares nothing with this one.
-        assert!(store.actions_for(Uuid::new_v4(), 10).await.unwrap().is_empty());
+        assert!(
+            store
+                .actions_for(Uuid::new_v4(), 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

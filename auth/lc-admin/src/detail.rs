@@ -35,8 +35,10 @@ impl Grant {
     }
 }
 
+type LinkRow = (String, String, Option<String>, bool, DateTime<Utc>);
+
 pub async fn links_for(pool: &PgPool, account_id: Uuid) -> sqlx::Result<Vec<Link>> {
-    let rows: Vec<(String, String, Option<String>, bool, DateTime<Utc>)> = sqlx::query_as(
+    let rows: Vec<LinkRow> = sqlx::query_as(
         "select provider, subject, email, email_verified, created_at \
          from links where account_id = $1 order by created_at, provider",
     )
@@ -60,8 +62,10 @@ pub async fn links_for(pool: &PgPool, account_id: Uuid) -> sqlx::Result<Vec<Link
 /// **The digest is not selected.** It is the longest-lived credential in the system, and a
 /// page that put it on screen would be a page that puts it in a screenshot. What an
 /// administrator needs is the label and the dates.
+type GrantRow = (String, DateTime<Utc>, Option<DateTime<Utc>>, DateTime<Utc>);
+
 pub async fn grants_for(pool: &PgPool, account_id: Uuid) -> sqlx::Result<Vec<Grant>> {
-    let rows: Vec<(String, DateTime<Utc>, Option<DateTime<Utc>>, DateTime<Utc>)> = sqlx::query_as(
+    let rows: Vec<GrantRow> = sqlx::query_as(
         "select label, created_at, last_used, expires_at \
          from device_grants where account_id = $1 order by created_at desc",
     )

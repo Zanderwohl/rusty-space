@@ -167,10 +167,7 @@ mod tests {
                 let why = why.to_string();
                 // The one acceptable failure: a checkout where `npm run build` has not run.
                 // Anything else is a broken stylesheet and has to fail the test.
-                assert!(
-                    why.contains("TypeScript has not been compiled"),
-                    "{why}",
-                );
+                assert!(why.contains("TypeScript has not been compiled"), "{why}",);
             }
         }
     }

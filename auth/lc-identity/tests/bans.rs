@@ -108,12 +108,15 @@ async fn text(response: Response) -> String {
 async fn sign_in(app: &axum::Router) -> String {
     let response = send(
         app,
-        form("/signin/password", &[
-            ("return_to", RETURN_TO),
-            ("state", "a-nonce"),
-            ("email", EMAIL),
-            ("password", PASSWORD),
-        ]),
+        form(
+            "/signin/password",
+            &[
+                ("return_to", RETURN_TO),
+                ("state", "a-nonce"),
+                ("email", EMAIL),
+                ("password", PASSWORD),
+            ],
+        ),
     )
     .await;
     assert_eq!(
@@ -171,12 +174,15 @@ async fn a_banned_account_is_refused_at_the_form_and_told_how_long() {
     ban(&store, id, Term::Months2).await;
     let response = send(
         &app,
-        form("/signin/password", &[
-            ("return_to", RETURN_TO),
-            ("state", "a-nonce"),
-            ("email", EMAIL),
-            ("password", PASSWORD),
-        ]),
+        form(
+            "/signin/password",
+            &[
+                ("return_to", RETURN_TO),
+                ("state", "a-nonce"),
+                ("email", EMAIL),
+                ("password", PASSWORD),
+            ],
+        ),
     )
     .await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
@@ -202,12 +208,15 @@ async fn the_length_given_is_the_longest_ban() {
     ban(&store, id, Term::Year).await;
     let response = send(
         &app,
-        form("/signin/password", &[
-            ("return_to", RETURN_TO),
-            ("state", "a-nonce"),
-            ("email", EMAIL),
-            ("password", PASSWORD),
-        ]),
+        form(
+            "/signin/password",
+            &[
+                ("return_to", RETURN_TO),
+                ("state", "a-nonce"),
+                ("email", EMAIL),
+                ("password", PASSWORD),
+            ],
+        ),
     )
     .await;
     let page = text(response).await;
@@ -274,8 +283,16 @@ async fn a_banned_account_gets_no_device_grant() {
     let credentials = serde_json::json!({
         "email": EMAIL, "password": PASSWORD, "label": "Ada's laptop",
     });
-    let before = send(&app, json("/signin/password/native", credentials.clone(), None)).await;
-    assert_eq!(before.status(), StatusCode::OK, "the desktop sign-in failed");
+    let before = send(
+        &app,
+        json("/signin/password/native", credentials.clone(), None),
+    )
+    .await;
+    assert_eq!(
+        before.status(),
+        StatusCode::OK,
+        "the desktop sign-in failed"
+    );
 
     ban(&store, id, Term::Day).await;
     let after = send(&app, json("/signin/password/native", credentials, None)).await;
@@ -299,12 +316,15 @@ async fn lifting_the_only_ban_admits_the_account_again() {
 
     let blocked = send(
         &app,
-        form("/signin/password", &[
-            ("return_to", RETURN_TO),
-            ("state", "a-nonce"),
-            ("email", EMAIL),
-            ("password", PASSWORD),
-        ]),
+        form(
+            "/signin/password",
+            &[
+                ("return_to", RETURN_TO),
+                ("state", "a-nonce"),
+                ("email", EMAIL),
+                ("password", PASSWORD),
+            ],
+        ),
     )
     .await;
     assert_eq!(blocked.status(), StatusCode::FORBIDDEN);
@@ -333,12 +353,15 @@ async fn a_wrong_password_does_not_reveal_a_ban() {
     ban(&store, id, Term::Forever).await;
 
     let wrong = |email: &str| {
-        form("/signin/password", &[
-            ("return_to", RETURN_TO),
-            ("state", "a-nonce"),
-            ("email", email),
-            ("password", "not the password"),
-        ])
+        form(
+            "/signin/password",
+            &[
+                ("return_to", RETURN_TO),
+                ("state", "a-nonce"),
+                ("email", email),
+                ("password", "not the password"),
+            ],
+        )
     };
     let banned = send(&app, wrong(EMAIL)).await;
     let nobody = send(&app, wrong("nobody@example.test")).await;

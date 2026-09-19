@@ -508,7 +508,11 @@ mod tests {
 
         let other = flipped.sorted_by(Sort::Created);
         assert_eq!(other.sort, Sort::Created);
-        assert_eq!(other.dir, Dir::Asc, "a fresh column did not start ascending");
+        assert_eq!(
+            other.dir,
+            Dir::Asc,
+            "a fresh column did not start ascending"
+        );
         // Flipping twice comes back.
         assert_eq!(other.sorted_by(Sort::Created).dir, Dir::Desc);
     }
@@ -556,7 +560,11 @@ mod tests {
         // Every default, set explicitly, must still produce the empty query string — which is
         // the property the browser relies on when it drops them.
         let all_defaults: String = url::form_urlencoded::Serializer::new(String::new())
-            .extend_pairs(defaults.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap())))
+            .extend_pairs(
+                defaults
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.as_str().unwrap())),
+            )
             .finish();
         assert_eq!(parsed(&all_defaults).query_string(), "");
         assert_eq!(parsed(&all_defaults), Listing::default());

@@ -16,8 +16,8 @@ use uuid::Uuid;
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
 
-use crate::providers::{Provider, Upstream};
 use crate::pages::{refusal, sign_in_page};
+use crate::providers::{Provider, Upstream};
 use crate::routes::{Broker, Destination};
 use crate::signin::{self, Refused};
 use crate::store::{Flow, Link, Store, normalise_email};

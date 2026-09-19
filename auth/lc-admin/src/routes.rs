@@ -28,8 +28,8 @@ use crate::auth::Admin;
 use crate::detail;
 use crate::listing::{Listing, Params};
 use crate::users;
-use crate::views::{self, Head};
 use crate::views::user::{Detail, Notice};
+use crate::views::{self, Head};
 
 pub const SIGNIN: &str = "/signin";
 pub const RETURN: &str = "/auth/return";
@@ -144,7 +144,11 @@ async fn index(
 /// The same function the page renders, so the two cannot drift apart. It is reachable
 /// directly, which is deliberate: a partial that only works as part of a swap is a partial
 /// that cannot be looked at when it goes wrong.
-async fn rows(State(state): State<AppState>, admin: Admin, Query(params): Query<Params>) -> Response {
+async fn rows(
+    State(state): State<AppState>,
+    admin: Admin,
+    Query(params): Query<Params>,
+) -> Response {
     let _ = &admin;
     let listing = Listing::from_params(params);
     match load_page(&state, &listing).await {
@@ -153,6 +157,10 @@ async fn rows(State(state): State<AppState>, admin: Admin, Query(params): Query<
     }
 }
 
+// A rendered `Response` as the error is the axum convention and what every caller here wants
+// to do with a failure: return it. Boxing it to satisfy a size heuristic would put a
+// dereference at four call sites and buy nothing.
+#[allow(clippy::result_large_err)]
 async fn load_page(state: &AppState, listing: &Listing) -> Result<users::Page, Response> {
     users::page(&state.pool, listing, Utc::now())
         .await
@@ -184,6 +192,7 @@ async fn person(
     page_for(&state, &admin, &detail, notice.as_ref())
 }
 
+#[allow(clippy::result_large_err)]
 async fn load_detail(state: &AppState, id: Uuid) -> Result<Detail, Response> {
     let store = state.store();
     let failed = |why: String| {
@@ -212,7 +221,10 @@ async fn load_detail(state: &AppState, id: Uuid) -> Result<Detail, Response> {
             .sanction(id, now)
             .await
             .map_err(|e| failed(e.to_string()))?,
-        bans: store.bans_for(id).await.map_err(|e| failed(e.to_string()))?,
+        bans: store
+            .bans_for(id)
+            .await
+            .map_err(|e| failed(e.to_string()))?,
         log: store
             .actions_for(id, LOG_DEPTH)
             .await
@@ -233,12 +245,7 @@ async fn load_detail(state: &AppState, id: Uuid) -> Result<Detail, Response> {
 /// long-running argument does not render a page megabytes long.
 const LOG_DEPTH: i64 = 50;
 
-fn page_for(
-    state: &AppState,
-    admin: &Admin,
-    detail: &Detail,
-    notice: Option<&Notice>,
-) -> Response {
+fn page_for(state: &AppState, admin: &Admin, detail: &Detail, notice: Option<&Notice>) -> Response {
     views::shell(
         &state.assets,
         Head {
@@ -283,7 +290,12 @@ async fn answered(
                 // there saying nothing.
                 return (
                     status,
-                    render(views::user::region(admin, &detail, Some(&notice), Utc::now())),
+                    render(views::user::region(
+                        admin,
+                        &detail,
+                        Some(&notice),
+                        Utc::now(),
+                    )),
                 )
                     .into_response();
             }
@@ -336,7 +348,9 @@ async fn set_level(
         Ok(()) => match store.set_permission(id, proposed.as_i32()).await {
             Err(why) => {
                 tracing::error!(%why, "could not set a level");
-                Err(Notice::refused("The account store did not answer. Nothing changed."))
+                Err(Notice::refused(
+                    "The account store did not answer. Nothing changed.",
+                ))
             }
             Ok(()) => {
                 let action = if proposed.outranks(was) {
@@ -419,7 +433,9 @@ async fn issue_ban(
             match store.issue_ban(&issue, now).await {
                 Err(why) => {
                     tracing::error!(%why, "could not issue a ban");
-                    Err(Notice::refused("The account store did not answer. Nothing changed."))
+                    Err(Notice::refused(
+                        "The account store did not answer. Nothing changed.",
+                    ))
                 }
                 Ok(ban) => {
                     if let Err(why) = store
@@ -478,7 +494,9 @@ async fn lift_ban(
         {
             Err(why) => {
                 tracing::error!(%why, "could not lift a ban");
-                Err(Notice::refused("The account store did not answer. Nothing changed."))
+                Err(Notice::refused(
+                    "The account store did not answer. Nothing changed.",
+                ))
             }
             Ok(false) => Err(Notice::refused(
                 "That ban is not this account's, or was lifted already.",
