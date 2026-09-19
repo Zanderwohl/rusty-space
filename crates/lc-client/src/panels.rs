@@ -266,9 +266,11 @@ pub fn open_panels(
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
     for panel in ui_state.open_panels().to_vec() {
-        // The reader brings its own window: a book is not a readout, and egui's chrome around
-        // it would be a dark title bar over a white page. See `crate::reader`.
-        if panel == Panel::Reader {
+        // Two panels bring their own window. A book is not a readout, and egui's chrome around
+        // it would be a dark title bar over a white page; the map is a rendered surface that
+        // owns the corner its minimap sits in as well. See `crate::reader` and
+        // `crate::map_panel`.
+        if panel == Panel::Reader || panel == Panel::Map {
             continue;
         }
         let mut open = true;
@@ -293,6 +295,7 @@ pub fn open_panels(
                 crate::demos::scenarios(ui, &uplink, ui_state.0.perspective, &mut out)
             }
             Panel::Reader => unreachable!("drawn by crate::reader"),
+            Panel::Map => unreachable!("drawn by crate::map_panel"),
             Panel::Refit => crate::refit_panel::refit(ui, &ui_state.0, &game, &mut out),
             Panel::DevActions => crate::refit_panel::dev_actions(ui, &game, &mut out),
             Panel::Chat => crate::radio_panel::chat(

@@ -51,6 +51,11 @@ pub enum Panel {
     /// One conversation at a time, chosen from a list. Every ship this one has heard from is
     /// in it, whether or not it is still in sight.
     Chat,
+    /// Where everything is: a reference plane, decade rings, and what stands off it.
+    ///
+    /// Drawn by [`crate::map_panel`] rather than with the others, because it is a rendered
+    /// surface rather than a readout and it owns the corner the minimap sits in too.
+    Map,
     /// Something to read: the shelf, or a book off it. Drawn by [`crate::reader`] rather than
     /// with the others, because it is the one surface that is not a readout — it has its own
     /// frame, its own palette and its own keys.
@@ -58,7 +63,7 @@ pub enum Panel {
 }
 
 impl Panel {
-    pub const ALL: [Panel; 12] = [
+    pub const ALL: [Panel; 13] = [
         Panel::Escape,
         Panel::Settings,
         Panel::Debug,
@@ -71,6 +76,7 @@ impl Panel {
         Panel::DevActions,
         Panel::Chat,
         Panel::Reader,
+        Panel::Map,
     ];
 
     /// A panel by the name a development flag would use.
@@ -92,8 +98,24 @@ impl Panel {
             Panel::DevActions => "Dev actions",
             Panel::Chat => "Communications",
             Panel::Reader => "Reader",
+            Panel::Map => "Map",
         }
     }
+}
+
+/// What the map is showing, and from where.
+///
+/// One field on [`UiState`] rather than six, because every part of it moves together: a plane
+/// toggle that left the camera's angles measured against the old basis would be a plane toggle
+/// that tilted nothing.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MapView {
+    pub orbit: em_map::Orbit,
+    pub plane: em_map::Plane,
+    /// What the camera is centred on, or the observer when nothing is picked. A key rather
+    /// than a position: Saturn moves.
+    pub focus: Option<em_map::ItemKey>,
+    pub source: crate::map_source::Source,
 }
 
 /// Which craft the camera is behind.
@@ -287,6 +309,16 @@ pub struct UiState {
     pub focus: Option<crate::navigation::Target>,
     pub course: Option<crate::navigation::Course>,
     pub look: Look,
+    /// The map's camera, plane and source. See [`MapView`].
+    pub map: MapView,
+    /// Whether this client may ask for the god view.
+    ///
+    /// Read once from the ticket, at boot, because that is the only place the ticket is. Held
+    /// here so `action::apply` can refuse as well as the panel declining to offer — a control
+    /// that is merely absent is a control the next development flag reaches anyway.
+    ///
+    /// Advisory. See [`crate::map_source::may_see_everything`] for what it is not.
+    pub may_see_everything: bool,
     /// How far the orbit camera stands off, in hull lengths.
     ///
     /// A multiple rather than a distance, so it means the same framing whatever the player is
@@ -371,6 +403,8 @@ impl Default for UiState {
             focus: None,
             course: None,
             look: Look::default(),
+            map: MapView::default(),
+            may_see_everything: false,
             perspective: None,
             boom_lengths: crate::hull::DEFAULT_BOOM_LENGTHS,
             distant: crate::starfield::DISTANT,

@@ -29,6 +29,7 @@ pub fn bindings() -> Vec<(KeyCode, Action)> {
         (KeyCode::F5, Action::TogglePanel(Panel::DevActions)),
         // `R` is the refit window's. `C` for comms, which is what this is.
         (KeyCode::KeyC, Action::TogglePanel(Panel::Chat)),
+        (KeyCode::KeyM, Action::TogglePanel(Panel::Map)),
         (KeyCode::Digit1, Action::SetBandPreset(0)),
         (KeyCode::Digit2, Action::SetBandPreset(1)),
         (KeyCode::Digit3, Action::SetBandPreset(2)),

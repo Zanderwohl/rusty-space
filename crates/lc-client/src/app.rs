@@ -160,6 +160,7 @@ impl Plugin for ClientPlugin {
             crate::sky_asset::SkyAssetPlugin,
             crate::library::LibraryPlugin,
             crate::faces::FacesPlugin,
+            crate::map::MapPlugin,
         ))
             .init_state::<AppState>()
             .add_message::<Requested>()
@@ -263,7 +264,8 @@ impl Plugin for ClientPlugin {
                     // rather than the frame after it.
                     crate::faces::settle,
                     panels::loading.run_if(in_state(AppState::Loading)),
-                    (panels::hud, panels::open_panels, crate::reader::draw)
+                    (panels::hud, crate::map_panel::draw, panels::open_panels,
+                        crate::reader::draw)
                         .run_if(in_state(AppState::InGame)),
                     panels::unreachable.run_if(in_state(AppState::Unreachable)),
                 )
@@ -430,7 +432,21 @@ fn lifted(at: DVec3, star: DVec3, degrees: f64) -> DVec3 {
 }
 
 /// One frame of boot, so the window is up before anything slow happens.
-fn boot(mut next: ResMut<NextState<AppState>>, mut ui: ResMut<Ui>, dev: Res<DevEntry>) {
+fn boot(
+    mut next: ResMut<NextState<AppState>>,
+    mut ui: ResMut<Ui>,
+    dev: Res<DevEntry>,
+    ticket: Res<crate::Ticket>,
+) {
+    // Once, here, because this is where the ticket is. It does not change while the client
+    // runs: a sign-in that produced a different one would be a different session.
+    #[cfg(feature = "godview")]
+    {
+        ui.may_see_everything = crate::map_source::may_see_everything(ticket.0.as_deref());
+    }
+    #[cfg(not(feature = "godview"))]
+    let _ = &ticket;
+
     if dev.observe_immediately || !HAS_MAIN_MENU {
         ui.screen = Screen::Loading;
         next.set(AppState::Loading);

@@ -24,6 +24,23 @@ pub enum Action {
     GoToMenuPage(MenuPage),
     StartGame,
     Quit,
+    // --- the map ----------------------------------------------------------------------
+    /// Turn the map's camera by a relative amount, radians.
+    TurnMap { azimuth: f64, elevation: f64 },
+    /// In or out, in notches. Positive is closer.
+    ///
+    /// Not [`Action::Zoom`], which is the ship's boom in hull lengths and is clamped by two
+    /// angles. The map's is a stand-off in metres across fifteen orders of magnitude, and one
+    /// name for both would mean `--zoom` moving whichever happened to be on top.
+    ZoomMap(f64),
+    /// Slide the map's focus across the reference plane, in fractions of the stand-off.
+    PanMap { right: f64, ahead: f64 },
+    SetMapPlane(em_map::Plane),
+    ToggleMapPlane,
+    /// What the map is centred on. `None` is the observer.
+    FocusMap(Option<em_map::ItemKey>),
+    SetMapSource(crate::map_source::Source),
+
     /// Begin the desktop sign-in: open the browser and listen for the answer.
     SignIn,
     /// Give up on one in progress.
@@ -288,6 +305,27 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
 
         Action::Look { yaw, pitch } => ui.look.turn(yaw, pitch),
+
+    Action::TurnMap { azimuth, elevation } => ui.map.orbit.turn(azimuth, elevation),
+    Action::ZoomMap(notches) => ui.map.orbit.zoom(notches),
+    Action::PanMap { right, ahead } => {
+        let plane = ui.map.plane;
+        ui.map.orbit.pan(plane, right, ahead);
+        // A pan is a statement about where to look, so it gives up following anything.
+        ui.map.focus = None;
+    }
+    Action::SetMapPlane(plane) => ui.map.plane = plane,
+    Action::ToggleMapPlane => ui.map.plane = ui.map.plane.other(),
+    Action::FocusMap(key) => ui.map.focus = key,
+    Action::SetMapSource(source) => {
+        #[cfg(feature = "godview")]
+        if source == crate::map_source::Source::God && !ui.may_see_everything {
+            effects.push(Effect::Notify("god view needs an administrative account".into()));
+            return effects;
+        }
+        ui.map.source = source;
+    }
+
         // Multiplicative, because the range is two and a half decades: a fixed step is either
         // imperceptible at the far end or the whole range in one notch at the near one. Left
         // unclamped here and clamped against the viewport by `hull::place_eye`, which is the
