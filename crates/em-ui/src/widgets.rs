@@ -23,9 +23,11 @@ pub struct MenuUi<'a, 'w, 's> {
     commands: &'a mut Commands<'w, 's>,
     theme: MenuTheme,
     panel_width: f32,
-    /// The face the title is set in, for a product whose name is a wordmark. `None` is Bevy's
-    /// own font, which is what every other label uses: a display face is worth loading for one
-    /// line on one screen and is not worth it for a button.
+    /// The face every label, message and button is set in. `None` is Bevy's own font.
+    font: Option<Handle<Font>>,
+    /// The face the title is set in, for a product whose name is a wordmark. Falls back to
+    /// [`MenuUi::font`], because a screen whose heading is not the product's name — a modal,
+    /// say — wants the interface face rather than a display one.
     title_font: Option<Handle<Font>>,
     title_size: f32,
 }
@@ -39,6 +41,7 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
             commands,
             theme,
             panel_width: Self::DEFAULT_PANEL_WIDTH,
+            font: None,
             title_font: None,
             title_size: Self::DEFAULT_TITLE_SIZE,
         }
@@ -46,6 +49,14 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
 
     pub fn panel_width(mut self, width: f32) -> Self {
         self.panel_width = width;
+        self
+    }
+
+    /// Sets the whole screen in a face of the caller's own — the interface face, in a product
+    /// that has one. Bevy UI has no font database to name a family in, so it is a handle, and
+    /// the caller is the one holding it.
+    pub fn font(mut self, font: Handle<Font>) -> Self {
+        self.font = Some(font);
         self
     }
 
@@ -118,8 +129,14 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
     }
 
     pub fn title(&mut self, panel: Entity, text: &str) -> Entity {
-        let font = self.title_font.clone();
-        self.faced(panel, text, self.title_size, self.theme.text, font)
+        let font = self.title_font.clone().or_else(|| self.font.clone());
+        let size = match self.title_font {
+            Some(_) => self.title_size,
+            // A display size is the display face's; the interface face at it would just be
+            // a large label.
+            None => Self::DEFAULT_TITLE_SIZE,
+        };
+        self.faced(panel, text, size, self.theme.text, font)
     }
 
     pub fn message(&mut self, panel: Entity, text: &str) -> Entity {
@@ -127,7 +144,8 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
     }
 
     pub fn label(&mut self, panel: Entity, text: &str, font_size: f32, color: Color) -> Entity {
-        self.faced(panel, text, font_size, color, None)
+        let font = self.font.clone();
+        self.faced(panel, text, font_size, color, font)
     }
 
     fn faced(
@@ -161,6 +179,7 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
     /// `Interaction` query.
     pub fn button<A: Component>(&mut self, panel: Entity, text: &str, action: A) -> Entity {
         let theme = self.theme;
+        let font = self.font.clone();
         let btn = self
             .commands
             .spawn((
@@ -181,7 +200,11 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
             .with_children(|parent| {
                 parent.spawn((
                     Text::new(text),
-                    TextFont { font_size: FontSize::Px(18.0), ..default() },
+                    TextFont {
+                        font: font.map(FontSource::Handle).unwrap_or_default(),
+                        font_size: FontSize::Px(18.0),
+                        ..default()
+                    },
                     TextColor(theme.text),
                 ));
             })

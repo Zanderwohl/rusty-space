@@ -16,6 +16,11 @@ use crate::library::FontFace;
 /// Quantico: every readout, label and button.
 pub const UI: &str = "interface";
 
+/// Where Quantico comes from. Public because the main menu is Bevy UI rather than egui and
+/// loads its own copy of the same file — Bevy UI takes a `Handle<Font>` and has no font set
+/// to name a family in. One constant so the two cannot drift onto different cuts.
+pub const UI_FILE: &str = "fonts/Quantico-Regular.ttf";
+
 /// Geo: the radio logs, and nothing else. What a ship said is set apart from the window that
 /// is showing it — see [`crate::radio_panel`].
 pub const RADIO: &str = "radio";
@@ -23,7 +28,7 @@ pub const RADIO: &str = "radio";
 /// What is asked for at startup, before anything is drawn. The reader asks for its own when a
 /// book is first opened.
 const STARTUP: &[(&str, &str, As)] = &[
-    (UI, "fonts/Quantico-Regular.ttf", As::Interface),
+    (UI, UI_FILE, As::Interface),
     (RADIO, "fonts/Geo-Regular.ttf", As::Named),
 ];
 

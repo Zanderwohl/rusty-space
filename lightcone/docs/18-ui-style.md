@@ -127,7 +127,13 @@ toolkits' surfaces. It is a squared technical sans, which is what a panel of num
 rendered sky should look like, and it is the default — a surface that wants a different face has
 to say why.
 
-Two say why.
+Both toolkits, and they get there differently. egui is told once, through
+`faces::Faces::install`, and names the family by string. Bevy UI has no font set to name a
+family in, so it takes a `Handle<Font>` per label, which is what `MenuUi::font` is for and why
+`faces::UI_FILE` is public: the menu and the sign-in modal load their own copy of the same file,
+and the one constant is what stops the two toolkits landing on different cuts of it.
+
+Two surfaces say why they are not Quantico.
 
 **The title screen is Nabla**, and only the title screen. The game's name is a wordmark and the
 site sets it in the same face, so the menu and the front page are recognisably one thing. Nabla
@@ -135,6 +141,10 @@ is a colour font whose depth lives inside the glyph: it is unreadable at the siz
 set at, so `MenuUi::title_font` takes a size with the handle and the menu asks for 44. Bevy
 flattens its layers into one colour, which on the VFD palette is exactly the extruded green a
 title wants. It costs 1.6 MB and is asked for on the one screen that draws it.
+
+A `title` with no wordmark falls back to `MenuUi::font` at the ordinary heading size, which is
+what the sign-in modal wants: its heading is "SIGN IN", not the product's name, and the
+wordmark face would be claiming otherwise.
 
 **A radio log is Geo**, and only a radio log — the speaker's name and what was said, in
 [`radio_panel`](../../crates/lc-client/src/radio_panel.rs). Not the list of craft, not the

@@ -73,7 +73,13 @@ fn sync_screen(
         }
         commands.entity(entity).despawn();
     }
-    build(&mut commands, page, observe_action(&observe), assets.load(WORDMARK));
+    build(
+        &mut commands,
+        page,
+        observe_action(&observe),
+        assets.load(WORDMARK),
+        assets.load(crate::faces::UI_FILE),
+    );
 }
 
 /// What the Observe button asks for.
@@ -100,9 +106,16 @@ fn observe_action(_: &ObserveEmits) -> Action {
     Action::StartGame
 }
 
-fn build(commands: &mut Commands, page: MenuPage, observe: Action, wordmark: Handle<Font>) {
+fn build(
+    commands: &mut Commands,
+    page: MenuPage,
+    observe: Action,
+    wordmark: Handle<Font>,
+    interface: Handle<Font>,
+) {
     let mut ui = MenuUi::new(commands, MenuTheme::VFD)
         .panel_width(520.0)
+        .font(interface)
         .title_font(wordmark, WORDMARK_SIZE);
     let root = ui.screen(MenuScreen(page));
     // **One surface at a time.** The sign-in draws its own, and a menu behind it is a second
