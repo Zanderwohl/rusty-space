@@ -150,9 +150,13 @@ const MAX_DASHES: usize = 48;
 /// a body shrinks until it reaches this size and then holds it, so nothing jumps at the
 /// crossover. Below it a sphere is a dozen sub-pixel tubes drawn over each other, which is
 /// both the more expensive thing to draw and the less legible one.
-const POINT_PX: f32 = 5.0;
+///
+/// Twenty rather than the five it started at, because the crossover is where the sphere has to
+/// earn its place and at eleven pixels across it had not: the tube cap holds its lines to a
+/// third of a pixel, so what it draws is a smudge the circle says better.
+const POINT_PX: f32 = 20.0;
 
-/// Divisions of that circle. Sixteen is a smooth five-pixel ring and an eighth of the ring
+/// Divisions of that circle. Sixteen is smooth at twenty pixels and an eighth of the ring
 /// mesh — a level of detail that cost more to draw than the sphere would not be one.
 const POINT_SEGMENTS: u32 = 16;
 
@@ -574,10 +578,16 @@ fn at_of(placement: &Placement) -> Vec3 {
     render(placement.at.as_dvec3())
 }
 
-/// A body is a sphere at its own size once it is worth more than a few pixels across, and a
-/// circle of exactly [`POINT_PX`] below that.
+/// A body is a sphere at its own size once it is worth more than [`POINT_PX`] across, and a
+/// circle of exactly that below it.
+///
+/// **A ship is never a sphere, at any zoom.** It is a mark on a chart rather than a body seen:
+/// its size is not what anyone is reading off the map, and a hull that turned into a model on
+/// approach would be the one thing here drawing a shape it does not know.
 fn is_resolved(placement: &Placement, rad_per_px: f32) -> bool {
-    rad_per_px > 0.0 && 2.0 * placement.angular_radius / rad_per_px > POINT_PX
+    placement.kind != ItemKind::Ship
+        && rad_per_px > 0.0
+        && 2.0 * placement.angular_radius / rad_per_px > POINT_PX
 }
 
 /// The render-unit radius of a circle drawn [`POINT_PX`] across at `distance`.
@@ -952,9 +962,13 @@ mod tests {
     }
 
     fn body_at(distance: f32, radius: f32) -> Placement {
+        kind_at(ItemKind::Planet, distance, radius)
+    }
+
+    fn kind_at(kind: ItemKind, distance: f32, radius: f32) -> Placement {
         Placement {
             key: ItemKey::from_name("a body"),
-            kind: ItemKind::Planet,
+            kind,
             label: "a body".into(),
             at: glam::Vec3::new(0.0, distance, 0.0),
             foot: glam::Vec3::new(0.0, distance, 0.0),
@@ -986,6 +1000,28 @@ mod tests {
             (drawn / on - 1.0).abs() < 0.05,
             "a circle of {drawn} where the sphere it replaced was {on}",
         );
+    }
+
+    /// **A ship is a mark on a chart, at every zoom there is.**
+    ///
+    /// It has a hull size and the map is not the place to read it off: a contact that grew a
+    /// model on approach would be drawing a shape nobody sent. Given a planet's radius it must
+    /// still be a circle.
+    #[test]
+    fn a_ship_never_becomes_a_model() {
+        let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
+        // A radius that would fill the view, at a distance that would make anything else a
+        // sphere many times over.
+        let huge = kind_at(ItemKind::Ship, 1.0, 10.0);
+        assert!(!is_resolved(&huge, rad_per_px), "a ship is never a sphere");
+        assert!(
+            is_resolved(&kind_at(ItemKind::Planet, 1.0, 10.0), rad_per_px),
+            "and the exemption is the kind, not the numbers",
+        );
+        // Drawn at the symbol's own size, like every other circle.
+        let at = item_transform(&huge, rad_per_px);
+        let px = 2.0 * at.scale.x / (at.translation.length() * rad_per_px);
+        assert!((px / POINT_PX - 1.0).abs() < 1.0e-3, "a ship drew {px} px across");
     }
 
     /// And it holds that size at every distance, which is what makes it a symbol: the far one

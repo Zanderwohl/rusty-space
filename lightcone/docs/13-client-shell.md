@@ -690,19 +690,29 @@ rings mark order-of-magnitude distances; anything off the plane hangs from a das
 The reach is a fixed sphere of twenty-five light-years — a reach that moved with the zoom would
 change what exists as well as what is framed.
 
-### Below five pixels a body is a circle
+### Below twenty pixels a body is a circle
 
-A wireframe sphere drawn smaller than a few pixels across is a dozen sub-pixel tubes laid over
-each other: the most expensive thing on the layer to draw and the least legible, and at a
-system's scale most of what is on the map is that size. Below five pixels it is a circle facing
-the eye instead — a sixteenth of the sphere's geometry, and a shape rather than a smudge.
+A wireframe sphere drawn small is a dozen sub-pixel tubes laid over each other: the most
+expensive thing on the layer to draw and the least legible, and at a system's scale most of
+what is on the map is that size. Below twenty pixels across it is a circle facing the eye
+instead — a sixteenth of the sphere's geometry, and a shape rather than a smudge.
 
 **One number is both the threshold and the size the circle is drawn at**, so nothing changes
-size at the crossover: a body shrinks until it reaches five pixels and then holds. The circle is
-a symbol and keeps its palette color, so a distant ship is still amber.
+size at the crossover: a body shrinks until it reaches twenty pixels and then holds. Five was
+tried first and was the wrong answer in the interesting direction — eleven pixels of sphere is
+still a smudge, because the tube cap holds its lines to a third of a pixel. The crossover
+belongs where the sphere starts earning its place.
+
+**A ship is a circle at every zoom there is.** It has a hull size and the map is not where
+anyone reads it off; a contact that grew a model on approach would be the one thing here
+drawing a shape nobody sent. It keeps its amber, which is the one channel the map has that a
+list does not.
 
 It is a handle swap and not a respawn. Zooming in on a body crosses the threshold without
 changing the set of things drawn, the same way a body drifting off the plane gains a dash.
+
+The symbol is a fixed size in pixels, so it is a far larger share of the 190-point minimap than
+of the panel — at a system's scale that corner is mostly rings.
 
 ### The plane is drawn, never filled
 
