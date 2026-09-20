@@ -120,7 +120,10 @@ pub(crate) fn place_on_station(
     let waypoint = waypoint.nearest_to(here, &system, now);
     let Some(at) = waypoint.place_at(&system, now) else { return };
     let label = waypoint.label();
-    ui.focus = course.target();
+    // Not over a `--focus`: this flag says where the ship is, that one says what is selected.
+    if !dev.actions.iter().any(|action| matches!(action, Action::FocusTarget(_))) {
+        ui.focus = course.target();
+    }
 
     if let Some(degrees) = dev.lift_deg.filter(|d| d.abs() > 0.0) {
         let at = lifted(at, system.origin_ly, degrees);

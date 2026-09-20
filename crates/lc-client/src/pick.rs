@@ -8,6 +8,9 @@
 //! Everything is projected as a **direction**, not a position. The camera never translates: the
 //! ship sits at the render origin and the sky moves around it, so where a thing lands on screen
 //! is a function of which way it lies and nothing else.
+//!
+//! [`crate::map_pick`] is the same job over the map's surface and shares this module's
+//! [`Subject`], [`Mark`] and [`paint`], so one click means one thing in either mode.
 
 use bevy::math::Vec4;
 use bevy::prelude::*;
@@ -33,7 +36,7 @@ pub const PICK_BUTTON: MouseButton = MouseButton::Left;
 /// Radius of the ring drawn round something hovered, when it is smaller than this.
 const HOVER_RING_PX: f32 = 14.0;
 const BRACKET_ARM_PX: f32 = 8.0;
-const ARROW_PX: f32 = 11.0;
+pub(crate) const ARROW_PX: f32 = 11.0;
 
 /// What a candidate turned out to be, and what to call it.
 #[derive(Clone, Debug, PartialEq)]
@@ -48,7 +51,7 @@ pub enum Subject {
 
 impl Subject {
     /// Whether this is the same thing as `other`, by identity rather than by name.
-    fn is(&self, other: &Subject) -> bool {
+    pub(crate) fn is(&self, other: &Subject) -> bool {
         match (self, other) {
             (Subject::Body(a), Subject::Body(b)) => a == b,
             (Subject::Star(a, _), Subject::Star(b, _)) => a == b,
@@ -66,7 +69,7 @@ impl Subject {
     /// course to a ship is a rendezvous with something that is moving and that this client
     /// only knows the past of. Until that exists a contact is something to see and read the
     /// name of, not something to select.
-    fn select(&self) -> Option<Action> {
+    pub(crate) fn select(&self) -> Option<Action> {
         match self {
             Subject::Body(name) => Some(Action::FocusTarget(Some(Target::Body(name.clone())))),
             Subject::Star(id, _) => Some(Action::SelectTarget(Some(*id))),
@@ -239,8 +242,8 @@ fn survey(
     }
 }
 
-/// What the interface says is selected, as a subject.
-fn selected(ui: &Ui) -> Option<Subject> {
+/// What the interface says is selected, as a subject. The map marks the same thing.
+pub(crate) fn selected(ui: &Ui) -> Option<Subject> {
     match &ui.focus {
         Some(Target::Body(name)) => Some(Subject::Body(name.clone())),
         Some(Target::Band(index)) => Some(Subject::Swarm(*index, String::new())),
@@ -437,7 +440,7 @@ fn swarm_outlines(
 }
 
 /// Every curve of an outline, projected and cut at the camera plane.
-fn screen_runs(outline: &[Vec<Vec4>], viewport: Vec2) -> Vec<Vec<Vec2>> {
+pub(crate) fn screen_runs(outline: &[Vec<Vec4>], viewport: Vec2) -> Vec<Vec<Vec2>> {
     outline.iter().flat_map(|curve| reticle::project_path(curve, viewport)).collect()
 }
 
@@ -479,7 +482,7 @@ fn draw(mut contexts: EguiContexts, picked: Res<Picked>, windows: Query<&Window,
 
     // Contacts first and faint, so the one under the cursor or selected draws over them.
     for mark in &picked.contacts {
-        paint(&painter, mark, viewport, frame, CONTACT, false);
+        paint(&painter, mark, Vec2::ZERO, viewport, frame, CONTACT, false);
     }
     for (mark, color, bracketed) in [
         (picked.hover.as_ref(), HOVER, false),
@@ -488,15 +491,15 @@ fn draw(mut contexts: EguiContexts, picked: Res<Picked>, windows: Query<&Window,
     .into_iter()
     .filter_map(|(mark, color, bracketed)| Some((mark?, color, bracketed)))
     {
-        paint(&painter, mark, viewport, frame, color, bracketed);
+        paint(&painter, mark, Vec2::ZERO, viewport, frame, color, bracketed);
     }
 }
 
-const HOVER: egui::Color32 = egui::Color32::from_rgb(150, 170, 190);
+pub(crate) const HOVER: egui::Color32 = egui::Color32::from_rgb(150, 170, 190);
 /// Craft, which are always marked and must therefore be quiet enough to sit under everything
 /// else without the view reading as an instrument panel.
 const CONTACT: egui::Color32 = egui::Color32::from_rgb(110, 145, 130);
-const SELECTED: egui::Color32 = egui::Color32::from_rgb(235, 200, 120);
+pub(crate) const SELECTED: egui::Color32 = egui::Color32::from_rgb(235, 200, 120);
 const LABEL_SIZE: f32 = 12.0;
 
 /// How much fainter a swarm's skeleton is than the mark on it. The curve is long and would
@@ -524,9 +527,14 @@ pub(crate) fn occupied_rects(context: &egui::Context, except: &[egui::Id]) -> Ve
     })
 }
 
-fn paint(
+/// Paint one mark.
+///
+/// `frame`, `viewport` and the geometry are in the surface's own coordinates; `origin` is where
+/// that surface's top left sits in the window. The sky is the whole window and passes a zero.
+pub(crate) fn paint(
     painter: &egui::Painter,
     mark: &Mark,
+    origin: Vec2,
     viewport: Vec2,
     frame: Frame<'_>,
     color: egui::Color32,
@@ -540,7 +548,7 @@ fn paint(
     if let Some(outline) = &mark.outline {
         let faint = egui::Stroke::new(1.0_f32, color.gamma_multiply(SKELETON_FADE));
         let runs = screen_runs(outline, viewport);
-        draw_segments(painter, &reticle::path_segments(&runs), faint);
+        draw_segments(painter, &reticle::path_segments(&runs), origin, faint);
     }
 
     let (anchor, radius_px, preferred) =
@@ -552,11 +560,11 @@ fn paint(
             } else {
                 reticle::ring(at, radius, 40)
             };
-            draw_segments(painter, &segments, stroke);
+            draw_segments(painter, &segments, origin, stroke);
             (at, radius, None)
         }
         Marker::Off { at, direction } => {
-            draw_segments(painter, &reticle::arrow(at, direction, ARROW_PX), stroke);
+            draw_segments(painter, &reticle::arrow(at, direction, ARROW_PX), origin, stroke);
             (at, ARROW_PX, Some(-direction))
         }
     };
@@ -570,15 +578,18 @@ fn paint(
     let size = Vec2::new(galley.size().x, galley.size().y);
     let center =
         reticle::place_label(anchor, radius_px, size, frame, reticle::LABEL_GAP_PX, preferred);
-    painter.galley(
-        egui::pos2(center.x - size.x * 0.5, center.y - size.y * 0.5),
-        galley,
-        color,
-    );
+    let at = origin + center - size * 0.5;
+    painter.galley(egui::pos2(at.x, at.y), galley, color);
 }
 
-fn draw_segments(painter: &egui::Painter, segments: &[[Vec2; 2]], stroke: egui::Stroke) {
+fn draw_segments(
+    painter: &egui::Painter,
+    segments: &[[Vec2; 2]],
+    origin: Vec2,
+    stroke: egui::Stroke,
+) {
     for [a, b] in segments {
+        let (a, b) = (origin + *a, origin + *b);
         painter.line_segment([egui::pos2(a.x, a.y), egui::pos2(b.x, b.y)], stroke);
     }
 }

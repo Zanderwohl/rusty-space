@@ -1,8 +1,10 @@
 //! Building a map snapshot out of what this client holds.
 //!
-//! Every provider returns a plain [`MapSnapshot`]. The map renders one and knows nothing
-//! about where it came from, so switching perspective is a choice of function rather than a
-//! second renderer, and a relay or a fleet's shared picture is another provider.
+//! Every provider returns a [`Picture`]: a plain [`MapSnapshot`], and what each of its items
+//! is in the terms the rest of the interface selects things in. The map renders the snapshot
+//! and knows nothing about where it came from, so switching perspective is a choice of
+//! function rather than a second renderer, and a relay or a fleet's shared picture is another
+//! provider.
 //!
 //! The catalogue is test data. Stars come from [`Session::stars`], whatever the session was
 //! handed: a CSV today, a shard's answer once the server is authoritative. `local::start`
@@ -12,6 +14,7 @@ use em_map::{ItemKey, ItemKind, MapItem, MapSnapshot};
 use glam::DVec3;
 use lc_world::navigation::Kind;
 
+use crate::pick::Subject;
 use crate::session::Session;
 use crate::starfield::Bodies;
 use crate::uplink::Uplink;
@@ -47,6 +50,44 @@ impl Source {
     }
 }
 
+/// A snapshot, and what each of its items is in the terms the rest of the interface selects
+/// things in.
+///
+/// Both at once because only the provider can say: an [`ItemKey`] is a digest and nothing
+/// reads back out of it. Recovering a star's id afterwards would mean hashing the whole
+/// catalogue every frame.
+///
+/// Not every item has a subject. The reader's own craft has none and is picked through.
+pub struct Picture {
+    pub snapshot: MapSnapshot,
+    pub subjects: Vec<(ItemKey, Subject)>,
+}
+
+
+/// A picture under construction.
+#[derive(Default)]
+struct Build {
+    items: Vec<MapItem>,
+    subjects: Vec<(ItemKey, Subject)>,
+}
+
+impl Build {
+    fn with_capacity(n: usize) -> Self {
+        Self { items: Vec::with_capacity(n), subjects: Vec::with_capacity(n) }
+    }
+
+    fn push(&mut self, item: MapItem, subject: Option<Subject>) {
+        if let Some(subject) = subject {
+            self.subjects.push((item.key, subject));
+        }
+        self.items.push(item);
+    }
+
+    fn into_picture(self, snapshot: impl FnOnce(Vec<MapItem>) -> MapSnapshot) -> Picture {
+        Picture { snapshot: snapshot(self.items), subjects: self.subjects }
+    }
+}
+
 fn kind_of(kind: Kind) -> ItemKind {
     match kind {
         Kind::Star => ItemKind::Star,
@@ -66,28 +107,31 @@ fn kind_of(kind: Kind) -> ItemKind {
 /// Contacts are retarded — a ship is drawn where the light arriving now left from — and stars
 /// are older still. Bodies in the observer's own system are at coordinate time, because
 /// `update_bodies` places them there: across one system the delay is under a pixel.
-pub fn observed(session: &Session, bodies: &Bodies, uplink: &Uplink, eye_ly: DVec3)
-    -> MapSnapshot {
-    let mut items = Vec::with_capacity(bodies.drawn.len() + uplink.contacts.len() + 64);
-    items.push(observer(session, uplink, eye_ly));
-    push_local_system(&mut items, session);
-    push_bodies(&mut items, bodies);
-    push_stars(&mut items, session, eye_ly);
+pub fn observed(session: &Session, bodies: &Bodies, uplink: &Uplink, eye_ly: DVec3) -> Picture {
+    let mut build = Build::with_capacity(bodies.drawn.len() + uplink.contacts.len() + 64);
+    build.push(observer(session, uplink, eye_ly), None);
+    push_local_system(&mut build, session);
+    push_bodies(&mut build, bodies);
+    push_stars(&mut build, session, eye_ly);
 
     for contact in &uplink.contacts {
-        items.push(MapItem::body(
-            ItemKey::from_id("ship", contact.ship_id.0 as u64),
-            contact.name.clone(),
-            ItemKind::Ship,
-            contact.position_ly,
-            // Nothing on this map is drawn at its true size; half the length is a radius to
-            // hang a marker on.
-            contact.length_m * 0.5,
-            contact.facing,
-        ).weighing(f64::INFINITY));
+        build.push(
+            MapItem::body(
+                ItemKey::from_id("ship", contact.ship_id.0 as u64),
+                contact.name.clone(),
+                ItemKind::Ship,
+                contact.position_ly,
+                // Nothing on this map is drawn at its true size; half the length is a radius to
+                // hang a marker on.
+                contact.length_m * 0.5,
+                contact.facing,
+            ).weighing(f64::INFINITY),
+            Some(Subject::Craft(contact.ship_id, contact.name.clone())),
+        );
     }
 
-    MapSnapshot::observed(session.coordinate_time_s(), items)
+    let now = session.coordinate_time_s();
+    build.into_picture(|items| MapSnapshot::observed(now, items))
 }
 
 /// Every worldline at the coordinate clock, with no light delay.
@@ -99,17 +143,18 @@ pub fn observed(session: &Session, bodies: &Bodies, uplink: &Uplink, eye_ly: DVe
 /// The only difference from [`observed`] is the instant each worldline is sampled at. See
 /// `lightcone/docs/07-rendering.md`.
 #[cfg(feature = "godview")]
-pub fn coordinate(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> MapSnapshot {
+pub fn coordinate(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> Picture {
     let now = session.coordinate_time_s();
-    let mut items = vec![observer(session, uplink, eye_ly)];
-    push_local_system(&mut items, session);
+    let mut build = Build::default();
+    build.push(observer(session, uplink, eye_ly), None);
+    push_local_system(&mut build, session);
     if let Some(system) = session.system.as_ref() {
         for body in system.drawables_at(eye_ly, now) {
-            items.push(drawable_item(&body));
+            push_drawable(&mut build, &body);
         }
     }
-    push_stars(&mut items, session, eye_ly);
-    MapSnapshot::coordinate(now, items)
+    push_stars(&mut build, session, eye_ly);
+    build.into_picture(|items| MapSnapshot::coordinate(now, items))
 }
 
 /// Whether this client may ask for the god view.
@@ -169,7 +214,7 @@ fn base64url(text: &str) -> Option<Vec<u8>> {
 fn observer(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> MapItem {
     MapItem::body(
         ItemKey::from_name("observer"),
-        own_name(uplink),
+        uplink.own_name(),
         ItemKind::Observer,
         eye_ly,
         session.ship.length_m * 0.5,
@@ -178,26 +223,24 @@ fn observer(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> MapItem {
     .weighing(f64::INFINITY)
 }
 
-/// What this ship is called: the display name the account carries, which is the name every
-/// other client sees on it. Offline there is no broker to have said one.
-fn own_name(uplink: &Uplink) -> String {
-    uplink
-        .joined()
-        .map(|joined| joined.name.clone())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "this ship".into())
-}
 
-fn drawable_item(body: &lc_world::system::Drawable) -> MapItem {
-    MapItem::body(
-        ItemKey::from_name(&body.name),
-        body.name.clone(),
-        kind_of(body.kind),
-        body.position_ly,
-        body.radius_m,
-        body.pole,
-    )
-    .weighing(body.mass_kg)
+/// A body, and the target the rest of the interface names it by.
+///
+/// The same name `pick.rs` builds a `Target::Body` from over the sky, so a click means the
+/// same thing in either mode.
+fn push_drawable(build: &mut Build, body: &lc_world::system::Drawable) {
+    build.push(
+        MapItem::body(
+            ItemKey::from_name(&body.name),
+            body.name.clone(),
+            kind_of(body.kind),
+            body.position_ly,
+            body.radius_m,
+            body.pole,
+        )
+        .weighing(body.mass_kg),
+        Some(Subject::Body(body.name.clone())),
+    );
 }
 
 /// What holds the ship, as a key into the snapshot.
@@ -223,44 +266,53 @@ fn key_of(system: &lc_world::system::LocalSystem, index: em_sim::id::BodyIndex) 
     }
 }
 
-fn push_bodies(items: &mut Vec<MapItem>, bodies: &Bodies) {
-    items.extend(bodies.drawn.iter().map(drawable_item));
+fn push_bodies(build: &mut Build, bodies: &Bodies) {
+    for body in &bodies.drawn {
+        push_drawable(build, body);
+    }
 }
 
 /// The local system's own star and its belts. `drawables_at` returns neither: the primary is
 /// excluded by construction and a population is not a body.
-fn push_local_system(items: &mut Vec<MapItem>, session: &Session) {
+fn push_local_system(build: &mut Build, session: &Session) {
     let Some(system) = session.system.as_ref() else { return };
-    items.push(MapItem::body(
-        ItemKey::from_id("star", system.star.get()),
-        system.star_name.clone(),
-        ItemKind::Star,
-        system.star_position_ly(),
-        system.star_radius_m(),
-        DVec3::Z,
-    ).weighing(system.star_mass_kg()));
+    build.push(
+        MapItem::body(
+            ItemKey::from_id("star", system.star.get()),
+            system.star_name.clone(),
+            ItemKind::Star,
+            system.star_position_ly(),
+            system.star_radius_m(),
+            DVec3::Z,
+        ).weighing(system.star_mass_kg()),
+        Some(Subject::Star(system.star, system.star_name.clone())),
+    );
     let origin = system.star_position_ly();
-    for population in &system.populations {
+    for (index, population) in system.populations.iter().enumerate() {
         let Some(extent) = population.extent() else { continue };
         let name = lc_world::navigation::band_designation(population);
-        items.push(MapItem::annulus(
-            ItemKey::from_name(&name),
-            name,
-            origin,
-            population.pole,
-            em_map::outline::Extent {
-                inner: extent.inner_m,
-                outer: extent.outer_m,
-                // Without it a belt and a cloud are the same pair of radii.
-                // `lc_world::navigation::is_flat` reads the same number.
-                half_angle_rad: extent.half_angle_rad,
-            },
-        ));
+        build.push(
+            MapItem::annulus(
+                ItemKey::from_name(&name),
+                name.clone(),
+                origin,
+                population.pole,
+                em_map::outline::Extent {
+                    inner: extent.inner_m,
+                    outer: extent.outer_m,
+                    // Without it a belt and a cloud are the same pair of radii.
+                    // `lc_world::navigation::is_flat` reads the same number.
+                    half_angle_rad: extent.half_angle_rad,
+                },
+            ),
+            // The index into the system's own list, which is what `Target::Band` means.
+            Some(Subject::Swarm(index, name)),
+        );
     }
 }
 
 /// Catalogue stars inside the reach, less the one this system is already drawing.
-fn push_stars(items: &mut Vec<MapItem>, session: &Session, eye_ly: DVec3) {
+fn push_stars(build: &mut Build, session: &Session, eye_ly: DVec3) {
     let here = session.system.as_ref().map(|s| s.star);
     for star in &session.stars {
         if Some(star.id) == here {
@@ -269,14 +321,18 @@ fn push_stars(items: &mut Vec<MapItem>, session: &Session, eye_ly: DVec3) {
         if star.position_ly.distance(eye_ly) > REACH_LY {
             continue;
         }
-        items.push(MapItem::body(
-            ItemKey::from_id("star", star.id.get()),
-            star.name.clone().unwrap_or_else(|| format!("{:x}", star.id.get())),
-            ItemKind::Star,
-            star.position_ly,
-            star.star.radius_m,
-            DVec3::Z,
-        ).weighing(star.mass_solar * SOLAR_MASS_KG));
+        let name = star.name.clone().unwrap_or_else(|| format!("{:x}", star.id.get()));
+        build.push(
+            MapItem::body(
+                ItemKey::from_id("star", star.id.get()),
+                name.clone(),
+                ItemKind::Star,
+                star.position_ly,
+                star.star.radius_m,
+                DVec3::Z,
+            ).weighing(star.mass_solar * SOLAR_MASS_KG),
+            Some(Subject::Star(star.id, name)),
+        );
     }
 }
 
@@ -300,7 +356,8 @@ mod tests {
     #[test]
     fn the_observer_is_in_every_snapshot() {
         let session = session();
-        let snapshot = observed(&session, &Bodies::default(), &Uplink::default(), DVec3::ZERO);
+        let snapshot = observed(&session, &Bodies::default(), &Uplink::default(), DVec3::ZERO)
+            .snapshot;
         let observer = snapshot.observer().expect("the observer is not on their own map");
         assert_eq!(observer.position_ly, DVec3::ZERO);
         assert_eq!(snapshot.provenance, em_map::Provenance::Observed);
@@ -313,6 +370,7 @@ mod tests {
         let session = session();
         let count = |eye: DVec3| {
             observed(&session, &Bodies::default(), &Uplink::default(), eye)
+                .snapshot
                 .items
                 .iter()
                 .filter(|i| i.kind == ItemKind::Star)
@@ -354,19 +412,22 @@ mod tests {
     /// rather than a word for "you".
     #[test]
     fn this_ship_is_named_and_weighed_like_a_ship() {
-        let snapshot = observed(&session(), &Bodies::default(), &Uplink::default(), DVec3::ZERO);
+        let snapshot = observed(&session(), &Bodies::default(), &Uplink::default(), DVec3::ZERO)
+            .snapshot;
         let observer = snapshot.observer().expect("the observer is not on their own map");
         assert!(!observer.label.is_empty(), "nothing to draw");
         assert!(observer.weight.is_infinite(), "a ship sets no bar for the names");
-        // Offline there is no broker to have said a name, and this says so rather than
-        // inventing one.
-        assert_eq!(observer.label, "this ship");
+        // The literal, not the constant: comparing a constant to itself would pass whatever
+        // the word was, and the point is that a nameless ship is named rather than described.
+        assert_eq!(observer.label, "Anonymous Ship");
+        assert_eq!(observer.label, crate::uplink::ANONYMOUS, "two answers to one question");
     }
 
     /// Two things sharing a key share an entity and a selection.
     #[test]
     fn nothing_shares_a_key() {
-        let snapshot = observed(&session(), &Bodies::default(), &Uplink::default(), DVec3::ZERO);
+        let snapshot = observed(&session(), &Bodies::default(), &Uplink::default(), DVec3::ZERO)
+            .snapshot;
         let mut seen = keys(&snapshot);
         let before = seen.len();
         seen.sort_unstable();
@@ -380,8 +441,10 @@ mod tests {
     #[test]
     fn a_snapshot_is_stated_at_one_epoch() {
         let session = session();
-        let once = observed(&session, &Bodies::default(), &Uplink::default(), DVec3::ZERO);
-        let twice = observed(&session, &Bodies::default(), &Uplink::default(), DVec3::ZERO);
+        let once = observed(&session, &Bodies::default(), &Uplink::default(), DVec3::ZERO)
+            .snapshot;
+        let twice = observed(&session, &Bodies::default(), &Uplink::default(), DVec3::ZERO)
+            .snapshot;
         assert_eq!(once.epoch_s, session.coordinate_time_s());
         assert_eq!(once, twice);
     }
@@ -446,7 +509,7 @@ mod tests {
         /// and says so rather than quietly omitting them.
         #[test]
         fn the_god_view_is_marked_and_carries_no_ships() {
-            let snapshot = coordinate(&session(), &Uplink::default(), DVec3::ZERO);
+            let snapshot = coordinate(&session(), &Uplink::default(), DVec3::ZERO).snapshot;
             assert_eq!(snapshot.provenance, em_map::Provenance::Coordinate);
             assert!(snapshot.items.iter().all(|i| i.kind != ItemKind::Ship));
             assert!(snapshot.observer().is_some());

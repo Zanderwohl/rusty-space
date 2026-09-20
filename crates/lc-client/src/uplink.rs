@@ -22,6 +22,13 @@ use lc_world::system::LocalSystem;
 
 use crate::link::{Link, Status};
 
+/// What a ship with no account behind it is called.
+///
+/// Offline there is no broker to have said a name, and every craft on the map is named
+/// including this one. A name rather than a word for the reader, so that a real name can be
+/// told from the absence of one at a glance.
+pub const ANONYMOUS: &str = "Anonymous Ship";
+
 /// Where this client is with respect to a server.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum State {
@@ -321,6 +328,18 @@ impl Uplink {
             State::Joined(joined) => Some(joined),
             _ => None,
         }
+    }
+
+    /// What this ship is called: the display name the account carries, which is the name every
+    /// other client has for it. [`ANONYMOUS`] when nobody has said one.
+    ///
+    /// One answer for the two places that show it, the map's mark and the radio window's own
+    /// lines.
+    pub fn own_name(&self) -> String {
+        self.joined()
+            .map(|joined| joined.name.clone())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| ANONYMOUS.to_string())
     }
 
     /// What a craft is called, from whatever this client knows of it.

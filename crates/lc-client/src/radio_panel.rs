@@ -108,7 +108,7 @@ pub(crate) fn chat(
 
     // What this ship is called, for its own lines. The account's name as the broker knows it,
     // which is what every other craft sees on its contact list.
-    let own = uplink.joined().map(|j| j.name.clone()).unwrap_or_else(|| "this ship".into());
+    let own = uplink.own_name();
     let showing = state.0.chat_with;
 
     // **One allocation for the whole body.** Everything inside is bounded by it, so the window

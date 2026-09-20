@@ -121,8 +121,15 @@ pub fn draw(
         ViewMode::Map => square,
         ViewMode::World => egui::Rect::NOTHING,
     };
+    // Before the names, because a mark carries its own and the layout has to leave that one
+    // out. Nothing is picked off the corner square: 190 points is a thumbnail, not a surface.
+    let picked = match mode {
+        ViewMode::Map => crate::map_pick::survey(&response, rect, &ui_state, &map, &mut out),
+        ViewMode::World => crate::map_pick::Picked::default(),
+    };
     scale_rule(&painter, rect, ui_state.map, &over);
-    labels(&painter, rect, hole, ui_state.map, &map);
+    labels(&painter, rect, hole, ui_state.map, &map, &picked.named);
+    crate::map_pick::draw(&painter, rect, hole, &over, &picked);
     read_input(ctx, &response, rect, ViewMode::Map, ui_state.map, &map, &mut out);
     if mode == ViewMode::Map {
         // The square is showing the world, so it answers the world's own gesture.
@@ -191,6 +198,7 @@ fn labels(
     hole: egui::Rect,
     view: crate::ui::MapView,
     map: &Map,
+    named: &[em_map::ItemKey],
 ) {
     let Some(frame) = map.frame.as_ref() else { return };
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
@@ -203,7 +211,8 @@ fn labels(
     let mut candidates = Vec::with_capacity(frame.placements.len());
     let mut galleys = Vec::with_capacity(frame.placements.len());
     for placement in &frame.placements {
-        if placement.label.is_empty() {
+        // A mark names what it is on; naming it here too would write it twice.
+        if placement.label.is_empty() || named.contains(&placement.key) {
             continue;
         }
         let Some(ndc) =
@@ -231,10 +240,7 @@ fn labels(
 
     // Clear of the mark and centered on it. The mark is sized against the texture and the
     // text against the surface showing it, which differ on a display that scales.
-    let points_per_pixel = match map.size.y {
-        0 => 1.0,
-        height => rect.height() / height as f32,
-    };
+    let points_per_pixel = map.points_per_pixel(rect.height());
     let layout = em_map::label::Layout {
         offset: glam::Vec2::new(
             map.symbol_px() * points_per_pixel * 0.5 + LABEL_GAP_PX,

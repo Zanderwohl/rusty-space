@@ -46,6 +46,7 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--at <body>` / `--station <course>` | stand off a body, or start on a station |
 | `--lift <deg>` | raise the ship out of the ecliptic about the star, keeping its distance |
 | `--panel <name>` / `--tune` | open a panel. `--panel map` is the exception: the map is a mode of the main view, so this is a pin holding it there |
+| `--focus <body>` / `--focus band:<n>` | what is **selected**, as a click on either view would leave it. Everything else that aims is a camera, so this is the only way to photograph a reticle. `--station` sets the focus itself and stands aside when this is given |
 | `--book <id>` | open a book from `crates/lc-client/assets/books/<id>.epub`; `--chapter <n>` and `--pages <n>` move within it |
 | `--menu` | hold at the main menu, so `--shot` photographs that instead of the sky |
 | `--signin` | hold at the sign-in modal, which draws over the menu and no action can reach |

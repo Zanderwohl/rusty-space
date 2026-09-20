@@ -873,6 +873,12 @@ five ships and names four of them has a hole in it where the reader is. It is la
 everything else: two craft at one pixel is one name, and the one worth keeping is the reader's
 — the other is the thing they can point at to ask about.
 
+Offline there is no broker to have said a name, so a ship with no account behind it is
+**Anonymous Ship** — `uplink::ANONYMOUS`, and the radio window calls it the same thing on this
+ship's own lines. A name and not a word for the reader. It was "this ship", which reads as the
+interface describing you rather than as a name: with that on screen there is no telling a real
+name from the absence of one, which is the one thing worth seeing at a glance.
+
 **Nothing on the map is white.** The palette has two phosphors, and this ship is drawn in the
 same amber as the rest, as the same filled dot. Drawn as a white circle it was a white outline
 around whichever contact happened to be beside it, which at these scales is most of them: ten
@@ -911,6 +917,53 @@ naming beside whatever is left, which is how one ratio serves a map spanning fif
 magnitude. Jupiter's irregular moons lose their names to Jupiter for the same reason its
 Galileans keep theirs.
 
+### What is selected is one thing, whichever view you are looking at
+
+**Decided: the map and the world pick into the same field.** Clicking Europa on the map, clicking
+it in the sky and picking it out of the System window are the same event by the time anything
+downstream sees them — they all send `Action::FocusTarget`. A selection made in one mode is
+marked in the other, so switching modes does not lose your place, and there is no second notion
+of "what is selected" to keep in step with the first.
+
+That is a statement about state, not about code sharing, but the code follows it: `pick.rs` and
+`map_pick.rs` both reduce what their view drew to `em_ui::picking::Candidate` and both ask
+`em_ui::picking::pick` which one was meant. Neither knows how the other drew anything, which is
+the point — the sky puts stars at their aberrated direction and the map puts them at their true
+one, and picking agrees with each picture because each candidate carries the position its own
+pass used.
+
+The quality-of-life rules come with it, unchanged, because they are one function:
+
+- **Rank beats distance outright.** A craft beats a body, a body beats a star, and everything
+  beats a belt. Without it the asteroid belt swallows every planet inside it, and from an inner
+  orbit the primary's disc swallows the rest.
+- **Nearest *center* wins inside a rank**, which is what makes a moon in front of its planet
+  selectable: a big disc's center is far from wherever you clicked on it.
+- **Twelve pixels of slack**, because a moon four pixels across cannot be hit exactly.
+- **A belt is picked along its outline**, at whatever part of it is nearest the cursor — the
+  same curves `em_map::outline` gives the geometry, so what you point at is what you see.
+
+Two things are true of the map only. **The mark is measured against the surface, not the
+window**, so a selection off the edge of the map gets an edge arrow at the *map's* edge and
+clear of whatever the interface is floating over it — the corner square included, where the
+world's own camera is drawing. And **a double click centers the map** on what was clicked,
+which is the one thing the map can do with a selection that the sky cannot, and the only way to
+center on a body the control strip's three buttons do not name.
+
+**Nothing is picked off the corner square.** It is 190 points; the map there is a thumbnail, not
+a surface to work on. This is the same rule that keeps the sky from being picked while the map
+is the view, and for the same reason.
+
+A mark carries its own name, and the layout drops that name rather than writing it twice a few
+pixels away. So pointing at a rock too light to have won a label is how you find out what it is
+— which is most of what pointing at something is for.
+
+**The reticle is one instrument, so it keeps its own two colors across both modes**: the
+hover ring and the selection's brackets look the same on the map as they do on the sky. They are
+the interface's overlay rather than the map's drawing, which is why they are not held to the two
+phosphors everything drawn *by* the map is.
+
 ## Open
-- Nothing here is clickable. A name is a good thing to be able to point at, and `pick.rs`
-  already knows how to turn a screen position into a selection.
+- A contact can be pointed at and read but not selected: every `Target` is somewhere a course
+  can be plotted to, and a course to a ship is a rendezvous with something moving that this
+  client only knows the past of. A double click still centers the map on one.

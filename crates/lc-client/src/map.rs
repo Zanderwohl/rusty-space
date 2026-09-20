@@ -161,6 +161,9 @@ pub struct Map {
     /// Whether anything is showing the map. Nothing is drawn when nothing is looking.
     pub shown: bool,
     pub snapshot: MapSnapshot,
+    /// What each item of the snapshot is, in the terms the rest of the interface selects
+    /// things in. See [`crate::map_source::Picture`].
+    pub subjects: Vec<(ItemKey, crate::pick::Subject)>,
     /// Which item holds the ship, when the snapshot has one. Worked out beside the snapshot
     /// because that is where the session is.
     pub primary: Option<ItemKey>,
@@ -195,6 +198,26 @@ impl Map {
     /// points that texture is shown at.
     pub fn symbol_px(&self) -> f32 {
         self.viewport(MAP_FOV).point_px
+    }
+
+    /// The radius a placement is drawn at, in texture pixels. Not the nominal mark size: a
+    /// resolved body is a sphere at its own angular size and only an unresolved one falls back
+    /// to the symbol. Picking reads this so that it agrees with the picture. See [`Form`].
+    pub fn drawn_radius_px(&self, placement: &Placement) -> f32 {
+        let view = self.viewport(MAP_FOV);
+        match form_of(placement, view) {
+            Form::Sphere => placement.angular_radius / view.rad_per_px.max(f32::MIN_POSITIVE),
+            Form::Circle | Form::Dot => view.mark_px(placement) * 0.5,
+        }
+    }
+
+    /// Points of a surface per pixel of the texture. They differ on a display that scales, and
+    /// on the frame after a resize.
+    pub fn points_per_pixel(&self, surface_height: f32) -> f32 {
+        match self.size.y {
+            0 => 1.0,
+            height => surface_height / height as f32,
+        }
     }
 }
 
@@ -273,6 +296,7 @@ fn setup(
         wanted: UVec2::splat(INITIAL_SIDE),
         shown: false,
         snapshot: MapSnapshot::observed(0.0, Vec::new()),
+        subjects: Vec::new(),
         primary: None,
         frame: None,
         sphere: meshes.add(wire_mesh::generate_latlon_sphere(&[], BASE_TUBE_RADIUS, 4)),
@@ -356,11 +380,13 @@ fn survey(
     if !map.shown {
         return;
     }
-    map.snapshot = match ui.map.source {
+    let picture = match ui.map.source {
         Source::Observed => crate::map_source::observed(&game.0, &bodies, &uplink, eye.at_ly),
         #[cfg(feature = "godview")]
         Source::God => crate::map_source::coordinate(&game.0, &uplink, eye.at_ly),
     };
+    map.snapshot = picture.snapshot;
+    map.subjects = picture.subjects;
     map.primary = crate::map_source::primary(&game.0);
 }
 
@@ -890,7 +916,7 @@ mod tests {
 
     fn snapshot() -> MapSnapshot {
         MapSnapshot::observed(0.0, vec![
-            MapItem::body(ItemKey::from_name("observer"), "this ship", ItemKind::Observer,
+            MapItem::body(ItemKey::from_name("observer"), "Anonymous Ship", ItemKind::Observer,
                 DVec3::new(1.0, 2.0, 3.0), 100.0, DVec3::Z),
             MapItem::body(ItemKey::from_id("star", 7), "Sol", ItemKind::Star,
                 DVec3::new(4.0, 5.0, 6.0), 7.0e8, DVec3::Z),
@@ -991,7 +1017,7 @@ mod tests {
     fn ship_at(bearing: f64) -> MapSnapshot {
         let star = DVec3::new(4.0, 5.0, 6.0);
         MapSnapshot::observed(0.0, vec![
-            MapItem::body(ItemKey::from_name("observer"), "this ship", ItemKind::Observer,
+            MapItem::body(ItemKey::from_name("observer"), "Anonymous Ship", ItemKind::Observer,
                 star + DVec3::new(bearing.cos(), bearing.sin(), 0.0), 100.0, DVec3::Z),
             MapItem::body(ItemKey::from_id("star", 7), "Sol", ItemKind::Star, star, 7.0e8,
                 DVec3::Z),
