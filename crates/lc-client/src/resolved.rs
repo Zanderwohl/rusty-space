@@ -418,6 +418,7 @@ mod tests {
 
     fn body(radius_m: f64, at: DVec3) -> Drawable {
         Drawable {
+            mass_kg: 0.0,
             name: "test".into(),
             kind: lc_world::navigation::Kind::Planet,
             rings: None,

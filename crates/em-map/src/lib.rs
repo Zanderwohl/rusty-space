@@ -26,6 +26,7 @@
 
 pub mod camera;
 pub mod frame;
+pub mod label;
 pub mod outline;
 pub mod plane;
 pub mod rings;

@@ -65,6 +65,9 @@ pub struct Drawable {
     /// Where it is, light-years from the world origin, simulation axes.
     pub position_ly: DVec3,
     pub radius_m: f64,
+    /// Kilograms, as the arena states it. Carried because it is what decides which of two
+    /// names a crowded map has room for — see `em_map::label`.
+    pub mass_kg: f64,
     /// The radius a blackbody at the star's temperature would need to deliver this body's
     /// reflected flux. See [`effective_radius`].
     pub effective_radius_m: f64,
@@ -230,6 +233,7 @@ impl LocalSystem {
                     pole,
                     position_ly: self.origin_ly + at / M_PER_LY,
                     radius_m,
+                    mass_kg: self.sim.info(i).mass,
                     effective_radius_m: effective_radius_from_area(
                         self.star_radius_m,
                         area,
@@ -358,6 +362,10 @@ impl LocalSystem {
 
     pub fn star_radius_m(&self) -> f64 {
         self.star_radius_m
+    }
+
+    pub fn star_mass_kg(&self) -> f64 {
+        self.sim.info(self.primary).mass
     }
 
     /// Where the star is, light-years from the world origin.

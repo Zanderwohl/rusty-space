@@ -24,6 +24,10 @@ use crate::uplink::Uplink;
 /// moved with the zoom would change what exists as well as what is framed. Twenty-five
 /// light-years is the conventional solar neighborhood and is 166 stars out of the bundled
 /// catalogue's 119 625 — small enough to draw whole, large enough to have somewhere to go.
+/// One solar mass. The catalogue states a star's mass in them and [`em_map::MapItem::weight`]
+/// wants kilograms, because a planet's does too and a common scale is the whole point.
+const SOLAR_MASS_KG: f64 = 1.988_41e30;
+
 pub const REACH_LY: f64 = 25.0;
 
 /// Which perspective the map is drawn from.
@@ -85,7 +89,7 @@ pub fn observed(session: &Session, bodies: &Bodies, uplink: &Uplink, eye_ly: DVe
             // size anyway; half the length is an honest radius to hang a marker on.
             contact.length_m * 0.5,
             contact.facing,
-        ));
+        ).weighing(f64::INFINITY));
     }
 
     MapSnapshot::observed(session.coordinate_time_s(), items)
@@ -194,6 +198,7 @@ fn drawable_item(body: &lc_world::system::Drawable) -> MapItem {
         body.radius_m,
         body.pole,
     )
+    .weighing(body.mass_kg)
 }
 
 fn push_bodies(items: &mut Vec<MapItem>, bodies: &Bodies) {
@@ -211,7 +216,7 @@ fn push_local_system(items: &mut Vec<MapItem>, session: &Session) {
         system.star_position_ly(),
         system.star_radius_m(),
         DVec3::Z,
-    ));
+    ).weighing(system.star_mass_kg()));
     let origin = system.star_position_ly();
     for population in &system.populations {
         let Some(extent) = population.extent() else { continue };
@@ -249,7 +254,7 @@ fn push_stars(items: &mut Vec<MapItem>, session: &Session, eye_ly: DVec3) {
             star.position_ly,
             star.star.radius_m,
             DVec3::Z,
-        ));
+        ).weighing(star.mass_solar * SOLAR_MASS_KG));
     }
 }
 

@@ -25,6 +25,8 @@ pub struct Placement {
     pub key: ItemKey,
     pub kind: ItemKind,
     pub label: String,
+    /// Carried from [`crate::MapItem::weight`]: what decides which of two names fit.
+    pub weight: f64,
     pub at: Vec3,
     /// Where a drop-line from [`Placement::at`] meets the plane. Equal to `at` for something
     /// already in it, which is the host's signal to draw no line at all.
@@ -143,6 +145,7 @@ pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Plane, meters_per_u
             key: item.key,
             kind: item.kind,
             label: item.label.clone(),
+            weight: item.weight,
             at,
             foot,
             radius: (item.radius_m / meters_per_unit) as f32,

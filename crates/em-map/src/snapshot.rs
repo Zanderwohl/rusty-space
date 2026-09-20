@@ -88,6 +88,12 @@ pub struct MapItem {
     pub position_ly: DVec3,
     /// Meters. Zero for anything with no size worth drawing at any zoom.
     pub radius_m: f64,
+    /// What wins when two labels want the same pixels: bigger takes them. Kilograms for a
+    /// body, so a map names Jupiter and not its moons for no reason beyond the mass.
+    ///
+    /// Zero where nothing says otherwise, and that is a real answer rather than a gap: an
+    /// unweighted thing is named only where there is room to spare. See [`crate::label`].
+    pub weight: f64,
     /// Spin axis, or the normal of a ring or belt. Ecliptic north where nothing says otherwise.
     pub pole: DVec3,
     /// How far it reaches, for something shaped like a ring or a shell rather than a ball.
@@ -101,7 +107,23 @@ impl MapItem {
     /// A body: something with a size and a pole.
     pub fn body(key: ItemKey, label: impl Into<String>, kind: ItemKind, position_ly: DVec3,
         radius_m: f64, pole: DVec3) -> Self {
-        Self { key, label: label.into(), kind, position_ly, radius_m, pole, annulus_m: None }
+        Self {
+            key,
+            label: label.into(),
+            kind,
+            position_ly,
+            radius_m,
+            weight: 0.0,
+            pole,
+            annulus_m: None,
+        }
+    }
+
+    /// How much this one is worth naming, against everything else wanting the same pixels.
+    /// Kilograms, where there is a mass to state.
+    pub fn weighing(mut self, kg: f64) -> Self {
+        self.weight = kg;
+        self
     }
 
     /// A belt, a cloud or a ring system, about `position_ly` and in the plane of `pole`.
@@ -113,6 +135,7 @@ impl MapItem {
             kind: ItemKind::Population,
             position_ly,
             radius_m: 0.0,
+            weight: 0.0,
             pole,
             annulus_m: Some(crate::outline::Extent {
                 inner: extent.inner.min(extent.outer),

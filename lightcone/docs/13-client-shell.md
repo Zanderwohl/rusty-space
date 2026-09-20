@@ -771,6 +771,31 @@ selected. Two answers to "where does this belt stop" is one too many, and the ha
 with the two radii for the same reason — without it a belt and a cloud are the same pair of
 numbers.
 
+### The heaviest name wins the pixels
+
+A planetary system has fifty names in it and a panel has room for six, so the map names what it
+can and drops the rest. The rule is **mass**: Jupiter is named and the moons crowding it are
+not, and where the moons have room it is the Galileans that get it. Nothing in the layout knows
+about primaries or satellites — a hierarchy is what mass already says, and encoding it twice is
+two answers to one question.
+
+Ships outrank every body there is and are written in their own amber, the same amber their mark
+is drawn in. Your own ship is not named: it is the one thing on the map whose position never
+has to be looked up, because the rings and the spokes are centered on it.
+
+**A name that would leave the viewport is dropped, not dragged to the rim.** An arrow at the
+edge names something the reader cannot see and spends the pixels of something they can.
+
+A label sits at one anchor and gets no second try on the other side of its symbol. A name that
+hops when a neighbour drifts past reads as a twitch, and a map of moving things would twitch
+constantly. Ties are broken by key for the same reason: two bodies of equal mass must not trade
+places between frames.
+
+The text is egui over the image rather than geometry on the layer, per `18-ui-style.md`, and
+the projection is `em_map::camera::Orbit::project` — the exact inverse of the ray the cursor is
+cast with, which is a round-trip test rather than two functions hoping to agree.
+
 ## Open
-- Nothing is labeled yet. The geometry is placed; the names that go beside it are screen-space
-  work for `em_ui::reticle`, which already has the clip-space placement for it.
+- A name is drawn wherever there is room for it, so a sparse field of minor bodies gets one
+  each: the collision rule thins a crowd and has nothing to say about an empty view. A floor on
+  mass relative to the heaviest thing on screen is the obvious next knob.

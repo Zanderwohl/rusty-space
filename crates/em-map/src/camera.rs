@@ -173,6 +173,26 @@ impl Orbit {
     /// but zero the normal is not perpendicular to the forward vector, so anything casting its
     /// own rays has to do the same or it is working in a skewed frame: the middle of the
     /// viewport stopped being the middle by a third of the screen at 25°.
+    /// Where a camera-relative offset lands on the viewport, in normalized device
+    /// coordinates — the exact inverse of [`Orbit::ray`], and what a label needs.
+    ///
+    /// `offset` is in simulation axes, measured from the eye. `None` for anything at or behind
+    /// the plane of the eye: the map draws no edge markers, so something off screen is simply
+    /// not named.
+    pub fn project(&self, plane: Plane, offset: DVec3, fov_y: f64, aspect: f64)
+        -> Option<glam::DVec2> {
+        let (forward, right, up) = self.view_basis(plane);
+        let depth = offset.dot(forward);
+        if !(depth > 0.0) || !depth.is_finite() {
+            return None;
+        }
+        let tan_half = (fov_y * 0.5).tan();
+        Some(glam::DVec2::new(
+            offset.dot(right) / (depth * tan_half * aspect),
+            offset.dot(up) / (depth * tan_half),
+        ))
+    }
+
     pub fn view_basis(&self, plane: Plane) -> (DVec3, DVec3, DVec3) {
         let (forward, normal) = self.orientation(plane);
         let right = forward.cross(normal).normalize_or(DVec3::X);
@@ -221,6 +241,44 @@ impl Orbit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **Projecting must be the exact inverse of casting.**
+    ///
+    /// A label placed by one and a cursor read by the other have to agree about where a thing
+    /// is, or naming a body puts its name somewhere the body is not.
+    #[test]
+    fn a_projected_ray_lands_where_it_was_cast_from() {
+        let fov = std::f64::consts::FRAC_PI_4;
+        for plane in [Plane::Ecliptic, Plane::Galactic] {
+            for aspect in [0.5, 1.0, 1.77] {
+                let orbit = Orbit {
+                    focus_ly: DVec3::new(0.3, -0.2, 0.05),
+                    azimuth: 0.9,
+                    elevation: 0.4,
+                    log_distance_m: 12.0,
+                };
+                for ndc in [
+                    glam::DVec2::ZERO,
+                    glam::DVec2::new(0.9, 0.9),
+                    glam::DVec2::new(-0.7, 0.3),
+                    glam::DVec2::new(0.2, -0.95),
+                ] {
+                    for range in [1.0e-3f64, 1.0, 1.0e6] {
+                        let offset = orbit.ray(plane, ndc, fov, aspect) * range;
+                        let back = orbit.project(plane, offset, fov, aspect).expect("in front");
+                        assert!(
+                            (back - ndc).length() < 1.0e-9,
+                            "{plane:?} aspect {aspect}: {ndc:?} came back {back:?}",
+                        );
+                    }
+                }
+                // And nothing behind the eye projects at all.
+                let (forward, ..) = orbit.view_basis(plane);
+                assert!(orbit.project(plane, -forward, fov, aspect).is_none());
+                assert!(orbit.project(plane, DVec3::ZERO, fov, aspect).is_none());
+            }
+        }
+    }
 
     /// One notch is the same fraction wherever it is spent.
     ///

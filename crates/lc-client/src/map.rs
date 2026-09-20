@@ -232,6 +232,12 @@ impl Map {
     fn viewport(&self, fov_y: f32) -> Viewport {
         Viewport::new(self.size.y, fov_y)
     }
+
+    /// How big a symbol is drawn, in **texture pixels** — what a label has to clear, once the
+    /// caller has scaled it by however many points that texture is being shown at.
+    pub fn symbol_px(&self) -> f32 {
+        self.viewport(MAP_FOV).point_px
+    }
 }
 
 /// What a pixel of the map's own viewport is worth. Both numbers come from its height, and
@@ -1024,6 +1030,7 @@ mod tests {
         Placement {
             key: ItemKey::from_name("a body"),
             kind,
+            weight: 0.0,
             label: "a body".into(),
             at: glam::Vec3::new(0.0, distance, 0.0),
             foot: glam::Vec3::new(0.0, distance, 0.0),

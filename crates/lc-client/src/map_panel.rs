@@ -49,6 +49,16 @@ const RULE_TICK_PX: f32 = 3.0;
 /// the middle of the view would be wrong by the depth between the two.
 const RULE_SAMPLE_NDC_Y: f64 = -0.75;
 
+/// How far a label sits from its symbol's edge, and the daylight kept between two labels.
+///
+/// The gap is generous on purpose: the map is read at a glance and two names a pixel apart
+/// are one smear. Dropping the second is the better answer, and which one is dropped is
+/// exactly what [`em_map::label`] decides.
+const LABEL_GAP_PX: f32 = 4.0;
+/// The amber a contact's name is written in, which is the amber its mark is drawn in.
+const SHIP_LABEL: bevy::prelude::Color = bevy::prelude::Color::srgb(0.95, 0.70, 0.25);
+const LABEL_CLEARANCE_PX: f32 = 6.0;
+
 /// The minimap's side, in points.
 const MINIMAP_SIDE: f32 = 190.0;
 
@@ -86,12 +96,98 @@ pub fn draw(
     );
     // The same gestures on both surfaces, from the same function, because two surfaces
     // showing one view that answer a drag differently is worse than either answer.
-    scale_rule(&ctx.layer_painter(response.layer_id), rect, ui_state.map);
+    let painter = ctx.layer_painter(response.layer_id);
+    scale_rule(&painter, rect, ui_state.map);
+    labels(&painter, rect, ui_state.map, &map);
     read_input(ctx, &response, rect, ui_state.map, &map, &mut out);
     if !open && response.clicked() {
         // A click is not a drag — egui keeps them apart — so this is the one gesture the
         // minimap has that the panel does not.
         ask(&mut out, Action::OpenPanel(Panel::Map));
+    }
+}
+
+/// The names, over the image.
+///
+/// egui text rather than geometry on the layer: `18-ui-style.md` keeps one face for the
+/// interface, and egui draws text better than a shader drawing letters would.
+///
+/// Every name is a claim on the same pixels, so the drawing is in two halves — the host lays
+/// out what each one would occupy, and [`em_map::label::lay_out`] says which of them get to
+/// exist. See there for why the heaviest wins.
+fn labels(painter: &egui::Painter, rect: egui::Rect, view: crate::ui::MapView, map: &Map) {
+    let Some(frame) = map.frame.as_ref() else { return };
+    if rect.width() <= 0.0 || rect.height() <= 0.0 {
+        return;
+    }
+    let aspect = (rect.width() / rect.height()) as f64;
+    let font = painter.ctx().style_of(egui::Theme::Dark).text_styles[&egui::TextStyle::Small]
+        .clone();
+
+    let mut candidates = Vec::with_capacity(frame.placements.len());
+    let mut galleys = Vec::with_capacity(frame.placements.len());
+    for placement in &frame.placements {
+        // Not the observer: it is the one thing on the map whose place never has to be
+        // looked up, because the rings and the spokes are centered on it.
+        if placement.kind == em_map::ItemKind::Observer || placement.label.is_empty() {
+            continue;
+        }
+        let Some(ndc) =
+            view.orbit.project(view.plane, placement.at.as_dvec3(), crate::map::MAP_FOV as f64,
+                aspect)
+        else {
+            continue;
+        };
+        let galley = painter.layout_no_wrap(placement.label.clone(), font.clone(),
+            label_color(placement.kind));
+        let size = galley.size();
+        candidates.push(em_map::label::Candidate {
+            key: placement.key,
+            weight: placement.weight,
+            // egui counts pixels down from the top left; normalized device coordinates run up
+            // from the middle.
+            at: glam::Vec2::new(
+                (ndc.x as f32 + 1.0) * 0.5 * rect.width(),
+                (1.0 - ndc.y as f32) * 0.5 * rect.height(),
+            ),
+            size: glam::Vec2::new(size.x, size.y),
+        });
+        galleys.push((placement.key, galley));
+    }
+
+    // Clear of the symbol, and vertically centered on it. The symbol is sized against the
+    // texture and the text against the surface showing it, which are not the same units on a
+    // display that scales.
+    let points_per_pixel = match map.size.y {
+        0 => 1.0,
+        height => rect.height() / height as f32,
+    };
+    let offset = glam::Vec2::new(
+        map.symbol_px() * points_per_pixel * 0.5 + LABEL_GAP_PX,
+        -font.size * 0.5,
+    );
+    let viewport = glam::Vec2::new(rect.width(), rect.height());
+    for placed in em_map::label::lay_out(candidates, viewport, offset, LABEL_CLEARANCE_PX) {
+        let Some((_, galley)) = galleys.iter().find(|(key, _)| *key == placed.key) else {
+            continue;
+        };
+        painter.galley(
+            rect.min + egui::vec2(placed.at.x, placed.at.y),
+            galley.clone(),
+            egui::Color32::WHITE,
+        );
+    }
+}
+
+/// Amber for a contact, the interface's own text color for everything else.
+///
+/// Not the symbol's color: a body's mark is drawn at the palette's dimmer greens so it sits
+/// behind what matters, and text at that weight over a black field is not read so much as
+/// squinted at.
+fn label_color(kind: em_map::ItemKind) -> egui::Color32 {
+    match kind {
+        em_map::ItemKind::Ship | em_map::ItemKind::Station => color_of(SHIP_LABEL),
+        _ => color_of(em_ui::vfd::TEXT),
     }
 }
 
