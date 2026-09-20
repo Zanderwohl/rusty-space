@@ -365,7 +365,7 @@ fn place(
         for entity in &existing {
             commands.entity(entity).despawn();
         }
-        spawn_scene(&mut commands, &map, &frame, standoff, &mut materials);
+        spawn_scene(&mut commands, &map, &frame, standoff, rad_per_px, &mut materials);
         map.drawn = wanted;
         map.rings_drawn = frame.rings.len();
         map.frame = Some(frame);
@@ -461,6 +461,23 @@ fn ring_transform(frame: &MapFrame, radius: f32) -> Transform {
 /// The shader displaces vertices along their normals in **local** space, so the world width is
 /// `scale * target`. Wanting a world width of `distance * rad_per_px * LINE_PX` therefore
 /// means asking for that over the scale.
+/// The tube radius a mesh wants, in its own local units.
+///
+/// Pure, and shared by the spawn and the per-frame update — **which is the whole point**. The
+/// spawn used to take the material's default and let the next frame correct it, and for that
+/// one frame a spoke scaled to forty stand-offs carried a tube `0.48` of a stand-off thick
+/// while the camera cleared the plane by `0.05` of one. The camera was inside the tube, and
+/// the inside of a tube is a solid wall: the map flashed full green. It happened on a respawn,
+/// a respawn happens when the ring count changes, and the ring count changes on every decade —
+/// so it fired while scrolling and almost never while sitting still.
+pub fn tube_target(scale: f32, rad_per_px: f32, distance: f32, max_fraction: f32) -> f32 {
+    let world = (distance * rad_per_px * LINE_PX).max(f32::MIN_POSITIVE);
+    match scale > f32::MIN_POSITIVE {
+        true => (world / scale).min(max_fraction),
+        false => BASE_TUBE_RADIUS,
+    }
+}
+
 fn set_thickness(
     materials: &mut Assets<BodyWireframeMaterial>,
     material: &MeshMaterial3d<BodyWireframeMaterial>,
@@ -470,12 +487,7 @@ fn set_thickness(
     max_fraction: f32,
 ) {
     let Some(mut asset) = materials.get_mut(&material.0) else { return };
-    let world = (distance * rad_per_px * LINE_PX).max(f32::MIN_POSITIVE);
-    let target = match scale > f32::MIN_POSITIVE {
-        true => (world / scale).min(max_fraction),
-        false => BASE_TUBE_RADIUS,
-    };
-    asset.target_tube_radius = target;
+    asset.target_tube_radius = tube_target(scale, rad_per_px, distance, max_fraction);
 }
 
 fn spawn_scene(
@@ -483,15 +495,19 @@ fn spawn_scene(
     map: &Map,
     frame: &MapFrame,
     standoff: f32,
+    rad_per_px: f32,
     materials: &mut Assets<BodyWireframeMaterial>,
 ) {
     let layer = RenderLayers::layer(MAP_LAYER);
 
     for (index, ring) in frame.rings.iter().enumerate() {
+        let at = ring_transform(frame, ring.radius);
+        let target = tube_target(ring.radius, rad_per_px,
+            at.translation.length().max(ring.radius), LINE_TUBE_FRACTION);
         commands.spawn((
             Mesh3d(map.ring.clone()),
-            MeshMaterial3d(materials.add(line_material(RING))),
-            ring_transform(frame, ring.radius),
+            MeshMaterial3d(materials.add(line_material(RING, target))),
+            at,
             NoFrustumCulling,
             layer.clone(),
             MapDrawn,
@@ -499,10 +515,14 @@ fn spawn_scene(
         ));
     }
 
+    let reach = standoff * SPOKE_REACH;
     commands.spawn((
         Mesh3d(map.spokes.clone()),
-        MeshMaterial3d(materials.add(line_material(SPOKE))),
-        ring_transform(frame, standoff * SPOKE_REACH),
+        MeshMaterial3d(materials.add(line_material(
+            SPOKE,
+            tube_target(reach, rad_per_px, standoff, LINE_TUBE_FRACTION),
+        ))),
+        ring_transform(frame, reach),
         NoFrustumCulling,
         layer.clone(),
         MapDrawn,
@@ -510,20 +530,32 @@ fn spawn_scene(
     ));
 
     for placement in &frame.placements {
+        let at = item_transform(placement, rad_per_px);
+        let fraction = match is_resolved(placement, rad_per_px) {
+            true => SPHERE_TUBE_FRACTION,
+            false => POINT_TUBE_FRACTION,
+        };
         commands.spawn((
             Mesh3d(map.sphere.clone()),
-            MeshMaterial3d(materials.add(line_material(color_of(placement.kind)))),
-            item_transform(placement, 0.0),
+            MeshMaterial3d(materials.add(line_material(
+                color_of(placement.kind),
+                tube_target(at.scale.max_element(), rad_per_px, at.translation.length(),
+                    fraction),
+            ))),
+            at,
             NoFrustumCulling,
             layer.clone(),
             MapDrawn,
             MapItemOf(placement.key),
         ));
         if placement.has_drop_line() {
+            let at = drop_transform(placement);
+            let target = tube_target(1.0, rad_per_px, at.translation.length(),
+                LINE_TUBE_FRACTION);
             commands.spawn((
                 Mesh3d(map.drop.clone()),
-                MeshMaterial3d(materials.add(line_material(DROP))),
-                drop_transform(placement),
+                MeshMaterial3d(materials.add(line_material(DROP, target))),
+                at,
                 NoFrustumCulling,
                 layer.clone(),
                 MapDrawn,
@@ -533,7 +565,7 @@ fn spawn_scene(
     }
 }
 
-fn line_material(color: Color) -> BodyWireframeMaterial {
+fn line_material(color: Color, target_tube_radius: f32) -> BodyWireframeMaterial {
     let rgba = color.to_linear();
     BodyWireframeMaterial {
         base_color: LinearRgba::new(
@@ -543,6 +575,9 @@ fn line_material(color: Color) -> BodyWireframeMaterial {
             1.0,
         ),
         emission_strength: LINE_EMISSION,
+        // Set here rather than left to the default and corrected next frame. See
+        // [`tube_target`] for what that cost.
+        target_tube_radius,
         // Unlit. With no suns the shader's day/night factor is one, which is what a diagram
         // wants: the map says where a thing is, and the sky says what it looks like.
         num_suns: 0,
@@ -566,5 +601,65 @@ fn color_of(kind: ItemKind) -> Color {
         // one channel a map has that a list does not.
         ItemKind::Ship | ItemKind::Station => Color::srgb(0.95, 0.70, 0.25),
         ItemKind::Observer => Color::srgb(1.0, 1.0, 1.0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **No line is ever thicker than the camera's clearance over the plane.**
+    ///
+    /// This is the invariant the whole map rests on: the camera is held off the plane by
+    /// `em_map::camera::ELEVATION_FLOOR`, and every line is a tube with a width of its own. A
+    /// tube wider than that clearance swallows the camera, and the inside of a tube is a solid
+    /// wall — the map goes flat green.
+    ///
+    /// Checked across the stand-offs and viewport sizes the map actually runs at, for the
+    /// family that reaches furthest and so is scaled hardest.
+    #[test]
+    fn a_line_is_never_thicker_than_the_camera_clears_the_plane() {
+        let floor = em_map::camera::ELEVATION_FLOOR.sin() as f32;
+        for standoff in [1.0e-3f32, 1.0, 40.0, 1.0e3, 1.0e5] {
+            for height in [64.0f32, 410.0, 2160.0] {
+                let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / height;
+                let reach = standoff * SPOKE_REACH;
+                let world = reach * tube_target(reach, rad_per_px, standoff, LINE_TUBE_FRACTION);
+                let clearance = standoff * floor;
+                assert!(
+                    world < clearance,
+                    "spokes at stand-off {standoff:e}, {height} px: tube {world:e} against a \
+                     clearance of {clearance:e}",
+                );
+            }
+        }
+    }
+
+    /// And the material's own default is *not* good enough, which is what the bug was: the
+    /// spawn took it and let the next frame correct it, so every respawn flashed.
+    #[test]
+    fn the_default_tube_would_swallow_the_camera() {
+        let standoff = 40.0f32;
+        let clearance = standoff * em_map::camera::ELEVATION_FLOOR.sin() as f32;
+        let world = standoff * SPOKE_REACH * BASE_TUBE_RADIUS;
+        assert!(
+            world > clearance,
+            "the default is safe after all, so this test is no longer about anything",
+        );
+    }
+
+    /// A line stays the same width on screen however hard its mesh is scaled. That is the
+    /// whole reason the thickness is a per-entity dial rather than baked into the mesh.
+    #[test]
+    fn a_line_holds_its_width_on_screen_across_the_scales() {
+        let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
+        let width_px = |scale: f32, distance: f32| {
+            let world = scale * tube_target(scale, rad_per_px, distance, LINE_TUBE_FRACTION);
+            world / distance / rad_per_px
+        };
+        for scale in [1.0f32, 1.0e2, 1.0e4] {
+            let px = width_px(scale, scale);
+            assert!((px - LINE_PX).abs() < 1.0e-3, "{scale:e} units drew {px} px");
+        }
     }
 }
