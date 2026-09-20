@@ -55,6 +55,14 @@ const RULE_SAMPLE_NDC_Y: f64 = -0.75;
 /// are one smear. Dropping the second is the better answer, and which one is dropped is
 /// exactly what [`em_map::label`] decides.
 const LABEL_GAP_PX: f32 = 4.0;
+/// How light a body may be and still be named, against the heaviest thing on screen.
+///
+/// Set from the case that has to work: **Earth beside the Sun**, which is three parts in a
+/// million. Well below it, because the gap this is really aimed at is the one between the
+/// smallest planet and the largest asteroid — Mercury is 1.7e-7 of the Sun and Ceres 4.7e-10,
+/// a factor of three hundred — and a floor in the middle of that keeps all eight planets
+/// while dropping every numbered rock. See [`em_map::label::Layout::floor`].
+const LABEL_FLOOR: f64 = 1.0e-8;
 /// The amber a contact's name is written in, which is the amber its mark is drawn in.
 const SHIP_LABEL: bevy::prelude::Color = bevy::prelude::Color::srgb(0.95, 0.70, 0.25);
 const LABEL_CLEARANCE_PX: f32 = 6.0;
@@ -162,12 +170,16 @@ fn labels(painter: &egui::Painter, rect: egui::Rect, view: crate::ui::MapView, m
         0 => 1.0,
         height => rect.height() / height as f32,
     };
-    let offset = glam::Vec2::new(
-        map.symbol_px() * points_per_pixel * 0.5 + LABEL_GAP_PX,
-        -font.size * 0.5,
-    );
+    let layout = em_map::label::Layout {
+        offset: glam::Vec2::new(
+            map.symbol_px() * points_per_pixel * 0.5 + LABEL_GAP_PX,
+            -font.size * 0.5,
+        ),
+        gap: LABEL_CLEARANCE_PX,
+        floor: LABEL_FLOOR,
+    };
     let viewport = glam::Vec2::new(rect.width(), rect.height());
-    for placed in em_map::label::lay_out(candidates, viewport, offset, LABEL_CLEARANCE_PX) {
+    for placed in em_map::label::lay_out(candidates, viewport, layout) {
         let Some((_, galley)) = galleys.iter().find(|(key, _)| *key == placed.key) else {
             continue;
         };
@@ -445,7 +457,22 @@ fn read_wheel_only(
     }
     let notches =
         crate::input::notches(bevy::input::mouse::MouseScrollUnit::Pixel, scrolled);
-    ask(out, Action::ZoomMap { notches, anchor_ly: under_cursor(ctx, rect, view, map) });
+    let anchor_ly = match zooms_to_cursor(view.focus) {
+        true => under_cursor(ctx, rect, view, map),
+        false => None,
+    };
+    ask(out, Action::ZoomMap { notches, anchor_ly });
+}
+
+/// Whether the wheel zooms toward the pointer rather than toward the center.
+///
+/// **Only when nothing is locked.** A center held on the ship or on a body is a statement
+/// about what the map is *of*, and `Action::ZoomMap` gives the lock up the moment an anchor
+/// moves the focus — so aiming at the pointer in those modes would quietly undo the thing
+/// that was asked for. Free is the mode where the center is nobody's in particular, and there
+/// the pointer is the only thing that says where to go.
+fn zooms_to_cursor(focus: crate::ui::MapFocus) -> bool {
+    matches!(focus, crate::ui::MapFocus::Free)
 }
 
 /// What the cursor is over, on the reference plane.
@@ -477,4 +504,23 @@ fn under_cursor(
         direction,
         map.plane_origin_ly(view.orbit.focus_ly),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::MapFocus;
+    use em_map::ItemKey;
+
+    /// **A lock is a lock, and the wheel does not quietly break it.**
+    ///
+    /// Zooming toward the pointer moves the focus, and `Action::ZoomMap` drops the lock the
+    /// moment it does — so the two modes that hold a center must not ask for an anchor at
+    /// all. Free is the one where the pointer decides.
+    #[test]
+    fn only_a_free_camera_zooms_toward_the_pointer() {
+        assert!(zooms_to_cursor(MapFocus::Free));
+        assert!(!zooms_to_cursor(MapFocus::Observer), "centered on the ship");
+        assert!(!zooms_to_cursor(MapFocus::Item(ItemKey::from_name("Sol"))), "on a body");
+    }
 }

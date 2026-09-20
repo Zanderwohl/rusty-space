@@ -33,37 +33,58 @@ pub struct Placed {
     pub at: Vec2,
 }
 
+/// How a surface lays its names out.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Layout {
+    /// Where a label sits relative to its symbol, in pixels.
+    pub offset: Vec2,
+    /// The clearance kept between two of them.
+    pub gap: f32,
+    /// How light a thing may be and still be named, as a fraction of the heaviest thing on
+    /// screen.
+    ///
+    /// **The collision rule thins a crowd and has nothing to say about an empty view**, so
+    /// without this a lone asteroid in open space is named as readily as a planet. Relative
+    /// rather than absolute because the map spans fifteen orders of magnitude: what deserves
+    /// a name beside the Sun and what deserves one beside Jupiter are different questions
+    /// with the same answer.
+    pub floor: f64,
+}
+
 /// Lay out as many as fit, heaviest first.
 ///
-/// `offset` is where a label sits relative to its symbol, and `gap` the clearance kept between
-/// two of them. One anchor and no second try: a label that hops to the other side of its
-/// symbol when a neighbour drifts past reads as a twitch, and a map of moving things would
-/// twitch constantly.
-pub fn lay_out(mut candidates: Vec<Candidate>, viewport: Vec2, offset: Vec2, gap: f32)
-    -> Vec<Placed> {
+/// One anchor and no second try: a label that hops to the other side of its symbol when a
+/// neighbour drifts past reads as a twitch, and a map of moving things would twitch
+/// constantly.
+pub fn lay_out(candidates: Vec<Candidate>, viewport: Vec2, layout: Layout) -> Vec<Placed> {
+    // The bar is set by what the reader can actually see, so it is drawn after the view is
+    // clipped and not before: pan the Sun off the edge and the question becomes what is worth
+    // naming beside whatever is left.
+    let mut inside: Vec<Candidate> =
+        candidates.into_iter().filter(|c| box_of(c, layout.offset, viewport).is_some()).collect();
+    let heaviest =
+        inside.iter().map(|c| c.weight).filter(|w| w.is_finite()).fold(0.0f64, f64::max);
+    let floor = heaviest * layout.floor;
+    // A ship's weight is infinite and sets no bar — it would silence the whole map — and
+    // something that never stated a mass is not silenced by a comparison it is not in.
+    inside.retain(|c| !(c.weight.is_finite() && c.weight > 0.0) || c.weight >= floor);
+
     // Ties broken by key, so two bodies of equal mass cannot trade places between frames.
     // Order alone is what decides who is dropped, so an unstable sort here is a flicker.
-    candidates.sort_by(|a, b| {
+    inside.sort_by(|a, b| {
         b.weight
             .partial_cmp(&a.weight)
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| a.key.cmp(&b.key))
     });
 
-    let mut taken: Vec<(Vec2, Vec2)> = Vec::with_capacity(candidates.len());
-    let mut placed = Vec::with_capacity(candidates.len());
-    for candidate in candidates {
-        let min = candidate.at + offset;
-        let max = min + candidate.size;
-        if !min.is_finite() || !max.is_finite() {
-            continue;
-        }
-        if min.x < 0.0 || min.y < 0.0 || max.x > viewport.x || max.y > viewport.y {
-            continue;
-        }
+    let mut taken: Vec<(Vec2, Vec2)> = Vec::with_capacity(inside.len());
+    let mut placed = Vec::with_capacity(inside.len());
+    for candidate in inside {
+        let Some((min, max)) = box_of(&candidate, layout.offset, viewport) else { continue };
         // Only the incoming rectangle is grown. Two rectangles that clear each other by `gap`
         // clear it once, not twice.
-        let grown = (min - Vec2::splat(gap), max + Vec2::splat(gap));
+        let grown = (min - Vec2::splat(layout.gap), max + Vec2::splat(layout.gap));
         if taken.iter().any(|other| overlaps(grown, *other)) {
             continue;
         }
@@ -71,6 +92,19 @@ pub fn lay_out(mut candidates: Vec<Candidate>, viewport: Vec2, offset: Vec2, gap
         placed.push(Placed { key: candidate.key, at: min });
     }
     placed
+}
+
+/// Where a label's text would sit, or `None` if that is not wholly on the surface.
+fn box_of(candidate: &Candidate, offset: Vec2, viewport: Vec2) -> Option<(Vec2, Vec2)> {
+    let min = candidate.at + offset;
+    let max = min + candidate.size;
+    let inside = min.is_finite()
+        && max.is_finite()
+        && min.x >= 0.0
+        && min.y >= 0.0
+        && max.x <= viewport.x
+        && max.y <= viewport.y;
+    inside.then_some((min, max))
 }
 
 fn overlaps(a: (Vec2, Vec2), b: (Vec2, Vec2)) -> bool {
@@ -93,6 +127,16 @@ mod tests {
     fn view() -> Vec2 {
         Vec2::new(640.0, 400.0)
     }
+
+    /// A layout with no floor, for the tests that are about collisions and nothing else.
+    fn loose(offset: Vec2, gap: f32) -> Layout {
+        Layout { offset, gap, floor: 0.0 }
+    }
+
+    const SUN: f64 = 1.988_41e30;
+    const EARTH: f64 = 5.972e24;
+    const MERCURY: f64 = 3.301e23;
+    const CERES: f64 = 9.39e20;
 
     fn names(placed: &[Placed], all: &[Candidate]) -> Vec<String> {
         placed
@@ -124,7 +168,7 @@ mod tests {
         let mut all = vec![jupiter];
         all.extend(galileans);
         all.extend(small);
-        let placed = lay_out(all.clone(), view(), Vec2::new(6.0, -6.0), 2.0);
+        let placed = lay_out(all.clone(), view(), loose(Vec2::new(6.0, -6.0), 2.0));
         assert_eq!(placed.len(), 1, "a pile has room for one name");
         assert_eq!(placed[0].key, jupiter.key, "and it is the planet's");
 
@@ -136,7 +180,7 @@ mod tests {
             c.at = Vec2::new(300.0, 40.0 * i as f32);
             spread.push(c);
         }
-        let placed = lay_out(spread.clone(), view(), Vec2::new(6.0, -6.0), 2.0);
+        let placed = lay_out(spread.clone(), view(), loose(Vec2::new(6.0, -6.0), 2.0));
         let named: Vec<&str> = placed
             .iter()
             .map(|p| {
@@ -150,13 +194,66 @@ mod tests {
         }
     }
 
+    /// **Earth is named beside the Sun. That is the case the floor is set from.**
+    ///
+    /// Three parts in a million separate them, and everything between a planet and a rock has
+    /// to land on the right side of one number. Mercury is the smallest planet there is and
+    /// Ceres the largest asteroid; the floor sits in the gap between them, which is a factor
+    /// of three hundred wide.
+    #[test]
+    fn earth_is_named_beside_the_sun_and_ceres_is_not() {
+        let floor = 1.0e-8;
+        let sky = vec![
+            at("Sol", SUN, 60.0, 40.0),
+            at("Earth", EARTH, 60.0, 120.0),
+            at("Mercury", MERCURY, 60.0, 200.0),
+            at("Ceres", CERES, 60.0, 280.0),
+        ];
+        let layout = Layout { offset: Vec2::ZERO, gap: 2.0, floor };
+        let placed = lay_out(sky.clone(), view(), layout);
+        let named = |name: &str| placed.iter().any(|p| p.key == ItemKey::from_name(name));
+        assert!(named("Sol"), "the star sets the bar and clears it");
+        assert!(named("Earth"), "Earth beside the Sun is the case this is tuned from");
+        assert!(named("Mercury"), "and the floor sits below the smallest planet");
+        assert!(!named("Ceres"), "and above the largest asteroid");
+        // Nothing is dropped for want of room: it is the floor doing this and not the gap.
+        assert_eq!(lay_out(sky, view(), loose(Vec2::ZERO, 2.0)).len(), 4);
+    }
+
+    /// **The bar is whatever the reader can see.** Pan the star off the edge and the question
+    /// becomes what is worth naming beside what is left — which is how one number serves a
+    /// map spanning fifteen orders of magnitude.
+    #[test]
+    fn the_floor_follows_what_is_on_screen() {
+        let layout = Layout { offset: Vec2::ZERO, gap: 2.0, floor: 1.0e-8 };
+        let without_the_sun = vec![at("Ceres", CERES, 60.0, 40.0), at("Vesta", 2.59e20, 60.0, 120.0)];
+        assert_eq!(
+            lay_out(without_the_sun, view(), layout).len(),
+            2,
+            "with nothing heavier in sight, a rock is worth naming",
+        );
+    }
+
+    /// And a ship is never silenced by it. Its weight is infinite, which would also make it
+    /// the bar — and a bar of infinity is a map with one name on it.
+    #[test]
+    fn a_ship_sets_no_floor_and_clears_every_one() {
+        let layout = Layout { offset: Vec2::ZERO, gap: 2.0, floor: 1.0e-8 };
+        let sky = vec![
+            at("Harrier", f64::INFINITY, 60.0, 40.0),
+            at("Sol", SUN, 60.0, 120.0),
+            at("Earth", EARTH, 60.0, 200.0),
+        ];
+        assert_eq!(lay_out(sky, view(), layout).len(), 3, "a ship must not floor the sky out");
+    }
+
     /// Room for everyone means everyone, in no particular hurry.
     #[test]
     fn nothing_is_dropped_when_nothing_collides() {
         let spread: Vec<Candidate> = (0..8)
             .map(|i| at(&format!("body {i}"), i as f64, 40.0, 20.0 + 40.0 * i as f32))
             .collect();
-        assert_eq!(lay_out(spread.clone(), view(), Vec2::ZERO, 2.0).len(), spread.len());
+        assert_eq!(lay_out(spread.clone(), view(), loose(Vec2::ZERO, 2.0)).len(), spread.len());
     }
 
     /// **A name off the edge is a name for something the reader cannot see.**
@@ -172,13 +269,13 @@ mod tests {
         ];
         for candidate in outside {
             assert!(
-                lay_out(vec![candidate], view(), Vec2::ZERO, 2.0).is_empty(),
+                lay_out(vec![candidate], view(), loose(Vec2::ZERO, 2.0)).is_empty(),
                 "{:?} should not have been placed",
                 candidate.at,
             );
         }
         // And one just inside is.
-        assert_eq!(lay_out(vec![at("in", 1.0, 1.0, 1.0)], view(), Vec2::ZERO, 2.0).len(), 1);
+        assert_eq!(lay_out(vec![at("in", 1.0, 1.0, 1.0)], view(), loose(Vec2::ZERO, 2.0)).len(), 1);
     }
 
     /// **Two things of equal mass must not trade places between frames.**
@@ -190,9 +287,9 @@ mod tests {
         let a = at("alpha", 5.0e20, 300.0, 200.0);
         let b = at("beta", 5.0e20, 302.0, 201.0);
         let c = at("gamma", 5.0e20, 298.0, 199.0);
-        let one = lay_out(vec![a, b, c], view(), Vec2::ZERO, 2.0);
-        let two = lay_out(vec![c, a, b], view(), Vec2::ZERO, 2.0);
-        let three = lay_out(vec![b, c, a], view(), Vec2::ZERO, 2.0);
+        let one = lay_out(vec![a, b, c], view(), loose(Vec2::ZERO, 2.0));
+        let two = lay_out(vec![c, a, b], view(), loose(Vec2::ZERO, 2.0));
+        let three = lay_out(vec![b, c, a], view(), loose(Vec2::ZERO, 2.0));
         assert_eq!(one, two);
         assert_eq!(two, three);
         assert_eq!(one.len(), 1);
@@ -203,12 +300,12 @@ mod tests {
     fn an_infinite_weight_wins() {
         let ship = at("Harrier", f64::INFINITY, 300.0, 200.0);
         let star = at("Sol", 1.989e30, 301.0, 201.0);
-        let placed = lay_out(vec![star, ship], view(), Vec2::ZERO, 2.0);
+        let placed = lay_out(vec![star, ship], view(), loose(Vec2::ZERO, 2.0));
         assert_eq!(placed.len(), 1);
         assert_eq!(placed[0].key, ship.key);
         // And a weight nobody stated loses to one that was.
         let nothing = at("a belt", f64::NAN, 300.0, 200.0);
-        let placed = lay_out(vec![nothing, star], view(), Vec2::ZERO, 2.0);
+        let placed = lay_out(vec![nothing, star], view(), loose(Vec2::ZERO, 2.0));
         assert_eq!(placed[0].key, star.key);
         let _ = names(&placed, &[star]);
     }
@@ -218,7 +315,7 @@ mod tests {
     fn the_gap_is_clearance_and_not_decoration() {
         // Two rows 14 pixels apart, with 12-pixel text: two pixels of daylight.
         let stacked = vec![at("upper", 2.0, 100.0, 100.0), at("lower", 1.0, 100.0, 114.0)];
-        assert_eq!(lay_out(stacked.clone(), view(), Vec2::ZERO, 1.0).len(), 2, "1 px fits");
-        assert_eq!(lay_out(stacked, view(), Vec2::ZERO, 4.0).len(), 1, "4 px does not");
+        assert_eq!(lay_out(stacked.clone(), view(), loose(Vec2::ZERO, 1.0)).len(), 2, "1 px fits");
+        assert_eq!(lay_out(stacked, view(), loose(Vec2::ZERO, 4.0)).len(), 1, "4 px does not");
     }
 }

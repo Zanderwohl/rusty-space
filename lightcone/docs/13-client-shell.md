@@ -669,12 +669,16 @@ reference plane how far a pixel reaches at the rule's own height down the viewpo
 where the bar is drawn — taking it from the middle of the view would be wrong by the depth
 between the two. Edge-on, where the ray meets no plane, it falls back to the stand-off.
 
-**The wheel zooms toward what the cursor is over.** The pointer names a ray, the ray meets the
-reference plane, and that place is held still while the camera comes in — so a body is reached
-by putting the pointer on it and scrolling. The eye scales about the anchor, which is what keeps
-it on the same pixel rather than merely nearer. With the pointer in the middle it is an ordinary
-zoom about the center, and edge-on, where the ray runs along the plane and meets nothing, it
-falls back to one.
+**The wheel zooms toward what the cursor is over, when the camera is free.** The pointer names
+a ray, the ray meets the reference plane, and that place is held still while the camera comes in
+— so a body is reached by putting the pointer on it and scrolling. The eye scales about the
+anchor, which is what keeps it on the same pixel rather than merely nearer. Edge-on, where the
+ray runs along the plane and meets nothing, it falls back to an ordinary zoom.
+
+**Locked on the ship or on a body, it zooms toward that instead.** A held center is a statement
+about what the map is *of*, and the wheel aiming somewhere else would quietly undo the thing
+that was asked for. So the pointer only decides in the mode where the center is nobody's in
+particular.
 
 Moving the focus that way is a pan by another name, so it gives up following — but only when the
 focus actually moves. Scaling about the center through itself changes nothing, so the wheel over
@@ -795,7 +799,20 @@ The text is egui over the image rather than geometry on the layer, per `18-ui-st
 the projection is `em_map::camera::Orbit::project` — the exact inverse of the ray the cursor is
 cast with, which is a round-trip test rather than two functions hoping to agree.
 
+**And a floor, because the collision rule thins a crowd and says nothing about an empty view.**
+Without one a lone asteroid in open space is named as readily as a planet, and the inner system
+came out a field of catalogue designations. A thing must weigh at least a hundred-millionth of
+the heaviest thing **on screen** to be worth a name. That bar is set from the case that has to
+work — Earth beside the Sun, three parts in a million — and sits well under it, because what it
+is really aimed at is the gap between the smallest planet and the largest asteroid: Mercury is
+1.7e-7 of the Sun and Ceres 4.7e-10, a factor of three hundred, and a floor in the middle of
+that keeps all eight planets and drops every numbered rock.
+
+On screen, not in the snapshot: pan the star off the edge and the question becomes what is worth
+naming beside whatever is left, which is how one ratio serves a map spanning fifteen orders of
+magnitude. Jupiter's irregular moons lose their names to Jupiter for the same reason its
+Galileans keep theirs.
+
 ## Open
-- A name is drawn wherever there is room for it, so a sparse field of minor bodies gets one
-  each: the collision rule thins a crowd and has nothing to say about an empty view. A floor on
-  mass relative to the heaviest thing on screen is the obvious next knob.
+- Nothing here is clickable. A name is a good thing to be able to point at, and `pick.rs`
+  already knows how to turn a screen position into a selection.
