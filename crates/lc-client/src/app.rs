@@ -5,7 +5,7 @@ use bevy::math::DVec3;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::camera::Hdr;
-use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
+use bevy_egui::{EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext};
 use lc_world::sky::{AuthoredStars, StarProvider};
 
 use em_render::body_surface_material::BodySurfaceMaterialPlugin;
@@ -162,6 +162,20 @@ impl Plugin for ClientPlugin {
             crate::faces::FacesPlugin,
             crate::map::MapPlugin,
         ))
+            // **Which camera egui draws on is not left to spawn order.**
+            //
+            // `bevy_egui` gives its primary context to the first camera an application
+            // creates, and `spawn_camera` and the map's own setup are two `Startup` systems
+            // with no order between them. Whichever won, the readout and every panel were
+            // drawn onto that camera's target — and when the map won, the whole interface
+            // went into a 512-pixel texture and the window showed the sky with nothing on it.
+            //
+            // The same lesson as `18-ui-style.md`'s Z-order note, one layer down: two systems
+            // spawning into one frame have no order, so say which one you meant.
+            .insert_resource(EguiGlobalSettings {
+                auto_create_primary_context: false,
+                ..default()
+            })
             .init_state::<AppState>()
             .add_message::<Requested>()
             .insert_resource(Ui(UiState::default()))
@@ -308,6 +322,8 @@ fn spawn_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
         SkyCamera,
+        // The interface is drawn on this one. See `EguiGlobalSettings` above.
+        PrimaryEguiContext,
         // A system spans a hundred thousand astronomical units and the render unit is one, so
         // the default thousand-unit far plane would clip everything past Saturn.
         //
