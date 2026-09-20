@@ -124,7 +124,9 @@ with.
 | scenarios | — | scenes to stage. Development only, and every button does nothing without a shard started for it |
 | refit | `R` | module counts and hull slots as sliders, what applying them would cost and take, and the refit under way. See [19-ship-fitting.md](19-ship-fitting.md) |
 | dev actions | `F5` | energy for the ship. Development only; a shard refuses it |
-| map | `M` | where everything is: a reference plane, decade rings, and what stands off it |
+
+The map is not in that table. It is the **other mode of the main view** — see below — and `M`
+switches to it rather than opening anything.
 
 Panels are windows rather than menu pages because the clock never stops: a player has to be
 able to watch a curve and fly at the same time.
@@ -331,7 +333,7 @@ Omit the path for the three authored sample stars.
 |---|---|
 | `Esc` | close the top panel, then the menu |
 | `T` `Y` `F` `F3` `F4` | telescope, system, flight, debug, starfield tuning |
-| `M` | the map |
+| `M` | switch the main view between the world and the map |
 | arrows, right-drag | look |
 | | the cursor is pinned while the right button is held, and released on let go |
 | `L` | look at the selection |
@@ -379,7 +381,7 @@ seven hours twenty times a second having never drifted at all.
 | `--frames <n>` | frames before the shutter |
 | `--at <body>` | stand off a named body of the local system |
 | `--station <course>` | put the ship straight on a station: `orbit:Earth`, `polar:Mars:high`, `rings:Saturn`, `l2:Earth`, `belt:0`, `leave` |
-| `--panel <name>` | open a panel by name |
+| `--panel <name>` | open a panel by name. `--panel map` holds the main view in the map's mode instead, since the map is not a panel |
 | `--burst <n>` | photograph `n` consecutive frames, numbered. For flicker: two runs stopped at frame `n` and frame `n+1` have accumulated different wall time and are not consecutive at all |
 | `--demo <name>` | stage a scene, and bring a shard to run it in |
 | `--demo-cam <yaw:pitch:booms>` | pin the camera for the run |
@@ -633,6 +635,28 @@ rather than added and later removed.
 
 ## The map
 
+**A mode of play, not an accessory.** The main view under the readout is either the world seen
+through the ship's camera or the map, and `M` switches between them. Windows float over either
+one, so a curve or a conversation can be read with the map behind it.
+
+**Whichever mode is not in force is the square in the bottom left**, and a click on the square
+swaps them. It is in the same place in both, which is what makes the click one control rather
+than two: the map in the corner while flying, the world in the corner while reading the map.
+The world's own camera takes that square as its viewport, so the corner is the live view and
+not a picture of one.
+
+**A thumbnail is not a viewfinder.** Both ends of the boom are angles, so the corner square is
+the tighter frame — and clamping the framing against it would pull the player's own view in on
+the way to the map and not give it back on the way out. So the boom is held to the view the
+player is being shown, and left alone while the world is a thumbnail. For the same reason
+nothing on the sky is picked or marked from the map's mode: every mark is measured against the
+whole window.
+
+The map's own controls — the reference plane, the source, and what the camera is centered on —
+sit in **one strip directly under the readout**, shown only in that mode. Everything on it says
+what the map is a map *of*, which is why it is a strip to glance at rather than a panel to work
+down.
+
 **Both, and one camera.** The question this section used to pose — a window or the world seen
 from a ship — is answered by having the sky be the view through the camera and the map be a
 second camera on its own render layer, drawing into an image that egui shows. So it is real
@@ -663,6 +687,9 @@ the reader gets a second scale for nothing.
 Astronomical units and light-years sit among the metric prefixes because this is a map of space:
 between a gigametre and an astronomical unit there is nothing anyone measures in, and `150 Gm`
 is a worse answer than `1 AU` to the same question.
+
+The rule is lifted clear of anything floating across the bottom of the surface — the events box
+takes that same corner with the same inset, and a scale rule under it is not one.
 
 **The camera is perspective, so there is no one scale even within a frame.** The rule asks the
 reference plane how far a pixel reaches at the rule's own height down the viewport, which is
@@ -702,9 +729,9 @@ what is on the map is that size. Below the symbol's own size it is a circle faci
 instead — a sixteenth of the sphere's geometry, and a shape rather than a smudge.
 
 **The symbol is a share of the view, not a count of pixels.** One texture is drawn into a
-190-point corner and into a panel several times that, so a fixed size right for one is wrong
-for the other: twenty pixels suited the panel and left the minimap a pile of overlapping rings
-with no grid visible behind them. Two percent of the viewport's height, floored at twice a
+190-point corner and into a whole screen, so a fixed size right for one is wrong for the other:
+twenty pixels suited the full view and left the corner a pile of overlapping rings with no grid
+visible behind them. Two percent of the viewport's height, floored at twice a
 line's own width — and at that floor a ring has no inside left and is simply a dot, which is
 the honest answer for a surface with no room for more.
 
@@ -722,8 +749,8 @@ rather than the heaviest on screen, because a name may come and go as the view m
 may not — bodies that resized every time the star left the frame would pulse.
 
 Two floors hold the bottom of it: a quarter of full size in `em_map::weight`, and twice a
-line's width in pixels, which is usually the one that binds. On the minimap, where every mark
-is already at the pixel floor, there is no room to vary at all.
+line's width in pixels, which is usually the one that binds. In the corner square, where every
+mark is already at the pixel floor, there is no room to vary at all.
 
 **The crossover is the surface's size and not the mark's, which is the one place the no-jump
 rule gives way.** A body heavy enough to be drawn whole still holds its size across it; a
@@ -760,24 +787,26 @@ it has a width the geometry does not know about.
   its rim, and a constant width that is a pixel at the far end is eighty at the near one.
   Scaled to the outermost decade, twelve spokes were twelve solid wedges across the view.
 
-### The minimap is the map, at a corner
+### The corner square, and one set of gestures
 
-It is the map when the panel is closed, and the same texture: transforms are camera-relative,
-so an entity belongs to exactly one camera and two independently aimed views would need two
-sets of them. There has never been a second framing to want.
+The map is one texture on whichever surface it has — the whole view, or the corner square while
+the world is being flown. Transforms are camera-relative, so an entity belongs to exactly one
+camera and two independently aimed views would need two sets of them. There has never been a
+second framing to want.
 
-It takes the same gestures the panel does — **left-drag turns, right-drag pans, the wheel
-zooms** — and a click, which opens the panel. Both surfaces read them through one function,
-because two views of one thing that answer a drag differently is worse than either answer.
+Both surfaces take the same gestures — **left-drag turns, right-drag pans, the wheel zooms** —
+through one function, because two views of one thing that answer a drag differently is worse
+than either answer. A click is the extra one, and it swaps the modes.
 
-**What that costs is real and is the price of the second button.** `input::read_wheel` and
-`grab_cursor` both stand down while egui wants the pointer, so hovering the corner stops the
-ship's boom zooming, and a right-press begun on the minimap pans the map rather than turning
-the view — a drag belongs to the widget it started on even after the cursor leaves, which is
-correct and is exactly why the whole gesture is the map's.
+**Nothing paints in the square while the map is the view.** The world's camera is drawing into
+exactly those pixels, so the image is painted as the pieces around the square and a name that
+would land on it is dropped: a name alone over the world reads as a name for the world.
 
-Every panel in the interface already costs this. The minimap is the only one that is never
-closed, which is the whole of the difference, and it is a corner of 190 points.
+**The ship's own view controls are held to the world's mode.** In the map's mode a drag over the
+map would otherwise turn the ship behind it, and two modes would be fighting over one pointer.
+In the world's mode the corner costs what every panel costs: egui takes the pointer over it, so
+hovering the square stops the boom zooming and a right-press begun there pans the map. The
+square is the only surface that is never closed, and it is 190 points.
 
 ### Belts, rings and clouds are drawn as themselves
 

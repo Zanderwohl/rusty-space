@@ -156,6 +156,11 @@ pub fn parse(args: &[String]) -> Entry {
             }
         }),
         map_focus: after("--map-focus").as_deref().and_then(crate::app::WantedFocus::named),
+        // The map is a mode now rather than a window, and `--panel map` is the spelling every
+        // shot list already has. A pin, not an action: see `DevEntry::view`.
+        view: after("--panel")
+            .filter(|name| name.eq_ignore_ascii_case("map"))
+            .map(|_| crate::ui::ViewMode::Map),
         at_body: after("--at"),
         station: after("--station"),
         map_camera: after("--map").and_then(|spec| {

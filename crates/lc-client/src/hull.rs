@@ -120,6 +120,21 @@ pub fn boom_limits(rad_per_px: f32, fov_x_rad: f32) -> (f64, f64) {
     (near, far.max(near))
 }
 
+/// The limits the boom is held to for the view on screen, or `None` for leaving it alone.
+///
+/// **A thumbnail is not a viewfinder.** In the map's mode the world's camera draws into a
+/// square 190 points wide, and both limits are angular: clamped against that, going to the map
+/// would pull the player's own framing in, and coming back would not give it away again.
+/// `None` on the first frames too, where there is no viewport measured yet.
+fn held_to(view: crate::ui::ViewMode, size: Option<Vec2>, fov_y: f32) -> Option<(f64, f64)> {
+    if view != crate::ui::ViewMode::World {
+        return None;
+    }
+    let size = size?;
+    let rad_per_px = crate::starfield::radians_per_pixel(fov_y, size.y);
+    Some(boom_limits(rad_per_px, fov_x(fov_y, size.x / size.y.max(1.0))))
+}
+
 /// The horizontal field of view, radians, for a projection given its vertical one.
 pub fn fov_x(fov_y: f32, aspect: f32) -> f32 {
     2.0 * ((fov_y * 0.5).tan() * aspect.max(f32::MIN_POSITIVE)).atan()
@@ -187,16 +202,15 @@ pub fn place_eye(
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     mut eye: ResMut<Eye>,
 ) {
-    let (near, far) = match camera.single() {
+    let measured = match camera.single() {
         Ok((Projection::Perspective(perspective), camera)) => {
-            let size = camera.logical_viewport_size().unwrap_or(Vec2::new(16.0, 9.0));
-            let rad_per_px = crate::starfield::radians_per_pixel(perspective.fov, size.y);
-            boom_limits(rad_per_px, fov_x(perspective.fov, size.x / size.y.max(1.0)))
+            held_to(ui.view, camera.logical_viewport_size(), perspective.fov)
         }
-        // No camera yet, on the first frames. Whatever the interface has is left alone rather
-        // than clamped against a viewport nobody has measured.
-        _ => (ui.boom_lengths, ui.boom_lengths),
+        _ => None,
     };
+    // Whatever the interface has, left alone rather than clamped against a view nobody is
+    // being shown.
+    let (near, far) = measured.unwrap_or((ui.boom_lengths, ui.boom_lengths));
     let (anchored, at_ly, length_m) = anchor(&ui, &game, &uplink);
     ui.boom_lengths = ui.boom_lengths.clamp(near, far);
     let boom_m = ui.boom_lengths * length_m;
@@ -451,6 +465,23 @@ mod tests {
     use super::*;
 
     const RAD_PER_PX: f32 = 7.67e-4;
+
+    /// **A thumbnail is not a viewfinder.** Both boom limits are angular, so the corner square
+    /// the world is drawn in while the map is up would pull the framing in — and leaving the
+    /// map would not give it back.
+    #[test]
+    fn the_map_does_not_reframe_the_world() {
+        use crate::ui::ViewMode;
+        let wide = Vec2::new(1280.0, 720.0);
+        let square = Vec2::new(190.0, 190.0);
+        let fov = std::f32::consts::FRAC_PI_4;
+        assert!(held_to(ViewMode::Map, Some(square), fov).is_none(), "the map clamped the boom");
+        assert!(held_to(ViewMode::World, None, fov).is_none(), "nothing measured yet");
+        let (_, wide_far) = held_to(ViewMode::World, Some(wide), fov).expect("a view to hold to");
+        let (_, square_far) =
+            held_to(ViewMode::World, Some(square), fov).expect("a view to hold to");
+        assert!(square_far < wide_far, "the corner is the tighter frame, which is the hazard");
+    }
 
     /// The two ends of the zoom, stated as what they are for: five pixels of hull at one end
     /// and a hull the width of the window at the other.

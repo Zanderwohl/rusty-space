@@ -35,8 +35,8 @@ Which button matters, and giving one away has a price. **Left** turns the map an
 pans it — and right is also the sky's look button, so a right-press that starts on a map
 surface turns the map and not the view. The grab is asked for once, on the press, and
 `grab_cursor` stands down while egui wants the pointer. That is a drag belonging to the widget
-it began on, which is right; what makes it worth saying is that the minimap is never closed, so
-its corner always answers.
+it began on, which is right; what makes it worth saying is that the map's corner square is never
+closed, so that corner always answers.
 
 ## One surface at a time
 
@@ -85,8 +85,9 @@ them, so an overlay drawn by one lands *behind* a screen drawn by the other — 
 it, text through text. `em_ui::MenuUi::overlay` sets a `GlobalZIndex` for exactly this, and an
 overlay is above by definition rather than by luck.
 
-The minimap is `Order::Middle` for the same reason read the other way: it has to go *under* an
-open window rather than over it.
+The map's corner square is `Order::Middle` for the same reason read the other way: it has to go
+*under* an open window rather than over it. The map itself, when it is the whole view, is in
+`Order::Background` — which is what makes every window float over it.
 
 **egui has its own orders**, and they are not the same thing. Panels paint in
 `Order::Background`, floating windows and notices in `Order::Middle`, and an overlay that wants

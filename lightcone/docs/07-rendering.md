@@ -110,12 +110,25 @@ day/night factor is one, which is exactly an unlit wireframe, and line weight al
 vertex-color alpha — so a grid line, an equator and a decade ring differ by a vertex attribute
 rather than by a material.
 
-Three things about it that are not obvious from the code:
+### Three cameras, and what each one costs
+
+The client draws with three: the map's, the sky's, and one for the interface. The third exists
+because the map is a mode of the main view rather than a window over it, so the sky's camera
+takes a viewport of its own — the corner square — while the map is up.
 
 - **Which camera egui draws on is not left to spawn order.** `bevy_egui` gives its primary
   context to the first camera an application creates, and two `Startup` systems have no order
   between them. When the map won, the entire interface was drawn into a 512-pixel texture while
   the window showed the sky with nothing on it.
+- **The interface is laid out inside its camera's viewport.** That is why it has a camera of its
+  own rather than riding on the sky's: the frame the sky camera is given shrinks to 190 points
+  square in the map's mode, and it took the readout, the strips and every window down into the
+  corner with it.
+- **Two cameras on one window share the texture they draw into only when their format, sample
+  count and usages all match**, and `Hdr` is what decides the format. So the interface's camera
+  carries `Hdr` although it draws no scene: without it, it got a texture of its own that nothing
+  ever cleared, and every frame's interface was laid over the last until the words were a smear
+  with the loading screen still under them a thousand frames later.
 - **`RenderTarget` is a component**, not a field on `Camera`. Left off, the camera renders over
   the primary window on a layer with nothing on it and clears the frame to black.
 - **A render target that is resized needs `COPY_SRC`.** `Image::new_target_texture` does not set

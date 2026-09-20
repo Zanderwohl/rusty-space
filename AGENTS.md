@@ -45,7 +45,7 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--burst <n>` | photograph `n` **consecutive** frames — the only way to see a flicker |
 | `--at <body>` / `--station <course>` | stand off a body, or start on a station |
 | `--lift <deg>` | raise the ship out of the ecliptic about the star, keeping its distance |
-| `--panel <name>` / `--tune` | open a panel |
+| `--panel <name>` / `--tune` | open a panel. `--panel map` is the exception: the map is a mode of the main view, so this is a pin holding it there |
 | `--book <id>` | open a book from `crates/lc-client/assets/books/<id>.epub`; `--chapter <n>` and `--pages <n>` move within it |
 | `--menu` | hold at the main menu, so `--shot` photographs that instead of the sky |
 | `--signin` | hold at the sign-in modal, which draws over the menu and no action can reach |
@@ -138,6 +138,15 @@ Each of these cost real time. None of them are visible from the code that hits t
   build to say why. `SkyCamera` is the disambiguator. `bevy_egui` has the same shape of problem
   one layer up: it gives its primary context to the **first camera created**, and two `Startup`
   systems have no order between them, so the whole interface went into a 512-pixel texture.
+- **The interface is laid out inside the viewport of the camera that holds its egui context.**
+  Give that camera a viewport of its own and the readout, the strips and every window go with
+  it: the whole interface arrived in a 190-point square in the bottom left, over a black
+  window. A camera whose frame moves cannot also be the one the interface is drawn on.
+- **Two cameras on one window share the texture they draw into only when their format, sample
+  count and usages all match**, and `Hdr` decides the format. A second camera that does not
+  match gets a texture of its own, and `ClearColorConfig::None` means nothing ever clears it:
+  every frame is laid over the last. It reads as smeared text and stale windows, with the
+  loading screen still underneath a thousand frames later, and there is nothing in the log.
 - **A render target that will be resized needs `COPY_SRC`.** `Image::new_target_texture` sets
   three usages and not that one, and `Image::resize` copies the old contents forward. The first
   resize is a wgpu validation failure, and it takes the application down long after the frame

@@ -161,6 +161,11 @@ fn survey(
     mut out: MessageWriter<Requested>,
 ) {
     *picked = Picked::default();
+    // Nothing on the sky is being pointed at from the map's mode: the world is a thumbnail in
+    // the corner there, and every mark below is measured against the whole window.
+    if ui.view != crate::ui::ViewMode::World {
+        return;
+    }
     let Ok(window) = windows.single() else { return };
     let Ok((Projection::Perspective(perspective), camera_at)) = camera.single() else { return };
     let viewport = Vec2::new(window.width(), window.height());
@@ -452,7 +457,15 @@ fn draw(mut contexts: EguiContexts, picked: Res<Picked>, windows: Query<&Window,
     );
     // What the interface has taken. `available_rect` accounts for docked panels and nothing
     // else, so every floating window and notice has to be named here or a mark lands on one.
-    let occupied = occupied_rects(context);
+    let occupied: Vec<bevy::math::Rect> = occupied_rects(context, &[])
+        .into_iter()
+        .map(|rect| {
+            bevy::math::Rect::from_corners(
+                Vec2::new(rect.min.x, rect.min.y),
+                Vec2::new(rect.max.x, rect.max.y),
+            )
+        })
+        .collect();
     let frame = Frame::with(safe, &occupied, ARROW_PX);
 
     // Foreground, not background. Panels paint in `Order::Background` and floating notices in
@@ -496,20 +509,17 @@ const SKELETON_FADE: f32 = 0.45;
 /// [`egui::Context::available_rect`]. This is the rest of the interface: windows, notices,
 /// tooltips — everything that floats over the view and that `available_rect` says nothing
 /// about. The overlay's own layer is skipped, or it would exclude itself.
-fn occupied_rects(context: &egui::Context) -> Vec<bevy::math::Rect> {
+/// Also read by [`crate::map_panel`], which keeps the map's scale rule out from under the same
+/// boxes — and passes its own corner in `except`, since a surface does not float over itself.
+pub(crate) fn occupied_rects(context: &egui::Context, except: &[egui::Id]) -> Vec<egui::Rect> {
     context.memory(|memory| {
         memory
             .areas()
             .visible_layer_ids()
             .iter()
             .filter(|layer| layer.order < egui::Order::Foreground)
+            .filter(|layer| !except.contains(&layer.id))
             .filter_map(|layer| memory.area_rect(layer.id))
-            .map(|rect| {
-                bevy::math::Rect::from_corners(
-                    Vec2::new(rect.min.x, rect.min.y),
-                    Vec2::new(rect.max.x, rect.max.y),
-                )
-            })
             .collect()
     })
 }

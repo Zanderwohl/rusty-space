@@ -1,11 +1,16 @@
 //! The two surfaces the map is shown on, and the input they take.
 //!
-//! One rendered image inside an egui surface, a third case beside the two
-//! `lightcone/docs/18-ui-style.md` names. The image is allocated with an explicit
-//! [`egui::Sense`] rather than through `ui.image`, so egui wants the pointer and
-//! `crate::input`'s wheel and cursor grab stand down on their own.
+//! The map is a **mode of the main view**, not a window over it: it fills the screen under the
+//! readout, with the world in the corner square, and the same square shows the map while the
+//! world is the one being flown. A click on the square swaps them. Windows float over either.
+//!
+//! The image is allocated with an explicit [`egui::Sense`] rather than through `ui.image`, so
+//! a drag on it belongs to the map.
 
+use bevy::camera::Viewport;
+use bevy::math::URect;
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use glam::DVec3;
 use bevy_egui::{EguiContexts, egui};
 
@@ -16,7 +21,7 @@ use crate::map::Map;
 #[cfg(feature = "godview")]
 use crate::map_source::Source;
 use crate::panels::ask;
-use crate::ui::Panel;
+use crate::ui::ViewMode;
 
 /// Radians of turn per point of drag. The same feel as the sky's own look.
 const TURN_PER_POINT: f64 = 0.006;
@@ -25,8 +30,8 @@ const TURN_PER_POINT: f64 = 0.006;
 const PAN_PER_VIEWPORT: f64 = 1.2;
 
 /// How much of the surface the scale rule may take, and the least it is worth drawing at. A
-/// fraction to stay proportionate on the minimap, and a ceiling so it does not stretch across
-/// a wide panel.
+/// fraction to stay proportionate in the corner square, and a ceiling so it does not stretch
+/// across a whole screen.
 const RULE_MAX_FRACTION: f32 = 0.4;
 const RULE_MIN_FRACTION: f32 = 0.3;
 const RULE_MAX_PX: f32 = 600.0;
@@ -58,46 +63,118 @@ const LABEL_FLOOR: f64 = em_map::weight::FLOOR;
 const SHIP_LABEL: bevy::prelude::Color = bevy::prelude::Color::srgb(0.95, 0.70, 0.25);
 const LABEL_CLEARANCE_PX: f32 = 6.0;
 
-/// The minimap's side, in points.
-const MINIMAP_SIDE: f32 = 190.0;
+/// The corner square's side and its inset from the bottom left, in points. The event log
+/// takes the bottom right with the same inset (`panels.rs`).
+const CORNER_SIDE: f32 = 190.0;
+const CORNER_INSET: f32 = 12.0;
 
-/// Bottom left. The event log takes bottom right with this same inset (`panels.rs`).
-const MINIMAP_MARGIN: egui::Vec2 = egui::vec2(12.0, -12.0);
+/// The whole of a texture.
+const WHOLE_TEXTURE: egui::Rect =
+    egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1.0, 1.0) };
 
-/// Draw whichever surface is in force, and turn pointer input on it into actions. The panel
-/// and the minimap are never both up: the minimap is the map when the panel is closed.
+/// Where the world's camera draws, in physical pixels, or the whole window when the world is
+/// what the screen is showing.
+///
+/// Written by the egui pass and spent by [`frame_world`] on the next frame's scene stage. The
+/// square is laid out in points, and egui is the only thing here that knows what a point is
+/// worth.
+#[derive(Resource, Default)]
+pub struct WorldInset(pub Option<URect>);
+
+/// Draw the map on whichever surface it has, and turn pointer input on it into actions.
+///
+/// Both modes end in the same three calls: one rule, one set of names, one reading of the
+/// pointer. A map that answered a drag differently depending on how big it was drawn would be
+/// two maps.
 pub fn draw(
     mut contexts: EguiContexts,
     ui_state: Res<Ui>,
     game: Res<Game>,
     mut map: ResMut<Map>,
+    foot: Res<crate::panels::HudFoot>,
+    mut world: ResMut<WorldInset>,
     mut out: MessageWriter<Requested>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
-    let open = ui_state.is_open(Panel::Map);
+    let mode = ui_state.view;
+    let per_point = ctx.pixels_per_point();
+    let square = corner(ctx.viewport_rect());
     map.shown = true;
 
-    let response = match open {
-        true => panel(ctx, &ui_state, &game, &mut map, &mut out),
-        false => minimap(ctx, &mut map),
-    };
+    // What the world's camera is to draw into, which is the square it is the thumbnail in.
+    world.0 = (mode == ViewMode::Map).then(|| pixels(square, per_point));
 
-    let Some((rect, response)) = response else {
-        map.shown = false;
-        return;
+    // The square holds whichever mode is not in force, and a click swaps them.
+    let swap = square_area(ctx, square, (mode == ViewMode::World).then_some(&*map));
+    if swap.clicked() {
+        ask(&mut out, Action::SetView(mode.other()));
+    }
+
+    let (rect, response) = match mode {
+        ViewMode::Map => whole(ctx, foot.0, &ui_state, &game, &map, square, &mut out),
+        ViewMode::World => (square, swap),
     };
-    map.wanted = UVec2::new(
-        (rect.width() * ctx.pixels_per_point()).round().max(1.0) as u32,
-        (rect.height() * ctx.pixels_per_point()).round().max(1.0) as u32,
-    );
-    // One function for both surfaces, so they answer a drag alike.
+    map.wanted = pixels(rect, per_point).size().max(UVec2::ONE);
+
     let painter = ctx.layer_painter(response.layer_id);
-    scale_rule(&painter, rect, ui_state.map);
-    labels(&painter, rect, ui_state.map, &map);
+    // The square is the map's own, and in world mode it is the surface itself.
+    let over = crate::pick::occupied_rects(ctx, &[corner_id()]);
+    let hole = match mode {
+        ViewMode::Map => square,
+        ViewMode::World => egui::Rect::NOTHING,
+    };
+    scale_rule(&painter, rect, ui_state.map, &over);
+    labels(&painter, rect, hole, ui_state.map, &map);
     read_input(ctx, &response, rect, ui_state.map, &map, &mut out);
-    if !open && response.clicked() {
-        // egui keeps a click and a drag apart, so this is the minimap's one extra gesture.
-        ask(&mut out, Action::OpenPanel(Panel::Map));
+}
+
+/// Put the world's camera in the corner square, or give it the window back.
+///
+/// Clamped to the window: the square was laid out against a rect a frame old, and a viewport
+/// reaching past the surface is a wgpu validation failure rather than a clipped picture.
+pub fn frame_world(
+    inset: Res<WorldInset>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut camera: Query<&mut Camera, With<crate::app::SkyCamera>>,
+) {
+    let Ok(window) = windows.single() else { return };
+    let Ok(mut camera) = camera.single_mut() else { return };
+    let wanted = inset.0.filter(|rect| !rect.is_empty()).map(|rect| {
+        let mut viewport = Viewport {
+            physical_position: rect.min,
+            physical_size: rect.size(),
+            ..default()
+        };
+        viewport.clamp_to_size(UVec2::new(window.physical_width(), window.physical_height()));
+        viewport
+    });
+    // Written only when it moves. A camera marked changed every frame is a frame's worth of
+    // render-world work for a viewport that did not budge.
+    let same = |a: &Viewport, b: &Viewport| {
+        a.physical_position == b.physical_position && a.physical_size == b.physical_size
+    };
+    let settled = match (&camera.viewport, &wanted) {
+        (None, None) => true,
+        (Some(held), Some(wanted)) => same(held, wanted),
+        _ => false,
+    };
+    if !settled {
+        camera.viewport = wanted;
+    }
+}
+
+/// Give the window back on leaving the sky.
+///
+/// The browser build can be stranded from in game, and nothing outside the sky writes an
+/// inset — so without this the world's camera would still be drawing into a corner of a screen
+/// the map is no longer on.
+pub fn release_world_frame(
+    mut inset: ResMut<WorldInset>,
+    mut camera: Query<&mut Camera, With<crate::app::SkyCamera>>,
+) {
+    inset.0 = None;
+    if let Ok(mut camera) = camera.single_mut() {
+        camera.viewport = None;
     }
 }
 
@@ -106,7 +183,13 @@ pub fn draw(
 /// egui text rather than geometry on the layer, per `18-ui-style.md`. The work is in two
 /// halves: this measures what each name would occupy, and [`em_map::label::lay_out`] decides
 /// which of them fit.
-fn labels(painter: &egui::Painter, rect: egui::Rect, view: crate::ui::MapView, map: &Map) {
+fn labels(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    hole: egui::Rect,
+    view: crate::ui::MapView,
+    map: &Map,
+) {
     let Some(frame) = map.frame.as_ref() else { return };
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
         return;
@@ -163,11 +246,13 @@ fn labels(painter: &egui::Painter, rect: egui::Rect, view: crate::ui::MapView, m
         let Some((_, galley)) = galleys.iter().find(|(key, _)| *key == placed.key) else {
             continue;
         };
-        painter.galley(
-            rect.min + egui::vec2(placed.at.x, placed.at.y),
-            galley.clone(),
-            egui::Color32::WHITE,
-        );
+        let at = rect.min + egui::vec2(placed.at.x, placed.at.y);
+        // Not over the corner square. Nothing else of the map is drawn there, and a name alone
+        // on the world reads as a name for the world.
+        if egui::Rect::from_min_size(at, galley.size()).intersects(hole) {
+            continue;
+        }
+        painter.galley(at, galley.clone(), egui::Color32::WHITE);
     }
 }
 
@@ -180,69 +265,148 @@ fn label_color(kind: em_map::ItemKind) -> egui::Color32 {
     }
 }
 
-/// The full surface: the map, and the controls for what it is showing.
-fn panel(
+/// The map as the main view: a strip of controls under the readout, and the image under that.
+///
+/// In the background layer, which is what puts every window over it, and with a hole left
+/// where the world's camera is drawing.
+fn whole(
     ctx: &egui::Context,
+    foot: f32,
     ui_state: &Ui,
     game: &Game,
-    map: &mut Map,
+    map: &Map,
+    hole: egui::Rect,
     out: &mut MessageWriter<Requested>,
-) -> Option<(egui::Rect, egui::Response)> {
-    let mut open = true;
-    let mut answer = None;
-    egui::Window::new("Map")
-        .open(&mut open)
-        .default_size([640.0, 520.0])
-        .resizable(true)
-        .show(ctx, |ui| {
-            controls(ui, ui_state, game, out);
-            ui.separator();
-            let side = ui.available_size();
-            answer = Some(image(ui, map, side, egui::Sense::click_and_drag()));
-        });
-    if !open {
-        ask(out, Action::ClosePanel(Panel::Map));
-    }
-    answer
-}
+) -> (egui::Rect, egui::Response) {
+    let mut under = ctx.viewport_rect();
+    under.min.y = foot.clamp(under.min.y, under.max.y);
+    let mut root = egui::Ui::new(
+        ctx.clone(),
+        "map mode".into(),
+        egui::UiBuilder::new().layer_id(egui::LayerId::background()).max_rect(under),
+    );
+    egui::Panel::top("map controls").show(&mut root, |ui| controls(ui, ui_state, game, out));
 
-/// The corner surface: the panel's gestures, plus a click that opens the panel.
-///
-/// The cost is real and worth stating. `crate::input`'s wheel and cursor grab stand down while
-/// egui wants the pointer, and this surface is always on screen, so hovering the corner stops
-/// the ship's boom zooming and a right-press begun here pans the map. Every panel costs this;
-/// the minimap is the only one never closed.
-fn minimap(ctx: &egui::Context, map: &mut Map) -> Option<(egui::Rect, egui::Response)> {
-    let mut answer = None;
-    egui::Area::new("minimap".into())
-        // Middle, not Foreground: an open window has to cover this.
-        .order(egui::Order::Middle)
-        .anchor(egui::Align2::LEFT_BOTTOM, MINIMAP_MARGIN)
-        .show(ctx, |ui| {
-            let side = egui::vec2(MINIMAP_SIDE, MINIMAP_SIDE);
-            answer = Some(image(ui, map, side, egui::Sense::click_and_drag()));
-        });
-    answer
-}
-
-/// Put the rendered texture on screen, with a sense so egui claims the pointer over it.
-fn image(ui: &mut egui::Ui, map: &Map, size: egui::Vec2, sense: egui::Sense)
-    -> (egui::Rect, egui::Response) {
-    let size = egui::vec2(size.x.max(64.0), size.y.max(64.0));
-    let (rect, response) = ui.allocate_exact_size(size, sense);
+    let rect = root.available_rect_before_wrap();
+    let response = root.allocate_rect(rect, egui::Sense::click_and_drag());
     if let Some(texture) = map.texture {
-        ui.painter().image(
-            texture,
-            rect,
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            egui::Color32::WHITE,
-        );
+        for piece in around(rect, hole) {
+            root.painter().image(texture, piece, uv(rect, piece), egui::Color32::WHITE);
+        }
     }
     (rect, response)
 }
 
+/// The corner square: the mode that is not in force, and the way into it.
+///
+/// It paints no image in map mode, because the world's own camera is drawing into exactly this
+/// square and anything painted here would be painted over it.
+///
+/// The cost is real and worth stating. A drag begun on the square belongs to it wherever the
+/// cursor goes afterwards, so a right-press begun in the corner pans the map instead of turning
+/// the view. Every panel in the interface costs this; the square is the one never closed.
+fn square_area(ctx: &egui::Context, square: egui::Rect, map: Option<&Map>) -> egui::Response {
+    egui::Area::new(corner_id())
+        // Middle, not Foreground: an open window has to cover this.
+        .order(egui::Order::Middle)
+        .fixed_pos(square.min)
+        .show(ctx, |ui| {
+            let response = ui.allocate_rect(square, egui::Sense::click_and_drag());
+            if let Some(texture) = map.and_then(|map| map.texture) {
+                ui.painter().image(texture, square, WHOLE_TEXTURE, egui::Color32::WHITE);
+            }
+            // A border, so the world in the corner reads as a frame within a frame rather than
+            // as the map failing to draw there.
+            ui.painter().rect_stroke(
+                square,
+                0.0,
+                egui::Stroke::new(1.0, color_of(em_ui::vfd::TEXT_DIM)),
+                egui::StrokeKind::Inside,
+            );
+            response
+        })
+        .inner
+}
+
+fn corner_id() -> egui::Id {
+    egui::Id::new("map corner")
+}
+
+/// Where the square sits, in points: the same place in both modes, so the click that swaps
+/// them does not move out from under the cursor that took it.
+///
+/// Shrunk to fit a window too small to hold it. Nothing here may leave the window: the world's
+/// viewport is cut from this.
+fn corner(viewport: egui::Rect) -> egui::Rect {
+    let side = CORNER_SIDE
+        .min(viewport.width() - 2.0 * CORNER_INSET)
+        .min(viewport.height() - 2.0 * CORNER_INSET)
+        .max(0.0);
+    // The inset is clamped as well as the side: a window smaller than the inset itself would
+    // otherwise put the square above the top of it.
+    let min = egui::pos2(
+        (viewport.min.x + CORNER_INSET).min(viewport.max.x),
+        (viewport.max.y - CORNER_INSET - side).max(viewport.min.y),
+    );
+    egui::Rect::from_min_size(min, egui::vec2(side, side))
+}
+
+/// The pieces of `rect` left over around `hole`: one above, one below, and one to each side.
+///
+/// egui clips to rectangles, and a rectangle with a hole in it is not one. Empty pieces are
+/// dropped, so a hole that touches nothing gives back the whole of `rect`.
+fn around(rect: egui::Rect, hole: egui::Rect) -> Vec<egui::Rect> {
+    let hole = hole.intersect(rect);
+    if !hole.is_positive() {
+        return vec![rect];
+    }
+    let mut pieces = Vec::with_capacity(4);
+    for piece in [
+        egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, hole.min.y)),
+        egui::Rect::from_min_max(egui::pos2(rect.min.x, hole.max.y), rect.max),
+        egui::Rect::from_min_max(
+            egui::pos2(rect.min.x, hole.min.y),
+            egui::pos2(hole.min.x, hole.max.y),
+        ),
+        egui::Rect::from_min_max(
+            egui::pos2(hole.max.x, hole.min.y),
+            egui::pos2(rect.max.x, hole.max.y),
+        ),
+    ] {
+        if piece.is_positive() {
+            pieces.push(piece);
+        }
+    }
+    pieces
+}
+
+/// Which part of the texture a piece of the surface shows. The image is drawn for the whole
+/// surface, so a piece of it takes the matching piece of the texture.
+fn uv(rect: egui::Rect, piece: egui::Rect) -> egui::Rect {
+    let at = |p: egui::Pos2| {
+        egui::pos2(
+            (p.x - rect.min.x) / rect.width().max(f32::MIN_POSITIVE),
+            (p.y - rect.min.y) / rect.height().max(f32::MIN_POSITIVE),
+        )
+    };
+    egui::Rect::from_min_max(at(piece.min), at(piece.max))
+}
+
+/// A rect of the surface as one of the window, which is what a render target and a camera's
+/// viewport are measured in.
+fn pixels(rect: egui::Rect, per_point: f32) -> URect {
+    let px = |v: f32| (v * per_point).round().max(0.0) as u32;
+    let at = |p: egui::Pos2| UVec2::new(px(p.x), px(p.y));
+    URect::from_corners(at(rect.min), at(rect.max))
+}
+
 /// Draw the scale rule into the bottom right of the map's surface.
-fn scale_rule(painter: &egui::Painter, rect: egui::Rect, view: crate::ui::MapView) {
+fn scale_rule(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    view: crate::ui::MapView,
+    over: &[egui::Rect],
+) {
     let Some(per_point) = meters_per_point(rect, view) else { return };
     let max = (rect.width() * RULE_MAX_FRACTION).min(RULE_MAX_PX);
     let min = (rect.width() * RULE_MIN_FRACTION).min(RULE_MIN_PX);
@@ -257,8 +421,8 @@ fn scale_rule(painter: &egui::Painter, rect: egui::Rect, view: crate::ui::MapVie
 
     let stroke = egui::Stroke::new(1.0, color_of(em_ui::vfd::TEXT_DIM));
     let right = rect.max.x - RULE_INSET.x;
-    let y = rect.max.y - RULE_INSET.y;
     let left = right - length;
+    let y = rule_row(rect, left..right, over);
     painter.line_segment([egui::pos2(left, y), egui::pos2(right, y)], stroke);
     for (at, height) in [(left, RULE_CAP_PX), (right, RULE_CAP_PX)] {
         painter.line_segment([egui::pos2(at, y - height), egui::pos2(at, y)], stroke);
@@ -275,6 +439,30 @@ fn scale_rule(painter: &egui::Painter, rect: egui::Rect, view: crate::ui::MapVie
         egui::FontId::proportional(11.0),
         color_of(em_ui::vfd::TEXT),
     );
+}
+
+/// Which row the rule is drawn on: the bottom of the surface, lifted clear of anything
+/// floating across it.
+///
+/// The events box takes the same corner with the same inset, and a scale rule under it is a
+/// scale rule nobody can read. Only boxes that cross the row it would take count, and the lift
+/// clears the highest of them.
+fn rule_row(rect: egui::Rect, span: std::ops::Range<f32>, over: &[egui::Rect]) -> f32 {
+    let row = rect.max.y - RULE_INSET.y;
+    let lifted = over
+        .iter()
+        // The background layer is one of these and it is the whole window. A box covering the
+        // surface is not floating over it; it is what the surface is drawn on.
+        .filter(|box_| !box_.contains_rect(rect))
+        .filter(|box_| box_.min.x < span.end && box_.max.x > span.start)
+        .filter(|box_| box_.min.y <= row && box_.max.y >= row - RULE_CAP_PX)
+        .fold(row, |row, box_| row.min(box_.min.y - RULE_INSET.y));
+    // Nowhere to go is a reason to stay put. On the corner square a covered rule is better
+    // than one drawn above the surface it measures.
+    match lifted > rect.min.y + RULE_CAP_PX {
+        true => lifted,
+        false => row,
+    }
 }
 
 /// How far a point on the surface reaches, in meters, where the rule is drawn. A ray cast at
@@ -310,56 +498,54 @@ fn color_of(color: bevy::prelude::Color) -> egui::Color32 {
     )
 }
 
+/// The map's own controls, in one strip under the readout.
+///
+/// One row and not three. It is a strip rather than a panel of settings: everything on it says
+/// what the map is a map *of*, and a reader glances at it rather than working down it.
 fn controls(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {
     ui.horizontal(|ui| {
-        ui.label("plane");
         for plane in [em_map::Plane::Ecliptic, em_map::Plane::Galactic] {
             if ui.selectable_label(state.map.plane == plane, plane.label()).clicked() {
                 ask(out, Action::SetMapPlane(plane));
             }
         }
-        // Light delay is the premise everywhere in the client; the picture taken without it
-        // is the one that has to say so.
+
         #[cfg(feature = "godview")]
-        if state.map.source == Source::God {
+        {
             ui.separator();
-            ui.weak("coordinate time, no light delay");
-        }
-    });
-
-    #[cfg(feature = "godview")]
-    ui.horizontal(|ui| {
-        ui.label("source");
-        for source in [Source::Observed, Source::God] {
-            let allowed = source == Source::Observed || state.may_see_everything;
-            let chosen = state.map.source == source;
-            // A plain selectable label: `add_enabled` around one reports clicks nobody made.
-            // A refused source is grayed and says why, because color is not the only signal.
-            if !allowed {
-                ui.weak(source.label()).on_hover_text("needs an administrative account");
-                continue;
+            for source in [Source::Observed, Source::God] {
+                let allowed = source == Source::Observed || state.may_see_everything;
+                let chosen = state.map.source == source;
+                // A plain selectable label: `add_enabled` around one reports clicks nobody
+                // made. A refused source is grayed and says why, because color is not the only
+                // signal.
+                if !allowed {
+                    ui.weak(source.label()).on_hover_text("needs an administrative account");
+                    continue;
+                }
+                if ui.selectable_label(chosen, source.label()).clicked() {
+                    ask(out, Action::SetMapSource(source));
+                }
             }
-            if ui.selectable_label(chosen, source.label()).clicked() {
-                ask(out, Action::SetMapSource(source));
+            // Light delay is the premise everywhere in the client; the picture taken without it
+            // is the one that has to say so.
+            if state.map.source == Source::God {
+                ui.weak("coordinate time, no light delay — other ships are not drawn");
             }
         }
-        if state.map.source == Source::God {
-            ui.weak("— other ships are not drawn: their light has not arrived");
-        }
-    });
 
-    ui.horizontal(|ui| {
+        ui.separator();
         if ui.button("center on the ship").clicked() {
             ask(out, Action::FocusMap(crate::ui::MapFocus::Observer));
         }
         // "the star", not its name: a button whose label changes between systems has to be
         // read before it is pressed. The name is on the star itself.
-        if let Some(system) = game.0.system.as_ref() {
-            if ui.button("center on the star").clicked() {
-                ask(out, Action::FocusMap(crate::ui::MapFocus::Item(
-                    em_map::ItemKey::from_id("star", system.star.get()),
-                )));
-            }
+        if let Some(system) = game.0.system.as_ref()
+            && ui.button("center on the star").clicked()
+        {
+            ask(out, Action::FocusMap(crate::ui::MapFocus::Item(
+                em_map::ItemKey::from_id("star", system.star.get()),
+            )));
         }
     });
 }
@@ -379,7 +565,7 @@ fn read_input(
 ) {
     if response.dragged() {
         let delta = response.drag_delta();
-        // Right as well as middle: the minimap is too small to hold a modifier over.
+        // Right as well as middle: the corner square is too small to hold a modifier over.
         let panning = response.dragged_by(egui::PointerButton::Secondary)
             || response.dragged_by(egui::PointerButton::Middle)
             || ctx.input(|i| i.modifiers.shift);
@@ -464,6 +650,100 @@ mod tests {
     use super::*;
     use crate::ui::MapFocus;
     use em_map::ItemKey;
+
+    fn window() -> egui::Rect {
+        egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1280.0, 720.0))
+    }
+
+    /// The square is the click that swaps the modes, so it is in one place and it is the
+    /// bottom left corner.
+    #[test]
+    fn the_square_sits_in_the_corner_at_its_stated_size() {
+        let square = corner(window());
+        assert_eq!(square.width(), CORNER_SIDE);
+        assert_eq!(square.height(), CORNER_SIDE);
+        assert_eq!(square.min.x, CORNER_INSET);
+        assert_eq!(square.max.y, 720.0 - CORNER_INSET);
+    }
+
+    /// **Nothing may leave the window**: the world's own viewport is cut from this, and one
+    /// reaching past the surface is a wgpu validation failure rather than a clipped picture.
+    #[test]
+    fn a_window_too_small_shrinks_the_square_rather_than_spilling_out_of_it() {
+        for size in [egui::vec2(120.0, 90.0), egui::vec2(20.0, 400.0), egui::vec2(1.0, 1.0)] {
+            let viewport = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), size);
+            let square = corner(viewport);
+            assert!(square.width() >= 0.0 && square.height() >= 0.0, "{size:?}");
+            assert!(viewport.contains_rect(square), "{size:?} let the square out at {square:?}");
+        }
+    }
+
+    /// The pieces are the surface less the hole: all of it, once each, and none of it over the
+    /// square the world is drawing into.
+    #[test]
+    fn the_pieces_cover_everything_but_the_hole() {
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 30.0), egui::vec2(800.0, 500.0));
+        let hole = corner(rect);
+        let pieces = around(rect, hole);
+        let area = |r: egui::Rect| r.width() * r.height();
+        let covered: f32 = pieces.iter().copied().map(area).sum();
+        assert!((covered - (area(rect) - area(hole))).abs() < 0.01, "{covered} covered");
+        for piece in &pieces {
+            assert!(rect.contains_rect(*piece), "{piece:?} is outside the surface");
+            assert!(!piece.intersect(hole).is_positive(), "{piece:?} paints over the world");
+        }
+    }
+
+    /// A hole outside the surface takes nothing from it, and one covering it leaves nothing.
+    #[test]
+    fn a_hole_that_touches_nothing_leaves_the_surface_whole() {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0, 100.0));
+        let away = egui::Rect::from_min_size(egui::pos2(500.0, 500.0), egui::vec2(20.0, 20.0));
+        assert_eq!(around(rect, away), vec![rect]);
+        assert_eq!(around(rect, egui::Rect::NOTHING), vec![rect]);
+        assert!(around(rect, rect).is_empty(), "a hole the size of the surface leaves none");
+    }
+
+    /// The rule goes under the events box otherwise, which takes the same corner with the same
+    /// inset — and a scale rule nobody can read is not one.
+    #[test]
+    fn the_rule_is_lifted_clear_of_what_floats_over_it() {
+        // The surface as the map's mode leaves it: the window, less the two strips at the top.
+        let rect = egui::Rect::from_min_max(egui::pos2(0.0, 61.0), egui::pos2(1280.0, 720.0));
+        let span = 885.0..1268.0;
+        let bottom = rect.max.y - RULE_INSET.y;
+        assert_eq!(rule_row(rect, span.clone(), &[]), bottom, "nothing in the way");
+
+        let elsewhere = egui::Rect::from_min_size(egui::pos2(0.0, 620.0), egui::vec2(200.0, 100.0));
+        assert_eq!(rule_row(rect, span.clone(), &[elsewhere]), bottom, "not in these columns");
+
+        let events = egui::Rect::from_min_size(egui::pos2(954.0, 654.0), egui::vec2(314.0, 54.0));
+        assert!(rule_row(rect, span.clone(), &[events]) < events.min.y, "still under the box");
+
+        // **The background layer is one of these and it is the whole window.** Counted, it
+        // reaches past the top of the surface, the lift has nowhere to go, and the rule stays
+        // under the events box — which is what it did.
+        let window = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1280.0, 720.0));
+        let lifted = rule_row(rect, span.clone(), &[window, events]);
+        assert!(lifted < events.min.y, "the whole window counted as a box over the surface");
+        assert_eq!(rule_row(rect, span.clone(), &[window]), bottom, "and on its own it is not");
+
+        // A box down the whole right-hand side, which leaves the rule nowhere to go.
+        let tall = egui::Rect::from_min_max(egui::pos2(900.0, 61.0), egui::pos2(1280.0, 720.0));
+        assert_eq!(rule_row(rect, span, &[tall]), bottom, "nowhere to go is a reason to stay");
+    }
+
+    /// A piece of the surface shows the matching piece of the texture. Get this wrong and the
+    /// map is drawn four times over, once per piece.
+    #[test]
+    fn a_piece_takes_the_matching_piece_of_the_texture() {
+        let rect = egui::Rect::from_min_size(egui::pos2(40.0, 20.0), egui::vec2(200.0, 100.0));
+        assert_eq!(uv(rect, rect), WHOLE_TEXTURE);
+        let quarter = egui::Rect::from_min_size(rect.min, rect.size() * 0.5);
+        let taken = uv(rect, quarter);
+        assert_eq!(taken.min, egui::pos2(0.0, 0.0));
+        assert_eq!(taken.max, egui::pos2(0.5, 0.5));
+    }
 
     /// The wheel does not break a lock. Zooming toward the pointer moves the focus and
     /// `Action::ZoomMap` drops the lock when it does, so a held center asks for no anchor.

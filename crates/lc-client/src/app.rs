@@ -118,6 +118,13 @@ pub struct DevEntry {
     /// What the map's camera is to hold onto, written every frame like the rest of the pin.
     pub map_focus: Option<WantedFocus>,
 
+    /// Which mode of play to hold the main view in.
+    ///
+    /// A **pin**, for the reason [`DevEntry::map_camera`] is one: as an action it came back in
+    /// the world's mode on one run in four, because a dev action is written once and whatever
+    /// else was settling that frame won.
+    pub view: Option<crate::ui::ViewMode>,
+
     /// Where the map's camera stands: bearing and elevation in degrees, stand-off in
     /// astronomical units. A light-year is 63 241 of them.
     ///
@@ -202,8 +209,11 @@ impl Plugin for ClientPlugin {
             .init_resource::<crate::plume::Plumes>()
             .init_resource::<crate::resolved::Resolved>()
             .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
+            .init_resource::<panels::HudFoot>()
+            .init_resource::<crate::map_panel::WorldInset>()
             .add_systems(Startup, spawn_camera)
             .add_systems(OnEnter(AppState::Loading), begin_load)
+            .add_systems(OnExit(AppState::InGame), crate::map_panel::release_world_frame)
             .add_systems(OnEnter(AppState::InGame), spawn_sky)
             .insert_resource(ClearColor(Color::BLACK))
             .add_systems(
@@ -217,7 +227,13 @@ impl Plugin for ClientPlugin {
                     run_dev_actions.run_if(in_state(AppState::InGame)),
                     place_at_body.run_if(in_state(AppState::InGame)),
                     place_on_station.run_if(in_state(AppState::InGame)),
-                    (read_keys, grab_cursor, look_around, crate::input::read_wheel)
+                    (
+                        read_keys,
+                        // Only while the world is the view being flown. In the map's mode the
+                        // world is a thumbnail in the corner, and a drag over the map turning
+                        // the ship behind it would be the two modes fighting over one pointer.
+                        (grab_cursor, look_around, crate::input::read_wheel).chain().run_if(flying),
+                    )
                         .chain()
                         .run_if(in_state(AppState::InGame)),
                     dispatch,
@@ -228,6 +244,7 @@ impl Plugin for ClientPlugin {
                     open_the_radio.run_if(in_state(AppState::InGame)),
                     // After the framing, because a pin overrules everything including that.
                     pin_camera.run_if(in_state(AppState::InGame)),
+                    pin_view.run_if(in_state(AppState::InGame)),
                     pin_map_camera.run_if(in_state(AppState::InGame)),
                     pin_map_focus.run_if(in_state(AppState::InGame)),
                     // The clock is deliberately not gated on any panel or overlay. See
@@ -244,9 +261,12 @@ impl Plugin for ClientPlugin {
             .add_systems(
                 Update,
                 (
-                    // First of the stage. Everything below is drawn relative to the eye, and
-                    // one placed against last frame's would shear the whole scene against the
-                    // ship every time the view turned.
+                    // Before anything is placed for it: how much of the window the world's
+                    // camera has decides what a pixel of it is worth.
+                    crate::map_panel::frame_world,
+                    // Everything below is drawn relative to the eye, and one placed against
+                    // last frame's would shear the whole scene against the ship every time the
+                    // view turned.
                     crate::hull::place_eye,
                     aim_camera,
                     update_sky,
@@ -314,6 +334,11 @@ impl Plugin for ClientPlugin {
     }
 }
 
+/// Whether the world is the view being flown, rather than the map's thumbnail.
+fn flying(ui: Res<Ui>) -> bool {
+    ui.view == crate::ui::ViewMode::World
+}
+
 /// The camera the sky is drawn for.
 ///
 /// HDR with bloom is not decoration here: the tone map deliberately pushes anything above the
@@ -332,12 +357,38 @@ pub struct SkyCamera;
 /// Anything nearer than this is clipped, so it is the closest a ship can come to a surface.
 pub const NEAR_PLANE: f32 = 1.0e-10;
 
+/// The camera the interface is drawn on.
+///
+/// Its own camera, and not the sky's. `bevy_egui` lays the interface out inside the viewport of
+/// the camera holding the context, and the sky's viewport is the corner square while the map is
+/// the view — so the whole readout went down into the corner with it, over a black window.
+#[derive(Component)]
+pub struct UiCamera;
+
 fn spawn_camera(mut commands: Commands) {
+    // Last, over the sky, and clearing nothing: it has the interface to draw and no scene.
+    //
+    // **`Hdr`, although it draws no scene.** Two cameras on one window share the texture they
+    // draw into only when their format, sample count and usages all match, and `Hdr` is what
+    // decides the format. Without it the interface got a texture of its own that nothing ever
+    // cleared: every frame's readout was laid over the last until the words were a smear, with
+    // the loading screen still underneath it a thousand frames later.
+    commands.spawn((
+        Camera2d,
+        UiCamera,
+        // See `EguiGlobalSettings` above for why this is said rather than left to spawn order.
+        PrimaryEguiContext,
+        Hdr,
+        Camera {
+            order: 1,
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
+    ));
+
     commands.spawn((
         Camera3d::default(),
         SkyCamera,
-        // The interface is drawn on this one. See `EguiGlobalSettings` above.
-        PrimaryEguiContext,
         // A system spans a hundred thousand astronomical units and the render unit is one, so
         // the default thousand-unit far plane would clip everything past Saturn.
         //
@@ -703,6 +754,13 @@ fn pin_map_focus(dev: Res<DevEntry>, game: Res<Game>, mut ui: ResMut<Ui>) {
             None => return,
         },
     };
+}
+
+/// Hold the main view in the mode the development flags asked for.
+fn pin_view(dev: Res<DevEntry>, mut ui: ResMut<Ui>) {
+    if let Some(view) = dev.view {
+        ui.view = view;
+    }
 }
 
 /// The same, for the map. See [`DevEntry::map_camera`].

@@ -75,19 +75,28 @@ fn connection_color(note: crate::uplink::Note) -> egui::Color32 {
     }
 }
 
+/// Where the readout ends, in points from the top of the window.
+///
+/// egui panels stack inside one `Ui` and every system here builds its own root, so a second
+/// strip cannot find the first by asking. [`crate::map_panel`] needs it: the map's own strip
+/// hangs under this one.
+#[derive(Resource, Default)]
+pub struct HudFoot(pub f32);
+
 /// The always-visible readout. Never in a closable panel: it is the premise.
 pub fn hud(
     mut contexts: EguiContexts,
     ui_state: Res<Ui>,
     game: Res<Game>,
     uplink: Res<crate::uplink::Uplink>,
+    mut foot: ResMut<HudFoot>,
     mut out: MessageWriter<Requested>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
     let lines = hud::lines(&game.0, &ui_state.0);
 
     let mut root = viewport_ui(ctx);
-    egui::Panel::top("hud").show(&mut root, |ui| {
+    let strip = egui::Panel::top("hud").show(&mut root, |ui| {
         ui.horizontal(|ui| {
             ui.strong(&lines.clock);
             ui.separator();
@@ -152,6 +161,7 @@ pub fn hud(
             }
         });
     });
+    foot.0 = strip.response.rect.max.y;
 
     if !ui_state.notifications.is_empty() {
         egui::Window::new("notifications")
@@ -266,11 +276,9 @@ pub fn open_panels(
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
     for panel in ui_state.open_panels().to_vec() {
-        // Two panels bring their own window. A book is not a readout, and egui's chrome around
-        // it would be a dark title bar over a white page; the map is a rendered surface that
-        // owns the corner its minimap sits in as well. See `crate::reader` and
-        // `crate::map_panel`.
-        if panel == Panel::Reader || panel == Panel::Map {
+        // The book brings its own window: it is not a readout, and egui's chrome around it
+        // would be a dark title bar over a white page. See `crate::reader`.
+        if panel == Panel::Reader {
             continue;
         }
         let mut open = true;
@@ -295,7 +303,6 @@ pub fn open_panels(
                 crate::demos::scenarios(ui, &uplink, ui_state.0.perspective, &mut out)
             }
             Panel::Reader => unreachable!("drawn by crate::reader"),
-            Panel::Map => unreachable!("drawn by crate::map_panel"),
             Panel::Refit => crate::refit_panel::refit(ui, &ui_state.0, &game, &mut out),
             Panel::DevActions => crate::refit_panel::dev_actions(ui, &game, &mut out),
             Panel::Chat => crate::radio_panel::chat(

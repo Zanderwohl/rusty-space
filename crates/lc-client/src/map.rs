@@ -2,8 +2,9 @@
 //!
 //! A second `Camera3d` on its own [`MAP_LAYER`], rendering into an [`Image`] that egui shows.
 //!
-//! Transforms are camera-relative, so an entity belongs to exactly one camera: the panel and
-//! the minimap share one image because two aimed views would need two sets of entities.
+//! Transforms are camera-relative, so an entity belongs to exactly one camera: the whole view
+//! and the corner square share one image because two aimed views would need two sets of
+//! entities.
 //!
 //! No `Hdr`, bloom or tone map. The sky's camera is metered for a photograph and a diagram
 //! needs a different range — see [`LINE_COLOR_SCALE`].

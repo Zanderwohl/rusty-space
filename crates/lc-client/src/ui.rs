@@ -51,11 +51,6 @@ pub enum Panel {
     /// One conversation at a time, chosen from a list. Every ship this one has heard from is
     /// in it, whether or not it is still in sight.
     Chat,
-    /// Where everything is: a reference plane, decade rings, and what stands off it.
-    ///
-    /// Drawn by [`crate::map_panel`] rather than with the others, because it is a rendered
-    /// surface rather than a readout and it owns the corner the minimap sits in too.
-    Map,
     /// Something to read: the shelf, or a book off it. Drawn by [`crate::reader`] rather than
     /// with the others, because it is the one surface that is not a readout — it has its own
     /// frame, its own palette and its own keys.
@@ -63,7 +58,7 @@ pub enum Panel {
 }
 
 impl Panel {
-    pub const ALL: [Panel; 13] = [
+    pub const ALL: [Panel; 12] = [
         Panel::Escape,
         Panel::Settings,
         Panel::Debug,
@@ -76,7 +71,6 @@ impl Panel {
         Panel::DevActions,
         Panel::Chat,
         Panel::Reader,
-        Panel::Map,
     ];
 
     /// A panel by the name a development flag would use.
@@ -98,7 +92,28 @@ impl Panel {
             Panel::DevActions => "Dev actions",
             Panel::Chat => "Communications",
             Panel::Reader => "Reader",
-            Panel::Map => "Map",
+        }
+    }
+}
+
+/// Which mode of play the main view is showing.
+///
+/// The map is not a window over the world: it is the other thing the same screen can be, and
+/// whichever one is not in force is the thumbnail in the corner. Windows float above either.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ViewMode {
+    /// The sky, through the ship's own camera.
+    #[default]
+    World,
+    /// Where everything is: a reference plane, decade rings, and what stands off it.
+    Map,
+}
+
+impl ViewMode {
+    pub fn other(self) -> Self {
+        match self {
+            ViewMode::World => ViewMode::Map,
+            ViewMode::Map => ViewMode::World,
         }
     }
 }
@@ -331,6 +346,8 @@ pub struct UiState {
     pub focus: Option<crate::navigation::Target>,
     pub course: Option<crate::navigation::Course>,
     pub look: Look,
+    /// Which mode of play the main view is showing. See [`ViewMode`].
+    pub view: ViewMode,
     /// The map's camera, plane and source. See [`MapView`].
     pub map: MapView,
     /// Whether this client may ask for the god view.
@@ -425,6 +442,7 @@ impl Default for UiState {
             focus: None,
             course: None,
             look: Look::default(),
+            view: ViewMode::default(),
             map: MapView::default(),
             may_see_everything: false,
             perspective: None,

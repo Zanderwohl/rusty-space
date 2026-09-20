@@ -11,7 +11,7 @@ use lc_world::sky::StarId;
 use crate::navigation::{Course, Target};
 use crate::session::Session;
 use crate::starfield::{PointStyle, Which};
-use crate::ui::{Look, MenuPage, Panel, UiState};
+use crate::ui::{Look, MenuPage, Panel, UiState, ViewMode};
 
 /// Everything the interface can be asked to do.
 #[derive(Clone, Debug, PartialEq)]
@@ -24,6 +24,9 @@ pub enum Action {
     GoToMenuPage(MenuPage),
     StartGame,
     Quit,
+    /// Which mode of play the main view shows. The map is one of two, not a window.
+    SetView(ViewMode),
+    ToggleView,
     // --- the map ----------------------------------------------------------------------
     /// Turn the map's camera by a relative amount, radians.
     TurnMap { azimuth: f64, elevation: f64 },
@@ -309,6 +312,8 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
 
         Action::Look { yaw, pitch } => ui.look.turn(yaw, pitch),
 
+    Action::SetView(view) => ui.view = view,
+    Action::ToggleView => ui.view = ui.view.other(),
     Action::TurnMap { azimuth, elevation } => ui.map.orbit.turn(azimuth, elevation),
     Action::ZoomMap { notches, anchor_ly } => match anchor_ly {
         Some(anchor) => {
@@ -689,6 +694,21 @@ mod tests {
 
     fn fixture() -> (UiState, Session) {
         (UiState::default(), Session::new(&AuthoredStars::sample(), 3))
+    }
+
+    /// The map is a mode of the main view, so the key that shows it puts it away again and
+    /// asking for the mode already in force is not a toggle.
+    #[test]
+    fn the_map_is_the_other_mode_of_the_main_view() {
+        let (mut ui, mut s) = fixture();
+        assert_eq!(ui.view, ViewMode::World, "a session starts flying");
+        apply(Action::ToggleView, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::Map);
+        apply(Action::ToggleView, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::World);
+        apply(Action::SetView(ViewMode::Map), &mut ui, &mut s);
+        apply(Action::SetView(ViewMode::Map), &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::Map);
     }
 
     #[test]
