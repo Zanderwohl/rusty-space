@@ -131,7 +131,10 @@ pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Plane, meters_per_u
         if !at.is_finite() || at.length() > MAX_RENDER_UNITS {
             continue;
         }
-        let foot = relative(plane.foot_ly(item.position_ly, orbit.focus_ly));
+        // The same plane the rings are drawn on, anchored at the observer. Measuring height
+        // above a plane through the camera's focus while the rings sat on the ship was two
+        // planes answering one question.
+        let foot = relative(plane.foot_ly(item.position_ly, rings_ly));
         if !foot.is_finite() {
             continue;
         }

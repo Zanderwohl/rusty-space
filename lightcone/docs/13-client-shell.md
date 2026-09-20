@@ -652,6 +652,17 @@ looking at: a decade ring answers "how far is that from *me*", and the whole gam
 perspective. Center the camera on a star and the scale stays where you are, which is what makes
 the offset between the two readable instead of hiding it.
 
+**The wheel zooms toward what the cursor is over.** The pointer names a ray, the ray meets the
+reference plane, and that place is held still while the camera comes in — so a body is reached
+by putting the pointer on it and scrolling. The eye scales about the anchor, which is what keeps
+it on the same pixel rather than merely nearer. With the pointer in the middle it is an ordinary
+zoom about the center, and edge-on, where the ray runs along the plane and meets nothing, it
+falls back to one.
+
+Moving the focus that way is a pan by another name, so it gives up following — but only when the
+focus actually moves. Scaling about the center through itself changes nothing, so the wheel over
+a locked center does not cost the lock.
+
 What the camera looks at is a separate thing with three states. **Free** is wherever a pan left
 it; **the ship** and **a body** lock the center and hold it every frame until the next pan,
 which drops back to free. A right-drag is that pan.

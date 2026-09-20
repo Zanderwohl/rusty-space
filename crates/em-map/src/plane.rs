@@ -64,6 +64,22 @@ impl Plane {
         (at_ly - origin_ly).dot(self.normal()) * M_PER_LY
     }
 
+    /// Where a ray meets the plane, or `None` when it runs along it or points away.
+    ///
+    /// What "zoom toward what the cursor is over" is built from: the cursor names a ray, the
+    /// ray names a place on the plane, and the place is held still while the camera comes in.
+    pub fn intersect(self, from_ly: DVec3, direction: DVec3, origin_ly: DVec3) -> Option<DVec3> {
+        let n = self.normal();
+        let along = direction.dot(n);
+        // A ray within a thousandth of parallel names a point so far away that holding it still
+        // would throw the camera across the system. Edge-on, there is nothing under the cursor.
+        if along.abs() < 1.0e-3 {
+            return None;
+        }
+        let t = (origin_ly - from_ly).dot(n) / along;
+        (t > 0.0 && t.is_finite()).then(|| from_ly + direction * t)
+    }
+
     /// Where a drop-line from `at_ly` meets the plane: the point straight below it.
     pub fn foot_ly(self, at_ly: DVec3, origin_ly: DVec3) -> DVec3 {
         let n = self.normal();

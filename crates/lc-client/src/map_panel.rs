@@ -7,6 +7,7 @@
 //! down when it does. No new coordination, no flag, no ordering constraint.
 
 use bevy::prelude::*;
+use glam::DVec3;
 use bevy_egui::{EguiContexts, egui};
 
 use crate::action::Action;
@@ -60,7 +61,7 @@ pub fn draw(
     );
     // The same gestures on both surfaces, from the same function, because two surfaces
     // showing one view that answer a drag differently is worse than either answer.
-    read_input(ctx, &response, rect, &mut out);
+    read_input(ctx, &response, rect, ui_state.map, &map, &mut out);
     if !open && response.clicked() {
         // A click is not a drag — egui keeps them apart — so this is the one gesture the
         // minimap has that the panel does not.
@@ -206,6 +207,8 @@ fn read_input(
     ctx: &egui::Context,
     response: &egui::Response,
     rect: egui::Rect,
+    view: crate::ui::MapView,
+    map: &Map,
     out: &mut MessageWriter<Requested>,
 ) {
     if response.dragged() {
@@ -228,12 +231,15 @@ fn read_input(
             });
         }
     }
-    read_wheel_only(ctx, response, out);
+    read_wheel_only(ctx, response, rect, view, map, out);
 }
 
 fn read_wheel_only(
     ctx: &egui::Context,
     response: &egui::Response,
+    rect: egui::Rect,
+    view: crate::ui::MapView,
+    map: &Map,
     out: &mut MessageWriter<Requested>,
 ) {
     if !response.hovered() {
@@ -242,11 +248,41 @@ fn read_wheel_only(
     // egui reports pixels, and `input::notches` is already the tested divider — it knows what
     // a trackpad does, which a number written here would have to learn again.
     let scrolled = ctx.input(|i| i.smooth_scroll_delta.y);
-    if scrolled != 0.0 {
-        let notches = crate::input::notches(
-            bevy::input::mouse::MouseScrollUnit::Pixel,
-            scrolled,
-        );
-        ask(out, Action::ZoomMap(notches));
+    if scrolled == 0.0 {
+        return;
     }
+    let notches =
+        crate::input::notches(bevy::input::mouse::MouseScrollUnit::Pixel, scrolled);
+    ask(out, Action::ZoomMap { notches, anchor_ly: under_cursor(ctx, rect, view, map) });
+}
+
+/// What the cursor is over, on the reference plane.
+///
+/// The ray through the pointer, met with the plane the rings are drawn on. `None` when the
+/// pointer is nowhere, when the view is edge-on enough that the ray runs along the plane, or
+/// when the plane is behind the camera — and the caller then zooms about the middle, which is
+/// what the wheel has always done.
+fn under_cursor(
+    ctx: &egui::Context,
+    rect: egui::Rect,
+    view: crate::ui::MapView,
+    map: &Map,
+) -> Option<DVec3> {
+    let at = ctx.input(|i| i.pointer.hover_pos())?;
+    if rect.width() <= 0.0 || rect.height() <= 0.0 {
+        return None;
+    }
+    // Normalized device coordinates: `[-1, 1]` across the viewport with `+y` up, where egui
+    // counts pixels down from the top left.
+    let ndc = glam::DVec2::new(
+        ((at.x - rect.min.x) / rect.width() * 2.0 - 1.0) as f64,
+        (1.0 - (at.y - rect.min.y) / rect.height() * 2.0) as f64,
+    );
+    let aspect = (rect.width() / rect.height()) as f64;
+    let direction = view.orbit.ray(view.plane, ndc, crate::map::MAP_FOV as f64, aspect);
+    view.plane.intersect(
+        view.orbit.eye_ly(view.plane),
+        direction,
+        map.plane_origin_ly(view.orbit.focus_ly),
+    )
 }

@@ -132,6 +132,53 @@ impl Orbit {
         self.elevation = heading * ELEVATION_FLOOR;
     }
 
+    /// Zoom while holding `anchor_ly` still on screen.
+    ///
+    /// The eye scales about the anchor: with the distance multiplied by `k`, putting the focus
+    /// at `anchor + (focus - anchor) * k` leaves `eye - anchor` scaled by the same `k`. The
+    /// anchor therefore stays on the ray it was already on, which is to say at the same pixel,
+    /// and the camera walks toward it as it comes in.
+    ///
+    /// Returns whether the focus moved. It does not when the anchor is already the focus —
+    /// scaling about a point through itself is the identity — which is what lets a camera
+    /// locked on the ship stay locked while the wheel turns over it.
+    pub fn zoom_about(&mut self, anchor_ly: DVec3, notches: f64) -> bool {
+        let before = self.distance_m();
+        self.zoom(notches);
+        let k = self.distance_m() / before;
+        if !k.is_finite() || k <= 0.0 {
+            return false;
+        }
+        let moved = anchor_ly + (self.focus_ly - anchor_ly) * k;
+        let changed = moved != self.focus_ly;
+        self.focus_ly = moved;
+        changed
+    }
+
+    /// A ray from the eye through a point on the viewport, in simulation axes.
+    ///
+    /// `ndc` is `[-1, 1]` across the viewport with `+y` up, which is the frame a renderer hands
+    /// out; `aspect` is width over height.
+    pub fn ray(&self, plane: Plane, ndc: glam::DVec2, fov_y: f64, aspect: f64) -> DVec3 {
+        let (forward, right, up) = self.view_basis(plane);
+        let tan_half = (fov_y * 0.5).tan();
+        (forward + right * (ndc.x * tan_half * aspect) + up * (ndc.y * tan_half))
+            .normalize_or(forward)
+    }
+
+    /// The camera's own orthonormal frame: forward, screen right, screen up.
+    ///
+    /// **Not the plane's normal for up.** [`Orbit::orientation`] hands out the normal, which is
+    /// what a renderer's `look_to` wants — and `look_to` orthonormalizes it. At any elevation
+    /// but zero the normal is not perpendicular to the forward vector, so anything casting its
+    /// own rays has to do the same or it is working in a skewed frame: the middle of the
+    /// viewport stopped being the middle by a third of the screen at 25°.
+    pub fn view_basis(&self, plane: Plane) -> (DVec3, DVec3, DVec3) {
+        let (forward, normal) = self.orientation(plane);
+        let right = forward.cross(normal).normalize_or(DVec3::X);
+        (forward, right, right.cross(forward).normalize_or(normal))
+    }
+
     /// Slide the focus across the plane, in fractions of the stand-off.
     ///
     /// Fractions rather than meters, because a drag of so many pixels has to move the view by
@@ -298,6 +345,113 @@ mod tests {
         };
         assert!((moved_at(M_PER_AU) - moved_at(1.0e4 * M_PER_AU)).abs() < 1e-9);
         assert!(moved_at(M_PER_AU) > 0.0, "a pan moved nothing");
+    }
+
+    /// The anchor holds its place on screen: that is the whole of what zoom-to-cursor means.
+    ///
+    /// Checked by projecting it, rather than by trusting the algebra — the anchor has to land
+    /// on the same pixel before and after, and a camera that merely ended up nearer would pass
+    /// a test written about distances.
+    #[test]
+    fn a_zoom_holds_its_anchor_on_screen() {
+        for plane in [Plane::Ecliptic, Plane::Galactic] {
+            let mut orbit = Orbit::framing(DVec3::ZERO, 40.0 * M_PER_AU);
+            orbit.turn(0.7, -0.2);
+            // Somewhere off-center, in the plane, a quarter of the view away.
+            let (u, v, _) = plane.basis();
+            let anchor = (u * 0.3 + v * 0.2) * 10.0 * M_PER_AU / M_PER_LY;
+
+            let before = screen_of(&orbit, plane, anchor);
+            let closer = orbit.distance_m();
+            assert!(orbit.zoom_about(anchor, 12.0), "an off-center anchor should move the focus");
+            assert!(orbit.distance_m() < closer, "it should have come closer");
+            let after = screen_of(&orbit, plane, anchor);
+
+            assert!(
+                (before - after).length() < 1.0e-6,
+                "{plane:?}: the anchor moved from {before:?} to {after:?}",
+            );
+        }
+    }
+
+    /// A ray cast through a point on the viewport comes back to that same point.
+    ///
+    /// The round trip is the assertion worth making: a flipped sign, a dropped aspect or a
+    /// half-angle used where a full one belongs all survive "it hit something", and all of
+    /// them put the anchor somewhere the pointer is not.
+    #[test]
+    fn a_cursor_ray_lands_where_the_cursor_is() {
+        let fov_y = std::f32::consts::FRAC_PI_4 as f64;
+        let tan_half = (fov_y * 0.5).tan();
+        for plane in [Plane::Ecliptic, Plane::Galactic] {
+            for aspect in [1.0, 16.0 / 9.0, 0.6] {
+                let mut orbit = Orbit::framing(DVec3::ZERO, 40.0 * M_PER_AU);
+                // Steeply enough that every sampled ray still meets the plane: from low down,
+                // one through the top of the viewport points above the horizon and correctly
+                // meets nothing, which `a_ray_that_meets_nothing_says_so` covers instead.
+                orbit.turn(0.4, 0.5);
+                for ndc in [
+                    glam::DVec2::ZERO,
+                    glam::DVec2::new(0.5, 0.0),
+                    glam::DVec2::new(-0.3, 0.4),
+                    glam::DVec2::new(0.2, -0.6),
+                ] {
+                    let direction = orbit.ray(plane, ndc, fov_y, aspect);
+                    let hit = plane
+                        .intersect(orbit.eye_ly(plane), direction, orbit.focus_ly)
+                        .expect("a ray through the viewport should meet the plane");
+                    let back = screen_of(&orbit, plane, hit) / tan_half;
+                    assert!(
+                        (back.x - ndc.x * aspect).abs() < 1e-9 && (back.y - ndc.y).abs() < 1e-9,
+                        "{plane:?} at {aspect}: {ndc:?} came back as {back:?}",
+                    );
+                }
+            }
+        }
+    }
+
+    /// The middle of the viewport is the focus, which is the one point that can be checked
+    /// without trusting any of the projection at all.
+    #[test]
+    fn the_middle_of_the_view_is_the_focus() {
+        for plane in [Plane::Ecliptic, Plane::Galactic] {
+            let mut orbit = Orbit::framing(DVec3::new(0.5, -0.25, 0.0), 12.0 * M_PER_AU);
+            orbit.turn(1.1, 0.15);
+            let direction = orbit.ray(plane, glam::DVec2::ZERO, 0.8, 1.5);
+            let hit = plane.intersect(orbit.eye_ly(plane), direction, orbit.focus_ly).unwrap();
+            let off_m = hit.distance(orbit.focus_ly) * M_PER_LY;
+            assert!(off_m < 1.0e3, "{plane:?}: the middle missed the focus by {off_m} m");
+        }
+    }
+
+    /// A ray pointing away from the plane, or along it, names nothing.
+    #[test]
+    fn a_ray_that_meets_nothing_says_so() {
+        let orbit = Orbit::framing(DVec3::ZERO, M_PER_AU);
+        let plane = Plane::Ecliptic;
+        let eye = orbit.eye_ly(plane);
+        assert!(plane.intersect(eye, DVec3::Z, orbit.focus_ly).is_none(), "away from the plane");
+        assert!(plane.intersect(eye, DVec3::X, orbit.focus_ly).is_none(), "along the plane");
+    }
+
+    /// Zooming about the focus is an ordinary zoom and leaves the focus alone, which is what
+    /// keeps a camera locked on the ship locked while the wheel turns over it.
+    #[test]
+    fn zooming_about_the_focus_does_not_move_it() {
+        let mut orbit = Orbit::framing(DVec3::new(1.0, 2.0, 3.0), 40.0 * M_PER_AU);
+        let focus = orbit.focus_ly;
+        assert!(!orbit.zoom_about(focus, 5.0), "it reported a move it did not make");
+        assert_eq!(orbit.focus_ly, focus);
+        assert!(orbit.distance_m() < 40.0 * M_PER_AU, "but it still zoomed");
+    }
+
+    /// Where a point lands on screen, as a fraction of the viewport. Perspective divide and no
+    /// more, which is all the assertion above needs.
+    fn screen_of(orbit: &Orbit, plane: Plane, at_ly: DVec3) -> glam::DVec2 {
+        let (forward, right, up) = orbit.view_basis(plane);
+        let offset = at_ly - orbit.eye_ly(plane);
+        let depth = offset.dot(forward);
+        glam::DVec2::new(offset.dot(right) / depth, offset.dot(up) / depth)
     }
 
     /// A pan stays in the plane. Otherwise sliding across a map would walk it off the surface

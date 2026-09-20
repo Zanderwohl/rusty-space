@@ -78,6 +78,12 @@ const LINE_EMISSION: f32 = 1.2;
 const NEAR_FRACTION: f32 = 1.0e-4;
 const FAR_MULTIPLE: f32 = 1.0e6;
 
+/// The map camera's vertical field of view.
+///
+/// Named rather than defaulted, because the panel casts the cursor's ray with it and a camera
+/// and a cursor that disagree about the frustum put the anchor somewhere the pointer is not.
+pub const MAP_FOV: f32 = std::f32::consts::FRAC_PI_4;
+
 /// Divisions of a decade ring. Enough that the largest one does not read as a polygon.
 const RING_SEGMENTS: u32 = 128;
 
@@ -171,6 +177,12 @@ pub struct Map {
 impl Map {
     /// Radians per pixel of the map's own viewport, which is what decides a sphere from a
     /// point and how thick a line is.
+    /// Where the reference plane is anchored: the observer, or the camera's focus when a
+    /// snapshot has nobody in it.
+    pub fn plane_origin_ly(&self, focus_ly: DVec3) -> DVec3 {
+        self.snapshot.observer().map_or(focus_ly, |o| o.position_ly)
+    }
+
     pub fn radians_per_pixel(&self, fov_y: f32) -> f32 {
         match self.size.y {
             0 => 0.0,
@@ -239,6 +251,7 @@ fn setup(
             clear_color: ClearColorConfig::Custom(Color::BLACK),
             ..default()
         },
+        Projection::Perspective(PerspectiveProjection { fov: MAP_FOV, ..default() }),
         // No `Hdr`, no bloom, and no tone map. See the module doc.
         Tonemapping::None,
         Transform::default(),
@@ -369,7 +382,7 @@ fn place(
 
     let fov_y = match &*projection {
         Projection::Perspective(perspective) => perspective.fov,
-        _ => std::f32::consts::FRAC_PI_4,
+        _ => MAP_FOV,
     };
     let rad_per_px = map.radians_per_pixel(fov_y);
 

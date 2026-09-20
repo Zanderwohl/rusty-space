@@ -32,7 +32,10 @@ pub enum Action {
     /// Not [`Action::Zoom`], which is the ship's boom in hull lengths and is clamped by two
     /// angles. The map's is a stand-off in meters across fifteen orders of magnitude, and one
     /// name for both would mean `--zoom` moving whichever happened to be on top.
-    ZoomMap(f64),
+    ///
+    /// `anchor_ly` is a place on the reference plane to hold still while the camera comes in —
+    /// what the cursor is over. `None` zooms about the middle of the view.
+    ZoomMap { notches: f64, anchor_ly: Option<glam::DVec3> },
     /// Slide the map's focus across the reference plane, in fractions of the stand-off.
     PanMap { right: f64, ahead: f64 },
     SetMapPlane(em_map::Plane),
@@ -307,7 +310,17 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::Look { yaw, pitch } => ui.look.turn(yaw, pitch),
 
     Action::TurnMap { azimuth, elevation } => ui.map.orbit.turn(azimuth, elevation),
-    Action::ZoomMap(notches) => ui.map.orbit.zoom(notches),
+    Action::ZoomMap { notches, anchor_ly } => match anchor_ly {
+        Some(anchor) => {
+            // Moving the focus is a pan by another name, so it gives up following — but only
+            // if it moved. The wheel over a locked center scales about the center itself,
+            // which changes nothing and must not cost the lock.
+            if ui.map.orbit.zoom_about(anchor, notches) {
+                ui.map.focus = crate::ui::MapFocus::Free;
+            }
+        }
+        None => ui.map.orbit.zoom(notches),
+    },
     Action::PanMap { right, ahead } => {
         let plane = ui.map.plane;
         ui.map.orbit.pan(plane, right, ahead);
