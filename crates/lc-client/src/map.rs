@@ -162,7 +162,7 @@ pub struct Map {
     pub shown: bool,
     pub snapshot: MapSnapshot,
     /// What each item of the snapshot is, in the terms the rest of the interface selects
-    /// things in. Built with the snapshot, by the provider — see [`crate::map_source::Picture`].
+    /// things in. See [`crate::map_source::Picture`].
     pub subjects: Vec<(ItemKey, crate::pick::Subject)>,
     /// Which item holds the ship, when the snapshot has one. Worked out beside the snapshot
     /// because that is where the session is.
@@ -200,11 +200,9 @@ impl Map {
         self.viewport(MAP_FOV).point_px
     }
 
-    /// The **radius one placement is actually drawn at**, in texture pixels.
-    ///
-    /// Not the mark's nominal size: a resolved body is a sphere at its own angular size and
-    /// only an unresolved one falls back to the symbol. Read by picking, which has to agree
-    /// with the picture rather than with a nominal size — see [`Form`].
+    /// The radius a placement is drawn at, in texture pixels. Not the nominal mark size: a
+    /// resolved body is a sphere at its own angular size and only an unresolved one falls back
+    /// to the symbol. Picking reads this so that it agrees with the picture. See [`Form`].
     pub fn drawn_radius_px(&self, placement: &Placement) -> f32 {
         let view = self.viewport(MAP_FOV);
         match form_of(placement, view) {
@@ -213,8 +211,8 @@ impl Map {
         }
     }
 
-    /// Points of a surface per pixel of the texture. They differ on a display that scales,
-    /// and on the frame after a resize, when the texture is still the size it was.
+    /// Points of a surface per pixel of the texture. They differ on a display that scales, and
+    /// on the frame after a resize.
     pub fn points_per_pixel(&self, surface_height: f32) -> f32 {
         match self.size.y {
             0 => 1.0,

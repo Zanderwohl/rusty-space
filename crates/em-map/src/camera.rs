@@ -152,13 +152,11 @@ impl Orbit {
         Some(glam::DVec2::new(clip.x / clip.w, clip.y / clip.w))
     }
 
-    /// The same projection with the perspective divide **not** applied.
+    /// The same projection without the perspective divide.
     ///
-    /// `w` is the depth along the view direction, so it is negative behind the eye while `x`
-    /// and `y` keep their signs — which is the whole reason this exists. Dividing anyway
-    /// mirrors a thing behind the camera through the middle of the view, and an edge marker
-    /// built from that points away from what it is marking. `z` is unused: nothing here reads
-    /// depth back.
+    /// `w` is the depth along the view direction, so behind the eye it is negative while `x`
+    /// and `y` keep their signs. Dividing anyway mirrors the point through the middle of the
+    /// view, and an edge marker built from that points away from what it marks. `z` is unused.
     pub fn clip(&self, plane: Plane, offset: DVec3, fov_y: f64, aspect: f64) -> glam::DVec4 {
         let (forward, right, up) = self.view_basis(plane);
         let tan_half = (fov_y * 0.5).tan();
@@ -256,17 +254,16 @@ mod tests {
         }
     }
 
-    /// **Behind the eye keeps its sign.** A marker at the edge of the view is built from the
-    /// undivided form, and dividing through a negative `w` mirrors the point across the middle
-    /// — which puts the arrow on the wrong edge, pointing away from what it marks.
+    /// An edge marker is built from the undivided form. Dividing through a negative `w` puts
+    /// the arrow on the opposite edge, pointing away from what it marks.
     #[test]
     fn the_undivided_form_still_says_which_way_a_thing_lies() {
         let fov = std::f64::consts::FRAC_PI_4;
         let orbit = Orbit::framing(DVec3::ZERO, M_PER_AU);
         let (forward, right, up) = orbit.view_basis(Plane::Ecliptic);
 
-        // Behind and to the right: `w` is negative and `x` is positive, which is the pair a
-        // caller reads. Dividing gives a negative `x` and an arrow at the left edge.
+        // Behind and to the right: `w` negative, `x` positive, which is the pair a caller
+        // reads.
         let behind = -forward * 2.0 + right * 0.5 + up * 0.25;
         let clip = orbit.clip(Plane::Ecliptic, behind, fov, 1.6);
         assert!(clip.w < 0.0, "{clip:?}");
@@ -274,8 +271,8 @@ mod tests {
         assert!(orbit.project(Plane::Ecliptic, behind, fov, 1.6).is_none());
     }
 
-    /// And in front it is the projection, exactly. Two functions hoping to agree is the bug
-    /// this pair exists to rule out: the labels project and the marks clip, over one picture.
+    /// In front it is the projection exactly. The labels project and the marks clip over one
+    /// picture, so the two must not be able to drift apart.
     #[test]
     fn dividing_the_clip_is_the_projection() {
         let fov = std::f64::consts::FRAC_PI_4;

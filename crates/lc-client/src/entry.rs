@@ -103,9 +103,8 @@ pub fn parse(args: &[String]) -> Entry {
         // Index 0 of the sorted sky is the Sun in the full catalogue; 1 is interstellar.
         actions.push(Action::FlyToNearest);
     }
-    // What is selected, exactly as a click on either view or a row of the System window would
-    // leave it. Everything else that aims is a *camera*, so without this there is no way to
-    // photograph a reticle on a body at all — in the sky or on the map.
+    // What is selected, as a click on either view would leave it. Everything else that aims is
+    // a camera, so this is the only way to photograph a reticle.
     if let Some(name) = after("--focus") {
         let target = match name.strip_prefix("band:").and_then(|n| n.parse::<usize>().ok()) {
             Some(index) => crate::navigation::Target::Band(index),

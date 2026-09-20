@@ -53,12 +53,11 @@ impl Source {
 /// A snapshot, and what each of its items is in the terms the rest of the interface selects
 /// things in.
 ///
-/// The two are built together because only the provider can say: an [`ItemKey`] is a digest
-/// and nothing reads back out of it, and the alternatives are a second pass over the whole
-/// star catalogue per frame or teaching `em-map` what a Lightcone thing is.
+/// Both at once because only the provider can say: an [`ItemKey`] is a digest and nothing
+/// reads back out of it. Recovering a star's id afterwards would mean hashing the whole
+/// catalogue every frame.
 ///
-/// Not every item is in it. The reader's own craft is where the view is *from* rather than
-/// something to point at, so it has no subject and is picked through.
+/// Not every item has a subject. The reader's own craft has none and is picked through.
 pub struct Picture {
     pub snapshot: MapSnapshot,
     pub subjects: Vec<(ItemKey, Subject)>,
@@ -227,8 +226,8 @@ fn observer(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> MapItem {
 
 /// A body, and the target the rest of the interface names it by.
 ///
-/// `Target::Body` carries the same name `pick.rs` builds one from over the sky, so a click on
-/// Europa means the same thing in either mode.
+/// The same name `pick.rs` builds a `Target::Body` from over the sky, so a click means the
+/// same thing in either mode.
 fn push_drawable(build: &mut Build, body: &lc_world::system::Drawable) {
     build.push(
         MapItem::body(
@@ -306,8 +305,7 @@ fn push_local_system(build: &mut Build, session: &Session) {
                     half_angle_rad: extent.half_angle_rad,
                 },
             ),
-            // The index into the system's own list, which is what `Target::Band` means and
-            // what the System window's rows carry.
+            // The index into the system's own list, which is what `Target::Band` means.
             Some(Subject::Swarm(index, name)),
         );
     }
@@ -419,9 +417,8 @@ mod tests {
         let observer = snapshot.observer().expect("the observer is not on their own map");
         assert!(!observer.label.is_empty(), "nothing to draw");
         assert!(observer.weight.is_infinite(), "a ship sets no bar for the names");
-        // Offline there is no broker to have said a name. The literal, not the constant: a
-        // test comparing a constant to itself would pass whatever the word was, and the point
-        // of this one is that a nameless ship is *named* rather than described.
+        // The literal, not the constant: comparing a constant to itself would pass whatever
+        // the word was, and the point is that a nameless ship is named rather than described.
         assert_eq!(observer.label, "Anonymous Ship");
         assert_eq!(observer.label, crate::uplink::ANONYMOUS, "two answers to one question");
     }

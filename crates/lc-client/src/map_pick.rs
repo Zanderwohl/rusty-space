@@ -1,21 +1,13 @@
 //! What the cursor is on over the map, and the mark that says so.
 //!
-//! The counterpart of [`crate::pick`], and deliberately not a second answer to the same
-//! question: the rule is [`em_ui::picking`], the shapes are [`em_ui::reticle`], and what a
-//! thing *is* is [`crate::pick::Subject`]. All this does is reduce the frame the map drew to
-//! candidates on the surface it was drawn on, which is the same reduction the sky makes — so
-//! a moon in front of its planet is selectable on the map for the same reason it is in the
-//! world, without either place knowing how the other drew it.
+//! [`crate::pick`] over the map's surface instead of the sky. The rule is [`em_ui::picking`],
+//! the shapes are [`em_ui::reticle`], and what a thing is is [`crate::pick::Subject`]; this
+//! reduces the frame the map drew to candidates. A click sends the action a click on the sky
+//! sends, and what is marked is what [`crate::pick::selected`] reads, so one selection serves
+//! both modes.
 //!
-//! **What is selected is one thing across both modes.** A click here sends the action a click
-//! on the sky sends and a panel row sends, so picking Europa off the map and picking it out of
-//! the System window are the same event by the time anything downstream sees them; and what is
-//! marked is whatever [`crate::pick::selected`] reads, which is the field the sky's reticle is
-//! drawn from.
-//!
-//! Everything here is in the **surface's own** coordinates, with its top left at the origin.
-//! The painter is told where that is. The map is a rectangle inside the window and the sky is
-//! the whole of it, and none of the geometry wants to know which.
+//! Coordinates are the surface's own, its top left at the origin. `origin` is what puts them
+//! back in the window when they reach the painter.
 
 use bevy::math::{Vec2, Vec4};
 use bevy::prelude::MessageWriter;
@@ -38,16 +30,12 @@ use crate::ui::{MapFocus, MapView};
 pub(crate) struct Picked {
     hover: Option<Mark>,
     selected: Option<Mark>,
-    /// Keys this is naming, so [`crate::map_panel`]'s layout does not name them a second time
-    /// a few pixels away. A mark carries its own name because the whole point of pointing at
-    /// something is to learn what it is — including the things too light to have won a label.
+    /// Keys this is naming, so [`crate::map_panel`]'s layout does not name them again a few
+    /// pixels away.
     pub named: Vec<ItemKey>,
 }
 
 /// One placement on the surface, before it is known whether the cursor is on it.
-///
-/// Borrowed from the frame and the picture, both of which outlive the pass: this is rebuilt
-/// every frame for every placement, and a few hundred clones of a name per frame buys nothing.
 struct Seen<'a> {
     key: ItemKey,
     subject: &'a Subject,
@@ -56,7 +44,7 @@ struct Seen<'a> {
     radius_px: f32,
     rank: u8,
     /// The curves a population is drawn along. It has no center to be pointed at, so it is
-    /// picked and marked along these — the same shape the geometry is built from.
+    /// picked and marked along these.
     outline: Option<Vec<Vec<Vec4>>>,
 }
 
@@ -77,20 +65,18 @@ pub(crate) fn survey(
     let origin = Vec2::new(rect.min.x, rect.min.y);
     let seen = sight(state, map, frame, viewport);
 
-    // Against the whole surface, because that is where the cursor can be. Anything the
-    // interface has put over it is not pickable anyway: egui gives the pointer to whatever is
-    // on top, so `hover_pos` is already `None` there — the corner square included.
+    // egui gives the pointer to whatever is on top, so `hover_pos` is already `None` over a
+    // panel or the corner square and nothing has to be excluded here.
     let whole = Frame::bare(reticle::safe_rect(viewport, 0.0));
     let cursor = response.hover_pos().map(|at| Vec2::new(at.x, at.y) - origin);
 
-    // Only what is actually on the surface can be under the cursor. Something off it is marked
-    // on the border, and taking that as a position would make the edges pick whatever is out
-    // there.
+    // Only what is on the surface can be under the cursor. Something off it is placed on the
+    // border, and taking that as a position would make the edges pick whatever is out there.
     let mut candidates = Vec::with_capacity(seen.len());
     for (index, thing) in seen.iter().enumerate() {
         let at = match (&thing.outline, cursor) {
-            // A curve has no one place it is: what the cursor is on is the nearest part of it,
-            // and that is a different point for every cursor position.
+            // The nearest part of the curve, which is a different point for every cursor
+            // position.
             (Some(outline), Some(cursor)) => {
                 let runs = pick::screen_runs(outline, viewport);
                 picking::nearest_on_path(&runs, cursor).map(|(at, _)| (at, 0.0))
@@ -118,8 +104,8 @@ pub(crate) fn survey(
     }
 
     // Marked whether or not it is on the surface: an arrow at the edge is the only way to say
-    // where something went. Against the middle rather than the cursor, because a selection
-    // stands whether or not anyone is pointing at it.
+    // where something went. Anchored against the middle, since a selection stands with nobody
+    // pointing at it.
     if let Some(chosen) = pick::selected(state)
         && let Some(thing) = seen.iter().find(|s| s.subject.is(&chosen))
     {
@@ -131,8 +117,8 @@ pub(crate) fn survey(
 
 /// Paint the marks, over the names.
 ///
-/// `hole` is the corner square the world's own camera is drawing into; `over` is what the
-/// interface is floating across the surface. A mark in either is a mark on something else.
+/// `hole` is the corner square the world's camera draws into and `over` is what the interface
+/// floats across the surface. A mark in either is a mark on something else.
 pub(crate) fn draw(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -149,15 +135,14 @@ pub(crate) fn draw(
         .iter()
         .chain(std::iter::once(&hole))
         // The background layer is one of these and it is the whole window. A box covering the
-        // surface is not floating over it; it is what the surface is drawn on.
+        // surface is what the surface is drawn on, not something floating over it.
         .filter(|taken| taken.is_positive() && !taken.contains_rect(rect))
         .map(|taken| local(*taken, origin))
         .collect();
     let bounds = Frame::with(reticle::safe_rect(viewport, reticle::EDGE_INSET_PX), &occupied,
         pick::ARROW_PX);
 
-    // The selection first, so a ring drawn on the thing already selected reads as both rather
-    // than hiding the brackets.
+    // The selection first, so hovering what is already selected shows both marks.
     for (mark, color, bracketed) in [
         (picked.selected.as_ref(), pick::SELECTED, true),
         (picked.hover.as_ref(), pick::HOVER, false),
@@ -169,11 +154,8 @@ pub(crate) fn draw(
     }
 }
 
-/// What a click does.
-///
-/// A single click selects, which is the action the sky and the panel rows already send. A
-/// double click also **centers the map** on it — the one thing the map can do with a selection
-/// that the sky cannot, and the only way to center on a body the control strip does not name.
+/// A single click selects, as it does on the sky. A double click also centers the map, which
+/// is the only way to center on a body the control strip does not name.
 fn act(response: &egui::Response, thing: &Seen<'_>, out: &mut MessageWriter<Requested>) {
     if response.clicked()
         && let Some(action) = thing.subject.select()
@@ -201,8 +183,8 @@ fn mark(thing: &Seen<'_>, viewport: Vec2, toward: Vec2) -> Mark {
 
 /// The sample of `outline` that lands nearest `toward` on the surface.
 ///
-/// Clip space out as well as in, so a marker is placed from it by the same path as anything
-/// else — the edge arrow included, for when the whole curve is behind the camera.
+/// Clip space out as well as in, so an edge arrow can be placed from it when the whole curve
+/// is behind the camera.
 fn nearest_sample(outline: &[Vec<Vec4>], viewport: Vec2, toward: Vec2) -> Option<Vec4> {
     outline
         .iter()
@@ -219,14 +201,13 @@ fn nearest_sample(outline: &[Vec<Vec4>], viewport: Vec2, toward: Vec2) -> Option
 
 /// Everything the map drew, reduced to where it was drawn.
 ///
-/// A placement with no subject is left out rather than picked and ignored. The reader's own
-/// craft is the one of those, and a candidate that outranks every body and answers no click is
-/// a hole in the map you cannot click through.
+/// A placement with no subject is left out rather than picked and ignored: the reader's own
+/// craft is the one of those, and it outranks every body while answering no click.
 fn sight<'a>(state: &Ui, map: &'a Map, frame: &'a MapFrame, viewport: Vec2) -> Vec<Seen<'a>> {
     let view = state.map;
     let aspect = (viewport.x / viewport.y) as f64;
-    // The marks are sized against the texture and drawn on the surface showing it, which
-    // differ on a display that scales and on the frame after a resize.
+    // Marks are sized against the texture and drawn on the surface showing it. The two differ
+    // on a display that scales, and on the frame after a resize.
     let per_pixel = map.points_per_pixel(viewport.y);
 
     let mut out = Vec::with_capacity(frame.placements.len());
@@ -236,7 +217,6 @@ fn sight<'a>(state: &Ui, map: &'a Map, frame: &'a MapFrame, viewport: Vec2) -> V
         };
         let outline = outline_of(placement, &view, aspect);
         let clip = match &outline {
-            // Filled in against the cursor; a torus has no one place it is.
             Some(curves) => match curves.iter().flatten().next().copied() {
                 Some(first) => first,
                 None => continue,
@@ -271,8 +251,8 @@ fn rank_of(kind: ItemKind) -> u8 {
 
 /// The curves a population is drawn along, in clip space.
 ///
-/// Render units throughout, which is what the placement is already in: `em_map::outline` works
-/// in whatever unit it is handed, and the projection divides the scale out again.
+/// Render units, which is what the placement is already in: `em_map::outline` works in
+/// whatever unit it is handed and the projection divides the scale out again.
 fn outline_of(placement: &Placement, view: &MapView, aspect: f64) -> Option<Vec<Vec<Vec4>>> {
     let annulus = placement.annulus?;
     let curves = em_map::outline::torus(
@@ -292,7 +272,7 @@ fn outline_of(placement: &Placement, view: &MapView, aspect: f64) -> Option<Vec<
     )
 }
 
-/// A camera-relative offset in clip space: the projection applied and the divide not, so
+/// A camera-relative offset in clip space: the projection applied, the divide not, so
 /// something behind the camera still says which way it lies.
 fn clip_of(view: &MapView, offset: DVec3, aspect: f64) -> Vec4 {
     view.orbit.clip(view.plane, offset, MAP_FOV as f64, aspect).as_vec4()
@@ -310,8 +290,8 @@ fn local(rect: egui::Rect, origin: Vec2) -> bevy::math::Rect {
 mod tests {
     use super::*;
 
-    /// **The two modes agree about what a thing is.** A map item's rank has to be the one the
-    /// sky gives the same thing, or a moon picked off the map is a planet picked off the sky.
+    /// A map item's rank has to be the one the sky gives the same thing, or picking a moon
+    /// off the map picks the planet behind it.
     #[test]
     fn a_map_item_ranks_as_the_sky_ranks_it() {
         assert_eq!(rank_of(ItemKind::Ship), rank::CRAFT);
@@ -321,12 +301,11 @@ mod tests {
         assert_eq!(rank_of(ItemKind::Minor), rank::BODY);
         assert_eq!(rank_of(ItemKind::Star), rank::STAR);
         assert_eq!(rank_of(ItemKind::Population), rank::SWARM);
-        // The ordering itself, since the ranks are what the whole rule turns on.
         assert!(rank::CRAFT < rank::BODY && rank::BODY < rank::STAR && rank::STAR < rank::SWARM);
     }
 
-    /// A belt is picked along its outline, and the outline is the one the geometry is built
-    /// from: two edge circles and four cross-sections, in the population's own plane.
+    /// A belt is picked along the outline the geometry is built from: two edge circles and
+    /// four cross-sections.
     #[test]
     fn a_population_is_picked_along_the_curves_it_is_drawn_as() {
         let placement = Placement {
@@ -350,14 +329,12 @@ mod tests {
         assert_eq!(curves.len(), 2 + em_map::outline::CROSS_SECTIONS);
         assert!(curves.iter().all(|curve| curve.len() > 2));
 
-        // And a body has none: it is a disc with a center, picked at it.
         let body = Placement { annulus: None, kind: ItemKind::Planet, ..placement };
         assert!(outline_of(&body, &view, 1.6).is_none());
     }
 
-    /// The mark of something off the surface still says which way it lies, which is what the
-    /// undivided projection is for. Dividing through a negative `w` sends the arrow to the
-    /// opposite edge.
+    /// Something off the surface still says which way it lies. Dividing through a negative
+    /// `w` sends the arrow to the opposite edge.
     #[test]
     fn something_behind_the_camera_is_marked_at_an_edge() {
         let view = MapView {

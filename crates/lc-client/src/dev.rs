@@ -120,9 +120,7 @@ pub(crate) fn place_on_station(
     let waypoint = waypoint.nearest_to(here, &system, now);
     let Some(at) = waypoint.place_at(&system, now) else { return };
     let label = waypoint.label();
-    // Not over a `--focus`. This flag says where the ship *is*; that one says what is
-    // selected, and the two together used to be the station's own body whatever was asked
-    // for — silently, because both produce a perfectly good picture.
+    // Not over a `--focus`: this flag says where the ship is, that one says what is selected.
     if !dev.actions.iter().any(|action| matches!(action, Action::FocusTarget(_))) {
         ui.focus = course.target();
     }

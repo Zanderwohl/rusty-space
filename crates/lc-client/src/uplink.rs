@@ -25,10 +25,8 @@ use crate::link::{Link, Status};
 /// What a ship with no account behind it is called.
 ///
 /// Offline there is no broker to have said a name, and every craft on the map is named
-/// including this one — so there has to be something. **A name, not a word for the reader.**
-/// It was "this ship", which reads as the interface describing you rather than as a name: with
-/// it on screen there is no telling a real name from the absence of one, which is exactly the
-/// thing worth being able to see at a glance.
+/// including this one. A name rather than a word for the reader, so that a real name can be
+/// told from the absence of one at a glance.
 pub const ANONYMOUS: &str = "Anonymous Ship";
 
 /// Where this client is with respect to a server.
@@ -335,8 +333,8 @@ impl Uplink {
     /// What this ship is called: the display name the account carries, which is the name every
     /// other client has for it. [`ANONYMOUS`] when nobody has said one.
     ///
-    /// One answer, because two places show it — the map's own mark and this ship's own lines in
-    /// the radio window — and a craft with two names is two craft to a reader.
+    /// One answer for the two places that show it, the map's mark and the radio window's own
+    /// lines.
     pub fn own_name(&self) -> String {
         self.joined()
             .map(|joined| joined.name.clone())

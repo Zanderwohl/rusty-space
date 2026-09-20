@@ -121,9 +121,8 @@ pub fn draw(
         ViewMode::Map => square,
         ViewMode::World => egui::Rect::NOTHING,
     };
-    // Picking before the names, because a mark carries its own and the layout must not draw
-    // that name a second time a few pixels away. Nothing is picked off the corner square: it
-    // is 190 points, and the map there is a thumbnail rather than a surface to work on.
+    // Before the names, because a mark carries its own and the layout has to leave that one
+    // out. Nothing is picked off the corner square: 190 points is a thumbnail, not a surface.
     let picked = match mode {
         ViewMode::Map => crate::map_pick::survey(&response, rect, &ui_state, &map, &mut out),
         ViewMode::World => crate::map_pick::Picked::default(),
@@ -212,8 +211,7 @@ fn labels(
     let mut candidates = Vec::with_capacity(frame.placements.len());
     let mut galleys = Vec::with_capacity(frame.placements.len());
     for placement in &frame.placements {
-        // A mark names what it is on, so the layout leaves that one alone rather than writing
-        // the same name twice in two places.
+        // A mark names what it is on; naming it here too would write it twice.
         if placement.label.is_empty() || named.contains(&placement.key) {
             continue;
         }

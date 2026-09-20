@@ -9,9 +9,8 @@
 //! ship sits at the render origin and the sky moves around it, so where a thing lands on screen
 //! is a function of which way it lies and nothing else.
 //!
-//! [`crate::map_pick`] is the same job over the map's surface, and shares this module's
-//! [`Subject`], its [`Mark`] and its [`paint`]: one click means one thing in either mode, and
-//! a selection looks the same wherever it is drawn.
+//! [`crate::map_pick`] is the same job over the map's surface and shares this module's
+//! [`Subject`], [`Mark`] and [`paint`], so one click means one thing in either mode.
 
 use bevy::math::Vec4;
 use bevy::prelude::*;
@@ -243,8 +242,7 @@ fn survey(
     }
 }
 
-/// What the interface says is selected, as a subject. Read by the map as well, which marks
-/// the same thing this does.
+/// What the interface says is selected, as a subject. The map marks the same thing.
 pub(crate) fn selected(ui: &Ui) -> Option<Subject> {
     match &ui.focus {
         Some(Target::Body(name)) => Some(Subject::Body(name.clone())),
@@ -531,9 +529,8 @@ pub(crate) fn occupied_rects(context: &egui::Context, except: &[egui::Id]) -> Ve
 
 /// Paint one mark.
 ///
-/// Everything — `frame`, `viewport`, the geometry that comes back — is in the **surface's own**
-/// coordinates, with `origin` saying where that surface's top left sits in the window. The sky
-/// is the whole window and passes a zero; the map is a rectangle inside it and does not.
+/// `frame`, `viewport` and the geometry are in the surface's own coordinates; `origin` is where
+/// that surface's top left sits in the window. The sky is the whole window and passes a zero.
 pub(crate) fn paint(
     painter: &egui::Painter,
     mark: &Mark,
