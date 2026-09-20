@@ -49,9 +49,18 @@ const MAX_SIDE: u32 = 4096;
 /// dial, and it is set per entity from that entity's own scale.
 const LINE_PX: f32 = 1.6;
 
-/// And a floor on how thick a line may get in world terms, so a mesh very close to the camera
-/// does not swell into a pipe.
-const MAX_TUBE_FRACTION: f32 = 0.25;
+/// How fat a tube may get, as a fraction of its own unit mesh — and it is per family, because
+/// one number cannot serve all three.
+///
+/// The shader displaces vertices along their normals in the mesh's own space, so this is a
+/// proportion of the thing drawn rather than of the screen. A ring scaled to one astronomical
+/// unit and seen from forty needs a tube of a tenth of a unit to be a pixel wide; unclamped
+/// that is a tenth of the ring, and the twelve spokes of the reference plane came out as
+/// twelve solid wedges. A point is the opposite case: it is *meant* to be a blob, and a
+/// wireframe ball with hairline tubes is invisible at three pixels across.
+const LINE_TUBE_FRACTION: f32 = 0.02;
+const SPHERE_TUBE_FRACTION: f32 = 0.06;
+const POINT_TUBE_FRACTION: f32 = 0.5;
 
 /// How much of the palette color a line is drawn at.
 ///
@@ -73,6 +82,13 @@ const FAR_MULTIPLE: f32 = 1.0e6;
 const RING_SEGMENTS: u32 = 128;
 
 /// Radial spokes in the reference plane.
+///
+/// **Sized to the stand-off, not to the outermost ring.** Every point of a ring is the same
+/// distance from the center, so one tube radius is right for all of it; a spoke runs from
+/// near the camera out to its rim, and a constant world radius that is a pixel at the far end
+/// is eighty at the near one. Scaled to the outermost decade the twelve of them were twelve
+/// solid wedges across the top of the view, and the arithmetic for the thickness looked
+/// entirely correct — it was answering about the wrong end.
 const PLANE_SPOKES: u32 = 12;
 
 /// Dashes in a drop-line, and the count is fixed so it is the same line at every zoom.
@@ -328,7 +344,7 @@ fn place(
         for entity in &existing {
             commands.entity(entity).despawn();
         }
-        spawn_scene(&mut commands, &map, &frame, &mut materials);
+        spawn_scene(&mut commands, &map, &frame, standoff, &mut materials);
         map.drawn = wanted;
         map.rings_drawn = frame.rings.len();
         map.frame = Some(frame);
@@ -337,26 +353,28 @@ fn place(
 
     for (of, mut at, material) in items.iter_mut() {
         let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
+        let resolved = is_resolved(placement, rad_per_px);
         *at = item_transform(placement, rad_per_px);
         set_thickness(&mut materials, material, at.scale.max_element(), rad_per_px,
-            at.translation.length());
+            at.translation.length(),
+            if resolved { SPHERE_TUBE_FRACTION } else { POINT_TUBE_FRACTION });
     }
     for (of, mut at, material) in drops.iter_mut() {
         let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
         *at = drop_transform(placement);
-        set_thickness(&mut materials, material, 1.0, rad_per_px, at.translation.length());
+        set_thickness(&mut materials, material, 1.0, rad_per_px, at.translation.length(),
+            LINE_TUBE_FRACTION);
     }
     for (of, mut at, material) in rings.iter_mut() {
         let Some(ring) = frame.rings.get(of.0) else { continue };
         *at = ring_transform(&frame, ring.radius);
         set_thickness(&mut materials, material, ring.radius, rad_per_px,
-            at.translation.length().max(ring.radius));
+            at.translation.length().max(ring.radius), LINE_TUBE_FRACTION);
     }
     if let Ok((mut at, material)) = spokes.single_mut() {
-        let outer = frame.rings.iter().map(|r| r.radius).fold(0.0f32, f32::max);
-        *at = ring_transform(&frame, outer);
-        set_thickness(&mut materials, material, outer, rad_per_px,
-            at.translation.length().max(outer));
+        *at = ring_transform(&frame, standoff);
+        set_thickness(&mut materials, material, standoff, rad_per_px, standoff,
+            LINE_TUBE_FRACTION);
     }
     map.frame = Some(frame);
 }
@@ -371,9 +389,13 @@ fn at_of(placement: &Placement) -> Vec3 {
 
 /// A body is a sphere at its own size once it is worth more than a few pixels, and a point of
 /// a fixed angular size below that.
+fn is_resolved(placement: &Placement, rad_per_px: f32) -> bool {
+    rad_per_px > 0.0 && placement.angular_radius / rad_per_px > SPHERE_PX
+}
+
 fn item_transform(placement: &Placement, rad_per_px: f32) -> Transform {
     let at = at_of(placement);
-    let resolved = rad_per_px > 0.0 && placement.angular_radius / rad_per_px > SPHERE_PX;
+    let resolved = is_resolved(placement, rad_per_px);
     let radius = match resolved {
         true => placement.radius,
         false => (at.length() * POINT_ANGULAR_RADIUS).max(f32::MIN_POSITIVE),
@@ -421,11 +443,12 @@ fn set_thickness(
     scale: f32,
     rad_per_px: f32,
     distance: f32,
+    max_fraction: f32,
 ) {
     let Some(mut asset) = materials.get_mut(&material.0) else { return };
     let world = (distance * rad_per_px * LINE_PX).max(f32::MIN_POSITIVE);
     let target = match scale > f32::MIN_POSITIVE {
-        true => (world / scale).min(MAX_TUBE_FRACTION),
+        true => (world / scale).min(max_fraction),
         false => BASE_TUBE_RADIUS,
     };
     asset.target_tube_radius = target;
@@ -435,6 +458,7 @@ fn spawn_scene(
     commands: &mut Commands,
     map: &Map,
     frame: &MapFrame,
+    standoff: f32,
     materials: &mut Assets<BodyWireframeMaterial>,
 ) {
     let layer = RenderLayers::layer(MAP_LAYER);
@@ -451,11 +475,10 @@ fn spawn_scene(
         ));
     }
 
-    let outer = frame.rings.iter().map(|r| r.radius).fold(0.0f32, f32::max);
     commands.spawn((
         Mesh3d(map.spokes.clone()),
         MeshMaterial3d(materials.add(line_material(SPOKE))),
-        ring_transform(frame, outer),
+        ring_transform(frame, standoff),
         NoFrustumCulling,
         layer.clone(),
         MapDrawn,
