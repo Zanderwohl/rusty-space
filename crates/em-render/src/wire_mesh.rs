@@ -369,10 +369,10 @@ pub fn plane_spokes(spokes: u32, inner: f32, tube_radius: f32, tube_sides: u32, 
 
 /// A dashed line of unit height along `+Y`, from the plane up to what hangs above it.
 ///
-/// A fixed dash **count** rather than a fixed length, because the mesh is scaled: a dash
-/// measured in world units is a solid line at one zoom and a single dash at another, and this
-/// one line is drawn from a planet's orbit down to the ecliptic and from a star's height down
-/// to the galactic disc in the same session.
+/// The mesh is scaled to the drop it is drawn for, so `dashes` sets how long each dash ends up
+/// being — and the caller picks it per line to keep the dash itself a constant size. A single
+/// count for every line would make a long drop's dashes long and a short one's short, which
+/// reads as two different kinds of line rather than one line at two lengths.
 pub fn drop_line(dashes: u32, tube_radius: f32, tube_sides: u32, brightness: f32) -> Mesh {
     let dashes = dashes.max(1);
     // `dashes` dashes and `dashes - 1` gaps, all the same length, so the line starts and ends

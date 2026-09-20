@@ -124,8 +124,16 @@ const SPOKE_INNER: f32 = 0.02;
 /// entirely correct — it was answering about the wrong end.
 const PLANE_SPOKES: u32 = 12;
 
-/// Dashes in a drop-line, and the count is fixed so it is the same line at every zoom.
-const DROP_DASHES: u32 = 9;
+/// How long a dash is, in pixels, wherever it is drawn.
+///
+/// Constant in size rather than constant in count: the mesh is scaled to the drop, so a fixed
+/// count gives a tall drop long dashes and a short one short ones — two kinds of line instead
+/// of one line at two lengths. The host picks the count per drop to hold this.
+const DASH_PX: f32 = 5.0;
+
+/// The most dashes a drop-line is built with. A drop needing more than this is longer than the
+/// viewport many times over and its dashes are sub-pixel anyway.
+const MAX_DASHES: usize = 48;
 
 /// Angular radius, in pixels, past which an item is drawn as a wireframe sphere rather than a
 /// point. Below it a sphere is a handful of sub-pixel tubes and reads as nothing at all.
@@ -180,7 +188,10 @@ pub struct Map {
     sphere: Handle<Mesh>,
     ring: Handle<Mesh>,
     spokes: Handle<Mesh>,
-    drop: Handle<Mesh>,
+    /// One drop-line mesh per dash count, indexed from one dash. Built once: every one of them
+    /// is a handful of tubes, and picking a handle is cheaper than rebuilding geometry when a
+    /// body drifts further off the plane.
+    drops: Vec<Handle<Mesh>>,
     /// What is spawned, in order. A rebuild happens only when this stops matching the frame.
     drawn: Vec<ItemKey>,
     rings_drawn: usize,
@@ -240,7 +251,9 @@ fn setup(
             4,
             0.6,
         )),
-        drop: meshes.add(wire_mesh::drop_line(DROP_DASHES, BASE_TUBE_RADIUS, 4, 0.8)),
+        drops: (1..=MAX_DASHES)
+            .map(|n| meshes.add(wire_mesh::drop_line(n as u32, BASE_TUBE_RADIUS, 4, 0.8)))
+            .collect(),
         drawn: Vec::new(),
         rings_drawn: 0,
         image,
@@ -336,7 +349,7 @@ fn place(
         (Without<MapCamera>, Without<MapDropOf>, Without<MapRingOf>, Without<MapAnnulusOf>, Without<MapSpokes>),
     >,
     mut drops: Query<
-        (&MapDropOf, &mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
+        (&MapDropOf, &mut Transform, &mut Mesh3d, &MeshMaterial3d<BodyWireframeMaterial>),
         (Without<MapCamera>, Without<MapItemOf>, Without<MapRingOf>, Without<MapSpokes>, Without<MapAnnulusOf>),
     >,
     mut rings: Query<
@@ -419,9 +432,16 @@ fn place(
             at.translation.length(),
             if resolved { SPHERE_TUBE_FRACTION } else { POINT_TUBE_FRACTION }, LINE_PX);
     }
-    for (of, mut at, material) in drops.iter_mut() {
+    for (of, mut at, mut mesh, material) in drops.iter_mut() {
         let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
         *at = drop_transform(placement);
+        // A body drifting off the plane gains dashes rather than longer ones, so the mesh it
+        // is drawn with changes. A handle swap, not a rebuild.
+        let dashes = dash_count(at.scale.y, at.translation.length(), rad_per_px);
+        let wanted = &map.drops[dashes - 1];
+        if mesh.0 != *wanted {
+            mesh.0 = wanted.clone();
+        }
         set_thickness(&mut materials, material, 1.0, rad_per_px, at.translation.length(),
             LINE_TUBE_FRACTION, SCALE_PX);
     }
@@ -547,6 +567,19 @@ fn item_transform(placement: &Placement, rad_per_px: f32) -> Transform {
         rotation: Quat::from_rotation_arc(Vec3::Y, render(placement.pole.as_dvec3()).normalize()),
         scale: Vec3::splat(radius),
     }
+}
+
+/// How many dashes a drop wants, so that each one is [`DASH_PX`] long on screen.
+///
+/// The mesh lays `n` dashes and `n - 1` gaps of equal length over a unit height, so a dash is
+/// `1 / (2n - 1)` of the drop; wanting a dash of `d` render units out of a drop of `h` gives
+/// `n = (h / d + 1) / 2`.
+fn dash_count(height: f32, distance: f32, rad_per_px: f32) -> usize {
+    let dash = distance * rad_per_px * DASH_PX;
+    if !(dash > 0.0) || !height.is_finite() {
+        return 1;
+    }
+    (((height / dash + 1.0) * 0.5).round() as i64).clamp(1, MAX_DASHES as i64) as usize
 }
 
 /// The dashed line is a unit height along `+Y`, so it is scaled to the drop and turned onto it.
@@ -693,8 +726,9 @@ fn spawn_scene(
             let at = drop_transform(placement);
             let target = tube_target(1.0, rad_per_px, at.translation.length(),
                 LINE_TUBE_FRACTION, SCALE_PX);
+            let dashes = dash_count(at.scale.y, at.translation.length(), rad_per_px);
             commands.spawn((
-                Mesh3d(map.drop.clone()),
+                Mesh3d(map.drops[dashes - 1].clone()),
                 MeshMaterial3d(materials.add(line_material(DROP, target, SCALE_COLOR_SCALE))),
                 at,
                 NoFrustumCulling,
@@ -868,6 +902,50 @@ mod tests {
                     "spokes at stand-off {standoff:e}, {height} px: tube {world:e} against a \
                      clearance of {clearance:e}",
                 );
+            }
+        }
+    }
+
+    /// **A dash is the same length wherever it is drawn.**
+    ///
+    /// The count follows the drop rather than the other way round: twice the drop is twice the
+    /// dashes, not dashes twice as long. A fixed count gave a tall drop long dashes and a
+    /// short one short ones, which reads as two kinds of line.
+    #[test]
+    fn a_longer_drop_gets_more_dashes_not_longer_ones() {
+        let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
+        let distance = 40.0;
+        let dash_of = |height: f32| {
+            let n = dash_count(height, distance, rad_per_px);
+            // The mesh lays `n` dashes and `n - 1` gaps of equal length over the drop.
+            height / (2 * n - 1) as f32
+        };
+        let want = distance * rad_per_px * DASH_PX;
+        // Up to the cap, which is about a viewport's worth of line.
+        for height in [0.5f32, 2.0, 9.0, 20.0] {
+            let dash = dash_of(height);
+            assert!(
+                (dash / want - 1.0).abs() < 0.5,
+                "a drop of {height} drew dashes of {dash} against a wanted {want}",
+            );
+        }
+        assert!(
+            dash_count(20.0, distance, rad_per_px) > dash_count(2.0, distance, rad_per_px),
+            "a longer drop should have gained dashes",
+        );
+        // Past it the dashes do stretch, and that is the cap rather than the rule: a drop that
+        // long runs several viewports off the screen and is not being read as dashes anyway.
+        assert_eq!(dash_count(150.0, distance, rad_per_px), MAX_DASHES);
+    }
+
+    /// And it stays inside the meshes that exist, whatever it is handed.
+    #[test]
+    fn a_dash_count_is_always_a_mesh_there_is() {
+        let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
+        for height in [0.0f32, -1.0, 1.0e-9, 1.0e9, f32::INFINITY, f32::NAN] {
+            for distance in [0.0f32, 1.0e-6, 40.0, 1.0e5] {
+                let n = dash_count(height, distance, rad_per_px);
+                assert!((1..=MAX_DASHES).contains(&n), "{height} at {distance} gave {n}");
             }
         }
     }
