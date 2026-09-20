@@ -250,12 +250,17 @@ mod tests {
         assert_eq!(lines(&s, &ui).exposure, "auto");
     }
 
-    /// The development default is itself non-canonical, and has to say so: a sixty-times
-    /// clock that looked normal would make every duration on screen a lie.
+    /// A rate that is not the world's has to say so: a sixty-times clock that looked normal
+    /// would make every duration on screen a lie.
+    ///
+    /// The default is the design rate and therefore says nothing, which is the point of it —
+    /// a warning that is always on is a warning nobody reads.
     #[test]
     fn a_non_canonical_clock_rate_is_announced() {
         let (mut ui, mut s) = fixture();
-        assert_eq!(lines(&s, &ui).warning.unwrap(), "1 year / minute", "the test rate must be flagged");
+        assert!(lines(&s, &ui).warning.is_none(), "the default is the world's own rate");
+        apply(Action::SetTimeRate(60.0), &mut ui, &mut s);
+        assert_eq!(lines(&s, &ui).warning.unwrap(), "1 year / minute", "a fast clock is flagged");
         apply(Action::SetTimeRate(64.0), &mut ui, &mut s);
         let off_ladder = lines(&s, &ui).warning.expect("one off the ladder must be flagged");
         assert_eq!(off_ladder, "1 year / 56 seconds");

@@ -1046,15 +1046,20 @@ mod tests {
     }
 
     /// **The bug behind "clock corrected by 140 hours", every second.** Refusing to let a
-    /// player *change* the rate was not enough: the client's own default is sixty times the
+    /// player *change* the rate was not enough: the client's own default was sixty times the
     /// server's, so a joined client ran away from it without anybody touching a key — and the
     /// correction fired every second and never fixed anything, because it re-diverged as fast
     /// as it was pulled back.
+    ///
+    /// The default is the design rate now, so the two agree before anything is sent. This
+    /// still has to hold: `--rate` and the ladder can both leave a client running fast, and
+    /// joining has to bring it back whatever put it there.
     #[test]
     fn joining_adopts_the_servers_rate() {
         let (mut uplink, mut game, mut ui) = app();
-        ui.0.time_rate = crate::ui::TEST_TIME_RATE;
-        assert!(ui.0.time_rate > SERVER_RATE, "premise: the default outruns the server");
+        // Sixty: what the offline default used to be, and what `--rate 60` still does.
+        ui.0.time_rate = 60.0;
+        assert!(ui.0.time_rate > SERVER_RATE, "premise: this outruns the server");
 
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
 
@@ -1113,16 +1118,15 @@ mod tests {
 
     /// The arithmetic that made the number recognizable, kept so the correspondence is pinned
     /// rather than remembered: a multiplier of one is the server's 8766 coordinate seconds per
-    /// real second, and the old default was sixty of those — 143.7 coordinate hours a second,
-    /// which is what the report said.
+    /// real second, and the offline default used to be sixty of those — 143.7 coordinate hours
+    /// a second, which is what the report said. It is one now, and this records what it cost.
     #[test]
     fn the_servers_rate_is_the_one_the_clocks_agree_at() {
         assert_eq!(crate::session::TIME_RATE * SERVER_RATE, 8766.0);
         // And a world that says sixty is a Julian year a minute, which is the number this
         // codebase already reaches for when it wants to watch something happen.
         assert!((crate::session::TIME_RATE * 60.0 * 60.0 - 31_557_600.0).abs() < 1.0);
-        let gained_per_second =
-            crate::session::TIME_RATE * (crate::ui::TEST_TIME_RATE - SERVER_RATE);
+        let gained_per_second = crate::session::TIME_RATE * (60.0 - SERVER_RATE);
         assert!(
             (gained_per_second / 3600.0 - 143.7).abs() < 0.1,
             "{} coordinate hours a second",

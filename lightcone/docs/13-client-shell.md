@@ -368,7 +368,7 @@ seven hours twenty times a second having never drifted at all.
 | `--shot <path>` | photograph the sky through the real pipeline, then quit |
 | `--fly` | cross to the nearest interstellar star |
 | `--band <n>` | band preset |
-| `--rate <n>` | clock multiplier against one year per hour: `360` is a year per ten seconds |
+| `--rate <n>` | clock multiplier against one year per hour: `360` is a year per ten seconds. Without it a session runs at the world's own rate |
 | `--watch` | target the nearest system and open the telescope |
 | `--swarm` | target the nearest star carrying a swarm |
 | `--curve <n>` | which band the light curve measures |

@@ -285,12 +285,17 @@ pub fn rate_step(rate: f64, up: bool) -> f64 {
     RATE_LADDER[next.min(RATE_LADDER.len() - 1)].0
 }
 
-/// Development default for the clock multiplier: a Julian year a minute rather than an hour.
+/// The clock multiplier a session starts at: **the design rate**, one Julian year an hour.
 ///
-/// A four light-year crossing then takes four minutes of real time instead of four hours,
-/// which is the difference between watching the sky move and taking it on faith. The server
-/// owns the rate in a real session and this multiplier does not exist there.
-pub const TEST_TIME_RATE: f64 = 60.0;
+/// The same number a shard runs at, and the same one [`crate::uplink::SERVER_RATE`] names. A
+/// single-player session is a server with one player, so it has no business running at a
+/// different speed from one — and the offline default used to be sixty times the server's,
+/// which is the whole of the bug behind "clock corrected by 140 hours" firing every second at
+/// a client that had joined without touching a key.
+///
+/// Speeding it up is what `--rate` is for, and what the ladder in the interface is for. Both
+/// are development affordances, and a shard refuses them: the rate is the world's.
+pub const DESIGN_TIME_RATE: f64 = 1.0;
 
 #[derive(Clone, Debug)]
 pub struct UiState {
@@ -415,7 +420,7 @@ impl Default for UiState {
             preset: 0,
             integration_s: 1.0e4,
             god_view: false,
-            time_rate: TEST_TIME_RATE,
+            time_rate: DESIGN_TIME_RATE,
             notifications: Vec::new(),
             reading: Reading::default(),
             refit_draft: None,
