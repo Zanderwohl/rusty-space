@@ -58,8 +58,9 @@ pub fn draw(
     );
     if open {
         read_input(ctx, &response, rect, &mut out);
-    } else {
-        read_wheel_only(ctx, &response, &mut out);
+    } else if response.clicked() {
+        // The corner surface's whole interaction. See [`minimap`].
+        ask(&mut out, Action::OpenPanel(Panel::Map));
     }
 }
 
@@ -91,10 +92,13 @@ fn panel(
 
 /// The corner surface. One gesture and no more.
 ///
-/// A minimap that took a drag would orbit a view the size of a postage stamp, and one that
-/// took the wheel would stop the ship's own camera zooming whenever the cursor drifted into
-/// the corner — which is the failure `crate::input::read_wheel` exists to prevent, arriving
-/// from the other side. It takes the wheel and nothing else, and one click opens the panel.
+/// A minimap that took a drag would orbit a view the size of a postage stamp. One that took
+/// the wheel would be worse: it is always on screen, so the ship's own camera would stop
+/// zooming whenever the cursor drifted into the corner — the failure
+/// `crate::input::read_wheel` consults egui to prevent, arriving from the other side. It took
+/// the wheel for a while anyway, two lines under a comment saying it must not.
+///
+/// One click, which opens the panel. That is the whole of it.
 fn minimap(ctx: &egui::Context, map: &mut Map) -> Option<(egui::Rect, egui::Response)> {
     let mut answer = None;
     egui::Area::new("minimap".into())
