@@ -26,7 +26,9 @@ const PAN_PER_VIEWPORT: f64 = 1.2;
 /// The minimap's side, in points.
 const MINIMAP_SIDE: f32 = 190.0;
 
-const MINIMAP_MARGIN: egui::Vec2 = egui::vec2(-12.0, -12.0);
+/// Bottom **left**. The event log is anchored bottom right with this same inset
+/// (`panels.rs`), and two surfaces at one corner is one surface with the other underneath it.
+const MINIMAP_MARGIN: egui::Vec2 = egui::vec2(12.0, -12.0);
 
 /// Draw whichever surface is in force, and turn pointer input on it into actions.
 ///
@@ -104,7 +106,7 @@ fn minimap(ctx: &egui::Context, map: &mut Map) -> Option<(egui::Rect, egui::Resp
     egui::Area::new("minimap".into())
         // Middle, not Foreground: an open window has to cover this, not the other way round.
         .order(egui::Order::Middle)
-        .anchor(egui::Align2::RIGHT_BOTTOM, MINIMAP_MARGIN)
+        .anchor(egui::Align2::LEFT_BOTTOM, MINIMAP_MARGIN)
         .show(ctx, |ui| {
             let side = egui::vec2(MINIMAP_SIDE, MINIMAP_SIDE);
             answer = Some(image(ui, map, side, egui::Sense::click()));

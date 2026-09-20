@@ -105,19 +105,31 @@ impl Orbit {
 
     /// Turn by a relative amount, radians, and hold both clamps.
     ///
-    /// A turn that would carry the elevation through the plane stops at the floor **on the
-    /// side it came from**. Letting it cross would teleport the view to the mirror image of
-    /// itself in one frame, which reads as the camera jumping rather than as a limit.
+    /// **The plane can be crossed; it just cannot be landed on.** Stopping at the floor on the
+    /// side it came from was the first rule here, and it locked the camera into the upper
+    /// hemisphere — half the perspectives a map exists to offer, and no way to look up at
+    /// anything from underneath. A turn that would land inside the floor now continues to the
+    /// far side of it, in the direction it was already going.
+    ///
+    /// So there is a band of about six degrees the elevation skips over. That is the smallest
+    /// jump the floor allows, and it only happens to someone dragging the view flat — which is
+    /// the one gesture that has to do *something* other than stop.
     pub fn turn(&mut self, d_azimuth: f64, d_elevation: f64) {
         self.azimuth = (self.azimuth + d_azimuth).rem_euclid(std::f64::consts::TAU);
-        let side = if self.elevation < 0.0 { -1.0 } else { 1.0 };
         let next = (self.elevation + d_elevation).clamp(-ELEVATION_LIMIT, ELEVATION_LIMIT);
-        // One comparison for both limits: a `next` on the other side of the plane has a
-        // negative product, and one too close to it has a small positive product.
-        self.elevation = match next * side < ELEVATION_FLOOR {
-            true => side * ELEVATION_FLOOR,
-            false => next,
+        if next.abs() >= ELEVATION_FLOOR {
+            self.elevation = next;
+            return;
+        }
+        // Inside the band. Leave it on the side the turn was heading for, and on the side it
+        // started from when the turn was not about elevation at all.
+        let heading = match d_elevation.partial_cmp(&0.0) {
+            Some(std::cmp::Ordering::Less) => -1.0,
+            Some(std::cmp::Ordering::Greater) => 1.0,
+            _ if self.elevation < 0.0 => -1.0,
+            _ => 1.0,
         };
+        self.elevation = heading * ELEVATION_FLOOR;
     }
 
     /// Slide the focus across the plane, in fractions of the stand-off.
@@ -224,17 +236,32 @@ mod tests {
         }
     }
 
-    /// A turn that would cross the plane stops on the side it came from.
+    /// Both hemispheres are reachable, which is half the perspectives a map is for.
+    ///
+    /// The first rule here stopped a turn at the floor on the side it came from, and the
+    /// camera could never get under the plane to look up at anything.
     #[test]
-    fn a_turn_does_not_jump_the_plane() {
+    fn the_camera_can_get_under_the_plane() {
         let mut orbit = Orbit::framing(DVec3::ZERO, M_PER_AU);
-        orbit.elevation = 0.5;
-        orbit.turn(0.0, -10.0);
-        assert!(orbit.elevation > 0.0, "crossed to {}", orbit.elevation);
+        let mut lowest: f64 = orbit.elevation;
+        for _ in 0..500 {
+            orbit.turn(0.0, -0.006);
+            lowest = lowest.min(orbit.elevation);
+        }
+        assert!(lowest < -0.5, "never got below the plane; lowest was {lowest}");
+        assert!(orbit.elevation >= -ELEVATION_LIMIT);
+    }
 
-        orbit.elevation = -0.5;
-        orbit.turn(0.0, 10.0);
-        assert!(orbit.elevation < 0.0, "crossed to {}", orbit.elevation);
+    /// And it passes through the band rather than landing in it.
+    #[test]
+    fn a_turn_steps_over_the_plane_rather_than_onto_it() {
+        for (from, delta, want) in [(0.5, -0.5, -1.0), (-0.5, 0.5, 1.0)] {
+            let mut orbit = Orbit::framing(DVec3::ZERO, M_PER_AU);
+            orbit.elevation = from;
+            orbit.turn(0.0, delta);
+            assert!(orbit.elevation.abs() >= ELEVATION_FLOOR, "landed in the plane");
+            assert_eq!(orbit.elevation.signum(), want, "stepped the wrong way from {from}");
+        }
     }
 
     /// And it never reaches a pole, where the azimuth would stop meaning anything.

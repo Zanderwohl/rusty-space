@@ -81,11 +81,20 @@ const FAR_MULTIPLE: f32 = 1.0e6;
 /// Divisions of a decade ring. Enough that the largest one does not read as a polygon.
 const RING_SEGMENTS: u32 = 128;
 
-/// How far the spokes reach, as a fraction of the stand-off.
+/// How far the spokes reach, as a multiple of the stand-off.
 ///
-/// Short of the camera, deliberately. Reaching exactly the stand-off put the rim of one spoke
-/// at precisely the eye, so an edge-on view was taken from inside a tube.
-const SPOKE_REACH: f32 = 0.5;
+/// **Far past the edge of the view, because a spoke's end should never be visible.** A line
+/// that stops inside the frame reads as an object with a tip rather than as a rule running
+/// off the picture. Forty stand-offs puts the far end forty times further than the focus, so
+/// its tube is a fortieth of a pixel there and it fades out instead of ending.
+///
+/// Passing the eye is safe, and the elevation floor is what makes it so: the camera clears the
+/// plane by `sin(3°)` of the stand-off, which is some sixteen times a line's own half-width.
+const SPOKE_REACH: f32 = 40.0;
+
+/// Where a spoke starts, as a fraction of the stand-off — so the hole in the middle stays the
+/// same size whatever [`SPOKE_REACH`] is.
+const SPOKE_INNER: f32 = 0.02;
 
 /// Radial spokes in the reference plane.
 ///
@@ -196,7 +205,13 @@ fn setup(
         frame: None,
         sphere: meshes.add(wire_mesh::generate_latlon_sphere(&[], BASE_TUBE_RADIUS, 4)),
         ring: meshes.add(wire_mesh::ring_tube(RING_SEGMENTS, BASE_TUBE_RADIUS, 4, 1.0)),
-        spokes: meshes.add(wire_mesh::plane_spokes(PLANE_SPOKES, BASE_TUBE_RADIUS, 4, 0.6)),
+        spokes: meshes.add(wire_mesh::plane_spokes(
+            PLANE_SPOKES,
+            SPOKE_INNER / SPOKE_REACH,
+            BASE_TUBE_RADIUS,
+            4,
+            0.6,
+        )),
         drop: meshes.add(wire_mesh::drop_line(DROP_DASHES, BASE_TUBE_RADIUS, 4, 0.8)),
         drawn: Vec::new(),
         rings_drawn: 0,
@@ -379,7 +394,10 @@ fn place(
     }
     if let Ok((mut at, material)) = spokes.single_mut() {
         *at = ring_transform(&frame, standoff * SPOKE_REACH);
-        set_thickness(&mut materials, material, standoff, rad_per_px, standoff,
+        // The scale written into the transform, not the stand-off: the shader displaces in the
+        // mesh's own space, so a thickness computed against a different number is wrong by
+        // exactly that ratio. Sized against the near end, which is the focus.
+        set_thickness(&mut materials, material, standoff * SPOKE_REACH, rad_per_px, standoff,
             LINE_TUBE_FRACTION);
     }
     map.frame = Some(frame);

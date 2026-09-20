@@ -350,15 +350,19 @@ pub fn ring_tube(segments: u32, tube_radius: f32, tube_sides: u32, brightness: f
 ///
 /// What makes an edge-on plane read as a plane. Seen from within it the rings are a single
 /// line and carry no depth at all; the spokes are what still converge.
-pub fn plane_spokes(spokes: u32, tube_radius: f32, tube_sides: u32, brightness: f32) -> Mesh {
+/// `inner` is where a spoke starts, as a fraction of its length: every spoke meeting every
+/// other one at the origin is a blob rather than a center. It is a parameter because the mesh
+/// is scaled, and a caller that stretches the spokes past the edge of the view has to shrink
+/// it by the same factor or the hole in the middle grows with them.
+pub fn plane_spokes(spokes: u32, inner: f32, tube_radius: f32, tube_sides: u32, brightness: f32)
+    -> Mesh {
     let mut buffers = Buffers::default();
+    let inner = inner.clamp(f32::MIN_POSITIVE, 0.9);
     for i in 0..spokes {
         let angle = (i as f32 / spokes.max(1) as f32) * 2.0 * PI;
         let (sin_a, cos_a) = angle.sin_cos();
         let out = Vec3::new(cos_a, 0.0, sin_a);
-        // From a little way out rather than from the center, where every spoke would meet
-        // every other one inside a tube's own radius and read as a blob.
-        buffers.add(&[out * 0.02, out], brightness, tube_radius, tube_sides, false);
+        buffers.add(&[out * inner, out], brightness, tube_radius, tube_sides, false);
     }
     buffers.into_mesh()
 }
@@ -569,7 +573,7 @@ mod tests {
     /// one tube's radius reads as a blob rather than as a center.
     #[test]
     fn spokes_reach_the_rim_without_piling_up_in_the_middle() {
-        let mesh = plane_spokes(12, 0.01, 4, 0.5);
+        let mesh = plane_spokes(12, 0.02, 0.01, 4, 0.5);
         let radii: Vec<f32> = positions(&mesh).iter().map(|p| Vec2::new(p.x, p.z).length())
             .collect();
         assert!(radii.iter().any(|r| *r > 0.97), "no spoke reached the rim");
@@ -608,7 +612,7 @@ mod tests {
     /// Asking for nothing must not produce a mesh that divides by zero or wraps.
     #[test]
     fn degenerate_requests_are_still_meshes() {
-        for mesh in [ring_tube(0, 0.01, 4, 1.0), plane_spokes(0, 0.01, 4, 1.0),
+        for mesh in [ring_tube(0, 0.01, 4, 1.0), plane_spokes(0, 0.02, 0.01, 4, 1.0),
             drop_line(0, 0.01, 4, 1.0)] {
             assert!(positions(&mesh).iter().all(|p| p.is_finite()), "a NaN got into a buffer");
             assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
