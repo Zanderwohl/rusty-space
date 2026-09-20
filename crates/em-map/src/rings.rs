@@ -15,22 +15,19 @@ pub struct Ring {
 
 /// Decade rings spanning `[inner_m, outer_m]`, at most `max` of them.
 ///
-/// `em_plot::Scale::Log10` already chooses powers of ten and already thins by a whole-decade
-/// step when the range is wider than the count allows, which is exactly what fifteen orders of
-/// magnitude needs; it also already survives a lower bound of zero, which is the case a map
-/// centered on one of its own items hits every time. None of that is worth writing twice.
+/// `em_plot::Scale::Log10` chooses powers of ten, thins by whole decades when the range is
+/// wider than the count allows, and survives a lower bound of zero.
 ///
-/// What this adds is the widening. `ticks` keeps only what falls strictly inside the range, so
-/// asking it for `[1.2e11, 4.5e11]` returns nothing at all — both decades that frame the view
-/// are outside it. Rounding out to whole decades first is what makes the outermost ring, the
-/// one that frames the picture, the one that is actually drawn.
+/// What this adds is the widening: `ticks` keeps only what falls strictly inside the range, so
+/// `[1.2e11, 4.5e11]` returns nothing. Rounding out to whole decades first is what draws the
+/// outermost ring, the one that frames the picture.
 pub fn decades(inner_m: f64, outer_m: f64, max: usize) -> Vec<Ring> {
     let outer = outer_m.max(inner_m);
     if !outer.is_finite() || outer <= 0.0 || max == 0 {
         return Vec::new();
     }
-    // A zero or negative inner bound is ordinary: the focus is usually on something. Start a
-    // few decades in from the outer edge rather than at the first positive float.
+    // A zero or negative inner bound is ordinary, because the focus is usually on something.
+    // Start a few decades in from the outer edge rather than at the first positive float.
     let lo = match inner_m.is_finite() && inner_m > 0.0 {
         true => 10f64.powf(inner_m.log10().floor()),
         false => 10f64.powf(outer.log10().floor() - max as f64 + 1.0),
@@ -43,10 +40,8 @@ pub fn decades(inner_m: f64, outer_m: f64, max: usize) -> Vec<Ring> {
         .collect()
 }
 
-/// A distance in whatever unit a reader can hold it in.
-///
-/// The same ladder `lc_client::hud::span` uses, one step longer: a map goes further out than a
-/// flight readout ever does.
+/// A distance in whatever unit a reader can hold it in. The ladder `lc_client::hud::span`
+/// uses, one step longer, because a map goes further out than a flight readout.
 pub fn label_m(meters: f64) -> String {
     match meters {
         m if m < 1.0e3 => format!("{m:.0} m"),
@@ -65,8 +60,7 @@ mod tests {
         rings.iter().map(|r| r.radius_m).collect()
     }
 
-    /// Every ring is a power of ten. `nice_ticks`'s 1-2-5 spacings are right for a chart axis
-    /// and wrong here: an order of magnitude is what the rings are for.
+    /// Every ring is a power of ten. The 1-2-5 spacings of a chart axis are wrong here.
     #[test]
     fn every_ring_is_a_decade() {
         for radius in radii(&decades(1.0e6, 1.0e16, MAX_RINGS)) {

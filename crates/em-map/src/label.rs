@@ -1,13 +1,10 @@
-//! Which of a crowded map's names there is actually room for.
+//! Which of a crowded map's names there is room for.
 //!
-//! A planetary system has fifty names in it and a panel has room for six. The rule is that the
-//! **heaviest wins**: Jupiter is named and its moons are not, and where the moons are named it
-//! is the Galileans that fit. Nothing here knows about primaries or satellites — a hierarchy
-//! is what mass already says, and encoding it twice is two answers to one question.
+//! The heaviest wins: Jupiter is named and its moons are not. Nothing here knows about
+//! primaries or satellites, because mass already says what the hierarchy says.
 //!
-//! A label that would leave the viewport is dropped rather than dragged back to the edge. The
-//! map draws no edge markers by choice: an arrow at the rim names something the reader cannot
-//! see, and pays for it with the pixels of something they can.
+//! A label that would leave the viewport is dropped rather than moved to the edge. An edge
+//! marker names something the reader cannot see, using pixels from something they can.
 
 use glam::Vec2;
 
@@ -41,35 +38,30 @@ pub struct Layout {
     /// The clearance kept between two of them.
     pub gap: f32,
     /// How light a thing may be and still be named, as a fraction of the heaviest thing on
-    /// screen. [`crate::weight::FLOOR`] is the value this was tuned at.
+    /// screen. [`crate::weight::FLOOR`] is the tuned value.
     ///
-    /// **The collision rule thins a crowd and has nothing to say about an empty view**, so
-    /// without this a lone asteroid in open space is named as readily as a planet. Relative
-    /// rather than absolute because the map spans fifteen orders of magnitude: what deserves
-    /// a name beside the Sun and what deserves one beside Jupiter are different questions
-    /// with the same answer.
+    /// The collision rule thins a crowd and says nothing about an empty view, so without this
+    /// a lone asteroid is named as readily as a planet. Relative because the map spans fifteen
+    /// orders of magnitude and an absolute mass would only suit one of them.
     pub floor: f64,
 }
 
 /// Lay out as many as fit, heaviest first.
 ///
-/// One anchor and no second try: a label that hops to the other side of its symbol when a
-/// neighbour drifts past reads as a twitch, and a map of moving things would twitch
-/// constantly.
+/// One anchor and no second try, because a label that hops to the other side of its symbol
+/// when a neighbour drifts past would do so constantly on a map of moving things.
 pub fn lay_out(candidates: Vec<Candidate>, viewport: Vec2, layout: Layout) -> Vec<Placed> {
-    // The bar is set by what the reader can actually see, so it is drawn after the view is
-    // clipped and not before: pan the Sun off the edge and the question becomes what is worth
-    // naming beside whatever is left.
+    // The bar is what the reader can see, so it is taken after clipping: pan the star off the
+    // edge and the question becomes what is worth naming beside what is left.
     let mut inside: Vec<Candidate> =
         candidates.into_iter().filter(|c| box_of(c, layout.offset, viewport).is_some()).collect();
     let heaviest = crate::weight::heaviest(inside.iter().map(|c| c.weight));
     let floor = heaviest * layout.floor;
-    // A ship's weight is infinite and sets no bar — it would silence the whole map — and
-    // something that never stated a mass is not silenced by a comparison it is not in.
+    // Infinite and unstated weights are exempt: a ship must not silence the map, and nothing
+    // is silenced by a comparison it is not in.
     inside.retain(|c| !(c.weight.is_finite() && c.weight > 0.0) || c.weight >= floor);
 
-    // Ties broken by key, so two bodies of equal mass cannot trade places between frames.
-    // Order alone is what decides who is dropped, so an unstable sort here is a flicker.
+    // Ties broken by key: order alone decides who is dropped, so an unstable sort flickers.
     inside.sort_by(|a, b| {
         b.weight
             .partial_cmp(&a.weight)
@@ -81,8 +73,7 @@ pub fn lay_out(candidates: Vec<Candidate>, viewport: Vec2, layout: Layout) -> Ve
     let mut placed = Vec::with_capacity(inside.len());
     for candidate in inside {
         let Some((min, max)) = box_of(&candidate, layout.offset, viewport) else { continue };
-        // Only the incoming rectangle is grown. Two rectangles that clear each other by `gap`
-        // clear it once, not twice.
+        // Only the incoming rectangle is grown, or the clearance would be counted twice.
         let grown = (min - Vec2::splat(layout.gap), max + Vec2::splat(layout.gap));
         if taken.iter().any(|other| overlaps(grown, *other)) {
             continue;
@@ -93,7 +84,7 @@ pub fn lay_out(candidates: Vec<Candidate>, viewport: Vec2, layout: Layout) -> Ve
     placed
 }
 
-/// Where a label's text would sit, or `None` if that is not wholly on the surface.
+/// Where a label's text would sit, or `None` if it would not fit wholly on the surface.
 fn box_of(candidate: &Candidate, offset: Vec2, viewport: Vec2) -> Option<(Vec2, Vec2)> {
     let min = candidate.at + offset;
     let max = min + candidate.size;
@@ -144,11 +135,9 @@ mod tests {
             .collect()
     }
 
-    /// **The whole point, in the arrangement it was asked for.**
-    ///
-    /// Jupiter and its moons on top of each other: one name comes out, and it is the planet's.
-    /// Give the moons room and the Galileans are the four that fit, because they outweigh the
-    /// small ones by four orders of magnitude and nothing else had to say so.
+    /// Jupiter and its moons on top of each other: one name comes out and it is the planet's.
+    /// Given room, the Galileans fit, because they outweigh the small ones by four orders of
+    /// magnitude and nothing else has to say so.
     #[test]
     fn the_heaviest_in_a_pile_is_the_one_named() {
         let jupiter = at("Jupiter", 1.898e27, 300.0, 200.0);
@@ -193,12 +182,8 @@ mod tests {
         }
     }
 
-    /// **Earth is named beside the Sun. That is the case the floor is set from.**
-    ///
-    /// Three parts in a million separate them, and everything between a planet and a rock has
-    /// to land on the right side of one number. Mercury is the smallest planet there is and
-    /// Ceres the largest asteroid; the floor sits in the gap between them, which is a factor
-    /// of three hundred wide.
+    /// Earth is named beside the Sun, which is the case the floor is set from. Mercury and
+    /// Ceres straddle it: the floor sits in the factor of three hundred between them.
     #[test]
     fn earth_is_named_beside_the_sun_and_ceres_is_not() {
         let floor = 1.0e-8;
@@ -219,9 +204,8 @@ mod tests {
         assert_eq!(lay_out(sky, view(), loose(Vec2::ZERO, 2.0)).len(), 4);
     }
 
-    /// **The bar is whatever the reader can see.** Pan the star off the edge and the question
-    /// becomes what is worth naming beside what is left — which is how one number serves a
-    /// map spanning fifteen orders of magnitude.
+    /// The bar is whatever the reader can see, which is how one ratio serves a map spanning
+    /// fifteen orders of magnitude.
     #[test]
     fn the_floor_follows_what_is_on_screen() {
         let layout = Layout { offset: Vec2::ZERO, gap: 2.0, floor: 1.0e-8 };
@@ -233,8 +217,8 @@ mod tests {
         );
     }
 
-    /// And a ship is never silenced by it. Its weight is infinite, which would also make it
-    /// the bar — and a bar of infinity is a map with one name on it.
+    /// A ship is never silenced by it. Its infinite weight would otherwise be the bar, and a
+    /// bar of infinity leaves one name.
     #[test]
     fn a_ship_sets_no_floor_and_clears_every_one() {
         let layout = Layout { offset: Vec2::ZERO, gap: 2.0, floor: 1.0e-8 };
@@ -246,7 +230,7 @@ mod tests {
         assert_eq!(lay_out(sky, view(), layout).len(), 3, "a ship must not floor the sky out");
     }
 
-    /// Room for everyone means everyone, in no particular hurry.
+    /// Room for everyone means everyone.
     #[test]
     fn nothing_is_dropped_when_nothing_collides() {
         let spread: Vec<Candidate> = (0..8)
@@ -255,9 +239,8 @@ mod tests {
         assert_eq!(lay_out(spread.clone(), view(), loose(Vec2::ZERO, 2.0)).len(), spread.len());
     }
 
-    /// **A name off the edge is a name for something the reader cannot see.**
-    ///
-    /// Dropped, not dragged to the rim: the map has no edge markers on purpose.
+    /// A name off the edge names something the reader cannot see. Dropped, not moved to the
+    /// rim: the map has no edge markers.
     #[test]
     fn a_label_that_would_leave_the_view_is_dropped() {
         let outside = [
@@ -277,10 +260,8 @@ mod tests {
         assert_eq!(lay_out(vec![at("in", 1.0, 1.0, 1.0)], view(), loose(Vec2::ZERO, 2.0)).len(), 1);
     }
 
-    /// **Two things of equal mass must not trade places between frames.**
-    ///
-    /// Only the order decides who is dropped, so a tie resolved by whatever the sort happened
-    /// to do is a label blinking on and off while nothing moves.
+    /// Two things of equal mass must not trade places between frames. Only the order decides
+    /// who is dropped, so an arbitrary tie is a label blinking while nothing moves.
     #[test]
     fn a_tie_is_broken_the_same_way_every_time() {
         let a = at("alpha", 5.0e20, 300.0, 200.0);
@@ -294,7 +275,7 @@ mod tests {
         assert_eq!(one.len(), 1);
     }
 
-    /// A ship outranks every body there is, and `f64::INFINITY` is how the client says so.
+    /// A ship outranks every body, which the client states as `f64::INFINITY`.
     #[test]
     fn an_infinite_weight_wins() {
         let ship = at("Harrier", f64::INFINITY, 300.0, 200.0);

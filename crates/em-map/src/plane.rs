@@ -7,9 +7,8 @@ use crate::snapshot::M_PER_LY;
 
 /// Which plane the map lays its rings in.
 ///
-/// Two, because there are two questions. Where a moon sits relative to its system is a
-/// question about the ecliptic; where a system sits relative to everything else is a question
-/// about the disc of the galaxy. Drawing either one against the other's plane answers neither.
+/// Two, because there are two questions: where a moon sits in its system is about the
+/// ecliptic, and where a system sits among the rest is about the disc of the galaxy.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Plane {
     #[default]
@@ -32,10 +31,8 @@ impl Plane {
         }
     }
 
-    /// The plane's normal, a unit vector in simulation space.
-    ///
-    /// The ecliptic's is `+Z` by construction rather than by coincidence: simulation space
-    /// *is* the ecliptic of J2000. That is worth saying, because it looks like a shortcut.
+    /// The plane's normal, a unit vector in simulation space. The ecliptic's is `+Z` by
+    /// construction and not by coincidence: simulation space is the ecliptic of J2000.
     pub fn normal(self) -> DVec3 {
         match self {
             Self::Ecliptic => DVec3::Z,
@@ -45,9 +42,8 @@ impl Plane {
 
     /// A right-handed orthonormal basis `(u, v, n)`, with `n` the normal.
     ///
-    /// `u` is where a ring's zero bearing points and where the camera's azimuth is measured
-    /// from, so it has to be a *fixed* direction rather than anything derived from the view —
-    /// otherwise turning the camera would turn the thing it is measured against.
+    /// `u` is where a ring's zero bearing points and where azimuth is measured from, so it
+    /// must be fixed rather than derived from the view.
     pub fn basis(self) -> (DVec3, DVec3, DVec3) {
         match self {
             Self::Ecliptic => (DVec3::X, DVec3::Y, DVec3::Z),
@@ -57,22 +53,19 @@ impl Plane {
 
     /// How far `at_ly` stands above the plane through `origin_ly`, meters. Signed.
     ///
-    /// The plane is anchored at whatever the map is looking at, not at a galaxy's own zero
-    /// point. At every scale this draws, where that zero sits makes no visible difference, and
-    /// carrying a 26 000-light-year offset would spend precision on nothing.
+    /// Anchored at what the map is looking at rather than a galaxy's own zero point: at every
+    /// scale this draws the difference is invisible, and the offset would cost precision.
     pub fn height_m(self, at_ly: DVec3, origin_ly: DVec3) -> f64 {
         (at_ly - origin_ly).dot(self.normal()) * M_PER_LY
     }
 
-    /// Where a ray meets the plane, or `None` when it runs along it or points away.
-    ///
-    /// What "zoom toward what the cursor is over" is built from: the cursor names a ray, the
-    /// ray names a place on the plane, and the place is held still while the camera comes in.
+    /// Where a ray meets the plane, or `None` when it runs along it or points away. Zooming
+    /// toward the cursor is built from this.
     pub fn intersect(self, from_ly: DVec3, direction: DVec3, origin_ly: DVec3) -> Option<DVec3> {
         let n = self.normal();
         let along = direction.dot(n);
-        // A ray within a thousandth of parallel names a point so far away that holding it still
-        // would throw the camera across the system. Edge-on, there is nothing under the cursor.
+        // A ray within a thousandth of parallel names a point far enough away that holding it
+        // still would throw the camera across the system.
         if along.abs() < 1.0e-3 {
             return None;
         }
@@ -93,16 +86,15 @@ mod tests {
 
     /// What a light-year's worth of `f64` is worth, in meters.
     ///
-    /// The mantissa is 53 bits, so a position held in light-years resolves about a meter per
-    /// light-year of magnitude. A drop-line's foot is therefore "in the plane" to a few meters
-    /// and never to less — asserting meters flat passes near the origin and fails at Alpha
-    /// Centauri, which reads as a bug in the plane and is the representation.
+    /// The mantissa is 53 bits, so a position in light-years resolves about a meter per
+    /// light-year of magnitude. A flat meter tolerance passes near the origin and fails at
+    /// Alpha Centauri, which reads as a bug in the plane and is the representation.
     fn floor_m(magnitude_ly: f64) -> f64 {
         (magnitude_ly.abs().max(1.0) * M_PER_LY * 4.0 * f64::EPSILON).max(1.0)
     }
 
-    /// Both planes, and both signs. A galactic drop-line that used `+Z` would land in the
-    /// ecliptic instead and look entirely plausible from most angles.
+    /// Both planes and both signs. A galactic drop-line using `+Z` lands in the ecliptic and
+    /// looks plausible from most angles.
     #[test]
     fn a_drop_line_ends_in_the_plane_it_was_dropped_to() {
         let origin = DVec3::new(4.2, -1.0, 0.7);
@@ -148,8 +140,8 @@ mod tests {
         assert!(plane.height_m(-DVec3::Z, DVec3::ZERO) < 0.0);
     }
 
-    /// The two planes are genuinely different, which is the whole point of the toggle. A
-    /// `Galactic` wired to `+Z` passes every other test in this file.
+    /// The two planes differ, which is the point of the toggle. A `Galactic` wired to `+Z`
+    /// passes every other test here.
     #[test]
     fn the_two_planes_disagree() {
         let tilt = Plane::Ecliptic.normal().dot(Plane::Galactic.normal()).acos().to_degrees();

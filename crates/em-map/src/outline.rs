@@ -1,26 +1,21 @@
 //! The wire shape of a belt, a ring system or a cloud.
 //!
-//! One definition, two callers: the reticle draws it over the sky when a swarm is selected, and
-//! the map draws it as geometry. It traces the **edge of the material** — the inclination
-//! sweeps every element through the same latitude band, so the cross-section is an annular
-//! sector and not the ellipse the old surface shader implied, whose corners were several
-//! degrees of latitude from where the material actually stops.
+//! One definition, two callers: the reticle draws it over the sky when a swarm is selected,
+//! and the map draws it as geometry. It traces the edge of the material — the inclination
+//! sweeps every element through one latitude band, so the cross-section is an annular sector
+//! rather than an ellipse.
 //!
-//! It degenerates correctly. An isotropic cloud reaches a right angle, its cross-sections close
-//! into full meridians, and the whole thing reads as the shell it is.
+//! It degenerates correctly: an isotropic cloud reaches a right angle, its cross-sections
+//! close into full meridians, and it reads as a shell.
 
 use glam::DVec3;
 
-/// How many points a curve is sampled at.
-///
-/// Sixty-four is a fifth of a degree against a true circle at the widest, far below a pixel at
-/// any distance one is drawn at. Divisible by four, which the cross-section's legs rely on.
+/// How many points a curve is sampled at. Sixty-four is a fifth of a degree at the widest,
+/// below a pixel at any distance one is drawn at, and divisible by four for the legs.
 pub const SAMPLES: usize = 64;
 
-/// How many cross-sections are drawn around the torus.
-///
-/// Four reads as a donut and no more: the two edge circles carry the shape, and these say which
-/// way round it is thick.
+/// How many cross-sections are drawn around the torus. The two edge circles carry the shape;
+/// four of these say which way round it is thick.
 pub const CROSS_SECTIONS: usize = 4;
 
 /// How far a population reaches, in whatever unit the caller is working in.
@@ -78,8 +73,8 @@ pub fn torus(center: DVec3, pole: DVec3, extent: Extent) -> Vec<Vec<DVec3>> {
 /// Two axes spanning the plane whose normal is `pole`.
 pub fn basis(pole: DVec3) -> (DVec3, DVec3) {
     let n = pole.normalize_or(DVec3::Z);
-    // Any fixed vector not parallel to the pole. Z first because most poles are near it and the
-    // cross product is then largest.
+    // Any fixed vector not parallel to the pole. Z first: most poles are near it, so the
+    // cross product is largest.
     let seed = if n.z.abs() < 0.9 { DVec3::Z } else { DVec3::X };
     let u = seed.cross(n).normalize_or(DVec3::X);
     (u, n.cross(u))
@@ -107,8 +102,7 @@ mod tests {
         }
     }
 
-    /// Nothing reaches past the outer edge or inside the inner one, at any latitude. A
-    /// cross-section that bulged would be claiming material where there is none.
+    /// Nothing reaches past the outer edge or inside the inner one, at any latitude.
     #[test]
     fn everything_lies_between_the_two_edges() {
         let curves = torus(DVec3::ZERO, DVec3::Z, belt());
@@ -119,8 +113,7 @@ mod tests {
     }
 
     /// And the tube is as thick as the inclination says: the highest point sits at the outer
-    /// radius times the sine of the half-angle. A shape built from the wrong latitude reads as
-    /// a belt that misses its own material.
+    /// radius times the sine of the half-angle.
     #[test]
     fn the_tube_is_as_thick_as_the_inclination() {
         let extent = belt();
@@ -145,7 +138,7 @@ mod tests {
     fn it_sits_where_it_was_centered() {
         let at = DVec3::new(-4.0, 1.5, 9.0);
         let curves = torus(at, DVec3::Y, belt());
-        // Less the repeated closing point, which would otherwise pull the mean toward it.
+        // Less the repeated closing point, which would pull the mean toward it.
         let loop_ = &curves[1][..curves[1].len() - 1];
         let mean: DVec3 = loop_.iter().sum::<DVec3>() / loop_.len() as f64;
         assert!((mean - at).length() < 1e-9, "{mean:?} against {at:?}");

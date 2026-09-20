@@ -10,32 +10,17 @@ use crate::snapshot::{M_PER_AU, M_PER_LY};
 /// The same limit and the same reason as `lc_client::ui::Look::PITCH_LIMIT`.
 pub const ELEVATION_LIMIT: f64 = std::f64::consts::FRAC_PI_2 - 1.0e-3;
 
-/// And the camera is never *in* the plane.
+/// And the camera is never in the plane. An angle, so the stand-off scales by itself.
 ///
-/// `AGENTS.md`: an infinitely thin sheet containing the camera swings wildly from frame to
-/// frame. Nothing the map draws is a sheet — the rings are tubes with a real radius, which is
-/// most of the answer — but a floor costs nothing and is what stops the next person's filled
-/// disc from re-teaching it.
-///
-/// An angle rather than a distance, so the stand-off it buys scales by itself: `d · sin` of
-/// this is a fixed fraction of the view at every scale.
-///
-/// **It has to exceed the angular half-width of a drawn line, and the first value did not.**
-/// A line is a tube, and a tube a host draws at 1.6 pixels has an angular radius of about
-/// three milliradians from the camera. At a floor of two, the camera cleared the plane by less
-/// than that and sat *inside* the nearest ring — and the inside of a tube is a solid wall, so
-/// an edge-on map came out as a rectangle of flat green with nothing in it.
-///
-/// Three degrees. Still edge-on to look at, and a whole order of magnitude clear of any tube
-/// the host is likely to draw.
+/// It must exceed a drawn line's angular half-width, near three milliradians for a tube drawn
+/// at 1.6 pixels; a camera closer than that is inside the nearest ring, whose inside is
+/// opaque. Three degrees is still edge-on and an order of magnitude clear.
 pub const ELEVATION_FLOOR: f64 = 5.0e-2;
 
 /// Decades of stand-off per notch of wheel.
 ///
-/// Zoom is additive in `log10` meters, which is what makes one notch mean the same *fraction*
-/// at a hull as at a spiral arm. Seven notches is a decade, and the whole range is about 113 —
-/// continuous, where a discrete tier would jump by five orders between two of them and be a
-/// control nobody could aim.
+/// Zoom is additive in `log10` meters, so one notch means the same fraction at a hull as at a
+/// spiral arm. Seven notches to a decade, and about 113 over the whole range.
 pub const ZOOM_DECADES_PER_NOTCH: f64 = 0.15;
 
 /// `log10` of the closest the camera stands off, meters. A kilometer: a hull.
@@ -53,10 +38,8 @@ const DEFAULT_ELEVATION: f64 = 25.0 * std::f64::consts::PI / 180.0;
 /// rather than leaving the rings lying at an angle under an unchanged camera.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Orbit {
-    /// Light-years from the world origin, simulation axes. What the camera looks at.
-    ///
-    /// A position, not a thing. Saturn moves; the host holds the selection and writes this
-    /// every frame from wherever the selection is now.
+    /// Light-years from the world origin, simulation axes. A position, not a thing: the host
+    /// holds the selection and writes this every frame from wherever it is now.
     pub focus_ly: DVec3,
     /// Bearing within the plane, radians, from the plane basis's first axis.
     pub azimuth: f64,
@@ -103,17 +86,11 @@ impl Orbit {
             .clamp(LOG_MIN_M, LOG_MAX_M);
     }
 
-    /// Turn by a relative amount, radians, and hold both clamps.
+    /// Turn by a relative amount, radians, holding both clamps.
     ///
-    /// **The plane can be crossed; it just cannot be landed on.** Stopping at the floor on the
-    /// side it came from was the first rule here, and it locked the camera into the upper
-    /// hemisphere — half the perspectives a map exists to offer, and no way to look up at
-    /// anything from underneath. A turn that would land inside the floor now continues to the
-    /// far side of it, in the direction it was already going.
-    ///
-    /// So there is a band of about six degrees the elevation skips over. That is the smallest
-    /// jump the floor allows, and it only happens to someone dragging the view flat — which is
-    /// the one gesture that has to do *something* other than stop.
+    /// The plane can be crossed but not landed on: a turn ending inside the floor continues to
+    /// the far side, so elevation skips a band of about six degrees. Stopping at the floor
+    /// instead confines the camera to one hemisphere.
     pub fn turn(&mut self, d_azimuth: f64, d_elevation: f64) {
         self.azimuth = (self.azimuth + d_azimuth).rem_euclid(std::f64::consts::TAU);
         let next = (self.elevation + d_elevation).clamp(-ELEVATION_LIMIT, ELEVATION_LIMIT);
@@ -121,8 +98,8 @@ impl Orbit {
             self.elevation = next;
             return;
         }
-        // Inside the band. Leave it on the side the turn was heading for, and on the side it
-        // started from when the turn was not about elevation at all.
+        // Inside the band: leave it on the side the turn was heading for, or the side it
+        // started from when the turn was not about elevation.
         let heading = match d_elevation.partial_cmp(&0.0) {
             Some(std::cmp::Ordering::Less) => -1.0,
             Some(std::cmp::Ordering::Greater) => 1.0,
@@ -132,16 +109,11 @@ impl Orbit {
         self.elevation = heading * ELEVATION_FLOOR;
     }
 
-    /// Zoom while holding `anchor_ly` still on screen.
+    /// Zoom while holding `anchor_ly` still on screen: with the distance multiplied by `k`,
+    /// a focus at `anchor + (focus - anchor)*k` scales `eye - anchor` by the same `k`.
     ///
-    /// The eye scales about the anchor: with the distance multiplied by `k`, putting the focus
-    /// at `anchor + (focus - anchor) * k` leaves `eye - anchor` scaled by the same `k`. The
-    /// anchor therefore stays on the ray it was already on, which is to say at the same pixel,
-    /// and the camera walks toward it as it comes in.
-    ///
-    /// Returns whether the focus moved. It does not when the anchor is already the focus —
-    /// scaling about a point through itself is the identity — which is what lets a camera
-    /// locked on the ship stay locked while the wheel turns over it.
+    /// Returns whether the focus moved, which it does not when the anchor is already the
+    /// focus — so a locked camera stays locked while the wheel turns over it.
     pub fn zoom_about(&mut self, anchor_ly: DVec3, notches: f64) -> bool {
         let before = self.distance_m();
         self.zoom(notches);
@@ -168,17 +140,14 @@ impl Orbit {
 
     /// The camera's own orthonormal frame: forward, screen right, screen up.
     ///
-    /// **Not the plane's normal for up.** [`Orbit::orientation`] hands out the normal, which is
-    /// what a renderer's `look_to` wants — and `look_to` orthonormalizes it. At any elevation
-    /// but zero the normal is not perpendicular to the forward vector, so anything casting its
-    /// own rays has to do the same or it is working in a skewed frame: the middle of the
-    /// viewport stopped being the middle by a third of the screen at 25°.
+    /// Not the plane's normal for up. [`Orbit::orientation`] hands out the normal because
+    /// `look_to` wants it and orthonormalizes it; at any elevation but zero the normal is not
+    /// perpendicular to forward, so anything casting rays has to orthonormalize too.
     /// Where a camera-relative offset lands on the viewport, in normalized device
-    /// coordinates — the exact inverse of [`Orbit::ray`], and what a label needs.
+    /// coordinates. The exact inverse of [`Orbit::ray`].
     ///
-    /// `offset` is in simulation axes, measured from the eye. `None` for anything at or behind
-    /// the plane of the eye: the map draws no edge markers, so something off screen is simply
-    /// not named.
+    /// `offset` is in simulation axes from the eye. `None` for anything at or behind the plane
+    /// of the eye, which the caller drops rather than marking at the edge.
     pub fn project(&self, plane: Plane, offset: DVec3, fov_y: f64, aspect: f64)
         -> Option<glam::DVec2> {
         let (forward, right, up) = self.view_basis(plane);
@@ -199,11 +168,8 @@ impl Orbit {
         (forward, right, right.cross(forward).normalize_or(normal))
     }
 
-    /// Slide the focus across the plane, in fractions of the stand-off.
-    ///
-    /// Fractions rather than meters, because a drag of so many pixels has to move the view by
-    /// the same part of itself at every zoom. In meters it is imperceptible at a light-year
-    /// and throws the system off screen at a kilometer.
+    /// Slide the focus across the plane, in fractions of the stand-off. Fractions rather than
+    /// meters, so a drag moves the view by the same part of itself at every zoom.
     pub fn pan(&mut self, plane: Plane, right: f64, ahead: f64) {
         let normal = plane.normal();
         let screen_right = (-self.offset_direction(plane)).cross(normal).normalize_or_zero();
@@ -230,9 +196,8 @@ impl Orbit {
 
     /// Which way the camera faces and which way is up, simulation axes.
     ///
-    /// Up is the **plane's** normal, not `+Z`. That is what makes the plane toggle tilt the
-    /// whole view, which is the point of having a toggle. It is well conditioned because
-    /// [`ELEVATION_LIMIT`] keeps the forward vector off the normal.
+    /// Up is the plane's normal, not `+Z`, which is what makes the plane toggle tilt the whole
+    /// view. Well conditioned because [`ELEVATION_LIMIT`] keeps forward off the normal.
     pub fn orientation(&self, plane: Plane) -> (DVec3, DVec3) {
         (-self.offset_direction(plane), plane.normal())
     }
@@ -242,10 +207,8 @@ impl Orbit {
 mod tests {
     use super::*;
 
-    /// **Projecting must be the exact inverse of casting.**
-    ///
-    /// A label placed by one and a cursor read by the other have to agree about where a thing
-    /// is, or naming a body puts its name somewhere the body is not.
+    /// Projecting must be the exact inverse of casting, or a label lands away from the body
+    /// the cursor picks.
     #[test]
     fn a_projected_ray_lands_where_it_was_cast_from() {
         let fov = std::f64::consts::FRAC_PI_4;
@@ -272,7 +235,7 @@ mod tests {
                         );
                     }
                 }
-                // And nothing behind the eye projects at all.
+                // Nothing behind the eye projects.
                 let (forward, ..) = orbit.view_basis(plane);
                 assert!(orbit.project(plane, -forward, fov, aspect).is_none());
                 assert!(orbit.project(plane, DVec3::ZERO, fov, aspect).is_none());
@@ -280,11 +243,8 @@ mod tests {
         }
     }
 
-    /// One notch is the same fraction wherever it is spent.
-    ///
-    /// Break it by subtracting meters instead of decades and the ratio at a hull and the ratio
-    /// at a spiral arm stop agreeing, which is the whole difference between a usable zoom and
-    /// one that is dead at one end.
+    /// One notch is the same fraction wherever it is spent. Subtracting meters instead of
+    /// decades leaves the zoom dead at one end of the range.
     #[test]
     fn a_notch_is_the_same_fraction_at_every_scale() {
         let ratio_at = |log| {
@@ -316,10 +276,8 @@ mod tests {
 
     /// The camera never stands in the plane it is drawing.
     ///
-    /// Every third turn is aimed *straight at zero*, which is what a hand dragging the view
-    /// flat does and what a drifting sweep never quite manages. Written the obvious way — a
-    /// thousand sine-driven deltas — this passed with the floor deleted, because none of them
-    /// happened to land on it. Break the floor now and it fails on the first aimed step.
+    /// Every third turn is aimed straight at zero, which is what a hand dragging the view flat
+    /// does. A sweep of arbitrary deltas never lands on the floor and so tests nothing.
     #[test]
     fn the_camera_is_never_in_the_plane() {
         for plane in [Plane::Ecliptic, Plane::Galactic] {
@@ -341,10 +299,8 @@ mod tests {
         }
     }
 
-    /// Both hemispheres are reachable, which is half the perspectives a map is for.
-    ///
-    /// The first rule here stopped a turn at the floor on the side it came from, and the
-    /// camera could never get under the plane to look up at anything.
+    /// Both hemispheres are reachable. Stopping a turn at the floor on the side it came from
+    /// confines the camera above the plane.
     #[test]
     fn the_camera_can_get_under_the_plane() {
         let mut orbit = Orbit::framing(DVec3::ZERO, M_PER_AU);

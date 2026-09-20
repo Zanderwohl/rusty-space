@@ -1,9 +1,8 @@
 //! What a spatial map draws, decided without an engine.
 //!
 //! A [`MapSnapshot`] is a flat list of things and where they are. Nothing here knows how they
-//! were found out: one observer's instruments, several folded together, or a coordinate-time
-//! reading with no light delay are three providers and one type, so a map written against any
-//! of them is written against all three.
+//! were found out: instruments, several sources folded together, and a coordinate-time reading
+//! with no light delay are three providers and one type.
 //!
 //! # Frame and units
 //!
@@ -18,9 +17,8 @@
 //! equinox. The same frame and units `lc_world`'s `Drawable::position_ly` and `lc_proto`'s
 //! `Presence::at_ly` already use, so a provider converts nothing.
 //!
-//! [`Placement`] is camera-relative and scaled, and it is **still Z-up**. The rotation into a
-//! renderer's axes belongs to the renderer — `em_render::render_space` is the one place that
-//! does it, and a second converter here would be a second chance to get the handedness wrong.
+//! [`Placement`] is camera-relative and scaled, and still Z-up. The rotation into a
+//! renderer's axes belongs to the renderer: `em_render::render_space` is the one place for it.
 
 #![forbid(unsafe_code)]
 

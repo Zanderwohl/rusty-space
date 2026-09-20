@@ -1,17 +1,12 @@
 //! The map's camera, its render target, and the entities it draws.
 //!
 //! A second `Camera3d` on its own [`MAP_LAYER`], rendering into an [`Image`] that egui shows.
-//! Real geometry with real depth, not a projection painted by egui — which is what lets it
-//! reuse the wireframe spheres the other product draws bodies with.
 //!
-//! **One camera, one image, and both surfaces share it.** Map transforms are camera-relative,
-//! so an entity belongs to exactly one camera: two independently aimed views would need two
-//! sets of them. The panel is the map and the minimap is the map when the panel is closed, so
-//! there is never a second framing to want.
+//! Transforms are camera-relative, so an entity belongs to exactly one camera: the panel and
+//! the minimap share one image because two aimed views would need two sets of entities.
 //!
-//! The camera is **not** the sky's. No `Hdr`, no bloom, no tone map: the sky is a photograph
-//! and is metered like one, and a diagram is not. The wireframe shader's emissive range is
-//! aimed at the display instead — see [`LINE_COLOR_SCALE`].
+//! No `Hdr`, bloom or tone map. The sky's camera is metered for a photograph and a diagram
+//! needs a different range — see [`LINE_COLOR_SCALE`].
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
@@ -29,75 +24,54 @@ use glam::DVec3;
 use crate::app::{Game, Stage, Ui};
 use crate::map_source::Source;
 
-/// The map's own layer. Everything else in this client is on layer 0, and the sky's camera
-/// keeps that layer, so neither can see the other's entities.
+/// The map's own layer. The sky keeps layer 0, so neither camera sees the other's entities.
 pub const MAP_LAYER: usize = 1;
 
 /// What the target starts at, before a surface has asked for a size.
 const INITIAL_SIDE: u32 = 512;
 
 /// egui reports a zero rect on the frame a window opens, and a zero-sized texture is a wgpu
-/// validation failure rather than a warning. The upper bound is for a resize drag that runs
-/// away on a high-density display.
+/// validation failure. The ceiling bounds a runaway resize drag on a dense display.
 const MIN_SIDE: u32 = 64;
 const MAX_SIDE: u32 = 4096;
 
-/// How wide a line is drawn, in pixels.
-///
-/// Screen-constant rather than world-constant: a ring scaled to ten thousand render units
-/// would scale its own tube to ten thousand as well. The shader's `target_tube_radius` is the
-/// dial, and it is set per entity from that entity's own scale.
+/// How wide a line is drawn, in pixels. Screen-constant, so the shader's `target_tube_radius`
+/// is set per entity from that entity's own scale.
 const LINE_PX: f32 = 1.6;
 
-/// And the reference scale — decade rings, spokes, drop-lines — at half that, in width and in
-/// brightness both.
+/// The most of its own unit mesh a tube may take, per family.
 ///
-/// They are the ruler and not the thing being measured. At equal weight the grid competes with
-/// the bodies on it for the same attention, and the bodies are what the map is of.
-
-/// How fat a tube may get, as a fraction of its own unit mesh — and it is per family, because
-/// one number cannot serve all three.
-///
-/// The shader displaces vertices along their normals in the mesh's own space, so this is a
-/// proportion of the thing drawn rather than of the screen. A ring scaled to one astronomical
-/// unit and seen from forty needs a tube of a tenth of a unit to be a pixel wide; unclamped
-/// that is a tenth of the ring, and the twelve spokes of the reference plane came out as
-/// twelve solid wedges. A point is the opposite case: it is *meant* to be a blob, and a
-/// wireframe ball with hairline tubes is invisible at three pixels across.
+/// The shader displaces along normals in mesh space, so this is a proportion of the thing
+/// drawn and not of the screen. Unclamped, a ring seen from forty times its radius wants a
+/// tube a tenth of itself thick and the camera ends up inside it.
 const LINE_TUBE_FRACTION: f32 = 0.02;
 const SPHERE_TUBE_FRACTION: f32 = 0.06;
 
-/// A ship's dot has one normal, so the shader's displacement would translate it rather than
-/// thicken it. Asking for exactly the material's own base radius makes that displacement zero
-/// and the disc comes out the size the transform says.
+/// A disc has one normal, so displacement translates it instead of thickening it. Asking for
+/// the material's base radius makes the displacement zero.
 const DOT_TUBE_FRACTION: f32 = BASE_TUBE_RADIUS;
 
+/// The reference scale — rings, spokes, drop-lines — is drawn at half a line's width and half
+/// its brightness. It is the ruler, not what is being measured.
 const SCALE_PX: f32 = LINE_PX * 0.5;
+const SCALE_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.5;
 
 /// How much of the palette color a line is drawn at.
 ///
-/// The shader gives `base_color * (1 + alpha * emission_strength)`, and the alpha is the line
-/// weight the mesh carries: 0.6 for grid, 1.0 for an equator. With no tone map in front of it
-/// the whole range has to land inside the display, so the base is scaled down and the emission
-/// makes up the contrast — 0.45 and 1.2 put a grid line at 0.77 and an equator at 0.99.
+/// The shader gives `base_color * (1 + alpha * emission_strength)`, where alpha is the mesh's
+/// line weight: 0.6 for grid, 1.0 for an equator. With no tone map in front of it the whole
+/// range has to land inside the display, so 0.45 and 1.2 put a grid line at 0.77 and an
+/// equator at 0.99.
 const LINE_COLOR_SCALE: f32 = 0.45;
 const LINE_EMISSION: f32 = 1.2;
 
-/// The reference scale's share of it. The shader multiplies the base color through, so halving
-/// the base halves what reaches the screen.
-const SCALE_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.5;
-
-/// The near and far planes, as multiples of the stand-off.
-///
-/// Wide enough that a ship beside the camera and the outermost decade ring are both in the
-/// frustum, and no wider — `MAX_RENDER_UNITS` bounds what can be placed at all.
+/// The near and far planes, as multiples of the stand-off: wide enough for a ship beside the
+/// camera and the outermost ring at once, and no wider.
 const NEAR_FRACTION: f32 = 1.0e-4;
 const FAR_MULTIPLE: f32 = 1.0e6;
 
-/// The map camera's vertical field of view.
-///
-/// Named rather than defaulted, because the panel casts the cursor's ray with it and a camera
-/// and a cursor that disagree about the frustum put the anchor somewhere the pointer is not.
+/// The map camera's vertical field of view. Named because the panel casts the cursor's ray
+/// with it, and a camera and a cursor that disagree put the anchor away from the pointer.
 pub const MAP_FOV: f32 = std::f32::consts::FRAC_PI_4;
 
 /// Divisions of a decade ring. Enough that the largest one does not read as a polygon.
@@ -105,63 +79,45 @@ const RING_SEGMENTS: u32 = 128;
 
 /// How far the spokes reach, as a multiple of the stand-off.
 ///
-/// **Far past the edge of the view, because a spoke's end should never be visible.** A line
-/// that stops inside the frame reads as an object with a tip rather than as a rule running
-/// off the picture. Forty stand-offs puts the far end forty times further than the focus, so
-/// its tube is a fortieth of a pixel there and it fades out instead of ending.
-///
-/// Passing the eye is safe, and the elevation floor is what makes it so: the camera clears the
-/// plane by `sin(3°)` of the stand-off, which is some sixteen times a line's own half-width.
+/// Far past the edge of the view: a spoke that ends inside the frame reads as an object with
+/// a tip. At forty the far end's tube is a fortieth of a pixel, so it fades out instead.
+/// Passing the eye is safe because the elevation floor clears the plane by `sin(3°)` of the
+/// stand-off, sixteen times a line's half-width.
 const SPOKE_REACH: f32 = 40.0;
 
-/// Where a spoke starts, as a fraction of the stand-off — so the hole in the middle stays the
-/// same size whatever [`SPOKE_REACH`] is.
+/// Where a spoke starts, as a fraction of the stand-off, so the hole in the middle holds its
+/// size whatever [`SPOKE_REACH`] is.
 const SPOKE_INNER: f32 = 0.02;
 
 /// Radial spokes in the reference plane.
 ///
-/// **Sized to the stand-off, not to the outermost ring.** Every point of a ring is the same
-/// distance from the center, so one tube radius is right for all of it; a spoke runs from
-/// near the camera out to its rim, and a constant world radius that is a pixel at the far end
-/// is eighty at the near one. Scaled to the outermost decade the twelve of them were twelve
-/// solid wedges across the top of the view, and the arithmetic for the thickness looked
-/// entirely correct — it was answering about the wrong end.
+/// Their thickness is sized to the stand-off, not to the outermost ring. A ring is all at one
+/// distance so one radius serves it; a spoke runs from near the camera to its rim, and a width
+/// of a pixel at the far end is eighty at the near one.
 const PLANE_SPOKES: u32 = 12;
 
-/// How long a dash is, in pixels, wherever it is drawn.
-///
-/// Constant in size rather than constant in count: the mesh is scaled to the drop, so a fixed
-/// count gives a tall drop long dashes and a short one short ones — two kinds of line instead
-/// of one line at two lengths. The host picks the count per drop to hold this.
+/// How long a dash is, in pixels, wherever it is drawn. The mesh is scaled to the drop, so a
+/// fixed count would give a tall drop long dashes; the host picks the count per drop instead.
 const DASH_PX: f32 = 5.0;
 
 /// The most dashes a drop-line is built with. A drop needing more than this is longer than the
 /// viewport many times over and its dashes are sub-pixel anyway.
 const MAX_DASHES: usize = 48;
 
-/// The symbol's apparent **diameter**, as a share of the viewport's height.
+/// A mark's apparent diameter, as a share of the viewport's height. A diameter, unlike the
+/// sky's `resolved::RESOLVE_PX`, and a share because one texture serves two surfaces.
 ///
-/// A diameter, not a radius — the sky's `resolved::RESOLVE_PX` is a radius and the two do not
-/// mean the same thing.
-///
-/// **A share of the view, not a count of pixels.** One texture is drawn into a 190-point
-/// corner and into a panel several times that, so a symbol sized right for one is a fifth of
-/// the other; a fixed twenty pixels left the minimap a pile of overlapping rings with no grid
-/// visible behind them.
-///
-/// It is both the threshold and the size the symbol is drawn at, which is the point of having
-/// one number: a body shrinks until it reaches this and then holds, so nothing jumps at the
-/// crossover. Below it a sphere is a dozen sub-pixel tubes over each other — the more
-/// expensive thing to draw and the less legible one.
+/// Both the threshold and the size a mark is drawn at, so a body shrinks to this and holds and
+/// nothing jumps at the crossover. Below it a sphere is a dozen sub-pixel tubes over each
+/// other: dearer to draw and less legible.
 const POINT_FRACTION: f32 = 0.02;
 
-/// And the floor, at twice a line's own width. Under that a ring has no inside left and is
-/// simply a dot, which is the honest answer for a surface with no room for more.
+/// The floor under that, at twice a line's width. Below it a ring has no inside left, which
+/// makes it a dot.
 const POINT_FLOOR_PX: f32 = 2.0 * LINE_PX;
 
-/// Divisions of the circle, and of a ship's disc. Sixteen is smooth at any size this symbol
-/// reaches and an eighth of the ring mesh — a level of detail that cost more to draw than the
-/// sphere would not be one.
+/// Divisions of a mark. Sixteen is smooth at any size one reaches, and an eighth of the ring
+/// mesh — a level of detail that cost more than the sphere would not be one.
 const POINT_SEGMENTS: u32 = 16;
 
 /// The camera the map is drawn for.
@@ -199,23 +155,21 @@ pub struct Map {
     /// What the target currently is.
     pub size: UVec2,
     /// What the surface drawing it asked for, last frame. egui runs after the scene stage, so
-    /// a resize lands one frame late — the frame after shows the previous texture stretched,
-    /// which is a stretch and not a flicker.
+    /// a resize lands one frame late and that frame shows the previous texture stretched.
     pub wanted: UVec2,
-    /// Whether anything is showing the map at all. Nothing is drawn when nothing is looking.
+    /// Whether anything is showing the map. Nothing is drawn when nothing is looking.
     pub shown: bool,
     pub snapshot: MapSnapshot,
     pub frame: Option<MapFrame>,
     sphere: Handle<Mesh>,
-    /// What an unresolved body is drawn with: a circle facing the eye. See [`POINT_FRACTION`].
+    /// An unresolved body: a circle facing the eye. See [`POINT_FRACTION`].
     point: Handle<Mesh>,
-    /// And what a ship is drawn with, at any zoom: the same size, filled.
+    /// A ship, at any zoom: the same size, filled.
     dot: Handle<Mesh>,
     ring: Handle<Mesh>,
     spokes: Handle<Mesh>,
-    /// One drop-line mesh per dash count, indexed from one dash. Built once: every one of them
-    /// is a handful of tubes, and picking a handle is cheaper than rebuilding geometry when a
-    /// body drifts further off the plane.
+    /// One drop-line mesh per dash count, indexed from one dash. Built once, so a body
+    /// drifting off the plane swaps a handle instead of rebuilding geometry.
     drops: Vec<Handle<Mesh>>,
     /// What is spawned, in order. A rebuild happens only when this stops matching the frame.
     drawn: Vec<ItemKey>,
@@ -233,21 +187,20 @@ impl Map {
         Viewport::new(self.size.y, fov_y)
     }
 
-    /// How big a symbol is drawn, in **texture pixels** — what a label has to clear, once the
-    /// caller has scaled it by however many points that texture is being shown at.
+    /// How big a mark is, in texture pixels. A label has to clear it, after scaling by the
+    /// points that texture is shown at.
     pub fn symbol_px(&self) -> f32 {
         self.viewport(MAP_FOV).point_px
     }
 }
 
-/// What a pixel of the map's own viewport is worth. Both numbers come from its height, and
-/// everything drawn on the layer is sized from one or the other.
+/// What a pixel of the map's viewport is worth. Everything on the layer is sized from one of
+/// these two, and both come from the viewport's height.
 #[derive(Clone, Copy, Debug)]
 struct Viewport {
-    /// Radians a pixel subtends: how thick every line is, and half of what decides a sphere
-    /// from a symbol.
+    /// Radians a pixel subtends: every line's thickness, and half of the sphere decision.
     rad_per_px: f32,
-    /// The symbol's diameter in pixels. See [`POINT_FRACTION`].
+    /// A mark's diameter in pixels. See [`POINT_FRACTION`].
     point_px: f32,
 }
 
@@ -262,26 +215,20 @@ impl Viewport {
         }
     }
 
-    /// How big one item's mark is, in pixels: the surface's own size, scaled by what the
-    /// thing weighs, and never under the floor a shape needs to be a shape in.
-    ///
-    /// The pixel floor usually binds before [`em_map::weight::MIN_SCALE`] does — on a panel
-    /// whose marks are eight pixels it takes over about a decade under the mass floor, and on
-    /// the minimap, where the marks are already at the floor, there is no room to vary at all.
+    /// One item's mark, in pixels: the surface's size scaled by what the thing weighs, never
+    /// under the floor. The pixel floor usually binds before [`em_map::weight::MIN_SCALE`].
     fn mark_px(self, placement: &Placement) -> f32 {
         (self.point_px * placement.symbol_scale).max(POINT_FLOOR_PX)
     }
 
-    /// A circle's line, as a fraction of its own radius: the one member of the family that is
-    /// an answer rather than a cap that occasionally binds. Both the mark and its line are
-    /// fixed pixel sizes, so the distance and the scale in [`tube_target`] cancel exactly —
-    /// but the mark's size is per item, so this is too.
+    /// A circle's line, as a fraction of its radius. Both are fixed pixel sizes, so the
+    /// distance and scale in [`tube_target`] cancel and this is the answer, not a cap.
     fn point_tube_fraction(self, mark_px: f32) -> f32 {
         LINE_PX / (mark_px * 0.5)
     }
 }
 
-/// How a body is drawn at this zoom, which is one decision read in three places.
+/// How a body is drawn at this zoom. One decision, read in three places.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Form {
     Sphere,
@@ -340,21 +287,18 @@ fn setup(
         Camera3d::default(),
         MapCamera,
         RenderLayers::layer(MAP_LAYER),
-        // **The target, which is the whole point, and a component of its own in Bevy 0.19
-        // rather than a field on `Camera`.** Left off, this camera renders over the primary
-        // window instead, on a layer with nothing on it, and clears the frame to black — the
-        // sky, the readout and every panel with it. A black window is what a missing target
-        // looks like, and nothing in the log says so.
+        // A component of its own in Bevy 0.19, not a field on `Camera`. Left off, this camera
+        // renders over the primary window on an empty layer and clears everything to black,
+        // with nothing in the log to say why.
         RenderTarget::Image(map_image.into()),
         Camera {
-            // Before the window camera, because the window camera's frame shows what this one
-            // drew: one frame behind otherwise.
+            // Before the window camera, whose frame shows what this one drew.
             order: -1,
             clear_color: ClearColorConfig::Custom(Color::BLACK),
             ..default()
         },
         Projection::Perspective(PerspectiveProjection { fov: MAP_FOV, ..default() }),
-        // No `Hdr`, no bloom, and no tone map. See the module doc.
+        // See the module doc.
         Tonemapping::None,
         Transform::default(),
     ));
@@ -364,19 +308,15 @@ fn target_image(size: UVec2) -> Image {
     let mut image = Image::new_target_texture(
         size.x.max(MIN_SIDE),
         size.y.max(MIN_SIDE),
-        // An 8-bit sRGB target, so egui samples it and gets back what was drawn. A float
-        // target is stored linear and comes out of `ui.image` looking wrong in a way that
-        // reads as a shading bug. Named outright: `bevy_default()` is deprecated, and this is
-        // the format it named.
+        // 8-bit sRGB, so egui samples it and gets back what was drawn. A float target is
+        // stored linear and comes out of `ui.image` looking like a shading bug.
         TextureFormat::Rgba8UnormSrgb,
         None,
     );
     image.asset_usage = RenderAssetUsages::RENDER_WORLD;
-    // `new_target_texture` sets TEXTURE_BINDING | COPY_DST | RENDER_ATTACHMENT, and resizing
-    // one needs COPY_SRC as well: `Image::resize` copies the old contents into the new texture
-    // so a resize does not flash. Without it the first resize is a wgpu validation failure
-    // that takes the whole application down — `copy_image_on_resize`, several seconds after
-    // the only thing that caused it.
+    // `Image::resize` copies the old contents forward so a resize does not flash, and
+    // `new_target_texture` leaves out the COPY_SRC that needs. Without it the first resize is
+    // a wgpu validation failure that ends the process.
     image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
     image
 }
@@ -455,13 +395,9 @@ fn place(
         return;
     }
 
-    // Follow the selection rather than a remembered position: Saturn moves, and a map that
-    // centered on where it was is a map that drifts off it over an afternoon.
-    //
-    // **Written back, not applied to a copy.** The interface's own `focus_ly` is where every
-    // action that moves the camera starts from, so leaving it stale means a pan begins
-    // somewhere the camera has not been since the map opened — the world origin, by default.
-    // That was one jarring jump on the first frame of the first drag and smooth after it.
+    // Follow the selection, not a remembered position: Saturn moves. Written back rather than
+    // applied to a copy, because every action that moves the camera starts from the
+    // interface's own `focus_ly`, and a stale one makes the first frame of a drag jump.
     follow(ui.map.focus, &map.snapshot, &mut ui.map.orbit.focus_ly);
     let view = ui.map;
     let meters_per_unit = crate::view::ScaleTier::for_distance(view.orbit.distance_m())
@@ -504,9 +440,8 @@ fn place(
     for (of, mut at, mut mesh, material) in items.iter_mut() {
         let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
         *at = item_transform(placement, view);
-        // Zooming in on a body crosses the threshold without changing the set that is drawn,
-        // so the level of detail is a handle swap here and not a respawn. Same as a drop-line
-        // gaining a dash.
+        // Crossing the threshold does not change the set that is drawn, so the level of
+        // detail is a handle swap rather than a respawn.
         let (wanted, fraction) = mesh_for(form_of(placement, view), placement, &map, view);
         if mesh.0 != *wanted {
             mesh.0 = wanted.clone();
@@ -517,8 +452,7 @@ fn place(
     for (of, mut at, mut mesh, material) in drops.iter_mut() {
         let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
         *at = drop_transform(placement);
-        // A body drifting off the plane gains dashes rather than longer ones, so the mesh it
-        // is drawn with changes. A handle swap, not a rebuild.
+        // Drifting off the plane gains dashes, not longer ones, so the mesh changes.
         let dashes = dash_count(at.scale.y, at.translation.length(), rad_per_px);
         let wanted = &map.drops[dashes - 1];
         if mesh.0 != *wanted {
@@ -543,19 +477,16 @@ fn place(
     }
     if let Ok((mut at, material)) = spokes.single_mut() {
         *at = ring_transform(&frame, standoff * SPOKE_REACH);
-        // The scale written into the transform, not the stand-off: the shader displaces in the
-        // mesh's own space, so a thickness computed against a different number is wrong by
-        // exactly that ratio. Sized against the near end, which is the focus.
+        // Against the transform's scale, not the stand-off: the shader displaces in mesh
+        // space, so any other number is wrong by that ratio. Sized at the near end.
         set_thickness(&mut materials, material, standoff * SPOKE_REACH, rad_per_px, standoff,
             LINE_TUBE_FRACTION, SCALE_PX);
     }
     map.frame = Some(frame);
 }
 
-/// Put `focus_ly` where the focus says to look, and say whether it moved.
-///
-/// The interface holds one position and it has to be the one on screen: an action that pans or
-/// zooms starts from it, and a stale value is a jump the moment anything does.
+/// Put `focus_ly` where the focus says to look, and say whether it moved. Pans and zooms start
+/// from this value, so a stale one is a jump.
 pub fn follow(focus: crate::ui::MapFocus, snapshot: &MapSnapshot, focus_ly: &mut DVec3) -> bool {
     match focus_position(focus, snapshot) {
         Some(at) if at != *focus_ly => {
@@ -566,10 +497,8 @@ pub fn follow(focus: crate::ui::MapFocus, snapshot: &MapSnapshot, focus_ly: &mut
     }
 }
 
-/// Where the camera should be looking, or `None` to leave it where it is.
-///
-/// A key that is no longer in the snapshot also leaves it: a body going out of range should
-/// stop the camera following it, not throw the view at the world origin.
+/// Where the camera should look, or `None` to leave it. A key no longer in the snapshot also
+/// leaves it, so a body going out of range stops the camera rather than moving it to nowhere.
 pub fn focus_position(focus: crate::ui::MapFocus, snapshot: &MapSnapshot) -> Option<DVec3> {
     match focus {
         crate::ui::MapFocus::Free => None,
@@ -580,15 +509,10 @@ pub fn focus_position(focus: crate::ui::MapFocus, snapshot: &MapSnapshot) -> Opt
 
 /// How close a ring or a shell comes to the camera, in render units.
 ///
-/// **A tube's width is set by the nearest part of its own mesh, never the furthest.** A ring
-/// gets away with one number because every point of it is the same distance off; anything with
-/// a radial extent does not, and the Oort cloud is the extreme case — a shell from 633 render
-/// units out to 181 000, sized against the far edge, came back with a tube 585 units thick
-/// while its inner edge passed 574 from the camera. The camera was inside it and the map went
-/// flat green, which is the same failure the plane's spokes had and the same cause.
-///
-/// Floored at the camera's own clearance over the reference plane, so a view from *inside* a
-/// belt still draws it as a hairline rather than shrinking it to nothing.
+/// A tube's width is set by the nearest part of its mesh. Sized against the far edge, a shell
+/// spanning 633 to 181 000 units gets a tube thicker than its inner edge's distance, which
+/// puts the camera inside it. Floored at the camera's clearance over the reference plane, so a
+/// belt seen from within is a hairline rather than nothing.
 fn nearest_reach(center_at: f32, annulus: em_map::Annulus, standoff: f32) -> f32 {
     let nearest = if center_at < annulus.inner {
         annulus.inner - center_at
@@ -602,10 +526,9 @@ fn nearest_reach(center_at: f32, annulus: em_map::Annulus, standoff: f32) -> f32
 
 /// The outline mesh for a population, normalized so its outer edge is one unit.
 ///
-/// Built in simulation axes with the pole on `+Z` and converted here, so it arrives with the
-/// pole on `+Y` — which is what [`ring_transform`] and [`annulus_transform`] rotate from. The
-/// shape depends only on the inner-to-outer ratio and the half-angle, so it survives every
-/// zoom: what changes is the scale it is drawn at.
+/// Built in simulation axes and converted here, so the pole arrives on `+Y` — what
+/// [`annulus_transform`] rotates from. The shape depends only on the radius ratio and the
+/// half-angle, so only its scale changes with zoom.
 fn annulus_mesh(annulus: em_map::Annulus) -> Mesh {
     let curves: Vec<Vec<Vec3>> = em_map::outline::torus(DVec3::ZERO, DVec3::Z, annulus.unit())
         .into_iter()
@@ -631,18 +554,13 @@ fn at_of(placement: &Placement) -> Vec3 {
     render(placement.at.as_dvec3())
 }
 
-/// A body is a sphere at its own size once it is worth more than [`Viewport::point_px`]
-/// across, and a mark below it.
+/// A body is a sphere at its own size above [`Viewport::point_px`] across, and a mark below.
 ///
-/// **The threshold is the surface's size and not the mark's**, which is the one place the
-/// no-jump rule gives way: a body heavy enough to be drawn whole still holds its size across
-/// the crossover, and a lighter one steps *down* to the mark its mass earned. The alternative
-/// was to let a rock stay a sphere until it was three pixels across, and a three-pixel
-/// wireframe sphere is the smudge all of this exists to be rid of.
+/// The threshold is the surface's size and not the mark's, so a light body steps *down* to
+/// its mark at the crossover. The alternative lets a rock stay a sphere down to three pixels,
+/// which is the illegible case the level of detail exists for.
 ///
-/// **A ship is a filled dot, at every zoom there is.** It is a mark on a chart rather than a
-/// body seen: its hull size is not what anyone reads off a map, and a contact that grew a
-/// model on approach would be the one thing here drawing a shape nobody sent.
+/// A ship is always a dot: its hull size is not what anyone reads off a map.
 fn form_of(placement: &Placement, view: Viewport) -> Form {
     match placement.kind {
         ItemKind::Ship => Form::Dot,
@@ -660,9 +578,8 @@ fn point_radius(distance: f32, rad_per_px: f32, mark_px: f32) -> f32 {
     (distance * rad_per_px * mark_px * 0.5).max(f32::MIN_POSITIVE)
 }
 
-/// A circle is a symbol rather than an object, so it faces the eye — which is the render
-/// origin, because every transform here is camera-relative. The mesh lies in the XZ plane,
-/// so it is its +Y that has to point back.
+/// A mark faces the eye, which is the render origin because every transform here is
+/// camera-relative. The mesh lies in the XZ plane, so its +Y is what points back.
 fn face_camera(at: Vec3) -> Quat {
     match at.try_normalize() {
         Some(away) => Quat::from_rotation_arc(Vec3::Y, -away),
@@ -681,8 +598,7 @@ fn item_transform(placement: &Placement, view: Viewport) -> Transform {
             ),
             scale: Vec3::splat(placement.radius),
         },
-        // Both marks are flat and face the eye, and both are drawn at the size this one's
-        // mass has earned.
+        // Flat, facing the eye, at the size this one's mass earns.
         Form::Circle | Form::Dot => Transform {
             translation: at,
             rotation: face_camera(at),
@@ -701,11 +617,8 @@ fn mesh_for<'a>(form: Form, placement: &Placement, map: &'a Map, view: Viewport)
     }
 }
 
-/// How many dashes a drop wants, so that each one is [`DASH_PX`] long on screen.
-///
-/// The mesh lays `n` dashes and `n - 1` gaps of equal length over a unit height, so a dash is
-/// `1 / (2n - 1)` of the drop; wanting a dash of `d` render units out of a drop of `h` gives
-/// `n = (h / d + 1) / 2`.
+/// How many dashes a drop wants, so each is [`DASH_PX`] long on screen. The mesh lays `n`
+/// dashes and `n - 1` equal gaps over a unit height, so `n = (h / d + 1) / 2`.
 fn dash_count(height: f32, distance: f32, rad_per_px: f32) -> usize {
     let dash = distance * rad_per_px * DASH_PX;
     if !(dash > 0.0) || !height.is_finite() {
@@ -740,20 +653,12 @@ fn ring_transform(frame: &MapFrame, radius: f32) -> Transform {
     }
 }
 
-/// Keep a line the same width on screen whatever its entity is scaled to.
+/// The tube radius a mesh wants, in its own local units, to hold `width_px` on screen.
 ///
-/// The shader displaces vertices along their normals in **local** space, so the world width is
-/// `scale * target`. Wanting a world width of `distance * rad_per_px * LINE_PX` therefore
-/// means asking for that over the scale.
-/// The tube radius a mesh wants, in its own local units.
-///
-/// Pure, and shared by the spawn and the per-frame update — **which is the whole point**. The
-/// spawn used to take the material's default and let the next frame correct it, and for that
-/// one frame a spoke scaled to forty stand-offs carried a tube `0.48` of a stand-off thick
-/// while the camera cleared the plane by `0.05` of one. The camera was inside the tube, and
-/// the inside of a tube is a solid wall: the map flashed full green. It happened on a respawn,
-/// a respawn happens when the ring count changes, and the ring count changes on every decade —
-/// so it fired while scrolling and almost never while sitting still.
+/// The shader displaces along normals in local space, so the world width is `scale * target`
+/// and the answer is the wanted world width over the scale. Shared by the spawn and the
+/// per-frame update: a spawn that took the material's default and let the next frame correct
+/// it put the camera inside a spoke's tube for that frame.
 pub fn tube_target(scale: f32, rad_per_px: f32, distance: f32, max_fraction: f32,
     width_px: f32) -> f32 {
     let world = (distance * rad_per_px * width_px).max(f32::MIN_POSITIVE);
@@ -881,18 +786,15 @@ fn line_material(color: Color, target_tube_radius: f32, color_scale: f32)
             1.0,
         ),
         emission_strength: LINE_EMISSION,
-        // Set here rather than left to the default and corrected next frame. See
-        // [`tube_target`] for what that cost.
+        // Set here rather than corrected next frame. See [`tube_target`].
         target_tube_radius,
-        // Unlit. With no suns the shader's day/night factor is one, which is what a diagram
-        // wants: the map says where a thing is, and the sky says what it looks like.
+        // Unlit: with no suns the shader's day/night factor is one.
         num_suns: 0,
         ..default()
     }
 }
 
-// The palette is the interface's own. `18-ui-style.md`: one source, and a conversion at the
-// edge — never a second set of values chosen to look about right.
+// The interface's own palette. `18-ui-style.md`: one source, converted at the edge.
 const RING: Color = em_ui::vfd::TEXT_DIM;
 const SPOKE: Color = em_ui::vfd::TEXT_DIM;
 const DROP: Color = em_ui::vfd::BUTTON_BORDER;
@@ -900,12 +802,10 @@ const POPULATION: Color = em_ui::vfd::TEXT_DIM;
 
 fn color_of(kind: ItemKind) -> Color {
     match kind {
-        // A star is what a system is, so it takes the one bright color.
         ItemKind::Star => em_ui::vfd::TEXT,
         ItemKind::Planet | ItemKind::Moon | ItemKind::Minor => em_ui::vfd::BUTTON_BORDER,
         ItemKind::Population => em_ui::vfd::TEXT_DIM,
-        // The two the player is here to find. Amber against the green, because color is the
-        // one channel a map has that a list does not.
+        // Amber against the green: color is the one channel a map has that a list does not.
         ItemKind::Ship | ItemKind::Station => Color::srgb(0.95, 0.70, 0.25),
         ItemKind::Observer => Color::srgb(1.0, 1.0, 1.0),
     }
@@ -928,11 +828,8 @@ mod tests {
         ])
     }
 
-    /// **The ship was the one thing on the map you could not center on.**
-    ///
-    /// Focus was an `Option<ItemKey>` and `None` had to mean "leave the camera alone", because
-    /// that is what a pan needs — so the button that asked for the observer asked for nothing
-    /// and the camera stayed at the world origin. Three states, because there are three.
+    /// The observer needs a focus state of its own. `None` has to mean "leave the camera
+    /// alone" for a pan, so the ship cannot share it.
     #[test]
     fn centering_on_the_ship_finds_the_ship() {
         let snapshot = snapshot();
@@ -946,12 +843,8 @@ mod tests {
         );
     }
 
-    /// **The first frame of a drag used to jump to the world origin.**
-    ///
-    /// `place` resolved the focus into a *copy* of the view, so the interface's own
-    /// `focus_ly` stayed at its default — `DVec3::ZERO`, which is where the star sits — and a
-    /// pan started from there rather than from what was on screen. One jarring jump, then
-    /// smooth, which is the signature of a stale starting point rather than a bad delta.
+    /// A pan starts from the interface's own `focus_ly`, so `place` has to write the followed
+    /// position back into it and not into a copy.
     #[test]
     fn a_pan_begins_where_the_camera_actually_is() {
         let snapshot = snapshot();
@@ -972,8 +865,8 @@ mod tests {
         );
     }
 
-    /// And following writes only when it has something to say, so a resource that half the
-    /// interface watches is not marked changed every frame for nothing.
+    /// Following writes only on a change, so a resource half the interface watches is not
+    /// marked dirty every frame.
     #[test]
     fn following_the_same_place_twice_writes_once() {
         let snapshot = snapshot();
@@ -983,22 +876,19 @@ mod tests {
         assert!(!follow(MapFocus::Free, &snapshot, &mut at), "free never moves it");
     }
 
-    /// And a pan has to be able to leave the camera alone, which is the state the other two
-    /// were competing with.
+    /// A pan has to be able to leave the camera where it is.
     #[test]
     fn a_free_camera_is_left_where_it_was_put() {
         assert_eq!(focus_position(MapFocus::Free, &snapshot()), None);
     }
 
-    /// A map opens on the observer rather than on the world origin, which is empty space some
-    /// distance from wherever the ship happens to be.
+    /// A map opens on the observer, not on the world origin.
     #[test]
     fn a_map_opens_on_the_ship() {
         assert_eq!(crate::ui::MapView::default().focus, MapFocus::Observer);
     }
 
-    /// Following something that has gone out of range stops following it. It does not throw
-    /// the view at the origin, which is what a `None`-means-origin reading would do.
+    /// Following something out of range stops following it rather than moving the view.
     #[test]
     fn following_something_that_is_gone_holds_still() {
         assert_eq!(focus_position(MapFocus::Item(ItemKey(999)), &snapshot()), None);
@@ -1008,15 +898,11 @@ mod tests {
         );
     }
 
-    /// **No line is ever thicker than the camera's clearance over the plane.**
+    /// No line is thicker than the camera's clearance over the plane.
     ///
-    /// This is the invariant the whole map rests on: the camera is held off the plane by
-    /// `em_map::camera::ELEVATION_FLOOR`, and every line is a tube with a width of its own. A
-    /// tube wider than that clearance swallows the camera, and the inside of a tube is a solid
-    /// wall — the map goes flat green.
-    ///
-    /// Checked across the stand-offs and viewport sizes the map actually runs at, for the
-    /// family that reaches furthest and so is scaled hardest.
+    /// `em_map::camera::ELEVATION_FLOOR` holds the camera off the plane and every line is a
+    /// tube with a width of its own. A tube wider than that clearance contains the camera, and
+    /// the inside of a tube is opaque. Checked on the family that is scaled hardest.
     #[test]
     fn a_line_is_never_thicker_than_the_camera_clears_the_plane() {
         let floor = em_map::camera::ELEVATION_FLOOR.sin() as f32;
@@ -1061,12 +947,8 @@ mod tests {
         }
     }
 
-    /// **Nothing changes size at the level of detail.**
-    ///
-    /// One number is both the threshold and the size the circle is drawn at, so a body shrinks
-    /// until it reaches [`POINT_PX`] and then holds it. Reading that number as a radius in one
-    /// place and a diameter in the other is a factor of two at the crossover — a visible pop,
-    /// and nothing in the types to catch it.
+    /// Nothing changes size at the crossover. Reading the one number as a radius in one place
+    /// and a diameter in the other is a factor of two, with nothing in the types to catch it.
     #[test]
     fn a_body_holds_its_size_where_it_stops_being_a_sphere() {
         let view = viewport();
@@ -1084,10 +966,7 @@ mod tests {
         );
     }
 
-    /// **A lighter thing gets a smaller mark, and never one too small to be a shape.**
-    ///
-    /// Two per decade is the whole relationship; the pixel floor is what keeps the bottom of
-    /// it drawable, and on most surfaces it takes over before the mass scale runs out.
+    /// A lighter thing gets a smaller mark, and never one too small to draw.
     #[test]
     fn a_lighter_mark_is_smaller_but_never_vanishes() {
         let view = viewport();
@@ -1109,11 +988,8 @@ mod tests {
         );
     }
 
-    /// **The one place the no-jump rule gives way, and it gives way downward.**
-    ///
-    /// The crossover is the surface's own size for everyone, so a body too light to be drawn
-    /// whole steps down to its mark rather than holding. Stepping *up* would be a body
-    /// getting bigger as it recedes.
+    /// The crossover is the surface's size for everyone, so a light body steps down to its
+    /// mark. Stepping up would be a body growing as it recedes.
     #[test]
     fn a_light_body_steps_down_at_the_crossover_and_never_up() {
         let view = viewport();
@@ -1131,11 +1007,8 @@ mod tests {
         }
     }
 
-    /// **A symbol is the same share of every surface it is drawn on.**
-    ///
-    /// One texture serves a 190-point corner and a panel several times that. A fixed twenty
-    /// pixels was right for the panel and left the minimap a pile of overlapping rings with
-    /// the grid lost behind them.
+    /// A mark is the same share of every surface. One texture serves a 190-point corner and a
+    /// panel several times that.
     #[test]
     fn a_symbol_is_a_share_of_the_view_above_its_floor() {
         let fov = std::f32::consts::FRAC_PI_4;
@@ -1155,11 +1028,8 @@ mod tests {
         assert!(POINT_FLOOR_PX <= 2.0 * LINE_PX, "the floor is twice a line and no more");
     }
 
-    /// **A ship's disc comes out exactly the size the transform says.**
-    ///
-    /// Every one of its vertices shares one normal, so the shader's thickness displacement
-    /// translates the whole disc rather than fattening it. Asking for the material's own base
-    /// radius makes that displacement zero — and that holds only while the cap is what binds.
+    /// A disc comes out the size the transform says. Its vertices share one normal, so the
+    /// displacement translates it; only asking for the base radius makes that zero.
     #[test]
     fn a_dot_is_never_displaced() {
         let view = viewport();
@@ -1175,11 +1045,7 @@ mod tests {
         }
     }
 
-    /// **A ship is a mark on a chart, at every zoom there is.**
-    ///
-    /// It has a hull size and the map is not the place to read it off: a contact that grew a
-    /// model on approach would be drawing a shape nobody sent. Given a planet's radius it must
-    /// still be a circle.
+    /// A ship is a mark at every zoom. Given a planet's radius it is still a mark.
     #[test]
     fn a_ship_never_becomes_a_model() {
         let view = viewport();
@@ -1198,8 +1064,7 @@ mod tests {
         assert!((px / view.point_px - 1.0).abs() < 1.0e-3, "a ship drew {px} px across");
     }
 
-    /// And it holds that size at every distance, which is what makes it a symbol: the far one
-    /// is as readable as the near one, and only its place on the map says which is which.
+    /// And it holds that size at every distance, so the far one reads as well as the near.
     #[test]
     fn a_circle_is_the_same_size_wherever_it_is() {
         let view = viewport();
@@ -1215,9 +1080,8 @@ mod tests {
         }
     }
 
-    /// **A circle faces the eye, or it is an ellipse and sometimes a line.**
-    ///
-    /// The eye is the render origin, because every transform on this layer is camera-relative.
+    /// A mark that does not face the eye is an ellipse, and edge-on a line. The eye is the
+    /// render origin, because every transform on this layer is camera-relative.
     #[test]
     fn a_circle_faces_the_eye() {
         let view = viewport();
@@ -1247,11 +1111,8 @@ mod tests {
         assert!(face_camera(Vec3::ZERO).is_finite());
     }
 
-    /// **A dash is the same length wherever it is drawn.**
-    ///
-    /// The count follows the drop rather than the other way round: twice the drop is twice the
-    /// dashes, not dashes twice as long. A fixed count gave a tall drop long dashes and a
-    /// short one short ones, which reads as two kinds of line.
+    /// A dash is the same length wherever it is drawn: the count follows the drop, so twice
+    /// the drop is twice the dashes and not dashes twice as long.
     #[test]
     fn a_longer_drop_gets_more_dashes_not_longer_ones() {
         let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
@@ -1291,13 +1152,8 @@ mod tests {
         }
     }
 
-    /// **A belt's tube never reaches the camera either.**
-    ///
-    /// The fourth time this family of bug appeared, and the same cause as the plane's spokes:
-    /// a width set by the far side of something that spans a range of distances. The Oort
-    /// cloud is the extreme case — a shell from 633 render units to 181 000 — and sized
-    /// against its outer edge it came back 585 units thick while its inner edge passed 574
-    /// from the camera.
+    /// A belt's tube never reaches the camera. Anything spanning a range of distances has to
+    /// be sized by its near side; the Oort cloud runs from 633 render units to 181 000.
     #[test]
     fn an_annulus_never_swallows_the_camera() {
         let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
@@ -1322,7 +1178,7 @@ mod tests {
         }
     }
 
-    /// And the reach is the *near* edge, which is the whole of the fix.
+    /// And the reach is the near edge.
     #[test]
     fn the_reach_is_measured_to_the_near_edge() {
         let shell = em_map::Annulus { inner: 600.0, outer: 1.0e5, half_angle_rad: 1.57 };
@@ -1334,8 +1190,8 @@ mod tests {
         assert!(nearest_reach(1000.0, shell, 60.0) > 0.0);
     }
 
-    /// And the material's own default is *not* good enough, which is what the bug was: the
-    /// spawn took it and let the next frame correct it, so every respawn flashed.
+    /// And the material's default is not good enough, so a spawn cannot take it and wait for
+    /// the next frame to correct it.
     #[test]
     fn the_default_tube_would_swallow_the_camera() {
         let standoff = 40.0f32;
@@ -1347,8 +1203,8 @@ mod tests {
         );
     }
 
-    /// A line stays the same width on screen however hard its mesh is scaled. That is the
-    /// whole reason the thickness is a per-entity dial rather than baked into the mesh.
+    /// A line holds its screen width however hard its mesh is scaled, which is why the
+    /// thickness is a per-entity dial rather than baked in.
     #[test]
     fn a_line_holds_its_width_on_screen_across_the_scales() {
         let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;

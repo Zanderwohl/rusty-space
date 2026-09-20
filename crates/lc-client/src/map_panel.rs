@@ -1,10 +1,9 @@
 //! The two surfaces the map is shown on, and the input they take.
 //!
-//! One rendered image inside an egui surface, which is a third case beside the two
-//! `lightcone/docs/18-ui-style.md` names. What makes it behave is allocating the image with an
-//! explicit [`egui::Sense`] rather than calling `ui.image`: an interactive allocation is what
-//! makes egui *want* the pointer, and `crate::input`'s wheel and cursor grab both already stand
-//! down when it does. No new coordination, no flag, no ordering constraint.
+//! One rendered image inside an egui surface, a third case beside the two
+//! `lightcone/docs/18-ui-style.md` names. The image is allocated with an explicit
+//! [`egui::Sense`] rather than through `ui.image`, so egui wants the pointer and
+//! `crate::input`'s wheel and cursor grab stand down on their own.
 
 use bevy::prelude::*;
 use glam::DVec3;
@@ -25,11 +24,9 @@ const TURN_PER_POINT: f64 = 0.006;
 /// A pan drag across the whole viewport moves the focus by this much of the stand-off.
 const PAN_PER_VIEWPORT: f64 = 1.2;
 
-/// How much of the surface the scale rule may take, and the least it is worth drawing at.
-///
-/// A fraction so it stays proportionate on the minimap, and a ceiling so it does not stretch
-/// across a wide panel — a rule is read by its label and its ends, and a very long one is just
-/// a line.
+/// How much of the surface the scale rule may take, and the least it is worth drawing at. A
+/// fraction to stay proportionate on the minimap, and a ceiling so it does not stretch across
+/// a wide panel.
 const RULE_MAX_FRACTION: f32 = 0.4;
 const RULE_MIN_FRACTION: f32 = 0.3;
 const RULE_MAX_PX: f32 = 600.0;
@@ -44,16 +41,13 @@ const RULE_TICK_PX: f32 = 3.0;
 
 /// Where the plane is sampled for the scale, as a fraction of the way down the viewport.
 ///
-/// **The camera is perspective, so there is no one scale.** The rule is drawn near the bottom
-/// of the surface, so that is where the plane is asked how far a pixel goes: a scale taken at
-/// the middle of the view would be wrong by the depth between the two.
+/// The camera is perspective, so there is no one scale. The rule is drawn near the bottom, so
+/// that is where the plane is asked how far a pixel goes.
 const RULE_SAMPLE_NDC_Y: f64 = -0.75;
 
-/// How far a label sits from its symbol's edge, and the daylight kept between two labels.
-///
-/// The gap is generous on purpose: the map is read at a glance and two names a pixel apart
-/// are one smear. Dropping the second is the better answer, and which one is dropped is
-/// exactly what [`em_map::label`] decides.
+/// How far a label sits from its mark's edge, and the clearance kept between two labels. Two
+/// names a pixel apart are one smear, so the clearance is generous and [`em_map::label`] drops
+/// the second.
 const LABEL_GAP_PX: f32 = 4.0;
 /// How light a body may be and still be named, against the heaviest thing on screen.
 ///
@@ -67,14 +61,11 @@ const LABEL_CLEARANCE_PX: f32 = 6.0;
 /// The minimap's side, in points.
 const MINIMAP_SIDE: f32 = 190.0;
 
-/// Bottom **left**. The event log is anchored bottom right with this same inset
-/// (`panels.rs`), and two surfaces at one corner is one surface with the other underneath it.
+/// Bottom left. The event log takes bottom right with this same inset (`panels.rs`).
 const MINIMAP_MARGIN: egui::Vec2 = egui::vec2(12.0, -12.0);
 
-/// Draw whichever surface is in force, and turn pointer input on it into actions.
-///
-/// The panel and the minimap are never both up: the minimap *is* the map when the panel is
-/// closed, and two of the same thing at two sizes is the muddle `18-ui-style.md` is about.
+/// Draw whichever surface is in force, and turn pointer input on it into actions. The panel
+/// and the minimap are never both up: the minimap is the map when the panel is closed.
 pub fn draw(
     mut contexts: EguiContexts,
     ui_state: Res<Ui>,
@@ -99,27 +90,22 @@ pub fn draw(
         (rect.width() * ctx.pixels_per_point()).round().max(1.0) as u32,
         (rect.height() * ctx.pixels_per_point()).round().max(1.0) as u32,
     );
-    // The same gestures on both surfaces, from the same function, because two surfaces
-    // showing one view that answer a drag differently is worse than either answer.
+    // One function for both surfaces, so they answer a drag alike.
     let painter = ctx.layer_painter(response.layer_id);
     scale_rule(&painter, rect, ui_state.map);
     labels(&painter, rect, ui_state.map, &map);
     read_input(ctx, &response, rect, ui_state.map, &map, &mut out);
     if !open && response.clicked() {
-        // A click is not a drag — egui keeps them apart — so this is the one gesture the
-        // minimap has that the panel does not.
+        // egui keeps a click and a drag apart, so this is the minimap's one extra gesture.
         ask(&mut out, Action::OpenPanel(Panel::Map));
     }
 }
 
 /// The names, over the image.
 ///
-/// egui text rather than geometry on the layer: `18-ui-style.md` keeps one face for the
-/// interface, and egui draws text better than a shader drawing letters would.
-///
-/// Every name is a claim on the same pixels, so the drawing is in two halves — the host lays
-/// out what each one would occupy, and [`em_map::label::lay_out`] says which of them get to
-/// exist. See there for why the heaviest wins.
+/// egui text rather than geometry on the layer, per `18-ui-style.md`. The work is in two
+/// halves: this measures what each name would occupy, and [`em_map::label::lay_out`] decides
+/// which of them fit.
 fn labels(painter: &egui::Painter, rect: egui::Rect, view: crate::ui::MapView, map: &Map) {
     let Some(frame) = map.frame.as_ref() else { return };
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
@@ -132,8 +118,7 @@ fn labels(painter: &egui::Painter, rect: egui::Rect, view: crate::ui::MapView, m
     let mut candidates = Vec::with_capacity(frame.placements.len());
     let mut galleys = Vec::with_capacity(frame.placements.len());
     for placement in &frame.placements {
-        // Not the observer: it is the one thing on the map whose place never has to be
-        // looked up, because the rings and the spokes are centered on it.
+        // Not the observer: the rings and spokes are centered on it already.
         if placement.kind == em_map::ItemKind::Observer || placement.label.is_empty() {
             continue;
         }
@@ -149,8 +134,7 @@ fn labels(painter: &egui::Painter, rect: egui::Rect, view: crate::ui::MapView, m
         candidates.push(em_map::label::Candidate {
             key: placement.key,
             weight: placement.weight,
-            // egui counts pixels down from the top left; normalized device coordinates run up
-            // from the middle.
+            // egui counts pixels down from the top left; NDC runs up from the middle.
             at: glam::Vec2::new(
                 (ndc.x as f32 + 1.0) * 0.5 * rect.width(),
                 (1.0 - ndc.y as f32) * 0.5 * rect.height(),
@@ -160,9 +144,8 @@ fn labels(painter: &egui::Painter, rect: egui::Rect, view: crate::ui::MapView, m
         galleys.push((placement.key, galley));
     }
 
-    // Clear of the symbol, and vertically centered on it. The symbol is sized against the
-    // texture and the text against the surface showing it, which are not the same units on a
-    // display that scales.
+    // Clear of the mark and centered on it. The mark is sized against the texture and the
+    // text against the surface showing it, which differ on a display that scales.
     let points_per_pixel = match map.size.y {
         0 => 1.0,
         height => rect.height() / height as f32,
@@ -188,11 +171,8 @@ fn labels(painter: &egui::Painter, rect: egui::Rect, view: crate::ui::MapView, m
     }
 }
 
-/// Amber for a contact, the interface's own text color for everything else.
-///
-/// Not the symbol's color: a body's mark is drawn at the palette's dimmer greens so it sits
-/// behind what matters, and text at that weight over a black field is not read so much as
-/// squinted at.
+/// Amber for a contact, the interface's text color for everything else. Not the mark's color:
+/// a body's mark takes the palette's dimmer greens, too dim to read text at.
 fn label_color(kind: em_map::ItemKind) -> egui::Color32 {
     match kind {
         em_map::ItemKind::Ship | em_map::ItemKind::Station => color_of(SHIP_LABEL),
@@ -226,23 +206,16 @@ fn panel(
     answer
 }
 
-/// The corner surface. One gesture and no more.
+/// The corner surface: the panel's gestures, plus a click that opens the panel.
 ///
-/// It takes the same gestures the panel does, and a click on top of them, which opens the
-/// panel.
-///
-/// **What that costs, stated because it is a real cost.** `crate::input`'s wheel and cursor
-/// grab both stand down while egui wants the pointer, and this surface is always on screen —
-/// so hovering the corner stops the ship's boom zooming, and a right-press begun here pans the
-/// map instead of turning the view. A drag belongs to the widget it started on even after the
-/// cursor leaves, which is right, and is also why the whole gesture is the map's.
-///
-/// Every panel in the interface already costs exactly this. The minimap is the only one that
-/// is never closed, which is the whole of the difference and is a corner of 190 points.
+/// The cost is real and worth stating. `crate::input`'s wheel and cursor grab stand down while
+/// egui wants the pointer, and this surface is always on screen, so hovering the corner stops
+/// the ship's boom zooming and a right-press begun here pans the map. Every panel costs this;
+/// the minimap is the only one never closed.
 fn minimap(ctx: &egui::Context, map: &mut Map) -> Option<(egui::Rect, egui::Response)> {
     let mut answer = None;
     egui::Area::new("minimap".into())
-        // Middle, not Foreground: an open window has to cover this, not the other way round.
+        // Middle, not Foreground: an open window has to cover this.
         .order(egui::Order::Middle)
         .anchor(egui::Align2::LEFT_BOTTOM, MINIMAP_MARGIN)
         .show(ctx, |ui| {
@@ -304,11 +277,9 @@ fn scale_rule(painter: &egui::Painter, rect: egui::Rect, view: crate::ui::MapVie
     );
 }
 
-/// How far a point on the surface reaches, in meters, where the rule is drawn.
-///
-/// The plane is met by a ray cast at the rule's own height, and the scale taken at that depth.
-/// Falls back to the stand-off when the ray meets nothing, which is the scale at the middle of
-/// the view — wrong for the bottom of an edge-on one, and the only answer left.
+/// How far a point on the surface reaches, in meters, where the rule is drawn. A ray cast at
+/// the rule's own height meets the plane, and the scale is taken at that depth; when it meets
+/// nothing the stand-off is the only answer left.
 fn meters_per_point(rect: egui::Rect, view: crate::ui::MapView) -> Option<f32> {
     if rect.height() <= 0.0 {
         return None;
@@ -328,10 +299,8 @@ fn meters_per_point(rect: egui::Rect, view: crate::ui::MapView) -> Option<f32> {
     (per_point.is_finite() && per_point > 0.0).then_some(per_point)
 }
 
-/// The interface's palette, at the toolkit boundary.
-///
-/// One source and a conversion at the edge, as `lightcone/docs/18-ui-style.md` has it — never a
-/// hex value typed in beside it that drifts the first time the palette moves.
+/// The interface's palette, converted at the toolkit boundary. One source, per
+/// `lightcone/docs/18-ui-style.md`.
 fn color_of(color: bevy::prelude::Color) -> egui::Color32 {
     let rgba = color.to_srgba();
     egui::Color32::from_rgb(
@@ -349,8 +318,8 @@ fn controls(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<
                 ask(out, Action::SetMapPlane(plane));
             }
         }
-        // Light delay is the premise everywhere in the client and needs no caption; a picture
-        // taken without it is the one that has to say so. See `13-client-shell.md`.
+        // Light delay is the premise everywhere in the client; the picture taken without it
+        // is the one that has to say so.
         #[cfg(feature = "godview")]
         if state.map.source == Source::God {
             ui.separator();
@@ -364,9 +333,8 @@ fn controls(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<
         for source in [Source::Observed, Source::God] {
             let allowed = source == Source::Observed || state.may_see_everything;
             let chosen = state.map.source == source;
-            // A plain selectable label: `add_enabled` wrapping one reports clicks nobody made.
-            // A refused source is shown grayed and says why rather than being absent, because
-            // color is never the only signal.
+            // A plain selectable label: `add_enabled` around one reports clicks nobody made.
+            // A refused source is grayed and says why, because color is not the only signal.
             if !allowed {
                 ui.weak(source.label()).on_hover_text("needs an administrative account");
                 continue;
@@ -384,9 +352,8 @@ fn controls(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<
         if ui.button("center on the ship").clicked() {
             ask(out, Action::FocusMap(crate::ui::MapFocus::Observer));
         }
-        // "the star", not its name: whichever one this is, the button does the same thing, and
-        // a label that changes between systems is a label that has to be read before it is
-        // pressed. The name is on the star itself.
+        // "the star", not its name: a button whose label changes between systems has to be
+        // read before it is pressed. The name is on the star itself.
         if let Some(system) = game.0.system.as_ref() {
             if ui.button("center on the star").clicked() {
                 ask(out, Action::FocusMap(crate::ui::MapFocus::Item(
@@ -397,13 +364,11 @@ fn controls(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<
     });
 }
 
-/// Drag and wheel over the full surface.
+/// Drag and wheel over the full surface: left turns, right pans.
 ///
-/// **Left** turns and **right** pans. Right is also the sky's look button, so a right-press
-/// that starts on either map surface turns the map and not the view — the grab is asked for
-/// once, on the press, and `grab_cursor` stands down while egui wants the pointer. That is a
-/// drag belonging to the widget it began on, which is correct, and it is the price of the
-/// second button.
+/// Right is also the sky's look button, so a right-press that starts on either map surface
+/// pans the map and not the view. `grab_cursor` stands down while egui wants the pointer, and
+/// the drag belongs to the widget it began on.
 fn read_input(
     ctx: &egui::Context,
     response: &egui::Response,
@@ -414,8 +379,7 @@ fn read_input(
 ) {
     if response.dragged() {
         let delta = response.drag_delta();
-        // Right as well as middle, because the minimap is too small to reach for a modifier
-        // over and a second button is the one thing a postage stamp has room for.
+        // Right as well as middle: the minimap is too small to hold a modifier over.
         let panning = response.dragged_by(egui::PointerButton::Secondary)
             || response.dragged_by(egui::PointerButton::Middle)
             || ctx.input(|i| i.modifiers.shift);
@@ -446,8 +410,7 @@ fn read_wheel_only(
     if !response.hovered() {
         return;
     }
-    // egui reports pixels, and `input::notches` is already the tested divider — it knows what
-    // a trackpad does, which a number written here would have to learn again.
+    // egui reports pixels, and `input::notches` is the tested divider for a trackpad.
     let scrolled = ctx.input(|i| i.smooth_scroll_delta.y);
     if scrolled == 0.0 {
         return;
@@ -461,23 +424,17 @@ fn read_wheel_only(
     ask(out, Action::ZoomMap { notches, anchor_ly });
 }
 
-/// Whether the wheel zooms toward the pointer rather than toward the center.
+/// Whether the wheel zooms toward the pointer rather than the center.
 ///
-/// **Only when nothing is locked.** A center held on the ship or on a body is a statement
-/// about what the map is *of*, and `Action::ZoomMap` gives the lock up the moment an anchor
-/// moves the focus — so aiming at the pointer in those modes would quietly undo the thing
-/// that was asked for. Free is the mode where the center is nobody's in particular, and there
-/// the pointer is the only thing that says where to go.
+/// Only when nothing is locked. `Action::ZoomMap` gives the lock up the moment an anchor moves
+/// the focus, so a held center must ask for no anchor.
 fn zooms_to_cursor(focus: crate::ui::MapFocus) -> bool {
     matches!(focus, crate::ui::MapFocus::Free)
 }
 
-/// What the cursor is over, on the reference plane.
-///
-/// The ray through the pointer, met with the plane the rings are drawn on. `None` when the
-/// pointer is nowhere, when the view is edge-on enough that the ray runs along the plane, or
-/// when the plane is behind the camera — and the caller then zooms about the middle, which is
-/// what the wheel has always done.
+/// What the cursor is over, on the reference plane. `None` when the pointer is nowhere, the
+/// ray runs along the plane, or the plane is behind the camera; the caller then zooms about
+/// the middle.
 fn under_cursor(
     ctx: &egui::Context,
     rect: egui::Rect,
@@ -488,8 +445,7 @@ fn under_cursor(
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
         return None;
     }
-    // Normalized device coordinates: `[-1, 1]` across the viewport with `+y` up, where egui
-    // counts pixels down from the top left.
+    // NDC: `[-1, 1]` across the viewport with `+y` up, where egui counts down from the top.
     let ndc = glam::DVec2::new(
         ((at.x - rect.min.x) / rect.width() * 2.0 - 1.0) as f64,
         (1.0 - (at.y - rect.min.y) / rect.height() * 2.0) as f64,
@@ -509,11 +465,8 @@ mod tests {
     use crate::ui::MapFocus;
     use em_map::ItemKey;
 
-    /// **A lock is a lock, and the wheel does not quietly break it.**
-    ///
-    /// Zooming toward the pointer moves the focus, and `Action::ZoomMap` drops the lock the
-    /// moment it does — so the two modes that hold a center must not ask for an anchor at
-    /// all. Free is the one where the pointer decides.
+    /// The wheel does not break a lock. Zooming toward the pointer moves the focus and
+    /// `Action::ZoomMap` drops the lock when it does, so a held center asks for no anchor.
     #[test]
     fn only_a_free_camera_zooms_toward_the_pointer() {
         assert!(zooms_to_cursor(MapFocus::Free));

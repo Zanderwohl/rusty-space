@@ -16,10 +16,9 @@ pub const MAX_RENDER_UNITS: f32 = 1.0e5;
 
 /// Where one item goes.
 ///
-/// **Simulation axes, Z-up**, camera-relative and already divided by `meters_per_unit`. The
+/// Simulation axes, Z-up, camera-relative and already divided by `meters_per_unit`. The
 /// rotation into a renderer's axes is the renderer's: `em_render::render_space` is the one
-/// place that does it, and a second converter here would be a second chance to get the
-/// handedness wrong and no way to notice.
+/// place that does it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Placement {
     pub key: ItemKey,
@@ -27,12 +26,10 @@ pub struct Placement {
     pub label: String,
     /// Carried from [`crate::MapItem::weight`]: what decides which of two names fit.
     pub weight: f64,
-    /// How big this one's mark is drawn, as a fraction of the full size. See
-    /// [`crate::weight::scale`] — ten times the mass is twice the radius.
+    /// How big this one's mark is, as a fraction of full size. See [`crate::weight::scale`].
     ///
-    /// **Against the heaviest thing in the whole snapshot, not the heaviest on screen.** A
-    /// name may come and go as the view moves and a size may not: bodies that resized every
-    /// time the star left the frame would pulse.
+    /// Against the heaviest thing in the snapshot, not on screen: a name may come and go as
+    /// the view moves and a size may not, or bodies pulse when the star leaves the frame.
     pub symbol_scale: f32,
     pub at: Vec3,
     /// Where a drop-line from [`Placement::at`] meets the plane. Equal to `at` for something
@@ -98,21 +95,18 @@ pub struct MapFrame {
     pub plane_normal: Vec3,
     /// The focus, camera-relative: what the camera is looking at.
     pub focus: Vec3,
-    /// The observer, camera-relative — **where the rings and the spokes are centered**.
+    /// The observer, camera-relative: where the rings and spokes are centered.
     ///
-    /// Not the focus. A decade ring answers "how far is that from *me*", and the whole game is
-    /// the ship's perspective, so the scale stays on the ship even while the camera is looking
-    /// at a star. Falls back to the focus when a snapshot has no observer in it, which is a
-    /// snapshot with nothing to be a perspective of.
+    /// Not the focus. A decade ring answers how far something is from the ship, so the scale
+    /// stays there even while the camera looks at a star. Falls back to the focus when a
+    /// snapshot has no observer.
     pub rings_at: Vec3,
     pub placements: Vec<Placement>,
     pub rings: Vec<RingPlacement>,
 }
 
-/// Reduce a snapshot and a camera to a frame.
-///
-/// The one pure function everything else is tested through. `meters_per_unit` is the host's,
-/// because which scale tier is in force is the host's business — see `lc_client::view`.
+/// Reduce a snapshot and a camera to a frame. `meters_per_unit` is the host's, because which
+/// scale tier is in force is the host's business — see `lc_client::view`.
 pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Plane, meters_per_unit: f64)
     -> MapFrame {
     let eye_ly = orbit.eye_ly(plane);
@@ -122,8 +116,8 @@ pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Plane, meters_per_u
     // Rings are measured from the observer, not from whatever the camera happens to be on.
     let rings_ly = snapshot.observer().map_or(orbit.focus_ly, |o| o.position_ly);
     let (near_m, far_m) = snapshot.extent_m(rings_ly);
-    // Out to whichever is further, the furthest thing or the edge of the view. A map zoomed
-    // out past everything in it would otherwise lose its scale exactly when it needs one.
+    // Out to whichever is further, the furthest thing or the edge of the view, so a map
+    // zoomed out past its contents keeps a scale.
     let outer_m = far_m.max(orbit.distance_m());
     let rings = rings::decades(near_m, outer_m, MAX_RINGS)
         .into_iter()
@@ -142,9 +136,8 @@ pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Plane, meters_per_u
         if !at.is_finite() || at.length() > MAX_RENDER_UNITS {
             continue;
         }
-        // The same plane the rings are drawn on, anchored at the observer. Measuring height
-        // above a plane through the camera's focus while the rings sat on the ship was two
-        // planes answering one question.
+        // The same plane the rings are drawn on, anchored at the observer. A plane through
+        // the focus instead would disagree with the rings.
         let foot = relative(plane.foot_ly(item.position_ly, rings_ly));
         if !foot.is_finite() {
             continue;
@@ -195,11 +188,9 @@ mod tests {
         DVec3::new(x, y, z) * M_PER_AU / M_PER_LY
     }
 
-    /// Nothing ever reaches the renderer as a number `f32` cannot hold.
-    ///
-    /// Break it by dropping the cull and a catalogue star at a thousand light-years, composed
-    /// at the system tier, arrives as `inf` — which draws as nothing and takes the whole
-    /// instance batch with it.
+    /// Nothing reaches the renderer as a number `f32` cannot hold. Without the cull, a star a
+    /// thousand light-years off composed at the system tier arrives as `inf`, which drops the
+    /// whole instance batch.
     #[test]
     fn every_placement_stays_inside_f32() {
         let far = DVec3::new(1000.0, 0.0, 0.0);
@@ -215,10 +206,8 @@ mod tests {
         }
     }
 
-    /// A drop-line ends in the plane, for both planes and both sides of it.
-    ///
-    /// Break it by using `+Z` for the galactic plane and only the galactic half fails, which
-    /// is why both are here.
+    /// A drop-line ends in the plane, for both planes and both sides. Using `+Z` for the
+    /// galactic plane fails only the galactic half, which is why both are here.
     #[test]
     fn a_drop_line_ends_in_the_plane() {
         for plane in [Plane::Ecliptic, Plane::Galactic] {
@@ -239,8 +228,8 @@ mod tests {
         }
     }
 
-    /// Something in the plane has nowhere to fall, and the host must draw no tube: a
-    /// zero-length one is degenerate geometry, not an invisible one.
+    /// Something in the plane has nowhere to fall, and a zero-length tube is degenerate
+    /// geometry rather than an invisible one.
     #[test]
     fn something_in_the_plane_has_no_drop_line() {
         for plane in [Plane::Ecliptic, Plane::Galactic] {
@@ -278,11 +267,8 @@ mod tests {
         assert!(outermost >= 1.0e4, "outermost ring at {outermost} units, view is 1e4");
     }
 
-    /// The rings measure distance from the **ship**, not from whatever the camera is on.
-    ///
-    /// The scale belongs to the observer: "how far is that from me" is the question a decade
-    /// ring answers, and centering it on a star the camera happened to be looking at answers a
-    /// different one.
+    /// The rings measure distance from the ship, not from whatever the camera is on: a decade
+    /// ring answers how far something is from the observer.
     #[test]
     fn the_rings_are_centered_on_the_observer() {
         let ship = au(30.0, 0.0, 0.0);

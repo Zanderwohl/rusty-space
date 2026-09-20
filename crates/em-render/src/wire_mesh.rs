@@ -1,18 +1,15 @@
 //! Wireframe geometry: lat/lon grid spheres, great circles, and the tube builder under them.
 //!
-//! Meshes only, and no systems. Both products draw wireframes and neither draws them the same
-//! way — one has a planetarium of bodies with terminators, the other a map of decade rings —
-//! so what is shared is the geometry and what is not is every ECS system around it. That split
-//! is the one `lightcone/docs/06-crate-layout.md` argues for, and it is why
-//! [`build_tube_from_points`] is public: everything here is a tube, and a second tube builder
-//! in the other product would be the duplication the extraction exists to avoid.
+//! Meshes only, no systems: both products draw wireframes and neither draws them the same
+//! way, so the geometry is shared and the ECS systems around it are not. See
+//! `lightcone/docs/06-crate-layout.md`. [`build_tube_from_points`] is public because
+//! everything here is a tube and a second tube builder elsewhere would be a duplicate.
 //!
-//! Bevy's **Y-up render axes**, not simulation space: these are meshes, and a mesh is already
-//! in the renderer. `render_space` is where the boundary is.
+//! Bevy's Y-up render axes, not simulation space: a mesh is already in the renderer, and
+//! `render_space` is the boundary.
 //!
-//! Brightness rides in vertex-color **alpha**, which `body_wireframe.wgsl` reads as line
-//! weight. Under a plain blended material it reads as opacity instead, which is the same
-//! picture for a diagram — a solid equator and a faint grid.
+//! Brightness rides in vertex-color alpha, which `body_wireframe.wgsl` reads as line weight
+//! and a plain blended material reads as opacity.
 
 use std::f32::consts::PI;
 
@@ -321,17 +318,12 @@ pub fn generate_great_circle_tube(normal: Vec3, tube_radius: f32, tube_sides: u3
 }
 
 
-// ---------------------------------------------------------------------------------------
-// Map geometry.
-//
-// All three are **unit-sized** and scaled per entity. A map spans fifteen orders of
-// magnitude, so a mesh built at a world size is one mesh per ring per frame; built at unit
-// size it is one asset and a transform. The tubes go elliptical under a non-uniform scale,
-// which on a four-sided tube is a fraction of a pixel and is the trade being made.
-// ---------------------------------------------------------------------------------------
+// Map geometry. All of it is unit-sized and scaled per entity: a mesh built at a world size
+// is one mesh per ring per frame, where a unit one is a single asset and a transform. Tubes go
+// elliptical under a non-uniform scale, which on four sides is a fraction of a pixel.
 
-/// A unit-radius ring in the XZ plane, so its normal is `+Y` — Bevy's up, and what a map's
-/// reference plane is rotated from.
+/// A unit-radius ring in the XZ plane, so its normal is `+Y`: what a reference plane rotates
+/// from.
 pub fn ring_tube(segments: u32, tube_radius: f32, tube_sides: u32, brightness: f32) -> Mesh {
     let segments = segments.max(3);
     let points: Vec<Vec3> = (0..segments)
@@ -346,17 +338,14 @@ pub fn ring_tube(segments: u32, tube_radius: f32, tube_sides: u32, brightness: f
     assemble(positions, normals, colors, indices)
 }
 
-/// A **filled** unit disc in the XZ plane, normal `+Y`. The one solid thing a wireframe map
-/// draws, and what tells a contact from a body at a size where shape is all there is.
+/// A filled unit disc in the XZ plane, normal `+Y`.
 ///
-/// Wound both ways, so it is visible from either face and no caller has to think about the
-/// material's cull mode. It is a fan from a rim vertex rather than from the center, because
-/// the wireframe shader takes `normalize(position)` for its day/night term and a vertex at the
-/// origin makes that a NaN — dead code at `num_suns: 0`, and not worth leaving loaded.
+/// Wound both ways, so no caller has to think about the material's cull mode. A fan from a rim
+/// vertex rather than the center: the wireframe shader takes `normalize(position)`, which is a
+/// NaN at the origin.
 ///
-/// Every normal is `+Y`, so the shader's thickness displacement translates the disc along its
-/// own normal instead of resizing it. A caller wanting it exactly unit-sized asks for a target
-/// radius equal to the material's base.
+/// Every normal is `+Y`, so the shader's thickness displacement translates the disc rather
+/// than resizing it. A caller wanting it unit-sized asks for the material's base radius.
 pub fn disc(segments: u32, brightness: f32) -> Mesh {
     let segments = segments.max(3);
     let positions: Vec<[f32; 3]> = (0..segments)
@@ -399,14 +388,11 @@ pub fn plane_spokes(spokes: u32, inner: f32, tube_radius: f32, tube_sides: u32, 
 
 /// A dashed line of unit height along `+Y`, from the plane up to what hangs above it.
 ///
-/// The mesh is scaled to the drop it is drawn for, so `dashes` sets how long each dash ends up
-/// being — and the caller picks it per line to keep the dash itself a constant size. A single
-/// count for every line would make a long drop's dashes long and a short one's short, which
-/// reads as two different kinds of line rather than one line at two lengths.
+/// The mesh is scaled to the drop, so `dashes` sets how long each one ends up; the caller
+/// picks it per line to keep the dash a constant size.
 pub fn drop_line(dashes: u32, tube_radius: f32, tube_sides: u32, brightness: f32) -> Mesh {
     let dashes = dashes.max(1);
-    // `dashes` dashes and `dashes - 1` gaps, all the same length, so the line starts and ends
-    // on a dash — an object with a gap under it looks detached from its own marker.
+    // `dashes` dashes and `dashes - 1` equal gaps, so the line starts and ends on a dash.
     let step = 1.0 / (2 * dashes - 1) as f32;
     let mut buffers = Buffers::default();
     for i in 0..dashes {
@@ -416,17 +402,14 @@ pub fn drop_line(dashes: u32, tube_radius: f32, tube_sides: u32, brightness: f32
     buffers.into_mesh()
 }
 
-/// One mesh from a set of polylines, each drawn as a closed or open tube.
-///
-/// What a population's outline is: two edge circles and four cross-sections, which is six
-/// curves and one draw. `em_map::outline` decides the curves and this turns them into
-/// geometry.
+/// One mesh from a set of polylines, each drawn as a closed or open tube. A population's
+/// outline is six curves and one draw; `em_map::outline` decides them.
 pub fn tube_curves(curves: &[Vec<Vec3>], tube_radius: f32, tube_sides: u32, brightness: f32)
     -> Mesh {
     let mut buffers = Buffers::default();
     for curve in curves {
-        // Already closed by the caller, which repeats its first point — so an open tube, or
-        // the joining quad would be laid over the repeat.
+        // Closed by the caller, which repeats its first point, so build an open tube or the
+        // joining quad lands on the repeat.
         buffers.add(curve, brightness, tube_radius, tube_sides, false);
     }
     buffers.into_mesh()
@@ -523,8 +506,8 @@ mod tests {
         mesh.indices().map(|i| i.len()).unwrap_or(0)
     }
 
-    /// A grid sphere is a sphere: every vertex sits on the unit surface, give or take the
-    /// tube's own thickness. Only the pole skewer sticks out, deliberately.
+    /// Every vertex sits on the unit surface, give or take the tube's thickness. Only the
+    /// pole skewer sticks out.
     #[test]
     fn a_grid_sphere_is_a_unit_sphere() {
         let mesh = generate_latlon_sphere(&[], 0.01, 4);
@@ -541,8 +524,8 @@ mod tests {
         );
     }
 
-    /// Brightness rides in alpha, and the three weights are what make an equator read as one.
-    /// A builder that wrote a single brightness would draw a uniform cage.
+    /// Brightness rides in alpha, and the three weights are what make an equator read as
+    /// one rather than as another grid line.
     #[test]
     fn the_grid_carries_its_three_line_weights() {
         let mesh = generate_latlon_sphere(&[23.4], 0.01, 4);
@@ -568,8 +551,8 @@ mod tests {
         assert_eq!(tropics - plain, 2 * one_circle, "expected two extra parallels");
     }
 
-    /// A great circle lies in the plane its normal names. Getting this wrong puts a
-    /// terminator at right angles to the light, which looks like a shading bug.
+    /// A great circle lies in the plane its normal names. Wrong, it puts a terminator at
+    /// right angles to the light.
     #[test]
     fn a_great_circle_is_perpendicular_to_its_normal() {
         for normal in [Vec3::Y, Vec3::X, Vec3::new(1.0, 2.0, -3.0).normalize()] {
@@ -581,9 +564,8 @@ mod tests {
         }
     }
 
-    /// A zero normal names no plane, so there is nothing to draw — and the empty mesh still
-    /// has to declare the layout `body_wireframe.wgsl` binds, or the pipeline fails at run
-    /// time rather than at build time.
+    /// A zero normal names no plane. The empty mesh still declares the layout
+    /// `body_wireframe.wgsl` binds, or the pipeline fails at run time.
     #[test]
     fn a_circle_with_no_plane_is_empty_but_still_a_wireframe() {
         let mesh = generate_great_circle_tube(Vec3::ZERO, 0.01, 4);
@@ -601,9 +583,8 @@ mod tests {
         assert_eq!(closed.3.len() - open.3.len(), 4 * 6, "one ring of quads, four sides");
     }
 
-    /// Fewer than two points is not a tube. It has to come back empty rather than
-    /// degenerate: a zero-length tube is geometry with no normal, and the map draws one for
-    /// every object that happens to sit in the reference plane.
+    /// Fewer than two points must come back empty rather than degenerate. A zero-length tube
+    /// has no normal, and the map would build one per object sitting in the plane.
     #[test]
     fn a_tube_needs_somewhere_to_go() {
         for points in [vec![], vec![Vec3::X]] {
@@ -612,8 +593,8 @@ mod tests {
         }
     }
 
-    /// The offset is what lets one mesh hold many tubes, and an index that ignores it points
-    /// at another tube's vertices — which draws as sheets of triangles across the sphere.
+    /// The offset lets one mesh hold many tubes. An index ignoring it points at another
+    /// tube's vertices and draws sheets of triangles.
     #[test]
     fn the_index_offset_moves_the_indices() {
         let points = vec![Vec3::X, Vec3::Y];
@@ -633,8 +614,7 @@ mod tests {
         }
     }
 
-    /// And it closes. An open ring has a seam, which at a decade boundary is a gap in the one
-    /// thing on screen that is claiming to be a circle.
+    /// And it closes: an open ring has a seam.
     #[test]
     fn a_ring_closes_on_itself() {
         let open = build_tube_from_points(
@@ -646,7 +626,7 @@ mod tests {
     }
 
     /// Spokes reach the rim and start clear of the middle, where a dozen tubes meeting inside
-    /// one tube's radius reads as a blob rather than as a center.
+    /// one radius would read as a blob.
     #[test]
     fn spokes_reach_the_rim_without_piling_up_in_the_middle() {
         let mesh = plane_spokes(12, 0.02, 0.01, 4, 0.5);
@@ -657,8 +637,7 @@ mod tests {
         assert!(positions(&mesh).iter().all(|p| p.y.abs() < 0.02), "a spoke left the plane");
     }
 
-    /// A drop-line starts and ends on a dash. An object with a gap under it looks detached
-    /// from its own marker, and the plane end looks like it is not quite touching.
+    /// A drop-line starts and ends on a dash, so neither end looks detached.
     #[test]
     fn a_drop_line_starts_and_ends_on_a_dash() {
         for dashes in [1, 2, 5, 9] {
@@ -685,8 +664,7 @@ mod tests {
         assert_eq!(heights.len(), 12, "six dashes have twelve ends");
     }
 
-    /// A set of curves becomes one mesh, and an empty set is still a wireframe rather than a
-    /// panic.
+    /// A set of curves becomes one mesh, and an empty set a wireframe rather than a panic.
     #[test]
     fn curves_become_one_tube_mesh() {
         let square: Vec<Vec3> = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)]

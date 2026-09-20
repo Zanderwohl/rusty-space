@@ -11,9 +11,8 @@ pub const M_PER_AU: f64 = 1.495_978_707e11;
 
 /// How a whole snapshot was arrived at.
 ///
-/// Per snapshot, not per item. A picture is one claim about what is where at one moment; a
-/// mixture of two kinds of knowledge with no label on the join is worse than either, because
-/// the reader has to audit it to know which half they are looking at.
+/// Per snapshot, not per item: a picture is one claim about what is where at one moment, and a
+/// mixture with no label on the join leaves the reader to audit which half is which.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Provenance {
     /// One observer's instruments. Everything is where its light says it was.
@@ -24,10 +23,8 @@ pub enum Provenance {
     Coordinate,
 }
 
-/// What a thing is, which is what decides how it is drawn and what color it takes.
-///
-/// The color is the host's: `em-map` names none, for the reason `em_ui::MenuTheme` carries
-/// its seven by value. A palette belongs to a product.
+/// What a thing is, which decides how it is drawn and what color it takes. The color itself
+/// is the host's: a palette belongs to a product.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ItemKind {
     Star,
@@ -59,11 +56,9 @@ impl ItemKey {
 
     /// A key for an id that is only unique inside its own domain.
     ///
-    /// A star's catalogue id and a ship's id are both small integers counted from different
-    /// places, so used raw they collide — and a collision here is two unrelated things sharing
-    /// one entity and one selection, which looks like a rendering bug a long way from its
-    /// cause. The domain name is hashed in first, so `from_id("star", 7)` and
-    /// `from_id("ship", 7)` are unrelated.
+    /// A star's catalogue id and a ship's id are small integers counted from different places,
+    /// so raw they collide, and a collision is two things sharing one entity and one
+    /// selection. The domain is hashed in first.
     pub const fn from_id(domain: &str, id: u64) -> Self {
         Self(fnv(fnv(0xcbf2_9ce4_8422_2325, domain.as_bytes()), &id.to_le_bytes()))
     }
@@ -88,11 +83,9 @@ pub struct MapItem {
     pub position_ly: DVec3,
     /// Meters. Zero for anything with no size worth drawing at any zoom.
     pub radius_m: f64,
-    /// What wins when two labels want the same pixels: bigger takes them. Kilograms for a
-    /// body, so a map names Jupiter and not its moons for no reason beyond the mass.
-    ///
-    /// Zero where nothing says otherwise, and that is a real answer rather than a gap: an
-    /// unweighted thing is named only where there is room to spare. See [`crate::label`].
+    /// What wins when two labels want the same pixels, and how big a mark is drawn.
+    /// Kilograms for a body. Zero means unstated, which is named only where there is room to
+    /// spare and drawn at full size. See [`crate::weight`].
     pub weight: f64,
     /// Spin axis, or the normal of a ring or belt. Ecliptic north where nothing says otherwise.
     pub pole: DVec3,
