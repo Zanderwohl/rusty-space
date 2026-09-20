@@ -16,6 +16,12 @@ pub struct Candidate {
     pub key: ItemKey,
     /// Bigger takes the pixels. See [`crate::MapItem::weight`].
     pub weight: f64,
+    /// Laid out before everything else, whatever it weighs.
+    ///
+    /// The reader's own craft is the one of these. It is not competing for the view; it is
+    /// where the view is from, and a map that names every ship but the reader's has a hole in
+    /// it exactly where they are looking.
+    pub first: bool,
     /// The symbol's center, in pixels from the viewport's top left.
     pub at: Vec2,
     /// What the text will occupy, in pixels.
@@ -63,9 +69,11 @@ pub fn lay_out(candidates: Vec<Candidate>, viewport: Vec2, layout: Layout) -> Ve
 
     // Ties broken by key: order alone decides who is dropped, so an unstable sort flickers.
     inside.sort_by(|a, b| {
-        b.weight
-            .partial_cmp(&a.weight)
-            .unwrap_or(std::cmp::Ordering::Equal)
+        b.first
+            .cmp(&a.first)
+            .then_with(|| {
+                b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal)
+            })
             .then_with(|| a.key.cmp(&b.key))
     });
 
@@ -109,6 +117,7 @@ mod tests {
         Candidate {
             key: ItemKey::from_name(key),
             weight,
+            first: false,
             at: Vec2::new(x, y),
             size: Vec2::new(40.0, 12.0),
         }
@@ -273,6 +282,25 @@ mod tests {
         assert_eq!(one, two);
         assert_eq!(two, three);
         assert_eq!(one.len(), 1);
+    }
+
+    /// **The reader's own craft is named whatever it is standing on top of.** Two ships at one
+    /// pixel is one name, and the one worth keeping is the reader's: the other is the one they
+    /// can point at to ask.
+    #[test]
+    fn the_readers_own_craft_is_named_first() {
+        // Keys chosen so the tie-break alone would hand it to the other ship: `first` is the
+        // only thing that can save it.
+        let mut own = at("this ship", f64::INFINITY, 300.0, 200.0);
+        own.key = ItemKey(u64::MAX);
+        own.first = true;
+        let mut other = at("Wren", f64::INFINITY, 301.0, 201.0);
+        other.key = ItemKey(0);
+        for handed in [vec![own, other], vec![other, own]] {
+            let placed = lay_out(handed, view(), loose(Vec2::ZERO, 2.0));
+            assert_eq!(placed.len(), 1);
+            assert_eq!(placed[0].key, own.key, "the other ship took the reader's name");
+        }
     }
 
     /// A ship outranks every body, which the client states as `f64::INFINITY`.

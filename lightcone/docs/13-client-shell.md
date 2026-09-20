@@ -867,8 +867,23 @@ about primaries or satellites — a hierarchy is what mass already says, and enc
 two answers to one question.
 
 Ships outrank every body there is and are written in their own amber, the same amber their mark
-is drawn in. Your own ship is not named: it is the one thing on the map whose position never
-has to be looked up, because the rings and the spokes are centered on it.
+is drawn in. **Every craft is named, this one included** — by the name the account carries,
+which is the name every other client has for it, and not a word for "you". A map that draws
+five ships and names four of them has a hole in it where the reader is. It is laid out before
+everything else: two craft at one pixel is one name, and the one worth keeping is the reader's
+— the other is the thing they can point at to ask about.
+
+**Nothing on the map is white.** The palette has two phosphors, and this ship is drawn in the
+same amber as the rest, as the same filled dot. Drawn as a white circle it was a white outline
+around whichever contact happened to be beside it, which at these scales is most of them: ten
+kilometres is well under a pixel at a hundredth of an astronomical unit. What says which craft
+is the reader's is the rings, which are drawn from it.
+
+The amber is `em_ui::vfd::AMBER`, at the **same perceptual lightness as the interface's green**
+— Oklab `L`, asserted in a test rather than eyeballed. A ship and a body are two kinds of
+thing, not one more important than the other, so only their hue says which is which. Against
+that constraint it is as chromatic as sRGB reaches, which is what keeps it amber rather than
+cream.
 
 **A name that would leave the viewport is dropped, not dragged to the rim.** An arrow at the
 edge names something the reader cannot see and spends the pixels of something they can.

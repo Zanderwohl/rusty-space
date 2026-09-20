@@ -59,8 +59,6 @@ const LABEL_GAP_PX: f32 = 4.0;
 /// The same number that decides how big its mark is drawn, because it is the same comparison:
 /// see [`em_map::weight::FLOOR`] for where it comes from.
 const LABEL_FLOOR: f64 = em_map::weight::FLOOR;
-/// The amber a contact's name is written in, which is the amber its mark is drawn in.
-const SHIP_LABEL: bevy::prelude::Color = bevy::prelude::Color::srgb(0.95, 0.70, 0.25);
 const LABEL_CLEARANCE_PX: f32 = 6.0;
 
 /// The corner square's side and its inset from the bottom left, in points. The event log
@@ -205,8 +203,7 @@ fn labels(
     let mut candidates = Vec::with_capacity(frame.placements.len());
     let mut galleys = Vec::with_capacity(frame.placements.len());
     for placement in &frame.placements {
-        // Not the observer: the rings and spokes are centered on it already.
-        if placement.kind == em_map::ItemKind::Observer || placement.label.is_empty() {
+        if placement.label.is_empty() {
             continue;
         }
         let Some(ndc) =
@@ -221,6 +218,7 @@ fn labels(
         candidates.push(em_map::label::Candidate {
             key: placement.key,
             weight: placement.weight,
+            first: placement.kind == em_map::ItemKind::Observer,
             // egui counts pixels down from the top left; NDC runs up from the middle.
             at: glam::Vec2::new(
                 (ndc.x as f32 + 1.0) * 0.5 * rect.width(),
@@ -260,11 +258,16 @@ fn labels(
     }
 }
 
-/// Amber for a contact, the interface's text color for everything else. Not the mark's color:
-/// a body's mark takes the palette's dimmer greens, too dim to read text at.
+/// Amber for a craft, this ship included, and the interface's text color for everything else.
+/// The palette has two phosphors and no white.
+///
+/// Not the mark's color for a body: those take the palette's dimmer greens, which are too dim
+/// to read text at.
 fn label_color(kind: em_map::ItemKind) -> egui::Color32 {
     match kind {
-        em_map::ItemKind::Ship | em_map::ItemKind::Station => color_of(SHIP_LABEL),
+        em_map::ItemKind::Ship | em_map::ItemKind::Station | em_map::ItemKind::Observer => {
+            color_of(em_ui::vfd::AMBER)
+        }
         _ => color_of(em_ui::vfd::TEXT),
     }
 }
@@ -835,6 +838,17 @@ mod tests {
         assert_eq!(drag_of(ViewMode::World, true), Some(Drag::Look), "the same one, over a ship");
         assert_eq!(drag_of(ViewMode::Map, false), Some(Drag::Pan));
         assert_eq!(drag_of(ViewMode::World, false), None, "the left button is picking's");
+    }
+
+    /// Every name is written in a palette color, this ship's included. Two phosphors, and no
+    /// white: a craft is amber and everything else is the interface's own green.
+    #[test]
+    fn every_name_is_written_in_the_palette() {
+        for kind in [em_map::ItemKind::Ship, em_map::ItemKind::Station, em_map::ItemKind::Observer]
+        {
+            assert_eq!(label_color(kind), color_of(em_ui::vfd::AMBER), "{kind:?}");
+        }
+        assert_eq!(label_color(em_map::ItemKind::Planet), color_of(em_ui::vfd::TEXT));
     }
 
     /// The wheel does not break a lock. Zooming toward the pointer moves the focus and

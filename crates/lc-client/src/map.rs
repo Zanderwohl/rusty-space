@@ -246,8 +246,14 @@ impl Plugin for MapPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(em_render::body_material::BodyWireframeMaterialPlugin)
             .add_systems(Startup, setup)
-            .add_systems(Update, survey.in_set(Stage::Act))
-            .add_systems(Update, (resize, place).chain().in_set(Stage::Scene));
+            // **After the scene the snapshot is built from.** Taken in `Stage::Act`, it held
+            // the previous frame's eye while the contacts in it were this frame's, so this
+            // ship's own mark trailed one frame behind everything around it — a jitter
+            // whenever the ship was under way.
+            .add_systems(
+                Update,
+                (survey, resize, place).chain().in_set(Stage::Scene).after(crate::app::Placed),
+            );
     }
 }
 
@@ -353,7 +359,7 @@ fn survey(
     map.snapshot = match ui.map.source {
         Source::Observed => crate::map_source::observed(&game.0, &bodies, &uplink, eye.at_ly),
         #[cfg(feature = "godview")]
-        Source::God => crate::map_source::coordinate(&game.0, eye.at_ly),
+        Source::God => crate::map_source::coordinate(&game.0, &uplink, eye.at_ly),
     };
     map.primary = crate::map_source::primary(&game.0);
 }
@@ -623,7 +629,9 @@ fn at_of(placement: &Placement) -> Vec3 {
 /// A ship is always a dot: its hull size is not what anyone reads off a map.
 fn form_of(placement: &Placement, view: Viewport) -> Form {
     match placement.kind {
-        ItemKind::Ship => Form::Dot,
+        // This ship is drawn as one of them: a circle around a dot at the same place is a
+        // white outline on somebody else's mark.
+        ItemKind::Ship | ItemKind::Observer => Form::Dot,
         _ if view.rad_per_px > 0.0
             && 2.0 * placement.angular_radius / view.rad_per_px > view.point_px =>
         {
@@ -866,8 +874,9 @@ fn color_of(kind: ItemKind) -> Color {
         ItemKind::Planet | ItemKind::Moon | ItemKind::Minor => em_ui::vfd::BUTTON_BORDER,
         ItemKind::Population => em_ui::vfd::TEXT_DIM,
         // Amber against the green: color is the one channel a map has that a list does not.
-        ItemKind::Ship | ItemKind::Station => Color::srgb(0.95, 0.70, 0.25),
-        ItemKind::Observer => Color::srgb(1.0, 1.0, 1.0),
+        // This ship included — it is a craft like the others, and the palette has no white in
+        // it. What says which one is the reader's is the rings, which are drawn from it.
+        ItemKind::Ship | ItemKind::Station | ItemKind::Observer => em_ui::vfd::AMBER,
     }
 }
 
@@ -934,6 +943,31 @@ mod tests {
         assert!(follow(MapFocus::Observer, &snapshot, None, &mut at), "the first call should move it");
         assert!(!follow(MapFocus::Observer, &snapshot, None, &mut at), "the second should not");
         assert!(!follow(MapFocus::Free, &snapshot, None, &mut at), "free never moves it");
+    }
+
+    /// **Every mark is drawn in the palette, and the palette has no white in it.** A color
+    /// written straight into a match arm is one the interface cannot re-theme and one nothing
+    /// else agrees with.
+    #[test]
+    fn nothing_is_drawn_outside_the_palette() {
+        let palette = [
+            em_ui::vfd::TEXT,
+            em_ui::vfd::TEXT_DIM,
+            em_ui::vfd::BUTTON_BORDER,
+            em_ui::vfd::AMBER,
+        ];
+        for kind in [
+            ItemKind::Star,
+            ItemKind::Planet,
+            ItemKind::Moon,
+            ItemKind::Minor,
+            ItemKind::Population,
+            ItemKind::Ship,
+            ItemKind::Station,
+            ItemKind::Observer,
+        ] {
+            assert!(palette.contains(&color_of(kind)), "{kind:?} is drawn off the palette");
+        }
     }
 
     /// **The primary is a mode, not the body it resolves to today.** Centering on it and

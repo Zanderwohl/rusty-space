@@ -69,7 +69,7 @@ fn kind_of(kind: Kind) -> ItemKind {
 pub fn observed(session: &Session, bodies: &Bodies, uplink: &Uplink, eye_ly: DVec3)
     -> MapSnapshot {
     let mut items = Vec::with_capacity(bodies.drawn.len() + uplink.contacts.len() + 64);
-    items.push(observer(session, eye_ly));
+    items.push(observer(session, uplink, eye_ly));
     push_local_system(&mut items, session);
     push_bodies(&mut items, bodies);
     push_stars(&mut items, session, eye_ly);
@@ -99,9 +99,9 @@ pub fn observed(session: &Session, bodies: &Bodies, uplink: &Uplink, eye_ly: DVe
 /// The only difference from [`observed`] is the instant each worldline is sampled at. See
 /// `lightcone/docs/07-rendering.md`.
 #[cfg(feature = "godview")]
-pub fn coordinate(session: &Session, eye_ly: DVec3) -> MapSnapshot {
+pub fn coordinate(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> MapSnapshot {
     let now = session.coordinate_time_s();
-    let mut items = vec![observer(session, eye_ly)];
+    let mut items = vec![observer(session, uplink, eye_ly)];
     push_local_system(&mut items, session);
     if let Some(system) = session.system.as_ref() {
         for body in system.drawables_at(eye_ly, now) {
@@ -161,15 +161,31 @@ fn base64url(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn observer(session: &Session, eye_ly: DVec3) -> MapItem {
+/// This ship, by the name every other client has for it.
+///
+/// Named like any other craft and weighed like one: a map that draws five ships and names four
+/// of them is a map with a hole where the reader is. The weight is what keeps it out of the
+/// mass comparison the names are ranked by — see [`em_map::weight`].
+fn observer(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> MapItem {
     MapItem::body(
         ItemKey::from_name("observer"),
-        "this ship",
+        own_name(uplink),
         ItemKind::Observer,
         eye_ly,
         session.ship.length_m * 0.5,
         session.ship.motion.attitude,
     )
+    .weighing(f64::INFINITY)
+}
+
+/// What this ship is called: the display name the account carries, which is the name every
+/// other client sees on it. Offline there is no broker to have said one.
+fn own_name(uplink: &Uplink) -> String {
+    uplink
+        .joined()
+        .map(|joined| joined.name.clone())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "this ship".into())
 }
 
 fn drawable_item(body: &lc_world::system::Drawable) -> MapItem {
@@ -333,6 +349,20 @@ mod tests {
         assert_ne!(star_key, ItemKey::from_name(&system.star_name), "the star is not by name");
     }
 
+    /// **This ship is named like any other.** A map that draws five ships and names four of
+    /// them has a hole in it where the reader is, and the name is the one the account carries
+    /// rather than a word for "you".
+    #[test]
+    fn this_ship_is_named_and_weighed_like_a_ship() {
+        let snapshot = observed(&session(), &Bodies::default(), &Uplink::default(), DVec3::ZERO);
+        let observer = snapshot.observer().expect("the observer is not on their own map");
+        assert!(!observer.label.is_empty(), "nothing to draw");
+        assert!(observer.weight.is_infinite(), "a ship sets no bar for the names");
+        // Offline there is no broker to have said a name, and this says so rather than
+        // inventing one.
+        assert_eq!(observer.label, "this ship");
+    }
+
     /// Two things sharing a key share an entity and a selection.
     #[test]
     fn nothing_shares_a_key() {
@@ -416,7 +446,7 @@ mod tests {
         /// and says so rather than quietly omitting them.
         #[test]
         fn the_god_view_is_marked_and_carries_no_ships() {
-            let snapshot = coordinate(&session(), DVec3::ZERO);
+            let snapshot = coordinate(&session(), &Uplink::default(), DVec3::ZERO);
             assert_eq!(snapshot.provenance, em_map::Provenance::Coordinate);
             assert!(snapshot.items.iter().all(|i| i.kind != ItemKind::Ship));
             assert!(snapshot.observer().is_some());

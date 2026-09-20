@@ -50,6 +50,11 @@ pub const HAS_MAIN_MENU: bool = cfg!(not(target_arch = "wasm32"));
 /// happened to leave in the component, and trailed the view by a frame whenever that was the
 /// old one.
 ///
+/// The same shape three times over since: the map's snapshot was taken in [`Stage::Act`] and
+/// held the previous frame's eye while the contacts in it were this frame's, so this ship's own
+/// mark trailed one frame behind everything around it. **Anything built from the scene belongs
+/// after the scene is placed.**
+///
 /// [`survey`]: crate::pick
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Stage {
@@ -66,6 +71,14 @@ pub enum Stage {
     /// the one this stage measures.
     Mark,
 }
+
+/// The scene is placed: the eye, the sky, the bodies, the hulls.
+///
+/// A set rather than the systems themselves. `place_eye` is registered twice — once for the
+/// sky and once for the menu's backdrop — and Bevy refuses to order against a system type with
+/// two instances in one schedule.
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Placed;
 
 #[derive(Resource, Deref, DerefMut)]
 pub struct Ui(pub UiState);
@@ -207,6 +220,7 @@ impl Plugin for ClientPlugin {
                 )
                     .chain()
                     .in_set(Stage::Scene)
+                    .in_set(Placed)
                     .run_if(in_state(AppState::InGame)),
             )
             // The menu's backdrop is the same starfield pass, so it needs the same two
