@@ -873,6 +873,12 @@ five ships and names four of them has a hole in it where the reader is. It is la
 everything else: two craft at one pixel is one name, and the one worth keeping is the reader's
 — the other is the thing they can point at to ask about.
 
+Offline there is no broker to have said a name, so a ship with no account behind it is
+**Anonymous Ship** — `uplink::ANONYMOUS`, and the radio window calls it the same thing on this
+ship's own lines. A name and not a word for the reader. It was "this ship", which reads as the
+interface describing you rather than as a name: with that on screen there is no telling a real
+name from the absence of one, which is the one thing worth seeing at a glance.
+
 **Nothing on the map is white.** The palette has two phosphors, and this ship is drawn in the
 same amber as the rest, as the same filled dot. Drawn as a white circle it was a white outline
 around whichever contact happened to be beside it, which at these scales is most of them: ten

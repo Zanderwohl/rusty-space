@@ -918,7 +918,7 @@ mod tests {
 
     fn snapshot() -> MapSnapshot {
         MapSnapshot::observed(0.0, vec![
-            MapItem::body(ItemKey::from_name("observer"), "this ship", ItemKind::Observer,
+            MapItem::body(ItemKey::from_name("observer"), "Anonymous Ship", ItemKind::Observer,
                 DVec3::new(1.0, 2.0, 3.0), 100.0, DVec3::Z),
             MapItem::body(ItemKey::from_id("star", 7), "Sol", ItemKind::Star,
                 DVec3::new(4.0, 5.0, 6.0), 7.0e8, DVec3::Z),
@@ -1019,7 +1019,7 @@ mod tests {
     fn ship_at(bearing: f64) -> MapSnapshot {
         let star = DVec3::new(4.0, 5.0, 6.0);
         MapSnapshot::observed(0.0, vec![
-            MapItem::body(ItemKey::from_name("observer"), "this ship", ItemKind::Observer,
+            MapItem::body(ItemKey::from_name("observer"), "Anonymous Ship", ItemKind::Observer,
                 star + DVec3::new(bearing.cos(), bearing.sin(), 0.0), 100.0, DVec3::Z),
             MapItem::body(ItemKey::from_id("star", 7), "Sol", ItemKind::Star, star, 7.0e8,
                 DVec3::Z),

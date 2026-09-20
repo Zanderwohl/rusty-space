@@ -215,7 +215,7 @@ fn base64url(text: &str) -> Option<Vec<u8>> {
 fn observer(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> MapItem {
     MapItem::body(
         ItemKey::from_name("observer"),
-        own_name(uplink),
+        uplink.own_name(),
         ItemKind::Observer,
         eye_ly,
         session.ship.length_m * 0.5,
@@ -224,15 +224,6 @@ fn observer(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> MapItem {
     .weighing(f64::INFINITY)
 }
 
-/// What this ship is called: the display name the account carries, which is the name every
-/// other client sees on it. Offline there is no broker to have said one.
-fn own_name(uplink: &Uplink) -> String {
-    uplink
-        .joined()
-        .map(|joined| joined.name.clone())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "this ship".into())
-}
 
 /// A body, and the target the rest of the interface names it by.
 ///
@@ -428,9 +419,11 @@ mod tests {
         let observer = snapshot.observer().expect("the observer is not on their own map");
         assert!(!observer.label.is_empty(), "nothing to draw");
         assert!(observer.weight.is_infinite(), "a ship sets no bar for the names");
-        // Offline there is no broker to have said a name, and this says so rather than
-        // inventing one.
-        assert_eq!(observer.label, "this ship");
+        // Offline there is no broker to have said a name. The literal, not the constant: a
+        // test comparing a constant to itself would pass whatever the word was, and the point
+        // of this one is that a nameless ship is *named* rather than described.
+        assert_eq!(observer.label, "Anonymous Ship");
+        assert_eq!(observer.label, crate::uplink::ANONYMOUS, "two answers to one question");
     }
 
     /// Two things sharing a key share an entity and a selection.
