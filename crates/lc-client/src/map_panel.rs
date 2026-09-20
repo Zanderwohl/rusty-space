@@ -58,10 +58,12 @@ pub fn draw(
         (rect.width() * ctx.pixels_per_point()).round().max(1.0) as u32,
         (rect.height() * ctx.pixels_per_point()).round().max(1.0) as u32,
     );
-    if open {
-        read_input(ctx, &response, rect, &mut out);
-    } else if response.clicked() {
-        // The corner surface's whole interaction. See [`minimap`].
+    // The same gestures on both surfaces, from the same function, because two surfaces
+    // showing one view that answer a drag differently is worse than either answer.
+    read_input(ctx, &response, rect, &mut out);
+    if !open && response.clicked() {
+        // A click is not a drag — egui keeps them apart — so this is the one gesture the
+        // minimap has that the panel does not.
         ask(&mut out, Action::OpenPanel(Panel::Map));
     }
 }
@@ -94,13 +96,17 @@ fn panel(
 
 /// The corner surface. One gesture and no more.
 ///
-/// A minimap that took a drag would orbit a view the size of a postage stamp. One that took
-/// the wheel would be worse: it is always on screen, so the ship's own camera would stop
-/// zooming whenever the cursor drifted into the corner — the failure
-/// `crate::input::read_wheel` consults egui to prevent, arriving from the other side. It took
-/// the wheel for a while anyway, two lines under a comment saying it must not.
+/// It takes the same gestures the panel does, and a click on top of them, which opens the
+/// panel.
 ///
-/// One click, which opens the panel. That is the whole of it.
+/// **What that costs, stated because it is a real cost.** `crate::input`'s wheel and cursor
+/// grab both stand down while egui wants the pointer, and this surface is always on screen —
+/// so hovering the corner stops the ship's boom zooming, and a right-press begun here pans the
+/// map instead of turning the view. A drag belongs to the widget it started on even after the
+/// cursor leaves, which is right, and is also why the whole gesture is the map's.
+///
+/// Every panel in the interface already costs exactly this. The minimap is the only one that
+/// is never closed, which is the whole of the difference and is a corner of 190 points.
 fn minimap(ctx: &egui::Context, map: &mut Map) -> Option<(egui::Rect, egui::Response)> {
     let mut answer = None;
     egui::Area::new("minimap".into())
@@ -109,7 +115,7 @@ fn minimap(ctx: &egui::Context, map: &mut Map) -> Option<(egui::Rect, egui::Resp
         .anchor(egui::Align2::LEFT_BOTTOM, MINIMAP_MARGIN)
         .show(ctx, |ui| {
             let side = egui::vec2(MINIMAP_SIDE, MINIMAP_SIDE);
-            answer = Some(image(ui, map, side, egui::Sense::click()));
+            answer = Some(image(ui, map, side, egui::Sense::click_and_drag()));
         });
     answer
 }
@@ -189,9 +195,11 @@ fn controls(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<
 
 /// Drag and wheel over the full surface.
 ///
-/// **Left** drags to turn, not right: right is the sky's look button and the cursor grab, and
-/// a right-drag that began on the map and ended off it would leave the ship turning — the
-/// grab is asked for once, on the press, by design.
+/// **Left** turns and **right** pans. Right is also the sky's look button, so a right-press
+/// that starts on either map surface turns the map and not the view — the grab is asked for
+/// once, on the press, and `grab_cursor` stands down while egui wants the pointer. That is a
+/// drag belonging to the widget it began on, which is correct, and it is the price of the
+/// second button.
 fn read_input(
     ctx: &egui::Context,
     response: &egui::Response,
@@ -200,7 +208,10 @@ fn read_input(
 ) {
     if response.dragged() {
         let delta = response.drag_delta();
-        let panning = response.dragged_by(egui::PointerButton::Middle)
+        // Right as well as middle, because the minimap is too small to reach for a modifier
+        // over and a second button is the one thing a postage stamp has room for.
+        let panning = response.dragged_by(egui::PointerButton::Secondary)
+            || response.dragged_by(egui::PointerButton::Middle)
             || ctx.input(|i| i.modifiers.shift);
         if panning {
             let span = rect.width().max(rect.height()).max(1.0) as f64;

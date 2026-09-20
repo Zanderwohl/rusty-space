@@ -672,15 +672,24 @@ it has a width the geometry does not know about.
   its rim, and a constant width that is a pixel at the far end is eighty at the near one.
   Scaled to the outermost decade, twelve spokes were twelve solid wedges across the view.
 
-### The minimap takes one gesture
+### The minimap is the map, at a corner
 
 It is the map when the panel is closed, and the same texture: transforms are camera-relative,
 so an entity belongs to exactly one camera and two independently aimed views would need two
 sets of them. There has never been a second framing to want.
 
-It senses clicks and nothing else. One that took the wheel would stop the ship's own camera
-zooming whenever the cursor drifted into the corner, which is exactly the failure
-`input::read_wheel` consults egui to prevent, arriving from the other side.
+It takes the same gestures the panel does — **left-drag turns, right-drag pans, the wheel
+zooms** — and a click, which opens the panel. Both surfaces read them through one function,
+because two views of one thing that answer a drag differently is worse than either answer.
+
+**What that costs is real and is the price of the second button.** `input::read_wheel` and
+`grab_cursor` both stand down while egui wants the pointer, so hovering the corner stops the
+ship's boom zooming, and a right-press begun on the minimap pans the map rather than turning
+the view — a drag belongs to the widget it started on even after the cursor leaves, which is
+correct and is exactly why the whole gesture is the map's.
+
+Every panel in the interface already costs this. The minimap is the only one that is never
+closed, which is the whole of the difference, and it is a corner of 190 points.
 
 ## Open
 
