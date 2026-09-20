@@ -61,33 +61,33 @@ pub fn text_row(ui: &mut Ui, label: &str, hint: &str, value: &str, value_hint: &
 
 // ------------------------------------------------------------------ formatting
 
-/// Metres in whichever unit keeps the number readable; the tooltip has the metres.
-pub fn distance(metres: f64) -> String {
-    if !metres.is_finite() {
+/// Meters in whichever unit keeps the number readable; the tooltip has the meters.
+pub fn distance(meters: f64) -> String {
+    if !meters.is_finite() {
         return NONE.to_string();
     }
-    let magnitude = metres.abs();
+    let magnitude = meters.abs();
     if magnitude < 1.0e3 {
-        format!("{metres:.1} m")
+        format!("{meters:.1} m")
     } else if magnitude < 0.01 * AU_M {
-        format!("{:.3} km", metres / 1.0e3)
+        format!("{:.3} km", meters / 1.0e3)
     } else {
-        format!("{:.6} AU", metres / AU_M)
+        format!("{:.6} AU", meters / AU_M)
     }
 }
 
-pub fn distance_hint(metres: f64) -> String {
-    format!("{} m", format::sci_not(metres))
+pub fn distance_hint(meters: f64) -> String {
+    format!("{} m", format::sci_not(meters))
 }
 
-pub fn speed(metres_per_second: f64) -> String {
-    if !metres_per_second.is_finite() {
+pub fn speed(meters_per_second: f64) -> String {
+    if !meters_per_second.is_finite() {
         return NONE.to_string();
     }
-    if metres_per_second.abs() < 1.0e3 {
-        format!("{metres_per_second:.2} m/s")
+    if meters_per_second.abs() < 1.0e3 {
+        format!("{meters_per_second:.2} m/s")
     } else {
-        format!("{:.3} km/s", metres_per_second / 1.0e3)
+        format!("{:.3} km/s", meters_per_second / 1.0e3)
     }
 }
 

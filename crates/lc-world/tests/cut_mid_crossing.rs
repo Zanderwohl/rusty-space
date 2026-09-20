@@ -125,7 +125,7 @@ fn a_crossing_ordered_in_flight_keeps_the_speed_already_built() {
 #[test]
 fn a_crossing_ordered_from_an_orbit_keeps_its_speed() {
     let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
-    // Thirty kilometres a second, mostly across the line rather than along it.
+    // Thirty kilometers a second, mostly across the line rather than along it.
     craft.motion.beta = DVec3::new(0.00002, 0.00009, 0.0);
     craft.motion.set_adrift(0.0);
     let moving = craft.motion.beta.length();

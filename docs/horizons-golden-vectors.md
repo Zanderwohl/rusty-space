@@ -13,9 +13,9 @@ that validates the orbital element *data* rather than internal consistency.
 | `REF_SYSTEM` | `ICRF` | |
 | `VEC_TABLE` | `2` | position + velocity |
 | `VEC_CORR` | `NONE` | **geometric** states — no light-time or aberration |
-| `OUT_UNITS` | `KM-S` | km and km/s; the sim uses metres, so multiply by 1000 |
-| `CENTER` | `500@10` | Sun body centre, for heliocentric planets |
-| `CENTER` | `500@399` | Earth body centre, for Luna |
+| `OUT_UNITS` | `KM-S` | km and km/s; the sim uses meters, so multiply by 1000 |
+| `CENTER` | `500@10` | Sun body center, for heliocentric planets |
+| `CENTER` | `500@399` | Earth body center, for Luna |
 | `TLIST_TYPE` | `JD` | |
 | `TLIST` | `2451545.0,2460676.5` | J2000, and 2025-01-01 to expose secular drift |
 
@@ -117,10 +117,10 @@ python3 gen_rust.py        # -> generated_bodies.rs
 
 - **Comets need an apparition selector.** `COMMAND='1P;'` returns a list of per-apparition
   records rather than an ephemeris. Use `DES=1P;CAP;` — closest apparition.
-- **Some moons orbit a barycentre, not their planet.** Nix, Hydra, Kerberos and Styx circle
-  the Pluto–Charon barycentre (`500@9`); centring them on Pluto puts Pluto's own 2100 km
+- **Some moons orbit a barycenter, not their planet.** Nix, Hydra, Kerberos and Styx circle
+  the Pluto–Charon barycenter (`500@9`); centring them on Pluto puts Pluto's own 2100 km
   wobble into the "orbit" and the fit fails outright. Dysnomia likewise orbits the Eris
-  system barycentre, `500@20136199`.
+  system barycenter, `500@20136199`.
 - **The first continuation window must be a few orbits, not a fixed fraction.** Osculating
   mean motion can be a percent or two off for a close-in moon — Saturn's J₂ shifts Pan's by
   ~1.5% — and across hundreds of orbits that is several revolutions of phase error, leaving
@@ -136,7 +136,7 @@ python3 gen_rust.py        # -> generated_bodies.rs
 ## Merging an existing save
 
 `docs/scratch/{resolve,resolve2,run_new,gen2,merged_table}.py` merge a `.em` save with
-JPL. The save is authoritative for identity, mass, radius, colour, tags and rotation;
+JPL. The save is authoritative for identity, mass, radius, color, tags and rotation;
 JPL supplies only the orbital elements. `assets/systems/solar_system.em` is the input.
 
 Resolving body names to Horizons ids takes three passes:
@@ -144,7 +144,7 @@ Resolving body names to Horizons ids takes three passes:
 1. The name as written, against the body's own primary as CENTER.
 2. Horizons answers an ambiguous name with a table of `ID# / Name` — parse it and take the
    exact match. "Titan" matches Titan (606), Titania (703) and a Titan-3C rocket body.
-3. Explicit NAIF ids for the planets, whose names also match their barycentres.
+3. Explicit NAIF ids for the planets, whose names also match their barycenters.
 
 Two traps:
 
@@ -152,6 +152,6 @@ Two traps:
   `C/2010 J1`, and `S2011 J1` returns `251P/LINEAR`. Fitting a comet's orbit onto a moon
   would look perfectly healthy in the output.
 - **Re-fit anything whose primary changed.** A body already fitted in an earlier pass may
-  now orbit something else — Pluto and Charon move from heliocentric and Pluto-centred to
-  the Pluto–Charon barycentre. Diff the CENTER each body was fetched with against the one
+  now orbit something else — Pluto and Charon move from heliocentric and Pluto-centered to
+  the Pluto–Charon barycenter. Diff the CENTER each body was fetched with against the one
   its current primary implies, rather than assuming a cached fit is still valid.

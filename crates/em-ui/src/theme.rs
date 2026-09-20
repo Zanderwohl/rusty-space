@@ -1,4 +1,4 @@
-//! The colours a menu is drawn in.
+//! The colors a menu is drawn in.
 
 use bevy::color::Color;
 
@@ -16,7 +16,7 @@ pub mod vfd {
     pub const OVERLAY_BACKDROP: Color = Color::srgba(0.0, 0.0, 0.0, 0.70);
 }
 
-/// Every colour a menu screen needs, carried by value so two products - or two screens of one
+/// Every color a menu screen needs, carried by value so two products - or two screens of one
 /// product - can differ without a global.
 #[derive(Clone, Copy, Debug)]
 pub struct MenuTheme {

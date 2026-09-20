@@ -10,7 +10,7 @@
 //! relative to: [`Eye`] is where the player is looking *from*, which is a boom's length behind
 //! the hull rather than inside it, and the ship becomes the one thing drawn at an offset from
 //! the render origin. Every other pass reads the eye where it used to read the ship, so the
-//! parallax a ten-thousand-kilometre boom opens up against a nearby moon is simply correct
+//! parallax a ten-thousand-kilometer boom opens up against a nearby moon is simply correct
 //! instead of being an error nobody measured.
 
 use bevy::camera::visibility::NoFrustumCulling;
@@ -47,13 +47,13 @@ pub const DEFAULT_BOOM_LENGTHS: f64 = 4.0;
 /// What one notch of the wheel multiplies the boom by.
 pub const ZOOM_STEP: f64 = 1.25;
 
-/// A hull's albedo. Grey paint, near enough, and the one number that says how bright a ship is
+/// A hull's albedo. Gray paint, near enough, and the one number that says how bright a ship is
 /// against the planet behind it.
 pub const ALBEDO: f64 = 0.35;
 
 /// The two ends of the palette. Equal, because a hull has no generated surface: the material
 /// is a planet's and the pattern is turned off by a contrast of zero.
-const GREY: Vec4 = Vec4::new(0.30, 0.31, 0.33, 1.0);
+const GRAY: Vec4 = Vec4::new(0.30, 0.31, 0.33, 1.0);
 
 /// Light on the unlit side, as a fraction. Higher than a planet's, because a hull is small
 /// enough that its dark half is most of its silhouette and a hard terminator eats the shape.
@@ -68,12 +68,12 @@ const NIGHT: f32 = 0.10;
 pub struct Eye {
     /// Light-years from the world origin.
     pub at_ly: DVec3,
-    /// Metres from the hull's centre, back along the view.
+    /// Meters from the hull's center, back along the view.
     pub boom_m: f64,
     /// The craft the boom is on, or `None` for the player's own.
     ///
     /// Read by [`drawn`], which gives that one craft the boom exactly rather than the
-    /// difference of two light-year positions. A metres-wide offset taken that way loses most
+    /// difference of two light-year positions. A meters-wide offset taken that way loses most
     /// of its bits, and the hull the camera is closest to is the one that can least afford it.
     pub anchored: Option<ShipId>,
 }
@@ -279,15 +279,15 @@ fn uniforms(
     tone: &crate::tonemap::ToneMap,
 ) -> BodySurfaceUniform {
     BodySurfaceUniform {
-        dark: GREY,
-        light: GREY,
+        dark: GRAY,
+        light: GRAY,
         to_star: sim_to_render(to_star.normalize_or_zero()).as_vec3().extend(NIGHT),
         // A contrast of zero is what turns the generated surface off: the shader mixes the
-        // palette at a half whatever the noise says, and the two ends are the same grey.
+        // palette at a half whatever the noise says, and the two ends are the same gray.
         params: Vec4::new(0.0, 0.0, 0.0, 0.0),
         reflected: reflected.extend(0.0),
         // `w` is how far the pattern inverts in the body's own light, and a hull has no
-        // pattern: its two palette ends are the same grey.
+        // pattern: its two palette ends are the same gray.
         emitted: emitted.extend(0.0),
         exposure: Vec4::new(tone.surface_reference, tone.stops, 0.0, 0.0),
     }
@@ -336,7 +336,7 @@ fn drawn(game: &Session, uplink: &Uplink, eye: &Eye, look: DVec3) -> Vec<(Option
 
 /// One hull, reduced to what the transform and the material need.
 struct Placed {
-    /// From the eye, in simulation axes, metres.
+    /// From the eye, in simulation axes, meters.
     offset_m: DVec3,
     length_m: f64,
     /// Unit, or zero where nothing decides it.
@@ -548,7 +548,7 @@ mod tests {
         for length in [500.0, 5_000.0, 50_000.0] {
             let e = half_extents(length);
             // Relative, because the numbers are billionths: a render unit is an astronomical
-            // unit and a hull is metres, so `f32` carries seven digits of a very small one.
+            // unit and a hull is meters, so `f32` carries seven digits of a very small one.
             let want = length * 0.5 / UNIT_M;
             assert!((e.z as f64 - want).abs() < want * 1e-6, "{length} m gave {}", e.z);
             assert!((e.x / e.z - 0.6).abs() < 1e-5, "beam {e:?}");
@@ -562,7 +562,7 @@ mod tests {
     fn the_nearest_the_camera_comes_is_still_outside_the_near_plane() {
         let (near, _) = boom_limits(RAD_PER_PX, fov_x(std::f32::consts::FRAC_PI_4, 16.0 / 9.0));
         let length = lc_world::craft::LENGTH_RANGE_M.0;
-        // Boom to the centre, less the half-length the nose reaches back toward the camera.
+        // Boom to the center, less the half-length the nose reaches back toward the camera.
         let clearance = (near - 0.5) * length / UNIT_M;
         assert!(clearance > crate::app::NEAR_PLANE as f64, "{clearance} units of clearance");
     }

@@ -98,7 +98,7 @@ impl Observation {
         self.bands[b].as_ref()
     }
 
-    /// Ratio of the deficit in two bands. Unity means a grey occulter; above unity in the
+    /// Ratio of the deficit in two bands. Unity means a gray occulter; above unity in the
     /// bluer band means something that reddens, which is to say dust.
     pub fn deficit_ratio(&self, numerator: Band, denominator: Band) -> Option<f64> {
         let (n, d) = (self.band(numerator)?, self.band(denominator)?);
@@ -285,7 +285,7 @@ mod tests {
         assert!(n.age_seconds() < f.age_seconds());
     }
 
-    /// Step 5, corrected. Grey versus reddening is a *ratio* between bands, so one band
+    /// Step 5, corrected. Gray versus reddening is a *ratio* between bands, so one band
     /// cannot do it at any exposure and two can. The stellar-locus degeneracy that K does not
     /// rescue is a different measurement -- a steady obscuration with no baseline to compare
     /// against -- and lives in `em_spectra::extinction`.
@@ -297,12 +297,12 @@ mod tests {
             dust_response[b] = extinction::RATIO[b] as f32;
         }
 
-        let mut grey_model = EmissionModel::new(star, 5);
-        grey_model.populations.push(swarm(1.5e6, PerBand::splat(1.0)));
+        let mut gray_model = EmissionModel::new(star, 5);
+        gray_model.populations.push(swarm(1.5e6, PerBand::splat(1.0)));
         let mut dust_model = EmissionModel::new(star, 5);
         dust_model.populations.push(swarm(1.5e6, dust_response));
 
-        let grey = Target::new(frame_at_ly(30.0), grey_model);
+        let gray = Target::new(frame_at_ly(30.0), gray_model);
         let dust = Target::new(frame_at_ly(30.0), dust_model);
         let at = observer_at(60.0);
 
@@ -310,7 +310,7 @@ mod tests {
         let optical = big_scope().with_bands(BandMask::SILICON);
 
         let (g1, d1) = (
-            observe(&grey, at, &v_only, 1e8, 1).unwrap(),
+            observe(&gray, at, &v_only, 1e8, 1).unwrap(),
             observe(&dust, at, &v_only, 1e8, 1).unwrap(),
         );
         // In V the two are the same measurement, and there is no second band to compare.
@@ -319,12 +319,12 @@ mod tests {
         assert!(g1.deficit_ratio(Band::B, Band::V).is_none(), "V alone has no ratio to form");
 
         let (g2, d2) = (
-            observe(&grey, at, &optical, 1e8, 1).unwrap(),
+            observe(&gray, at, &optical, 1e8, 1).unwrap(),
             observe(&dust, at, &optical, 1e8, 1).unwrap(),
         );
-        let grey_ratio = g2.deficit_ratio(Band::B, Band::V).unwrap();
+        let gray_ratio = g2.deficit_ratio(Band::B, Band::V).unwrap();
         let dust_ratio = d2.deficit_ratio(Band::B, Band::V).unwrap();
-        assert!((grey_ratio - 1.0).abs() < 0.05, "a solid occulter is grey: {grey_ratio}");
+        assert!((gray_ratio - 1.0).abs() < 0.05, "a solid occulter is gray: {gray_ratio}");
         assert!((dust_ratio - 1.32).abs() < 0.1, "dust reddens: {dust_ratio}");
     }
 
@@ -441,9 +441,9 @@ mod tests {
         assert!(extra[Band::ThermalIr] > 50.0,
             "ten microns should be swamped, got {}", extra[Band::ThermalIr]);
 
-        // And the two are the same population: occultation is grey, so V and I agree.
+        // And the two are the same population: occultation is gray, so V and I agree.
         let ratio = occulted[Band::I] / occulted[Band::V];
-        assert!((ratio - 1.0).abs() < 0.02, "solid occultation is grey, got {ratio}");
+        assert!((ratio - 1.0).abs() < 0.02, "solid occultation is gray, got {ratio}");
     }
 
     /// The diagnostic, not merely the signature: transits move and waste heat does not. A swarm

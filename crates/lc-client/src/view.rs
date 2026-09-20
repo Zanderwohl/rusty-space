@@ -24,8 +24,8 @@ impl ScaleTier {
     pub const SURFACE_LIMIT_M: f64 = 1e4;
     pub const SYSTEM_LIMIT_M: f64 = 1e14;
 
-    pub fn for_distance(metres: f64) -> Self {
-        let d = metres.abs();
+    pub fn for_distance(meters: f64) -> Self {
+        let d = meters.abs();
         if d < Self::SURFACE_LIMIT_M {
             Self::Surface
         } else if d < Self::SYSTEM_LIMIT_M {
@@ -35,8 +35,8 @@ impl ScaleTier {
         }
     }
 
-    /// Metres per render unit.
-    pub fn metres_per_unit(&self) -> f64 {
+    /// Meters per render unit.
+    pub fn meters_per_unit(&self) -> f64 {
         match self {
             Self::Surface => 1.0,
             Self::System => 1.496e11,          // one AU
@@ -51,7 +51,7 @@ impl ScaleTier {
 /// difference entirely at system scale, where the two positions agree to more digits than
 /// `f32` carries.
 pub fn camera_relative(world_m: DVec3, camera_m: DVec3, tier: ScaleTier) -> Vec3 {
-    ((world_m - camera_m) / tier.metres_per_unit()).as_vec3()
+    ((world_m - camera_m) / tier.meters_per_unit()).as_vec3()
 }
 
 /// How finely retarded time is sampled.
@@ -112,7 +112,7 @@ mod tests {
 
     /// The reduction exists because narrowing first destroys the difference.
     ///
-    /// `f32` spacing at 1 AU is 2^14 metres, about 16 km, so an offset below 8 km vanishes
+    /// `f32` spacing at 1 AU is 2^14 meters, about 16 km, so an offset below 8 km vanishes
     /// entirely and a larger one survives only in 16 km steps.
     #[test]
     fn subtracting_before_narrowing_keeps_a_difference_f32_would_lose() {
@@ -121,9 +121,9 @@ mod tests {
             ((camera + DVec3::new(offset, 0.0, 0.0)).as_vec3() - camera.as_vec3()).x as f64
         };
 
-        // A structure a kilometre away is simply gone.
+        // A structure a kilometer away is simply gone.
         assert_eq!(narrow_first(1.0e3), 0.0, "this is the failure the reduction avoids");
-        // A thousand kilometres survives, quantised to the 16 km grid.
+        // A thousand kilometers survives, quantised to the 16 km grid.
         let coarse = narrow_first(1.0e6);
         assert!(coarse > 0.0 && (coarse - 1.0e6).abs() > 500.0, "quantised to {coarse}");
 

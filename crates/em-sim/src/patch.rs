@@ -50,7 +50,7 @@ const SEARCH_REVOLUTIONS: f64 = 6.0;
 ///
 /// At a join the traveller is exactly on a boundary, so a search starting there would find
 /// that same crossing again and the walk would not advance. A second of flight puts it
-/// about a kilometre clear — far outside the metre-scale tolerance the root was found to,
+/// about a kilometer clear — far outside the meter-scale tolerance the root was found to,
 /// and far inside any arc.
 const JOIN_CLEARANCE: TimeDelta = TimeDelta::from_seconds(1.0);
 
@@ -399,8 +399,8 @@ mod tests {
             // motion too: across 2 ms Earth alone carries the craft some 60 m, which is
             // travel, not a jump. What must be zero is the part of the step that the
             // velocity does not account for.
-            let travelled = (before.1 + after.1) / 2.0 * (2.0 * nudge.to_seconds());
-            let jump = ((after.0 - before.0) - travelled).length();
+            let traveled = (before.1 + after.1) / 2.0 * (2.0 * nudge.to_seconds());
+            let jump = ((after.0 - before.0) - traveled).length();
             assert!(jump < 1.0, "position jumps {jump:e} m across the join at {join:?}");
 
             let slip = (after.1 - before.1).length();

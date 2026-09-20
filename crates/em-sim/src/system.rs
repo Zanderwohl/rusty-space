@@ -197,7 +197,7 @@ impl System {
         self.rotations[i.get()].as_ref()
     }
     #[inline] pub fn appearance(&self, i: BodyIndex) -> &Appearance { &self.appearance[i.get()] }
-    /// Radius in metres, from the appearance.
+    /// Radius in meters, from the appearance.
     #[inline] pub fn radius(&self, i: BodyIndex) -> f64 { self.appearance[i.get()].radius() }
     #[inline] pub fn position(&self, i: BodyIndex) -> DVec3 { self.position[i.get()] }
     #[inline] pub fn velocity(&self, i: BodyIndex) -> DVec3 { self.velocity[i.get()] }

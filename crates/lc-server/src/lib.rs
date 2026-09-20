@@ -5,7 +5,7 @@
 //! deliverable — see `lightcone/docs/08-networking.md` — and it lives in `lc-proto`, because
 //! the type the event channel carries is the gate.
 //!
-//! Nothing here is optimised. The filter's correctness is what is being built.
+//! Nothing here is optimized. The filter's correctness is what is being built.
 
 #![forbid(unsafe_code)]
 

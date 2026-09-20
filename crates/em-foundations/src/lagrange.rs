@@ -13,7 +13,7 @@
 //! Richardson (1980), *Analytic construction of periodic orbits about the collinear points*,
 //! is the source for the `c_n` expansion and the amplitude ratio.
 
-/// Which collinear point. L3, on the far side of the larger primary, is not modelled: nothing
+/// Which collinear point. L3, on the far side of the larger primary, is not modeled: nothing
 /// is ever sent there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Collinear {
@@ -44,7 +44,7 @@ const GAMMA_ITERATIONS: usize = 16;
 ///
 /// `mass_ratio` is `m2 / (m1 + m2)`, the smaller primary's share. The root of Lagrange's
 /// quintic, not the Hill radius — those differ by about a per cent at Sun-Earth, which is
-/// two hundred thousand kilometres.
+/// two hundred thousand kilometers.
 ///
 /// `None` for a ratio outside `(0, 1)`, or one the iteration leaves without a positive root.
 pub fn gamma(mass_ratio: f64, point: Collinear) -> Option<f64> {
@@ -154,7 +154,7 @@ mod tests {
         assert!((g1 - 0.009_970_3).abs() < 1.0e-6, "L1 at {g1}");
         assert!((g2 - 0.010_037_0).abs() < 1.0e-6, "L2 at {g2}");
 
-        // In kilometres of the real separation: about a hundredth of an astronomical unit.
+        // In kilometers of the real separation: about a hundredth of an astronomical unit.
         let au_km = 149_597_871.0;
         assert!((g1 * au_km - 1_491_500.0).abs() < 2_000.0, "{} km", g1 * au_km);
         assert!((g2 * au_km - 1_501_500.0).abs() < 2_000.0, "{} km", g2 * au_km);
@@ -196,7 +196,7 @@ mod tests {
     /// The quintic is solved, not approximated.
     ///
     /// The Hill radius is the first term of the same expansion and is where the iteration
-    /// starts. At Sun-Earth it is out by a third of a per cent — five thousand kilometres, or
+    /// starts. At Sun-Earth it is out by a third of a per cent — five thousand kilometers, or
     /// three times the libration amplitude a mission actually flies. At Earth-Moon, where the
     /// ratio is four thousand times larger, it is out by five and a half.
     #[test]

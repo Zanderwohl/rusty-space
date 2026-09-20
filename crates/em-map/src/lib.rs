@@ -10,7 +10,7 @@
 //! | Quantity | Unit |
 //! |---|---|
 //! | Position | light-years from the world origin, `f64` |
-//! | Radius, distance, height | metres, `f64` |
+//! | Radius, distance, height | meters, `f64` |
 //! | Angle | radians |
 //! | Time | coordinate seconds since J2000 |
 //!
@@ -53,7 +53,7 @@ mod standalone {
 
         assert_eq!(frame.placements.len(), 1);
         assert!(frame.placements[0].at.is_finite());
-        assert!(frame.placements[0].has_drop_line(), "Earth is not in the ecliptic to the metre");
+        assert!(frame.placements[0].has_drop_line(), "Earth is not in the ecliptic to the meter");
         assert!(!frame.rings.is_empty(), "a decade ring should have been chosen");
     }
 }

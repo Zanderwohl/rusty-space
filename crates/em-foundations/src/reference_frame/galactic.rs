@@ -28,11 +28,11 @@ pub const NORTH_POLE_RA: f64 = 192.859_48 * DEG;
 /// Declination of the north galactic pole, J2000 (27.12825°).
 pub const NORTH_POLE_DEC: f64 = 27.128_25 * DEG;
 
-/// Right ascension of the galactic centre, J2000 (266.40510°).
-pub const CENTRE_RA: f64 = 266.405_10 * DEG;
+/// Right ascension of the galactic center, J2000 (266.40510°).
+pub const CENTER_RA: f64 = 266.405_10 * DEG;
 
-/// Declination of the galactic centre, J2000 (−28.93617°).
-pub const CENTRE_DEC: f64 = -28.936_17 * DEG;
+/// Declination of the galactic center, J2000 (−28.93617°).
+pub const CENTER_DEC: f64 = -28.936_17 * DEG;
 
 /// The north galactic pole, as a unit vector in simulation space.
 #[inline]
@@ -40,21 +40,21 @@ pub fn north_pole() -> DVec3 {
     equatorial::ecliptic_direction(NORTH_POLE_RA, NORTH_POLE_DEC)
 }
 
-/// The direction of the galactic centre, as a unit vector in simulation space.
+/// The direction of the galactic center, as a unit vector in simulation space.
 #[inline]
-pub fn centre() -> DVec3 {
-    equatorial::ecliptic_direction(CENTRE_RA, CENTRE_DEC)
+pub fn center() -> DVec3 {
+    equatorial::ecliptic_direction(CENTER_RA, CENTER_DEC)
 }
 
 /// A right-handed orthonormal basis for the galactic frame, in simulation space: `(u, v, n)`.
 ///
-/// `n` is the north pole and `u` points at the galactic centre. The two published directions
+/// `n` is the north pole and `u` points at the galactic center. The two published directions
 /// are perpendicular to within a ten-thousandth of a degree and not exactly, so `u` is the
-/// centre with its `n` component removed rather than the centre itself — otherwise the basis
+/// center with its `n` component removed rather than the center itself — otherwise the basis
 /// would be very slightly skewed, and a basis is either orthonormal or it is a source of drift.
 pub fn basis() -> (DVec3, DVec3, DVec3) {
     let n = north_pole();
-    let u = (centre() - n * centre().dot(n)).normalize();
+    let u = (center() - n * center().dot(n)).normalize();
     (u, n.cross(u), n)
 }
 
@@ -93,21 +93,21 @@ mod tests {
         );
     }
 
-    /// The galactic centre lies in the galactic plane, which is what makes it usable as the
+    /// The galactic center lies in the galactic plane, which is what makes it usable as the
     /// basis's first axis. Not exactly: the two published directions disagree by under a
     /// ten-thousandth of a degree, which is the convention's own rounding.
     #[test]
-    fn the_centre_is_in_the_plane() {
-        let out_of_plane = centre().dot(north_pole()).abs();
-        assert!(out_of_plane < 1e-5, "centre is {out_of_plane:.2e} out of its own plane");
+    fn the_center_is_in_the_plane() {
+        let out_of_plane = center().dot(north_pole()).abs();
+        assert!(out_of_plane < 1e-5, "center is {out_of_plane:.2e} out of its own plane");
     }
 
-    /// Seen from here, the galactic centre is a few degrees below the ecliptic at a longitude
+    /// Seen from here, the galactic center is a few degrees below the ecliptic at a longitude
     /// of about 267° — a figure any ephemeris will give, and one no arrangement of the wrong
     /// axes reproduces.
     #[test]
-    fn the_centre_is_where_the_summer_sky_has_it() {
-        let c = centre();
+    fn the_center_is_where_the_summer_sky_has_it() {
+        let c = center();
         let longitude = c.y.atan2(c.x).rem_euclid(std::f64::consts::TAU) / DEG;
         let latitude = c.z.asin() / DEG;
         assert!((longitude - 266.84).abs() < 0.01, "longitude {longitude:.3}°");

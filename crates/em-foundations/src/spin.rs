@@ -2,7 +2,7 @@
 
 use std::f64::consts::PI;
 
-/// Tangential velocity (m/s) at `radius` metres from the axis, given rotations per minute.
+/// Tangential velocity (m/s) at `radius` meters from the axis, given rotations per minute.
 pub fn tangential_velocity(radius: f64, rpm: f64) -> f64 {
     2.0 * PI * radius * rpm / 60.0
 }

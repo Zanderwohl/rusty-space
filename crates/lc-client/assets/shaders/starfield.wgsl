@@ -3,7 +3,7 @@
 // Descended from assets/shaders/starfield.wgsl in the Exotic Matters app, which established
 // the technique: bake four vertices per star into one mesh, expand the quad in view space in
 // the vertex stage, and clamp to background depth. What is different here is that nothing
-// about a star's *appearance* is baked. The catalogue shader bakes a colour and a brightness
+// about a star's *appearance* is baked. The catalogue shader bakes a color and a brightness
 // because its only input is an apparent magnitude; this one bakes a temperature and a radius
 // and derives the rest per frame, because aberration, Doppler shift, the band mapping and the
 // exposure all change while the ship flies and re-uploading the mesh for them does not scale.
@@ -12,7 +12,7 @@
 //   POSITION : star position relative to the bake origin, light-years, render axes
 //   CORNER   : quad corner in [-1, 1]^2, also the radial falloff coordinate
 //   PARAMS   : (effective temperature K, radius m, corona seed, unused)
-//   WARM     : (population temperature K, its radiance over the star's disc, grey deficit, -)
+//   WARM     : (population temperature K, its radiance over the star's disc, gray deficit, -)
 //
 // Everything else is a uniform. See lightcone/docs/07-rendering.md.
 
@@ -54,7 +54,7 @@ struct StarfieldUniform {
     /// How far the corona reaches, in **stellar radii**.
     ///
     /// The one quantity here that is a world size rather than a screen size. Everything else
-    /// about a point source is angular on purpose — a star's glare is an artefact of looking at
+    /// about a point source is angular on purpose — a star's glare is an artifact of looking at
     /// it, and does not grow as you approach. A corona is a thing that is *there*, so its
     /// angular size has to fall off with distance like the disc it surrounds.
     corona_radii: f32,
@@ -77,7 +77,7 @@ struct Vertex {
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) corner: vec2<f32>,
-    @location(1) colour: vec3<f32>,
+    @location(1) color: vec3<f32>,
     /// Where the source itself ends and the glare begins, as a fraction of the quad.
     @location(2) core: f32,
     /// Offset from the star in the plane of the sky, world axes. Its *direction* is the angle
@@ -219,13 +219,13 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let teff = max(vertex.params.x * doppler(to_source, beta), 1.0);
 
     // The star's true angular radius, and its solid angle. Ratio before squaring: distance in
-    // metres squared overflows f32 past a couple of thousand light-years, and the ratio never
+    // meters squared overflows f32 past a couple of thousand light-years, and the ratio never
     // does.
     let disc_rad = vertex.params.y / (distance_ly * 9.4607305e15);
     let geometry = PI * disc_rad * disc_rad;
 
     // A population absorbs starlight and re-emits it as a blackbody at the temperature its
-    // orbit sets. Occultation is grey and removes; re-emission is cold and adds, which in the
+    // orbit sets. Occultation is gray and removes; re-emission is cold and adds, which in the
     // thermal infrared can be a hundred times what the star itself puts out. Both shift with
     // the same Doppler factor, because both are blackbodies.
     let warm_t = max(vertex.warm.x * doppler(to_source, beta), 1.0);
@@ -256,7 +256,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // Overflow leaves as an HDR value rather than clipping to white. A star seen from sixty
     // astronomical units is twenty-four stops over the window; without this it renders exactly
     // like one that is barely over, and arriving somewhere looks like arriving nowhere.
-    out.colour = chroma * material.brightness * (level + glow * material.overflow_gain);
+    out.color = chroma * material.brightness * (level + glow * material.overflow_gain);
 
     // The source itself: its disc if that is resolvable, otherwise the smallest thing worth
     // drawing. At sixty astronomical units a sun is a fiftieth of a pixel across, and it is
@@ -291,7 +291,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.seed = vertex.params.z;
 
     // w = 0 drops the camera's translation, so the sky depends only on where it is pointed.
-    // The quad centre sits one unit down the view ray, which makes the corner offset equal to
+    // The quad center sits one unit down the view ray, which makes the corner offset equal to
     // the angle subtended, so radius_rad is an angular radius with no projection arithmetic.
     let dir_view = normalize((view.view_from_world * vec4<f32>(seen, 0.0)).xyz);
     let pos_view = dir_view + vec3<f32>(vertex.corner, 0.0) * radius_rad;
@@ -358,5 +358,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // because two transparent meshes at the same depth are sorted with an arbitrary tie-break,
     // the squares flickered on and off from frame to frame. It read as z-fighting and it was
     // blend order. At alpha zero the blend is `src + dst` and the order stops mattering.
-    return vec4<f32>(in.colour * (core + halo * material.halo_gain), 0.0);
+    return vec4<f32>(in.color * (core + halo * material.halo_gain), 0.0);
 }

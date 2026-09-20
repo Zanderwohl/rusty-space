@@ -39,7 +39,7 @@ pub struct Reception {
     pub arrive_t: f64,
     /// Unit vector from the observer toward where the source appears to be.
     pub direction: DVec3,
-    /// Power over the square of the distance travelled.
+    /// Power over the square of the distance traveled.
     pub strength: f64,
 }
 
@@ -201,8 +201,8 @@ impl<'a, E: EventSource> LightConeCursor<'a, E> {
         self.work.sources_solved += 1;
         // The window is on arrival, so the emissions that can land in it are bounded by the
         // light travel time to the nearest and furthest the observer can be.
-        let (centre, radius) = self.ball;
-        let gap = (source.position - centre).length();
+        let (center, radius) = self.ball;
+        let gap = (source.position - center).length();
         let earliest_emission = self.from_t - (gap + radius);
         let latest_emission = self.to_t - (gap - radius).max(0.0);
         let from = earliest_emission.max(source.first_t);
@@ -227,8 +227,8 @@ impl<'a, E: EventSource> LightConeCursor<'a, E> {
             if arrive < self.from_t || arrive > self.to_t {
                 continue;
             }
-            let travelled = (self.observer.position_at(arrive) - source.position).length();
-            if !self.can_be_heard(event.power, travelled) {
+            let traveled = (self.observer.position_at(arrive) - source.position).length();
+            if !self.can_be_heard(event.power, traveled) {
                 continue;
             }
             solved.push((arrive, event));
@@ -251,7 +251,7 @@ impl<'a, E: EventSource> LightConeCursor<'a, E> {
     }
 }
 
-/// Power over the square of the distance travelled, with a floor on the distance so a
+/// Power over the square of the distance traveled, with a floor on the distance so a
 /// coincident source is bright rather than infinite.
 pub fn strength(power: f64, distance: f64) -> f64 {
     power / distance.max(1.0).powi(2)
@@ -284,7 +284,7 @@ impl<E: EventSource> Iterator for LightConeCursor<'_, E> {
                     debug_assert!(key <= arrive + 1e-6, "the heap key was not a lower bound");
                     let at = self.observer.position_at(arrive);
                     let offset = position - at;
-                    let travelled = offset.length();
+                    let traveled = offset.length();
                     if next + 1 < events.len() {
                         let following = events[next + 1].0;
                         self.heap.push(Keyed {
@@ -301,8 +301,8 @@ impl<E: EventSource> Iterator for LightConeCursor<'_, E> {
                         event_id: event.event_id,
                         source_id,
                         arrive_t: arrive,
-                        direction: if travelled > 0.0 { offset / travelled } else { DVec3::X },
-                        strength: strength(event.power, travelled),
+                        direction: if traveled > 0.0 { offset / traveled } else { DVec3::X },
+                        strength: strength(event.power, traveled),
                     });
                 }
             }
@@ -396,8 +396,8 @@ mod tests {
                 if arrive < from_t || arrive > to_t {
                     continue;
                 }
-                let travelled = (observer.position_at(arrive) - source.position).length();
-                let strength = strength(event.power, travelled);
+                let traveled = (observer.position_at(arrive) - source.position).length();
+                let strength = strength(event.power, traveled);
                 if strength < floor {
                     continue;
                 }

@@ -2,7 +2,7 @@
 //!
 //! A ship cannot thrust in a direction it is not facing, so every burn is really a turn and
 //! then a burn. At the rates this game runs at the turn is usually over before anyone could
-//! see it — a five-hundred-metre hull flips in a minute of coordinate time, which is
+//! see it — a five-hundred-meter hull flips in a minute of coordinate time, which is
 //! milliseconds of real time at the design clock — and it is here anyway, because "the drive
 //! points wherever the trajectory needs it to, instantly" is the kind of small lie that other
 //! things end up built on.
@@ -21,7 +21,7 @@ use glam::{DQuat, DVec3};
 /// attitude control that can keep up with it.
 pub const RATE_RAD_S: f64 = std::f64::consts::PI / 60.0;
 
-/// The hull [`RATE_RAD_S`] is quoted for, metres.
+/// The hull [`RATE_RAD_S`] is quoted for, meters.
 pub const REFERENCE_LENGTH_M: f64 = 500.0;
 
 /// How fast a hull of `length_m` can turn, radians a second.
@@ -32,7 +32,7 @@ pub const REFERENCE_LENGTH_M: f64 = 500.0;
 /// power. Angular acceleration is the ratio, `1/L²`, and the *time* to swing through a fixed
 /// angle at that acceleration goes as `L` — so the rate goes as `1/L`.
 ///
-/// A fifty-kilometre ship therefore turns a hundred times slower than a five-hundred-metre one:
+/// A fifty-kilometer ship therefore turns a hundred times slower than a five-hundred-meter one:
 /// a flip takes it the better part of two hours.
 pub fn rate_rad_s(length_m: f64) -> f64 {
     if length_m <= 0.0 {
@@ -156,7 +156,7 @@ mod tests {
     }
 
     /// A bigger ship is a slower ship, and by the length rather than by the mass — which is
-    /// cubic, and would make a fifty-kilometre hull a million times more ponderous instead of a
+    /// cubic, and would make a fifty-kilometer hull a million times more ponderous instead of a
     /// hundred.
     #[test]
     fn a_longer_hull_turns_more_slowly() {

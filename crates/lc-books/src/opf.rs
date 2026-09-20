@@ -196,7 +196,7 @@ pub fn parse(xml: &str, opf_path: &str) -> Result<Package, Error> {
         }
     }
 
-    // Authors with no name are an artefact of a `<creator>` that held only markup.
+    // Authors with no name are an artifact of a `<creator>` that held only markup.
     package.metadata.authors.retain(|a| !a.name.is_empty());
     if package.spine.is_empty() {
         return Err(Error::Malformed("the package document has an empty spine".into()));

@@ -221,7 +221,7 @@ assumes the gate was forgotten rather than reasoned about.
 That ordering is load-bearing: it is the only record of recency on the wire, and it is what lets
 the shelf offer "recently read" without either end having to agree about whose clock a timestamp
 would be in. All three are appended variants — the discriminants above them are what the goldens
-are pinned at, and a version bump is not a licence to renumber them.
+are pinned at, and a version bump is not a license to renumber them.
 
 `library_base` comes from the shard rather than the client's own configuration, mirroring
 `cdn_base` on the site's `releases` row: it lets the shelf move CDNs without a client release,
@@ -379,7 +379,7 @@ plate again on reopening is the smaller wrong, and the one that cannot trap anyb
 
 ## Rendering
 
-One `LayoutJob` per block, drawn into a column that is centred in the panel and capped at a
+One `LayoutJob` per block, drawn into a column that is centered in the panel and capped at a
 comfortable measure — around 66 characters, which is a width in `em`, not in pixels. No
 justification: egui has none, and faked justification without hyphenation is worse than a ragged
 edge.
@@ -423,7 +423,7 @@ this had before them, is egui shearing the regular — against one file per fami
 run. Worth revisiting; not yet measured.
 
 Two numbers that go with them: the body is set at 18 points, and **the column is capped at
-thirty-four times that**, centred in whatever the window gives. A line of prose stops being
+thirty-four times that**, centered in whatever the window gives. A line of prose stops being
 readable somewhere past seventy characters, and a maximised window would otherwise set a book at
 a hundred and forty. **It is loaded as an asset
 when the reader is first opened, not embedded in the binary**, so a player who never opens a
@@ -608,7 +608,7 @@ would need a size cap, a sanitiser and somewhere to put the bytes that is not th
 
 ## A note on Project Gutenberg
 
-Their epubs carry a licence header and footer inside the text. Leaving them there costs a
+Their epubs carry a license header and footer inside the text. Leaving them there costs a
 screen and requires nothing of anyone; **stripping them is what triggers the clause about
 removing every reference to Project Gutenberg**, which is not a trade worth making. So the
 files are published byte-for-byte as downloaded — which the `sha256` in the catalogue also

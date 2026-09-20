@@ -1,6 +1,6 @@
 //! What the ship is doing when nothing is pushing it.
 //!
-//! Cancelling a manoeuvre does not stop the ship. It stops the *engine*, and the ship keeps
+//! Canceling a maneuvere does not stop the ship. It stops the *engine*, and the ship keeps
 //! whatever velocity it had — which inside a system means it is now on a conic about whichever
 //! body's sphere of influence it happens to be in. That can be a circular orbit, an ellipse
 //! that grazes the atmosphere, or an escape.
@@ -41,7 +41,7 @@ impl Coast {
     ///
     /// `velocity_m_s` is in the world frame, the same frame positions are in. The primary's own
     /// motion is subtracted here: a ship matching Earth's orbit is at rest about Earth and
-    /// moving at thirty kilometres a second about the Sun, and only one of those is the orbit
+    /// moving at thirty kilometers a second about the Sun, and only one of those is the orbit
     /// it is on.
     pub fn from_state(
         system: &LocalSystem,
@@ -74,12 +74,12 @@ impl Coast {
         now_s: f64,
     ) -> Option<Self> {
         let at_m = (position_ly - system.origin_ly) * M_PER_LY;
-        let (centre, carried) = system.body_state_at(index, now_s)?;
+        let (center, carried) = system.body_state_at(index, now_s)?;
         let mu = system.sim().gravitational_constant() * system.sim().mass(index);
         if mu <= 0.0 || !mu.is_finite() {
             return None;
         }
-        let local = at_m - centre;
+        let local = at_m - center;
         let relative = velocity_m_s - carried;
         let mut elements = state::from_state(mu, local, relative)?;
         elements.eccentricity = nudged(elements.eccentricity);
@@ -91,7 +91,7 @@ impl Coast {
         })
     }
 
-    /// Where the ship is and how fast, at a coordinate time. Light-years and metres a second,
+    /// Where the ship is and how fast, at a coordinate time. Light-years and meters a second,
     /// world frame.
     ///
     /// The primary is placed at `now_s` analytically rather than read from the arena, so the
@@ -103,16 +103,16 @@ impl Coast {
         Some((system.origin_ly + at_m / M_PER_LY, velocity))
     }
 
-    /// The same, in simulation space: metres from the system's own origin, and metres a
+    /// The same, in simulation space: meters from the system's own origin, and meters a
     /// second. What `em-sim` measures in, and what the crossing search wants.
     pub fn sim_state_at(&self, system: &LocalSystem, now_s: f64) -> Option<(DVec3, DVec3)> {
         let index = system.body_named(&self.primary)?;
-        let (centre, carried) = system.body_state_at(index, now_s)?;
+        let (center, carried) = system.body_state_at(index, now_s)?;
         let (local, relative) = self.local_state_at(now_s)?;
-        Some((centre + local, carried + relative))
+        Some((center + local, carried + relative))
     }
 
-    /// Where round the conic the ship is, measured from the primary. Metres.
+    /// Where round the conic the ship is, measured from the primary. Meters.
     pub fn local_state_at(&self, now_s: f64) -> Option<(DVec3, DVec3)> {
         let mut elements = self.elements;
         elements.true_anomaly = self.true_anomaly_at(now_s)?;
@@ -277,7 +277,7 @@ mod tests {
     }
 
     /// The state the station hold puts a ship in: a circular orbit, at the speed that keeps it
-    /// there. Cancelling from that has to leave it exactly where it was.
+    /// there. Canceling from that has to leave it exactly where it was.
     fn circular(system: &LocalSystem, body: &str, radii: f64) -> (DVec3, DVec3) {
         let index = system.body_named(body).unwrap();
         let radius = system.sim().radius(index) * (1.0 + radii);
@@ -292,8 +292,8 @@ mod tests {
         )
     }
 
-    /// Cancelling in a circular orbit leaves a circular orbit. The eccentricity is the whole
-    /// test: anything that loses the primary's own motion comes out at thirty kilometres a
+    /// Canceling in a circular orbit leaves a circular orbit. The eccentricity is the whole
+    /// test: anything that loses the primary's own motion comes out at thirty kilometers a
     /// second relative to Earth, which is an escape.
     #[test]
     fn a_circular_state_solves_to_a_circular_orbit() {
@@ -330,7 +330,7 @@ mod tests {
             seen.push((where_now, earth));
         }
         // A full period comes back to the start -- relative to Earth, which has itself run
-        // eight hundred thousand kilometres along its own orbit in the meantime.
+        // eight hundred thousand kilometers along its own orbit in the meantime.
         system.advance_to(period);
         let (closed, _) = coast.at(&system, period).unwrap();
         let earth_then = seen[0].1;
@@ -343,7 +343,7 @@ mod tests {
     }
 
     /// Slower than circular is an ellipse that falls inward; faster than escape is a hyperbola.
-    /// Both are things a player can end up on by cancelling at the wrong moment, and both have
+    /// Both are things a player can end up on by canceling at the wrong moment, and both have
     /// to come out as what they are rather than as an error.
     #[test]
     fn a_slow_state_falls_and_a_fast_one_escapes() {
@@ -386,7 +386,7 @@ mod tests {
     ///
     /// It refuses rather than inventing an orbit, and a refusal leaves the ship drifting at the
     /// velocity it has, which is none. Standing still when you cut the engine standing still is
-    /// the wrong physics and the right behaviour; falling into the star over the next two
+    /// the wrong physics and the right behavior; falling into the star over the next two
     /// months is neither.
     #[test]
     fn a_radial_state_has_no_elements_and_says_so() {
@@ -411,10 +411,10 @@ mod tests {
         assert_eq!(moved.primary, system.sim().name(system.primary()));
     }
 
-    /// A station is a place the engine holds the ship; cancelling there has to produce the
+    /// A station is a place the engine holds the ship; canceling there has to produce the
     /// orbit the ship was being held on, which for an orbit station is that orbit.
     #[test]
-    fn cancelling_a_held_orbit_leaves_that_orbit() {
+    fn canceling_a_held_orbit_leaves_that_orbit() {
         let system = sol();
         let course =
             Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };

@@ -19,7 +19,7 @@ pub const ICE_LINE_K: f64 = 190.0;
 /// Mass, not temperature. An ice giant is one because it never accreted enough hydrogen and
 /// helium, and that is a fact about its mass: Saturn is 5.7e26 kg and Neptune 1.0e26. Sorting
 /// by temperature put Saturn, at 90 K, in with Uranus -- which is true about its temperature
-/// and wrong about everything a person would recognise, since Saturn looks like Jupiter.
+/// and wrong about everything a person would recognize, since Saturn looks like Jupiter.
 pub const GAS_GIANT_MASS: f64 = 2.0e26;
 
 /// Past this a rocky surface is bare and dark, its volatiles long gone.
@@ -28,7 +28,7 @@ pub const SCORCHED_K: f64 = 500.0;
 /// Below the ice line, the density that separates a body with an icy surface from one without.
 ///
 /// Bulk density, so it is a proxy: Europa is 3013 and is an ice shell over rock, Io is 3528 and
-/// has essentially no water at all. Those two are a hundred thousand kilometres apart and they
+/// has essentially no water at all. Those two are a hundred thousand kilometers apart and they
 /// are what this number is set between.
 pub const ICY_SURFACE_DENSITY: f64 = 3200.0;
 
@@ -75,8 +75,8 @@ impl Surface {
         matches!(self, Self::GasGiant | Self::IceGiant)
     }
 
-    /// Two colours the surface varies between, as linear RGB, and how much contrast to give
-    /// them. Deliberately narrow ranges: a planet is one colour with variation, not a palette.
+    /// Two colors the surface varies between, as linear RGB, and how much contrast to give
+    /// them. Deliberately narrow ranges: a planet is one color with variation, not a palette.
     pub fn palette(&self) -> ([f32; 3], [f32; 3], f32) {
         match self {
             Self::GasGiant => ([0.52, 0.42, 0.32], [0.84, 0.76, 0.63], 1.0),
@@ -143,7 +143,7 @@ impl Surface {
         }
     }
 
-    /// What the body actually radiates at, given the grey equilibrium temperature.
+    /// What the body actually radiates at, given the gray equilibrium temperature.
     ///
     /// `equilibrium_k` is the zero-albedo balance [`crate::system::equilibrium_temperature`]
     /// computes, which is what [`Surface::classify`] is calibrated against. This is the
@@ -210,7 +210,7 @@ mod tests {
         assert_eq!(Surface::Weathered.internal_heat_ratio(), 1.0);
         assert_eq!(Surface::Ice.internal_heat_ratio(), 1.0);
 
-        // Earth: 278.6 K grey, Bond albedo near a third, and 254 K is the textbook answer.
+        // Earth: 278.6 K gray, Bond albedo near a third, and 254 K is the textbook answer.
         let earth = Surface::Weathered.effective_temperature(278.6);
         assert!((earth - 254.0).abs() < 8.0, "{earth:.1} K against a textbook 254 K");
         assert_eq!(Surface::Rock.effective_temperature(0.0), 0.0);
@@ -260,7 +260,7 @@ mod tests {
     }
 
     /// Europa and Io are the pair the ice threshold is set between: both cold, both moons of
-    /// Jupiter, a hundred thousand kilometres apart, and one is ice and the other is not.
+    /// Jupiter, a hundred thousand kilometers apart, and one is ice and the other is not.
     #[test]
     fn europa_and_io_land_on_opposite_sides() {
         assert_eq!(Surface::classify(1.5608e6, 4.800e22, 102.0), Surface::Ice);

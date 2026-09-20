@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::units::Micros;
 
-/// One light-microsecond, in metres. Exact: `c` is defined as 299 792 458 m/s.
+/// One light-microsecond, in meters. Exact: `c` is defined as 299 792 458 m/s.
 pub const LIGHT_MICROSECOND_M: f64 = 299.792458;
 
 /// Every coordinate component satisfies `|c| < COORD_BOUND`: 36 534 light-years and years.

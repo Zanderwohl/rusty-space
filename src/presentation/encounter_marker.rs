@@ -60,7 +60,7 @@ pub struct EncounterMarker {
 /// slices fill in sooner and cost more per frame.
 ///
 /// At this size a lunar flyby's whole chain lands in a few dozen frames, at a few
-/// milliseconds each in a dev build — where this workspace's own crates are unoptimised.
+/// milliseconds each in a dev build — where this workspace's own crates are unoptimized.
 const SOLVE_SAMPLES_PER_FRAME: usize = 250;
 
 /// Which arena the chains on the timelines belong to.
@@ -246,7 +246,7 @@ pub fn update_encounter_markers(
         // Anchor where the trajectory is drawn, not where the crossing happens in inertial
         // space: the orbit is drawn about the primary's *current* position, so a crossing a
         // fortnight out would otherwise land where the primary will be by then — tens of
-        // millions of kilometres off the drawn path.
+        // millions of kilometers off the drawn path.
         let drawn = system.0.position(anchor.expect("checked above")) + offset;
         transform.translation = drawn.to_render_relative(scale, freecam.bevy_pos);
         *visibility = Visibility::Visible;

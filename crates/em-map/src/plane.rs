@@ -55,7 +55,7 @@ impl Plane {
         }
     }
 
-    /// How far `at_ly` stands above the plane through `origin_ly`, metres. Signed.
+    /// How far `at_ly` stands above the plane through `origin_ly`, meters. Signed.
     ///
     /// The plane is anchored at whatever the map is looking at, not at a galaxy's own zero
     /// point. At every scale this draws, where that zero sits makes no visible difference, and
@@ -75,11 +75,11 @@ impl Plane {
 mod tests {
     use super::*;
 
-    /// What a light-year's worth of `f64` is worth, in metres.
+    /// What a light-year's worth of `f64` is worth, in meters.
     ///
-    /// The mantissa is 53 bits, so a position held in light-years resolves about a metre per
-    /// light-year of magnitude. A drop-line's foot is therefore "in the plane" to a few metres
-    /// and never to less — asserting metres flat passes near the origin and fails at Alpha
+    /// The mantissa is 53 bits, so a position held in light-years resolves about a meter per
+    /// light-year of magnitude. A drop-line's foot is therefore "in the plane" to a few meters
+    /// and never to less — asserting meters flat passes near the origin and fails at Alpha
     /// Centauri, which reads as a bug in the plane and is the representation.
     fn floor_m(magnitude_ly: f64) -> f64 {
         (magnitude_ly.abs().max(1.0) * M_PER_LY * 4.0 * f64::EPSILON).max(1.0)

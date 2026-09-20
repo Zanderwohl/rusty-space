@@ -11,6 +11,6 @@ authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 # second place that knows how to rotate one.
 em-foundations = { path = "../em-foundations" }
 # Decade ticks. `Scale::Log10` already chooses powers of ten and already handles a range whose
-# lower bound is zero, which is exactly what a map centred on one of its own items hits.
+# lower bound is zero, which is exactly what a map centered on one of its own items hits.
 em-plot = { path = "../em-plot" }
 glam = { version = "0.32", features = ["serde"] }

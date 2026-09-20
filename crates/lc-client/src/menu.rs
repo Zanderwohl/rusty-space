@@ -222,7 +222,7 @@ fn backdrop_star(seed: u64, index: u64) -> CatalogueStar {
 
     let mass = salpeter_mass(draw(4));
     // Main-sequence mass-luminosity, and an effective temperature consistent with it. Rough,
-    // but the backdrop is judged by eye and the two have to agree or the colours will not
+    // but the backdrop is judged by eye and the two have to agree or the colors will not
     // match the sizes.
     let luminosity_solar = mass.powf(3.5);
     let teff_k = em_spectra::stellar::SOLAR_TEFF * mass.powf(0.505);

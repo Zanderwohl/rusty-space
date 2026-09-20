@@ -29,7 +29,7 @@ pub const LUT_SAMPLES: usize = 2048;
 /// Far wider than any star, because the shader looks the table up at the *Doppler-shifted*
 /// temperature. At the drive's 0.999c cap the shift factor is 44.7 either way, so a 2000 K red
 /// dwarf astern arrives at 45 K and a 50 000 K O star ahead arrives at 2.2 million. Both ends
-/// have to be in the table or the sky clips to a flat colour at speed.
+/// have to be in the table or the sky clips to a flat color at speed.
 pub const LOG_T_MIN: f32 = 4.0;
 pub const LOG_T_MAX: f32 = 22.0;
 
@@ -296,7 +296,7 @@ pub struct Point {
     /// radius, not the physical one.
     pub radius_m: f32,
     pub seed: f32,
-    /// `(temperature K, radiance over the source's disc, grey deficit, unused)`.
+    /// `(temperature K, radiance over the source's disc, gray deficit, unused)`.
     pub warm: [f32; 4],
 }
 
@@ -364,7 +364,7 @@ pub fn build_mesh(points: &[Point], origin_ly: DVec3) -> Mesh {
 }
 
 /// A star's swarm, as the shader wants it: temperature, radiance against the stellar disc, and
-/// the grey deficit it removes. Zeros where there is nothing.
+/// the gray deficit it removes. Zeros where there is nothing.
 ///
 /// Drawn from the same generator the telescope reads, so a star that measures as engineered
 /// also looks engineered. The swarm is separable from the rest of the system on purpose: this

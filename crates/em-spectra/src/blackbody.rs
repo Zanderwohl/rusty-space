@@ -50,7 +50,7 @@ pub fn luminosity(radius_m: f64, temperature_k: f64) -> f64 {
 
 /// Radiance integrated over a band's nominal top-hat, W m^-2 sr^-1.
 ///
-/// A top-hat, not a real filter response. Adequate for colours and ratios; a photometric
+/// A top-hat, not a real filter response. Adequate for colors and ratios; a photometric
 /// zero-point calibration would need the response curve.
 pub fn band_radiance(band: Band, temperature_k: f64) -> f64 {
     let (lo, hi) = band.limits_m();
@@ -108,7 +108,7 @@ mod tests {
     fn the_radio_band_stays_precise_in_the_rayleigh_jeans_tail() {
         // x = hc/(lambda k T) is about 1.2e-5 here, where exp(x) - 1 would lose eleven
         // digits. Rayleigh-Jeans gives 2 c k T / lambda^4 as the limit.
-        let (lambda, t) = (Band::Radio.centre_m(), 5772.0);
+        let (lambda, t) = (Band::Radio.center_m(), 5772.0);
         let exact = spectral_radiance(lambda, t);
         let rj = 2.0 * C * K_B * t / lambda.powi(4);
         assert!((exact / rj - 1.0).abs() < 1e-4, "{exact} vs Rayleigh-Jeans {rj}");

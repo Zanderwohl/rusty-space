@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS sources (
 );
 
 -- Lossy float8 cube, for pruning only. Every exact test happens afterwards on the bigints:
--- a float8 cannot hold 2^60 microseconds, and the 150 metres the grid resolves would be lost.
+-- a float8 cannot hold 2^60 microseconds, and the 150 meters the grid resolves would be lost.
 CREATE INDEX IF NOT EXISTS sources_pos ON sources
     USING gist (cube(ARRAY[gx::float8, gy::float8, gz::float8]));
 

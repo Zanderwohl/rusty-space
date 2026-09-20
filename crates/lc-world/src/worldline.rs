@@ -27,7 +27,7 @@ pub struct Past {
 /// `t`, so evaluating the *current* one at an earlier time answers about a ship that did not
 /// exist yet: `Motive::Drifting` extrapolates backwards, so a burn would retroactively rewrite
 /// where the ship was an hour ago and how fast. Every retarded solve then reads the new motion
-/// at the old time — which is a client watching a manoeuvre the instant it happens, at any
+/// at the old time — which is a client watching a maneuvere the instant it happens, at any
 /// range, and the end of the game this is all built to be.
 ///
 /// So a craft keeps the motives it has flown, stamped with when each stopped, and this picks
@@ -41,7 +41,7 @@ pub struct Past {
 /// The frame is `lc-spacetime`'s: light-microseconds from the world origin, and coordinate
 /// microseconds. Note the precision this costs at galactic distances — a position is a `f64`
 /// count of light-microseconds, so a ship in a system a hundred light-years out is at `3e15`
-/// and resolves to about a hundred metres. Fine for a light-delay solve, useless for an orbit,
+/// and resolves to about a hundred meters. Fine for a light-delay solve, useless for an orbit,
 /// and the reason doc 08 shards the frame rather than keeping one origin for everything.
 pub struct Flight<'a> {
     state: &'a ShipState,

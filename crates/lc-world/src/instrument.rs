@@ -22,7 +22,7 @@ pub struct Instrument {
 }
 
 impl Instrument {
-    /// A one square metre silicon camera at room temperature: the cheap baseline.
+    /// A one square meter silicon camera at room temperature: the cheap baseline.
     pub const BASELINE: Self = Self {
         aperture_m2: 1.0,
         throughput: 0.5,
@@ -31,7 +31,7 @@ impl Instrument {
         emissivity: 0.05,
     };
 
-    /// What a crewed ship carries: four square metres, cooled, across every band.
+    /// What a crewed ship carries: four square meters, cooled, across every band.
     pub const SHIP: Self = Self {
         aperture_m2: 4.0,
         throughput: 0.6,
@@ -40,7 +40,7 @@ impl Instrument {
         emissivity: 0.05,
     };
 
-    /// What fits on something small enough to throw somewhere. A quarter of a square metre
+    /// What fits on something small enough to throw somewhere. A quarter of a square meter
     /// and warmer, so it sees an order of magnitude less far than a ship does.
     pub const PROBE: Self = Self {
         aperture_m2: 0.25,
@@ -75,7 +75,7 @@ impl Instrument {
         if flux_w_per_m2 <= 0.0 || exposure_s <= 0.0 {
             return 0.0;
         }
-        flux_w_per_m2 / (HC / band.centre_m()) * self.aperture_m2 * self.throughput * exposure_s
+        flux_w_per_m2 / (HC / band.center_m()) * self.aperture_m2 * self.throughput * exposure_s
     }
 
     /// Photons the instrument's own thermal emission contributes.

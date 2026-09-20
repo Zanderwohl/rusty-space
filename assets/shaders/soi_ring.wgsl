@@ -4,7 +4,7 @@
 // cross-section angle `c` in NORMAL — so it is built once and never rebuilt, no matter how
 // the radius breathes or the camera moves.
 //
-// For an isotropic shell the silhouette is a circle behind the centre, at the classic
+// For an isotropic shell the silhouette is a circle behind the center, at the classic
 // angular radius asin(R/D). For an anisotropic one it is a closed but NON-planar curve, so
 // each station solves for its own tangent point.
 
@@ -60,11 +60,11 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
 
     let world_from_local = mesh_functions::get_world_from_local(vertex.instance_index);
-    let centre = mesh_functions::mesh_position_local_to_world(
+    let center = mesh_functions::mesh_position_local_to_world(
         world_from_local, vec4<f32>(0.0, 0.0, 0.0, 1.0)).xyz;
 
     // The camera is at the render origin under this app's camera-relative scheme.
-    let to_camera = view.world_position.xyz - centre;
+    let to_camera = view.world_position.xyz - center;
     let distance = length(to_camera);
 
     // Inside the shell there is no silhouette at all. Collapse to a degenerate triangle
@@ -116,7 +116,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     }
 
     let dir = e * cos(theta) + w * sin(theta);
-    let ring_point = centre + soi_radius(material.shape, dir) * dir;
+    let ring_point = center + soi_radius(material.shape, dir) * dir;
 
     // The ring's own tangent, for the tube's cross-section frame. Exact for a sphere and
     // within a fraction of a degree for the squashed shell — invisible on a tube a few

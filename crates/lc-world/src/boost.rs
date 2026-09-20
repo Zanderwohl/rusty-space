@@ -23,7 +23,7 @@ pub fn gamma_of(beta: DVec3) -> f64 {
 ///
 /// Displacements rather than coordinates, because the origin is always a specific event — the
 /// sighting a pursuit is anchored at — and carrying absolute positions through a boost would
-/// mean boosting numbers of order a light-year to answer a question about kilometres.
+/// mean boosting numbers of order a light-year to answer a question about kilometers.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Event {
     /// Seconds.
@@ -98,9 +98,9 @@ pub fn separation_in_frame(separation: DVec3, beta: DVec3) -> f64 {
 /// reason this is written out. Simultaneous in the frame is not simultaneous in the world, so
 /// inverting a separation means transforming the two *worldlines* and differencing them at one
 /// world instant — and when you do that, the `γt'` term appears on both sides and cancels
-/// symbolically. Cancelling it in the algebra rather than in `f64` is what keeps this usable:
+/// symbolically. Canceling it in the algebra rather than in `f64` is what keeps this usable:
 /// a chase at `0.99c` puts the frame's anchor event tens of light-years behind, and subtracting
-/// two positions of that size to recover a five-kilometre standoff leaves about a hundred bits
+/// two positions of that size to recover a five-kilometer standoff leaves about a hundred bits
 /// of nothing.
 pub fn separation_in_world(separation: DVec3, beta: DVec3) -> DVec3 {
     let b2 = beta.length_squared();

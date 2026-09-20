@@ -77,7 +77,7 @@ impl Budget {
     /// A tick has passed: refill, and close the window the counters were measuring.
     ///
     /// Refill is per tick rather than per elapsed wall second, so a server running slow limits
-    /// proportionally harder. That is the behaviour wanted under load rather than a defect: the
+    /// proportionally harder. That is the behavior wanted under load rather than a defect: the
     /// thing being protected is the server, and a server that is struggling should take less.
     pub fn advance(&mut self, ticks_per_second: u32) {
         self.tokens = (self.tokens + self.per_tick).min(self.capacity);
@@ -221,7 +221,7 @@ mod tests {
         assert_eq!(budget.usage.peak_per_tick, BURST as u32 + 5, "the attempt was not recorded");
     }
 
-    /// A slower server takes less, which is the behaviour wanted under load.
+    /// A slower server takes less, which is the behavior wanted under load.
     #[test]
     fn a_server_running_slow_limits_harder() {
         let fast = Budget::new(50);

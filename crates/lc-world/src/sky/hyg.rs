@@ -96,7 +96,7 @@ impl HygProvider {
                 name: r.get(c_proper).filter(|s| !s.is_empty()).map(str::to_owned),
                 position_ly: equatorial::to_ecliptic(equatorial_pc) * PARSEC_LY,
                 velocity: equatorial::to_ecliptic(velocity_eq),
-                colour_index: ci,
+                color_index: ci,
                 luminosity_solar: lum,
                 component_index: num(c_comp).unwrap_or(1.0) as u8,
                 group: num(c_primary).map(|p| p as u64),

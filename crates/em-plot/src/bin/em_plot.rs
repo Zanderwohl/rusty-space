@@ -30,10 +30,10 @@ Options
   --dark           light on dark
   --svg            also write <output>.svg
   --scatter        draw marks instead of a line
-  --density        bin to cells and colour by count; for very dense scatters
+  --density        bin to cells and color by count; for very dense scatters
   --size <px>      marker or cell size                        (default 2)
   --alpha <a>      marker opacity                             (default 0.5)
-  --color-by <col> colour marks by a third column
+  --color-by <col> color marks by a third column
   --cmap <name>    viridis | magma | diverging                (default viridis)
   --gamma <g>      density contrast, below 1 lifts sparse cells (default 0.45)
   --invert-x       run the x axis backwards
@@ -146,7 +146,7 @@ fn parse_args() -> Result<Options, String> {
                     "viridis" => ColorMap::Viridis,
                     "magma" => ColorMap::Magma,
                     "diverging" => ColorMap::Diverging,
-                    other => return Err(format!("unknown colour map {other:?}")),
+                    other => return Err(format!("unknown color map {other:?}")),
                 }
             }
             other if other.starts_with("--") => return Err(format!("unknown option {other}")),
@@ -210,7 +210,7 @@ fn read_csv(path: &str, x: &str, ys: &[String], color_by: Option<&str>) -> Resul
         let r = record.map_err(|e| e.to_string())?;
         let Some(xv) = r.get(xi).and_then(|v| v.trim().parse::<f64>().ok()) else { continue };
         let shade = ci.and_then(|i| r.get(i)).and_then(|v| v.trim().parse::<f64>().ok());
-        // A row missing its colour value is dropped rather than shaded arbitrarily.
+        // A row missing its color value is dropped rather than shaded arbitrarily.
         if ci.is_some() && shade.is_none() {
             continue;
         }
@@ -359,7 +359,7 @@ fn draw(
     let mut layers = vec![chart.frame()];
     let mut legend = Primitives::default();
     for (k, s) in series.iter().enumerate() {
-        let colour = PALETTE[k % PALETTE.len()];
+        let color = PALETTE[k % PALETTE.len()];
         if o.density {
             layers.push(chart.density(s, o.size, o.cmap, o.gamma));
         } else if o.scatter {
@@ -378,15 +378,15 @@ fn draw(
                 }
                 None => layers.push(chart.scatter(
                     s,
-                    Marker::new(o.size, Rgba(colour.0, colour.1, colour.2, o.alpha)),
+                    Marker::new(o.size, Rgba(color.0, color.1, color.2, o.alpha)),
                 )),
             }
         } else {
             // The envelope carries the extremes; at these densities it is a solid block, so
             // it goes in faint and the mean track goes over it.
-            chart.style.series = Rgba(colour.0, colour.1, colour.2, 0.35);
+            chart.style.series = Rgba(color.0, color.1, color.2, 0.35);
             layers.push(chart.series(s));
-            layers.push(chart.mean_track(s, colour));
+            layers.push(chart.mean_track(s, color));
         }
         if series.len() > 1 {
             legend.labels.push(Label {
@@ -394,7 +394,7 @@ fn draw(
                 text: names.get(k).cloned().unwrap_or_default(),
                 size: 14.0,
                 anchor: Anchor::End,
-                colour: PALETTE[k % PALETTE.len()],
+                color: PALETTE[k % PALETTE.len()],
             });
         }
     }
@@ -406,7 +406,7 @@ fn draw(
             text: t.clone(),
             size: 20.0,
             anchor: Anchor::Middle,
-            colour: fg,
+            color: fg,
         });
     }
     if let Some(t) = &o.xlabel {
@@ -415,7 +415,7 @@ fn draw(
             text: t.clone(),
             size: 15.0,
             anchor: Anchor::Middle,
-            colour: fg,
+            color: fg,
         });
     }
     if let Some(t) = &o.ylabel {
@@ -425,7 +425,7 @@ fn draw(
             text: t.clone(),
             size: 15.0,
             anchor: Anchor::Start,
-            colour: fg,
+            color: fg,
         });
     }
     layers.push(legend);

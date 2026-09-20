@@ -104,7 +104,7 @@ pub fn render(samples: &[(f64, f64)], width: u32, height: u32) -> Option<egui::C
     let mut layers = vec![chart.frame()];
     let mut baseline = chart.series(&[(span.0, 1.0), (span.1, 1.0)]);
     for line in &mut baseline.polylines {
-        line.colour = BASELINE;
+        line.color = BASELINE;
     }
     layers.push(baseline);
     layers.push(chart.series(&flux));

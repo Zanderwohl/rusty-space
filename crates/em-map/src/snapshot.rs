@@ -2,11 +2,11 @@
 
 use glam::DVec3;
 
-/// Metres in a light-year. The crate's interface is light-years and metres, so it names the
+/// Meters in a light-year. The crate's interface is light-years and meters, so it names the
 /// conversion between them; `lc_world::system::M_PER_LY` is the same number for the same reason.
 pub const M_PER_LY: f64 = 9.460_730_472_580_8e15;
 
-/// Metres in an astronomical unit, by definition.
+/// Meters in an astronomical unit, by definition.
 pub const M_PER_AU: f64 = 1.495_978_707e11;
 
 /// How a whole snapshot was arrived at.
@@ -24,9 +24,9 @@ pub enum Provenance {
     Coordinate,
 }
 
-/// What a thing is, which is what decides how it is drawn and what colour it takes.
+/// What a thing is, which is what decides how it is drawn and what color it takes.
 ///
-/// The colour is the host's: `em-map` names none, for the reason `em_ui::MenuTheme` carries
+/// The color is the host's: `em-map` names none, for the reason `em_ui::MenuTheme` carries
 /// its seven by value. A palette belongs to a product.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ItemKind {
@@ -86,11 +86,11 @@ pub struct MapItem {
     pub kind: ItemKind,
     /// Light-years from the world origin, simulation axes.
     pub position_ly: DVec3,
-    /// Metres. Zero for anything with no size worth drawing at any zoom.
+    /// Meters. Zero for anything with no size worth drawing at any zoom.
     pub radius_m: f64,
     /// Spin axis, or the normal of a ring or belt. Ecliptic north where nothing says otherwise.
     pub pole: DVec3,
-    /// Inner and outer radius in metres, for something shaped like a ring rather than a ball.
+    /// Inner and outer radius in meters, for something shaped like a ring rather than a ball.
     pub annulus_m: Option<(f64, f64)>,
 }
 
@@ -145,7 +145,7 @@ impl MapSnapshot {
         self.items.iter().find(|i| i.kind == ItemKind::Observer)
     }
 
-    /// How far the nearest and furthest items sit from `focus_ly`, metres.
+    /// How far the nearest and furthest items sit from `focus_ly`, meters.
     ///
     /// What ring selection is given. The nearest is often zero — the focus is usually *on*
     /// something — which is why [`crate::rings::decades`] has to survive a zero lower bound.
@@ -155,8 +155,8 @@ impl MapSnapshot {
         for item in &self.items {
             let d = item.position_ly.distance(focus_ly) * M_PER_LY;
             // An annulus is drawn out to its own edge, so it sets the extent even when its
-            // centre is the focus. Without this a system framed on its star is framed on
-            // nothing, because every belt's centre is the star.
+            // center is the focus. Without this a system framed on its star is framed on
+            // nothing, because every belt's center is the star.
             let outer = d + item.annulus_m.map_or(item.radius_m, |(_, o)| o);
             near = near.min(d);
             far = far.max(outer);
@@ -238,7 +238,7 @@ pub(crate) mod tests {
         assert!(near.is_finite() && far.is_finite(), "{near} {far}");
     }
 
-    /// A belt centred on the focus still has an extent, because it is drawn out to its edge.
+    /// A belt centered on the focus still has an extent, because it is drawn out to its edge.
     /// Without that, framing a system on its star frames it on nothing.
     #[test]
     fn an_annulus_sets_the_extent_from_its_edge() {

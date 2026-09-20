@@ -20,7 +20,7 @@ pub struct KeplerMotive {
     #[serde(default)]
     pub anomalistic_period: Option<TimeDelta>,
     /// Explicit mu, m^3/s^2, overriding `G * (M_primary + m)`. Needed for a body orbiting a
-    /// barycentre, where effective mu depends on the *other* body's mass (Pluto and Charon).
+    /// barycenter, where effective mu depends on the *other* body's mass (Pluto and Charon).
     /// Dropping it silently changes the orbit.
     #[serde(default)]
     pub gravitational_parameter: Option<f64>,

@@ -526,7 +526,7 @@ pub fn update_focused_trajectory_markers(
     };
 
     let primary_position = system.0.position(primary_index);
-    // Arena mu honours the explicit override; recomputing from primary mass would be
+    // Arena mu honors the explicit override; recomputing from primary mass would be
     // wrong for barycentric orbits.
     let mu = system.0.mu(focused_index);
     let period_seconds = kepler.period(mu).to_seconds();
@@ -691,7 +691,7 @@ pub fn update_mouse_hit_marker(
         return;
     }
 
-    // Arena mu: G(M+m) with the explicit override honoured. Open-coding G*M here made
+    // Arena mu: G(M+m) with the explicit override honored. Open-coding G*M here made
     // the readout disagree with the propagated position, and an unresolved primary gave
     // mu = 0, which feeds infinities into the period.
     let mu = system.0.mu(focused_index);
@@ -1270,7 +1270,7 @@ mod tests {
     }
 
     /// An ellipse sampled at both ends of its period closes on itself, and so must the
-    /// tube: every ring meets its neighbour, including the last meeting the first.
+    /// tube: every ring meets its neighbor, including the last meeting the first.
     #[test]
     fn a_closed_orbits_tube_meets_itself() {
         // A sampled ellipse in the plane perifocal space puts the orbit in, with the
@@ -1295,9 +1295,9 @@ mod tests {
         for ring in 0..resolution {
             worst = worst.max(angle_between(perp1_of(ring), perp1_of(ring + 1)));
         }
-        // Neighbouring rings on a 120-sample ellipse are ~3 degrees apart; anything
+        // Neighboring rings on a 120-sample ellipse are ~3 degrees apart; anything
         // approaching a right angle is the frame flipping rather than the curve turning.
-        assert!(worst < 0.2, "worst turn between neighbouring rings was {worst} rad");
+        assert!(worst < 0.2, "worst turn between neighboring rings was {worst} rad");
 
         // The duplicated end sample lands on the first, so their frames must agree exactly.
         let seam = angle_between(perp1_of(0), perp1_of(resolution));

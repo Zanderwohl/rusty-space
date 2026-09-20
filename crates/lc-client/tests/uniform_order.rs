@@ -72,7 +72,7 @@ fn the_body_surface_uniform_is_declared_in_one_order() {
     );
 }
 
-/// The plume's uniform grew a second colour and a churn, appended to both — but it is six vectors
+/// The plume's uniform grew a second color and a churn, appended to both — but it is six vectors
 /// the shader reads positionally, and a march that takes the soot for the exposure draws nothing
 /// at all.
 #[test]

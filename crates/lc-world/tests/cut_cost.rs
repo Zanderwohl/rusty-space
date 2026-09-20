@@ -28,8 +28,8 @@ fn a_craft_in_a_system() -> Craft {
 fn a_frame_after_a_cut_is_not_a_search() {
     let mut craft = a_craft_in_a_system();
 
-    // Out at a belt's radius rather than at the star's centre, and moving at roughly circular
-    // speed. At the centre the conic is degenerate and the craft goes adrift, which skips the
+    // Out at a belt's radius rather than at the star's center, and moving at roughly circular
+    // speed. At the center the conic is degenerate and the craft goes adrift, which skips the
     // whole patched-conic path — so a test written there measures nothing and says 99 ns.
     const AU_LY: f64 = 1.495_978_707e11 / 9.460_730_472_580_8e15;
     let origin = craft.motion.position_ly;

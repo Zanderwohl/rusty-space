@@ -3,7 +3,7 @@
 ## The server frame
 
 One inertial frame is privileged by fiat. Call it the **server frame**. Its origin in space
-and time is arbitrary and fixed at world creation; a sensible choice is the barycentre of
+and time is arbitrary and fixed at world creation; a sensible choice is the barycenter of
 the starting system at the moment the world is generated. The server's coordinate time `t`
 advances monotonically at 8766x real time.
 
@@ -80,29 +80,29 @@ The difference is small, so the `f64` is precise, and there is exactly one funct
 how the two systems relate — the same discipline `em_foundations::time` applies between
 `Instant` and `JulianDate`, for the same reason.
 
-### Local tier: f64 metres from a system barycentre
+### Local tier: f64 meters from a system barycenter
 
-Inside a star system, positions are `f64` metres relative to that system's barycentre. This is
+Inside a star system, positions are `f64` meters relative to that system's barycenter. This is
 exactly what `em-foundations` and `em-sim` already use, so orbital code needs no changes.
 
 Precision, since this is why the split exists:
 
-| distance from barycentre | f64 metre ulp |
+| distance from barycenter | f64 meter ulp |
 |---|---|
 | 1 AU (1.5e11 m) | 31 um |
 | 1000 AU | 31 mm |
 | 100 000 AU (1.58 ly, Oort edge) | 2.0 m |
-| 1 ly in a *global* metre frame | 2.0 m |
-| 100 ly in a *global* metre frame | 128 m |
+| 1 ly in a *global* meter frame | 2.0 m |
+| 100 ly in a *global* meter frame | 128 m |
 
-Local metres stay precise because the demand for precision falls off with distance from the
-star at the same rate the representation does. Global metres do not, which is why the global
+Local meters stay precise because the demand for precision falls off with distance from the
+star at the same rate the representation does. Global meters do not, which is why the global
 tier is an integer grid instead.
 
 ### Converting between tiers
 
 ```
-global = system_origin_global + round(local_metres / 299.792458)
+global = system_origin_global + round(local_meters / 299.792458)
 ```
 
 The rounding costs up to 150 m, i.e. 0.5 us of coordinate time, i.e. 57 us of real time.
@@ -110,7 +110,7 @@ That is below any timescale a player can perceive and below the resolution of ev
 gameplay rule.
 
 **Rule: the global grid is the index; local arithmetic is the truth.** Causality *within*
-a system is evaluated in local f64 seconds and metres. Causality *between* systems is
+a system is evaluated in local f64 seconds and meters. Causality *between* systems is
 evaluated on the integer grid. A query that spans the boundary uses the grid to select
 candidates and local arithmetic to refine, in that order.
 
@@ -190,7 +190,7 @@ Four effects, and nothing else.
 4. **Proper time.** A ship accumulates `tau = integral dt/gamma`. Onboard processes —
    construction, refining, computation — advance on `tau`. The player's clock is `t`. A ship
    that runs at `beta = 0.87` (`gamma = 2`) builds at half rate as measured by the player,
-   and its crew ages half as fast. The UI shows both, labelled, and never transforms the
+   and its crew ages half as fast. The UI shows both, labeled, and never transforms the
    world into the ship's frame.
 
 Nothing else from SR appears. There is no length contraction of rendered objects (it would
@@ -219,7 +219,7 @@ pub enum Separation { Timelike, Lightlike, Spacelike }
 pub fn retarded_times(observer: Coord, w: &dyn Worldline) -> SmallVec<[f64; 2]>;
 
 pub trait Worldline {
-    fn position_at(&self, t: f64) -> DVec3;   // local metres, or global if unparented
+    fn position_at(&self, t: f64) -> DVec3;   // local meters, or global if unparented
     fn velocity_at(&self, t: f64) -> DVec3;
     fn defined_over(&self) -> Range<f64>;
 
@@ -263,7 +263,7 @@ carries one lesson worth stating on its own.
 A frame is pinned to an event, and a long burn carries the ship a long way from it: shedding
 `0.9999c` at five gravities takes most of a century and leaves the anchor hundreds of
 light-years astern. Transforming the ship's position out of the frame and then subtracting the
-quarry's to recover a five-kilometre standoff is a difference of two numbers of order a hundred
+quarry's to recover a five-kilometer standoff is a difference of two numbers of order a hundred
 light-years, and `f64` has nothing left at that ratio.
 
 The fix is not a better solver. Ask for the *offset* rather than the position, and the enormous

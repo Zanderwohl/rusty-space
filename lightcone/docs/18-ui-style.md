@@ -93,7 +93,7 @@ drifting starfield is unreadable in a way a readout over one is not. The rule's 
 for the exception: a panel is translucent so it feels part of the scene, and a book is not part of
 the scene. See [21-library.md](21-library.md).
 
-What the exception does **not** licence is hiding the world behind it. The flight readout and the
+What the exception does **not** license is hiding the world behind it. The flight readout and the
 staleness figure stay visible, and notifications still draw on top; the whole premise of the
 feature is that the player is waiting for something, so the thing they are waiting for has to be
 able to interrupt them.
@@ -103,7 +103,7 @@ able to interrupt them.
 One source — `em_ui::vfd` — and a conversion at the edge:
 
 ```rust
-fn colour(from: bevy::prelude::Color) -> egui::Color32
+fn color(from: bevy::prelude::Color) -> egui::Color32
 ```
 
 An egui surface inside the menu dresses itself from that, so the two agree by construction. The
@@ -136,10 +136,10 @@ and the one constant is what stops the two toolkits landing on different cuts of
 Two surfaces say why they are not Quantico.
 
 **The title screen is Nabla**, and only the title screen. The game's name is a wordmark and the
-site sets it in the same face, so the menu and the front page are recognisably one thing. Nabla
-is a colour font whose depth lives inside the glyph: it is unreadable at the size a heading is
+site sets it in the same face, so the menu and the front page are recognizably one thing. Nabla
+is a color font whose depth lives inside the glyph: it is unreadable at the size a heading is
 set at, so `MenuUi::title_font` takes a size with the handle and the menu asks for 44. Bevy
-flattens its layers into one colour, which on the VFD palette is exactly the extruded green a
+flattens its layers into one color, which on the VFD palette is exactly the extruded green a
 title wants. It costs 1.6 MB and is asked for on the one screen that draws it.
 
 A `title` with no wordmark falls back to `MenuUi::font` at the ordinary heading size, which is
@@ -213,7 +213,7 @@ it does on submit is start a task and set one field, not reach into the world.
   targets.
 - **Something to act on, always.** The browser sign-in shows the URL as well as opening it,
   because a browser that did not open leaves a player staring at nothing otherwise.
-- **Colour is never the only signal.** A disabled button is disabled *and* says why it cannot be
+- **Color is never the only signal.** A disabled button is disabled *and* says why it cannot be
   pressed, or is not there.
 
 ## Nothing is modal to the clock

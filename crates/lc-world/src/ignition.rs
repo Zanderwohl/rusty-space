@@ -105,7 +105,7 @@ mod tests {
     use crate::motion::{Change, Event, ShipId};
     use crate::system::M_PER_LY;
 
-    /// Twenty thousand kilometres from rest along `toward`, ordered at `at_s`: a crossing whose
+    /// Twenty thousand kilometers from rest along `toward`, ordered at `at_s`: a crossing whose
     /// flip is a minute long. The ship starts facing +x.
     fn crossing(at_s: f64, toward: DVec3) -> Craft {
         let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);

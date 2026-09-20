@@ -801,7 +801,7 @@ fn fold(
 /// How loudly a connection state should be shown.
 ///
 /// The words live here and the palette lives in the interface, so "what does this state mean"
-/// and "what colour is that" stay separable. Every variant carries text: colour is never the
+/// and "what color is that" stay separable. Every variant carries text: color is never the
 /// only signal — see `lightcone/docs/18-ui-style.md`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Note {
@@ -950,7 +950,7 @@ mod tests {
     /// A ship that was *doing* something comes back doing it.
     ///
     /// The welcome used to carry a point, so a player who signed out of an orbit signed back
-    /// into a drift — and drifted two and a half million kilometres off it in a day while the
+    /// into a drift — and drifted two and a half million kilometers off it in a day while the
     /// interface said LINKED.
     #[test]
     fn a_welcome_puts_the_ship_back_on_the_station_it_was_holding() {
@@ -1111,7 +1111,7 @@ mod tests {
         assert!(uplink.applied.is_none(), "it complained about nothing");
     }
 
-    /// The arithmetic that made the number recognisable, kept so the correspondence is pinned
+    /// The arithmetic that made the number recognizable, kept so the correspondence is pinned
     /// rather than remembered: a multiplier of one is the server's 8766 coordinate seconds per
     /// real second, and the old default was sixty of those — 143.7 coordinate hours a second,
     /// which is what the report said.
@@ -1212,9 +1212,9 @@ mod tests {
         assert!(uplink.contacts.is_empty(), "a dropped contact was kept");
     }
 
-    /// **The flicker this exists for.** Two craft a kilometre and a half apart in low orbit of
+    /// **The flicker this exists for.** Two craft a kilometer and a half apart in low orbit of
     /// Jupiter, and a statement once a server tick — 438 coordinate seconds at the design rate,
-    /// three frames at sixty. Held still, the contact fell up to twenty thousand kilometres
+    /// three frames at sixty. Held still, the contact fell up to twenty thousand kilometers
     /// behind the ship between statements and snapped back on each one. Reckoned, the range
     /// reads the formation.
     #[test]
@@ -1616,7 +1616,7 @@ mod tests {
         for state in states {
             let (_, words) = note(&state, None).expect("something to show");
             assert!(!words.is_empty());
-            // Colour is never the only signal, so the words have to carry it alone.
+            // Color is never the only signal, so the words have to carry it alone.
             assert!(
                 words.chars().any(|c| c.is_ascii_uppercase()),
                 "{words} reads as nothing",

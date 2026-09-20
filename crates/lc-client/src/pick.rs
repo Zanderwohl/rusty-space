@@ -141,7 +141,7 @@ struct Sighted {
     radius_px: f32,
     rank: u8,
     /// The curves it is drawn along, clip space, for anything that is not a point. A swarm is
-    /// picked and marked along these rather than at a centre it does not have.
+    /// picked and marked along these rather than at a center it does not have.
     outline: Option<Vec<Vec<Vec4>>>,
 }
 
@@ -439,13 +439,13 @@ fn swarm_outlines(
     let Some(extent) = population.extent() else { return Vec::new() };
     let (u, v) = lc_world::navigation::basis(population.pole);
     let pole = population.pole.normalize_or_zero();
-    let centre = (star_ly - ship_ly) * M_PER_LY;
+    let center = (star_ly - ship_ly) * M_PER_LY;
 
     let ring = |radius: f64, lift: f64| -> Vec<DVec3> {
         (0..=SWARM_SAMPLES)
             .map(|i| {
                 let theta = std::f64::consts::TAU * i as f64 / SWARM_SAMPLES as f64;
-                centre + (u * theta.cos() + v * theta.sin()) * radius + pole * lift
+                center + (u * theta.cos() + v * theta.sin()) * radius + pole * lift
             })
             .collect()
     };
@@ -461,7 +461,7 @@ fn swarm_outlines(
         let phi = std::f64::consts::TAU * k as f64 / SWARM_CROSS_SECTIONS as f64;
         let outward = u * phi.cos() + v * phi.sin();
         let at = |radius: f64, latitude: f64| {
-            centre + (outward * latitude.cos() + pole * latitude.sin()) * radius
+            center + (outward * latitude.cos() + pole * latitude.sin()) * radius
         };
         let leg = |steps: usize, f: &dyn Fn(f64) -> DVec3| {
             (0..steps).map(|i| f(i as f64 / steps as f64)).collect::<Vec<_>>()
@@ -518,14 +518,14 @@ fn draw(mut contexts: EguiContexts, picked: Res<Picked>, windows: Query<&Window,
     for mark in &picked.contacts {
         paint(&painter, mark, viewport, frame, CONTACT, false);
     }
-    for (mark, colour, bracketed) in [
+    for (mark, color, bracketed) in [
         (picked.hover.as_ref(), HOVER, false),
         (picked.selected.as_ref(), SELECTED, true),
     ]
     .into_iter()
-    .filter_map(|(mark, colour, bracketed)| Some((mark?, colour, bracketed)))
+    .filter_map(|(mark, color, bracketed)| Some((mark?, color, bracketed)))
     {
-        paint(&painter, mark, viewport, frame, colour, bracketed);
+        paint(&painter, mark, viewport, frame, color, bracketed);
     }
 }
 
@@ -569,16 +569,16 @@ fn paint(
     mark: &Mark,
     viewport: Vec2,
     frame: Frame<'_>,
-    colour: egui::Color32,
+    color: egui::Color32,
     bracketed: bool,
 ) {
-    let stroke = egui::Stroke::new(1.0_f32, colour);
+    let stroke = egui::Stroke::new(1.0_f32, color);
 
     // The skeleton first, under whatever marks the anchor. A swarm is a shell and has no
     // outline of its own on screen; this is the circle its elements are drawn from, which is
     // the only line in it a player can be said to be pointing at.
     if let Some(outline) = &mark.outline {
-        let faint = egui::Stroke::new(1.0_f32, colour.gamma_multiply(SKELETON_FADE));
+        let faint = egui::Stroke::new(1.0_f32, color.gamma_multiply(SKELETON_FADE));
         let runs = screen_runs(outline, viewport);
         draw_segments(painter, &reticle::path_segments(&runs), faint);
     }
@@ -606,14 +606,14 @@ fn paint(
     }
     // Measured before it is placed, because where it fits depends on how wide it is.
     let font = egui::FontId::proportional(LABEL_SIZE);
-    let galley = painter.layout_no_wrap(mark.label.clone(), font, colour);
+    let galley = painter.layout_no_wrap(mark.label.clone(), font, color);
     let size = Vec2::new(galley.size().x, galley.size().y);
-    let centre =
+    let center =
         reticle::place_label(anchor, radius_px, size, frame, reticle::LABEL_GAP_PX, preferred);
     painter.galley(
-        egui::pos2(centre.x - size.x * 0.5, centre.y - size.y * 0.5),
+        egui::pos2(center.x - size.x * 0.5, center.y - size.y * 0.5),
         galley,
-        colour,
+        color,
     );
 }
 
@@ -768,13 +768,13 @@ mod tests {
         let e = belt.extent().unwrap();
         let (inner, outer, half_angle) = (e.inner_m, e.outer_m, e.half_angle_rad);
         // Inside the system, which is the only place anyone sees one. Putting the star light-
-        // years off instead costs metres of cancellation against an AU-scale radius, and the
+        // years off instead costs meters of cancellation against an AU-scale radius, and the
         // first version of this test read that as a geometry error.
         let star = DVec3::splat(1.0e-5);
         let curves = swarm_outlines(star, DVec3::ZERO, &belt);
         assert_eq!(curves.len(), 2 + SWARM_CROSS_SECTIONS);
 
-        let centre = (star - DVec3::ZERO) * M_PER_LY;
+        let center = (star - DVec3::ZERO) * M_PER_LY;
         for (which, curve) in curves.iter().enumerate() {
             assert_eq!(curve.len(), SWARM_SAMPLES + 1, "curve {which} is not closed");
             assert!(
@@ -782,7 +782,7 @@ mod tests {
                 "curve {which} has a seam",
             );
             for at in curve {
-                let local = *at - centre;
+                let local = *at - center;
                 // Distance from the *star*, not from the pole: the material is a shell between
                 // two radii, so that is the quantity that is bounded. A point at the inner edge
                 // and a high latitude is legitimately closer to the axis than `inner`.
@@ -802,7 +802,7 @@ mod tests {
 
         // The first two are flat: the edges of the plane.
         for edge in &curves[..2] {
-            assert!(edge.iter().all(|at| (*at - centre).dot(belt.pole).abs() < 1.0e3));
+            assert!(edge.iter().all(|at| (*at - center).dot(belt.pole).abs() < 1.0e3));
         }
     }
 

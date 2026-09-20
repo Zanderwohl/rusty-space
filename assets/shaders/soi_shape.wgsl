@@ -7,7 +7,7 @@
 // is what keeps `soi_radius` one branch instead of eight: adding an isotropic model needs
 // no change here at all.
 //
-// Radii are in RENDER units (metres times the view's distance factor), and `primary_dir`
+// Radii are in RENDER units (meters times the view's distance factor), and `primary_dir`
 // is in render space (Y-up), converted on the CPU through `render_space::ToRender`.
 
 struct SoiShape {
@@ -28,7 +28,7 @@ struct SoiShape {
 
 const MODEL_LAPLACE_ANGLED: u32 = 5u;
 
-/// Radius toward `dir` (a unit vector from the body's centre), in render units.
+/// Radius toward `dir` (a unit vector from the body's center), in render units.
 ///
 /// Mirrors `Soi::radius_at_cos` on the CPU. The two must agree: the CPU decides
 /// visibility and LOD from it, the GPU draws from it.

@@ -158,7 +158,7 @@ pub struct Scheduled {
     pub strength: f32,
 }
 
-/// Strength at the receiver: power over the square of the distance travelled, with the
+/// Strength at the receiver: power over the square of the distance traveled, with the
 /// distance floored so a coincident source is loud rather than infinite.
 pub fn strength(power_w: f64, distance: f64) -> f32 {
     (power_w / distance.max(1.0).powi(2)) as f32

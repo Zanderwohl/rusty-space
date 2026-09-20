@@ -73,7 +73,7 @@ CREATE TABLE events (
     gy         bigint  NOT NULL,
     gz         bigint  NOT NULL,
     system_id  bigint,                        -- NULL if outside any Oort shell
-    lx         double precision,              -- local metres, when system_id is set
+    lx         double precision,              -- local meters, when system_id is set
     ly         double precision,
     lz         double precision,
     lt         double precision,              -- local seconds from the system epoch
@@ -240,7 +240,7 @@ the second has to be answerable without walking the first.
 Everything in those tables is stamped with the time the light **lands**, never the time it left,
 and every read is gated on the clock having reached it. That is the same bargain the deliveries
 table makes — work it out at write time, gate it at read time — in a place where it happens to
-be the whole of a game mechanic rather than an optimisation:
+be the whole of a game mechanic rather than an optimization:
 
 | row | written | readable |
 |---|---|---|

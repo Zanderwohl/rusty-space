@@ -70,21 +70,21 @@ impl Plan {
 /// It was a flat ten coordinate minutes, which conflated the two jobs and suppressed the good
 /// signal. Ten minutes is far finer than the light delay across a system, which is what it was
 /// chosen against — and a craft in high orbit of Jupiter covers **fourteen thousand
-/// kilometres** in it. An orbital rendezvous spent the whole approach flying at a ten-minute-old
-/// position and settled into a relative orbit a hundred to four hundred kilometres across
+/// kilometers** in it. An orbital rendezvous spent the whole approach flying at a ten-minute-old
+/// position and settled into a relative orbit a hundred to four hundred kilometers across
 /// instead of onto the standoff.
 ///
 /// A fraction of the plan rather than a time, because what a guidance loop owes is a number of
-/// corrections across the manoeuvre, not a cadence in seconds — and because the approach
+/// corrections across the maneuvere, not a cadence in seconds — and because the approach
 /// *shrinks*. A fixed floor that is reasonable for the first three-thousand-second run at a
 /// quarry is hopeless for the sixty-second correction at the end of it, which is exactly how
 /// ten minutes came to be too coarse without ever looking wrong.
 ///
 /// **Ten of them, and more is worse.** That is not what you would guess, and it was measured:
 /// at a fiftieth of the plan a rendezvous thrashed between three and four hundred million
-/// metres before capturing, and at a two-hundredth it did not capture inside two thousand
-/// ticks. Each plan is a whole manoeuvre — a burn, a flip and a burn — rather than a
-/// controller's output, so re-solving faster than the manoeuvre can run keeps resetting the
+/// meters before capturing, and at a two-hundredth it did not capture inside two thousand
+/// ticks. Each plan is a whole maneuvere — a burn, a flip and a burn — rather than a
+/// controller's output, so re-solving faster than the maneuvere can run keeps resetting the
 /// flip and the pursuer never reaches its brake. Anything from a tenth to a third behaves the
 /// same; a tenth is the middle of the plateau.
 pub const STEER_FRACTION: f64 = 0.1;
@@ -102,14 +102,14 @@ fn steer_floor_us(pursuer: &Craft) -> i64 {
     (duration_s * STEER_FRACTION * crate::world::MICROS_PER_SECOND as f64) as i64
 }
 
-/// How far the quarry's burn may move from the one an escort is modelling, as a fraction of the
+/// How far the quarry's burn may move from the one an escort is modeling, as a fraction of the
 /// pursuer's drive, before a new plan skips [`STEER_FRACTION`]'s wait.
 ///
 /// The wait is a fraction of the approach, and following a quarry that pulls as hard as the
 /// pursuer leaves a sliver of thrust to close with, so the approach — and the wait — runs to
 /// hours. Held to it, a pursuer went on burning outward long after its quarry had flipped and
-/// braked, and ended eight million kilometres past it. A burn starting, stopping or turning
-/// round is a new manoeuvre rather than a correction, so it is answered at once; a steady burn
+/// braked, and ended eight million kilometers past it. A burn starting, stopping or turning
+/// round is a new maneuvere rather than a correction, so it is answered at once; a steady burn
 /// matches its model and is still rate-limited.
 pub const BURN_CHANGE_FRACTION: f64 = 0.25;
 
@@ -134,7 +134,7 @@ fn burn_changed(pursuer: &Craft, burn: Option<glam::DVec3>) -> bool {
 /// Whether an observer is entitled to know a craft exists at all.
 ///
 /// Sharing a system, which is the same [`LOCAL_SHELL_LY`] rule both ends already use to decide
-/// where a ship is. Not an angular size: a hull five hundred metres long is well under a pixel
+/// where a ship is. Not an angular size: a hull five hundred meters long is well under a pixel
 /// from anywhere in a system, and a rule drawn there would leave a player unable to find
 /// traffic they are sitting in the middle of. Between the stars, where there is no system to
 /// share, the same radius serves as a plain range.
@@ -233,8 +233,8 @@ pub fn contacts(
 /// Whether a craft flying a standing intercept should be given a new plan this tick.
 ///
 /// Two different questions wearing one name. A ship still flying a plan for this quarry is
-/// asked whether its quarry has stopped agreeing with it — which is the whole manoeuvre
-/// response, and which it cannot notice until the light of the manoeuvre arrives — or whether
+/// asked whether its quarry has stopped agreeing with it — which is the whole maneuvere
+/// response, and which it cannot notice until the light of the maneuvere arrives — or whether
 /// the plan is for another closeness. A ship that has arrived, or is doing anything else, is
 /// asked whether it has drifted off station.
 pub fn should_close(pursuer: &Craft, seen: &pursuit::Sighting, closeness: Closeness, now_s: f64) -> bool {

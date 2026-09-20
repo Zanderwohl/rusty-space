@@ -319,7 +319,7 @@ cannot carry its stylesheet: two workspaces, two docker build contexts, and a se
 
 So `_tokens.scss` is **copied**, and a test compares the two files byte for byte
 (`assets::tests::the_tokens_are_the_sites_tokens`). A copy with nothing watching it drifts; that
-test is what watches it. Anything genuinely broker-only — there is one thing, a colour for a
+test is what watches it. Anything genuinely broker-only — there is one thing, a color for a
 refusal, which the site has never needed because nothing there fails — goes in `_status.scss`
 instead, so the copied file stays a copy.
 
@@ -353,7 +353,7 @@ Named so they are decisions rather than omissions:
   if that changes it becomes a list and the client picks, which is a protocol change and a
   version bump.
 - **Reaping expired rows.** `signin_codes` and `upstream_flows` are deleted when spent and
-  filtered by expiry when read, so a stale row is never honoured — but an abandoned one is never
+  filtered by expiry when read, so a stale row is never honored — but an abandoned one is never
   swept either. Both tables carry an expiry index for the job; nothing runs it yet.
 - **A broker session.** Each `/signin` is a fresh one, so a player who signs in to the site and
   then launches the desktop client authenticates twice. The upstream providers paper over this
@@ -477,7 +477,7 @@ linked from exactly one place, which was the page a refused visitor never sees.
 **Signing out is a POST.** The session cookie is `SameSite=Lax`, which sends it on a cross-site
 top-level navigation when the method is safe — so as a `GET` it was a link on any page anywhere
 that signed you out of the console, and anything that follows links on its own did the same.
-Lax never sends a cookie on a cross-site `POST`, so the method is the whole of the defence and
+Lax never sends a cookie on a cross-site `POST`, so the method is the whole of the defense and
 no token is needed. The masthead offers a small form styled to read as the link it replaces.
 
 Its session is eight hours, not the site's fortnight: the revocation window of a signed cookie

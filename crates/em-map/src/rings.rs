@@ -18,7 +18,7 @@ pub struct Ring {
 /// `em_plot::Scale::Log10` already chooses powers of ten and already thins by a whole-decade
 /// step when the range is wider than the count allows, which is exactly what fifteen orders of
 /// magnitude needs; it also already survives a lower bound of zero, which is the case a map
-/// centred on one of its own items hits every time. None of that is worth writing twice.
+/// centered on one of its own items hits every time. None of that is worth writing twice.
 ///
 /// What this adds is the widening. `ticks` keeps only what falls strictly inside the range, so
 /// asking it for `[1.2e11, 4.5e11]` returns nothing at all — both decades that frame the view
@@ -47,8 +47,8 @@ pub fn decades(inner_m: f64, outer_m: f64, max: usize) -> Vec<Ring> {
 ///
 /// The same ladder `lc_client::hud::span` uses, one step longer: a map goes further out than a
 /// flight readout ever does.
-pub fn label_m(metres: f64) -> String {
-    match metres {
+pub fn label_m(meters: f64) -> String {
+    match meters {
         m if m < 1.0e3 => format!("{m:.0} m"),
         m if m < 1.0e9 => format!("{:.0} thousand km", m / 1.0e6),
         m if m < 0.1 * M_PER_AU => format!("{:.0} million km", m / 1.0e9),

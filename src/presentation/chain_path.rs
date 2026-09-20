@@ -258,7 +258,7 @@ fn write_tube(mesh: &mut Mesh, points: &[Vec3]) {
 
     if points.len() >= 2 {
         const NOMINAL_RADIUS: f32 = 0.0;
-        for (ring, centre) in points.iter().enumerate() {
+        for (ring, center) in points.iter().enumerate() {
             let tangent = if ring == 0 {
                 points[1] - points[0]
             } else if ring == points.len() - 1 {
@@ -277,7 +277,7 @@ fn write_tube(mesh: &mut Mesh, points: &[Vec3]) {
                 let angle = std::f32::consts::TAU * side as f32 / TUBE_SIDES as f32;
                 let (sin, cos) = angle.sin_cos();
                 let offset = perp1 * cos + perp2 * sin;
-                let position = *centre + offset * NOMINAL_RADIUS;
+                let position = *center + offset * NOMINAL_RADIUS;
                 positions.push(position.into());
                 normals.push(offset.normalize_or_zero().into());
                 colors.push([1.0, 1.0, 1.0, along]);

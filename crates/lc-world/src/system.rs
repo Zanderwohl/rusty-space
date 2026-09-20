@@ -11,10 +11,10 @@ use em_foundations::time::Instant;
 use glam::DVec3;
 use crate::sky::{CatalogueStar, StarId, generate};
 
-/// Metres in a light-year.
+/// Meters in a light-year.
 pub const M_PER_LY: f64 = 9.460_730_472_580_8e15;
 
-/// Metres in one render unit inside a system. An astronomical unit, so a belt's radius is a
+/// Meters in one render unit inside a system. An astronomical unit, so a belt's radius is a
 /// number of order ten rather than of order 1e11.
 pub const UNIT_M: f64 = 1.495_978_707e11;
 
@@ -68,7 +68,7 @@ pub struct Drawable {
     /// The radius a blackbody at the star's temperature would need to deliver this body's
     /// reflected flux. See [`effective_radius`].
     pub effective_radius_m: f64,
-    /// The grey, zero-albedo balance: what sunlight alone would leave it at, kelvin.
+    /// The gray, zero-albedo balance: what sunlight alone would leave it at, kelvin.
     ///
     /// Kept because [`crate::surface::Surface::classify`] is calibrated against it. It is not
     /// what the body radiates at — see [`Drawable::effective_k`].
@@ -76,7 +76,7 @@ pub struct Drawable {
     /// What it actually radiates at, kelvin: sunlight it keeps, plus heat of its own.
     ///
     /// The two differ for a giant and barely at all for anything else. Jupiter is 124 K where
-    /// the grey balance says 122 and the sunlight it keeps says 110 — the albedo takes it down
+    /// the gray balance says 122 and the sunlight it keeps says 110 — the albedo takes it down
     /// and its own contraction puts it back, which is a coincidence of the two corrections and
     /// not a reason to skip either.
     pub effective_k: f64,
@@ -90,7 +90,7 @@ pub struct LocalSystem {
     /// carries bodies and no distributions, and a system with a Kuiper belt and no Kuiper belt
     /// in it would be the stranger of the two errors.
     pub populations: Vec<crate::population::Population>,
-    /// Where the system's barycentre sits, light-years from the world origin.
+    /// Where the system's barycenter sits, light-years from the world origin.
     pub origin_ly: DVec3,
     sim: System,
     primary: BodyIndex,
@@ -110,8 +110,8 @@ impl LocalSystem {
         let populations = generate::system_for(star).populations;
         let contents = Self::contents_for(star);
         let sim = System::from_contents(&contents).ok()?;
-        // The most massive body is the primary. Not the first: a multiple is a barycentre with
-        // children, and the barycentre is massless.
+        // The most massive body is the primary. Not the first: a multiple is a barycenter with
+        // children, and the barycenter is massless.
         let primary = sim
             .indices()
             .max_by(|a, b| sim.info(*a).mass.total_cmp(&sim.info(*b).mass))?;
@@ -285,14 +285,14 @@ impl LocalSystem {
     }
 
     /// Where the primary is at a coordinate time. It moves: a star with planets orbits their
-    /// common centre, which for the Sun and Jupiter is outside the Sun.
+    /// common center, which for the Sun and Jupiter is outside the Sun.
     pub fn star_position_at(&self, seconds: f64) -> Option<DVec3> {
         let (at, _) = self.body_state_at(self.primary, seconds)?;
         Some(self.origin_ly + at / M_PER_LY)
     }
 
-    /// A body's position and velocity at a coordinate time, simulation frame, metres and
-    /// metres a second — without propagating this system to get there.
+    /// A body's position and velocity at a coordinate time, simulation frame, meters and
+    /// meters a second — without propagating this system to get there.
     ///
     /// [`LocalSystem::sim`]'s accessors read the arena, which holds one instant: asking them
     /// where a body *will* be means propagating a copy first. This walks the body's parent
@@ -370,11 +370,11 @@ impl LocalSystem {
 /// flux, so that a lit body can be drawn by the same shader as the star lighting it.
 ///
 /// `R_eff = R_star * R_body * sqrt(p) / d`, from equating `pi R_eff^2 B / D^2` with the
-/// standard `L p R^2 / (4 pi d^2 D^2)`. Exact for a grey reflector, and checked against a
+/// standard `L p R^2 / (4 pi d^2 D^2)`. Exact for a gray reflector, and checked against a
 /// measured magnitude: Jupiter comes out at -2.72 against an observed -2.70.
 ///
 /// Reflected light has the star's spectrum, which is what makes this work at all. A body with a
-/// strongly coloured albedo — Mars — comes out the star's colour rather than its own, and that
+/// strongly colored albedo — Mars — comes out the star's color rather than its own, and that
 /// is the approximation being made.
 pub fn effective_radius(star_radius_m: f64, radius_m: f64, albedo: f64, distance_m: f64) -> f64 {
     effective_radius_from_area(

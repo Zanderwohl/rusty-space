@@ -10,7 +10,7 @@
 //! Bevy's **Y-up render axes**, not simulation space: these are meshes, and a mesh is already
 //! in the renderer. `render_space` is where the boundary is.
 //!
-//! Brightness rides in vertex-colour **alpha**, which `body_wireframe.wgsl` reads as line
+//! Brightness rides in vertex-color **alpha**, which `body_wireframe.wgsl` reads as line
 //! weight. Under a plain blended material it reads as opacity instead, which is the same
 //! picture for a diagram — a solid equator and a faint grid.
 
@@ -356,7 +356,7 @@ pub fn plane_spokes(spokes: u32, tube_radius: f32, tube_sides: u32, brightness: 
         let angle = (i as f32 / spokes.max(1) as f32) * 2.0 * PI;
         let (sin_a, cos_a) = angle.sin_cos();
         let out = Vec3::new(cos_a, 0.0, sin_a);
-        // From a little way out rather than from the centre, where every spoke would meet
+        // From a little way out rather than from the center, where every spoke would meet
         // every other one inside a tube's own radius and read as a blob.
         buffers.add(&[out * 0.02, out], brightness, tube_radius, tube_sides, false);
     }
@@ -435,7 +435,7 @@ mod tests {
     fn alphas(mesh: &Mesh) -> Vec<f32> {
         match mesh.attribute(Mesh::ATTRIBUTE_COLOR) {
             Some(VertexAttributeValues::Float32x4(v)) => v.iter().map(|c| c[3]).collect(),
-            _ => panic!("a wireframe mesh without colours"),
+            _ => panic!("a wireframe mesh without colors"),
         }
     }
 
@@ -566,14 +566,14 @@ mod tests {
     }
 
     /// Spokes reach the rim and start clear of the middle, where a dozen tubes meeting inside
-    /// one tube's radius reads as a blob rather than as a centre.
+    /// one tube's radius reads as a blob rather than as a center.
     #[test]
     fn spokes_reach_the_rim_without_piling_up_in_the_middle() {
         let mesh = plane_spokes(12, 0.01, 4, 0.5);
         let radii: Vec<f32> = positions(&mesh).iter().map(|p| Vec2::new(p.x, p.z).length())
             .collect();
         assert!(radii.iter().any(|r| *r > 0.97), "no spoke reached the rim");
-        assert!(radii.iter().all(|r| *r > 0.005), "a spoke ran through the centre");
+        assert!(radii.iter().all(|r| *r > 0.005), "a spoke ran through the center");
         assert!(positions(&mesh).iter().all(|p| p.y.abs() < 0.02), "a spoke left the plane");
     }
 

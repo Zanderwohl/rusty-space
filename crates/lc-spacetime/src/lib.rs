@@ -12,7 +12,7 @@
 //! | Coordinate time | microseconds, `i64`, from the world origin |
 //! | Coordinate position | light-microseconds (299.792458 m), `i64` |
 //! | Velocity | `beta`, dimensionless |
-//! | Local position inside a system | metres, `f64`, about the barycentre |
+//! | Local position inside a system | meters, `f64`, about the barycenter |
 //!
 //! So **`c = 1`** and the light-cone test is integer arithmetic. Resolution is 299.79 m and
 //! 1 us.

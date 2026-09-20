@@ -44,8 +44,8 @@ cargo test -p em-sim --no-default-features           # the headless suite
 opt-level = 3
 ```
 
-So a debug build already runs Bevy, glam and the rest fully optimised — only this
-workspace's own code is unoptimised, and it is a thin layer over them. A release build
+So a debug build already runs Bevy, glam and the rest fully optimized — only this
+workspace's own code is unoptimized, and it is a thin layer over them. A release build
 adds `lto = true` and `codegen-units = 1`, which costs many minutes of link time for a
 speedup you will not notice while testing a change.
 

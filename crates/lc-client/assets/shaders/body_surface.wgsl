@@ -26,7 +26,7 @@ struct VertexOutput {
 }
 
 struct BodySurfaceUniform {
-    /// The two ends of the surface's colour, linear.
+    /// The two ends of the surface's color, linear.
     dark: vec4<f32>,
     light: vec4<f32>,
     /// World direction to the star. `w` is the ambient floor on the night side.

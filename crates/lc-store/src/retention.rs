@@ -237,7 +237,7 @@ mod tests {
         let ready = archivable(&client, now, SPAN_US).await.unwrap();
         assert!(ready.iter().any(|p| p.child == child), "should be archivable with no deliveries");
 
-        // Its light is still travelling: the delivery has not been read yet.
+        // Its light is still traveling: the delivery has not been read yet.
         store::insert_deliveries(&client, &[Delivery {
             observer_id: 20_100,
             arrive_t: now + SPAN_US / 2,

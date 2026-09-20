@@ -74,7 +74,7 @@ was added to avoid.
 
 So the menu generates four thousand main-sequence stars from a fixed seed: isotropic, uniform
 in volume out to four hundred light-years, masses from an inverted Salpeter IMF and effective
-temperature from the same mass so the colours agree with the sizes. Fixed rather than random
+temperature from the same mass so the colors agree with the sizes. Fixed rather than random
 per launch, because a backdrop that differs each time reads as a bug in the sky.
 
 The field turns at one radian a minute, in yaw only. `Look` carries no roll by construction, and
@@ -247,7 +247,7 @@ besides, per [07-rendering.md](07-rendering.md).
 | entry | why |
 |---|---|
 | God view toggle | `#[cfg(feature = "godview")]` |
-| causality overlay | lines from in-flight events to the observers they are travelling toward. The one bug class — an observer learning early or late — that no other view shows |
+| causality overlay | lines from in-flight events to the observers they are traveling toward. The one bug class — an observer learning early or late — that no other view shows |
 | **time-rate multiplier** | a transit at 8766x takes real hours. Dev only: the server owns the rate, and a client that can change it is a client that can cheat |
 | scale tier and camera distance | the three-tier reduction is invisible until it is wrong |
 | retarded-solver statistics | roots found, Newton iterations, bracket expansions |
@@ -271,9 +271,9 @@ restart are a development annoyance that becomes a shipping bug.
 The band mapping is an **information channel**, not decoration. The composition preset works by
 showing dust as orange and a solid occulter as neutral, which is the diagnostic
 [05-observation.md](05-observation.md) and phase 3 built the observation model around. A player
-who cannot separate those two colours cannot play that part of the game.
+who cannot separate those two colors cannot play that part of the game.
 
-**Every colour-carried readout gets a numeric twin.** The deficit ratio between two bands is a
+**Every color-carried readout gets a numeric twin.** The deficit ratio between two bands is a
 number as well as a hue; a star's temperature is a number as well as a tint. This is cheap now
 and structural later.
 
@@ -340,7 +340,7 @@ Omit the path for the three authored sample stars.
 | `,` `.` | clock rate down, up along the ladder |
 
 The clock rate is a development control and the server owns it in a real session. It is
-labelled by period rather than by factor — `1 year / 10 s`, not `360x` — because a factor is
+labeled by period rather than by factor — `1 year / 10 s`, not `360x` — because a factor is
 not something anyone can feel, and the head-up display flags any rate off the design one so a
 fast clock never looks normal.
 
@@ -389,7 +389,7 @@ recording setup.
 `--demo` is the exception that proves the rule, and it is worth saying why. It cannot be an
 action, because what it asks for is a craft placed somewhere by fiat and that is the one thing
 no client may ask for — every order on the wire is a request a ship makes about itself. So it
-is a message of its own, honoured only by a shard started for it, and the scene it names is
+is a message of its own, honored only by a shard started for it, and the scene it names is
 staged on the side that decides what happened. See `lc_world::scenario` for the scenes and
 `lc_server::director` for the runner.
 
@@ -406,13 +406,13 @@ point a scene is composed from, a free fly-around — and each of those is a dif
 
 **A scene says where to stand, and how fast to run.** Both are fields on it rather than things
 to pass in: it knows what it is about, and a rendezvous is two different events seen from its
-two ends. `approach` and `closing` are the same two ships doing the same manoeuvre, watched from
+two ends. `approach` and `closing` are the same two ships doing the same maneuvere, watched from
 one end and then the other.
 
 **The eye moves and the observer does not**, which is the boundary to know about. Everything the
 client works out about light — retarded times, aberration, what a contact looked like when it
 left — is still solved from the player's own ship, because that is the craft the session has a
-worldline for. Across a scene, where the cast is kilometres apart, the difference is
+worldline for. Across a scene, where the cast is kilometers apart, the difference is
 microseconds and there is nothing to see. Across the Oort cloud it would be hours. Watching from
 a craft you are not on is a development view until the observer can move too, which is why the
 only way to reach it is a flag and a panel that does nothing in a shipped build.
@@ -440,7 +440,7 @@ out of the body's own pole, a belt at the radius that actually carries its light
 
 Three things the shapes buy:
 
-- **An altitude is in radii above the surface**, not kilometres, so `low` means the same thing
+- **An altitude is in radii above the surface**, not kilometers, so `low` means the same thing
   at Deimos and at Jupiter — bodies four orders apart in size.
 - **A polar orbit is one whose normal is perpendicular to the body's pole**, and an equatorial
   one has the pole for its normal. One line either way, and the same `Orbit` draws a ring
@@ -486,7 +486,7 @@ and eighty-nine are not, so the list shows the former until you ask for `all`.
 Picking one opens its **courses**: equatorial and polar orbits at three altitudes, the two
 collinear libration points if it has a parent, above the rings if it has rings, and leaving the
 system if it is the star. What is offered is what exists — a moon of nothing has no libration
-points, and rather than grey the option out it is not there. A test flies every option every
+points, and rather than gray the option out it is not there. A test flies every option every
 major body offers and fails if any of them fails to resolve, so the list cannot lie.
 
 Arming a course and flying it are separate: **Go** is what commits, and it uses the ship's own
@@ -500,7 +500,7 @@ in the first slot and nothing else changes.
 
 ### Cutting the engine does not stop the ship
 
-**Decided: cancelling keeps the velocity, and inside a system that velocity is an orbit.**
+**Decided: canceling keeps the velocity, and inside a system that velocity is an orbit.**
 
 The `×` beside the flight readout cuts the drive, with no confirmation — the action is not
 destructive and a dialogue between a player and their own throttle is worse than the mistake it
@@ -516,7 +516,7 @@ that cannot be wrong.
 
 A torch ship makes this less forgiving than it sounds. Five gravities passes solar escape
 velocity in minutes, so cutting out of a brachistochrone halfway to Earth leaves an eccentricity
-of a hundred and sixty — a near-straight line out of the system. Cancelling off a station gives
+of a hundred and sixty — a near-straight line out of the system. Canceling off a station gives
 back the orbit the station was holding, which is the case the readout is really for.
 
 Two things it cannot do:
@@ -525,7 +525,7 @@ Two things it cannot do:
   straight down the line to it: the angular momentum is zero and the orbital plane is
   undefined, so no conic can be written. It refuses, and a refusal leaves the ship drifting at
   the velocity it has, which is none. Standing still is the wrong physics and the right
-  behaviour; falling into the star over the following two months is neither.
+  behavior; falling into the star over the following two months is neither.
 - **Parabolic is nudged off.** Both anomaly solvers divide by the distance from `e = 1`, and a
   state landing exactly there is an accident of arithmetic rather than a trajectory anyone
   chose.
@@ -553,23 +553,23 @@ The ring station started out mid-annulus, in the ring plane — which is what "e
 sounds like, and it was unusable. A ring is drawn as a surface with no thickness. With the ship
 inside the annulus that surface passes through the camera: the nearest geometry is at no
 distance at all, and the camera's own offset from the plane is smaller than f32 render
-positions can hold — about six metres at Saturn. The rings swung between a hairline and a
+positions can hold — about six meters at Saturn. The rings swung between a hairline and a
 bright wedge from one frame to the next, and nine and a half per cent of the screen changed
 every frame at real time.
 
 A ring station now stands a quarter outside the outer edge, in a plane tipped a quarter turn
 out of theirs, so the rings read as rings and the orbit still closes them to a line twice a
-turn. Outside the annulus the same six metres of jitter is six metres in a hundred and forty
-thousand kilometres, and the flicker falls by a factor of four thousand — from 87,704 changed
+turn. Outside the annulus the same six meters of jitter is six meters in a hundred and forty
+thousand kilometers, and the flicker falls by a factor of four thousand — from 87,704 changed
 pixels a frame to twenty, which is what a star field crossing pixel boundaries costs anyway.
 
 Edge-on from *outside* still shimmers on the one-pixel line the rings collapse to. That is
 ordinary geometric aliasing of a thin bright edge, it is bounded, and it is 141 pixels.
 
-### The near plane is fifteen metres
+### The near plane is fifteen meters
 
 A low orbit is a fraction of a planetary radius above the surface, and the render unit is an
-astronomical unit. The camera's near plane stood at a million and a half metres, which is
+astronomical unit. The camera's near plane stood at a million and a half meters, which is
 further from Earth than a low orbit is: the sphere was clipped away entirely while its own
 billboard still drew, so a planet filling the sky rendered as a dot. Reversed float depth costs
 nothing for the range — its precision is relative — but the constant the star field writes is
@@ -596,7 +596,7 @@ labels, and egui draws text better than a twelve-pixel bitmap font.
 
 The band the curve measures is chosen separately from the display mapping. They are different
 questions — one is what the instrument integrates, the other is how three numbers become a
-colour — and the screenshot above is the reason they have to be separate: the display is in the
+color — and the screenshot above is the reason they have to be separate: the display is in the
 thermal preset and the curve is in the thermal *band*, and only the second one is what makes the
 excess a number.
 
@@ -629,5 +629,5 @@ rather than added and later removed.
 ## Open
 
 - Whether the sky map is a window or the world seen from a ship. Likely both, in the manner of
-  Space Engine: a view through a camera, and a three-dimensional stellar map centred on the
+  Space Engine: a view through a camera, and a three-dimensional stellar map centered on the
   observer. The flat map is the cheaper first version and the two want different camera code.

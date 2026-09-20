@@ -44,7 +44,7 @@ struct TrajectoryMaterialUniform {
     distance_dim: f32,
 }
 
-// Distance (bevy metres) at/below which trajectories are at full brightness, and the
+// Distance (bevy meters) at/below which trajectories are at full brightness, and the
 // falloff past it. These live here rather than on the CPU: baking dimming into vertices
 // meant every camera move rebuilt the mesh.
 const DISTANCE_DIM_REF: f32 = 5.0;

@@ -42,9 +42,9 @@ impl BandMapping {
     /// radiance in V than at ten microns. Unweighted, that renders every ordinary star blue and
     /// leaves any swarm below about half coverage invisible, because its thermal excess has to
     /// beat the star's own visible light before it shows at all. Making the *baseline* neutral
-    /// is what turns an excess in one band into a colour.
+    /// is what turns an excess in one band into a color.
     ///
-    /// This is what a false-colour astronomical image does, and it is why they are readable.
+    /// This is what a false-color astronomical image does, and it is why they are readable.
     /// [`presets::natural`] does not need it: B, V and R are close enough together that a
     /// blackbody is already nearly neutral across them.
     pub fn direct_normalised(r: Band, g: Band, b: Band, reference_k: f64) -> Self {
@@ -142,12 +142,12 @@ pub mod presets {
         BandMapping::direct_normalised(Band::Radio, Band::ThermalIr, Band::K, REFERENCE_K)
     }
 
-    /// Grey versus reddening, made visible: dust reads orange, a swarm reads neutral.
+    /// Gray versus reddening, made visible: dust reads orange, a swarm reads neutral.
     pub fn composition() -> BandMapping {
         BandMapping::direct_normalised(Band::K, Band::V, Band::B, REFERENCE_K)
     }
 
-    /// A monochrome sky in which only excess heat is coloured.
+    /// A monochrome sky in which only excess heat is colored.
     pub fn survey() -> BandMapping {
         let mut m = BandMapping::direct(Band::V, Band::V, Band::V);
         m.matrix[0][Band::ThermalIr.index()] = 1.0;
@@ -222,7 +222,7 @@ mod tests {
     }
 
     /// The natural preset is for the player, and it is not colorimetrically exact. Direct
-    /// assignment fails to converge to neutral near white, where a colour cast is most
+    /// assignment fails to converge to neutral near white, where a color cast is most
     /// visible; at the extremes the two agree.
     #[test]
     fn direct_assignment_oversaturates_near_white() {
@@ -238,14 +238,14 @@ mod tests {
                 cie::chroma(exact)
             );
         }
-        // At 5772 K the excess is about half again as much colour as there should be.
+        // At 5772 K the excess is about half again as much color as there should be.
         let d = cie::normalise_to_max(natural.apply(&radiance_at(5772.0)).map(|v| v as f64));
         let e = cie::normalise_to_max(cie::linear_srgb_from_xyz(cie::xyz_from_blackbody(5772.0)));
         assert!((cie::chroma(d) / cie::chroma(e) - 1.5).abs() < 0.2);
     }
 
     #[test]
-    fn both_routes_agree_on_strongly_coloured_stars() {
+    fn both_routes_agree_on_strongly_colored_stars() {
         for t in [2500.0, 20000.0] {
             let direct = cie::normalise_to_max(presets::natural().apply(&radiance_at(t)).map(|v| v as f64));
             let exact = cie::normalise_to_max(cie::linear_srgb_from_xyz(cie::xyz_from_blackbody(t)));
@@ -282,7 +282,7 @@ mod tests {
         }
     }
 
-    /// What the preset is for: waste heat, as a colour.
+    /// What the preset is for: waste heat, as a color.
     #[test]
     fn a_thermal_excess_reads_as_red_once_the_baseline_is_neutral() {
         let mut radiance = PerBand::new(std::array::from_fn(|i| {

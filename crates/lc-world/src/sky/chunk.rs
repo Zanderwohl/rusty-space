@@ -5,7 +5,7 @@
 //! same [`StarRecord::assemble`] the CSV importer uses.
 //!
 //! **What is stored is what cannot be recomputed.** Radius, temperature, mu, mass and
-//! metallicity are all derived from colour index, luminosity and velocity, so they are absent
+//! metallicity are all derived from color index, luminosity and velocity, so they are absent
 //! here and computed on load. Storing them would be four times the size and a way for a chunk
 //! to disagree with the code that made it.
 //!
@@ -21,10 +21,10 @@ use super::{CatalogueStar, StarProvider};
 const MAGIC: &[u8; 6] = b"LCSKY\x00";
 const VERSION: u16 = 1;
 
-/// Bytes per packed record: key, position, velocity, colour index, luminosity, component.
+/// Bytes per packed record: key, position, velocity, color index, luminosity, component.
 const RECORD: usize = 4 + 12 + 12 + 2 + 4 + 1 + 4;
 
-/// Colour index is stored as a whole number of thousandths.
+/// Color index is stored as a whole number of thousandths.
 ///
 /// Not as `f32`, and the reason is a boundary rather than a size. `BV_VALID` starts at exactly
 /// -0.4, `f32` cannot represent -0.4, and the nearest `f32` is *below* it — so eleven stars
@@ -115,7 +115,7 @@ pub fn encode(source: &str, records: &[StarRecord]) -> Result<Vec<u8>, ChunkErro
         for v in [r.velocity.x, r.velocity.y, r.velocity.z] {
             out.extend_from_slice(&(v as f32).to_le_bytes());
         }
-        let bv = (r.colour_index * BV_SCALE).round().clamp(i16::MIN as f64, i16::MAX as f64);
+        let bv = (r.color_index * BV_SCALE).round().clamp(i16::MIN as f64, i16::MAX as f64);
         out.extend_from_slice(&(bv as i16).to_le_bytes());
         out.extend_from_slice(&(r.luminosity_solar as f32).to_le_bytes());
         let index = r.component_index & !HAS_GROUP;
@@ -162,7 +162,7 @@ pub fn decode(bytes: &[u8]) -> Result<(String, Vec<StarRecord>), ChunkError> {
         let key = r.u32()? as u64;
         let position_ly = DVec3::new(r.f32()? as f64, r.f32()? as f64, r.f32()? as f64);
         let velocity = DVec3::new(r.f32()? as f64, r.f32()? as f64, r.f32()? as f64);
-        let colour_index = r.i16()? as f64 / BV_SCALE;
+        let color_index = r.i16()? as f64 / BV_SCALE;
         let luminosity_solar = r.f32()? as f64;
         let packed = r.u8()?;
         let component_index = packed & !HAS_GROUP;
@@ -175,7 +175,7 @@ pub fn decode(bytes: &[u8]) -> Result<(String, Vec<StarRecord>), ChunkError> {
             name: None,
             position_ly,
             velocity,
-            colour_index,
+            color_index,
             luminosity_solar,
             component_index,
             group,
@@ -272,7 +272,7 @@ mod tests {
                 name: Some("Sol".into()),
                 position_ly: DVec3::ZERO,
                 velocity: DVec3::ZERO,
-                colour_index: 0.656,
+                color_index: 0.656,
                 luminosity_solar: 1.0,
                 component_index: 1,
                 group: None,
@@ -282,7 +282,7 @@ mod tests {
                 name: Some("Sirius".into()),
                 position_ly: DVec3::new(-1.6, 6.5, -5.2),
                 velocity: DVec3::new(-3.1e3, 1.2e4, 2.0e3),
-                colour_index: 0.009,
+                color_index: 0.009,
                 luminosity_solar: 25.4,
                 component_index: 1,
                 group: Some(32_263),
@@ -292,7 +292,7 @@ mod tests {
                 name: None,
                 position_ly: DVec3::new(-1.6, 6.5, -5.2),
                 velocity: DVec3::new(-3.1e3, 1.2e4, 2.0e3),
-                colour_index: 1.34,
+                color_index: 1.34,
                 luminosity_solar: 0.0024,
                 component_index: 2,
                 group: Some(32_263),
@@ -314,7 +314,7 @@ mod tests {
         // f32 storage, so compare at the precision the format claims rather than exactly.
         assert!((back[1].position_ly - records()[1].position_ly).length() < 1e-4);
         assert!((back[1].luminosity_solar - 25.4).abs() < 1e-3);
-        assert!((back[1].colour_index - 0.009).abs() < 1e-9, "thousandths are exact");
+        assert!((back[1].color_index - 0.009).abs() < 1e-9, "thousandths are exact");
     }
 
     #[test]
@@ -349,17 +349,17 @@ mod tests {
     }
 
     #[test]
-    fn a_colour_index_on_the_validity_boundary_survives_the_round_trip() {
+    fn a_color_index_on_the_validity_boundary_survives_the_round_trip() {
         // -0.4 is the low end of BV_VALID and is not representable in f32; the nearest f32
         // falls outside the range. Eleven real HYG stars sit exactly here.
         let mut r = records();
-        r[0].colour_index = em_spectra::colour_index::BV_VALID.0;
+        r[0].color_index = em_spectra::color_index::BV_VALID.0;
         let bytes = encode("test", &r).unwrap();
         let (_, back) = decode(&bytes).unwrap();
         assert!(
-            em_spectra::colour_index::bv_is_valid(back[0].colour_index),
+            em_spectra::color_index::bv_is_valid(back[0].color_index),
             "{} fell out of range",
-            back[0].colour_index
+            back[0].color_index
         );
         assert!(ChunkProvider::decode(&bytes).unwrap().skipped == 0);
     }
@@ -429,7 +429,7 @@ mod equivalence {
             worst_teff = worst_teff.max((a.star.teff_k - b.star.teff_k).abs() / a.star.teff_k);
         }
         assert!(worst_position < 1e-6, "position drifted by {worst_position:e} relative");
-        // Colour index is quantised to a thousandth, and temperature follows from it. Near
+        // Color index is quantised to a thousandth, and temperature follows from it. Near
         // the Sun that is about two kelvin, so the bound is the quantum and not a guess.
         assert!(worst_teff < 2e-3, "temperature drifted by {worst_teff:e} relative");
     }

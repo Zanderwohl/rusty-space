@@ -16,7 +16,7 @@ pub const MAX_RENDER_UNITS: f32 = 1.0e5;
 
 /// Where one item goes.
 ///
-/// **Simulation axes, Z-up**, camera-relative and already divided by `metres_per_unit`. The
+/// **Simulation axes, Z-up**, camera-relative and already divided by `meters_per_unit`. The
 /// rotation into a renderer's axes is the renderer's: `em_render::render_space` is the one
 /// place that does it, and a second converter here would be a second chance to get the
 /// handedness wrong and no way to notice.
@@ -60,12 +60,12 @@ pub struct RingPlacement {
 pub struct MapFrame {
     /// Where the camera is, light-years from the world origin.
     pub eye_ly: DVec3,
-    /// Metres in one render unit.
-    pub metres_per_unit: f64,
+    /// Meters in one render unit.
+    pub meters_per_unit: f64,
     pub plane: Plane,
     /// The plane's normal, simulation axes. What the rings lie perpendicular to.
     pub plane_normal: Vec3,
-    /// The focus, camera-relative: where the rings are centred.
+    /// The focus, camera-relative: where the rings are centered.
     pub focus: Vec3,
     pub placements: Vec<Placement>,
     pub rings: Vec<RingPlacement>,
@@ -73,12 +73,12 @@ pub struct MapFrame {
 
 /// Reduce a snapshot and a camera to a frame.
 ///
-/// The one pure function everything else is tested through. `metres_per_unit` is the host's,
+/// The one pure function everything else is tested through. `meters_per_unit` is the host's,
 /// because which scale tier is in force is the host's business — see `lc_client::view`.
-pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Plane, metres_per_unit: f64)
+pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Plane, meters_per_unit: f64)
     -> MapFrame {
     let eye_ly = orbit.eye_ly(plane);
-    let ly_per_unit = metres_per_unit / M_PER_LY;
+    let ly_per_unit = meters_per_unit / M_PER_LY;
     let relative = |at_ly: DVec3| ((at_ly - eye_ly) / ly_per_unit).as_vec3();
 
     let (near_m, far_m) = snapshot.extent_m(orbit.focus_ly);
@@ -88,7 +88,7 @@ pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Plane, metres_per_u
     let rings = rings::decades(near_m, outer_m, MAX_RINGS)
         .into_iter()
         .map(|Ring { radius_m, label }| RingPlacement {
-            radius: (radius_m / metres_per_unit) as f32,
+            radius: (radius_m / meters_per_unit) as f32,
             label,
         })
         .filter(|ring| ring.radius.is_finite() && ring.radius <= MAX_RENDER_UNITS)
@@ -111,10 +111,10 @@ pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Plane, metres_per_u
             label: item.label.clone(),
             at,
             foot,
-            radius: (item.radius_m / metres_per_unit) as f32,
+            radius: (item.radius_m / meters_per_unit) as f32,
             angular_radius: (item.radius_m / range_m) as f32,
             annulus: item.annulus_m.map(|(inner, outer)| {
-                ((inner / metres_per_unit) as f32, (outer / metres_per_unit) as f32)
+                ((inner / meters_per_unit) as f32, (outer / meters_per_unit) as f32)
             }),
             pole: item.pole.normalize_or(DVec3::Z).as_vec3(),
         });
@@ -122,7 +122,7 @@ pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Plane, metres_per_u
 
     MapFrame {
         eye_ly,
-        metres_per_unit,
+        meters_per_unit,
         plane,
         plane_normal: plane.normal().as_vec3(),
         focus: relative(orbit.focus_ly),

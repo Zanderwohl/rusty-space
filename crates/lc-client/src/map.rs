@@ -11,7 +11,7 @@
 //!
 //! The camera is **not** the sky's. No `Hdr`, no bloom, no tone map: the sky is a photograph
 //! and is metered like one, and a diagram is not. The wireframe shader's emissive range is
-//! aimed at the display instead — see [`LINE_COLOUR_SCALE`].
+//! aimed at the display instead — see [`LINE_COLOR_SCALE`].
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
@@ -53,13 +53,13 @@ const LINE_PX: f32 = 1.6;
 /// does not swell into a pipe.
 const MAX_TUBE_FRACTION: f32 = 0.25;
 
-/// How much of the palette colour a line is drawn at.
+/// How much of the palette color a line is drawn at.
 ///
 /// The shader gives `base_color * (1 + alpha * emission_strength)`, and the alpha is the line
 /// weight the mesh carries: 0.6 for grid, 1.0 for an equator. With no tone map in front of it
 /// the whole range has to land inside the display, so the base is scaled down and the emission
 /// makes up the contrast — 0.45 and 1.2 put a grid line at 0.77 and an equator at 0.99.
-const LINE_COLOUR_SCALE: f32 = 0.45;
+const LINE_COLOR_SCALE: f32 = 0.45;
 const LINE_EMISSION: f32 = 1.2;
 
 /// The near and far planes, as multiples of the stand-off.
@@ -295,18 +295,18 @@ fn place(
 
     let mut view = ui.map;
     // Follow the selection rather than a remembered position: Saturn moves, and a map that
-    // centred on where it was is a map that drifts off it over an afternoon.
+    // centered on where it was is a map that drifts off it over an afternoon.
     if let Some(item) = view.focus.and_then(|key| map.snapshot.item(key)) {
         view.orbit.focus_ly = item.position_ly;
     }
-    let metres_per_unit = crate::view::ScaleTier::for_distance(view.orbit.distance_m())
-        .metres_per_unit();
-    let frame = compose(&map.snapshot, &view.orbit, view.plane, metres_per_unit);
+    let meters_per_unit = crate::view::ScaleTier::for_distance(view.orbit.distance_m())
+        .meters_per_unit();
+    let frame = compose(&map.snapshot, &view.orbit, view.plane, meters_per_unit);
 
     // The depth range is written from the stand-off every frame rather than fixed. The sky's
     // camera spans 1e-10 to 1e9 because it has to cover everything at once; the map's distance
     // is a piece of state, so it can be exact — and reversed depth makes the span cheap.
-    let standoff = (view.orbit.distance_m() / metres_per_unit) as f32;
+    let standoff = (view.orbit.distance_m() / meters_per_unit) as f32;
     if let Projection::Perspective(perspective) = &mut *projection {
         perspective.near = (standoff * NEAR_FRACTION).max(f32::MIN_POSITIVE);
         perspective.far = standoff * FAR_MULTIPLE;
@@ -465,7 +465,7 @@ fn spawn_scene(
     for placement in &frame.placements {
         commands.spawn((
             Mesh3d(map.sphere.clone()),
-            MeshMaterial3d(materials.add(line_material(colour_of(placement.kind)))),
+            MeshMaterial3d(materials.add(line_material(color_of(placement.kind)))),
             item_transform(placement, 0.0),
             NoFrustumCulling,
             layer.clone(),
@@ -486,13 +486,13 @@ fn spawn_scene(
     }
 }
 
-fn line_material(colour: Color) -> BodyWireframeMaterial {
-    let rgba = colour.to_linear();
+fn line_material(color: Color) -> BodyWireframeMaterial {
+    let rgba = color.to_linear();
     BodyWireframeMaterial {
         base_color: LinearRgba::new(
-            rgba.red * LINE_COLOUR_SCALE,
-            rgba.green * LINE_COLOUR_SCALE,
-            rgba.blue * LINE_COLOUR_SCALE,
+            rgba.red * LINE_COLOR_SCALE,
+            rgba.green * LINE_COLOR_SCALE,
+            rgba.blue * LINE_COLOR_SCALE,
             1.0,
         ),
         emission_strength: LINE_EMISSION,
@@ -509,13 +509,13 @@ const RING: Color = em_ui::vfd::TEXT_DIM;
 const SPOKE: Color = em_ui::vfd::TEXT_DIM;
 const DROP: Color = em_ui::vfd::BUTTON_BORDER;
 
-fn colour_of(kind: ItemKind) -> Color {
+fn color_of(kind: ItemKind) -> Color {
     match kind {
-        // A star is what a system is, so it takes the one bright colour.
+        // A star is what a system is, so it takes the one bright color.
         ItemKind::Star => em_ui::vfd::TEXT,
         ItemKind::Planet | ItemKind::Moon | ItemKind::Minor => em_ui::vfd::BUTTON_BORDER,
         ItemKind::Population => em_ui::vfd::TEXT_DIM,
-        // The two the player is here to find. Amber against the green, because colour is the
+        // The two the player is here to find. Amber against the green, because color is the
         // one channel a map has that a list does not.
         ItemKind::Ship | ItemKind::Station => Color::srgb(0.95, 0.70, 0.25),
         ItemKind::Observer => Color::srgb(1.0, 1.0, 1.0),

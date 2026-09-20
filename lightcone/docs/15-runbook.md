@@ -116,7 +116,7 @@ LC_CDN=https://cdn.lc.zanderlowry.com tools/release.sh register <build-id>
 
 `CDN_BASE` on the site is only the default for builds served from the fallback path. Changing
 that environment variable does **not** move builds already registered, which is the intended
-behaviour and reliably surprising the first time.
+behavior and reliably surprising the first time.
 
 **Set `LC_CDN` when you register.** It defaults to the development CDN, so a build registered
 without it carries `http://rocinante.local:3101` no matter what the site is configured with.
@@ -220,7 +220,7 @@ HTTP `navigator.gpu` does not exist, so `/play` cannot run at all, however good 
 needs no DNS, no credentials and no certificates, so it is the fallback whenever the proxy is
 being changed or the certificate has expired. Both services become
 `localhost`, which is a secure context, and they stay on different ports, so cross-origin
-behaviour is still exercised rather than accidentally bypassed.
+behavior is still exercised rather than accidentally bypassed.
 
 ```bash
 ssh -N -L 3100:localhost:3100 -L 3101:localhost:3101 zandy@rocinante.local
@@ -747,7 +747,7 @@ connection, which from the outside is indistinguishable from everyone's credenti
 at once.
 
 The HUD says which of these happened: `LINKED <name>` on a welcome, `REFUSED — <why>` on a
-ticket the shard would not take. The words carry it and the colour only agrees — see
+ticket the shard would not take. The words carry it and the color only agrees — see
 [18-ui-style.md](18-ui-style.md).
 
 ## Checks

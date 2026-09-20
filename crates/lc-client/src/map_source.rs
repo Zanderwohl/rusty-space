@@ -22,7 +22,7 @@ use crate::uplink::Uplink;
 ///
 /// A fixed sphere, deliberately: the interesting question is what is near, and a reach that
 /// moved with the zoom would change what exists as well as what is framed. Twenty-five
-/// light-years is the conventional solar neighbourhood and is 166 stars out of the bundled
+/// light-years is the conventional solar neighborhood and is 166 stars out of the bundled
 /// catalogue's 119 625 — small enough to draw whole, large enough to have somewhere to go.
 pub const REACH_LY: f64 = 25.0;
 
@@ -81,7 +81,7 @@ pub fn observed(session: &Session, bodies: &Bodies, uplink: &Uplink, eye_ly: DVe
             contact.name.clone(),
             ItemKind::Ship,
             contact.position_ly,
-            // A hull is a few hundred metres and nothing on this map is drawn at its true
+            // A hull is a few hundred meters and nothing on this map is drawn at its true
             // size anyway; half the length is an honest radius to hang a marker on.
             contact.length_m * 0.5,
             contact.facing,

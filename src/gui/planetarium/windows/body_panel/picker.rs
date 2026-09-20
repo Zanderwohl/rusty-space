@@ -1,6 +1,6 @@
 //! Choosing a body, shared by the Viewer and the Editor.
 //!
-//! A flat alphabetical list is useless once a system has barycentres and moons in it, so
+//! A flat alphabetical list is useless once a system has barycenters and moons in it, so
 //! the tree follows the primary hierarchy the arena already derives. Typing switches to a
 //! flat search, because when you know the name you do not want to walk the tree.
 

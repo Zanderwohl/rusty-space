@@ -1,4 +1,4 @@
-//! Bands, blackbody radiation, extinction, colour, and the band-to-display mapping.
+//! Bands, blackbody radiation, extinction, color, and the band-to-display mapping.
 //!
 //! Physics rather than game rule, so both products share it. Depends on `serde` and nothing
 //! else: no engine, no ECS, no rendering.
@@ -14,7 +14,7 @@
 //!
 //! # Units
 //!
-//! SI. Wavelengths in metres, temperatures in kelvin, radiance in W m^-3 sr^-1 per unit
+//! SI. Wavelengths in meters, temperatures in kelvin, radiance in W m^-3 sr^-1 per unit
 //! wavelength. Extinction is in magnitudes, as astronomy has it.
 
 #![forbid(unsafe_code)]
@@ -22,11 +22,11 @@
 pub mod bands;
 pub mod blackbody;
 pub mod cie;
-pub mod colour_index;
+pub mod color_index;
 pub mod extinction;
 pub mod mapping;
 pub mod stellar;
 
 pub use bands::{BANDS, Band, BandMask, PerBand};
-pub use colour_index::teff_from_bv;
+pub use color_index::teff_from_bv;
 pub use mapping::{BandMapping, presets};

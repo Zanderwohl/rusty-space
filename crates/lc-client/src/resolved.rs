@@ -435,7 +435,7 @@ mod tests {
     fn giant() -> Drawable {
         let mut b = body(6.99e7, DVec3::X * 1.0e-9);
         b.surface = Surface::GasGiant;
-        // The grey balance at 5.2 AU, which is what `equilibrium_temperature` would give.
+        // The gray balance at 5.2 AU, which is what `equilibrium_temperature` would give.
         b.equilibrium_k = 122.0;
         b.effective_k = Surface::GasGiant.effective_temperature(122.0);
         b
@@ -616,7 +616,7 @@ mod tests {
     }
 
     /// The point of metering the bodies: a planet large enough to be the picture is exposed
-    /// for, and the same planet at a different distance from its star is not the same colour.
+    /// for, and the same planet at a different distance from its star is not the same color.
     ///
     /// A body's surface radiance does not change as the ship approaches it — only its size on
     /// screen does — so this is a statement about the reference following the subject.

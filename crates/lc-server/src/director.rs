@@ -233,7 +233,7 @@ impl<J: Journal> Server<J> {
             }
         }
         // A burn, and burns are the loudest thing a ship does. Everyone in range learns that
-        // this craft manoeuvred, at light delay, exactly as they would for any other.
+        // this craft maneuvered, at light delay, exactly as they would for any other.
         self.emit(id, KIND_BURN, BURN_POWER_W, "{}".into(), at_t, events, deliveries);
         self.tell_flying(wire, id);
     }
@@ -260,7 +260,7 @@ fn place(
             }
             let mut here = orbit.clone();
             // Arc length into angle. A standoff quoted in hull lengths is the same picture at
-            // any radius, which one quoted in metres is not.
+            // any radius, which one quoted in meters is not.
             here.phase_rad += lengths * other.length_m / orbit.radius_m;
             let here = Waypoint::Orbit(here);
             let Some(at) = here.place_at(system, now_s) else { return };
@@ -455,7 +455,7 @@ mod tests {
     }
     /// **The scene works or it does not.** Meeting somebody is ending up beside them, and the
     /// measure of that is a distance that stays: twelve hull lengths of the craft being met,
-    /// held there while both of them go round Jupiter at forty kilometres a second.
+    /// held there while both of them go round Jupiter at forty kilometers a second.
     #[tokio::test]
     async fn the_meeting_holds_beside_the_player() {
         let Some((mut server, mut wire, _, pov)) = staged(&lc_world::scenario::MEETING) else {
@@ -468,7 +468,7 @@ mod tests {
         };
         server.tick(&mut wire).await.unwrap();
 
-        // Twelve lengths of a five-hundred-metre hull, and the arc is short enough that the
+        // Twelve lengths of a five-hundred-meter hull, and the arc is short enough that the
         // chord across it is the same number to well inside a per cent.
         let want = 12.0 * 500.0;
         assert!((apart(&server) - want).abs() < want * 0.05, "opened {:.0} m apart", apart(&server));
@@ -507,9 +507,9 @@ mod tests {
         let closed = apart(&server);
         assert!(closed < opening / 20.0, "it barely closed: {opening:.0} to {closed:.0} m");
 
-        // **And then it holds its standoff, though it turns slowly.** A five-kilometre hull
+        // **And then it holds its standoff, though it turns slowly.** A five-kilometer hull
         // takes six hundred seconds to come about, and while its plans ignored the planet every
-        // correction was a flip against a quarry that had fallen ninety kilometres out of the
+        // correction was a flip against a quarry that had fallen ninety kilometers out of the
         // plan — so it could not get inside a hundred thousand. Reckoned along the quarry's
         // conic, it arrives once and stays: see `lc_world::consort`.
         let standoff = lc_world::pursuit::standoff_m(
@@ -532,7 +532,7 @@ mod tests {
     ///
     /// **It reaches the standoff and stays on it**, which it could not do while the guidance
     /// was gated on a flat ten coordinate minutes — it rode a relative orbit a hundred to four
-    /// hundred kilometres across instead — nor, to better than tens of kilometres, while its
+    /// hundred kilometers across instead — nor, to better than tens of kilometers, while its
     /// plans ignored the planet both ships were falling round.
     #[tokio::test]
     async fn the_small_ship_closes_on_the_large_one() {
@@ -560,7 +560,7 @@ mod tests {
         // station: somewhere in here it is inside the deadband. And it then *stays in company*:
         // the deadband is where a craft decides to correct rather than where it sits, so it
         // wanders a little past before the next correction pulls it back, and the bound on that
-        // is the one worth pinning — a five-kilometre hull at this range is sixty pixels of
+        // is the one worth pinning — a five-kilometer hull at this range is sixty pixels of
         // ship rather than a mark.
         let (mut nearest, mut furthest) = (f64::INFINITY, 0.0f64);
         for _ in 0..500 {
@@ -577,10 +577,10 @@ mod tests {
     }
 
     /// **Hanging out within sight of the other hull.** Once alongside, closing in brings the
-    /// small ship to a kilometre of clear space from the large one and holds it there, inside
-    /// a quarter of a kilometre, for days of orbits round Jupiter.
+    /// small ship to a kilometer of clear space from the large one and holds it there, inside
+    /// a quarter of a kilometer, for days of orbits round Jupiter.
     #[tokio::test]
-    async fn closing_in_holds_a_kilometre_off_the_hull() {
+    async fn closing_in_holds_a_kilometer_off_the_hull() {
         let Some((mut server, mut wire, client, pov)) = staged(&lc_world::scenario::CLOSING) else {
             return;
         };
@@ -603,7 +603,7 @@ mod tests {
         let (mine, theirs) =
             (server.fleet.get(pov).unwrap().length_m, server.fleet.get(cast).unwrap().length_m);
         let standoff = lc_world::pursuit::Closeness::Intimate.standoff_m(mine, theirs);
-        assert_eq!(standoff - 0.5 * (mine + theirs), 1_000.0, "premise: a kilometre between hulls");
+        assert_eq!(standoff - 0.5 * (mine + theirs), 1_000.0, "premise: a kilometer between hulls");
         for _ in 0..500 {
             server.tick(&mut wire).await.unwrap();
         }
@@ -625,7 +625,7 @@ mod tests {
     /// "close the gap and stop" every tick, each short enough to be flown whole — turn, burn,
     /// flip, brake — so the drive reversed about once a tick while the ship plainly left the
     /// system. Measured, it reversed eighteen thousand times across a chase and never closed
-    /// from two million kilometres. An escort matches the quarry's acceleration instead.
+    /// from two million kilometers. An escort matches the quarry's acceleration instead.
     ///
     /// Sampled *inside* each tick, because that is what a client draws: the plan is replayed
     /// between sightings, and sampling only at the tick saw each fresh plan's first instant.
@@ -671,7 +671,7 @@ mod tests {
         // Before the quarry turns round to brake there is nothing to reverse for.
         assert_eq!(reversals, 0, "the drive reversed {reversals} times while both were burning outward");
 
-        // And it caught up and stayed, rather than holding two million kilometres off.
+        // And it caught up and stayed, rather than holding two million kilometers off.
         let standoff = lc_world::pursuit::standoff_m(500.0, 500.0);
         let (chaser, quarry) = (server.fleet.get(pov).unwrap(), server.fleet.get(cast).unwrap());
         let gap = chaser.motion.position_ly.distance(quarry.motion.position_ly)

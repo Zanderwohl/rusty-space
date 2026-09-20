@@ -39,7 +39,7 @@ pub struct Saved {
     pub kind: u8,
     pub name: Option<String>,
     pub noise_floor: f32,
-    /// The hull's length, metres. Stored rather than derived from the kind, because two ships
+    /// The hull's length, meters. Stored rather than derived from the kind, because two ships
     /// of one kind may be different sizes and a craft that came back a different size from the
     /// one that was saved would be a silent loss nobody would think to look for.
     pub length_m: f64,

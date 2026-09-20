@@ -9,7 +9,7 @@ Decisions not yet made, grouped by what they block. Each topic document carries 
 |---|---|
 | Star proper motion | Planned, not implemented. Catalogue frozen; stars still get a `Worldline`, currently constant, so nothing reads a position as a field. |
 | World boundary | Terminates. The galaxy fits inside 36 500 ly; a skybox of distant galaxies lies beyond it. A third coordinate tier is possible and not expected. |
-| Multi-star systems | A binary is a barycentre with two children — a hierarchical decomposition `em-sim` already propagates. One shell per system, two emission sources, and coherent mutual eclipses on the analytic path. Contact binaries excluded from generation. |
+| Multi-star systems | A binary is a barycenter with two children — a hierarchical decomposition `em-sim` already propagates. One shell per system, two emission sources, and coherent mutual eclipses on the analytic path. Contact binaries excluded from generation. |
 | Shell radius | Immutable world geometry. |
 | Swarm sub-populations | They exist and nest. One record per wave or per band; deficits add, so a meta-population needs no separate representation. |
 | Oort and Kuiper generation | Scaled by stellar generation and metallicity, with metallicity synthesised from galactic kinematics since the catalogue lacks `[Fe/H]`. |
@@ -125,7 +125,7 @@ Listed so they do not get planned. Each is a local edit whenever it is faced.
 |---|---|
 | Threading in WASM | Cross-origin isolation breaks embeds. Single-threaded Bevy until profiling says otherwise. |
 | Interferometry displays | `u-v` coverage and correlation views are charts, so they belong to `em-plot`, but they need a place in the UI. |
-| Dust versus swarm appearance | Dust is chromatic and a swarm is grey. The shader probably needs two looks, which is the visual form of the photometric diagnostic. |
+| Dust versus swarm appearance | Dust is chromatic and a swarm is gray. The shader probably needs two looks, which is the visual form of the photometric diagnostic. |
 | Presenting an unavailable band | Masking to zero makes a scene look dark rather than uninstrumented, and the player needs the difference to decide what to build. |
 
 ## Blocking the server

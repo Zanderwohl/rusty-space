@@ -313,7 +313,7 @@ impl Plugin for ClientPlugin {
 #[derive(Component)]
 pub struct SkyCamera;
 
-/// Camera near plane, in render units of one astronomical unit. Fifteen metres.
+/// Camera near plane, in render units of one astronomical unit. Fifteen meters.
 ///
 /// Anything nearer than this is clipped, so it is the closest a ship can come to a surface.
 pub const NEAR_PLANE: f32 = 1.0e-10;
@@ -327,9 +327,9 @@ fn spawn_camera(mut commands: Commands) {
         // A system spans a hundred thousand astronomical units and the render unit is one, so
         // the default thousand-unit far plane would clip everything past Saturn.
         //
-        // The near plane is fifteen metres. It has to be, because a low orbit is a fraction of
+        // The near plane is fifteen meters. It has to be, because a low orbit is a fraction of
         // a planetary radius above the surface: at 1e-5 units the near plane stood a million
-        // and a half metres off, which is further than a low orbit of Earth, and the sphere
+        // and a half meters off, which is further than a low orbit of Earth, and the sphere
         // was clipped away to nothing while its billboard still drew. Reversed float depth
         // costs nothing for the range — precision is relative, not absolute.
         Projection::Perspective(PerspectiveProjection {
@@ -346,7 +346,7 @@ fn spawn_camera(mut commands: Commands) {
 
 /// Point the camera where the interface says it is looking.
 ///
-/// The camera never translates. Distance to a star is tens of trillions of kilometres and no
+/// The camera never translates. Distance to a star is tens of trillions of kilometers and no
 /// float holds that next to a render unit, so the ship stays at the render origin and the sky
 /// moves around it; what changes when the ship flies is the direction to each star.
 fn aim_camera(ui: Res<Ui>, mut camera: Query<&mut Transform, With<SkyCamera>>) {
@@ -409,7 +409,7 @@ fn place_on_station(
 
     if let Some(degrees) = dev.lift_deg.filter(|d| d.abs() > 0.0) {
         let at = lifted(at, system.origin_ly, degrees);
-        // Back at the star, which is the centre of whatever the lift was for looking down at.
+        // Back at the star, which is the center of whatever the lift was for looking down at.
         if let Some(look) = crate::ui::Look::aimed_at(system.origin_ly - at) {
             ui.look = look;
         }

@@ -1,8 +1,8 @@
-//! CIE 1931 colour matching, and conversion to sRGB.
+//! CIE 1931 color matching, and conversion to sRGB.
 
 use crate::blackbody::spectral_radiance;
 
-/// Integration limits for the visible range, nanometres.
+/// Integration limits for the visible range, nanometers.
 pub const VISIBLE_NM: (f64, f64) = (380.0, 780.0);
 
 /// Piecewise Gaussian: one sigma below the mean, another above.
@@ -14,7 +14,7 @@ fn lobe(x: f64, mu: f64, sigma_lo: f64, sigma_hi: f64) -> f64 {
 
 // Wyman, Sloan & Shirley (JCGT 2013) multi-lobe fits to the CIE 1931 2-degree observer.
 // Accurate to well under a percent; the y-bar integral comes out at 106.92 against the
-// tabulated 106.857. Chosen over a 400-entry table because it is exact enough for colour and
+// tabulated 106.857. Chosen over a 400-entry table because it is exact enough for color and
 // costs nothing to carry.
 
 pub fn x_bar(nm: f64) -> f64 {
@@ -30,7 +30,7 @@ pub fn z_bar(nm: f64) -> f64 {
     1.217 * lobe(nm, 437.0, 11.8, 36.0) + 0.681 * lobe(nm, 459.0, 26.0, 13.8)
 }
 
-/// Integrate a spectral radiance function, taking wavelength in **metres**, against the
+/// Integrate a spectral radiance function, taking wavelength in **meters**, against the
 /// matching functions. Unnormalised: only ratios and chromaticity are meaningful.
 pub fn xyz_from_spectral(f: impl Fn(f64) -> f64) -> [f64; 3] {
     let (lo, hi) = VISIBLE_NM;
@@ -72,7 +72,7 @@ fn apply(m: &[[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
     std::array::from_fn(|i| m[i][0] * v[0] + m[i][1] * v[1] + m[i][2] * v[2])
 }
 
-/// XYZ to linear sRGB, D65. Components may be negative for colours outside the gamut.
+/// XYZ to linear sRGB, D65. Components may be negative for colors outside the gamut.
 pub fn linear_srgb_from_xyz(xyz: [f64; 3]) -> [f64; 3] {
     apply(&XYZ_TO_RGB, xyz)
 }
@@ -90,7 +90,7 @@ pub fn decode_srgb(c: f64) -> f64 {
     if c <= 0.040_45 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
 }
 
-/// Clip negatives and scale so the largest component is 1. For displaying a colour whose
+/// Clip negatives and scale so the largest component is 1. For displaying a color whose
 /// absolute brightness is carried elsewhere — see the tone mapping in `07-rendering.md`.
 pub fn normalise_to_max(rgb: [f64; 3]) -> [f64; 3] {
     let clipped: [f64; 3] = std::array::from_fn(|i| rgb[i].max(0.0));

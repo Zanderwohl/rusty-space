@@ -21,18 +21,18 @@ pub struct Shaded {
     ///
     /// The window is two or three stops wide, so a source ten stops down has a `value` of
     /// zero and would be invisible. A point source is not: it is *small*. Keeping the true
-    /// offset lets a renderer map it to size over a much wider range than the colour spans.
+    /// offset lets a renderer map it to size over a much wider range than the color spans.
     pub stops: f32,
 }
 
 impl Shaded {
-    /// Colour of an extended surface: chroma at the windowed brightness.
-    pub fn colour(&self) -> Vec3 {
+    /// Color of an extended surface: chroma at the windowed brightness.
+    pub fn color(&self) -> Vec3 {
         self.chroma * self.value
     }
 
-    /// Colour of a point source, spread over `visible_stops` rather than the window's width.
-    pub fn point_colour(&self, visible_stops: f32) -> Vec3 {
+    /// Color of a point source, spread over `visible_stops` rather than the window's width.
+    pub fn point_color(&self, visible_stops: f32) -> Vec3 {
         self.chroma * self.point_brightness(visible_stops)
     }
 
@@ -135,7 +135,7 @@ mod tests {
         let scale = 1.0 / Vec3::from_array(m.apply(&flat(1.0))).dot(LUMA);
         let at_reference = tone.shade(&flat(scale), &m);
         assert!(at_reference.glow.abs() < 1e-5, "glow {}", at_reference.glow);
-        assert!(at_reference.colour().max_element() > 0.99);
+        assert!(at_reference.color().max_element() > 0.99);
     }
 
     #[test]
@@ -144,7 +144,7 @@ mod tests {
         let tone = ToneMap::default();
         let bright = tone.shade(&flat(1e3), &m);
         let brighter = tone.shade(&flat(1e6), &m);
-        assert_eq!(bright.colour(), brighter.colour(), "the pixel has nowhere left to go");
+        assert_eq!(bright.color(), brighter.color(), "the pixel has nowhere left to go");
         assert!(brighter.glow > bright.glow + 9.0, "a thousandfold is ten stops of glow");
     }
 
@@ -152,7 +152,7 @@ mod tests {
     fn the_window_is_logarithmic_and_only_as_wide_as_it_says() {
         let m = presets::natural();
         let tone = ToneMap { reference: 1.0, surface_reference: 1.0, stops: 2.0 };
-        let l = |v: f32| tone.shade(&flat(v), &m).colour().max_element();
+        let l = |v: f32| tone.shade(&flat(v), &m).color().max_element();
         let top = 1.0 / Vec3::from_array(m.apply(&flat(1.0))).dot(LUMA);
         // Two stops down is the bottom of the window; anything below is black.
         assert!(l(top) > 0.99);
@@ -161,7 +161,7 @@ mod tests {
     }
 
     #[test]
-    fn colour_survives_the_compression() {
+    fn color_survives_the_compression() {
         let m = presets::natural();
         let mut red = PerBand::splat(0.0f32);
         red[Band::R] = 5.0;
@@ -174,7 +174,7 @@ mod tests {
         let m = presets::natural();
         for tone in [ToneMap::default(), ToneMap { reference: 0.0, surface_reference: 0.0, stops: 2.0 }, ToneMap { reference: 1.0, surface_reference: 1.0, stops: 0.0 }] {
             let s = tone.shade(&flat(0.0), &m);
-            assert!(s.colour().is_finite() && s.glow.is_finite() && s.stops.is_finite());
+            assert!(s.color().is_finite() && s.glow.is_finite() && s.stops.is_finite());
         }
         assert!(ToneMap::default().shade(&flat(0.0), &m).is_dark());
     }
@@ -187,9 +187,9 @@ mod tests {
         let tone = ToneMap { reference: 1.0, surface_reference: 1.0, stops: 2.5 };
         let faint = tone.shade(&flat(1e-2), &m);
         assert_eq!(faint.value, 0.0, "six stops down is outside a 2.5 stop window");
-        assert!(faint.colour() == Vec3::ZERO);
+        assert!(faint.color() == Vec3::ZERO);
         assert!(faint.point_brightness(12.0) > 0.3, "but a point is merely dim");
-        assert!(faint.point_colour(12.0).length() > 0.0);
+        assert!(faint.point_color(12.0).length() > 0.0);
         // And further down is dimmer still, rather than equally black.
         let fainter = tone.shade(&flat(1e-4), &m);
         assert!(fainter.point_brightness(12.0) < faint.point_brightness(12.0));
@@ -203,7 +203,7 @@ mod tests {
         let base = ToneMap::default();
         let brighter = base.exposed(2.0);
         // A source already at the top of the window has nowhere to go, so test a dim one.
-        let v = |t: ToneMap| t.shade(&flat(0.1), &m).colour().max_element();
+        let v = |t: ToneMap| t.shade(&flat(0.1), &m).color().max_element();
         assert_eq!(v(base), 0.0, "0.1 is more than 2.5 stops below the reference");
         assert!(v(brighter) > 0.4, "opening up two stops must bring it into the window");
     }

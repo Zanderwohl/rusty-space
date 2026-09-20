@@ -5,7 +5,7 @@
 // A Hill sphere breathes over an eccentric orbit, so baking the radius into vertices
 // would mean rebuilding the buffer every frame.
 //
-//   POSITION : unit direction from the body's centre (identical for all four corners)
+//   POSITION : unit direction from the body's center (identical for all four corners)
 //   CORNER   : quad corner in [-1, 1]^2
 //
 // Alpha is weighted toward the limb so the cloud reads as a shell rather than a fog:
@@ -50,7 +50,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let radius = soi_radius(material.shape, dir);
 
     // The entity's transform is translation-only (the body's camera-relative position),
-    // so this places the point at centre + radius * dir.
+    // so this places the point at center + radius * dir.
     let world_from_local = mesh_functions::get_world_from_local(vertex.instance_index);
     let p_world = mesh_functions::mesh_position_local_to_world(
         world_from_local, vec4<f32>(dir * radius, 1.0)).xyz;

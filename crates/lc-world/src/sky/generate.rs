@@ -38,13 +38,13 @@ pub struct Planet {
     pub mass_kg: f64,
 }
 
-/// One star or a barycentre with two, plus everything orbiting it.
+/// One star or a barycenter with two, plus everything orbiting it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GeneratedSystem {
     pub name: String,
     /// The primary, and a companion when this is a multiple.
     pub stars: Vec<(String, Star, f64)>,
-    /// Separation of the two stars, metres. Zero for a single.
+    /// Separation of the two stars, meters. Zero for a single.
     pub separation_m: f64,
     pub planets: Vec<Planet>,
     pub populations: Vec<Population>,
@@ -76,10 +76,10 @@ pub fn system_for(star: &CatalogueStar) -> GeneratedSystem {
     system
 }
 
-/// A multiple, as a barycentre with two children.
+/// A multiple, as a barycenter with two children.
 ///
 /// Hierarchical two-body decomposition, which `em-sim` propagates unmodified. Contact and
-/// near-contact systems are excluded rather than modelled: they need more than two-body
+/// near-contact systems are excluded rather than modeled: they need more than two-body
 /// Keplerian motion.
 pub fn binary_for(primary: &CatalogueStar, secondary: &CatalogueStar) -> GeneratedSystem {
     let mut system = system_for(primary);
@@ -202,11 +202,11 @@ pub const SWARM_FRACTION: f64 = 0.03;
 /// An engineered swarm, if this star has one. See [`swarm_for`] for the public entry.
 ///
 /// Coverage is log-uniform from a thousandth to nine tenths, which is the range that makes the
-/// instrument worth having. At the bottom it is a few tenths of a percent of grey deficit and a
+/// instrument worth having. At the bottom it is a few tenths of a percent of gray deficit and a
 /// thermal excess that needs integrating to see at all. At the top the star is most of a
 /// magnitude down in V and brighter at ten microns than in the visible.
 ///
-/// Isotropic, circular and grey. Those three together are the signature, and no natural
+/// Isotropic, circular and gray. Those three together are the signature, and no natural
 /// population has all three: an isotropic natural population is an Oort cloud, which is
 /// eccentric and made of dust, and dust reddens where panels do not.
 /// Whether a star has a swarm, without generating its whole system.
@@ -226,7 +226,7 @@ fn swarm(seed: u64, star: &CatalogueStar) -> Option<Population> {
 
     // Where the light is: the radius at which a collector sees about what Earth sees.
     let radius = AU * star.luminosity_solar.max(1e-4).sqrt();
-    // A square kilometre apiece, which is a size the moment inversion can recover.
+    // A square kilometer apiece, which is a size the moment inversion can recover.
     let element = 1.0e6;
 
     Some(Population {
@@ -286,24 +286,24 @@ fn KeplerShapeEcc(a: f64, e: f64) -> em_sim::motive::kepler::KeplerShape {
 impl GeneratedSystem {
     /// Convert to the form `em_sim::system::System::from_contents` consumes.
     ///
-    /// A multiple becomes a fixed barycentre with two Keplerian children, which is the
-    /// hierarchical decomposition `em-sim` already propagates. Planets orbit the barycentre
+    /// A multiple becomes a fixed barycenter with two Keplerian children, which is the
+    /// hierarchical decomposition `em-sim` already propagates. Planets orbit the barycenter
     /// in that case and the primary otherwise.
     pub fn to_universe(&self) -> UniverseFileContents {
         const SOLAR_MASS: f64 = 1.988_41e30;
         let mut bodies = Vec::with_capacity(self.planets.len() + self.stars.len() + 1);
 
-        let centre = if self.is_multiple() {
-            let name = format!("{} Barycentre", self.name);
+        let center = if self.is_multiple() {
+            let name = format!("{} Barycenter", self.name);
             bodies.push(SomeBody::FixedEntry(FixedEntry {
-                info: info(&name, 0.0, false, &["Barycentre"]),
+                info: info(&name, 0.0, false, &["Barycenter"]),
                 position: DVec3::ZERO,
                 appearance: Appearance::Empty,
                 rotation: None,
             }));
             let total: f64 = self.mass_solar();
             for (k, (star_name, star, mass_solar)) in self.stars.iter().enumerate() {
-                // Each star orbits the barycentre at a radius set by the *other* star's share
+                // Each star orbits the barycenter at a radius set by the *other* star's share
                 // of the mass, and both must share one period. Matching
                 // 2 pi sqrt(r^3 / mu) to 2 pi sqrt(d^3 / (G M)) gives mu = G M share^3 --
                 // not G times either star's own mass, which is why em-sim lets this be
@@ -341,7 +341,7 @@ impl GeneratedSystem {
             bodies.push(SomeBody::KeplerEntry(KeplerEntry {
                 info: info(&p.name, p.mass_kg, false, &["Planet"]),
                 params: kepler(
-                    &centre,
+                    &center,
                     p.semi_major_m,
                     p.eccentricity,
                     p.inclination_deg,
@@ -399,7 +399,7 @@ mod tests {
             let sys = system_for(s);
             let mut prev = 0.0;
             for p in &sys.planets {
-                assert!(p.semi_major_m > prev, "{} is not outside its neighbour", p.name);
+                assert!(p.semi_major_m > prev, "{} is not outside its neighbor", p.name);
                 prev = p.semi_major_m;
                 assert!((0.0..0.2).contains(&p.eccentricity));
                 assert!(p.radius_m > 0.0 && p.mass_kg > 0.0);
@@ -443,17 +443,17 @@ mod tests {
         }
     }
 
-    /// The phase's structural check: a multiple is a barycentre with two children, and
+    /// The phase's structural check: a multiple is a barycenter with two children, and
     /// `em-sim` propagates it unmodified.
     #[test]
-    fn a_binary_orbits_its_barycentre() {
+    fn a_binary_orbits_its_barycenter() {
         let stars = AuthoredStars::sample();
         let sys = binary_for(&stars.stars()[1], &stars.stars()[2]);
         assert!(sys.is_multiple());
         assert!(sys.separation_m > 0.0);
 
         let mut sim = build(&sys);
-        let barycentre = sim.by_name(&format!("{} Barycentre", sys.name)).expect("barycentre");
+        let barycenter = sim.by_name(&format!("{} Barycenter", sys.name)).expect("barycenter");
         let a = sim.by_name(&sys.stars[0].0).expect("primary");
         let b = sim.by_name(&sys.stars[1].0).expect("secondary");
 
@@ -461,9 +461,9 @@ mod tests {
         for days in [0.0, 2_000.0, 9_000.0, 40_000.0] {
             let t = Instant::from_seconds_since_j2000(days * 86_400.0);
             em_sim::propagate::evaluate_at(&mut sim, t);
-            let (pa, pb, pc) = (sim.position(a), sim.position(b), sim.position(barycentre));
+            let (pa, pb, pc) = (sim.position(a), sim.position(b), sim.position(barycenter));
             assert!(pa.is_finite() && pb.is_finite());
-            assert_eq!(pc, DVec3::ZERO, "the barycentre is the frame");
+            assert_eq!(pc, DVec3::ZERO, "the barycenter is the frame");
             // Both stars are always on opposite sides of it.
             assert!(pa.dot(pb) < 0.0, "stars must stay opposed at day {days}");
             separations.push(pa.distance(pb));

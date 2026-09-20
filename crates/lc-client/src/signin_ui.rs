@@ -345,7 +345,7 @@ fn form(mut contexts: EguiContexts, mut signin: ResMut<Signin>, ui_state: Res<Ui
     let mut submit = false;
     let mut cancel = false;
     // Dressed in the menu's palette. The game's other egui panels are default dark and that is
-    // fine where they sit, over a rendered sky; this one is inside the menu, and a grey box in
+    // fine where they sit, over a rendered sky; this one is inside the menu, and a gray box in
     // the middle of it reads as a different application rather than as part of this one.
     egui::Window::new("Password")
         .collapsible(false)
@@ -354,23 +354,23 @@ fn form(mut contexts: EguiContexts, mut signin: ResMut<Signin>, ui_state: Res<Ui
         .frame(egui::Frame {
             // Opaque. The Bevy modal is behind it and a 92% panel lets its buttons read
             // straight through the form, which is the same muddle the modal itself had.
-            fill: colour(em_ui::vfd::PANEL_BG.with_alpha(1.0_f32)),
-            stroke: egui::Stroke::new(1.0_f32, colour(em_ui::vfd::BUTTON_BORDER)),
+            fill: color(em_ui::vfd::PANEL_BG.with_alpha(1.0_f32)),
+            stroke: egui::Stroke::new(1.0_f32, color(em_ui::vfd::BUTTON_BORDER)),
             inner_margin: egui::Margin::same(14),
             ..egui::Frame::NONE
         })
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .show(context, |ui| {
-            let text = colour(em_ui::vfd::TEXT);
+            let text = color(em_ui::vfd::TEXT);
             ui.visuals_mut().override_text_color = Some(text);
-            ui.visuals_mut().widgets.inactive.bg_fill = colour(em_ui::vfd::BUTTON_BG);
-            ui.visuals_mut().widgets.hovered.bg_fill = colour(em_ui::vfd::BUTTON_HOVER);
-            ui.visuals_mut().widgets.active.bg_fill = colour(em_ui::vfd::BUTTON_HOVER);
+            ui.visuals_mut().widgets.inactive.bg_fill = color(em_ui::vfd::BUTTON_BG);
+            ui.visuals_mut().widgets.hovered.bg_fill = color(em_ui::vfd::BUTTON_HOVER);
+            ui.visuals_mut().widgets.active.bg_fill = color(em_ui::vfd::BUTTON_HOVER);
             // What a text field is filled with. Darker than the panel, or a field with nothing
             // in it is invisible and the form looks like labels with no inputs.
             ui.visuals_mut().extreme_bg_color = egui::Color32::from_rgb(4, 14, 8);
             ui.visuals_mut().widgets.inactive.bg_stroke =
-                egui::Stroke::new(1.0_f32, colour(em_ui::vfd::TEXT_DIM));
+                egui::Stroke::new(1.0_f32, color(em_ui::vfd::TEXT_DIM));
             let Some(form) = signin.form.as_mut() else { return };
             ui.set_min_width(320.0);
             ui.heading("Password");
@@ -406,8 +406,8 @@ fn form(mut contexts: EguiContexts, mut signin: ResMut<Signin>, ui_state: Res<Ui
     }
 }
 
-/// A Bevy colour as an egui one, so the two surfaces share a palette rather than a guess.
-fn colour(from: bevy::prelude::Color) -> egui::Color32 {
+/// A Bevy color as an egui one, so the two surfaces share a palette rather than a guess.
+fn color(from: bevy::prelude::Color) -> egui::Color32 {
     let rgba = from.to_srgba();
     egui::Color32::from_rgba_unmultiplied(
         (rgba.red * 255.0) as u8,

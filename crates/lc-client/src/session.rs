@@ -27,8 +27,8 @@ const LY_PER_LUS: f64 = 299.792458 / 9.460_730_472_580_8e15;
 
 /// What the ship looks through.
 ///
-/// Four square metres, every band, and cooled. Not [`Instrument::BASELINE`], which is a one
-/// metre silicon camera at room temperature: it cannot reach the thermal infrared at all, and
+/// Four square meters, every band, and cooled. Not [`Instrument::BASELINE`], which is a one
+/// meter silicon camera at room temperature: it cannot reach the thermal infrared at all, and
 /// its own 290 K housing glows straight into the band a swarm lives in. A ship that is a mind
 /// with no eyes builds the sensor it needs.
 pub const SHIP_SENSOR: Instrument = Instrument::SHIP;
@@ -37,7 +37,7 @@ pub const SHIP_SENSOR: Instrument = Instrument::SHIP;
 ///
 /// The rest are drawn as bare blackbodies. Starlight is a function rather than an event
 /// stream, so a star with nothing around it costs one evaluation and needs no model at all.
-pub const MODELLED_STARS: usize = 12;
+pub const MODELED_STARS: usize = 12;
 
 /// A star as the renderer wants it.
 #[derive(Clone, Copy, Debug)]
@@ -130,7 +130,7 @@ impl Session {
         stars.truncate(count.max(1));
 
         let mut targets = HashMap::new();
-        for star in stars.iter().take(MODELLED_STARS) {
+        for star in stars.iter().take(MODELED_STARS) {
             targets.insert(star.id, build_target(star));
         }
 
@@ -211,7 +211,7 @@ impl Session {
         self.sync_observer();
     }
 
-    /// How fast the ship is going, metres a second, world frame.
+    /// How fast the ship is going, meters a second, world frame.
     pub fn velocity_m_s(&self) -> DVec3 {
         motion::velocity_m_s(&self.ship.motion, self.system.as_deref(), self.coordinate_time_s())
     }
@@ -281,7 +281,7 @@ impl Session {
 
     /// Put the continuous position back on the integer grid.
     ///
-    /// Rounding is to the nearest light-microsecond, 300 metres. Retarded-time solving reads
+    /// Rounding is to the nearest light-microsecond, 300 meters. Retarded-time solving reads
     /// the grid, so this is what the light delay is actually computed against.
     fn sync_observer(&mut self) {
         let grid = self.ship.motion.position_ly * LUS_PER_LY;
@@ -447,7 +447,7 @@ impl Session {
     /// Point the telescope, clearing whatever it was watching.
     ///
     /// Builds the target's emission model if this is the first time anything has looked at it.
-    /// [`MODELLED_STARS`] bounds what the *sky* evaluates every frame, which is a cost that
+    /// [`MODELED_STARS`] bounds what the *sky* evaluates every frame, which is a cost that
     /// scales with the field; the telescope looks at one star, and there is no reason a player
     /// should be unable to point it at the thirteenth-nearest.
     pub fn point_at(&mut self, id: Option<StarId>) {
@@ -491,7 +491,7 @@ impl Session {
         // the shifted temperature already carries the D^4 in the flux.
         let teff = (star.star.teff_k * self.doppler_to(star)).max(1.0);
         match self.targets.get(&star.id) {
-            // A modelled system is evaluated properly, light delay and all.
+            // A modeled system is evaluated properly, light delay and all.
             Some(target) => observe(target, self.observer, &full_spectrum(), 1.0, 0x5ee)
                 .map(|o| received(&o, teff, star.star.radius_m, distance_m))
                 .unwrap_or_default(),
@@ -557,7 +557,7 @@ impl Session {
     /// meter does — expose so that `1 - fraction` of the frame clips.
     ///
     /// Points all carry the same weight, so a sky with no bodies in it meters exactly as a
-    /// count percentile over stars did, `point_sr` cancelling. A resolved planet does not: at
+    /// count percentile over stars did, `point_sr` canceling. A resolved planet does not: at
     /// a couple of hundred pixels across it outweighs six thousand stars together and takes
     /// the exposure with it, which is what a photograph of a planet looks like.
     pub fn expose_to_percentile(&mut self, fraction: f32) {
@@ -621,7 +621,7 @@ fn full_spectrum() -> Instrument {
         .cooled_to(20.0)
 }
 
-/// Metres in a light-year.
+/// Meters in a light-year.
 const M_PER_LY: f64 = 9.460_730_472_580_8e15;
 
 fn geometry(radius_m: f64, distance_m: f64) -> f64 {
@@ -630,7 +630,7 @@ fn geometry(radius_m: f64, distance_m: f64) -> f64 {
 
 /// Band flux from a blackbody disc of `radius_m` seen from `distance_m`, W/m^2.
 ///
-/// The whole of an unmodelled star's brightness, and — at the star's own temperature and a
+/// The whole of an unmodeled star's brightness, and — at the star's own temperature and a
 /// body's effective radius — the whole of a body's reflected brightness.
 pub fn bare(teff_k: f64, radius_m: f64, distance_m: f64) -> PerBand<f32> {
     let spectrum = spectrum_at(teff_k);
@@ -664,7 +664,7 @@ fn spectrum_at(teff_k: f64) -> PerBand<f32> {
         static SPECTRA: std::cell::RefCell<HashMap<u64, PerBand<f32>>> =
             std::cell::RefCell::new(HashMap::new());
     }
-    // The key is the temperature in units of its own resolution, so neighbouring temperatures
+    // The key is the temperature in units of its own resolution, so neighboring temperatures
     // share an entry and a sweeping Doppler factor does not mint one per frame.
     let key = (teff_k / (teff_k * TEFF_RESOLUTION).max(1.0)).round() as u64;
     SPECTRA.with(|spectra| {
@@ -685,7 +685,7 @@ fn spectrum_at(teff_k: f64) -> PerBand<f32> {
 
 /// The deficit is applied in the band it was measured in, which is only right at rest: under
 /// a large shift the observer's V band samples what left the system somewhere else entirely.
-/// Correcting it needs the emission model evaluated at shifted band centres, which the world
+/// Correcting it needs the emission model evaluated at shifted band centers, which the world
 /// crate does not expose yet.
 fn received(observation: &Observation, teff_k: f64, radius_m: f64, distance_m: f64) -> PerBand<f32> {
     let g = geometry(radius_m, distance_m);
@@ -734,9 +734,9 @@ pub fn point_size(shaded: &Shaded, base: f32) -> f32 {
     base * (0.35 + shaded.point_brightness(POINT_STOPS) + shaded.glow.clamp(0.0, 12.0) * 0.3)
 }
 
-/// Colour for a star drawn as a point.
-pub fn point_colour(shaded: &Shaded) -> Vec3 {
-    shaded.point_colour(POINT_STOPS)
+/// Color for a star drawn as a point.
+pub fn point_color(shaded: &Shaded) -> Vec3 {
+    shaded.point_color(POINT_STOPS)
 }
 
 #[cfg(test)]
@@ -773,7 +773,7 @@ mod tests {
         let sky = s.sky();
         assert_eq!(sky.len(), 3);
         for star in &sky {
-            assert!(star.shaded.colour().is_finite());
+            assert!(star.shaded.color().is_finite());
             assert!(star.light_age_s > 0.0, "everything drawn is old");
             // Four light-years is about four years of staleness.
             let years = star.light_age_s / 31_557_600.0;
@@ -806,13 +806,13 @@ mod tests {
         stars.insert(0, sun);
 
         let s = Session::new(&AuthoredStars::new("many", stars), 201);
-        let visible = s.sky().iter().filter(|x| point_colour(&x.shaded).length() > 0.0).count();
+        let visible = s.sky().iter().filter(|x| point_color(&x.shaded).length() > 0.0).count();
         assert!(visible > 150, "only {visible} of 201 stars survived the exposure");
 
         // Exposing for the maximum instead is the failure: the field goes out.
         let mut naive = Session::new(&AuthoredStars::new("many", s.stars.clone()), 201);
         naive.expose_to_percentile(1.0);
-        let left = naive.sky().iter().filter(|x| point_colour(&x.shaded).length() > 0.0).count();
+        let left = naive.sky().iter().filter(|x| point_color(&x.shaded).length() > 0.0).count();
         assert!(left < 5, "{left} stars should have survived exposing for the Sun");
     }
 
@@ -863,7 +863,7 @@ mod tests {
         };
         assert!((altitude(&session) - 3.0).abs() < 0.05, "arrived at {}", altitude(&session));
 
-        // And an hour later, with Earth thirty thousand kilometres further round its year.
+        // And an hour later, with Earth thirty thousand kilometers further round its year.
         for _ in 0..40 {
             session.advance(0.1);
         }
@@ -873,7 +873,7 @@ mod tests {
 /// The whole of it through the session: fly a course, cut the engine partway, and end up
     /// on a real orbit that is then held without thrust.
     #[test]
-    fn cancelling_a_crossing_leaves_the_ship_on_a_conic() {
+    fn canceling_a_crossing_leaves_the_ship_on_a_conic() {
         let provider =
             lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv");
         let Ok(provider) = provider else { return };
@@ -980,10 +980,10 @@ mod tests {
     fn auto_exposure_puts_the_brightest_star_at_the_top_of_the_window() {
         let s = session();
         let sky = s.sky();
-        assert!(sky.iter().any(|x| x.shaded.colour().length() > 0.0), "something must be visible");
+        assert!(sky.iter().any(|x| x.shaded.color().length() > 0.0), "something must be visible");
         let brightest = sky
             .iter()
-            .map(|x| x.shaded.colour().max_element())
+            .map(|x| x.shaded.color().max_element())
             .fold(0.0f32, f32::max);
         assert!(brightest > 0.99, "the brightest should fill the window, got {brightest}");
     }
@@ -995,11 +995,11 @@ mod tests {
         let mut s = session();
         s.tone = ToneMap::default();
         assert!(
-            s.sky().iter().all(|x| x.shaded.colour() == Vec3::ZERO),
+            s.sky().iter().all(|x| x.shaded.color() == Vec3::ZERO),
             "an unexposed scene is black, which is why auto_expose exists"
         );
         s.auto_expose();
-        assert!(s.sky().iter().any(|x| x.shaded.colour().length() > 0.0));
+        assert!(s.sky().iter().any(|x| x.shaded.color().length() > 0.0));
     }
 
     #[test]
@@ -1021,7 +1021,7 @@ mod tests {
     }
 
     #[test]
-    fn a_modelled_system_accumulates_a_curve_over_time() {
+    fn a_modeled_system_accumulates_a_curve_over_time() {
         let mut s = session();
         s.telescope = s.telescope.with_aperture(1e4).with_bands(em_spectra::BandMask::ALL);
         s.point_at(Some(s.stars[0].id));
@@ -1154,7 +1154,7 @@ mod tests {
 
         s.cancel();
         assert!(s.cruise().is_none() && s.station().is_none());
-        // Not exactly: the velocity goes out through metres a second and comes back, and a
+        // Not exactly: the velocity goes out through meters a second and comes back, and a
         // multiply by `c` followed by a divide by `c` is not the identity in binary.
         assert!((s.ship.motion.beta - beta).length() < beta.length() * 1e-12, "cutting the engine is a brake");
 
@@ -1222,11 +1222,11 @@ mod tests {
     #[test]
     fn switching_the_band_mapping_changes_what_is_drawn() {
         let mut s = session();
-        let natural: Vec<Vec3> = s.sky().iter().map(|x| x.shaded.colour()).collect();
+        let natural: Vec<Vec3> = s.sky().iter().map(|x| x.shaded.color()).collect();
         s.mapping = presets::thermal();
         // The window follows the mapping: a different band is a different brightness.
         s.auto_expose();
-        let thermal: Vec<Vec3> = s.sky().iter().map(|x| x.shaded.colour()).collect();
+        let thermal: Vec<Vec3> = s.sky().iter().map(|x| x.shaded.color()).collect();
         assert_ne!(natural, thermal, "the preset must reach the picture");
     }
 }

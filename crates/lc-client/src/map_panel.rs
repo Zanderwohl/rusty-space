@@ -151,8 +151,8 @@ fn controls(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<
             let allowed = source == Source::Observed || state.may_see_everything;
             let chosen = state.map.source == source;
             // A plain selectable label: `add_enabled` wrapping one reports clicks nobody made.
-            // A refused source is shown greyed and says why rather than being absent, because
-            // colour is never the only signal.
+            // A refused source is shown grayed and says why rather than being absent, because
+            // color is never the only signal.
             if !allowed {
                 ui.weak(source.label()).on_hover_text("needs an administrative account");
                 continue;
@@ -167,11 +167,11 @@ fn controls(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<
     });
 
     ui.horizontal(|ui| {
-        if ui.button("centre on the ship").clicked() {
+        if ui.button("center on the ship").clicked() {
             ask(out, Action::FocusMap(None));
         }
         if let Some(system) = game.0.system.as_ref() {
-            if ui.button(format!("centre on {}", system.star_name)).clicked() {
+            if ui.button(format!("center on {}", system.star_name)).clicked() {
                 ask(out, Action::FocusMap(Some(em_map::ItemKey::from_id(
                     "star",
                     system.star.get(),

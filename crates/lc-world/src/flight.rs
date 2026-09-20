@@ -7,8 +7,8 @@
 //!
 //! **Every crossing coasts.** The flip is a turn and a turn takes time — see [`crate::attitude`]
 //! — so the plan holds the drive off for at least [`Drive::flip_s`] between the boost and the
-//! brake, and the ship covers that ground at its peak speed. For a five-hundred-metre hull it is
-//! a minute in the middle of a journey of years; for a fifty-kilometre one it is nearly two
+//! brake, and the ship covers that ground at its peak speed. For a five-hundred-meter hull it is
+//! a minute in the middle of a journey of years; for a fifty-kilometer one it is nearly two
 //! hours, and for a short hop it is most of the trip.
 
 use glam::DVec3;
@@ -21,7 +21,7 @@ mod lit;
 /// Standard gravity, m/s^2.
 pub const G0: f64 = 9.80665;
 
-/// Metres per second.
+/// Meters per second.
 pub const C_M_S: f64 = 299_792_458.0;
 
 /// Seconds in a Julian year. A light-year is this many light-seconds, exactly.
@@ -47,7 +47,7 @@ pub struct Drive {
     pub accel_g: f64,
     /// Speed cap as a fraction of `c`, strictly below 1.
     pub max_beta: f64,
-    /// How fast it throws its reaction mass, metres a second.
+    /// How fast it throws its reaction mass, meters a second.
     ///
     /// Nothing about a *trajectory* depends on this — a crossing is planned from the
     /// acceleration alone and would be the same at any exhaust speed. What it decides is the
@@ -158,9 +158,9 @@ pub struct FlightState {
 /// going, which depends on the line.
 ///
 /// The solve inside a round gets the part along the line exactly right, so what iterates is only
-/// the tilt, and it squares each round: over a thirty-five-thousand-kilometre transfer the miss
-/// goes two kilometres, two metres, two millimetres, two microns. Four rounds holds every case
-/// this is offered for to a few metres, which is what [`crate::navigation::ARRIVAL_ROUNDS`]
+/// the tilt, and it squares each round: over a thirty-five-thousand-kilometer transfer the miss
+/// goes two kilometers, two meters, two millimeters, two microns. Four rounds holds every case
+/// this is offered for to a few meters, which is what [`crate::navigation::ARRIVAL_ROUNDS`]
 /// holds a planet to.
 const AIM_ROUNDS: usize = 4;
 
@@ -168,7 +168,7 @@ const AIM_ROUNDS: usize = 4;
 ///
 /// A ship drifts while it comes about, so where the crossing starts depends on how long the turn
 /// takes — and which way it has to turn depends on where the crossing starts. Iterating that
-/// converges only while the drift is small next to the distance: a fifty-kilometre hull flipping
+/// converges only while the drift is small next to the distance: a fifty-kilometer hull flipping
 /// for two hours over a three-light-second hop moves a fifth of the way there while it turns,
 /// and the iteration walks away instead of settling.
 ///
@@ -356,7 +356,7 @@ impl Cruise {
     /// nose has to reach. Two passes, and they are not the same kind of pass:
     ///
     /// The first bisects. Iterating the drift converges only while the drift is small next to
-    /// the distance, and a fifty-kilometre hull flipping for two hours over a three-light-second
+    /// the distance, and a fifty-kilometer hull flipping for two hours over a three-light-second
     /// hop covers a fifth of the way there while it turns — the iteration walks away instead of
     /// settling. Bisection cannot: the turn lasts somewhere between no time and a flip, so
     /// `[0, flip]` brackets it whatever the geometry.
@@ -496,7 +496,7 @@ impl Cruise {
             // about a factor of two and leaves the iteration oscillating instead of converging.
             //
             // The line and the profile are re-solved together. A direction one round ahead of
-            // the profile it was paired with misses by tens of kilometres on a transfer of tens
+            // the profile it was paired with misses by tens of kilometers on a transfer of tens
             // of thousands.
             let Some(inject) = solved.inject else { break };
             let ran = inject.displacement_ls();
@@ -512,9 +512,9 @@ impl Cruise {
             solved;
 
         // **The point asked for, not the point reached.** They differ, because the aiming above
-        // stops after [`AIM_ROUNDS`] and leaves a couple of metres on a transfer of tens of
-        // thousands of kilometres. Keeping the *order* is what lets a crossing be re-planned
-        // from its recipe and come out the same crossing rather than one aimed two metres
+        // stops after [`AIM_ROUNDS`] and leaves a couple of meters on a transfer of tens of
+        // thousands of kilometers. Keeping the *order* is what lets a crossing be re-planned
+        // from its recipe and come out the same crossing rather than one aimed two meters
         // further on each time — see [`crate::resume`].
         //
         // A clamped crossing is the exception and has to report where it really ends, because
@@ -862,7 +862,7 @@ impl Cruise {
 
         // Vectors rather than a distance along the line, because the last burn need not run
         // along it: an injection is turning the ship's velocity as well as killing it.
-        let (travelled_ls, beta, proper_s, phase) = if t < self.boost_s {
+        let (traveled_ls, beta, proper_s, phase) = if t < self.boost_s {
             // Offset onto the rest profile: this ship entered that trajectory at `t0`. See
             // `plan_from`.
             let on = self.t0_s + t;
@@ -913,7 +913,7 @@ impl Cruise {
         FlightState {
             // From the matched point, which is where the line begins. For a ship that started
             // on the line already, that is where it started.
-            position_ly: self.matched_ly + travelled_ls / JULIAN_YEAR_S,
+            position_ly: self.matched_ly + traveled_ls / JULIAN_YEAR_S,
             beta,
             // The crew aged through the match too.
             proper_s: matched_proper + proper_s,
@@ -972,7 +972,7 @@ fn peak_time(k: f64, lower_s: f64, upper_s: f64, reach: &dyn Fn(f64) -> f64) -> 
         hi *= 2.0;
     }
     // Enough halvings to exhaust an f64 over any bracket this can be handed; the last few are
-    // no-ops once `lo` and `hi` are neighbours.
+    // no-ops once `lo` and `hi` are neighbors.
     for _ in 0..80 {
         let mid = 0.5 * (lo + hi);
         if reach(mid) < k {
@@ -1095,7 +1095,7 @@ mod tests {
         assert!(ponderous.peak_beta() < nimble.peak_beta(), "{ponderous:?}");
         assert!(
             ponderous.coast_s() > 0.5 * ponderous.duration_s(),
-            "a fifty-kilometre hull's hop is more than half flip: {} s of {} s",
+            "a fifty-kilometer hull's hop is more than half flip: {} s of {} s",
             ponderous.coast_s(),
             ponderous.duration_s(),
         );
@@ -1414,7 +1414,7 @@ mod tests {
     }
 
     /// A transfer between two orbits of one body, as the numbers actually are: thirty-five
-    /// thousand kilometres, and a station going a few kilometres a second across the line.
+    /// thousand kilometers, and a station going a few kilometers a second across the line.
     fn transfer(span_m: f64, station_m_s: DVec3) -> (Cruise, DVec3, DVec3) {
         let to = DVec3::X * (span_m / M_PER_LY);
         let onto = station_m_s / C_M_S;
@@ -1430,7 +1430,7 @@ mod tests {
         assert_eq!(end.phase, Phase::Arrived);
         assert_eq!(end.beta, onto, "it must end on the station's velocity exactly");
         let miss_m = (end.position_ly - to).length() * M_PER_LY;
-        assert!(miss_m < 10.0, "{miss_m} m off a thirty-five-thousand-kilometre transfer");
+        assert!(miss_m < 10.0, "{miss_m} m off a thirty-five-thousand-kilometer transfer");
     }
 
     /// One burn, at one angle, doing both jobs: pointing back down the track to kill what the

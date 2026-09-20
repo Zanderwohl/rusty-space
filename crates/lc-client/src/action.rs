@@ -30,14 +30,14 @@ pub enum Action {
     /// In or out, in notches. Positive is closer.
     ///
     /// Not [`Action::Zoom`], which is the ship's boom in hull lengths and is clamped by two
-    /// angles. The map's is a stand-off in metres across fifteen orders of magnitude, and one
+    /// angles. The map's is a stand-off in meters across fifteen orders of magnitude, and one
     /// name for both would mean `--zoom` moving whichever happened to be on top.
     ZoomMap(f64),
     /// Slide the map's focus across the reference plane, in fractions of the stand-off.
     PanMap { right: f64, ahead: f64 },
     SetMapPlane(em_map::Plane),
     ToggleMapPlane,
-    /// What the map is centred on. `None` is the observer.
+    /// What the map is centered on. `None` is the observer.
     FocusMap(Option<em_map::ItemKey>),
     SetMapSource(crate::map_source::Source),
 
@@ -367,7 +367,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 }
             } else if session.cruise().is_some() || session.station().is_some() {
                 let note = match session.cancel() {
-                    // What it says is where the ship ended up, because cancelling does not
+                    // What it says is where the ship ended up, because canceling does not
                     // stop it: it keeps its velocity and that velocity is now an orbit.
                     Some(coast) => format!("drive cut — {}", crate::hud::arc(&coast)),
                     None => "drive cut".to_string(),
@@ -498,7 +498,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         // **The server owns the rate**, which `lightcone/docs/13-client-shell.md` calls dev
         // only and says why: a client that can change it is a client that can cheat. It is also
         // the client that suffers — its clock runs away from the server's, so an order comes
-        // back stamped in its own past and folds as a manoeuvre that already finished. The ship
+        // back stamped in its own past and folds as a maneuvere that already finished. The ship
         // appears to teleport, and the server goes on refusing orders about a system it does
         // not believe the ship has reached.
         Action::SetTimeRate(_) | Action::TimeRateUp | Action::TimeRateDown if session.remote => {
@@ -511,7 +511,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
         Action::WriteSnapshot => effects.push(Effect::WriteSnapshot),
         // Only a shard can do this, and only one started for it will. Offline there is no
-        // authority to ask and nothing that could honour the answer.
+        // authority to ask and nothing that could honor the answer.
         Action::StageDemo(name) if !session.remote => {
             let _ = name;
             effects.push(Effect::Notify("no server, so nowhere to stage a scene".into()));

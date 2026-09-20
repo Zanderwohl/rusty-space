@@ -22,7 +22,7 @@ impl Occluder {
     }
 
     /// Fractional deficit this body causes, seen from `view`, with the body at
-    /// `position_m` relative to the star's centre.
+    /// `position_m` relative to the star's center.
     ///
     /// Zero when the body is behind the star, which is an eclipse rather than a transit.
     pub fn deficit(&self, position_m: DVec3, view: DVec3, star: &Star) -> f64 {
@@ -43,7 +43,7 @@ pub fn impact_parameter(position_m: DVec3, view: DVec3, star: &Star) -> Option<f
     Some((position_m - v * along).length() / star.radius_m)
 }
 
-/// Intensity at fractional radius `r` under quadratic limb darkening, relative to the centre.
+/// Intensity at fractional radius `r` under quadratic limb darkening, relative to the center.
 #[inline]
 fn intensity(r: f64, (u1, u2): (f64, f64)) -> f64 {
     let mu = (1.0 - r * r).max(0.0).sqrt();
@@ -67,7 +67,7 @@ pub fn disc_flux((u1, u2): (f64, f64)) -> f64 {
 /// inside the disc, which is what a transit does for most of its duration.
 ///
 /// This is the Mandel and Agol case without the elliptic integrals. The closed form is an
-/// optimisation for later; this version is checkable against the lens area exactly.
+/// optimization for later; this version is checkable against the lens area exactly.
 pub fn transit_depth(b: f64, ratio: f64, limb: (f64, f64)) -> f64 {
     if ratio <= 0.0 || b >= 1.0 + ratio {
         return 0.0;
@@ -80,7 +80,7 @@ pub fn transit_depth(b: f64, ratio: f64, limb: (f64, f64)) -> f64 {
     let (n_rho, n_alpha) = if crosses_limb { (48, 64) } else { (16, 24) };
     let rho_max = ratio.min(1.0 + b);
 
-    // For a point at (b + rho cos a, rho sin a), distance from the star centre is
+    // For a point at (b + rho cos a, rho sin a), distance from the star center is
     // sqrt(b^2 + rho^2 + 2 b rho cos a), largest at a = 0. Points inside the disc are those
     // with |a| >= a0, so the angular measure is exactly 2 (pi - a0) and the boundary needs no
     // indicator function.
@@ -144,7 +144,7 @@ fn simpson(lo: f64, hi: f64, intervals: usize, f: impl Fn(f64) -> f64) -> f64 {
 mod tests {
     use super::*;
 
-    /// Overlap area of two circles, radii 1 and `ratio`, centres `b` apart.
+    /// Overlap area of two circles, radii 1 and `ratio`, centers `b` apart.
     fn lens_area(b: f64, ratio: f64) -> f64 {
         if b >= 1.0 + ratio {
             return 0.0;
@@ -181,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn a_centred_occulter_without_limb_darkening_blocks_its_area() {
+    fn a_centered_occulter_without_limb_darkening_blocks_its_area() {
         assert!((transit_depth(0.0, 0.1, (0.0, 0.0)) - 0.01).abs() < 1e-12);
     }
 
@@ -190,7 +190,7 @@ mod tests {
         let ratio = 0.1;
         let flat = transit_depth(0.0, ratio, (0.0, 0.0));
         let darkened = transit_depth(0.0, ratio, (0.4, 0.26));
-        assert!(darkened > flat * 1.15, "centre is brighter: {darkened} vs {flat}");
+        assert!(darkened > flat * 1.15, "center is brighter: {darkened} vs {flat}");
     }
 
     #[test]

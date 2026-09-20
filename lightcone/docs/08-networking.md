@@ -85,9 +85,9 @@ attitude, and the coordinate time the light left — and not the motive it is fl
 **A client reckons a contact forward between statements**, along the conic that sample puts it
 on inside a system and a straight line outside one, to the instant whose light reaches the ship
 now (`lc_world::sighted`). It used to hold contacts still, and a tick is 438 coordinate seconds
-at the design rate: a craft in low orbit of Jupiter fell up to twenty thousand kilometres behind
+at the design rate: a craft in low orbit of Jupiter fell up to twenty thousand kilometers behind
 a ship flying formation with it and snapped back twenty times a second. Reckoning never draws
-an event whose light has not arrived. What it can get wrong is a manoeuvre since the sample,
+an event whose light has not arrived. What it can get wrong is a maneuvere since the sample,
 for at most a tick, which is the same thing a pursuer's dead reckoning gets wrong and for the
 same reason: it was not told.
 
@@ -102,7 +102,7 @@ missing, and one that has never had any needs no message twenty times a second s
 
 Which craft are worth solving for is a **visibility** rule and not a causality one: sharing a
 system, which is the same `LOCAL_SHELL_LY` both ends already use to decide where a ship is. Not
-an angular size — a five-hundred-metre hull is well under a pixel from anywhere in a system,
+an angular size — a five-hundred-meter hull is well under a pixel from anywhere in a system,
 and a rule drawn there would leave a player unable to find traffic they are sitting in the
 middle of. A client hears nothing at all about craft outside it, so a system with nobody in it
 and a system whose traffic is all elsewhere look the same from inside.
@@ -138,7 +138,7 @@ changed.
 
 **The pursuer steers by the same sighting its owner is sent.** One `sighting` serves both — two
 would be two answers, and the one the player watched would not be the one the autopilot used.
-So a quarry that manoeuvres is chased on stale information until the news arrives, which across
+So a quarry that maneuveres is chased on stale information until the news arrives, which across
 a system is seconds to hours, and that delay is the game rather than a shortcoming.
 
 A quarry holding course never diverges from the plan and it runs to completion. There used to
@@ -169,14 +169,14 @@ position and wrong about everything a player watches. Each re-solve was a fresh 
 rest where the quarry had been, and against a burning quarry every one of them was about a tick
 long — so the client replayed a whole turn, burn, flip and brake between each pair of sightings,
 and a pursuer plainly leaving the system drew its drive reversing twenty times a second. It never
-gained either: measured, it held two million kilometres off for the whole chase, spending the
+gained either: measured, it held two million kilometers off for the whole chase, spending the
 second half of every plan shedding the speed the first half built.
 
 So a quarry whose plume was lit at the sighting is escorted (`Motive::Escort`,
 `lc_world::escort`). Its acceleration is read from two sightings as the change in `γβ` over the
 world time between them, which is exact under constant thrust at any speed — the obvious
 version, coordinate acceleration scaled by `γ³`, is a few parts in a hundred thousand high at a
-hundredth of `c` and put the modelled quarry forty kilometres wrong in ten ticks. The approach is
+hundredth of `c` and put the modeled quarry forty kilometers wrong in ten ticks. The approach is
 planned in the frame that accelerates with the quarry, where it holds still and the pursuer's
 spare thrust is its drive less the quarry's. Back in the world the two add: full thrust to catch
 up, easing through the relative brake, and exactly the quarry's acceleration once alongside —
@@ -203,29 +203,29 @@ the most expensive thing there is to keep patching into spheres of influence.
 **A quarry that is falling is reckoned along its conic** (`Motive::Consort`, `lc_world::consort`).
 A rendezvous reckons in a straight line and plans in a frame that does not fall, which between
 the stars is exact and inside a system is not: a quarry in low orbit of Jupiter is bent off that
-line at nearly two gravities, a plan ignoring it is ninety kilometres out a hundred seconds in,
-and pursuers rode relative orbits tens to thousands of kilometres across. So inside a system,
+line at nearly two gravities, a plan ignoring it is ninety kilometers out a hundred seconds in,
+and pursuers rode relative orbits tens to thousands of kilometers across. So inside a system,
 below a thousandth of `c`, the conic through the sighting is solved — the same `Coast` a
 `Motive::Falling` is, re-solved at the far end from the same numbers — and the approach is
 planned Galilean in the frame that falls along it. Both ships fall together, so what is left is
 the relative motion, and a plan that ends at rest there *stays* matched: it never ends, like an
 escort, and holds its offset for as long as the quarry holds its arc. What that ignores is the
-tidal difference between two falls, milligravities a thousand kilometres apart, which is the
-bookkeeping a held station already waves away. A quarry that manoeuvres leaves its conic and is
+tidal difference between two falls, milligravities a thousand kilometers apart, which is the
+bookkeeping a held station already waves away. A quarry that maneuveres leaves its conic and is
 re-solved against when the light of it arrives.
 
-Two things had to be true of the numbers for that to hold a kilometre. An orbit station's
+Two things had to be true of the numbers for that to hold a kilometer. An orbit station's
 velocity is analytic — the body's as em-sim states it, plus the circle's — rather than
 differenced from positions, which read em-sim's own disagreement between its positions and
-velocities (nine metres a second about Jupiter) back in, and at four light-years out, where a
-light-year coordinate is good to eight metres, a metre and a half a second of rounding as well.
-With both, a consort holds its standoff to metres an orbit.
+velocities (nine meters a second about Jupiter) back in, and at four light-years out, where a
+light-year coordinate is good to eight meters, a meter and a half a second of rounding as well.
+With both, a consort holds its standoff to meters an orbit.
 
 **How close is a setting of the policy**, `Closeness`, and sending the intercept again with the
 other one closes in or stands off. *Company* is five combined hull lengths, a deadband from half
-of it to twice it. *Intimate* is a kilometre of clear space between the hulls — so half of each
-hull plus a kilometre between centres, which keeps a small ship out of a fifty-kilometre one —
-held to a quarter of a kilometre either side, and re-solved when the quarry strays an eighth.
+of it to twice it. *Intimate* is a kilometer of clear space between the hulls — so half of each
+hull plus a kilometer between centers, which keeps a small ship out of a fifty-kilometer one —
+held to a quarter of a kilometer either side, and re-solved when the quarry strays an eighth.
 A plan for one closeness is a reason to re-plan under the other.
 
 **A pursuit outlives its pilot's connection.** The policy belongs to the craft, not the socket,
@@ -248,7 +248,7 @@ measured from two of them.
 per tick is fine for the handful a shard carries today and is not fine for a busy system: a
 hundred craft in one place is ten thousand solves twenty times a second. The shape of the fix
 is the one the event store already uses — bound the work before solving it, with the craft
-indexed by position so an observer visits its own neighbourhood rather than the whole fleet,
+indexed by position so an observer visits its own neighborhood rather than the whole fleet,
 and a statement rate that falls off with range. Neither is built, and the visibility rule above
 is deliberately a single readable predicate so that replacing it is replacing one function.
 
@@ -259,7 +259,7 @@ at whatever time was asked for. A motive is a closed form total in `t`, so it an
 times before it was ever flown, and `Drifting` extrapolates backwards: a burn retroactively
 moved the ship an hour earlier and changed how fast it was going there. Every retarded solve
 read the new motion at the old time, so `Outbound::Present` showed every client in the system a
-manoeuvre on the tick it happened, at any range. Every message passed the gate. Every message
+maneuvere on the tick it happened, at any range. Every message passed the gate. Every message
 was a lie.
 
 A worldline has a past now — `lc_world::motion::Flight` over the stretches a craft has flown,
@@ -348,7 +348,7 @@ A position alone was the same failure one step in. A ship is not a point, it is 
 something — holding a low polar orbit of Titan, braking into Proxima, falling round a moon — and
 a welcome that carried only the point put the craft back at rest there. A player who signed out
 of an orbit signed back into a drift, and a day later the two ends were two and a half million
-kilometres apart with the interface saying LINKED the whole time.
+kilometers apart with the interface saying LINKED the whole time.
 
 So `Welcome` carries a `Motion`: position, velocity, the crew's own clock, the drive, and the
 motive. The motive travels as the **recipe and never the trajectory**, the same rule an order
@@ -363,8 +363,8 @@ not learned is a compile error.
 
 The tick advances the whole fleet and `disconnected` drops only the connection, so a course set
 before signing out is flown while signed out. Nothing is gated on somebody watching, and a test
-asserts the two runs end identically — because that is the kind of invariant an optimisation
-breaks, and the test is what says what the optimisation would cost.
+asserts the two runs end identically — because that is the kind of invariant an optimization
+breaks, and the test is what says what the optimization would cost.
 
 ### A crossing names a star
 
@@ -421,7 +421,7 @@ A standing intercept re-solves on a fraction of the approach it is flying rather
 fixed interval, and the reason is the same shape as this one: a floor that suits the first long
 run at a quarry is far too coarse for the short correction at the end of it. Ten coordinate
 minutes — chosen against the light delay across a system, which it is indeed much finer than —
-is fourteen thousand kilometres of travel for a craft in high orbit of Jupiter, and an orbital
+is fourteen thousand kilometers of travel for a craft in high orbit of Jupiter, and an orbital
 rendezvous spent the whole approach flying at a ten-minute-old position.
 
 What does depend on the rate is the clock the client runs between statements, and the deadband
@@ -465,7 +465,7 @@ Three levels, coarsest first:
 2. **Detection threshold.** Arrival is not detection. A signal below a receiver's noise floor
    arrives and is not sent. This prunes far more than the cone does.
 3. **Subscription.** A client asks for the systems and objects it is currently displaying.
-   Purely a bandwidth optimisation, never a correctness mechanism.
+   Purely a bandwidth optimization, never a correctness mechanism.
 
 Levels 1 and 2 are server-side and mandatory. Level 3 is a client hint and the server may
 ignore it.

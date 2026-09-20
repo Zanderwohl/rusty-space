@@ -53,7 +53,7 @@ fn ensure_shape_shader(app: &mut App) {
 
 /// The shape of one sphere of influence, as the shaders see it.
 ///
-/// Radii are in render units — metres times the view's distance factor — and
+/// Radii are in render units — meters times the view's distance factor — and
 /// `primary_dir` is in render space. Mirrors `SoiShape` in `shaders/soi_shape.wgsl`.
 #[derive(Clone, Debug, Default, ShaderType)]
 pub struct SoiShapeUniform {

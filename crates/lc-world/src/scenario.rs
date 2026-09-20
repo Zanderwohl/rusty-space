@@ -1,7 +1,7 @@
 //! Scenes to put in a world, so a ship has something to be near.
 //!
-//! Everything this game is about is a *relation* between two craft — a five-kilometre hull
-//! standing off a five-hundred-metre one, an approach seen from the craft being approached, a
+//! Everything this game is about is a *relation* between two craft — a five-kilometer hull
+//! standing off a five-hundred-meter one, an approach seen from the craft being approached, a
 //! stern chase that takes three months — and none of it can be looked at with one ship in the
 //! sky. What existed before this was a flag that parked a fan of unnamed hulls near the player
 //! and left them there, which photographs a hull and nothing a hull does.
@@ -59,8 +59,8 @@ pub enum Start {
     /// Off the player's shoulder, that many of *its own* hull lengths along a bearing in
     /// simulation axes.
     ///
-    /// Range in hull lengths rather than metres because the sizes span two decades: sixteen
-    /// lengths puts a five-hundred-metre hull and a fifty-kilometre one the same width on
+    /// Range in hull lengths rather than meters because the sizes span two decades: sixteen
+    /// lengths puts a five-hundred-meter hull and a fifty-kilometer one the same width on
     /// screen, which is the only arrangement where they are both worth looking at in one frame.
     ///
     /// Held where it is put. A world runs at thousands of times real time, so the slowest speed
@@ -75,9 +75,9 @@ pub struct Member {
     /// the flag this replaces did and is not a name.
     pub name: &'static str,
     pub kind: Kind,
-    /// Metres, within [`crate::craft::LENGTH_RANGE_M`] — the span the camera and the reticle
-    /// are built for. It also sets how fast the hull comes about: a fifty-kilometre ship turns
-    /// a hundred times slower than a five-hundred-metre one.
+    /// Meters, within [`crate::craft::LENGTH_RANGE_M`] — the span the camera and the reticle
+    /// are built for. It also sets how fast the hull comes about: a fifty-kilometer ship turns
+    /// a hundred times slower than a five-hundred-meter one.
     pub length_m: f64,
     /// What it flies with, in g.
     ///
@@ -108,8 +108,8 @@ pub enum Act {
     /// would be — and the only way to *meet* somebody. Being sent to the same orbit is not
     /// meeting them: two craft sent to `orbit:Jupiter:low` from different places each arrive at
     /// whatever point of the circle was nearest them, which can be opposite sides of the
-    /// planet. The standoff it settles at is worked out from both hulls, so a five-kilometre
-    /// ship stands further off than a five-hundred-metre one and the picture is the same.
+    /// planet. The standoff it settles at is worked out from both hulls, so a five-kilometer
+    /// ship stands further off than a five-hundred-meter one and the picture is the same.
     Chase(Slot),
     BreakOff,
     /// Cut the drive. Not a stop: whatever the ship was doing at the time, it keeps doing
@@ -188,7 +188,7 @@ impl Scenario {
 /// stepping it evenly would make every one of them large but the first.
 pub const TRAFFIC: Scenario = Scenario {
     name: "traffic",
-    blurb: "Four hulls to stand beside, from five hundred metres to fifty kilometres.",
+    blurb: "Four hulls to stand beside, from five hundred meters to fifty kilometers.",
     star: "Sol",
     rate: 1.0,
     watch: Slot::Pov,
@@ -234,11 +234,11 @@ pub const TRAFFIC: Scenario = Scenario {
 
 /// A big ship beside a small one, in low orbit of the biggest thing there is.
 ///
-/// The scale demonstration. Ten hull lengths apart, a five-kilometre ship from a
-/// five-hundred-metre one is a building seen from a car, and Jupiter behind it is neither.
+/// The scale demonstration. Ten hull lengths apart, a five-kilometer ship from a
+/// five-hundred-meter one is a building seen from a car, and Jupiter behind it is neither.
 pub const MEETING: Scenario = Scenario {
     name: "meeting",
-    blurb: "A five-kilometre ship holds station off your bow, in low orbit of Jupiter.",
+    blurb: "A five-kilometer ship holds station off your bow, in low orbit of Jupiter.",
     star: "Sol",
     // A low orbit at the design rate sweeps the whole view past twice a second.
     rate: 0.05,
@@ -273,7 +273,7 @@ pub const APPROACH: Scenario = Scenario {
     star: "Sol",
     rate: 0.05,
     // From the craft being approached, which is the whole of what makes this different
-    // from `closing`: the same two ships and the same manoeuvre, seen from the other end.
+    // from `closing`: the same two ships and the same maneuvere, seen from the other end.
     watch: Slot::Pov,
     pov: Member {
         name: "Kestrel",
@@ -288,7 +288,7 @@ pub const APPROACH: Scenario = Scenario {
         length_m: 5_000.0,
         // A pursuit curve against a craft in orbit spends the approach chasing where the
         // quarry was, so the approach has to be short against the period it is chasing round:
-        // a hundred thousand kilometres at five g is a sixth of an orbit, which converges.
+        // a hundred thousand kilometers at five g is a sixth of an orbit, which converges.
         accel_g: 5.0,
         start: Start::Holding("polar:Saturn:high"),
     }],
@@ -303,8 +303,8 @@ pub const APPROACH: Scenario = Scenario {
 ///
 /// The reciprocal of [`APPROACH`], and not the same picture at all. Being approached is a hull
 /// growing in your window while you hold still; approaching is a planet falling away behind you
-/// and a hull you are aiming at. Both are worth having, and which one a five-kilometre ship and
-/// a five-hundred-metre one make depends entirely on which of them the camera is on.
+/// and a hull you are aiming at. Both are worth having, and which one a five-kilometer ship and
+/// a five-hundred-meter one make depends entirely on which of them the camera is on.
 ///
 /// The big ship is the one in the *high* orbit, which is not decoration. A pursuit curve spends
 /// the approach chasing where the quarry was, so what has to be small is the transit time
@@ -312,7 +312,7 @@ pub const APPROACH: Scenario = Scenario {
 /// upper orbit, which converges. The other way round it is a quarter, which crawls.
 pub const CLOSING: Scenario = Scenario {
     name: "closing",
-    blurb: "You climb out of low orbit of Jupiter to meet a five-kilometre ship.",
+    blurb: "You climb out of low orbit of Jupiter to meet a five-kilometer ship.",
     star: "Sol",
     // A tenth rather than the twentieth the other two orbital scenes run at. The approach
     // itself is seven seconds of it; what takes the time is the pursuit settling onto the

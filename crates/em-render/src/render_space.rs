@@ -181,7 +181,7 @@ mod tests {
         assert!(at_camera.length() < 1e-6, "a body at the camera should render at the origin, got {at_camera:?}");
     }
 
-    /// Camera-relative before narrowing to f32 keeps metre-scale separations at 1 AU;
+    /// Camera-relative before narrowing to f32 keeps meter-scale separations at 1 AU;
     /// narrowing first loses them.
     #[test]
     fn relative_conversion_beats_narrowing_first() {

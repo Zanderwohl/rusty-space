@@ -4,7 +4,7 @@
 //! and it is derived here. Two importers deriving it separately is two chances to disagree,
 //! and the disagreement would be silent: both would produce a plausible star.
 
-use em_spectra::{colour_index, stellar};
+use em_spectra::{color_index, stellar};
 use glam::DVec3;
 
 use super::{CatalogueStar, Component, Provenance, StarId};
@@ -28,7 +28,7 @@ pub struct StarRecord {
     /// Ecliptic, m/s.
     pub velocity: DVec3,
     /// `B-V`.
-    pub colour_index: f64,
+    pub color_index: f64,
     pub luminosity_solar: f64,
     /// 1 for a single star or the primary of a multiple.
     pub component_index: u8,
@@ -42,10 +42,10 @@ impl StarRecord {
     /// Returning an option rather than filtering at the call site means both importers reject
     /// the same rows for the same reasons.
     pub fn assemble(&self, source: &str) -> Option<CatalogueStar> {
-        if !colour_index::bv_is_valid(self.colour_index) || self.luminosity_solar <= 0.0 {
+        if !color_index::bv_is_valid(self.color_index) || self.luminosity_solar <= 0.0 {
             return None;
         }
-        let teff = colour_index::teff_from_bv(self.colour_index);
+        let teff = color_index::teff_from_bv(self.color_index);
         let luminosity_w = self.luminosity_solar * stellar::SOLAR_LUMINOSITY;
         let radius = stellar::radius_from_luminosity(luminosity_w, teff);
         if !(radius.is_finite() && radius > 0.0) {
@@ -122,7 +122,7 @@ mod tests {
             name: Some("Sol".into()),
             position_ly: DVec3::ZERO,
             velocity: DVec3::ZERO,
-            colour_index: 0.656,
+            color_index: 0.656,
             luminosity_solar: 1.0,
             component_index: 1,
             group: None,
@@ -143,7 +143,7 @@ mod tests {
         r.luminosity_solar = 0.0;
         assert!(r.assemble("test").is_none());
         let mut r = sol();
-        r.colour_index = 99.0;
+        r.color_index = 99.0;
         assert!(r.assemble("test").is_none());
     }
 

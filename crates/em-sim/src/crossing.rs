@@ -10,7 +10,7 @@
 //! arbitrary instant, and how fast it turns. Requiring a `BodyIndex` for those meant a craft
 //! could only be given a predicted crossing by first being inserted into the arena.
 //!
-//! Everything is in metres, in simulation space (right-handed, Z-up, ecliptic of J2000).
+//! Everything is in meters, in simulation space (right-handed, Z-up, ecliptic of J2000).
 
 use em_foundations::time::{Instant, TimeDelta};
 use glam::DVec3;
@@ -28,7 +28,7 @@ use crate::system::System;
 /// the same constraint [`propagate::position_at`] states by returning `None` for an integrated
 /// body, and the same one `lc_spacetime::Worldline` states for the light-delay solve.
 pub trait Traveller {
-    /// Position and velocity in simulation space, metres and metres a second.
+    /// Position and velocity in simulation space, meters and meters a second.
     fn state_at(&self, time: Instant) -> Option<(DVec3, DVec3)>;
 
     /// The same, measured from whatever the path is anchored on.
@@ -159,7 +159,7 @@ const CROSSING_TOLERANCE_SECONDS: f64 = 1.0e-3;
 /// this the most expensive thing in the frame.
 const SEARCH_CHUNK_REVOLUTIONS: f64 = 0.25;
 
-/// Signed distance from the boundary of `target`'s sphere, in metres: negative inside.
+/// Signed distance from the boundary of `target`'s sphere, in meters: negative inside.
 ///
 /// `None` when the traveller or the target is not analytic at `time`, or `target` has no
 /// sphere. This is the scalar every search below is a root of.
@@ -171,7 +171,7 @@ pub fn boundary_distance_of(
 ) -> Option<f64> {
     let soi = soi_at(system, target, time)?;
     let (position, _) = traveller.state_at(time)?;
-    let offset = position - soi.centre;
+    let offset = position - soi.center;
     Some(offset.length() - soi.radius_toward(offset))
 }
 
@@ -213,7 +213,7 @@ pub fn crossings_of(
 
         if let Some((previous_time, previous_distance)) = previous {
             // Strictly opposite signs. A sample sitting exactly on the boundary is picked
-            // up by the neighbouring interval instead of counting twice.
+            // up by the neighboring interval instead of counting twice.
             if (previous_distance < 0.0) != (distance < 0.0) {
                 if let Some(crossing) = refine(
                     system, traveller, target,
@@ -252,7 +252,7 @@ pub fn next_crossing_of(
 }
 
 /// The first crossing of `target`'s sphere within `window`, for a traveller whose speed
-/// relative to the sphere's centre never exceeds `speed_bound`.
+/// relative to the sphere's center never exceeds `speed_bound`.
 ///
 /// Conservative advancement rather than a grid keyed on the traveller's time constant, which
 /// for a near-straight hyperbola at a fraction of `c` is milliseconds. Outside the bounding
@@ -289,7 +289,7 @@ pub fn next_crossing_bounded(
                 gap_step_s
             }
             Some((soi, (position, _))) => {
-                let offset = position - soi.centre;
+                let offset = position - soi.center;
                 let reach = offset.length();
                 let distance = reach - soi.radius_toward(offset);
                 if let Some(before) = previous
@@ -496,7 +496,7 @@ mod tests {
     /// wrong and measured a chord a sixtieth of the one it asked for.
     /// Fast, and deliberately so. Earth's frame is not inertial — over a traverse it turns
     /// with the orbit — so only a flyby quick enough that the turn is negligible has a chord
-    /// that can be predicted from the sphere's radius. At ten kilometres a second the traverse
+    /// that can be predicted from the sphere's radius. At ten kilometers a second the traverse
     /// takes nine days, Earth's velocity swings eight degrees, and the "diameter" this test
     /// asks for is out by a sixth.
     const FLYBY_SPEED: f64 = 100_000.0;
@@ -542,7 +542,7 @@ mod tests {
         for crossing in &found {
             let distance =
                 boundary_distance_of(&system, &line, earth, crossing.time).expect("evaluable");
-            // A millisecond of bisection tolerance is a hundred metres at this speed.
+            // A millisecond of bisection tolerance is a hundred meters at this speed.
             assert!(distance.abs() < 1_000.0, "{distance} m off the boundary");
         }
 

@@ -92,7 +92,7 @@ Each of these cost real time. None of them are visible from the code that hits t
   before it was ever flown. `Craft` keeps a history of the stretches it has flown for exactly
   this reason — without one, changing a motive rewrites the craft's whole past, and every
   retarded solve reads the new motion at the old time. That shipped once and leaked every
-  manoeuvre instantly to every client in the system. Change a motive only through
+  maneuvere instantly to every client in the system. Change a motive only through
   `Craft`'s own methods; they are what record it.
 - `Cleared::clear` gates **when** a message may be sent and says nothing about how its content
   was computed. A message can pass the gate and still be a fact from the future.
@@ -110,14 +110,14 @@ Each of these cost real time. None of them are visible from the code that hits t
 - `Camera::world_to_viewport` **errors** for anything behind the camera, so nothing built on it
   can point at what is behind you. Work in clip space and keep `w`: `clip.w` is `-view.z`, so
   behind the camera it is negative while `clip.x` keeps the sign of `view.x`. Dividing anyway
-  mirrors the point through the centre. See `em_ui::reticle::place`.
+  mirrors the point through the center. See `em_ui::reticle::place`.
 
 - Depth is **reversed**. `clip.z = clip.w` is the *near* plane. Background geometry wants a
   tiny positive value, not zero — the buffer clears to zero and the test is strictly greater.
 - `AlphaMode::Add` is *premultiplied*: `src + dst*(1-alpha)`. For pure additive the fragment
   must return **alpha 0**, or it overwrites and two coplanar meshes flicker on sort order.
-- Render positions are f32 relative to the camera: about **six metres** at a hundred thousand
-  kilometres. Never place the camera on a surface — an infinitely thin sheet containing the
+- Render positions are f32 relative to the camera: about **six meters** at a hundred thousand
+  kilometers. Never place the camera on a surface — an infinitely thin sheet containing the
   camera swings wildly from frame to frame.
 - Two runs stopped at frame `n` and frame `n+1` are **not** consecutive frames. They have
   accumulated different wall time. Use `--burst`.
@@ -170,7 +170,7 @@ Each of these cost real time. None of them are visible from the code that hits t
 - **`cargo fmt` is not run on the game workspace.** CI fmt-checks `auth/` and `web/` only, and
   the game's code is hand-formatted — `cargo fmt --all` at the repository root rewrites 204
   files and 22 000 lines, burying a change in churn. Format the files you write to match their
-  neighbours and leave the rest alone.
+  neighbors and leave the rest alone.
 
 **The administration console**
 
@@ -211,7 +211,7 @@ Each of these cost real time. None of them are visible from the code that hits t
   no way to guess the address of anything — including `/signout`, which existed the whole time
   and is a **POST**: `SameSite=Lax` sends the session on a cross-site top-level navigation when
   the method is safe, and never on a cross-site POST, so the method is the whole of the
-  defence. A link to it would not work and is asserted against.
+  defense. A link to it would not work and is asserted against.
   `views::refusal` takes a way out; `views::wrong` is for store failures, where there is
   nothing useful to offer.
 - **A session that can only be refused should not exist.** Check the level before sealing one,

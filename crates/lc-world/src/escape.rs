@@ -2,7 +2,7 @@
 //!
 //! [`em_sim::crossing::first_crossing_of`] keys its sampling on the traveller's time constant,
 //! `2 pi sqrt(|a|^3 / mu)`. For a hyperbola at a fraction of `c` that is milliseconds — the arc
-//! is a straight line and `|a|` is metres — so every candidate was sampled at that search's
+//! is a straight line and `|a|` is meters — so every candidate was sampled at that search's
 //! ceiling across a whole year: most of a minute a solve, on both client and server, and at a
 //! hundred and fifty seconds a step it stepped clean through every sphere in the system anyway.
 //!

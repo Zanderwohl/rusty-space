@@ -1,4 +1,4 @@
-//! Colour index to effective temperature.
+//! Color index to effective temperature.
 
 /// `B - V` outside this range puts Ballesteros' fit outside the data it was fitted to.
 pub const BV_VALID: (f64, f64) = (-0.4, 2.0);
@@ -57,7 +57,7 @@ mod tests {
     }
 
     #[test]
-    fn temperature_falls_monotonically_with_colour() {
+    fn temperature_falls_monotonically_with_color() {
         let mut prev = f64::INFINITY;
         let mut bv = BV_VALID.0;
         while bv <= BV_VALID.1 {

@@ -31,7 +31,7 @@ pub struct Preview {
     /// What the draft's engines pull with storage empty, and with it full.
     pub g_dry: f64,
     pub g_wet: f64,
-    /// What a change of velocity of one kilometre a second costs the draft at `mass_after_kg`.
+    /// What a change of velocity of one kilometer a second costs the draft at `mass_after_kg`.
     pub energy_per_km_s_j: f64,
     /// What the draft's hull would collect here, holding still, and what its living space drains.
     pub solar_after_w: f64,
@@ -190,7 +190,7 @@ fn step_name(step: Step) -> String {
     }
 }
 
-/// What changing a ship of `mass_kg`'s velocity by one kilometre a second costs, joules.
+/// What changing a ship of `mass_kg`'s velocity by one kilometer a second costs, joules.
 pub fn energy_per_km_s_j(balance: &Balance, mass_kg: f64) -> f64 {
     let rapidity = lc_world::cost::rapidity_between(
         glam::DVec3::ZERO,
@@ -210,9 +210,9 @@ fn me_small(joules: f64, module_j: f64) -> String {
     format!("{:.3e} ME", joules / module_j)
 }
 
-/// A hull length: metres, or kilometres once there are thousands of them.
-pub fn length(metres: f64) -> String {
-    if metres < 1.0e4 { format!("{metres:.0} m") } else { format!("{:.2} km", metres / 1.0e3) }
+/// A hull length: meters, or kilometers once there are thousands of them.
+pub fn length(meters: f64) -> String {
+    if meters < 1.0e4 { format!("{meters:.0} m") } else { format!("{:.2} km", meters / 1.0e3) }
 }
 
 /// A duration a refit is measured in: days, or years past a few hundred of them.
@@ -469,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn a_length_reads_in_metres_until_it_is_kilometres() {
+    fn a_length_reads_in_meters_until_it_is_kilometers() {
         assert_eq!(length(500.0), "500 m");
         assert_eq!(length(Balance::DEFAULT.length_m(22)), "516 m");
         assert_eq!(length(50_000.0), "50.00 km");

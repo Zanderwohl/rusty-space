@@ -201,7 +201,7 @@ impl<J: Journal> Server<J> {
     /// a craft with nobody flying it is served by the same path as one with a pilot watching —
     /// and every read of them is gated on the clock having reached the arrival. That is the
     /// same bargain the deliveries table makes, in a second place where it happens to be the
-    /// whole of a game mechanic rather than an optimisation.
+    /// whole of a game mechanic rather than an optimization.
     pub(crate) fn remember(
         &mut self,
         event_id: i64,
@@ -287,7 +287,7 @@ impl<J: Journal> Server<J> {
     /// The aim at a craft is the **advanced**-time solve of `lc_world::signal`, run against the
     /// sender's own sighting of it — which is stale, and is extrapolated forward across the
     /// flight time, so the aim is built on roughly twice the light delay in guesswork. A quarry
-    /// that manoeuvres in between is missed, and the message goes past it into empty space.
+    /// that maneuveres in between is missed, and the message goes past it into empty space.
     pub(crate) fn beam_for(&self, sender: CraftId, aim: &Aim, at: i64) -> Result<Beam, Refusal> {
         let Aim::Omni = aim else {
             let from = self.fleet.get(sender).ok_or(Refusal::NotYours)?.position_at(at as f64);
@@ -306,7 +306,7 @@ impl<J: Journal> Server<J> {
                     )
                     .ok_or(Refusal::Impossible)?
                 }
-                // A star does not manoeuvre, so this is the one aim that always lands — on
+                // A star does not maneuvere, so this is the one aim that always lands — on
                 // everybody in the system, which is what it is for.
                 Aim::Star(star) => {
                     let to = self.world.star_at(*star).ok_or(Refusal::Impossible)?;

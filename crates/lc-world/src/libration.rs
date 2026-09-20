@@ -2,7 +2,7 @@
 //!
 //! L1 and L2 are unstable equilibria: a craft placed exactly on one falls off it in weeks. No
 //! real mission tries. They fly a *libration orbit* about the point instead — SOHO round
-//! Sun-Earth L1, JWST round L2 — which costs a few metres a second a year to hold and, unlike
+//! Sun-Earth L1, JWST round L2 — which costs a few meters a second a year to hold and, unlike
 //! the point itself, is somewhere you can see out from.
 //!
 //! [`em_foundations::lagrange`] has the mechanics. This is the curve those numbers describe,
@@ -25,7 +25,7 @@ use crate::system::{LocalSystem, M_PER_LY};
 
 /// Radial amplitude as a fraction of the point's own distance from the body.
 ///
-/// A fifth puts a Sun-Earth libration orbit about three hundred thousand kilometres across the
+/// A fifth puts a Sun-Earth libration orbit about three hundred thousand kilometers across the
 /// radial direction and nine hundred thousand along track, which is the size JWST's actually
 /// is. Large enough to be a place rather than a dot; small enough that the linearisation the
 /// whole thing rests on still holds.
@@ -43,12 +43,12 @@ pub struct Libration {
     /// The smaller of the two primaries — the body the point belongs to.
     pub body: String,
     pub point: LagrangePoint,
-    /// Distance from the body to the point, metres.
+    /// Distance from the body to the point, meters.
     pub standoff_m: f64,
-    /// Half-width in the radial direction, metres. Along track it is
+    /// Half-width in the radial direction, meters. Along track it is
     /// [`amplitude_ratio`](Self::amplitude_ratio) times this.
     pub radial_m: f64,
-    /// Half-height out of the orbital plane, metres.
+    /// Half-height out of the orbital plane, meters.
     pub vertical_m: f64,
     /// Radians a second, in plane and out of it.
     pub planar_rate: f64,
@@ -121,14 +121,14 @@ impl Libration {
             return None;
         }
 
-        let centre = body_at + out * self.standoff_m * self.point.outward_sign();
+        let center = body_at + out * self.standoff_m * self.point.outward_sign();
 
         let offset = self.offset_m(now_s);
         let displaced = out * offset.x + along * offset.y + normal * offset.z;
-        Some(system.origin_ly + (centre + displaced) / M_PER_LY)
+        Some(system.origin_ly + (center + displaced) / M_PER_LY)
     }
 
-    /// Where the craft is relative to the point, in the rotating frame of the pair: metres
+    /// Where the craft is relative to the point, in the rotating frame of the pair: meters
     /// outward, along track, and out of plane.
     ///
     /// This, not [`at`](Self::at), is where the orbit is a closed curve. Seen from the body it
@@ -150,13 +150,13 @@ impl Libration {
         std::f64::consts::TAU / self.planar_rate
     }
 
-    /// Longest dimension of the orbit, metres: the along-track axis.
+    /// Longest dimension of the orbit, meters: the along-track axis.
     pub fn extent_m(&self) -> f64 {
         2.0 * self.amplitude_ratio * self.radial_m
     }
 }
 
-/// Separation and relative velocity of a body from its parent, at a time. Metres.
+/// Separation and relative velocity of a body from its parent, at a time. Meters.
 fn pair(
     system: &LocalSystem,
     body: em_sim::id::BodyIndex,
@@ -187,8 +187,8 @@ mod tests {
 
     const KM: f64 = 1_000.0;
 
-    /// The numbers JWST flies: about a million and a half kilometres out from Earth, and an
-    /// orbit some nine hundred thousand kilometres along track.
+    /// The numbers JWST flies: about a million and a half kilometers out from Earth, and an
+    /// orbit some nine hundred thousand kilometers along track.
     #[test]
     fn earths_l2_is_where_the_telescopes_are() {
         let Some(system) = sol() else { return };
@@ -237,7 +237,7 @@ mod tests {
     ///
     /// Measured in the rotating frame, which is the only frame this closes in. Seen from Earth
     /// it does not — the frame turns a half circle in a libration period, so a craft that has
-    /// come all the way round is three million kilometres from where it started, on the far
+    /// come all the way round is three million kilometers from where it started, on the far
     /// side of the planet. That is real, and it is not the orbit failing to close.
     #[test]
     fn the_craft_goes_round_the_point_and_returns() {
@@ -263,7 +263,7 @@ mod tests {
             "a Lissajous that closed exactly would be a halo: {} m", (full.z - start.z).abs(),
         );
 
-        // And it stays in the neighbourhood of the point all the way round.
+        // And it stays in the neighborhood of the point all the way round.
         for step in 0..16 {
             let at = orbit.offset_m(period * step as f64 / 16.0).length();
             assert!(at < orbit.extent_m(), "step {step}: {at:e} m from the point");
@@ -333,8 +333,8 @@ mod tests {
             crate::navigation::Waypoint::Lagrange { body: "Earth".into(), point: LagrangePoint::L2 };
         let (at_point, widest_at_point) = survey(&|t| point.place_at(&system, t));
         assert_eq!(at_point, 64, "the point is on the line at every instant, by construction");
-        // Not zero: the direction is normalised out of positions of order 1e11 metres, and a
-        // millionth of a degree at this range is four centimetres.
+        // Not zero: the direction is normalised out of positions of order 1e11 meters, and a
+        // millionth of a degree at this range is four centimeters.
         assert!(widest_at_point < 1.0e-4, "{widest_at_point} degrees off the line");
 
         let orbit = Libration::about(&system, "Earth", LagrangePoint::L2, 0.0).expect("L2");
@@ -362,7 +362,7 @@ mod tests {
         let one = LagrangePoint::L1.standoff_m(&system, "Earth", 0.0).unwrap();
         let two = LagrangePoint::L2.standoff_m(&system, "Earth", 0.0).unwrap();
         assert!(two > one, "L2 is the further out: {two} against {one}");
-        // Some seven thousand kilometres apart, which the Hill radius collapsed to zero.
+        // Some seven thousand kilometers apart, which the Hill radius collapsed to zero.
         assert!((two - one) / KM > 5_000.0, "{} km apart", (two - one) / KM);
     }
 

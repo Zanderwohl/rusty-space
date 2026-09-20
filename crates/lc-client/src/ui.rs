@@ -112,7 +112,7 @@ impl Panel {
 pub struct MapView {
     pub orbit: em_map::Orbit,
     pub plane: em_map::Plane,
-    /// What the camera is centred on, or the observer when nothing is picked. A key rather
+    /// What the camera is centered on, or the observer when nothing is picked. A key rather
     /// than a position: Saturn moves.
     pub focus: Option<em_map::ItemKey>,
     pub source: crate::map_source::Source,
@@ -131,7 +131,7 @@ pub enum CameraPerspective {
     /// **The eye moves; the observer does not.** Everything the client works out about *light*
     /// — retarded times, aberration, what a contact looked like when it left — is still solved
     /// from the player's own ship, because that is the craft the session has a worldline for.
-    /// Across a scene, where the cast is kilometres apart, the difference is microseconds and
+    /// Across a scene, where the cast is kilometers apart, the difference is microseconds and
     /// there is nothing to see. Across the Oort cloud it would be hours, and this would be a
     /// lie. Watching from a craft you are not on is a development view until the observer can
     /// move too.
@@ -209,7 +209,7 @@ pub const NOTIFICATION_LIMIT: usize = 6;
 /// Clock multipliers a development build offers, and what each one means to watch.
 ///
 /// The multiplier is against the design rate of one Julian year per real hour, so 60 is a year
-/// a minute. Labelled by period rather than by factor because a factor is not something anyone
+/// a minute. Labeled by period rather than by factor because a factor is not something anyone
 /// can feel, and these exist to be chosen by eye — a crossing to Proxima takes four and a half
 /// hours at 1x, four and a half minutes at 60x, and forty-five seconds at 360x.
 /// The ladder, as multiples of [`crate::session::TIME_RATE`].
@@ -461,7 +461,7 @@ impl UiState {
         self.raise(Notification { text: text.into(), at, from: None });
     }
 
-    /// Somebody said something. Shown in the events box in the colour the interface reserves
+    /// Somebody said something. Shown in the events box in the color the interface reserves
     /// for it, and clicking it opens the conversation.
     pub fn heard(&mut self, from: lc_proto::ShipId, text: impl Into<String>, at: f64) {
         self.raise(Notification { text: text.into(), at, from: Some(from) });

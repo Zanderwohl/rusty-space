@@ -18,20 +18,20 @@ pub const ELEVATION_LIMIT: f64 = std::f64::consts::FRAC_PI_2 - 1.0e-3;
 /// disc from re-teaching it.
 ///
 /// An angle rather than a distance, so the stand-off it buys scales by itself: `d · sin` of
-/// this is 300 000 km at one astronomical unit and two metres at a kilometre, which is a few
+/// this is 300 000 km at one astronomical unit and two meters at a kilometer, which is a few
 /// render units of whatever tier is in force either way. A tenth of a degree, so a view meant
 /// to be edge-on still reads as edge-on.
 pub const ELEVATION_FLOOR: f64 = 2.0e-3;
 
 /// Decades of stand-off per notch of wheel.
 ///
-/// Zoom is additive in `log10` metres, which is what makes one notch mean the same *fraction*
+/// Zoom is additive in `log10` meters, which is what makes one notch mean the same *fraction*
 /// at a hull as at a spiral arm. Seven notches is a decade, and the whole range is about 113 —
 /// continuous, where a discrete tier would jump by five orders between two of them and be a
 /// control nobody could aim.
 pub const ZOOM_DECADES_PER_NOTCH: f64 = 0.15;
 
-/// `log10` of the closest the camera stands off, metres. A kilometre: a hull.
+/// `log10` of the closest the camera stands off, meters. A kilometer: a hull.
 pub const LOG_MIN_M: f64 = 3.0;
 
 /// And the furthest. 1e20 m is about ten thousand light-years.
@@ -55,7 +55,7 @@ pub struct Orbit {
     pub azimuth: f64,
     /// Above the plane, radians. Never zero and never at a pole — see the two clamps.
     pub elevation: f64,
-    /// `log10` of the stand-off in metres. Zoom is addition here.
+    /// `log10` of the stand-off in meters. Zoom is addition here.
     pub log_distance_m: f64,
 }
 
@@ -82,9 +82,9 @@ impl Orbit {
         10f64.powf(self.log_distance_m)
     }
 
-    pub fn set_distance_m(&mut self, metres: f64) {
-        let log = match metres > 0.0 && metres.is_finite() {
-            true => metres.log10(),
+    pub fn set_distance_m(&mut self, meters: f64) {
+        let log = match meters > 0.0 && meters.is_finite() {
+            true => meters.log10(),
             false => LOG_MIN_M,
         };
         self.log_distance_m = log.clamp(LOG_MIN_M, LOG_MAX_M);
@@ -115,9 +115,9 @@ impl Orbit {
 
     /// Slide the focus across the plane, in fractions of the stand-off.
     ///
-    /// Fractions rather than metres, because a drag of so many pixels has to move the view by
-    /// the same part of itself at every zoom. In metres it is imperceptible at a light-year
-    /// and throws the system off screen at a kilometre.
+    /// Fractions rather than meters, because a drag of so many pixels has to move the view by
+    /// the same part of itself at every zoom. In meters it is imperceptible at a light-year
+    /// and throws the system off screen at a kilometer.
     pub fn pan(&mut self, plane: Plane, right: f64, ahead: f64) {
         let normal = plane.normal();
         let screen_right = (-self.offset_direction(plane)).cross(normal).normalize_or_zero();
@@ -158,7 +158,7 @@ mod tests {
 
     /// One notch is the same fraction wherever it is spent.
     ///
-    /// Break it by subtracting metres instead of decades and the ratio at a hull and the ratio
+    /// Break it by subtracting meters instead of decades and the ratio at a hull and the ratio
     /// at a spiral arm stop agreeing, which is the whole difference between a usable zoom and
     /// one that is dead at one end.
     #[test]
@@ -257,10 +257,10 @@ mod tests {
     /// A pan of the same fraction covers the same part of the view at every zoom.
     #[test]
     fn a_pan_is_a_fraction_of_the_view() {
-        let moved_at = |metres| {
-            let mut orbit = Orbit::framing(DVec3::ZERO, metres);
+        let moved_at = |meters| {
+            let mut orbit = Orbit::framing(DVec3::ZERO, meters);
             orbit.pan(Plane::Ecliptic, 0.25, 0.0);
-            orbit.focus_ly.length() * M_PER_LY / metres
+            orbit.focus_ly.length() * M_PER_LY / meters
         };
         assert!((moved_at(M_PER_AU) - moved_at(1.0e4 * M_PER_AU)).abs() < 1e-9);
         assert!(moved_at(M_PER_AU) > 0.0, "a pan moved nothing");

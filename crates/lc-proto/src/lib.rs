@@ -81,7 +81,7 @@ pub struct Drive {
     pub accel_g: f64,
     /// Speed cap as a fraction of `c`.
     pub max_beta: f64,
-    /// How fast it throws its reaction mass, metres a second.
+    /// How fast it throws its reaction mass, meters a second.
     ///
     /// On the wire because a client draws its own ship's plume, and what a burn looks like is
     /// `½ F v` — the one number a trajectory does not depend on and an exhaust does.
@@ -246,7 +246,7 @@ pub enum Closeness {
     /// Formation flying, a few combined hull lengths off.
     #[default]
     Company,
-    /// A kilometre of clear space between the hulls.
+    /// A kilometer of clear space between the hulls.
     Intimate,
 }
 
@@ -294,11 +294,11 @@ pub enum Aim {
     /// At where a craft is **predicted** to be when the light lands.
     ///
     /// The prediction is built from the sender's own sighting of it, which is already old, and
-    /// then extrapolated forward by the flight time. A quarry that manoeuvres in between is
+    /// then extrapolated forward by the flight time. A quarry that maneuveres in between is
     /// missed. Refused with [`Refusal::NotInSight`] for a craft the sender has never seen.
     Ship(ShipId),
     /// At a star, by catalogue id: the whole system, for when you do not know where in it they
-    /// are. A star does not manoeuvre, so this always lands — on everybody there.
+    /// are. A star does not maneuvere, so this always lands — on everybody there.
     Star(u64),
     /// Straight back along a bearing, as a unit vector in world axes.
     ///
@@ -582,7 +582,7 @@ pub struct Sighting {
 /// light-cone gate exists to prevent, handed over in a different shape. So this carries one
 /// sample of a worldline and not the motive behind it. A client reckons that sample forward
 /// ballistically to the light arriving now (`lc_world::sighted`), which is wrong about any
-/// manoeuvre since until the next statement — the light of it has not been delivered.
+/// maneuvere since until the next statement — the light of it has not been delivered.
 ///
 /// [`Presence`] is therefore not a small [`Motion`] and must not grow into one. `beta` is here
 /// because it is *measurable* at a distance — it is what the light arrives Doppler-shifted and
@@ -592,7 +592,7 @@ pub struct Presence {
     pub ship_id: ShipId,
     /// What to call it on screen.
     pub name: String,
-    /// How long the hull is, metres. On the wire rather than derived from a kind, so craft
+    /// How long the hull is, meters. On the wire rather than derived from a kind, so craft
     /// varying in size costs no protocol version.
     pub length_m: f64,
     /// Light-years from the world origin, at the moment the light left.
@@ -664,7 +664,7 @@ impl Cleared<Sighting> {
     ///
     /// Two tests, in the order they matter. The light cone is the one that cannot be relaxed:
     /// `arrive_t <= now_t` or the client is being told something it could not know, and there
-    /// is no threshold, subscription or optimisation that may be allowed to reverse it. The
+    /// is no threshold, subscription or optimization that may be allowed to reverse it. The
     /// noise floor is second and prunes far more, but it is a detection rule rather than a
     /// causality one.
     pub fn clear(sighting: Sighting, now_t: i64, noise_floor: f32) -> Result<Self, Withheld> {
@@ -794,7 +794,7 @@ pub enum Outbound {
     ///
     /// Without this the client and the server disagree about *when* the ship is, which reads as
     /// disagreeing about **where** it is: an order the server stamps in the client's past folds
-    /// as a manoeuvre that has already finished, so the ship appears to teleport to its
+    /// as a maneuvere that has already finished, so the ship appears to teleport to its
     /// destination, and the server goes on refusing orders about a system it does not think the
     /// ship has reached.
     ///
@@ -877,7 +877,7 @@ pub enum Outbound {
     /// What there is to read, and where the shelf is.
     ///
     /// Appended last, like every variant added since: the discriminants above are what the
-    /// goldens are pinned at, and a version bump is not a licence to renumber them.
+    /// goldens are pinned at, and a version bump is not a license to renumber them.
     ///
     /// **Not cleared, and deliberately.** Everything else the server says about the world goes
     /// through [`Cleared`], because delivering an event before its light arrives would delete
@@ -918,7 +918,7 @@ pub enum Refusal {
     Impossible,
     /// Not enough stored energy for even the slowest version of this.
     NoEnergy,
-    /// A refit is running, and the drive cannot be lit until it is done or cancelled.
+    /// A refit is running, and the drive cannot be lit until it is done or canceled.
     Refitting,
     /// The ship is under way, and cannot refit until it has stopped.
     UnderWay,
