@@ -20,6 +20,7 @@ pub mod bookshelf;
 pub mod chat;
 pub mod curve;
 pub mod demos;
+pub mod dev;
 pub mod entry;
 pub mod envelope;
 pub mod faces;

@@ -312,7 +312,12 @@ UiState        open panels, selected target, exposure offset, preset index
 action::apply  the only thing that mutates UiState
 hud::lines()   what the readout says, as plain strings
 panels::*      egui systems that draw UiState and emit Actions
+dev.rs         the development entry: the flags, and the pins that hold them
 ```
+
+`dev.rs` is apart from `app.rs` because it is the part that grows with every flag, and because
+what it does is one thing: put the world into a stated pose and photograph it. None of it is
+reachable from the interface.
 
 Anything that decides *what* to show is a function over `Session` and `UiState`, testable with
 no window — which is the only way any of it gets verified, since a window cannot be inspected
@@ -376,7 +381,7 @@ seven hours twenty times a second having never drifted at all.
 | `--curve <n>` | which band the light curve measures |
 | `--map <bearing:elevation:au>` | pin the map's camera. A light-year is 63 241 astronomical units |
 | `--map-plane <ecliptic\|galactic>` | which plane the map lays its rings in |
-| `--map-focus <ship\|primary\|star\|free>` | what the map's camera locks onto. A pin, like `--map`, which holds the ship on its own |
+| `--map-focus <ship\|primary\|local\|star\|free>` | what the map's camera locks onto; `local` is the primary in the frame that turns with the ship. A pin, like `--map`, which holds the ship on its own |
 | `--tune` | open the starfield tuning panel |
 | `--frames <n>` | frames before the shutter |
 | `--at <body>` | stand off a named body of the local system |
@@ -718,7 +723,19 @@ the next pan, which drops back to free. A left-drag is that pan.
 **The primary is a mode and not the body it resolves to today.** It is whatever holds the ship
 — a moon's planet, a planet's star — and it follows the ship across a sphere of influence into
 the next, where centering on Earth by name stays on Earth after the ship has gone. It is the
-same body the readout names while coasting, because both ask the system the same question. The
+same body the readout names while coasting, because both ask the system the same question.
+
+It is centered in one of **two frames**, which is the pair beside it. **Fixed** measures the
+camera against the reference plane's own axes and the ship goes round; **local** holds the
+camera against the line from the primary's center to the ship's, so the ship keeps its place on
+screen and the system turns behind it. That is the view that makes an orbit legible: in the
+fixed frame a low orbit is a ship going round a disc several times a second, and in the local
+one it is a stationary ship with a planet rotating under it.
+
+The turn is written into the camera's own azimuth, as the change in that line's bearing — not
+held as a second copy of the camera. So a drag, a cursor ray and a label all go on being
+measured in the one number, and leaving the frame leaves the camera exactly where the turning
+left it rather than snapping back. The
 button is grayed where nothing holds the ship, which is between the stars; it is not hidden,
 because a control that vanishes shuffles the two either side of it out from under the cursor.
 

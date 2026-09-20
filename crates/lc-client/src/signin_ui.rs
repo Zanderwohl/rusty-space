@@ -200,7 +200,7 @@ fn handle(
 }
 
 /// Open the form `--password` asked for, so it can be photographed.
-fn open_dev_form(dev: Res<crate::app::DevEntry>, mut signin: ResMut<Signin>) {
+fn open_dev_form(dev: Res<crate::dev::DevEntry>, mut signin: ResMut<Signin>) {
     if dev.open_password_form {
         signin.form = Some(Form::default());
     }

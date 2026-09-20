@@ -551,8 +551,24 @@ fn controls(
         }
         // Whatever holds the ship: a moon's planet, a planet's star. A mode, so it follows the
         // ship out of one sphere of influence and into the next.
-        if centering(ui, "center on the primary", primary.is_some()) {
-            ask(out, Action::FocusMap(crate::ui::MapFocus::Primary));
+        //
+        // A pair rather than a button, because which frame is in force is a thing to read off
+        // the strip: the same two bodies at the same zoom look alike, and only one of them is
+        // turning with the ship.
+        match primary.is_some() {
+            true => {
+                ui.label("center on the primary");
+                for frame in [crate::ui::Frame::Fixed, crate::ui::Frame::Local] {
+                    let held = state.map.focus == crate::ui::MapFocus::Primary(frame);
+                    if ui.selectable_label(held, frame.label()).clicked() {
+                        ask(out, Action::FocusMap(crate::ui::MapFocus::Primary(frame)));
+                    }
+                }
+            }
+            false => {
+                ui.weak("center on the primary")
+                    .on_hover_text("there is nothing here holding the ship");
+            }
         }
         // "the star", not its name: a button whose label changes between systems has to be
         // read before it is pressed. The name is on the star itself.
@@ -828,6 +844,9 @@ mod tests {
         assert!(zooms_to_cursor(MapFocus::Free));
         assert!(!zooms_to_cursor(MapFocus::Observer), "centered on the ship");
         assert!(!zooms_to_cursor(MapFocus::Item(ItemKey::from_name("Sol"))), "on a body");
-        assert!(!zooms_to_cursor(MapFocus::Primary), "on whatever holds the ship");
+        assert!(
+            !zooms_to_cursor(MapFocus::Primary(crate::ui::Frame::Fixed)),
+            "on whatever holds the ship",
+        );
     }
 }

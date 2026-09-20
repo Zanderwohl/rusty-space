@@ -162,7 +162,7 @@ const DRIFT_RATE: f64 = 1.0 / 60.0;
 const DRIFT_PITCH: f64 = 0.12;
 
 /// Open the page `--signin` asked for, so it can be photographed.
-fn open_dev_page(dev: Res<crate::app::DevEntry>, mut ui: ResMut<Ui>) {
+fn open_dev_page(dev: Res<crate::dev::DevEntry>, mut ui: ResMut<Ui>) {
     if let Some(page) = dev.menu_page {
         ui.menu_page = page;
     }

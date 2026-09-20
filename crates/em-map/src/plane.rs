@@ -73,6 +73,19 @@ impl Plane {
         (t > 0.0 && t.is_finite()).then(|| from_ly + direction * t)
     }
 
+    /// Which way `offset` points within the plane, radians, measured the way an [`crate::Orbit`]
+    /// measures its azimuth.
+    ///
+    /// `None` for an offset along the normal, which points nowhere in the plane and would name
+    /// an arbitrary bearing. The tolerance is relative: what matters is whether the in-plane
+    /// part is a real fraction of the offset, not how long the offset is.
+    pub fn bearing(self, offset: DVec3) -> Option<f64> {
+        let (u, v, _) = self.basis();
+        let (along_u, along_v) = (offset.dot(u), offset.dot(v));
+        let flat = (along_u * along_u + along_v * along_v).sqrt();
+        (flat > offset.length() * 1.0e-6).then(|| along_v.atan2(along_u))
+    }
+
     /// Where a drop-line from `at_ly` meets the plane: the point straight below it.
     pub fn foot_ly(self, at_ly: DVec3, origin_ly: DVec3) -> DVec3 {
         let n = self.normal();
@@ -83,6 +96,34 @@ impl Plane {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A bearing is what the camera's azimuth is measured against, so the two have to agree:
+    /// a camera at the bearing of a thing looks at it along the plane.
+    #[test]
+    fn a_bearing_is_the_azimuth_that_points_at_it() {
+        for plane in [Plane::Ecliptic, Plane::Galactic] {
+            let (u, v, n) = plane.basis();
+            assert!(plane.bearing(u).unwrap().abs() < 1.0e-12, "the axis it is measured from");
+            assert!((plane.bearing(v).unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1.0e-12);
+            assert_eq!(plane.bearing(n), None, "straight up points nowhere in the plane");
+            assert_eq!(plane.bearing(DVec3::ZERO), None);
+
+            // The azimuth an orbit would use for the same direction, which is the claim.
+            for turns in [0.1, 0.5, 2.5, -1.7] {
+                let azimuth = turns;
+                let mut orbit = crate::Orbit::default();
+                orbit.azimuth = azimuth;
+                orbit.elevation = 0.0;
+                let toward = orbit.offset_direction(plane);
+                let seen = plane.bearing(toward).expect("an in-plane direction");
+                let apart = (seen - azimuth).sin().abs();
+                assert!(apart < 1.0e-9, "{plane:?} at {azimuth}: read back {seen}");
+                // And a long offset reads the same as a short one.
+                let far = plane.bearing(toward * 1.0e12).expect("still in the plane");
+                assert!((far - seen).abs() < 1.0e-9, "scale changed the bearing");
+            }
+        }
+    }
 
     /// What a light-year's worth of `f64` is worth, in meters.
     ///

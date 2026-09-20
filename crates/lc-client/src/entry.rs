@@ -6,7 +6,7 @@
 
 use crate::action::Action;
 use lc_world::scenario;
-use crate::app::DevEntry;
+use crate::dev::DevEntry;
 
 /// Where this build's assets are.
 ///
@@ -155,7 +155,7 @@ pub fn parse(args: &[String]) -> Entry {
                 _ => None,
             }
         }),
-        map_focus: after("--map-focus").as_deref().and_then(crate::app::WantedFocus::named),
+        map_focus: after("--map-focus").as_deref().and_then(crate::dev::WantedFocus::named),
         // The map is a mode now rather than a window, and `--panel map` is the spelling every
         // shot list already has. A pin, not an action: see `DevEntry::view`.
         view: after("--panel")

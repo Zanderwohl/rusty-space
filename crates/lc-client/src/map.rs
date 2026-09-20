@@ -405,6 +405,8 @@ fn place(
     // applied to a copy, because every action that moves the camera starts from the
     // interface's own `focus_ly`, and a stale one makes the first frame of a drag jump.
     follow(ui.map.focus, &map.snapshot, map.primary, &mut ui.map.orbit.focus_ly);
+    // After the follow: the line is measured from where the camera is now looking.
+    spin(&mut ui.map, &map.snapshot, map.primary);
     let view = ui.map;
     let meters_per_unit = crate::view::ScaleTier::for_distance(view.orbit.distance_m())
         .meters_per_unit();
@@ -519,9 +521,50 @@ pub fn focus_position(
     match focus {
         crate::ui::MapFocus::Free => None,
         crate::ui::MapFocus::Observer => snapshot.observer().map(|o| o.position_ly),
-        crate::ui::MapFocus::Primary => primary.and_then(at),
+        crate::ui::MapFocus::Primary(_) => primary.and_then(at),
         crate::ui::MapFocus::Item(key) => at(key),
     }
+}
+
+/// Turn the camera with the reference line, when the focus asks for it, and say whether it
+/// moved.
+///
+/// The line runs from the primary's center to the ship's, and the local frame holds the camera
+/// against it: the ship keeps its place on screen and the rest of the system goes round. What
+/// is written is the *change* in the line's bearing, so the camera's azimuth stays the one
+/// number a drag, a ray and a label are all measured in.
+pub fn spin(view: &mut crate::ui::MapView, snapshot: &MapSnapshot, primary: Option<ItemKey>)
+    -> bool {
+    let line = match view.focus {
+        crate::ui::MapFocus::Primary(crate::ui::Frame::Local) => reference_line(snapshot, primary),
+        _ => None,
+    };
+    let Some(bearing) = line.and_then(|line| view.plane.bearing(line)) else {
+        // Nothing to hold onto: the camera stays where it is and starts again from whatever
+        // the line reads next.
+        view.bearing = None;
+        return false;
+    };
+    let turned = match view.bearing {
+        // The difference, with no mending at the seam: an azimuth is wrapped into its own
+        // circle, so a step that reads as a whole turn backwards lands in the same place as
+        // the hair's turn it really is.
+        Some(was) => {
+            view.orbit.turn(bearing - was, 0.0);
+            bearing != was
+        }
+        None => false,
+    };
+    view.bearing = Some(bearing);
+    turned
+}
+
+/// The primary's center to the ship's, in light-years, or `None` when the snapshot is missing
+/// either end.
+fn reference_line(snapshot: &MapSnapshot, primary: Option<ItemKey>) -> Option<DVec3> {
+    let ship = snapshot.observer()?.position_ly;
+    let at = snapshot.item(primary?)?.position_ly;
+    Some(ship - at)
 }
 
 /// How close a ring or a shell comes to the camera, in render units.
@@ -832,7 +875,7 @@ fn color_of(kind: ItemKind) -> Color {
 mod tests {
     use super::*;
 
-    use crate::ui::MapFocus;
+    use crate::ui::{Frame, MapFocus};
     use em_map::{ItemKey, ItemKind, MapItem, MapSnapshot};
     use glam::DVec3;
 
@@ -901,13 +944,118 @@ mod tests {
         let snapshot = snapshot();
         let star = ItemKey::from_id("star", 7);
         assert_eq!(
-            focus_position(MapFocus::Primary, &snapshot, Some(star)),
+            focus_position(MapFocus::Primary(Frame::Fixed), &snapshot, Some(star)),
             Some(DVec3::new(4.0, 5.0, 6.0)),
         );
         // Nothing holding it, and a body that is no longer in the snapshot: both leave the
         // camera where it is rather than moving it to nowhere.
-        assert_eq!(focus_position(MapFocus::Primary, &snapshot, None), None);
-        assert_eq!(focus_position(MapFocus::Primary, &snapshot, Some(ItemKey(999))), None);
+        assert_eq!(focus_position(MapFocus::Primary(Frame::Fixed), &snapshot, None), None);
+        assert_eq!(focus_position(MapFocus::Primary(Frame::Fixed), &snapshot, Some(ItemKey(999))), None);
+    }
+
+    /// A ship at `bearing` radians round its primary, a light-year out.
+    fn ship_at(bearing: f64) -> MapSnapshot {
+        let star = DVec3::new(4.0, 5.0, 6.0);
+        MapSnapshot::observed(0.0, vec![
+            MapItem::body(ItemKey::from_name("observer"), "this ship", ItemKind::Observer,
+                star + DVec3::new(bearing.cos(), bearing.sin(), 0.0), 100.0, DVec3::Z),
+            MapItem::body(ItemKey::from_id("star", 7), "Sol", ItemKind::Star, star, 7.0e8,
+                DVec3::Z),
+        ])
+    }
+
+    /// The shortest turn from `a` to `b`. An azimuth is stored wrapped into a circle, so
+    /// subtracting two of them is not the turn between them.
+    fn apart(a: f64, b: f64) -> f64 {
+        let by = (b - a).rem_euclid(std::f64::consts::TAU);
+        match by > std::f64::consts::PI {
+            true => by - std::f64::consts::TAU,
+            false => by,
+        }
+    }
+
+    fn locked_on(frame: Frame) -> crate::ui::MapView {
+        crate::ui::MapView {
+            focus: MapFocus::Primary(frame),
+            plane: em_map::Plane::Ecliptic,
+            ..Default::default()
+        }
+    }
+
+    /// **The local frame holds the camera against the reference line.** A quarter of an orbit
+    /// turns the camera a quarter, so the ship keeps its place on screen and the system goes
+    /// round it. The fixed frame turns nothing and the ship is what moves.
+    #[test]
+    fn the_local_frame_turns_with_the_ship() {
+        use std::f64::consts::FRAC_PI_2;
+        let star = Some(ItemKey::from_id("star", 7));
+        for (frame, expected) in [(Frame::Local, FRAC_PI_2), (Frame::Fixed, 0.0)] {
+            let mut view = locked_on(frame);
+            let was = view.orbit.azimuth;
+            // The first call has nothing to measure against, so it turns nothing.
+            assert!(!spin(&mut view, &ship_at(0.0), star), "{frame:?} turned on the first frame");
+            assert_eq!(view.orbit.azimuth, was);
+
+            spin(&mut view, &ship_at(FRAC_PI_2), star);
+            let by = apart(was, view.orbit.azimuth);
+            assert!((by - expected).abs() < 1.0e-9, "{frame:?} turned by {by}, wanted {expected}");
+        }
+    }
+
+    /// **A whole orbit brings the camera back to where it started.** The step from just under
+    /// +pi to just over it reads as a turn backwards round the whole circle, and the camera
+    /// lands in the same place either way only because it is turned *by* the change rather
+    /// than set *to* the bearing.
+    #[test]
+    fn a_whole_orbit_brings_the_camera_back() {
+        use std::f64::consts::TAU;
+        let star = Some(ItemKey::from_id("star", 7));
+        for way in [1.0, -1.0] {
+            let mut view = locked_on(Frame::Local);
+            view.orbit.turn(1.234, 0.0);
+            spin(&mut view, &ship_at(0.0), star);
+            let start = view.orbit.azimuth;
+            for step in 1..=16 {
+                spin(&mut view, &ship_at(way * step as f64 * TAU / 16.0), star);
+            }
+            let off = apart(start, view.orbit.azimuth);
+            assert!(off.abs() < 1.0e-9, "an orbit {way} came back {off} out");
+        }
+    }
+
+    /// Leaving the frame leaves the camera where it is, and coming back starts again from
+    /// wherever the line is then — neither is a jump.
+    #[test]
+    fn a_frame_is_left_and_entered_without_a_jump() {
+        let star = Some(ItemKey::from_id("star", 7));
+        let mut view = locked_on(Frame::Local);
+        spin(&mut view, &ship_at(0.0), star);
+        spin(&mut view, &ship_at(1.0), star);
+        let held = view.orbit.azimuth;
+
+        view.focus = MapFocus::Primary(Frame::Fixed);
+        assert!(!spin(&mut view, &ship_at(2.0), star), "the fixed frame turned the camera");
+        assert_eq!(view.orbit.azimuth, held);
+        assert_eq!(view.bearing, None, "nothing is being tracked");
+
+        // Back, from a line that has moved a long way since.
+        view.focus = MapFocus::Primary(Frame::Local);
+        assert!(!spin(&mut view, &ship_at(3.0), star), "coming back turned the camera");
+        assert_eq!(view.orbit.azimuth, held);
+    }
+
+    /// Nothing to hold onto: a snapshot without one end of the line leaves the camera alone
+    /// rather than turning it to an arbitrary bearing.
+    #[test]
+    fn a_line_with_one_end_missing_turns_nothing() {
+        let mut view = locked_on(Frame::Local);
+        spin(&mut view, &ship_at(0.0), Some(ItemKey::from_id("star", 7)));
+        let held = view.orbit.azimuth;
+        assert!(!spin(&mut view, &ship_at(1.0), None), "no primary, no line");
+        assert!(!spin(&mut view, &MapSnapshot::observed(0.0, Vec::new()),
+            Some(ItemKey::from_id("star", 7))), "no ship, no line");
+        assert_eq!(view.orbit.azimuth, held);
+        assert_eq!(view.bearing, None);
     }
 
     /// A pan has to be able to leave the camera where it is.

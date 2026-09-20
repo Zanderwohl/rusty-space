@@ -136,9 +136,33 @@ pub enum MapFocus {
     ///
     /// A mode and not the body it resolves to today, which is the whole of the difference:
     /// [`MapFocus::Item`] on Earth stays on Earth after the ship has left it.
-    Primary,
+    Primary(Frame),
     /// Something in the snapshot, followed as it moves.
     Item(em_map::ItemKey),
+}
+
+/// Which frame the map is drawn in while it is centered on the primary.
+///
+/// The reference line is the primary's center to the ship's. [`Frame::Local`] holds the camera
+/// against that line, so the ship keeps its place on screen and everything else goes round it;
+/// [`Frame::Fixed`] measures against the reference plane's own axes, and the ship is what moves.
+///
+/// Only on the primary. About the ship there is no line to hold — the two ends are the same
+/// point — and about a named body the ship is not one of the ends.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Frame {
+    #[default]
+    Fixed,
+    Local,
+}
+
+impl Frame {
+    pub fn label(self) -> &'static str {
+        match self {
+            Frame::Fixed => "fixed",
+            Frame::Local => "local",
+        }
+    }
 }
 
 /// What the map is showing, and from where.
@@ -153,6 +177,15 @@ pub struct MapView {
     /// A key rather than a position: Saturn moves, and a camera pointed at where it was is a
     /// camera that drifts off it over an afternoon.
     pub focus: MapFocus,
+    /// Where the reference line pointed when the camera was last turned with it, radians.
+    ///
+    /// Held so the turn can be the *change* in that bearing: the camera's azimuth stays the one
+    /// number every drag and every ray is measured in, which is what keeps a rotating frame
+    /// from needing a second copy of the camera.
+    ///
+    /// `None` whenever nothing is being tracked, so entering the local frame turns nothing and
+    /// leaving it leaves the camera where it is.
+    pub bearing: Option<f64>,
     pub source: crate::map_source::Source,
 }
 

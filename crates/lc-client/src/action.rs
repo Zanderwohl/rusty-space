@@ -711,6 +711,27 @@ mod tests {
         assert_eq!(ui.view, ViewMode::Map);
     }
 
+    /// **Switching the view leaves the map where it was.** The corner square and the whole
+    /// screen are one camera, so coming back has to find the picture that was left — including
+    /// the free camera a pan drops into, which is the state with no button of its own.
+    #[test]
+    fn switching_the_view_leaves_the_map_where_it_was() {
+        let (mut ui, mut s) = fixture();
+        apply(Action::SetMapPlane(em_map::Plane::Galactic), &mut ui, &mut s);
+        apply(Action::TurnMap { azimuth: 0.4, elevation: 0.1 }, &mut ui, &mut s);
+        apply(Action::ZoomMap { notches: 2.0, anchor_ly: None }, &mut ui, &mut s);
+        apply(Action::PanMap { right: 0.3, ahead: -0.2 }, &mut ui, &mut s);
+        assert_eq!(ui.map.focus, crate::ui::MapFocus::Free, "a pan is the way into it");
+
+        // Both ways in, because either could be the one that forgets.
+        let held = ui.map;
+        apply(Action::ToggleView, &mut ui, &mut s);
+        assert_eq!(ui.map, held, "showing the map moved its camera");
+        apply(Action::SetView(ViewMode::World), &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::World, "back where it started");
+        assert_eq!(ui.map, held, "the map's camera did not survive the round trip");
+    }
+
     #[test]
     fn panels_open_close_and_toggle_independently() {
         let (mut ui, mut s) = fixture();
