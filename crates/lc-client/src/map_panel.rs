@@ -112,7 +112,7 @@ pub fn draw(
 
     let (rect, response) = match mode {
         ViewMode::Map => whole(ctx, foot.0, &ui_state, &game, &map, square, &mut out),
-        ViewMode::World => (square, swap),
+        ViewMode::World => (square, swap.clone()),
     };
     map.wanted = pixels(rect, per_point).size().max(UVec2::ONE);
 
@@ -125,7 +125,11 @@ pub fn draw(
     };
     scale_rule(&painter, rect, ui_state.map, &over);
     labels(&painter, rect, hole, ui_state.map, &map);
-    read_input(ctx, &response, rect, ui_state.map, &map, &mut out);
+    read_input(ctx, &response, rect, ViewMode::Map, ui_state.map, &map, &mut out);
+    if mode == ViewMode::Map {
+        // The square is showing the world, so it answers the world's own gesture.
+        read_input(ctx, &swap, square, ViewMode::World, ui_state.map, &map, &mut out);
+    }
 }
 
 /// Put the world's camera in the corner square, or give it the window back.
@@ -550,52 +554,74 @@ fn controls(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<
     });
 }
 
-/// What a drag on the map does.
+/// What a drag does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Drag {
+    /// The map's camera about its focus.
     Turn,
+    /// The map's focus across the reference plane.
     Pan,
+    /// The ship's own view, as a drag over the sky would.
+    Look,
 }
 
-/// **The right button turns whatever view is under it.** It is the sky's look button, and one
-/// button meaning opposite things on the two modes of the same screen is worse than either
-/// meaning. Everything else pans.
-fn drag_of(right: bool) -> Drag {
-    match right {
-        true => Drag::Turn,
-        false => Drag::Pan,
+/// What a drag does on a surface showing `shown`, with the look button down or not.
+///
+/// **The right button turns whichever view is under it.** It is the sky's look button, and one
+/// button meaning opposite things on the two modes of one screen is worse than either meaning —
+/// so it turns the map over the map, and the ship's view over the world's corner square.
+///
+/// The button left over pans the map. Over the world it does nothing: there the left button
+/// belongs to picking, and the corner is too small to pick in.
+fn drag_of(shown: ViewMode, right: bool) -> Option<Drag> {
+    match (shown, right) {
+        (ViewMode::Map, true) => Some(Drag::Turn),
+        (ViewMode::Map, false) => Some(Drag::Pan),
+        (ViewMode::World, true) => Some(Drag::Look),
+        (ViewMode::World, false) => None,
     }
 }
 
-/// Drag and wheel over the full surface: right turns, left pans.
+/// Drag and wheel over a surface, as actions.
 ///
-/// A right-press that starts on the map turns the map and not the ship, because a drag belongs
-/// to the widget it began on and `grab_cursor` stands down while egui wants the pointer.
+/// A right-press that starts on either surface belongs to it wherever the cursor goes
+/// afterwards, and `grab_cursor` stands down while egui wants the pointer — which is what lets
+/// the corner square answer the look button while the map holds the rest of the screen.
 fn read_input(
     ctx: &egui::Context,
     response: &egui::Response,
     rect: egui::Rect,
+    shown: ViewMode,
     view: crate::ui::MapView,
     map: &Map,
     out: &mut MessageWriter<Requested>,
 ) {
     if response.dragged() {
         let delta = response.drag_delta();
-        match drag_of(response.dragged_by(egui::PointerButton::Secondary)) {
-            Drag::Pan => {
+        match drag_of(shown, response.dragged_by(egui::PointerButton::Secondary)) {
+            Some(Drag::Pan) => {
                 let span = rect.width().max(rect.height()).max(1.0) as f64;
                 ask(out, Action::PanMap {
                     right: -delta.x as f64 / span * PAN_PER_VIEWPORT,
                     ahead: delta.y as f64 / span * PAN_PER_VIEWPORT,
                 });
             }
-            Drag::Turn => ask(out, Action::TurnMap {
+            Some(Drag::Turn) => ask(out, Action::TurnMap {
                 azimuth: -delta.x as f64 * TURN_PER_POINT,
                 elevation: delta.y as f64 * TURN_PER_POINT,
             }),
+            Some(Drag::Look) => {
+                let (yaw, pitch) = crate::input::look_from(Vec2::new(delta.x, delta.y));
+                ask(out, Action::Look { yaw, pitch });
+            }
+            None => {}
         }
     }
-    read_wheel_only(ctx, response, rect, view, map, out);
+    // The wheel is the map's. Over the world's corner it is left to the ship, which is not
+    // being flown from here.
+    if shown == ViewMode::Map {
+        read_wheel_only(ctx, response, rect, view, map, out);
+    }
 }
 
 fn read_wheel_only(
@@ -764,8 +790,10 @@ mod tests {
     #[test]
     fn the_look_button_turns_whichever_view_is_under_it() {
         assert_eq!(crate::input::LOOK_BUTTON, bevy::input::mouse::MouseButton::Right);
-        assert_eq!(drag_of(true), Drag::Turn, "which is egui's secondary");
-        assert_eq!(drag_of(false), Drag::Pan);
+        assert_eq!(drag_of(ViewMode::Map, true), Some(Drag::Turn), "egui's secondary");
+        assert_eq!(drag_of(ViewMode::World, true), Some(Drag::Look), "the same one, over a ship");
+        assert_eq!(drag_of(ViewMode::Map, false), Some(Drag::Pan));
+        assert_eq!(drag_of(ViewMode::World, false), None, "the left button is picking's");
     }
 
     /// The wheel does not break a lock. Zooming toward the pointer moves the focus and

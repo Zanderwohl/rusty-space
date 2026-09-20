@@ -34,7 +34,8 @@ and no flag.
 Which button matters. **Right** turns the map, because right is the sky's look button and the
 map is the other mode of the same screen: one button meaning opposite things on the two of them
 is worse than either meaning. So a right-press that starts on a map surface turns the map and
-not the sky behind it. The grab is asked for once, on the press, and `grab_cursor` stands down
+not the sky behind it — and one that starts on the corner square while that square is showing
+the world turns the ship's view, because a surface answers for what it is showing. The grab is asked for once, on the press, and `grab_cursor` stands down
 while egui wants the pointer. That is a drag belonging to the widget it began on, which is
 right; what makes it worth saying is that the map's corner square is never closed, so that
 corner always answers.

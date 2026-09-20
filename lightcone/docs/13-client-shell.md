@@ -800,7 +800,14 @@ than either answer. A click is the extra one, and it swaps the modes.
 
 **The right button turns whichever view is under it.** It is the sky's look button, and the map
 is the other mode of the same screen, so one button meaning opposite things on the two of them
-is worse than either meaning. Panning is what the button that was left over does.
+is worse than either meaning. Read the other way round, that is also why a right-drag on the
+corner square showing the **world** turns the ship's view, exactly as the same drag on the sky
+would and by the same radians per pixel: the square answers for what it is showing. Panning is
+what the button that was left over does, and over the world it does nothing — there the left
+button belongs to picking.
+
+The keyboard is the exception, and deliberately: the arrow keys turn the view only while the
+world is the screen. A pointer is on a surface and can be answered by it; a key is not.
 
 **Nothing paints in the square while the map is the view.** The world's camera is drawing into
 exactly those pixels, so the image is painted as the pieces around the square and a name that
@@ -808,6 +815,7 @@ would land on it is dropped: a name alone over the world reads as a name for the
 
 **The ship's own view controls are held to the world's mode.** In the map's mode a drag over the
 map would otherwise turn the ship behind it, and two modes would be fighting over one pointer.
+The corner square is where the ship's view can still be turned, because that is where it is.
 In the world's mode the corner costs what every panel costs: egui takes the pointer over it, so
 hovering the square stops the boom zooming and a right-press begun there turns the map rather
 than the view. The square is the only surface that is never closed, and it is 190 points.

@@ -89,6 +89,14 @@ pub fn held_bindings() -> Vec<(KeyCode, (f64, f64))> {
 /// Radians of look per pixel of mouse movement.
 pub const MOUSE_SENSITIVITY: f64 = 0.003;
 
+/// A pointer movement as a turn of the view, radians of yaw and pitch.
+///
+/// Shared, because the sky reads it off a locked cursor and the map's corner square off an
+/// ordinary drag: the same movement has to mean the same turn on both.
+pub fn look_from(delta: Vec2) -> (f64, f64) {
+    (-delta.x as f64 * MOUSE_SENSITIVITY, -delta.y as f64 * MOUSE_SENSITIVITY)
+}
+
 /// Notches of zoom per line of wheel. A pixel-precision wheel — a trackpad — reports pixels
 /// instead, and this many of them make one notch.
 pub const WHEEL_PIXELS_PER_NOTCH: f32 = 50.0;
@@ -195,9 +203,9 @@ pub fn look_around(
         }
     }
     if looking.0 {
-        let d = motion.delta;
-        yaw -= d.x as f64 * MOUSE_SENSITIVITY;
-        pitch -= d.y as f64 * MOUSE_SENSITIVITY;
+        let (d_yaw, d_pitch) = look_from(motion.delta);
+        yaw += d_yaw;
+        pitch += d_pitch;
     }
 
     if yaw != 0.0 || pitch != 0.0 {
