@@ -346,6 +346,36 @@ pub fn ring_tube(segments: u32, tube_radius: f32, tube_sides: u32, brightness: f
     assemble(positions, normals, colors, indices)
 }
 
+/// A **filled** unit disc in the XZ plane, normal `+Y`. The one solid thing a wireframe map
+/// draws, and what tells a contact from a body at a size where shape is all there is.
+///
+/// Wound both ways, so it is visible from either face and no caller has to think about the
+/// material's cull mode. It is a fan from a rim vertex rather than from the center, because
+/// the wireframe shader takes `normalize(position)` for its day/night term and a vertex at the
+/// origin makes that a NaN — dead code at `num_suns: 0`, and not worth leaving loaded.
+///
+/// Every normal is `+Y`, so the shader's thickness displacement translates the disc along its
+/// own normal instead of resizing it. A caller wanting it exactly unit-sized asks for a target
+/// radius equal to the material's base.
+pub fn disc(segments: u32, brightness: f32) -> Mesh {
+    let segments = segments.max(3);
+    let positions: Vec<[f32; 3]> = (0..segments)
+        .map(|i| {
+            let angle = (i as f32 / segments as f32) * 2.0 * PI;
+            let (sin_a, cos_a) = angle.sin_cos();
+            [cos_a, 0.0, sin_a]
+        })
+        .collect();
+    let normals = vec![[0.0, 1.0, 0.0]; positions.len()];
+    let colors = vec![[1.0, 1.0, 1.0, brightness]; positions.len()];
+    let mut indices = Vec::with_capacity((segments as usize - 2) * 6);
+    for i in 1..segments - 1 {
+        indices.extend([0, i, i + 1]);
+        indices.extend([0, i + 1, i]);
+    }
+    assemble(positions, normals, colors, indices)
+}
+
 /// Radial spokes from the origin out to unit radius, in the XZ plane.
 ///
 /// What makes an edge-on plane read as a plane. Seen from within it the rings are a single
@@ -441,6 +471,36 @@ fn assemble(positions: Vec<[f32; 3]>, normals: Vec<[f32; 3]>, colors: Vec<[f32; 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A disc is solid and two-sided, and has no vertex where the shader would divide by zero.
+    #[test]
+    fn a_disc_is_filled_from_both_sides() {
+        let mesh = disc(16, 1.0);
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("no positions")
+        };
+        assert_eq!(positions.len(), 16, "the rim, and nothing in the middle");
+        for p in positions {
+            let radius = (p[0] * p[0] + p[2] * p[2]).sqrt();
+            assert!((radius - 1.0).abs() < 1.0e-5, "a rim point at {radius} from the center");
+            assert!(p[1].abs() < 1.0e-6, "a disc is flat");
+        }
+        let Some(Indices::U32(indices)) = mesh.indices() else { panic!("no indices") };
+        // Fourteen triangles to cover a sixteen-gon, and the same again reversed.
+        assert_eq!(indices.len(), 14 * 3 * 2);
+        let winding: i32 = indices
+            .chunks(3)
+            .map(|t| {
+                let (a, b, c) = (positions[t[0] as usize], positions[t[1] as usize],
+                    positions[t[2] as usize]);
+                let cross = (b[0] - a[0]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[0] - a[0]);
+                cross.signum() as i32
+            })
+            .sum();
+        assert_eq!(winding, 0, "every triangle should have its mirror");
+    }
 
     /// Vertex positions, which is what every assertion here is actually about.
     pub(super) fn positions(mesh: &Mesh) -> Vec<Vec3> {

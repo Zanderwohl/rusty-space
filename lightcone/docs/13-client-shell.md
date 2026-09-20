@@ -690,29 +690,33 @@ rings mark order-of-magnitude distances; anything off the plane hangs from a das
 The reach is a fixed sphere of twenty-five light-years — a reach that moved with the zoom would
 change what exists as well as what is framed.
 
-### Below twenty pixels a body is a circle
+### A body too small to be a sphere is a symbol
 
 A wireframe sphere drawn small is a dozen sub-pixel tubes laid over each other: the most
 expensive thing on the layer to draw and the least legible, and at a system's scale most of
-what is on the map is that size. Below twenty pixels across it is a circle facing the eye
+what is on the map is that size. Below the symbol's own size it is a circle facing the eye
 instead — a sixteenth of the sphere's geometry, and a shape rather than a smudge.
 
-**One number is both the threshold and the size the circle is drawn at**, so nothing changes
-size at the crossover: a body shrinks until it reaches twenty pixels and then holds. Five was
-tried first and was the wrong answer in the interesting direction — eleven pixels of sphere is
-still a smudge, because the tube cap holds its lines to a third of a pixel. The crossover
-belongs where the sphere starts earning its place.
+**The symbol is a share of the view, not a count of pixels.** One texture is drawn into a
+190-point corner and into a panel several times that, so a fixed size right for one is wrong
+for the other: twenty pixels suited the panel and left the minimap a pile of overlapping rings
+with no grid visible behind them. Two percent of the viewport's height, floored at twice a
+line's own width — and at that floor a ring has no inside left and is simply a dot, which is
+the honest answer for a surface with no room for more.
 
-**A ship is a circle at every zoom there is.** It has a hull size and the map is not where
+**One number is both the threshold and the size the symbol is drawn at**, which is the point of
+having one: a body shrinks until it reaches it and then holds, so nothing jumps at the
+crossover. It also means a small surface resolves fewer things into spheres, which is correct
+for the same reason.
+
+**A ship is a filled dot, at every zoom there is.** It has a hull size and the map is not where
 anyone reads it off; a contact that grew a model on approach would be the one thing here
 drawing a shape nobody sent. It keeps its amber, which is the one channel the map has that a
-list does not.
+list does not, and it is the one solid thing on a layer of wireframe — so shape says it too,
+and color is not carrying it alone.
 
 It is a handle swap and not a respawn. Zooming in on a body crosses the threshold without
 changing the set of things drawn, the same way a body drifting off the plane gains a dash.
-
-The symbol is a fixed size in pixels, so it is a far larger share of the 190-point minimap than
-of the panel — at a system's scale that corner is mostly rings.
 
 ### The plane is drawn, never filled
 

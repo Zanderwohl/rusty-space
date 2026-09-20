@@ -67,12 +67,10 @@ const LINE_PX: f32 = 1.6;
 const LINE_TUBE_FRACTION: f32 = 0.02;
 const SPHERE_TUBE_FRACTION: f32 = 0.06;
 
-/// A circle's line, as a fraction of its own radius.
-///
-/// The one member of the family that is a *constant* rather than a cap that occasionally
-/// binds: both the symbol and its line are fixed pixel sizes, so the distance and the scale in
-/// [`tube_target`] cancel and the answer is always this.
-const POINT_TUBE_FRACTION: f32 = LINE_PX / (POINT_PX * 0.5);
+/// A ship's dot has one normal, so the shader's displacement would translate it rather than
+/// thicken it. Asking for exactly the material's own base radius makes that displacement zero
+/// and the disc comes out the size the transform says.
+const DOT_TUBE_FRACTION: f32 = BASE_TUBE_RADIUS;
 
 const SCALE_PX: f32 = LINE_PX * 0.5;
 
@@ -141,23 +139,29 @@ const DASH_PX: f32 = 5.0;
 /// viewport many times over and its dashes are sub-pixel anyway.
 const MAX_DASHES: usize = 48;
 
-/// Apparent **diameter**, in pixels, below which a body is a circle instead of a sphere.
+/// The symbol's apparent **diameter**, as a share of the viewport's height.
 ///
-/// A diameter, not a radius — the sky's `resolved::RESOLVE_PX` is a radius, and the two
-/// numbers do not mean the same thing.
+/// A diameter, not a radius — the sky's `resolved::RESOLVE_PX` is a radius and the two do not
+/// mean the same thing.
 ///
-/// It is also the diameter the circle is drawn at, and that is the point of having one number:
-/// a body shrinks until it reaches this size and then holds it, so nothing jumps at the
-/// crossover. Below it a sphere is a dozen sub-pixel tubes drawn over each other, which is
-/// both the more expensive thing to draw and the less legible one.
+/// **A share of the view, not a count of pixels.** One texture is drawn into a 190-point
+/// corner and into a panel several times that, so a symbol sized right for one is a fifth of
+/// the other; a fixed twenty pixels left the minimap a pile of overlapping rings with no grid
+/// visible behind them.
 ///
-/// Twenty rather than the five it started at, because the crossover is where the sphere has to
-/// earn its place and at eleven pixels across it had not: the tube cap holds its lines to a
-/// third of a pixel, so what it draws is a smudge the circle says better.
-const POINT_PX: f32 = 20.0;
+/// It is both the threshold and the size the symbol is drawn at, which is the point of having
+/// one number: a body shrinks until it reaches this and then holds, so nothing jumps at the
+/// crossover. Below it a sphere is a dozen sub-pixel tubes over each other — the more
+/// expensive thing to draw and the less legible one.
+const POINT_FRACTION: f32 = 0.02;
 
-/// Divisions of that circle. Sixteen is smooth at twenty pixels and an eighth of the ring
-/// mesh — a level of detail that cost more to draw than the sphere would not be one.
+/// And the floor, at twice a line's own width. Under that a ring has no inside left and is
+/// simply a dot, which is the honest answer for a surface with no room for more.
+const POINT_FLOOR_PX: f32 = 2.0 * LINE_PX;
+
+/// Divisions of the circle, and of a ship's disc. Sixteen is smooth at any size this symbol
+/// reaches and an eighth of the ring mesh — a level of detail that cost more to draw than the
+/// sphere would not be one.
 const POINT_SEGMENTS: u32 = 16;
 
 /// The camera the map is drawn for.
@@ -203,8 +207,10 @@ pub struct Map {
     pub snapshot: MapSnapshot,
     pub frame: Option<MapFrame>,
     sphere: Handle<Mesh>,
-    /// What an unresolved body is drawn with: a circle facing the eye. See [`POINT_PX`].
+    /// What an unresolved body is drawn with: a circle facing the eye. See [`POINT_FRACTION`].
     point: Handle<Mesh>,
+    /// And what a ship is drawn with, at any zoom: the same size, filled.
+    dot: Handle<Mesh>,
     ring: Handle<Mesh>,
     spokes: Handle<Mesh>,
     /// One drop-line mesh per dash count, indexed from one dash. Built once: every one of them
@@ -217,20 +223,53 @@ pub struct Map {
 }
 
 impl Map {
-    /// Radians per pixel of the map's own viewport, which is what decides a sphere from a
-    /// point and how thick a line is.
     /// Where the reference plane is anchored: the observer, or the camera's focus when a
     /// snapshot has nobody in it.
     pub fn plane_origin_ly(&self, focus_ly: DVec3) -> DVec3 {
         self.snapshot.observer().map_or(focus_ly, |o| o.position_ly)
     }
 
-    pub fn radians_per_pixel(&self, fov_y: f32) -> f32 {
-        match self.size.y {
-            0 => 0.0,
-            height => 2.0 * (fov_y * 0.5).tan() / height as f32,
+    fn viewport(&self, fov_y: f32) -> Viewport {
+        Viewport::new(self.size.y, fov_y)
+    }
+}
+
+/// What a pixel of the map's own viewport is worth. Both numbers come from its height, and
+/// everything drawn on the layer is sized from one or the other.
+#[derive(Clone, Copy, Debug)]
+struct Viewport {
+    /// Radians a pixel subtends: how thick every line is, and half of what decides a sphere
+    /// from a symbol.
+    rad_per_px: f32,
+    /// The symbol's diameter in pixels. See [`POINT_FRACTION`].
+    point_px: f32,
+}
+
+impl Viewport {
+    fn new(height_px: u32, fov_y: f32) -> Self {
+        Self {
+            rad_per_px: match height_px {
+                0 => 0.0,
+                height => 2.0 * (fov_y * 0.5).tan() / height as f32,
+            },
+            point_px: (height_px as f32 * POINT_FRACTION).max(POINT_FLOOR_PX),
         }
     }
+
+    /// A circle's line, as a fraction of its own radius: the one member of the family that is
+    /// an answer rather than a cap that occasionally binds. Both the symbol and its line are
+    /// fixed pixel sizes, so the distance and the scale in [`tube_target`] cancel exactly.
+    fn point_tube_fraction(self) -> f32 {
+        LINE_PX / (self.point_px * 0.5)
+    }
+}
+
+/// How a body is drawn at this zoom, which is one decision read in three places.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Form {
+    Sphere,
+    Circle,
+    Dot,
 }
 
 pub struct MapPlugin;
@@ -263,6 +302,7 @@ fn setup(
         frame: None,
         sphere: meshes.add(wire_mesh::generate_latlon_sphere(&[], BASE_TUBE_RADIUS, 4)),
         point: meshes.add(wire_mesh::ring_tube(POINT_SEGMENTS, BASE_TUBE_RADIUS, 4, 1.0)),
+        dot: meshes.add(wire_mesh::disc(POINT_SEGMENTS, 1.0)),
         ring: meshes.add(wire_mesh::ring_tube(RING_SEGMENTS, BASE_TUBE_RADIUS, 4, 1.0)),
         spokes: meshes.add(wire_mesh::plane_spokes(
             PLANE_SPOKES,
@@ -429,15 +469,15 @@ fn place(
         Projection::Perspective(perspective) => perspective.fov,
         _ => MAP_FOV,
     };
-    let rad_per_px = map.radians_per_pixel(fov_y);
+    let view = map.viewport(fov_y);
+    let rad_per_px = view.rad_per_px;
 
     let wanted: Vec<ItemKey> = frame.placements.iter().map(|p| p.key).collect();
     if wanted != map.drawn || frame.rings.len() != map.rings_drawn {
         for entity in &existing {
             commands.entity(entity).despawn();
         }
-        spawn_scene(&mut commands, &map, &frame, standoff, rad_per_px, &mut meshes,
-            &mut materials);
+        spawn_scene(&mut commands, &map, &frame, standoff, view, &mut meshes, &mut materials);
         map.drawn = wanted;
         map.rings_drawn = frame.rings.len();
         map.frame = Some(frame);
@@ -446,19 +486,15 @@ fn place(
 
     for (of, mut at, mut mesh, material) in items.iter_mut() {
         let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
-        let resolved = is_resolved(placement, rad_per_px);
-        *at = item_transform(placement, rad_per_px);
+        *at = item_transform(placement, view);
         // Zooming in on a body crosses the threshold without changing the set that is drawn,
         // so the level of detail is a handle swap here and not a respawn. Same as a drop-line
         // gaining a dash.
-        let (wanted, fraction) = match resolved {
-            true => (&map.sphere, SPHERE_TUBE_FRACTION),
-            false => (&map.point, POINT_TUBE_FRACTION),
-        };
+        let (wanted, fraction) = mesh_for(form_of(placement, view), &map, view);
         if mesh.0 != *wanted {
             mesh.0 = wanted.clone();
         }
-        set_thickness(&mut materials, material, at.scale.max_element(), rad_per_px,
+        set_thickness(&mut materials, material, at.scale.max_element(), view.rad_per_px,
             at.translation.length(), fraction, LINE_PX);
     }
     for (of, mut at, mut mesh, material) in drops.iter_mut() {
@@ -578,21 +614,27 @@ fn at_of(placement: &Placement) -> Vec3 {
     render(placement.at.as_dvec3())
 }
 
-/// A body is a sphere at its own size once it is worth more than [`POINT_PX`] across, and a
-/// circle of exactly that below it.
+/// A body is a sphere at its own size once it is worth more than [`Viewport::point_px`]
+/// across, and a circle of exactly that below it.
 ///
-/// **A ship is never a sphere, at any zoom.** It is a mark on a chart rather than a body seen:
-/// its size is not what anyone is reading off the map, and a hull that turned into a model on
-/// approach would be the one thing here drawing a shape it does not know.
-fn is_resolved(placement: &Placement, rad_per_px: f32) -> bool {
-    placement.kind != ItemKind::Ship
-        && rad_per_px > 0.0
-        && 2.0 * placement.angular_radius / rad_per_px > POINT_PX
+/// **A ship is a filled dot, at every zoom there is.** It is a mark on a chart rather than a
+/// body seen: its hull size is not what anyone reads off a map, and a contact that grew a
+/// model on approach would be the one thing here drawing a shape nobody sent.
+fn form_of(placement: &Placement, view: Viewport) -> Form {
+    match placement.kind {
+        ItemKind::Ship => Form::Dot,
+        _ if view.rad_per_px > 0.0
+            && 2.0 * placement.angular_radius / view.rad_per_px > view.point_px =>
+        {
+            Form::Sphere
+        }
+        _ => Form::Circle,
+    }
 }
 
-/// The render-unit radius of a circle drawn [`POINT_PX`] across at `distance`.
-fn point_radius(distance: f32, rad_per_px: f32) -> f32 {
-    (distance * rad_per_px * POINT_PX * 0.5).max(f32::MIN_POSITIVE)
+/// The render-unit radius of a symbol drawn [`Viewport::point_px`] across at `distance`.
+fn point_radius(distance: f32, view: Viewport) -> f32 {
+    (distance * view.rad_per_px * view.point_px * 0.5).max(f32::MIN_POSITIVE)
 }
 
 /// A circle is a symbol rather than an object, so it faces the eye — which is the render
@@ -605,10 +647,10 @@ fn face_camera(at: Vec3) -> Quat {
     }
 }
 
-fn item_transform(placement: &Placement, rad_per_px: f32) -> Transform {
+fn item_transform(placement: &Placement, view: Viewport) -> Transform {
     let at = at_of(placement);
-    match is_resolved(placement, rad_per_px) {
-        true => Transform {
+    match form_of(placement, view) {
+        Form::Sphere => Transform {
             translation: at,
             rotation: Quat::from_rotation_arc(
                 Vec3::Y,
@@ -616,11 +658,21 @@ fn item_transform(placement: &Placement, rad_per_px: f32) -> Transform {
             ),
             scale: Vec3::splat(placement.radius),
         },
-        false => Transform {
+        // Both symbols are flat and face the eye, and both are drawn at the one size.
+        Form::Circle | Form::Dot => Transform {
             translation: at,
             rotation: face_camera(at),
-            scale: Vec3::splat(point_radius(at.length(), rad_per_px)),
+            scale: Vec3::splat(point_radius(at.length(), view)),
         },
+    }
+}
+
+/// The mesh a form is drawn with, and the cap its tube is sized under.
+fn mesh_for(form: Form, map: &Map, view: Viewport) -> (&Handle<Mesh>, f32) {
+    match form {
+        Form::Sphere => (&map.sphere, SPHERE_TUBE_FRACTION),
+        Form::Circle => (&map.point, view.point_tube_fraction()),
+        Form::Dot => (&map.dot, DOT_TUBE_FRACTION),
     }
 }
 
@@ -705,10 +757,11 @@ fn spawn_scene(
     map: &Map,
     frame: &MapFrame,
     standoff: f32,
-    rad_per_px: f32,
+    view: Viewport,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<BodyWireframeMaterial>,
 ) {
+    let rad_per_px = view.rad_per_px;
     let layer = RenderLayers::layer(MAP_LAYER);
 
     for (index, ring) in frame.rings.iter().enumerate() {
@@ -742,16 +795,13 @@ fn spawn_scene(
     ));
 
     for placement in &frame.placements {
-        let at = item_transform(placement, rad_per_px);
-        let (mesh, fraction) = match is_resolved(placement, rad_per_px) {
-            true => (&map.sphere, SPHERE_TUBE_FRACTION),
-            false => (&map.point, POINT_TUBE_FRACTION),
-        };
+        let at = item_transform(placement, view);
+        let (mesh, fraction) = mesh_for(form_of(placement, view), map, view);
         commands.spawn((
             Mesh3d(mesh.clone()),
             MeshMaterial3d(materials.add(line_material(
                 color_of(placement.kind),
-                tube_target(at.scale.max_element(), rad_per_px, at.translation.length(),
+                tube_target(at.scale.max_element(), view.rad_per_px, at.translation.length(),
                     fraction, LINE_PX),
                 LINE_COLOR_SCALE,
             ))),
@@ -961,6 +1011,11 @@ mod tests {
         }
     }
 
+    /// A 410-pixel surface, which is about what the panel's map area is.
+    fn viewport() -> Viewport {
+        Viewport::new(410, std::f32::consts::FRAC_PI_4)
+    }
+
     fn body_at(distance: f32, radius: f32) -> Placement {
         kind_at(ItemKind::Planet, distance, radius)
     }
@@ -987,19 +1042,63 @@ mod tests {
     /// and nothing in the types to catch it.
     #[test]
     fn a_body_holds_its_size_where_it_stops_being_a_sphere() {
-        let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
+        let view = viewport();
         let distance = 40.0;
         // A body sitting exactly on the threshold, and one a hair under it.
-        let on = POINT_PX * 0.5 * rad_per_px * distance;
-        assert!(is_resolved(&body_at(distance, on * 1.01), rad_per_px), "just over should be a sphere");
+        let on = view.point_px * 0.5 * view.rad_per_px * distance;
+        assert_eq!(form_of(&body_at(distance, on * 1.01), view), Form::Sphere, "just over");
         let under = body_at(distance, on * 0.99);
-        assert!(!is_resolved(&under, rad_per_px), "just under should be a circle");
+        assert_eq!(form_of(&under, view), Form::Circle, "just under");
 
-        let drawn = item_transform(&under, rad_per_px).scale.x;
+        let drawn = item_transform(&under, view).scale.x;
         assert!(
             (drawn / on - 1.0).abs() < 0.05,
             "a circle of {drawn} where the sphere it replaced was {on}",
         );
+    }
+
+    /// **A symbol is the same share of every surface it is drawn on.**
+    ///
+    /// One texture serves a 190-point corner and a panel several times that. A fixed twenty
+    /// pixels was right for the panel and left the minimap a pile of overlapping rings with
+    /// the grid lost behind them.
+    #[test]
+    fn a_symbol_is_a_share_of_the_view_above_its_floor() {
+        let fov = std::f32::consts::FRAC_PI_4;
+        for height in [200u32, 410, 1080, 2160] {
+            let share = Viewport::new(height, fov).point_px / height as f32;
+            assert!(
+                (share / POINT_FRACTION - 1.0).abs() < 1.0e-5,
+                "a {height}-pixel surface drew a symbol at {share} of itself",
+            );
+        }
+        // And below it the floor holds, which is where a ring has no inside left and the
+        // honest answer is a dot.
+        for height in [0u32, 1, 64, 159] {
+            let px = Viewport::new(height, fov).point_px;
+            assert!((px - POINT_FLOOR_PX).abs() < 1.0e-6, "{height} px drew a symbol of {px}");
+        }
+        assert!(POINT_FLOOR_PX <= 2.0 * LINE_PX, "the floor is twice a line and no more");
+    }
+
+    /// **A ship's disc comes out exactly the size the transform says.**
+    ///
+    /// Every one of its vertices shares one normal, so the shader's thickness displacement
+    /// translates the whole disc rather than fattening it. Asking for the material's own base
+    /// radius makes that displacement zero — and that holds only while the cap is what binds.
+    #[test]
+    fn a_dot_is_never_displaced() {
+        let view = viewport();
+        for distance in [1.0e-3f32, 1.0, 40.0, 1.0e5] {
+            let scale = point_radius(distance, view);
+            let target =
+                tube_target(scale, view.rad_per_px, distance, DOT_TUBE_FRACTION, LINE_PX);
+            assert!(
+                (target - BASE_TUBE_RADIUS).abs() < 1.0e-9,
+                "at {distance:e} the disc would shift by {}",
+                target - BASE_TUBE_RADIUS,
+            );
+        }
     }
 
     /// **A ship is a mark on a chart, at every zoom there is.**
@@ -1009,31 +1108,32 @@ mod tests {
     /// still be a circle.
     #[test]
     fn a_ship_never_becomes_a_model() {
-        let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
+        let view = viewport();
         // A radius that would fill the view, at a distance that would make anything else a
         // sphere many times over.
         let huge = kind_at(ItemKind::Ship, 1.0, 10.0);
-        assert!(!is_resolved(&huge, rad_per_px), "a ship is never a sphere");
-        assert!(
-            is_resolved(&kind_at(ItemKind::Planet, 1.0, 10.0), rad_per_px),
+        assert_eq!(form_of(&huge, view), Form::Dot, "a ship is never a sphere");
+        assert_eq!(
+            form_of(&kind_at(ItemKind::Planet, 1.0, 10.0), view),
+            Form::Sphere,
             "and the exemption is the kind, not the numbers",
         );
-        // Drawn at the symbol's own size, like every other circle.
-        let at = item_transform(&huge, rad_per_px);
-        let px = 2.0 * at.scale.x / (at.translation.length() * rad_per_px);
-        assert!((px / POINT_PX - 1.0).abs() < 1.0e-3, "a ship drew {px} px across");
+        // Drawn at the symbol's own size, like every other mark.
+        let at = item_transform(&huge, view);
+        let px = 2.0 * at.scale.x / (at.translation.length() * view.rad_per_px);
+        assert!((px / view.point_px - 1.0).abs() < 1.0e-3, "a ship drew {px} px across");
     }
 
     /// And it holds that size at every distance, which is what makes it a symbol: the far one
     /// is as readable as the near one, and only its place on the map says which is which.
     #[test]
     fn a_circle_is_the_same_size_wherever_it_is() {
-        let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
-        let want = POINT_PX * 0.5;
+        let view = viewport();
+        let want = view.point_px * 0.5;
         for distance in [1.0e-3f32, 1.0, 40.0, 1.0e5] {
-            // Radius zero: a ship, which has no size to draw at any zoom.
-            let at = item_transform(&body_at(distance, 0.0), rad_per_px);
-            let px = at.scale.x / (at.translation.length() * rad_per_px);
+            // Radius zero: nothing to draw at its own size, at any zoom.
+            let at = item_transform(&body_at(distance, 0.0), view);
+            let px = at.scale.x / (at.translation.length() * view.rad_per_px);
             assert!(
                 (px / want - 1.0).abs() < 1.0e-3,
                 "at {distance:e} the circle came out {px} px across the radius, wanted {want}",
@@ -1046,7 +1146,7 @@ mod tests {
     /// The eye is the render origin, because every transform on this layer is camera-relative.
     #[test]
     fn a_circle_faces_the_eye() {
-        let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
+        let view = viewport();
         let places = [
             glam::Vec3::new(0.0, 40.0, 0.0),
             glam::Vec3::new(-3.0, 0.5, 12.0),
@@ -1058,7 +1158,7 @@ mod tests {
             let mut placement = body_at(1.0, 0.0);
             placement.at = place;
             placement.foot = place;
-            let at = item_transform(&placement, rad_per_px);
+            let at = item_transform(&placement, view);
             // The mesh's own normal is +Y; after the rotation it must point back at the eye.
             // Against the transform's own translation, not the placement's: these are two
             // different frames and `item_transform` is where the swizzle happens.
