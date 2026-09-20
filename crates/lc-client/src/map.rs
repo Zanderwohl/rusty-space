@@ -297,7 +297,7 @@ fn survey(
 fn place(
     mut commands: Commands,
     mut map: ResMut<Map>,
-    ui: Res<Ui>,
+    mut ui: ResMut<Ui>,
     mut materials: ResMut<Assets<BodyWireframeMaterial>>,
     mut camera: Query<(&mut Transform, &mut Projection), (With<MapCamera>, Without<MapDrawn>)>,
     existing: Query<Entity, With<MapDrawn>>,
@@ -330,12 +330,15 @@ fn place(
         return;
     }
 
-    let mut view = ui.map;
     // Follow the selection rather than a remembered position: Saturn moves, and a map that
     // centered on where it was is a map that drifts off it over an afternoon.
-    if let Some(at) = focus_position(view.focus, &map.snapshot) {
-        view.orbit.focus_ly = at;
-    }
+    //
+    // **Written back, not applied to a copy.** The interface's own `focus_ly` is where every
+    // action that moves the camera starts from, so leaving it stale means a pan begins
+    // somewhere the camera has not been since the map opened — the world origin, by default.
+    // That was one jarring jump on the first frame of the first drag and smooth after it.
+    follow(ui.map.focus, &map.snapshot, &mut ui.map.orbit.focus_ly);
+    let view = ui.map;
     let meters_per_unit = crate::view::ScaleTier::for_distance(view.orbit.distance_m())
         .meters_per_unit();
     let frame = compose(&map.snapshot, &view.orbit, view.plane, meters_per_unit);
@@ -401,6 +404,20 @@ fn place(
             LINE_TUBE_FRACTION);
     }
     map.frame = Some(frame);
+}
+
+/// Put `focus_ly` where the focus says to look, and say whether it moved.
+///
+/// The interface holds one position and it has to be the one on screen: an action that pans or
+/// zooms starts from it, and a stale value is a jump the moment anything does.
+pub fn follow(focus: crate::ui::MapFocus, snapshot: &MapSnapshot, focus_ly: &mut DVec3) -> bool {
+    match focus_position(focus, snapshot) {
+        Some(at) if at != *focus_ly => {
+            *focus_ly = at;
+            true
+        }
+        _ => false,
+    }
 }
 
 /// Where the camera should be looking, or `None` to leave it where it is.
@@ -649,6 +666,43 @@ mod tests {
             focus_position(MapFocus::Item(ItemKey::from_id("star", 7)), &snapshot),
             Some(DVec3::new(4.0, 5.0, 6.0)),
         );
+    }
+
+    /// **The first frame of a drag used to jump to the world origin.**
+    ///
+    /// `place` resolved the focus into a *copy* of the view, so the interface's own
+    /// `focus_ly` stayed at its default — `DVec3::ZERO`, which is where the star sits — and a
+    /// pan started from there rather than from what was on screen. One jarring jump, then
+    /// smooth, which is the signature of a stale starting point rather than a bad delta.
+    #[test]
+    fn a_pan_begins_where_the_camera_actually_is() {
+        let snapshot = snapshot();
+        let ship = DVec3::new(1.0, 2.0, 3.0);
+        let mut orbit = em_map::Orbit::framing(DVec3::ZERO, em_map::snapshot::M_PER_AU * 40.0);
+        assert_eq!(orbit.focus_ly, DVec3::ZERO, "premise: it starts at the origin");
+
+        follow(MapFocus::Observer, &snapshot, &mut orbit.focus_ly);
+        assert_eq!(orbit.focus_ly, ship, "following did not reach the interface's copy");
+
+        // Now the drag. A small pan has to leave the camera near the ship, not near zero.
+        orbit.pan(em_map::Plane::Ecliptic, 0.05, 0.0);
+        let moved = orbit.focus_ly.distance(ship);
+        assert!(moved > 0.0, "the pan moved nothing");
+        assert!(
+            moved < 0.25 * ship.length(),
+            "the pan threw the camera {moved} ly from the ship, which is the jump",
+        );
+    }
+
+    /// And following writes only when it has something to say, so a resource that half the
+    /// interface watches is not marked changed every frame for nothing.
+    #[test]
+    fn following_the_same_place_twice_writes_once() {
+        let snapshot = snapshot();
+        let mut at = DVec3::ZERO;
+        assert!(follow(MapFocus::Observer, &snapshot, &mut at), "the first call should move it");
+        assert!(!follow(MapFocus::Observer, &snapshot, &mut at), "the second should not");
+        assert!(!follow(MapFocus::Free, &snapshot, &mut at), "free never moves it");
     }
 
     /// And a pan has to be able to leave the camera alone, which is the state the other two
