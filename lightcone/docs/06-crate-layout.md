@@ -8,6 +8,7 @@
 | `crates/em-sim` | simulation state and propagation | em-foundations; `bevy_ecs` behind the `bevy` feature |
 | `crates/em-render` | **new.** reusable Bevy rendering for orbital scenes | em-foundations, em-sim, bevy |
 | `crates/em-plot` | **new.** charts, curves, heat maps; see [11-plotting.md](11-plotting.md) | glam; bevy and egui behind features |
+| `crates/em-map` | **new.** what a spatial map draws: snapshots, reference planes, decade rings, an orbit camera | glam, em-plot, em-foundations; no engine |
 | `crates/em-spectra` | **new.** bands, blackbody, extinction, color, stellar relations, band-to-display mapping | serde only; no engine, no glam |
 | `crates/lc-spacetime` | event coordinates, intervals, retarded time, worldlines | glam, serde; no engine |
 | `crates/lc-world` | game rules, systems, structures, ships, resources, photometry | em-foundations, em-sim, em-spectra, lc-spacetime |
@@ -34,6 +35,7 @@ cargo tree -p exotic-matters | grep -i '^\s*lc-'            # must be empty
 cargo tree -p em-foundations | grep -i bevy                 # must be empty
 cargo tree -p em-sim --no-default-features | grep -i bevy   # must be empty
 cargo tree -p em-plot --no-default-features | grep -i bevy  # must be empty
+cargo tree -p em-map | grep -i bevy                          # must be empty
 cargo tree -p lc-spacetime | grep -i bevy                   # must be empty
 ```
 

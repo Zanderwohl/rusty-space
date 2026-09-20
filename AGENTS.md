@@ -52,6 +52,8 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--password` | hold at the password form, the one egui surface inside the menu |
 | `--turn <deg>` / `--pitch <deg>` | turn the view, the only way to put something off screen |
 | `--zoom <notches>` | move the orbit camera; both its stops are clamps, so ask for far too much |
+| `--map <bearing:elevation:au>` | pin the map's camera. A pin, so two shots of it are the same shot |
+| `--map-plane <ecliptic\|galactic>` | which plane the map lays its rings in |
 | `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `closing`, `chase`. Brings its own shard |
 | `--demo-cam <yaw:pitch:booms>` | pin the camera for the run, so two shots of a scene are the same shot |
 | `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable. Offline only — a shard states its own |
@@ -129,6 +131,23 @@ Each of these cost real time. None of them are visible from the code that hits t
   after the laptop moved to another are 1280x720 and 2560x1440, and a patch measured at fixed
   pixel coordinates then samples two different parts of the picture. It reads exactly like a
   regression and is not one. Measure in fractions of the frame.
+- **A second camera turns every `.single()` camera query into an early return.** Seven systems
+  in `lc-client` wanted "the camera"; adding the map's did not draw a wrong picture, it drew no
+  picture — the view froze, the stars sized to zero and nothing was pickable, with nothing in the
+  build to say why. `SkyCamera` is the disambiguator. `bevy_egui` has the same shape of problem
+  one layer up: it gives its primary context to the **first camera created**, and two `Startup`
+  systems have no order between them, so the whole interface went into a 512-pixel texture.
+- **A render target that will be resized needs `COPY_SRC`.** `Image::new_target_texture` sets
+  three usages and not that one, and `Image::resize` copies the old contents forward. The first
+  resize is a wgpu validation failure, and it takes the application down long after the frame
+  that caused it. `RenderTarget` is also a *component* in Bevy 0.19, not a field on `Camera`;
+  left off, the camera clears the primary window to black.
+- **A line is a tube, so it has a width the geometry does not know about.** Two consequences,
+  both found by looking. A camera closer to a plane than a tube's angular radius is *inside* the
+  nearest ring, and the inside of a tube is a solid wall — an edge-on map came out as a
+  rectangle of flat green. And a tube's thickness has to be set by its **near** end: every point
+  of a ring is equidistant from the center, but a spoke runs from the eye to the rim, and a
+  width that is a pixel at the far end is eighty at the near one.
 - WGSL reserves more words than you expect. `from` and `target` are both reserved and both are
   natural names in a ray marcher; the error arrives from the pipeline cache at run time, not
   from `cargo build`.

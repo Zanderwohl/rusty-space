@@ -23,6 +23,18 @@ a custom widget nobody asked for.
 A single egui surface *inside* a Bevy UI screen is allowed, and the password form is one. What
 it costs is a palette that has to be carried across the boundary by hand; see below.
 
+### A rendered image inside an egui surface
+
+A third case beside the two above, and it behaves because of one decision: the image is
+allocated with an explicit `Sense` rather than shown with `ui.image`. An interactive allocation
+makes egui *want* the pointer, and `crate::input`'s wheel and cursor grab both already stand
+down when it does — so a drag on the map does not also fly the ship, with no new coordination
+and no flag.
+
+Which button matters. **Left** drags to turn the map, because right is the sky's look button and
+the cursor grab, and a right-drag begun on the map and ended off it would leave the ship turning:
+the grab is asked for once, on the press, by design.
+
 ## One surface at a time
 
 When something is modal, **what is behind it stands down**. Not dimmed and still readable —
@@ -69,6 +81,9 @@ keeping sharp.
 them, so an overlay drawn by one lands *behind* a screen drawn by the other — interleaved with
 it, text through text. `em_ui::MenuUi::overlay` sets a `GlobalZIndex` for exactly this, and an
 overlay is above by definition rather than by luck.
+
+The minimap is `Order::Middle` for the same reason read the other way: it has to go *under* an
+open window rather than over it.
 
 **egui has its own orders**, and they are not the same thing. Panels paint in
 `Order::Background`, floating windows and notices in `Order::Middle`, and an overlay that wants

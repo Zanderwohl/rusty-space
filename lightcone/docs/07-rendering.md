@@ -1,6 +1,6 @@
 # Rendering
 
-Bevy 0.17, wgpu, WGSL. One shader set for native and browser.
+Bevy 0.19, wgpu, WGSL. One shader set for native and browser.
 
 ## View modes
 
@@ -8,6 +8,7 @@ Bevy 0.17, wgpu, WGSL. One shader set for native and browser.
 |---|---|---|
 | observer view | every object at its **retarded** state, as seen from the player's ship | players, default and usually only |
 | god view | every object at coordinate time `t`, no delay | development, replays, spectators |
+| aggregate | several observers' sightings folded together | nobody yet; `Provenance::Aggregate` exists and no provider does |
 
 Observer view is the game. Each drawable is evaluated at its own retarded time, solved
 against the camera's worldline, so a distant ship appears where it was when its light left
@@ -97,6 +98,29 @@ Render tiers back to front into the same target with separate depth ranges, or c
 separate passes. Reverse-Z with an infinite far plane, per tier, keeps depth precision
 usable; the standard forward-Z projection wastes almost all of its precision near the near
 plane, which at these scale ratios means z-fighting on everything past a planet.
+
+## The map view
+
+A second `Camera3d` on its own `RenderLayers`, rendering into an `Image` that egui shows. It
+carries **no `Hdr`, no bloom and no tone map**: the sky is a photograph and is metered like one,
+and a diagram is not. The wireframe shader's emissive range is aimed at the display instead.
+
+It reuses `BodyWireframeMaterial` and adds no shader of its own. With no suns the shader's
+day/night factor is one, which is exactly an unlit wireframe, and line weight already rides in
+vertex-color alpha — so a grid line, an equator and a decade ring differ by a vertex attribute
+rather than by a material.
+
+Three things about it that are not obvious from the code:
+
+- **Which camera egui draws on is not left to spawn order.** `bevy_egui` gives its primary
+  context to the first camera an application creates, and two `Startup` systems have no order
+  between them. When the map won, the entire interface was drawn into a 512-pixel texture while
+  the window showed the sky with nothing on it.
+- **`RenderTarget` is a component**, not a field on `Camera`. Left off, the camera renders over
+  the primary window on a layer with nothing on it and clears the frame to black.
+- **A render target that is resized needs `COPY_SRC`.** `Image::new_target_texture` does not set
+  it and `Image::resize` copies the old contents forward, so the first resize is a validation
+  failure named `copy_image_on_resize` — several seconds after the thing that caused it.
 
 ## Star rendering
 

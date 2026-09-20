@@ -11,6 +11,7 @@ someone a day. This file is the conventions.
 |---|---|---|
 | `crates/em-foundations` | orbital mechanics, reference frames, epochs | glam, serde, num-traits, scilib |
 | `crates/em-sim` | simulation state and propagation | em-foundations; `bevy_ecs` only behind the `bevy` feature |
+| `crates/em-map` | what a spatial map draws; no engine | glam, em-plot, em-foundations |
 | `crates/em-ui` | Bevy-native menu widgets, in a palette the caller picks | bevy |
 | `.` (`exotic-matters`) | the app: rendering, egui, persistence | anything |
 
@@ -32,6 +33,7 @@ Two invariants worth checking after any structural change:
 ```bash
 cargo tree -p em-foundations | grep -i bevy          # must be empty
 cargo tree -p em-sim --no-default-features | grep -i bevy   # must be empty
+cargo tree -p em-map | grep -i bevy                          # must be empty
 cargo test -p em-sim --no-default-features           # the headless suite
 ```
 

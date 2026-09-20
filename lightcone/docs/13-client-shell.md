@@ -124,6 +124,7 @@ with.
 | scenarios | — | scenes to stage. Development only, and every button does nothing without a shard started for it |
 | refit | `R` | module counts and hull slots as sliders, what applying them would cost and take, and the refit under way. See [19-ship-fitting.md](19-ship-fitting.md) |
 | dev actions | `F5` | energy for the ship. Development only; a shard refuses it |
+| map | `M` | where everything is: a reference plane, decade rings, and what stands off it |
 
 Panels are windows rather than menu pages because the clock never stops: a player has to be
 able to watch a curve and fly at the same time.
@@ -330,6 +331,7 @@ Omit the path for the three authored sample stars.
 |---|---|
 | `Esc` | close the top panel, then the menu |
 | `T` `Y` `F` `F3` `F4` | telescope, system, flight, debug, starfield tuning |
+| `M` | the map |
 | arrows, right-drag | look |
 | | the cursor is pinned while the right button is held, and released on let go |
 | `L` | look at the selection |
@@ -370,6 +372,8 @@ seven hours twenty times a second having never drifted at all.
 | `--watch` | target the nearest system and open the telescope |
 | `--swarm` | target the nearest star carrying a swarm |
 | `--curve <n>` | which band the light curve measures |
+| `--map <bearing:elevation:au>` | pin the map's camera. A light-year is 63 241 astronomical units |
+| `--map-plane <ecliptic\|galactic>` | which plane the map lays its rings in |
 | `--tune` | open the starfield tuning panel |
 | `--frames <n>` | frames before the shutter |
 | `--at <body>` | stand off a named body of the local system |
@@ -626,8 +630,61 @@ belongs in `DISTANT` or `LOCAL` where it can be read and reasoned about.
 WASM, networking, and God view in any shipped build. The last is compiled out from the start
 rather than added and later removed.
 
+## The map
+
+**Both, and one camera.** The question this section used to pose — a window or the world seen
+from a ship — is answered by having the sky be the view through the camera and the map be a
+second camera on its own render layer, drawing into an image that egui shows. So it is real
+geometry with real depth rather than a projection painted by egui, which is what lets it reuse
+the wireframe spheres Exotic Matters draws bodies with. The flat map was the cheaper first
+version and was never built, because the expensive one turned out to be a fortnight rather than
+a quarter.
+
+It draws a **snapshot**: a flat list of things and where they are, with a label saying how it
+was arrived at. One observer's instruments, several folded together, and a coordinate-time
+reading with no light delay are three providers and one type, so switching perspective is
+choosing a function rather than writing a second renderer. That is the whole reason the seam is
+in `em-map` and not in the ECS.
+
+The reference plane is the **local ecliptic or the disc of the galaxy**, and the toggle tilts
+the whole view because the camera's own angles are measured in the plane's basis. Concentric
+rings mark order-of-magnitude distances; anything off the plane hangs from a dashed drop-line.
+The reach is a fixed sphere of twenty-five light-years — a reach that moved with the zoom would
+change what exists as well as what is framed.
+
+### The plane is drawn, never filled
+
+Rings and radial spokes, all of them tubes with a real radius. Nothing in the map is a surface,
+which is most of what keeps `AGENTS.md`'s warning about a camera on an infinitely thin sheet
+from applying at all — and the map's whole point is the edge-on view, where what is above the
+plane and what is below it are finally distinguishable.
+
+Two numbers had to be found by looking, and both are about the same thing: a line is a tube, so
+it has a width the geometry does not know about.
+
+- **The camera is never exactly in the plane.** The floor is three degrees, not the tenth of a
+  degree it started at, because a tube drawn 1.6 pixels wide has an angular radius of about
+  three milliradians — and a camera closer to the plane than that is *inside* the nearest ring.
+  The inside of a tube is a solid wall, so the first edge-on photograph was a rectangle of flat
+  green with nothing in it.
+- **A spoke's thickness is set by its near end.** Every point of a ring is the same distance
+  from the center, so one tube radius serves all of it. A spoke runs from near the eye out to
+  its rim, and a constant width that is a pixel at the far end is eighty at the near one.
+  Scaled to the outermost decade, twelve spokes were twelve solid wedges across the view.
+
+### The minimap takes one gesture
+
+It is the map when the panel is closed, and the same texture: transforms are camera-relative,
+so an entity belongs to exactly one camera and two independently aimed views would need two
+sets of them. There has never been a second framing to want.
+
+It senses clicks and nothing else. One that took the wheel would stop the ship's own camera
+zooming whenever the cursor drifted into the corner, which is exactly the failure
+`input::read_wheel` consults egui to prevent, arriving from the other side.
+
 ## Open
 
-- Whether the sky map is a window or the world seen from a ship. Likely both, in the manner of
-  Space Engine: a view through a camera, and a three-dimensional stellar map centered on the
-  observer. The flat map is the cheaper first version and the two want different camera code.
+- Belts and rings are carried in a snapshot as an annulus and still drawn as a point. They want
+  a ring of their own, in the population's plane rather than the reference one.
+- Nothing is labeled yet. The geometry is placed; the names that go beside it are screen-space
+  work for `em_ui::reticle`, which already has the clip-space placement for it.
