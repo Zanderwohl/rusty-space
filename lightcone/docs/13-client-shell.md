@@ -374,7 +374,7 @@ seven hours twenty times a second having never drifted at all.
 | `--curve <n>` | which band the light curve measures |
 | `--map <bearing:elevation:au>` | pin the map's camera. A light-year is 63 241 astronomical units |
 | `--map-plane <ecliptic\|galactic>` | which plane the map lays its rings in |
-| `--map-focus <ship\|star\|free>` | what the map's camera locks onto |
+| `--map-focus <ship\|star\|free>` | what the map's camera locks onto. A pin, like `--map`, which holds the ship on its own |
 | `--tune` | open the starfield tuning panel |
 | `--frames <n>` | frames before the shutter |
 | `--at <body>` | stand off a named body of the local system |
@@ -651,6 +651,23 @@ in `em-map` and not in the ECS.
 looking at: a decade ring answers "how far is that from *me*", and the whole game is the ship's
 perspective. Center the camera on a star and the scale stays where you are, which is what makes
 the offset between the two readable instead of hiding it.
+
+### The scale is drawn, because there is no fixed one
+
+Fifteen orders of magnitude of zoom means the map has no scale of its own, so a rule is drawn
+in the bottom right of whichever surface is up: a bar of a round length, labeled in a unit a
+reader holds — `5 Gm`, `2 AU`, `1 ly`. Where the label is a small whole number of its own unit
+the bar is ticked into that many parts, so five ticks on a `5 Gm` bar are a gigametre each and
+the reader gets a second scale for nothing.
+
+Astronomical units and light-years sit among the metric prefixes because this is a map of space:
+between a gigametre and an astronomical unit there is nothing anyone measures in, and `150 Gm`
+is a worse answer than `1 AU` to the same question.
+
+**The camera is perspective, so there is no one scale even within a frame.** The rule asks the
+reference plane how far a pixel reaches at the rule's own height down the viewport, which is
+where the bar is drawn — taking it from the middle of the view would be wrong by the depth
+between the two. Edge-on, where the ray meets no plane, it falls back to the stand-off.
 
 **The wheel zooms toward what the cursor is over.** The pointer names a ray, the ray meets the
 reference plane, and that place is held still while the camera comes in — so a body is reached

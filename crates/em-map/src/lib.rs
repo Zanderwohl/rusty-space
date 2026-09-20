@@ -29,6 +29,7 @@ pub mod frame;
 pub mod outline;
 pub mod plane;
 pub mod rings;
+pub mod rule;
 pub mod snapshot;
 
 pub use camera::Orbit;

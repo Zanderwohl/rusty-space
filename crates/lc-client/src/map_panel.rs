@@ -24,6 +24,30 @@ const TURN_PER_POINT: f64 = 0.006;
 /// A pan drag across the whole viewport moves the focus by this much of the stand-off.
 const PAN_PER_VIEWPORT: f64 = 1.2;
 
+/// How much of the surface the scale rule may take, and the least it is worth drawing at.
+///
+/// A fraction so it stays proportionate on the minimap, and a ceiling so it does not stretch
+/// across a wide panel — a rule is read by its label and its ends, and a very long one is just
+/// a line.
+const RULE_MAX_FRACTION: f32 = 0.4;
+const RULE_MIN_FRACTION: f32 = 0.3;
+const RULE_MAX_PX: f32 = 600.0;
+const RULE_MIN_PX: f32 = 100.0;
+
+/// Where the rule sits, inset from the bottom right of the surface.
+const RULE_INSET: egui::Vec2 = egui::vec2(12.0, 10.0);
+
+/// How tall the end caps are, and the divisions between them.
+const RULE_CAP_PX: f32 = 5.0;
+const RULE_TICK_PX: f32 = 3.0;
+
+/// Where the plane is sampled for the scale, as a fraction of the way down the viewport.
+///
+/// **The camera is perspective, so there is no one scale.** The rule is drawn near the bottom
+/// of the surface, so that is where the plane is asked how far a pixel goes: a scale taken at
+/// the middle of the view would be wrong by the depth between the two.
+const RULE_SAMPLE_NDC_Y: f64 = -0.75;
+
 /// The minimap's side, in points.
 const MINIMAP_SIDE: f32 = 190.0;
 
@@ -61,6 +85,7 @@ pub fn draw(
     );
     // The same gestures on both surfaces, from the same function, because two surfaces
     // showing one view that answer a drag differently is worse than either answer.
+    scale_rule(&ctx.layer_painter(response.layer_id), rect, ui_state.map);
     read_input(ctx, &response, rect, ui_state.map, &map, &mut out);
     if !open && response.clicked() {
         // A click is not a drag — egui keeps them apart — so this is the one gesture the
@@ -135,6 +160,79 @@ fn image(ui: &mut egui::Ui, map: &Map, size: egui::Vec2, sense: egui::Sense)
         );
     }
     (rect, response)
+}
+
+/// Draw the scale rule into the bottom right of the map's surface.
+fn scale_rule(painter: &egui::Painter, rect: egui::Rect, view: crate::ui::MapView) {
+    let Some(per_point) = meters_per_point(rect, view) else { return };
+    let max = (rect.width() * RULE_MAX_FRACTION).min(RULE_MAX_PX);
+    let min = (rect.width() * RULE_MIN_FRACTION).min(RULE_MIN_PX);
+    let Some(rule) = em_map::rule::choose((max * per_point) as f64, (min * per_point) as f64)
+    else {
+        return;
+    };
+    let length = (rule.meters / per_point as f64) as f32;
+    if !length.is_finite() || length <= 0.0 || length > rect.width() {
+        return;
+    }
+
+    let stroke = egui::Stroke::new(1.0, color_of(em_ui::vfd::TEXT_DIM));
+    let right = rect.max.x - RULE_INSET.x;
+    let y = rect.max.y - RULE_INSET.y;
+    let left = right - length;
+    painter.line_segment([egui::pos2(left, y), egui::pos2(right, y)], stroke);
+    for (at, height) in [(left, RULE_CAP_PX), (right, RULE_CAP_PX)] {
+        painter.line_segment([egui::pos2(at, y - height), egui::pos2(at, y)], stroke);
+    }
+    // The divisions, which are whole units of the label. See `em_map::rule::Rule::parts`.
+    for i in 1..rule.parts {
+        let at = left + length * i as f32 / rule.parts as f32;
+        painter.line_segment([egui::pos2(at, y - RULE_TICK_PX), egui::pos2(at, y)], stroke);
+    }
+    painter.text(
+        egui::pos2(right, y - RULE_CAP_PX - 2.0),
+        egui::Align2::RIGHT_BOTTOM,
+        &rule.label,
+        egui::FontId::proportional(11.0),
+        color_of(em_ui::vfd::TEXT),
+    );
+}
+
+/// How far a point on the surface reaches, in meters, where the rule is drawn.
+///
+/// The plane is met by a ray cast at the rule's own height, and the scale taken at that depth.
+/// Falls back to the stand-off when the ray meets nothing, which is the scale at the middle of
+/// the view — wrong for the bottom of an edge-on one, and the only answer left.
+fn meters_per_point(rect: egui::Rect, view: crate::ui::MapView) -> Option<f32> {
+    if rect.height() <= 0.0 {
+        return None;
+    }
+    let rad_per_point = 2.0 * (crate::map::MAP_FOV * 0.5).tan() / rect.height();
+    let (forward, ..) = view.orbit.view_basis(view.plane);
+    let eye = view.orbit.eye_ly(view.plane);
+    let aspect = (rect.width() / rect.height()) as f64;
+    let direction =
+        view.orbit.ray(view.plane, glam::DVec2::new(0.0, RULE_SAMPLE_NDC_Y),
+            crate::map::MAP_FOV as f64, aspect);
+    let depth_m = match view.plane.intersect(eye, direction, view.orbit.focus_ly) {
+        Some(hit) => (hit - eye).dot(forward) * em_map::snapshot::M_PER_LY,
+        None => view.orbit.distance_m(),
+    };
+    let per_point = depth_m as f32 * rad_per_point;
+    (per_point.is_finite() && per_point > 0.0).then_some(per_point)
+}
+
+/// The interface's palette, at the toolkit boundary.
+///
+/// One source and a conversion at the edge, as `lightcone/docs/18-ui-style.md` has it — never a
+/// hex value typed in beside it that drifts the first time the palette moves.
+fn color_of(color: bevy::prelude::Color) -> egui::Color32 {
+    let rgba = color.to_srgba();
+    egui::Color32::from_rgb(
+        (rgba.red * 255.0).round().clamp(0.0, 255.0) as u8,
+        (rgba.green * 255.0).round().clamp(0.0, 255.0) as u8,
+        (rgba.blue * 255.0).round().clamp(0.0, 255.0) as u8,
+    )
 }
 
 fn controls(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {

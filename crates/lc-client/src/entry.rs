@@ -119,15 +119,6 @@ pub fn parse(args: &[String]) -> Entry {
     if let Some(notches) = value::<f64>(args, "--zoom") {
         actions.push(Action::Zoom(notches));
     }
-    // `star` needs the local system, which the entry does not have — so it is resolved on
-    // arrival, in `run_dev_actions`, and this only records which was asked for.
-    if let Some(name) = after("--map-focus") {
-        match name.as_str() {
-            "ship" => actions.push(Action::FocusMap(crate::ui::MapFocus::Observer)),
-            "free" => actions.push(Action::FocusMap(crate::ui::MapFocus::Free)),
-            _ => {}
-        }
-    }
     if let Some(name) = after("--map-plane") {
         let plane = match name.as_str() {
             "galactic" => Some(em_map::Plane::Galactic),
@@ -164,7 +155,7 @@ pub fn parse(args: &[String]) -> Entry {
                 _ => None,
             }
         }),
-        map_focus_star: after("--map-focus").is_some_and(|n| n == "star"),
+        map_focus: after("--map-focus").as_deref().and_then(crate::app::WantedFocus::named),
         at_body: after("--at"),
         station: after("--station"),
         map_camera: after("--map").and_then(|spec| {

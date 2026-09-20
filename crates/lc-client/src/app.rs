@@ -115,9 +115,8 @@ pub struct DevEntry {
     /// Put the ship straight onto a station, by [`crate::navigation::Course::parse`] spelling.
     /// The same courses the interface offers, without the crossing in between.
     pub station: Option<String>,
-    /// Center the map on the local star, which needs a system loaded and so cannot be an
-    /// action parsed at the entry.
-    pub map_focus_star: bool,
+    /// What the map's camera is to hold onto, written every frame like the rest of the pin.
+    pub map_focus: Option<WantedFocus>,
 
     /// Where the map's camera stands: bearing and elevation in degrees, stand-off in
     /// astronomical units. A light-year is 63 241 of them.
@@ -230,7 +229,7 @@ impl Plugin for ClientPlugin {
                     // After the framing, because a pin overrules everything including that.
                     pin_camera.run_if(in_state(AppState::InGame)),
                     pin_map_camera.run_if(in_state(AppState::InGame)),
-                    focus_map_star.run_if(in_state(AppState::InGame)),
+                    pin_map_focus.run_if(in_state(AppState::InGame)),
                     // The clock is deliberately not gated on any panel or overlay. See
                     // lightcone/docs/13-client-shell.md: the game does not pause.
                     advance_clock.run_if(in_state(AppState::InGame)),
@@ -663,13 +662,47 @@ fn pin_camera(dev: Res<DevEntry>, mut ui: ResMut<Ui>) {
     ui.boom_lengths = booms;
 }
 
-/// Center the map on the local star once there is one to center on.
-fn focus_map_star(dev: Res<DevEntry>, game: Res<Game>, mut ui: ResMut<Ui>) {
-    if !dev.map_focus_star {
-        return;
+/// What `--map-focus` asked for, before there is a system to resolve a star against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WantedFocus {
+    Ship,
+    Star,
+    Free,
+}
+
+impl WantedFocus {
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "ship" => Some(Self::Ship),
+            "star" => Some(Self::Star),
+            "free" => Some(Self::Free),
+            _ => None,
+        }
     }
-    let Some(system) = game.0.system.as_ref() else { return };
-    ui.map.focus = crate::ui::MapFocus::Item(em_map::ItemKey::from_id("star", system.star.get()));
+}
+
+/// Hold the map's focus where the development flags asked for it.
+///
+/// **A pin has to pin the whole camera.** `--map` held the angles and the stand-off and left
+/// the focus alone, so a hand on the mouse could pan a shot that was supposed to be
+/// reproducible — and two runs of the same command then framed differently, which is exactly
+/// what `--demo-cam` exists to prevent. `--map` on its own holds the ship.
+fn pin_map_focus(dev: Res<DevEntry>, game: Res<Game>, mut ui: ResMut<Ui>) {
+    let wanted = match (dev.map_focus, dev.map_camera) {
+        (Some(wanted), _) => wanted,
+        (None, Some(_)) => WantedFocus::Ship,
+        (None, None) => return,
+    };
+    ui.map.focus = match wanted {
+        WantedFocus::Ship => crate::ui::MapFocus::Observer,
+        WantedFocus::Free => crate::ui::MapFocus::Free,
+        WantedFocus::Star => match game.0.system.as_ref() {
+            Some(system) => {
+                crate::ui::MapFocus::Item(em_map::ItemKey::from_id("star", system.star.get()))
+            }
+            None => return,
+        },
+    };
 }
 
 /// The same, for the map. See [`DevEntry::map_camera`].
