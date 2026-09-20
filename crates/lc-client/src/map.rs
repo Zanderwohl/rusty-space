@@ -42,12 +42,18 @@ const INITIAL_SIDE: u32 = 512;
 const MIN_SIDE: u32 = 64;
 const MAX_SIDE: u32 = 4096;
 
-/// How wide a line is drawn, in pixels, whatever it is a line of.
+/// How wide a line is drawn, in pixels.
 ///
 /// Screen-constant rather than world-constant: a ring scaled to ten thousand render units
 /// would scale its own tube to ten thousand as well. The shader's `target_tube_radius` is the
 /// dial, and it is set per entity from that entity's own scale.
 const LINE_PX: f32 = 1.6;
+
+/// And the reference scale — decade rings, spokes, drop-lines — at half that, in width and in
+/// brightness both.
+///
+/// They are the ruler and not the thing being measured. At equal weight the grid competes with
+/// the bodies on it for the same attention, and the bodies are what the map is of.
 
 /// How fat a tube may get, as a fraction of its own unit mesh — and it is per family, because
 /// one number cannot serve all three.
@@ -62,6 +68,8 @@ const LINE_TUBE_FRACTION: f32 = 0.02;
 const SPHERE_TUBE_FRACTION: f32 = 0.06;
 const POINT_TUBE_FRACTION: f32 = 0.5;
 
+const SCALE_PX: f32 = LINE_PX * 0.5;
+
 /// How much of the palette color a line is drawn at.
 ///
 /// The shader gives `base_color * (1 + alpha * emission_strength)`, and the alpha is the line
@@ -70,6 +78,10 @@ const POINT_TUBE_FRACTION: f32 = 0.5;
 /// makes up the contrast — 0.45 and 1.2 put a grid line at 0.77 and an equator at 0.99.
 const LINE_COLOR_SCALE: f32 = 0.45;
 const LINE_EMISSION: f32 = 1.2;
+
+/// The reference scale's share of it. The shader multiplies the base color through, so halving
+/// the base halves what reaches the screen.
+const SCALE_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.5;
 
 /// The near and far planes, as multiples of the stand-off.
 ///
@@ -405,26 +417,27 @@ fn place(
         *at = item_transform(placement, rad_per_px);
         set_thickness(&mut materials, material, at.scale.max_element(), rad_per_px,
             at.translation.length(),
-            if resolved { SPHERE_TUBE_FRACTION } else { POINT_TUBE_FRACTION });
+            if resolved { SPHERE_TUBE_FRACTION } else { POINT_TUBE_FRACTION }, LINE_PX);
     }
     for (of, mut at, material) in drops.iter_mut() {
         let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
         *at = drop_transform(placement);
         set_thickness(&mut materials, material, 1.0, rad_per_px, at.translation.length(),
-            LINE_TUBE_FRACTION);
+            LINE_TUBE_FRACTION, SCALE_PX);
     }
     for (of, mut at, material) in rings.iter_mut() {
         let Some(ring) = frame.rings.get(of.0) else { continue };
         *at = ring_transform(&frame, ring.radius);
         set_thickness(&mut materials, material, ring.radius, rad_per_px,
-            at.translation.length().max(ring.radius), LINE_TUBE_FRACTION);
+            at.translation.length().max(ring.radius), LINE_TUBE_FRACTION, SCALE_PX);
     }
     for (of, mut at, material) in annuli.iter_mut() {
         let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
         let Some(annulus) = placement.annulus else { continue };
         *at = annulus_transform(placement, annulus);
         set_thickness(&mut materials, material, annulus.outer, rad_per_px,
-            nearest_reach(at.translation.length(), annulus, standoff), LINE_TUBE_FRACTION);
+            nearest_reach(at.translation.length(), annulus, standoff), LINE_TUBE_FRACTION,
+            LINE_PX);
     }
     if let Ok((mut at, material)) = spokes.single_mut() {
         *at = ring_transform(&frame, standoff * SPOKE_REACH);
@@ -432,7 +445,7 @@ fn place(
         // mesh's own space, so a thickness computed against a different number is wrong by
         // exactly that ratio. Sized against the near end, which is the focus.
         set_thickness(&mut materials, material, standoff * SPOKE_REACH, rad_per_px, standoff,
-            LINE_TUBE_FRACTION);
+            LINE_TUBE_FRACTION, SCALE_PX);
     }
     map.frame = Some(frame);
 }
@@ -576,14 +589,16 @@ fn ring_transform(frame: &MapFrame, radius: f32) -> Transform {
 /// the inside of a tube is a solid wall: the map flashed full green. It happened on a respawn,
 /// a respawn happens when the ring count changes, and the ring count changes on every decade —
 /// so it fired while scrolling and almost never while sitting still.
-pub fn tube_target(scale: f32, rad_per_px: f32, distance: f32, max_fraction: f32) -> f32 {
-    let world = (distance * rad_per_px * LINE_PX).max(f32::MIN_POSITIVE);
+pub fn tube_target(scale: f32, rad_per_px: f32, distance: f32, max_fraction: f32,
+    width_px: f32) -> f32 {
+    let world = (distance * rad_per_px * width_px).max(f32::MIN_POSITIVE);
     match scale > f32::MIN_POSITIVE {
         true => (world / scale).min(max_fraction),
         false => BASE_TUBE_RADIUS,
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn set_thickness(
     materials: &mut Assets<BodyWireframeMaterial>,
     material: &MeshMaterial3d<BodyWireframeMaterial>,
@@ -591,9 +606,10 @@ fn set_thickness(
     rad_per_px: f32,
     distance: f32,
     max_fraction: f32,
+    width_px: f32,
 ) {
     let Some(mut asset) = materials.get_mut(&material.0) else { return };
-    asset.target_tube_radius = tube_target(scale, rad_per_px, distance, max_fraction);
+    asset.target_tube_radius = tube_target(scale, rad_per_px, distance, max_fraction, width_px);
 }
 
 fn spawn_scene(
@@ -610,10 +626,10 @@ fn spawn_scene(
     for (index, ring) in frame.rings.iter().enumerate() {
         let at = ring_transform(frame, ring.radius);
         let target = tube_target(ring.radius, rad_per_px,
-            at.translation.length().max(ring.radius), LINE_TUBE_FRACTION);
+            at.translation.length().max(ring.radius), LINE_TUBE_FRACTION, SCALE_PX);
         commands.spawn((
             Mesh3d(map.ring.clone()),
-            MeshMaterial3d(materials.add(line_material(RING, target))),
+            MeshMaterial3d(materials.add(line_material(RING, target, SCALE_COLOR_SCALE))),
             at,
             NoFrustumCulling,
             layer.clone(),
@@ -627,7 +643,8 @@ fn spawn_scene(
         Mesh3d(map.spokes.clone()),
         MeshMaterial3d(materials.add(line_material(
             SPOKE,
-            tube_target(reach, rad_per_px, standoff, LINE_TUBE_FRACTION),
+            tube_target(reach, rad_per_px, standoff, LINE_TUBE_FRACTION, SCALE_PX),
+            SCALE_COLOR_SCALE,
         ))),
         ring_transform(frame, reach),
         NoFrustumCulling,
@@ -647,7 +664,8 @@ fn spawn_scene(
             MeshMaterial3d(materials.add(line_material(
                 color_of(placement.kind),
                 tube_target(at.scale.max_element(), rad_per_px, at.translation.length(),
-                    fraction),
+                    fraction, LINE_PX),
+                LINE_COLOR_SCALE,
             ))),
             at,
             NoFrustumCulling,
@@ -658,10 +676,12 @@ fn spawn_scene(
         if let Some(annulus) = placement.annulus {
             let at = annulus_transform(placement, annulus);
             let target = tube_target(annulus.outer, rad_per_px,
-                nearest_reach(at.translation.length(), annulus, standoff), LINE_TUBE_FRACTION);
+                nearest_reach(at.translation.length(), annulus, standoff), LINE_TUBE_FRACTION,
+                LINE_PX);
             commands.spawn((
                 Mesh3d(meshes.add(annulus_mesh(annulus))),
-                MeshMaterial3d(materials.add(line_material(POPULATION, target))),
+                MeshMaterial3d(materials.add(line_material(POPULATION, target,
+                    LINE_COLOR_SCALE))),
                 at,
                 NoFrustumCulling,
                 layer.clone(),
@@ -672,10 +692,10 @@ fn spawn_scene(
         if placement.has_drop_line() {
             let at = drop_transform(placement);
             let target = tube_target(1.0, rad_per_px, at.translation.length(),
-                LINE_TUBE_FRACTION);
+                LINE_TUBE_FRACTION, SCALE_PX);
             commands.spawn((
                 Mesh3d(map.drop.clone()),
-                MeshMaterial3d(materials.add(line_material(DROP, target))),
+                MeshMaterial3d(materials.add(line_material(DROP, target, SCALE_COLOR_SCALE))),
                 at,
                 NoFrustumCulling,
                 layer.clone(),
@@ -686,13 +706,14 @@ fn spawn_scene(
     }
 }
 
-fn line_material(color: Color, target_tube_radius: f32) -> BodyWireframeMaterial {
+fn line_material(color: Color, target_tube_radius: f32, color_scale: f32)
+    -> BodyWireframeMaterial {
     let rgba = color.to_linear();
     BodyWireframeMaterial {
         base_color: LinearRgba::new(
-            rgba.red * LINE_COLOR_SCALE,
-            rgba.green * LINE_COLOR_SCALE,
-            rgba.blue * LINE_COLOR_SCALE,
+            rgba.red * color_scale,
+            rgba.green * color_scale,
+            rgba.blue * color_scale,
             1.0,
         ),
         emission_strength: LINE_EMISSION,
@@ -839,7 +860,8 @@ mod tests {
             for height in [64.0f32, 410.0, 2160.0] {
                 let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / height;
                 let reach = standoff * SPOKE_REACH;
-                let world = reach * tube_target(reach, rad_per_px, standoff, LINE_TUBE_FRACTION);
+                let world =
+                    reach * tube_target(reach, rad_per_px, standoff, LINE_TUBE_FRACTION, SCALE_PX);
                 let clearance = standoff * floor;
                 assert!(
                     world < clearance,
@@ -872,7 +894,7 @@ mod tests {
         for (annulus, center_at, standoff) in cases {
             let reach = nearest_reach(center_at, annulus, standoff);
             let world = annulus.outer
-                * tube_target(annulus.outer, rad_per_px, reach, LINE_TUBE_FRACTION);
+                * tube_target(annulus.outer, rad_per_px, reach, LINE_TUBE_FRACTION, LINE_PX);
             assert!(
                 world < reach,
                 "outer {:e}: tube {world:e} against a reach of {reach:e}",
@@ -912,12 +934,13 @@ mod tests {
     fn a_line_holds_its_width_on_screen_across_the_scales() {
         let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
         let width_px = |scale: f32, distance: f32| {
-            let world = scale * tube_target(scale, rad_per_px, distance, LINE_TUBE_FRACTION);
+            let world =
+                scale * tube_target(scale, rad_per_px, distance, LINE_TUBE_FRACTION, SCALE_PX);
             world / distance / rad_per_px
         };
         for scale in [1.0f32, 1.0e2, 1.0e4] {
             let px = width_px(scale, scale);
-            assert!((px - LINE_PX).abs() < 1.0e-3, "{scale:e} units drew {px} px");
+            assert!((px - SCALE_PX).abs() < 1.0e-3, "{scale:e} units drew {px} px");
         }
     }
 }
