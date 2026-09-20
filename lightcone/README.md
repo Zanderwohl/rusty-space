@@ -53,6 +53,17 @@ cross-reference except where a shared crate is the subject.
 
 ## Status
 
-Nothing is implemented. These are planning documents, and planning is finished — the blocking
-decisions are made and [12-buildout.md](docs/12-buildout.md) is the order of work. Every number in them is a first
-estimate; where a number drives a decision, the derivation is shown so it can be rechecked.
+Phases 1a through 9 of [12-buildout.md](docs/12-buildout.md) are built — `crates/lc-*` is some
+59 000 lines of Rust. `lc-spacetime` and `lc-world` are engine-free and tested, `lc-store` holds
+the schema and the light-cone cursor, `lc-proto` is at wire version 27, `lc-server` is
+authoritative, and `lc-client` runs native and in a browser. What is left of phase 9 is delivery
+rather than the build: [14-hosting.md](docs/14-hosting.md) W4.
+
+Phase 10 — the game — has not started. There are no resources, no deposits, no construction and
+no replication; survey regimes and proper time are library code nothing calls yet. Much of what
+exists instead was never in the plan — ship fitting, solar income, radio, the scenarios,
+accounts, the library — which is why [12-buildout.md](docs/12-buildout.md) is the order of work
+and not a record of it. It carries no completion markers; the code is the only status.
+
+Every number in these documents is a first estimate until a phase has measured it; where a
+number drives a decision, the derivation is shown so it can be rechecked.
