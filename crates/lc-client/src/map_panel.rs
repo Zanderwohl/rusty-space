@@ -180,14 +180,16 @@ fn controls(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<
 
     ui.horizontal(|ui| {
         if ui.button("center on the ship").clicked() {
-            ask(out, Action::FocusMap(None));
+            ask(out, Action::FocusMap(crate::ui::MapFocus::Observer));
         }
+        // "the star", not its name: whichever one this is, the button does the same thing, and
+        // a label that changes between systems is a label that has to be read before it is
+        // pressed. The name is on the star itself.
         if let Some(system) = game.0.system.as_ref() {
-            if ui.button(format!("center on {}", system.star_name)).clicked() {
-                ask(out, Action::FocusMap(Some(em_map::ItemKey::from_id(
-                    "star",
-                    system.star.get(),
-                ))));
+            if ui.button("center on the star").clicked() {
+                ask(out, Action::FocusMap(crate::ui::MapFocus::Item(
+                    em_map::ItemKey::from_id("star", system.star.get()),
+                )));
             }
         }
     });

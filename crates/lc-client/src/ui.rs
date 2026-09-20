@@ -103,6 +103,23 @@ impl Panel {
     }
 }
 
+/// What the map's camera is centered on.
+///
+/// Three states and not an `Option`, which is what this was and what made "center on the
+/// ship" a button that did nothing at all. `None` has to mean *leave the camera where it is*,
+/// because that is what a pan needs; following the observer is a third thing, and folding it
+/// into the same `None` meant the ship was the one object on the map you could not center on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MapFocus {
+    /// Wherever it was last left. A pan puts it here.
+    Free,
+    /// The observer, which is where a map should open.
+    #[default]
+    Observer,
+    /// Something in the snapshot, followed as it moves.
+    Item(em_map::ItemKey),
+}
+
 /// What the map is showing, and from where.
 ///
 /// One field on [`UiState`] rather than six, because every part of it moves together: a plane
@@ -112,9 +129,9 @@ impl Panel {
 pub struct MapView {
     pub orbit: em_map::Orbit,
     pub plane: em_map::Plane,
-    /// What the camera is centered on, or the observer when nothing is picked. A key rather
-    /// than a position: Saturn moves.
-    pub focus: Option<em_map::ItemKey>,
+    /// A key rather than a position: Saturn moves, and a camera pointed at where it was is a
+    /// camera that drifts off it over an afternoon.
+    pub focus: MapFocus,
     pub source: crate::map_source::Source,
 }
 

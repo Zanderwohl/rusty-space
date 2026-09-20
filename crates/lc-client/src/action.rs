@@ -37,8 +37,8 @@ pub enum Action {
     PanMap { right: f64, ahead: f64 },
     SetMapPlane(em_map::Plane),
     ToggleMapPlane,
-    /// What the map is centered on. `None` is the observer.
-    FocusMap(Option<em_map::ItemKey>),
+    /// What the map is centered on.
+    FocusMap(crate::ui::MapFocus),
     SetMapSource(crate::map_source::Source),
 
     /// Begin the desktop sign-in: open the browser and listen for the answer.
@@ -312,7 +312,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         let plane = ui.map.plane;
         ui.map.orbit.pan(plane, right, ahead);
         // A pan is a statement about where to look, so it gives up following anything.
-        ui.map.focus = None;
+        ui.map.focus = crate::ui::MapFocus::Free;
     }
     Action::SetMapPlane(plane) => ui.map.plane = plane,
     Action::ToggleMapPlane => ui.map.plane = ui.map.plane.other(),

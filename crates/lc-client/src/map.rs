@@ -333,8 +333,8 @@ fn place(
     let mut view = ui.map;
     // Follow the selection rather than a remembered position: Saturn moves, and a map that
     // centered on where it was is a map that drifts off it over an afternoon.
-    if let Some(item) = view.focus.and_then(|key| map.snapshot.item(key)) {
-        view.orbit.focus_ly = item.position_ly;
+    if let Some(at) = focus_position(view.focus, &map.snapshot) {
+        view.orbit.focus_ly = at;
     }
     let meters_per_unit = crate::view::ScaleTier::for_distance(view.orbit.distance_m())
         .meters_per_unit();
@@ -401,6 +401,18 @@ fn place(
             LINE_TUBE_FRACTION);
     }
     map.frame = Some(frame);
+}
+
+/// Where the camera should be looking, or `None` to leave it where it is.
+///
+/// A key that is no longer in the snapshot also leaves it: a body going out of range should
+/// stop the camera following it, not throw the view at the world origin.
+pub fn focus_position(focus: crate::ui::MapFocus, snapshot: &MapSnapshot) -> Option<DVec3> {
+    match focus {
+        crate::ui::MapFocus::Free => None,
+        crate::ui::MapFocus::Observer => snapshot.observer().map(|o| o.position_ly),
+        crate::ui::MapFocus::Item(key) => snapshot.item(key).map(|i| i.position_ly),
+    }
 }
 
 fn render(v: DVec3) -> Vec3 {
@@ -607,6 +619,62 @@ fn color_of(kind: ItemKind) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::ui::MapFocus;
+    use em_map::{ItemKey, ItemKind, MapItem, MapSnapshot};
+    use glam::DVec3;
+
+    fn snapshot() -> MapSnapshot {
+        MapSnapshot::observed(0.0, vec![
+            MapItem::body(ItemKey::from_name("observer"), "this ship", ItemKind::Observer,
+                DVec3::new(1.0, 2.0, 3.0), 100.0, DVec3::Z),
+            MapItem::body(ItemKey::from_id("star", 7), "Sol", ItemKind::Star,
+                DVec3::new(4.0, 5.0, 6.0), 7.0e8, DVec3::Z),
+        ])
+    }
+
+    /// **The ship was the one thing on the map you could not center on.**
+    ///
+    /// Focus was an `Option<ItemKey>` and `None` had to mean "leave the camera alone", because
+    /// that is what a pan needs — so the button that asked for the observer asked for nothing
+    /// and the camera stayed at the world origin. Three states, because there are three.
+    #[test]
+    fn centering_on_the_ship_finds_the_ship() {
+        let snapshot = snapshot();
+        assert_eq!(
+            focus_position(MapFocus::Observer, &snapshot),
+            Some(DVec3::new(1.0, 2.0, 3.0)),
+        );
+        assert_eq!(
+            focus_position(MapFocus::Item(ItemKey::from_id("star", 7)), &snapshot),
+            Some(DVec3::new(4.0, 5.0, 6.0)),
+        );
+    }
+
+    /// And a pan has to be able to leave the camera alone, which is the state the other two
+    /// were competing with.
+    #[test]
+    fn a_free_camera_is_left_where_it_was_put() {
+        assert_eq!(focus_position(MapFocus::Free, &snapshot()), None);
+    }
+
+    /// A map opens on the observer rather than on the world origin, which is empty space some
+    /// distance from wherever the ship happens to be.
+    #[test]
+    fn a_map_opens_on_the_ship() {
+        assert_eq!(crate::ui::MapView::default().focus, MapFocus::Observer);
+    }
+
+    /// Following something that has gone out of range stops following it. It does not throw
+    /// the view at the origin, which is what a `None`-means-origin reading would do.
+    #[test]
+    fn following_something_that_is_gone_holds_still() {
+        assert_eq!(focus_position(MapFocus::Item(ItemKey(999)), &snapshot()), None);
+        assert_eq!(
+            focus_position(MapFocus::Observer, &MapSnapshot::observed(0.0, Vec::new())),
+            None,
+        );
+    }
 
     /// **No line is ever thicker than the camera's clearance over the plane.**
     ///
