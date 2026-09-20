@@ -66,7 +66,13 @@ const LINE_PX: f32 = 1.6;
 /// wireframe ball with hairline tubes is invisible at three pixels across.
 const LINE_TUBE_FRACTION: f32 = 0.02;
 const SPHERE_TUBE_FRACTION: f32 = 0.06;
-const POINT_TUBE_FRACTION: f32 = 0.5;
+
+/// A circle's line, as a fraction of its own radius.
+///
+/// The one member of the family that is a *constant* rather than a cap that occasionally
+/// binds: both the symbol and its line are fixed pixel sizes, so the distance and the scale in
+/// [`tube_target`] cancel and the answer is always this.
+const POINT_TUBE_FRACTION: f32 = LINE_PX / (POINT_PX * 0.5);
 
 const SCALE_PX: f32 = LINE_PX * 0.5;
 
@@ -135,13 +141,20 @@ const DASH_PX: f32 = 5.0;
 /// viewport many times over and its dashes are sub-pixel anyway.
 const MAX_DASHES: usize = 48;
 
-/// Angular radius, in pixels, past which an item is drawn as a wireframe sphere rather than a
-/// point. Below it a sphere is a handful of sub-pixel tubes and reads as nothing at all.
-const SPHERE_PX: f32 = 3.0;
+/// Apparent **diameter**, in pixels, below which a body is a circle instead of a sphere.
+///
+/// A diameter, not a radius — the sky's `resolved::RESOLVE_PX` is a radius, and the two
+/// numbers do not mean the same thing.
+///
+/// It is also the diameter the circle is drawn at, and that is the point of having one number:
+/// a body shrinks until it reaches this size and then holds it, so nothing jumps at the
+/// crossover. Below it a sphere is a dozen sub-pixel tubes drawn over each other, which is
+/// both the more expensive thing to draw and the less legible one.
+const POINT_PX: f32 = 5.0;
 
-/// What a point is drawn at, in render units per unit of distance: a small constant angle, so
-/// everything unresolved is the same size on screen.
-const POINT_ANGULAR_RADIUS: f32 = 0.004;
+/// Divisions of that circle. Sixteen is a smooth five-pixel ring and an eighth of the ring
+/// mesh — a level of detail that cost more to draw than the sphere would not be one.
+const POINT_SEGMENTS: u32 = 16;
 
 /// The camera the map is drawn for.
 #[derive(Component)]
@@ -186,6 +199,8 @@ pub struct Map {
     pub snapshot: MapSnapshot,
     pub frame: Option<MapFrame>,
     sphere: Handle<Mesh>,
+    /// What an unresolved body is drawn with: a circle facing the eye. See [`POINT_PX`].
+    point: Handle<Mesh>,
     ring: Handle<Mesh>,
     spokes: Handle<Mesh>,
     /// One drop-line mesh per dash count, indexed from one dash. Built once: every one of them
@@ -243,6 +258,7 @@ fn setup(
         snapshot: MapSnapshot::observed(0.0, Vec::new()),
         frame: None,
         sphere: meshes.add(wire_mesh::generate_latlon_sphere(&[], BASE_TUBE_RADIUS, 4)),
+        point: meshes.add(wire_mesh::ring_tube(POINT_SEGMENTS, BASE_TUBE_RADIUS, 4, 1.0)),
         ring: meshes.add(wire_mesh::ring_tube(RING_SEGMENTS, BASE_TUBE_RADIUS, 4, 1.0)),
         spokes: meshes.add(wire_mesh::plane_spokes(
             PLANE_SPOKES,
@@ -345,7 +361,7 @@ fn place(
     mut camera: Query<(&mut Transform, &mut Projection), (With<MapCamera>, Without<MapDrawn>)>,
     existing: Query<Entity, With<MapDrawn>>,
     mut items: Query<
-        (&MapItemOf, &mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
+        (&MapItemOf, &mut Transform, &mut Mesh3d, &MeshMaterial3d<BodyWireframeMaterial>),
         (Without<MapCamera>, Without<MapDropOf>, Without<MapRingOf>, Without<MapAnnulusOf>, Without<MapSpokes>),
     >,
     mut drops: Query<
@@ -424,13 +440,22 @@ fn place(
         return;
     }
 
-    for (of, mut at, material) in items.iter_mut() {
+    for (of, mut at, mut mesh, material) in items.iter_mut() {
         let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
         let resolved = is_resolved(placement, rad_per_px);
         *at = item_transform(placement, rad_per_px);
+        // Zooming in on a body crosses the threshold without changing the set that is drawn,
+        // so the level of detail is a handle swap here and not a respawn. Same as a drop-line
+        // gaining a dash.
+        let (wanted, fraction) = match resolved {
+            true => (&map.sphere, SPHERE_TUBE_FRACTION),
+            false => (&map.point, POINT_TUBE_FRACTION),
+        };
+        if mesh.0 != *wanted {
+            mesh.0 = wanted.clone();
+        }
         set_thickness(&mut materials, material, at.scale.max_element(), rad_per_px,
-            at.translation.length(),
-            if resolved { SPHERE_TUBE_FRACTION } else { POINT_TUBE_FRACTION }, LINE_PX);
+            at.translation.length(), fraction, LINE_PX);
     }
     for (of, mut at, mut mesh, material) in drops.iter_mut() {
         let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
@@ -549,23 +574,43 @@ fn at_of(placement: &Placement) -> Vec3 {
     render(placement.at.as_dvec3())
 }
 
-/// A body is a sphere at its own size once it is worth more than a few pixels, and a point of
-/// a fixed angular size below that.
+/// A body is a sphere at its own size once it is worth more than a few pixels across, and a
+/// circle of exactly [`POINT_PX`] below that.
 fn is_resolved(placement: &Placement, rad_per_px: f32) -> bool {
-    rad_per_px > 0.0 && placement.angular_radius / rad_per_px > SPHERE_PX
+    rad_per_px > 0.0 && 2.0 * placement.angular_radius / rad_per_px > POINT_PX
+}
+
+/// The render-unit radius of a circle drawn [`POINT_PX`] across at `distance`.
+fn point_radius(distance: f32, rad_per_px: f32) -> f32 {
+    (distance * rad_per_px * POINT_PX * 0.5).max(f32::MIN_POSITIVE)
+}
+
+/// A circle is a symbol rather than an object, so it faces the eye — which is the render
+/// origin, because every transform here is camera-relative. The mesh lies in the XZ plane,
+/// so it is its +Y that has to point back.
+fn face_camera(at: Vec3) -> Quat {
+    match at.try_normalize() {
+        Some(away) => Quat::from_rotation_arc(Vec3::Y, -away),
+        None => Quat::IDENTITY,
+    }
 }
 
 fn item_transform(placement: &Placement, rad_per_px: f32) -> Transform {
     let at = at_of(placement);
-    let resolved = is_resolved(placement, rad_per_px);
-    let radius = match resolved {
-        true => placement.radius,
-        false => (at.length() * POINT_ANGULAR_RADIUS).max(f32::MIN_POSITIVE),
-    };
-    Transform {
-        translation: at,
-        rotation: Quat::from_rotation_arc(Vec3::Y, render(placement.pole.as_dvec3()).normalize()),
-        scale: Vec3::splat(radius),
+    match is_resolved(placement, rad_per_px) {
+        true => Transform {
+            translation: at,
+            rotation: Quat::from_rotation_arc(
+                Vec3::Y,
+                render(placement.pole.as_dvec3()).normalize(),
+            ),
+            scale: Vec3::splat(placement.radius),
+        },
+        false => Transform {
+            translation: at,
+            rotation: face_camera(at),
+            scale: Vec3::splat(point_radius(at.length(), rad_per_px)),
+        },
     }
 }
 
@@ -688,12 +733,12 @@ fn spawn_scene(
 
     for placement in &frame.placements {
         let at = item_transform(placement, rad_per_px);
-        let fraction = match is_resolved(placement, rad_per_px) {
-            true => SPHERE_TUBE_FRACTION,
-            false => POINT_TUBE_FRACTION,
+        let (mesh, fraction) = match is_resolved(placement, rad_per_px) {
+            true => (&map.sphere, SPHERE_TUBE_FRACTION),
+            false => (&map.point, POINT_TUBE_FRACTION),
         };
         commands.spawn((
-            Mesh3d(map.sphere.clone()),
+            Mesh3d(mesh.clone()),
             MeshMaterial3d(materials.add(line_material(
                 color_of(placement.kind),
                 tube_target(at.scale.max_element(), rad_per_px, at.translation.length(),
@@ -904,6 +949,92 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn body_at(distance: f32, radius: f32) -> Placement {
+        Placement {
+            key: ItemKey::from_name("a body"),
+            kind: ItemKind::Planet,
+            label: "a body".into(),
+            at: glam::Vec3::new(0.0, distance, 0.0),
+            foot: glam::Vec3::new(0.0, distance, 0.0),
+            radius,
+            angular_radius: radius / distance,
+            annulus: None,
+            pole: glam::Vec3::Z,
+        }
+    }
+
+    /// **Nothing changes size at the level of detail.**
+    ///
+    /// One number is both the threshold and the size the circle is drawn at, so a body shrinks
+    /// until it reaches [`POINT_PX`] and then holds it. Reading that number as a radius in one
+    /// place and a diameter in the other is a factor of two at the crossover — a visible pop,
+    /// and nothing in the types to catch it.
+    #[test]
+    fn a_body_holds_its_size_where_it_stops_being_a_sphere() {
+        let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
+        let distance = 40.0;
+        // A body sitting exactly on the threshold, and one a hair under it.
+        let on = POINT_PX * 0.5 * rad_per_px * distance;
+        assert!(is_resolved(&body_at(distance, on * 1.01), rad_per_px), "just over should be a sphere");
+        let under = body_at(distance, on * 0.99);
+        assert!(!is_resolved(&under, rad_per_px), "just under should be a circle");
+
+        let drawn = item_transform(&under, rad_per_px).scale.x;
+        assert!(
+            (drawn / on - 1.0).abs() < 0.05,
+            "a circle of {drawn} where the sphere it replaced was {on}",
+        );
+    }
+
+    /// And it holds that size at every distance, which is what makes it a symbol: the far one
+    /// is as readable as the near one, and only its place on the map says which is which.
+    #[test]
+    fn a_circle_is_the_same_size_wherever_it_is() {
+        let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
+        let want = POINT_PX * 0.5;
+        for distance in [1.0e-3f32, 1.0, 40.0, 1.0e5] {
+            // Radius zero: a ship, which has no size to draw at any zoom.
+            let at = item_transform(&body_at(distance, 0.0), rad_per_px);
+            let px = at.scale.x / (at.translation.length() * rad_per_px);
+            assert!(
+                (px / want - 1.0).abs() < 1.0e-3,
+                "at {distance:e} the circle came out {px} px across the radius, wanted {want}",
+            );
+        }
+    }
+
+    /// **A circle faces the eye, or it is an ellipse and sometimes a line.**
+    ///
+    /// The eye is the render origin, because every transform on this layer is camera-relative.
+    #[test]
+    fn a_circle_faces_the_eye() {
+        let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
+        let places = [
+            glam::Vec3::new(0.0, 40.0, 0.0),
+            glam::Vec3::new(-3.0, 0.5, 12.0),
+            glam::Vec3::new(1.0e4, -2.0e3, 7.0),
+            glam::Vec3::Y,
+            -glam::Vec3::Y,
+        ];
+        for place in places {
+            let mut placement = body_at(1.0, 0.0);
+            placement.at = place;
+            placement.foot = place;
+            let at = item_transform(&placement, rad_per_px);
+            // The mesh's own normal is +Y; after the rotation it must point back at the eye.
+            // Against the transform's own translation, not the placement's: these are two
+            // different frames and `item_transform` is where the swizzle happens.
+            let normal = at.rotation * Vec3::Y;
+            let toward_eye = -at.translation.normalize();
+            assert!(
+                normal.dot(toward_eye) > 0.999,
+                "at {place:?} the circle's normal was {normal:?}, wanted {toward_eye:?}",
+            );
+        }
+        // And nothing blows up for something sitting on the camera.
+        assert!(face_camera(Vec3::ZERO).is_finite());
     }
 
     /// **A dash is the same length wherever it is drawn.**

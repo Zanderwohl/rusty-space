@@ -690,6 +690,20 @@ rings mark order-of-magnitude distances; anything off the plane hangs from a das
 The reach is a fixed sphere of twenty-five light-years — a reach that moved with the zoom would
 change what exists as well as what is framed.
 
+### Below five pixels a body is a circle
+
+A wireframe sphere drawn smaller than a few pixels across is a dozen sub-pixel tubes laid over
+each other: the most expensive thing on the layer to draw and the least legible, and at a
+system's scale most of what is on the map is that size. Below five pixels it is a circle facing
+the eye instead — a sixteenth of the sphere's geometry, and a shape rather than a smudge.
+
+**One number is both the threshold and the size the circle is drawn at**, so nothing changes
+size at the crossover: a body shrinks until it reaches five pixels and then holds. The circle is
+a symbol and keeps its palette color, so a distant ship is still amber.
+
+It is a handle swap and not a respawn. Zooming in on a body crosses the threshold without
+changing the set of things drawn, the same way a body drifting off the plane gains a dash.
+
 ### The plane is drawn, never filled
 
 Rings and radial spokes, all of them tubes with a real radius. Nothing in the map is a surface,
