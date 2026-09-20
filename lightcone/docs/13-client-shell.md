@@ -376,7 +376,7 @@ seven hours twenty times a second having never drifted at all.
 | `--curve <n>` | which band the light curve measures |
 | `--map <bearing:elevation:au>` | pin the map's camera. A light-year is 63 241 astronomical units |
 | `--map-plane <ecliptic\|galactic>` | which plane the map lays its rings in |
-| `--map-focus <ship\|star\|free>` | what the map's camera locks onto. A pin, like `--map`, which holds the ship on its own |
+| `--map-focus <ship\|primary\|star\|free>` | what the map's camera locks onto. A pin, like `--map`, which holds the ship on its own |
 | `--tune` | open the starfield tuning panel |
 | `--frames <n>` | frames before the shutter |
 | `--at <body>` | stand off a named body of the local system |
@@ -711,9 +711,16 @@ Moving the focus that way is a pan by another name, so it gives up following —
 focus actually moves. Scaling about the center through itself changes nothing, so the wheel over
 a locked center does not cost the lock.
 
-What the camera looks at is a separate thing with three states. **Free** is wherever a pan left
-it; **the ship** and **a body** lock the center and hold it every frame until the next pan,
-which drops back to free. A left-drag is that pan.
+What the camera looks at is a separate thing with four states. **Free** is wherever a pan left
+it; **the ship**, **the primary** and **a body** lock the center and hold it every frame until
+the next pan, which drops back to free. A left-drag is that pan.
+
+**The primary is a mode and not the body it resolves to today.** It is whatever holds the ship
+— a moon's planet, a planet's star — and it follows the ship across a sphere of influence into
+the next, where centering on Earth by name stays on Earth after the ship has gone. It is the
+same body the readout names while coasting, because both ask the system the same question. The
+button is grayed where nothing holds the ship, which is between the stars; it is not hidden,
+because a control that vanishes shuffles the two either side of it out from under the cursor.
 
 The reference plane is the **local ecliptic or the disc of the galaxy**, and the toggle tilts
 the whole view because the camera's own angles are measured in the plane's basis. Concentric

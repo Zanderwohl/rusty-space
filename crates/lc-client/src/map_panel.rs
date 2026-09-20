@@ -289,7 +289,8 @@ fn whole(
         "map mode".into(),
         egui::UiBuilder::new().layer_id(egui::LayerId::background()).max_rect(under),
     );
-    egui::Panel::top("map controls").show(&mut root, |ui| controls(ui, ui_state, game, out));
+    egui::Panel::top("map controls")
+        .show(&mut root, |ui| controls(ui, ui_state, game, map.primary, out));
 
     let rect = root.available_rect_before_wrap();
     let response = root.allocate_rect(rect, egui::Sense::click_and_drag());
@@ -506,7 +507,13 @@ fn color_of(color: bevy::prelude::Color) -> egui::Color32 {
 ///
 /// One row and not three. It is a strip rather than a panel of settings: everything on it says
 /// what the map is a map *of*, and a reader glances at it rather than working down it.
-fn controls(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {
+fn controls(
+    ui: &mut egui::Ui,
+    state: &Ui,
+    game: &Game,
+    primary: Option<em_map::ItemKey>,
+    out: &mut MessageWriter<Requested>,
+) {
     ui.horizontal(|ui| {
         for plane in [em_map::Plane::Ecliptic, em_map::Plane::Galactic] {
             if ui.selectable_label(state.map.plane == plane, plane.label()).clicked() {
@@ -542,13 +549,19 @@ fn controls(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<
         if ui.button("center on the ship").clicked() {
             ask(out, Action::FocusMap(crate::ui::MapFocus::Observer));
         }
+        // Whatever holds the ship: a moon's planet, a planet's star. A mode, so it follows the
+        // ship out of one sphere of influence and into the next.
+        if centering(ui, "center on the primary", primary.is_some()) {
+            ask(out, Action::FocusMap(crate::ui::MapFocus::Primary));
+        }
         // "the star", not its name: a button whose label changes between systems has to be
         // read before it is pressed. The name is on the star itself.
-        if let Some(system) = game.0.system.as_ref()
-            && ui.button("center on the star").clicked()
+        let star = game.0.system.as_ref().map(|system| system.star);
+        if centering(ui, "center on the star", star.is_some())
+            && let Some(star) = star
         {
             ask(out, Action::FocusMap(crate::ui::MapFocus::Item(
-                em_map::ItemKey::from_id("star", system.star.get()),
+                em_map::ItemKey::from_id("star", star.get()),
             )));
         }
     });
@@ -580,6 +593,18 @@ fn drag_of(shown: ViewMode, right: bool) -> Option<Drag> {
         (ViewMode::World, true) => Some(Drag::Look),
         (ViewMode::World, false) => None,
     }
+}
+
+/// One of the center buttons, grayed where there is nothing to center on.
+///
+/// Grayed rather than hidden: between the stars there is neither a primary nor a star, and a
+/// control that vanishes takes the strip's other buttons out from under the cursor with it.
+fn centering(ui: &mut egui::Ui, label: &str, exists: bool) -> bool {
+    if !exists {
+        ui.weak(label).on_hover_text("there is nothing here holding the ship");
+        return false;
+    }
+    ui.button(label).clicked()
 }
 
 /// Drag and wheel over a surface, as actions.
@@ -803,5 +828,6 @@ mod tests {
         assert!(zooms_to_cursor(MapFocus::Free));
         assert!(!zooms_to_cursor(MapFocus::Observer), "centered on the ship");
         assert!(!zooms_to_cursor(MapFocus::Item(ItemKey::from_name("Sol"))), "on a body");
+        assert!(!zooms_to_cursor(MapFocus::Primary), "on whatever holds the ship");
     }
 }

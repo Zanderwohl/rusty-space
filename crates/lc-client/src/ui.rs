@@ -131,6 +131,12 @@ pub enum MapFocus {
     /// The observer, which is where a map should open.
     #[default]
     Observer,
+    /// Whatever holds the ship — a moon's planet, a planet's star — followed as the ship
+    /// crosses from one sphere of influence into the next.
+    ///
+    /// A mode and not the body it resolves to today, which is the whole of the difference:
+    /// [`MapFocus::Item`] on Earth stays on Earth after the ship has left it.
+    Primary,
     /// Something in the snapshot, followed as it moves.
     Item(em_map::ItemKey),
 }

@@ -263,6 +263,17 @@ impl LocalSystem {
         self.primary
     }
 
+    /// The body whose sphere of influence holds a point: what an arc there is about, and what
+    /// the map means by the primary.
+    ///
+    /// The star holds anything outside every other sphere, because its own influence has no
+    /// outer edge until another star's begins.
+    pub fn holding(&self, position_ly: DVec3, seconds: f64) -> BodyIndex {
+        let at_m = (position_ly - self.origin_ly) * M_PER_LY;
+        em_sim::influence::containing(&self.sim, at_m, Instant::from_seconds_since_j2000(seconds))
+            .unwrap_or(self.primary)
+    }
+
     pub fn body_named(&self, name: &str) -> Option<BodyIndex> {
         // By display name as well as by id, because the interface offers what `drawables` shows
         // and that is the display name.

@@ -717,6 +717,7 @@ fn pin_camera(dev: Res<DevEntry>, mut ui: ResMut<Ui>) {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WantedFocus {
     Ship,
+    Primary,
     Star,
     Free,
 }
@@ -725,6 +726,7 @@ impl WantedFocus {
     pub fn named(name: &str) -> Option<Self> {
         match name {
             "ship" => Some(Self::Ship),
+            "primary" => Some(Self::Primary),
             "star" => Some(Self::Star),
             "free" => Some(Self::Free),
             _ => None,
@@ -746,6 +748,7 @@ fn pin_map_focus(dev: Res<DevEntry>, game: Res<Game>, mut ui: ResMut<Ui>) {
     };
     ui.map.focus = match wanted {
         WantedFocus::Ship => crate::ui::MapFocus::Observer,
+        WantedFocus::Primary => crate::ui::MapFocus::Primary,
         WantedFocus::Free => crate::ui::MapFocus::Free,
         WantedFocus::Star => match game.0.system.as_ref() {
             Some(system) => {

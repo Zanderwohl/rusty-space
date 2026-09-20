@@ -161,6 +161,9 @@ pub struct Map {
     /// Whether anything is showing the map. Nothing is drawn when nothing is looking.
     pub shown: bool,
     pub snapshot: MapSnapshot,
+    /// Which item holds the ship, when the snapshot has one. Worked out beside the snapshot
+    /// because that is where the session is.
+    pub primary: Option<ItemKey>,
     pub frame: Option<MapFrame>,
     sphere: Handle<Mesh>,
     /// An unresolved body: a circle facing the eye. See [`POINT_FRACTION`].
@@ -264,6 +267,7 @@ fn setup(
         wanted: UVec2::splat(INITIAL_SIDE),
         shown: false,
         snapshot: MapSnapshot::observed(0.0, Vec::new()),
+        primary: None,
         frame: None,
         sphere: meshes.add(wire_mesh::generate_latlon_sphere(&[], BASE_TUBE_RADIUS, 4)),
         point: meshes.add(wire_mesh::ring_tube(POINT_SEGMENTS, BASE_TUBE_RADIUS, 4, 1.0)),
@@ -351,6 +355,7 @@ fn survey(
         #[cfg(feature = "godview")]
         Source::God => crate::map_source::coordinate(&game.0, eye.at_ly),
     };
+    map.primary = crate::map_source::primary(&game.0);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -399,7 +404,7 @@ fn place(
     // Follow the selection, not a remembered position: Saturn moves. Written back rather than
     // applied to a copy, because every action that moves the camera starts from the
     // interface's own `focus_ly`, and a stale one makes the first frame of a drag jump.
-    follow(ui.map.focus, &map.snapshot, &mut ui.map.orbit.focus_ly);
+    follow(ui.map.focus, &map.snapshot, map.primary, &mut ui.map.orbit.focus_ly);
     let view = ui.map;
     let meters_per_unit = crate::view::ScaleTier::for_distance(view.orbit.distance_m())
         .meters_per_unit();
@@ -488,8 +493,13 @@ fn place(
 
 /// Put `focus_ly` where the focus says to look, and say whether it moved. Pans and zooms start
 /// from this value, so a stale one is a jump.
-pub fn follow(focus: crate::ui::MapFocus, snapshot: &MapSnapshot, focus_ly: &mut DVec3) -> bool {
-    match focus_position(focus, snapshot) {
+pub fn follow(
+    focus: crate::ui::MapFocus,
+    snapshot: &MapSnapshot,
+    primary: Option<ItemKey>,
+    focus_ly: &mut DVec3,
+) -> bool {
+    match focus_position(focus, snapshot, primary) {
         Some(at) if at != *focus_ly => {
             *focus_ly = at;
             true
@@ -500,11 +510,17 @@ pub fn follow(focus: crate::ui::MapFocus, snapshot: &MapSnapshot, focus_ly: &mut
 
 /// Where the camera should look, or `None` to leave it. A key no longer in the snapshot also
 /// leaves it, so a body going out of range stops the camera rather than moving it to nowhere.
-pub fn focus_position(focus: crate::ui::MapFocus, snapshot: &MapSnapshot) -> Option<DVec3> {
+pub fn focus_position(
+    focus: crate::ui::MapFocus,
+    snapshot: &MapSnapshot,
+    primary: Option<ItemKey>,
+) -> Option<DVec3> {
+    let at = |key| snapshot.item(key).map(|i| i.position_ly);
     match focus {
         crate::ui::MapFocus::Free => None,
         crate::ui::MapFocus::Observer => snapshot.observer().map(|o| o.position_ly),
-        crate::ui::MapFocus::Item(key) => snapshot.item(key).map(|i| i.position_ly),
+        crate::ui::MapFocus::Primary => primary.and_then(at),
+        crate::ui::MapFocus::Item(key) => at(key),
     }
 }
 
@@ -835,11 +851,11 @@ mod tests {
     fn centering_on_the_ship_finds_the_ship() {
         let snapshot = snapshot();
         assert_eq!(
-            focus_position(MapFocus::Observer, &snapshot),
+            focus_position(MapFocus::Observer, &snapshot, None),
             Some(DVec3::new(1.0, 2.0, 3.0)),
         );
         assert_eq!(
-            focus_position(MapFocus::Item(ItemKey::from_id("star", 7)), &snapshot),
+            focus_position(MapFocus::Item(ItemKey::from_id("star", 7)), &snapshot, None),
             Some(DVec3::new(4.0, 5.0, 6.0)),
         );
     }
@@ -853,7 +869,7 @@ mod tests {
         let mut orbit = em_map::Orbit::framing(DVec3::ZERO, em_map::snapshot::M_PER_AU * 40.0);
         assert_eq!(orbit.focus_ly, DVec3::ZERO, "premise: it starts at the origin");
 
-        follow(MapFocus::Observer, &snapshot, &mut orbit.focus_ly);
+        follow(MapFocus::Observer, &snapshot, None, &mut orbit.focus_ly);
         assert_eq!(orbit.focus_ly, ship, "following did not reach the interface's copy");
 
         // Now the drag. A small pan has to leave the camera near the ship, not near zero.
@@ -872,15 +888,32 @@ mod tests {
     fn following_the_same_place_twice_writes_once() {
         let snapshot = snapshot();
         let mut at = DVec3::ZERO;
-        assert!(follow(MapFocus::Observer, &snapshot, &mut at), "the first call should move it");
-        assert!(!follow(MapFocus::Observer, &snapshot, &mut at), "the second should not");
-        assert!(!follow(MapFocus::Free, &snapshot, &mut at), "free never moves it");
+        assert!(follow(MapFocus::Observer, &snapshot, None, &mut at), "the first call should move it");
+        assert!(!follow(MapFocus::Observer, &snapshot, None, &mut at), "the second should not");
+        assert!(!follow(MapFocus::Free, &snapshot, None, &mut at), "free never moves it");
+    }
+
+    /// **The primary is a mode, not the body it resolves to today.** Centering on it and
+    /// centering on Earth are the same picture while the ship is at Earth, and different
+    /// pictures the moment it is not.
+    #[test]
+    fn the_primary_is_whatever_the_map_is_told_holds_the_ship() {
+        let snapshot = snapshot();
+        let star = ItemKey::from_id("star", 7);
+        assert_eq!(
+            focus_position(MapFocus::Primary, &snapshot, Some(star)),
+            Some(DVec3::new(4.0, 5.0, 6.0)),
+        );
+        // Nothing holding it, and a body that is no longer in the snapshot: both leave the
+        // camera where it is rather than moving it to nowhere.
+        assert_eq!(focus_position(MapFocus::Primary, &snapshot, None), None);
+        assert_eq!(focus_position(MapFocus::Primary, &snapshot, Some(ItemKey(999))), None);
     }
 
     /// A pan has to be able to leave the camera where it is.
     #[test]
     fn a_free_camera_is_left_where_it_was_put() {
-        assert_eq!(focus_position(MapFocus::Free, &snapshot()), None);
+        assert_eq!(focus_position(MapFocus::Free, &snapshot(), None), None);
     }
 
     /// A map opens on the observer, not on the world origin.
@@ -892,9 +925,9 @@ mod tests {
     /// Following something out of range stops following it rather than moving the view.
     #[test]
     fn following_something_that_is_gone_holds_still() {
-        assert_eq!(focus_position(MapFocus::Item(ItemKey(999)), &snapshot()), None);
+        assert_eq!(focus_position(MapFocus::Item(ItemKey(999)), &snapshot(), None), None);
         assert_eq!(
-            focus_position(MapFocus::Observer, &MapSnapshot::observed(0.0, Vec::new())),
+            focus_position(MapFocus::Observer, &MapSnapshot::observed(0.0, Vec::new()), None),
             None,
         );
     }

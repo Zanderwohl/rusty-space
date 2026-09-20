@@ -184,6 +184,29 @@ fn drawable_item(body: &lc_world::system::Drawable) -> MapItem {
     .weighing(body.mass_kg)
 }
 
+/// What holds the ship, as a key into the snapshot.
+///
+/// The same body the readout names while coasting — `lc_world::coast::Coast::primary` asks the
+/// system the same question — so "about Earth" and the center of the map agree by construction.
+/// `None` between the stars, where there is no system to be held by.
+///
+/// The star is keyed by its catalogue id and every other body by name, because `drawables_at`
+/// leaves the star out and [`push_local_system`] puts it back under a key of its own. See
+/// [`key_of`].
+pub fn primary(session: &Session) -> Option<ItemKey> {
+    let system = session.system.as_ref()?;
+    Some(key_of(system, system.holding(session.ship.motion.position_ly,
+        session.coordinate_time_s())))
+}
+
+/// How a body of the local system is keyed.
+fn key_of(system: &lc_world::system::LocalSystem, index: em_sim::id::BodyIndex) -> ItemKey {
+    match index == system.primary() {
+        true => ItemKey::from_id("star", system.star.get()),
+        false => ItemKey::from_name(system.sim().name(index)),
+    }
+}
+
 fn push_bodies(items: &mut Vec<MapItem>, bodies: &Bodies) {
     items.extend(bodies.drawn.iter().map(drawable_item));
 }
@@ -284,6 +307,30 @@ mod tests {
         assert_eq!(count(DVec3::ZERO), 3);
         assert_eq!(count(DVec3::new(-1.0, 0.0, 0.0)), 2);
         assert_eq!(count(DVec3::new(-100.0, 0.0, 0.0)), 0);
+    }
+
+    /// **The primary has to be a key the snapshot holds.** The star is keyed by its catalogue
+    /// id and every other body by name, and a primary keyed the other way is a button that
+    /// does nothing at all.
+    #[test]
+    fn the_primary_is_a_key_the_snapshot_holds() {
+        let stars = AuthoredStars::sample();
+        // The third authored star is the one whose generated system has planets.
+        let star = &lc_world::sky::StarProvider::stars(&stars)[2];
+        let system = lc_world::system::LocalSystem::for_star(star).expect("a generated system");
+        let drawn = system.drawables_at(star.position_ly, 0.0);
+        let body = drawn.first().expect("a generated system has bodies");
+
+        // At a body's own center, that body holds the ship.
+        assert_eq!(
+            key_of(&system, system.holding(body.position_ly, 0.0)),
+            ItemKey::from_name(&body.name),
+            "the map keys a body by name",
+        );
+        // At the star's, nothing closer does.
+        let star_key = key_of(&system, system.holding(star.position_ly, 0.0));
+        assert_eq!(star_key, ItemKey::from_id("star", system.star.get()));
+        assert_ne!(star_key, ItemKey::from_name(&system.star_name), "the star is not by name");
     }
 
     /// Two things sharing a key share an entity and a selection.

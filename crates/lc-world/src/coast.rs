@@ -49,16 +49,7 @@ impl Coast {
         velocity_m_s: DVec3,
         now_s: f64,
     ) -> Option<Self> {
-        let at_m = (position_ly - system.origin_ly) * M_PER_LY;
-        let index = em_sim::influence::containing(
-            system.sim(),
-            at_m,
-            Instant::from_seconds_since_j2000(now_s),
-        )
-        // Outside every sphere of influence the star still holds it: the system's own influence
-        // has no outer edge until another star's begins.
-        .unwrap_or_else(|| system.primary());
-        Self::about(system, index, position_ly, velocity_m_s, now_s)
+        Self::about(system, system.holding(position_ly, now_s), position_ly, velocity_m_s, now_s)
     }
 
     /// Solve the arc about a *named* body, whether or not that body's sphere contains the ship.
@@ -173,13 +164,7 @@ impl Coast {
         velocity_m_s: DVec3,
         now_s: f64,
     ) -> Option<Self> {
-        let at_m = (position_ly - system.origin_ly) * M_PER_LY;
-        let holding = em_sim::influence::containing(
-            system.sim(),
-            at_m,
-            Instant::from_seconds_since_j2000(now_s),
-        )
-        .unwrap_or_else(|| system.primary());
+        let holding = system.holding(position_ly, now_s);
         if system.sim().name(holding) == self.primary {
             return None;
         }
