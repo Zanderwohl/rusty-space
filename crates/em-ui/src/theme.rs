@@ -1,4 +1,4 @@
-//! The colours a menu is drawn in.
+//! The colors a menu is drawn in.
 
 use bevy::color::Color;
 
@@ -13,10 +13,37 @@ pub mod vfd {
     pub const BUTTON_BORDER: Color = Color::srgb(0.23, 0.73, 0.40);
     pub const TEXT: Color = Color::srgb(0.35, 0.93, 0.69);
     pub const TEXT_DIM: Color = Color::srgb(0.20, 0.55, 0.40);
+
+    /// The second phosphor: a craft, against everything else.
+    ///
+    /// **The same perceptual lightness as [`TEXT`]**, so a ship and a body are equal weight on
+    /// a screen and only their hue differs — they are two kinds of thing, not one more
+    /// important than the other. Against that, as chromatic as sRGB reaches at that lightness,
+    /// which is what makes it amber rather than cream: Oklab `L = 0.852`, `C = 0.164`, and the
+    /// gamut boundary is at `C = 0.164`.
+    pub const AMBER: Color = Color::srgb(1.0, 0.77, 0.18);
     pub const OVERLAY_BACKDROP: Color = Color::srgba(0.0, 0.0, 0.0, 0.70);
 }
 
-/// Every colour a menu screen needs, carried by value so two products - or two screens of one
+#[cfg(test)]
+mod tests {
+    use super::vfd;
+    use bevy::color::Oklaba;
+
+    /// **A ship and a body are the same weight on screen.** Only the hue says which is which,
+    /// so the two have to sit at one perceptual lightness — a brighter amber would read as a
+    /// warning and a darker one as a thing already dealt with.
+    #[test]
+    fn the_amber_is_the_green_lightness() {
+        let green = Oklaba::from(vfd::TEXT).lightness;
+        let amber = Oklaba::from(vfd::AMBER).lightness;
+        assert!((amber - green).abs() < 0.01, "green {green}, amber {amber}");
+        // And it is a warm hue, not a second green: Oklab `b` is what says so.
+        assert!(Oklaba::from(vfd::AMBER).b > 0.1);
+    }
+}
+
+/// Every color a menu screen needs, carried by value so two products - or two screens of one
 /// product - can differ without a global.
 #[derive(Clone, Copy, Debug)]
 pub struct MenuTheme {

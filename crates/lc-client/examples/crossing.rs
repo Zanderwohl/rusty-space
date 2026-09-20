@@ -12,7 +12,7 @@ use em_plot::chart::{Axis, Chart, Rect, Style};
 use em_plot::primitives::{Anchor, Label, Point, Primitives, Rgba};
 use em_plot::{raster, scale::Scale};
 use lc_client::action::refresh_exposure;
-use lc_client::session::{POINT_STOPS, Session, SkyStar, TIME_RATE, point_colour};
+use lc_client::session::{POINT_STOPS, Session, SkyStar, TIME_RATE, point_color};
 use lc_client::ui::UiState;
 use lc_world::sky::{AuthoredStars, StarProvider};
 
@@ -79,7 +79,7 @@ fn main() {
         text: format!("crossing to {name} — {distance:.2} ly at {:.0} g", session.ship.motion.drive.accel_g),
         size: 17.0,
         anchor: Anchor::Start,
-        colour: FG,
+        color: FG,
     });
     layers.push(title);
 
@@ -139,14 +139,14 @@ fn panel(
                 (d.y.atan2(d.x).to_degrees(), d.z.clamp(-1.0, 1.0).asin().to_degrees())
             })
             .collect();
-        let colours: Vec<Rgba> = members
+        let colors: Vec<Rgba> = members
             .iter()
             .map(|s| {
-                let c = point_colour(&s.shaded);
+                let c = point_color(&s.shaded);
                 Rgba(c.x, c.y, c.z, 0.9)
             })
             .collect();
-        out.push(chart.scatter_with(&points, 0.8 + bucket as f32 * 1.2, |i, _| colours[i]));
+        out.push(chart.scatter_with(&points, 0.8 + bucket as f32 * 1.2, |i, _| colors[i]));
     }
 
     let beta = session.ship.motion.beta.length();
@@ -168,7 +168,7 @@ fn panel(
             text: line,
             size: 12.0,
             anchor: Anchor::Start,
-            colour: FG,
+            color: FG,
         });
     }
     out.push(text);

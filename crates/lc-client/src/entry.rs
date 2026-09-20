@@ -6,7 +6,7 @@
 
 use crate::action::Action;
 use lc_world::scenario;
-use crate::app::DevEntry;
+use crate::dev::DevEntry;
 
 /// Where this build's assets are.
 ///
@@ -119,6 +119,16 @@ pub fn parse(args: &[String]) -> Entry {
     if let Some(notches) = value::<f64>(args, "--zoom") {
         actions.push(Action::Zoom(notches));
     }
+    if let Some(name) = after("--map-plane") {
+        let plane = match name.as_str() {
+            "galactic" => Some(em_map::Plane::Galactic),
+            "ecliptic" => Some(em_map::Plane::Ecliptic),
+            _ => None,
+        };
+        if let Some(plane) = plane {
+            actions.push(Action::SetMapPlane(plane));
+        }
+    }
 
     // The sign-in modal draws over the main menu, so it cannot be reached by an action that
     // runs on entering the sky. This is the only way to photograph it.
@@ -145,8 +155,21 @@ pub fn parse(args: &[String]) -> Entry {
                 _ => None,
             }
         }),
+        map_focus: after("--map-focus").as_deref().and_then(crate::dev::WantedFocus::named),
+        // The map is a mode now rather than a window, and `--panel map` is the spelling every
+        // shot list already has. A pin, not an action: see `DevEntry::view`.
+        view: after("--panel")
+            .filter(|name| name.eq_ignore_ascii_case("map"))
+            .map(|_| crate::ui::ViewMode::Map),
         at_body: after("--at"),
         station: after("--station"),
+        map_camera: after("--map").and_then(|spec| {
+            let mut fields = spec.split(':').map(|f| f.parse::<f64>());
+            match (fields.next(), fields.next(), fields.next()) {
+                (Some(Ok(az)), Some(Ok(el)), Some(Ok(au))) => Some((az, el, au)),
+                _ => None,
+            }
+        }),
         lift_deg: value(args, "--lift"),
         screenshot: after("--shot"),
         after_frames: value(args, "--frames").unwrap_or(120),

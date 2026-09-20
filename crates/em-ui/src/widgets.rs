@@ -7,7 +7,7 @@ use bevy::prelude::*;
 
 use crate::theme::MenuTheme;
 
-/// A button that reacts to hover. The colours ride on the component so the hover system needs
+/// A button that reacts to hover. The colors ride on the component so the hover system needs
 /// no theme of its own, and two screens in different palettes can be on screen at once.
 #[derive(Component)]
 pub struct MenuButton {
@@ -69,7 +69,7 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         self
     }
 
-    /// A full-screen node that centres whatever is put in it. The screen's own marker goes on
+    /// A full-screen node that centers whatever is put in it. The screen's own marker goes on
     /// it, so despawning that one entity takes the screen with it.
     pub fn screen(&mut self, marker: impl Bundle) -> Entity {
         self.commands

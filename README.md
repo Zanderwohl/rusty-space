@@ -63,7 +63,7 @@ skewing an orbit.
 * `semi_minor_axis::conic_definition1` inverted the conic relation, returning
   `a * sqrt(1 + e^2)`.
 * True anomaly used `atan` where the quadrant mattered; it is `atan2`.
-* The equation of the centre dropped a term of its series.
+* The equation of the center dropped a term of its series.
 * `eccentricity_vector` had the cross product's operands reversed, flipping the
   direction of periapsis.
 * Specific orbital energy carried the wrong sign, so bound orbits read as unbound.
@@ -77,7 +77,7 @@ skewing an orbit.
 * Luna's elements were mixed-source: a semi-major axis inflated 0.66% by the absence
   of an anomalistic period, a prograde (positive) nodal precession period where nodal
   regression is retrograde, and a mass off by 22 orders of magnitude.
-* Bodies orbiting a barycentre took `mu = G(M_primary + m)`, which is wrong there —
+* Bodies orbiting a barycenter took `mu = G(M_primary + m)`, which is wrong there —
   each body's effective mu depends on the *other* body's mass. Pluto and Charon now
   carry an explicit `gravitational_parameter`.
 

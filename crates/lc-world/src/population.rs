@@ -18,7 +18,7 @@ use crate::star::Star;
 pub struct Population {
     /// Unit normal of the population's reference plane.
     pub pole: DVec3,
-    /// Semi-major axis, metres.
+    /// Semi-major axis, meters.
     pub semi_major: Distribution,
     pub eccentricity: Distribution,
     pub inclination: Inclination,
@@ -28,7 +28,7 @@ pub struct Population {
     /// Geometric cross-section per element, m^2.
     pub cross_section: f64,
     /// Per-band opacity. Flat for anything solid; an extinction curve for dust, which is what
-    /// makes grey-versus-reddening a diagnostic.
+    /// makes gray-versus-reddening a diagnostic.
     pub band_response: PerBand<f32>,
     /// Radiating area over intercepting cross-section, which is what sets the temperature the
     /// elements settle at.
@@ -45,9 +45,9 @@ pub struct Population {
 /// How far a population reaches: a torus, as the three distributions describe one.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Extent {
-    /// Nearest any element comes to the star, metres.
+    /// Nearest any element comes to the star, meters.
     pub inner_m: f64,
-    /// Furthest any element goes, metres.
+    /// Furthest any element goes, meters.
     pub outer_m: f64,
     /// Angle the inclinations tip it through: the half-thickness of the tube, as an angle from
     /// the plane. A right angle for an isotropic cloud, which is what makes one a shell.
@@ -55,17 +55,17 @@ pub struct Extent {
 }
 
 impl Extent {
-    /// Radius of the tube's centre line.
+    /// Radius of the tube's center line.
     pub fn core_m(&self) -> f64 {
         (self.inner_m + self.outer_m) * 0.5
     }
 
-    /// Half-width of the tube in the plane, metres.
+    /// Half-width of the tube in the plane, meters.
     pub fn half_width_m(&self) -> f64 {
         (self.outer_m - self.inner_m) * 0.5
     }
 
-    /// Half-height of the tube out of the plane, metres.
+    /// Half-height of the tube out of the plane, meters.
     pub fn half_height_m(&self) -> f64 {
         self.core_m() * self.half_angle_rad.sin()
     }
@@ -91,7 +91,7 @@ impl Population {
         let a_lo = axes.iter().map(|(v, _)| *v).fold(f64::INFINITY, f64::min);
         let a_hi = axes.iter().map(|(v, _)| *v).fold(0.0, f64::max);
         // Short of one, or a near-parabolic cloud has an inner radius of zero and a tube that
-        // swallows its own centre.
+        // swallows its own center.
         let e_hi = self.eccentricity.nodes().iter().map(|(v, _)| *v).fold(0.0, f64::max).clamp(0.0, 0.95);
         let inner_m = a_lo * (1.0 - e_hi);
         let outer_m = a_hi * (1.0 + e_hi);
@@ -111,7 +111,7 @@ impl Population {
         1.0 - (-self.covering_fraction()).exp()
     }
 
-    /// Flux-weighted orbital radius, metres.
+    /// Flux-weighted orbital radius, meters.
     ///
     /// From `E[1/r^2]`, not from the mean semi-major axis: what sets an element's temperature
     /// is the flux it receives, and that is what `inv_r2` already averages correctly.
@@ -241,7 +241,7 @@ impl Population {
     }
 }
 
-/// Average `f` over a disc of angular radius `s` centred at latitude `phi`.
+/// Average `f` over a disc of angular radius `s` centered at latitude `phi`.
 ///
 /// With `delta = s sin(theta)` the chord weighting becomes `cos^2(theta)`, and
 /// `(2/pi) * integral cos^2 = 1`, so a constant integrand passes through unchanged.
@@ -420,7 +420,7 @@ mod tests {
         }
     }
 
-    /// An element does not care how many neighbours it has. The absorbed fraction appears on
+    /// An element does not care how many neighbors it has. The absorbed fraction appears on
     /// both sides of the energy balance and cancels.
     #[test]
     fn coverage_does_not_change_the_temperature() {

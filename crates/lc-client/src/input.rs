@@ -29,6 +29,7 @@ pub fn bindings() -> Vec<(KeyCode, Action)> {
         (KeyCode::F5, Action::TogglePanel(Panel::DevActions)),
         // `R` is the refit window's. `C` for comms, which is what this is.
         (KeyCode::KeyC, Action::TogglePanel(Panel::Chat)),
+        (KeyCode::KeyM, Action::ToggleView),
         (KeyCode::Digit1, Action::SetBandPreset(0)),
         (KeyCode::Digit2, Action::SetBandPreset(1)),
         (KeyCode::Digit3, Action::SetBandPreset(2)),
@@ -87,6 +88,14 @@ pub fn held_bindings() -> Vec<(KeyCode, (f64, f64))> {
 
 /// Radians of look per pixel of mouse movement.
 pub const MOUSE_SENSITIVITY: f64 = 0.003;
+
+/// A pointer movement as a turn of the view, radians of yaw and pitch.
+///
+/// Shared, because the sky reads it off a locked cursor and the map's corner square off an
+/// ordinary drag: the same movement has to mean the same turn on both.
+pub fn look_from(delta: Vec2) -> (f64, f64) {
+    (-delta.x as f64 * MOUSE_SENSITIVITY, -delta.y as f64 * MOUSE_SENSITIVITY)
+}
 
 /// Notches of zoom per line of wheel. A pixel-precision wheel — a trackpad — reports pixels
 /// instead, and this many of them make one notch.
@@ -194,9 +203,9 @@ pub fn look_around(
         }
     }
     if looking.0 {
-        let d = motion.delta;
-        yaw -= d.x as f64 * MOUSE_SENSITIVITY;
-        pitch -= d.y as f64 * MOUSE_SENSITIVITY;
+        let (d_yaw, d_pitch) = look_from(motion.delta);
+        yaw += d_yaw;
+        pitch += d_pitch;
     }
 
     if yaw != 0.0 || pitch != 0.0 {

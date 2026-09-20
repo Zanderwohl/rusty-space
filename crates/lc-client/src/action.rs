@@ -11,7 +11,7 @@ use lc_world::sky::StarId;
 use crate::navigation::{Course, Target};
 use crate::session::Session;
 use crate::starfield::{PointStyle, Which};
-use crate::ui::{Look, MenuPage, Panel, UiState};
+use crate::ui::{Look, MenuPage, Panel, UiState, ViewMode};
 
 /// Everything the interface can be asked to do.
 #[derive(Clone, Debug, PartialEq)]
@@ -24,6 +24,29 @@ pub enum Action {
     GoToMenuPage(MenuPage),
     StartGame,
     Quit,
+    /// Which mode of play the main view shows. The map is one of two, not a window.
+    SetView(ViewMode),
+    ToggleView,
+    // --- the map ----------------------------------------------------------------------
+    /// Turn the map's camera by a relative amount, radians.
+    TurnMap { azimuth: f64, elevation: f64 },
+    /// In or out, in notches. Positive is closer.
+    ///
+    /// Not [`Action::Zoom`], which is the ship's boom in hull lengths and is clamped by two
+    /// angles. The map's is a stand-off in meters across fifteen orders of magnitude, and one
+    /// name for both would mean `--zoom` moving whichever happened to be on top.
+    ///
+    /// `anchor_ly` is a place on the reference plane to hold still while the camera comes in —
+    /// what the cursor is over. `None` zooms about the middle of the view.
+    ZoomMap { notches: f64, anchor_ly: Option<glam::DVec3> },
+    /// Slide the map's focus across the reference plane, in fractions of the stand-off.
+    PanMap { right: f64, ahead: f64 },
+    SetMapPlane(em_map::Plane),
+    ToggleMapPlane,
+    /// What the map is centered on.
+    FocusMap(crate::ui::MapFocus),
+    SetMapSource(crate::map_source::Source),
+
     /// Begin the desktop sign-in: open the browser and listen for the answer.
     SignIn,
     /// Give up on one in progress.
@@ -288,6 +311,39 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
 
         Action::Look { yaw, pitch } => ui.look.turn(yaw, pitch),
+
+    Action::SetView(view) => ui.view = view,
+    Action::ToggleView => ui.view = ui.view.other(),
+    Action::TurnMap { azimuth, elevation } => ui.map.orbit.turn(azimuth, elevation),
+    Action::ZoomMap { notches, anchor_ly } => match anchor_ly {
+        Some(anchor) => {
+            // Moving the focus is a pan by another name, so it gives up following — but only
+            // if it moved. The wheel over a locked center scales about the center itself,
+            // which changes nothing and must not cost the lock.
+            if ui.map.orbit.zoom_about(anchor, notches) {
+                ui.map.focus = crate::ui::MapFocus::Free;
+            }
+        }
+        None => ui.map.orbit.zoom(notches),
+    },
+    Action::PanMap { right, ahead } => {
+        let plane = ui.map.plane;
+        ui.map.orbit.pan(plane, right, ahead);
+        // A pan is a statement about where to look, so it gives up following anything.
+        ui.map.focus = crate::ui::MapFocus::Free;
+    }
+    Action::SetMapPlane(plane) => ui.map.plane = plane,
+    Action::ToggleMapPlane => ui.map.plane = ui.map.plane.other(),
+    Action::FocusMap(key) => ui.map.focus = key,
+    Action::SetMapSource(source) => {
+        #[cfg(feature = "godview")]
+        if source == crate::map_source::Source::God && !ui.may_see_everything {
+            effects.push(Effect::Notify("god view needs an administrative account".into()));
+            return effects;
+        }
+        ui.map.source = source;
+    }
+
         // Multiplicative, because the range is two and a half decades: a fixed step is either
         // imperceptible at the far end or the whole range in one notch at the near one. Left
         // unclamped here and clamped against the viewport by `hull::place_eye`, which is the
@@ -329,7 +385,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 }
             } else if session.cruise().is_some() || session.station().is_some() {
                 let note = match session.cancel() {
-                    // What it says is where the ship ended up, because cancelling does not
+                    // What it says is where the ship ended up, because canceling does not
                     // stop it: it keeps its velocity and that velocity is now an orbit.
                     Some(coast) => format!("drive cut — {}", crate::hud::arc(&coast)),
                     None => "drive cut".to_string(),
@@ -460,7 +516,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         // **The server owns the rate**, which `lightcone/docs/13-client-shell.md` calls dev
         // only and says why: a client that can change it is a client that can cheat. It is also
         // the client that suffers — its clock runs away from the server's, so an order comes
-        // back stamped in its own past and folds as a manoeuvre that already finished. The ship
+        // back stamped in its own past and folds as a maneuvere that already finished. The ship
         // appears to teleport, and the server goes on refusing orders about a system it does
         // not believe the ship has reached.
         Action::SetTimeRate(_) | Action::TimeRateUp | Action::TimeRateDown if session.remote => {
@@ -473,7 +529,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
         Action::WriteSnapshot => effects.push(Effect::WriteSnapshot),
         // Only a shard can do this, and only one started for it will. Offline there is no
-        // authority to ask and nothing that could honour the answer.
+        // authority to ask and nothing that could honor the answer.
         Action::StageDemo(name) if !session.remote => {
             let _ = name;
             effects.push(Effect::Notify("no server, so nowhere to stage a scene".into()));
@@ -638,6 +694,42 @@ mod tests {
 
     fn fixture() -> (UiState, Session) {
         (UiState::default(), Session::new(&AuthoredStars::sample(), 3))
+    }
+
+    /// The map is a mode of the main view, so the key that shows it puts it away again and
+    /// asking for the mode already in force is not a toggle.
+    #[test]
+    fn the_map_is_the_other_mode_of_the_main_view() {
+        let (mut ui, mut s) = fixture();
+        assert_eq!(ui.view, ViewMode::World, "a session starts flying");
+        apply(Action::ToggleView, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::Map);
+        apply(Action::ToggleView, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::World);
+        apply(Action::SetView(ViewMode::Map), &mut ui, &mut s);
+        apply(Action::SetView(ViewMode::Map), &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::Map);
+    }
+
+    /// **Switching the view leaves the map where it was.** The corner square and the whole
+    /// screen are one camera, so coming back has to find the picture that was left — including
+    /// the free camera a pan drops into, which is the state with no button of its own.
+    #[test]
+    fn switching_the_view_leaves_the_map_where_it_was() {
+        let (mut ui, mut s) = fixture();
+        apply(Action::SetMapPlane(em_map::Plane::Galactic), &mut ui, &mut s);
+        apply(Action::TurnMap { azimuth: 0.4, elevation: 0.1 }, &mut ui, &mut s);
+        apply(Action::ZoomMap { notches: 2.0, anchor_ly: None }, &mut ui, &mut s);
+        apply(Action::PanMap { right: 0.3, ahead: -0.2 }, &mut ui, &mut s);
+        assert_eq!(ui.map.focus, crate::ui::MapFocus::Free, "a pan is the way into it");
+
+        // Both ways in, because either could be the one that forgets.
+        let held = ui.map;
+        apply(Action::ToggleView, &mut ui, &mut s);
+        assert_eq!(ui.map, held, "showing the map moved its camera");
+        apply(Action::SetView(ViewMode::World), &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::World, "back where it started");
+        assert_eq!(ui.map, held, "the map's camera did not survive the round trip");
     }
 
     #[test]

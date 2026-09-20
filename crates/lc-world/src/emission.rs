@@ -16,7 +16,7 @@ use crate::star::Star;
 /// Phase 4 replaces implementations of this with `em-sim` propagation over real elements;
 /// the trait exists so photometry does not have to wait for it.
 pub trait OccluderMotion {
-    /// Star-centred position in metres at coordinate time `t`, seconds.
+    /// Star-centered position in meters at coordinate time `t`, seconds.
     fn position_at(&self, t: f64) -> DVec3;
 }
 
@@ -74,12 +74,12 @@ impl EmissionModel {
         let mut tau = PerBand::splat(0.0f64);
         for (k, p) in self.populations.iter().enumerate() {
             let f = Flicker::of(p, direction, &self.star, self.seed ^ (k as u64 + 1));
-            let grey = f.deficit_at(t);
-            if grey <= 0.0 {
+            let gray = f.deficit_at(t);
+            if gray <= 0.0 {
                 continue;
             }
             for b in Band::ALL {
-                tau[b] += grey * p.band_response[b] as f64;
+                tau[b] += gray * p.band_response[b] as f64;
             }
         }
         tau

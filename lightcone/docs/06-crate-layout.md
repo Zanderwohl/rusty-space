@@ -8,7 +8,8 @@
 | `crates/em-sim` | simulation state and propagation | em-foundations; `bevy_ecs` behind the `bevy` feature |
 | `crates/em-render` | **new.** reusable Bevy rendering for orbital scenes | em-foundations, em-sim, bevy |
 | `crates/em-plot` | **new.** charts, curves, heat maps; see [11-plotting.md](11-plotting.md) | glam; bevy and egui behind features |
-| `crates/em-spectra` | **new.** bands, blackbody, extinction, colour, stellar relations, band-to-display mapping | serde only; no engine, no glam |
+| `crates/em-map` | **new.** what a spatial map draws: snapshots, reference planes, decade rings, an orbit camera | glam, em-plot, em-foundations; no engine |
+| `crates/em-spectra` | **new.** bands, blackbody, extinction, color, stellar relations, band-to-display mapping | serde only; no engine, no glam |
 | `crates/lc-spacetime` | event coordinates, intervals, retarded time, worldlines | glam, serde; no engine |
 | `crates/lc-world` | game rules, systems, structures, ships, resources, photometry | em-foundations, em-sim, em-spectra, lc-spacetime |
 | `crates/lc-proto` | wire messages, serialisation, versioning | serde, lc-spacetime, lc-world types |
@@ -34,6 +35,7 @@ cargo tree -p exotic-matters | grep -i '^\s*lc-'            # must be empty
 cargo tree -p em-foundations | grep -i bevy                 # must be empty
 cargo tree -p em-sim --no-default-features | grep -i bevy   # must be empty
 cargo tree -p em-plot --no-default-features | grep -i bevy  # must be empty
+cargo tree -p em-map | grep -i bevy                          # must be empty
 cargo tree -p lc-spacetime | grep -i bevy                   # must be empty
 ```
 
@@ -103,7 +105,7 @@ The responsibilities split three ways instead:
 
 | concern | home |
 |---|---|
-| colour, temperature, blackbody, extinction | `em-spectra` |
+| color, temperature, blackbody, extinction | `em-spectra` |
 | catalogue parsing, star identity, world data | `lc-world::sky`, behind `StarProvider` |
 | drawing a list of stars it is handed | `em-render` |
 
@@ -122,13 +124,13 @@ Extraction order, one commit each, app building at every step:
 ## `em-spectra`
 
 Everything about light that is physics rather than game rule. Shared, because Exotic Matters
-has stars to colour too and because a physics toolkit is worth more than a game feature.
+has stars to color too and because a physics toolkit is worth more than a game feature.
 
 ```
-bands.rs       the seven-band definition, centres, widths, BandMask
+bands.rs       the seven-band definition, centers, widths, BandMask
 blackbody.rs   Planck, Wien, Stefan-Boltzmann, band-integrated emission
-colour_index.rs  B-V to Teff (Ballesteros) and back; the reddening degeneracy
-extinction.rs  A_lambda/A_V curves, reddening vectors, colour-colour geometry
+color_index.rs  B-V to Teff (Ballesteros) and back; the reddening degeneracy
+extinction.rs  A_lambda/A_V curves, reddening vectors, color-color geometry
 cie.rs         CIE matching functions, XYZ, sRGB, the direct-assignment shortcut
 mapping.rs     BandMapping: the 3 x BANDS display matrix, presets, bloom assignment
 ```
@@ -213,7 +215,7 @@ The WASM build is the constraint that shapes the client. Keep `lc-client` free o
 ## Do not build release
 
 The root `Cargo.toml` sets `opt-level = 3` for all dependencies in the dev profile, so a
-debug build already runs Bevy and glam fully optimised. Release adds `lto = true` and
+debug build already runs Bevy and glam fully optimized. Release adds `lto = true` and
 `codegen-units = 1`, which costs minutes of link time. This applies to the new crates too.
 The exception is the WASM build, where size matters and `--release` with `opt-level = "s"`
 plus `wasm-opt` is the only configuration worth shipping.

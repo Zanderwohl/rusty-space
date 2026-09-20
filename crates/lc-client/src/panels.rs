@@ -58,7 +58,7 @@ pub fn unreachable(
             ui.add_space(120.0);
             ui.heading("Not connected to the server");
             if let Some(why) = why {
-                ui.colored_label(connection_colour(crate::uplink::Note::Wrong), why);
+                ui.colored_label(connection_color(crate::uplink::Note::Wrong), why);
             }
             ui.add_space(12.0);
             ui.label("Reload the page to try again.");
@@ -66,8 +66,8 @@ pub fn unreachable(
     });
 }
 
-/// The palette for a connection state. The words are `uplink`'s; only the colour is here.
-fn connection_colour(note: crate::uplink::Note) -> egui::Color32 {
+/// The palette for a connection state. The words are `uplink`'s; only the color is here.
+fn connection_color(note: crate::uplink::Note) -> egui::Color32 {
     match note {
         crate::uplink::Note::Quiet => egui::Color32::from_rgb(140, 170, 150),
         crate::uplink::Note::Working => egui::Color32::from_rgb(240, 170, 60),
@@ -75,19 +75,28 @@ fn connection_colour(note: crate::uplink::Note) -> egui::Color32 {
     }
 }
 
+/// Where the readout ends, in points from the top of the window.
+///
+/// egui panels stack inside one `Ui` and every system here builds its own root, so a second
+/// strip cannot find the first by asking. [`crate::map_panel`] needs it: the map's own strip
+/// hangs under this one.
+#[derive(Resource, Default)]
+pub struct HudFoot(pub f32);
+
 /// The always-visible readout. Never in a closable panel: it is the premise.
 pub fn hud(
     mut contexts: EguiContexts,
     ui_state: Res<Ui>,
     game: Res<Game>,
     uplink: Res<crate::uplink::Uplink>,
+    mut foot: ResMut<HudFoot>,
     mut out: MessageWriter<Requested>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
     let lines = hud::lines(&game.0, &ui_state.0);
 
     let mut root = viewport_ui(ctx);
-    egui::Panel::top("hud").show(&mut root, |ui| {
+    let strip = egui::Panel::top("hud").show(&mut root, |ui| {
         ui.horizontal(|ui| {
             ui.strong(&lines.clock);
             ui.separator();
@@ -110,7 +119,7 @@ pub fn hud(
                 crate::uplink::note(&uplink.state, uplink.round_trip_s)
             {
                 ui.separator();
-                ui.colored_label(connection_colour(note), words);
+                ui.colored_label(connection_color(note), words);
             }
         });
         if let Some(target) = &lines.target {
@@ -152,6 +161,7 @@ pub fn hud(
             }
         });
     });
+    foot.0 = strip.response.rect.max.y;
 
     if !ui_state.notifications.is_empty() {
         egui::Window::new("notifications")
@@ -194,7 +204,7 @@ const NOTICE_WIDTH: f32 = 300.0;
 /// **Not a button**, and the whole row rather than the words. A button's frame in a list of
 /// notices makes the list read as a row of controls, and a click target the width of its own
 /// text is one a cursor slides off — these arrive unasked for, so hitting one should not need
-/// aim. What marks it out is the colour it is already drawn in and the background under it
+/// aim. What marks it out is the color it is already drawn in and the background under it
 /// while it is hovered.
 ///
 /// Laid out by hand rather than as a widget because the background has to be painted *under*
@@ -228,7 +238,7 @@ fn notice_link(ui: &mut egui::Ui, text: &str) -> egui::Response {
 fn closer(now: lc_proto::Closeness) -> (&'static str, &'static str, lc_proto::Closeness) {
     match now {
         lc_proto::Closeness::Company => {
-            ("close in", "within sight: a kilometre between hulls", lc_proto::Closeness::Intimate)
+            ("close in", "within sight: a kilometer between hulls", lc_proto::Closeness::Intimate)
         }
         lc_proto::Closeness::Intimate => {
             ("stand off", "back to formation distance", lc_proto::Closeness::Company)
@@ -266,8 +276,8 @@ pub fn open_panels(
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
     for panel in ui_state.open_panels().to_vec() {
-        // The reader brings its own window: a book is not a readout, and egui's chrome around
-        // it would be a dark title bar over a white page. See `crate::reader`.
+        // The book brings its own window: it is not a readout, and egui's chrome around it
+        // would be a dark title bar over a white page. See `crate::reader`.
         if panel == Panel::Reader {
             continue;
         }
@@ -450,7 +460,7 @@ fn telescope(
 
     if let Some((_, last)) = samples.last() {
         // The picture is the readout, but a number is the one form of it that survives being
-        // read aloud, screenshotted, or looked at by someone who cannot see the colour.
+        // read aloud, screenshotted, or looked at by someone who cannot see the color.
         let (label, value) = if *last >= 0.0 {
             ("deficit", *last)
         } else {
@@ -522,7 +532,7 @@ fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Re
             ui.add(egui::ProgressBar::new(cruise.progress(now) as f32).show_percentage());
             ui.label(format!("{:?}", state.phase));
             // A transfer's numbers are in its body's frame, and saying which is the difference
-            // between "ten kilometres a second" and "ten kilometres a second *past Earth*".
+            // between "ten kilometers a second" and "ten kilometers a second *past Earth*".
             let frame = match game.flown_about() {
                 Some(body) => format!(" past {body}"),
                 None => String::new(),
@@ -727,7 +737,7 @@ fn ships(
                     // definition, so the distance to where the light left *is* its age — and
                     // taking it that way needs no agreement with the server about what time it
                     // is. Differencing the timestamps instead measured the clock skew, which
-                    // at a frozen client rate put a ship eight kilometres away five minutes in
+                    // at a frozen client rate put a ship eight kilometers away five minutes in
                     // the past.
                     duration(range * lc_world::flight::JULIAN_YEAR_S),
                 ));
@@ -780,7 +790,7 @@ fn station(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<R
 /// How far the ship is from a target, light-years.
 fn range_to(game: &Game, system: &crate::system::LocalSystem, target: &Target) -> f64 {
     // At the ship's own time. Read out of the arena, which no longer advances, a three-radii
-    // orbit of Earth read as five hundred thousand kilometres after five hours -- which is
+    // orbit of Earth read as five hundred thousand kilometers after five hours -- which is
     // exactly how far Earth had gone in the meantime.
     let now = game.coordinate_time_s();
     let at = match target {
@@ -807,11 +817,11 @@ fn span(light_years: f64) -> String {
     span_m(light_years * crate::system::M_PER_LY)
 }
 
-fn span_m(metres: f64) -> String {
-    match metres {
+fn span_m(meters: f64) -> String {
+    match meters {
         // The primary orbits nothing, and "0 thousand km" reads as a measurement.
-        m if m <= 0.0 => "the centre".to_string(),
-        // Metres below a kilometre, because a hull is measured in them and "0 km" is not a
+        m if m <= 0.0 => "the center".to_string(),
+        // Meters below a kilometer, because a hull is measured in them and "0 km" is not a
         // size. Nothing that reads as an orbit radius is ever this small.
         m if m < 1.0e3 => format!("{m:.0} m"),
         m if m < 1.0e6 => format!("{:.0} km", m / 1.0e3),

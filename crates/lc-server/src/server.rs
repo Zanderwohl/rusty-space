@@ -914,7 +914,7 @@ impl<J: Journal> Server<J> {
     /// Fly every standing intercept one tick.
     ///
     /// Each craft steers by what **it** can see, which is the same sighting its owner is sent
-    /// and no fresher. A quarry that manoeuvres is therefore chased on stale information until
+    /// and no fresher. A quarry that maneuveres is therefore chased on stale information until
     /// the news arrives — seconds to hours across a system — and that delay is the game rather
     /// than a shortcoming of the guidance.
     ///
@@ -947,7 +947,7 @@ impl<J: Journal> Server<J> {
                 entry.last_plan_t = now;
             }
             // A burn, and burns are the loudest thing a ship does. Everyone in range learns
-            // that this craft manoeuvred, at light delay, exactly as they would for any other.
+            // that this craft maneuvered, at light delay, exactly as they would for any other.
             self.emit(id, KIND_BURN, BURN_POWER_W, "{}".into(), now, events, deliveries);
             // Its owner learns *what* it is flying, at once and directly. Nobody else does:
             // this is a ship being told about itself.
@@ -1138,7 +1138,7 @@ use crate::transport::Loopback;
         let beside = DVec3::new(0.0, 1.0e6 / lc_world::system::M_PER_LY, 0.0);
         server.admit(watcher, Craft::at(CraftId(2), lc_world::craft::Kind::Ship, beside), 0.0);
 
-        // Twenty thousand kilometres, past the standoff a crossing stops short of a star by.
+        // Twenty thousand kilometers, past the standoff a crossing stops short of a star by.
         let trip_ly = 2.0e7 / lc_world::system::M_PER_LY;
         let to_ly = DVec3::new(lc_world::flight::STANDOFF_LY + trip_ly, 0.0, 0.0);
         // Folded directly: between the stars there is no course to set, and an order to cross
@@ -1902,7 +1902,7 @@ use crate::transport::Loopback;
         );
 
         // Where the news starts from. The light of the burn leaves this point, and the
-        // pursuer may not act on it until it has travelled from here to wherever the pursuer
+        // pursuer may not act on it until it has traveled from here to wherever the pursuer
         // has got to — which is nearer than it was, because it has been closing all along.
         let from = at_now(&server, ShipId(2));
 
@@ -1924,8 +1924,8 @@ use crate::transport::Loopback;
         // closing and the true crossing is shorter than the one it was sent over. One tick of
         // slack, because a re-solve happens on a tick boundary and not at the instant the
         // light lands.
-        let travelled = reacted_where.distance(from) * lc_world::system::M_PER_LY;
-        let earliest_us = travelled / lc_world::flight::C_M_S * 1.0e6;
+        let traveled = reacted_where.distance(from) * lc_world::system::M_PER_LY;
+        let earliest_us = traveled / lc_world::flight::C_M_S * 1.0e6;
         let waited_us = (reacted_at - burn_t) as f64;
         assert!(
             waited_us + TICK_US as f64 >= earliest_us,
@@ -1941,9 +1941,9 @@ use crate::transport::Loopback;
     /// A contact's reported velocity may not change until the light of the burn that changed
     /// it has arrived. This is the one that had been wrong: a craft's worldline was its current
     /// motive evaluated at any time asked, so a burn rewrote its own past and every client in
-    /// the system saw the manoeuvre on the next tick, at any range.
+    /// the system saw the maneuvere on the next tick, at any range.
     #[tokio::test]
-    async fn a_contact_is_not_seen_to_manoeuvre_before_its_light_arrives() {
+    async fn a_contact_is_not_seen_to_maneuvere_before_its_light_arrives() {
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let watcher = ClientId(1);
@@ -1987,8 +1987,8 @@ use crate::transport::Loopback;
         let seen_moving = seen_moving.expect("the news never arrived at all");
 
         // The watcher does not move, so the crossing is the one the burn was sent over.
-        let travelled = here.distance(from) * lc_world::system::M_PER_LY;
-        let earliest_us = travelled / lc_world::flight::C_M_S * 1.0e6;
+        let traveled = here.distance(from) * lc_world::system::M_PER_LY;
+        let earliest_us = traveled / lc_world::flight::C_M_S * 1.0e6;
         let waited_us = (seen_moving - burn_t) as f64;
         assert!(
             waited_us + TICK_US as f64 >= earliest_us,
@@ -2787,7 +2787,7 @@ mod hello_tests {
         assert_eq!(welcomed(&mut wire, ClientId(2)), ShipId(2));
     }
 
-    /// Open house does not mean a valid ticket stops being honoured. A real account still
+    /// Open house does not mean a valid ticket stops being honored. A real account still
     /// reaches its own ship, which is what keeps one code path on the client.
     #[tokio::test]
     async fn a_real_ticket_still_names_its_account_when_the_door_is_open() {
@@ -2815,7 +2815,7 @@ mod hello_tests {
     ///
     /// The welcome used to carry a position and nothing else, so this ship came back at rest at
     /// the point it had reached — adrift, at a station it was no longer holding. A day later
-    /// the two were two and a half million kilometres apart, which is seven times the distance
+    /// the two were two and a half million kilometers apart, which is seven times the distance
     /// to the Moon.
     #[tokio::test]
     async fn signing_back_in_finds_the_ship_still_holding_its_orbit() {
@@ -3161,7 +3161,7 @@ mod hello_tests {
     ///
     /// Not a property of anything written for it — the fold is the fold, and a connection is a
     /// socket rather than a thing in space. It is asserted because it is the kind of invariant
-    /// that gets broken by an optimisation: gate any of the tick on who is connected and this is
+    /// that gets broken by an optimization: gate any of the tick on who is connected and this is
     /// the test that says what that cost.
     #[tokio::test]
     async fn watching_a_flight_does_not_change_it() {

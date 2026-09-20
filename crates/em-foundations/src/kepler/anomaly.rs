@@ -192,7 +192,7 @@ pub fn hyperbolic_from_true(true_anomaly: f64, eccentricity: f64) -> Option<f64>
     Some(2.0 * x.atanh())
 }
 
-/// Equation of the centre to `e^3`. Delegates to [`super::true_anomaly::from_mean_anomaly`].
+/// Equation of the center to `e^3`. Delegates to [`super::true_anomaly::from_mean_anomaly`].
 #[inline]
 pub fn true_from_mean_series(mean_anomaly: f64, eccentricity: f64) -> f64 {
     super::true_anomaly::from_mean_anomaly(mean_anomaly, eccentricity)
@@ -384,7 +384,7 @@ mod tests {
         assert!(worst(0.8, &bessel) > 1.0, "past the Laplace limit it should be hopeless");
 
         let series = |m, e| true_from_mean_series(m, e);
-        assert!(worst(0.0167, &series) < 1e-4, "equation of the centre is fine at low e");
+        assert!(worst(0.0167, &series) < 1e-4, "equation of the center is fine at low e");
         assert!(worst(0.5, &series) > 0.05, "and poor at high e");
     }
 

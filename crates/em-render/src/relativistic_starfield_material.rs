@@ -1,10 +1,10 @@
-//! A starfield shaded from physics rather than from a baked colour.
+//! A starfield shaded from physics rather than from a baked color.
 //!
 //! A descendant of [`crate::local_starfield_material`] and of the application's catalogue
 //! starfield, sharing their billboard technique: one mesh, four vertices per star, expanded in
 //! the vertex stage. It does not replace either. The difference is what is baked. Those bake a
-//! colour and a brightness, which is right when the input is a fixed apparent magnitude; this
-//! bakes a temperature and a radius, and derives colour, brightness and apparent direction per
+//! color and a brightness, which is right when the input is a fixed apparent magnitude; this
+//! bakes a temperature and a radius, and derives color, brightness and apparent direction per
 //! frame from uniforms, because a moving observer changes all three.
 //!
 //! The host supplies `shaders/starfield.wgsl` and the band lookup table; see
@@ -26,7 +26,7 @@ pub const ATTRIBUTE_STAR_CORNER: MeshVertexAttribute =
 pub const ATTRIBUTE_STAR_PARAMS: MeshVertexAttribute =
     MeshVertexAttribute::new("RelStarParams", 0x5245_4C53_0002, VertexFormat::Float32x4);
 
-/// What orbits it and is warm: `(temperature K, radiance over the star's disc, grey deficit, -)`.
+/// What orbits it and is warm: `(temperature K, radiance over the star's disc, gray deficit, -)`.
 ///
 /// All zero for a system with nothing in it, which is almost all of them. Steady rather than
 /// per-frame: what a population absorbs is set by how much of the sky around the star it covers,
@@ -86,7 +86,7 @@ pub struct RelativisticStarfieldUniform {
     /// How far the corona reaches, in **stellar radii**.
     ///
     /// The one size here that is a world size rather than a screen size. Everything else about
-    /// a point source is angular on purpose — glare is an artefact of looking at a star and
+    /// a point source is angular on purpose — glare is an artifact of looking at a star and
     /// does not grow as you approach it. A corona is a thing that is *there*, so it has to fall
     /// off with distance like the disc it surrounds.
     ///

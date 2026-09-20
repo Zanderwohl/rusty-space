@@ -17,5 +17,6 @@ pub mod plume_material;
 pub mod population_material;
 pub mod relativistic_starfield_material;
 pub mod render_space;
+pub mod wire_mesh;
 
 pub use render_space::{ToRender, render_to_sim, sim_to_render};

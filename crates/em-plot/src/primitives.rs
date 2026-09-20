@@ -30,7 +30,7 @@ impl Rgba {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Polyline {
     pub points: Vec<Point>,
-    pub colour: Rgba,
+    pub color: Rgba,
     pub width: f32,
 }
 
@@ -38,7 +38,7 @@ pub struct Polyline {
 pub struct Quad {
     pub min: Point,
     pub max: Point,
-    pub colour: Rgba,
+    pub color: Rgba,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,7 +54,7 @@ pub struct Label {
     pub text: String,
     pub size: f32,
     pub anchor: Anchor,
-    pub colour: Rgba,
+    pub color: Rgba,
 }
 
 /// Everything a chart produced, ready for a backend.
@@ -118,7 +118,7 @@ mod tests {
             text: "x".into(),
             size: 1.0,
             anchor: Anchor::Start,
-            colour: Rgba::BLACK,
+            color: Rgba::BLACK,
         });
         assert!(!p.is_empty());
     }

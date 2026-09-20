@@ -2,7 +2,7 @@
 //!
 //! The rule is [`em_ui::picking`], shared with the other product: in reach when the cursor is
 //! within a slack of the thing *as drawn*, then the lowest rank outright, then the nearest
-//! centre. What lives here is the part that knows what an Exotic Matters thing is — a body, a
+//! center. What lives here is the part that knows what an Exotic Matters thing is — a body, a
 //! trajectory marker, a segment of a drawn orbit — and turns the answer back into
 //! [`HoverState`].
 //!
@@ -516,7 +516,7 @@ mod tests {
 
     /// The old rule took the most massive of the hits, which made a moon in front of its
     /// planet unreachable at any distance. Luna is a millionth of the Sun's mass and outranks
-    /// it now, and ties Earth — where the nearest centre decides, as it should.
+    /// it now, and ties Earth — where the nearest center decides, as it should.
     #[test]
     fn mass_no_longer_decides() {
         let system = built();

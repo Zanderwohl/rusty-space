@@ -42,7 +42,7 @@ pub const OPACITY_GAIN: f32 = 8.0;
 /// Low, because "inside" spans a lot of ground. At one astronomical unit the Kuiper shell is
 /// forty times further out than the ship and reads as an even wash; at Uranus it is barely
 /// twice as far, lines of sight through it are oblique, and at a fade that suited the first
-/// case it became a grey barrel filling the frame.
+/// case it became a gray barrel filling the frame.
 ///
 /// It is a weaker knob than it looks. The exposure meters the whole frame, so inside a shell
 /// that fills the sky the meter follows this number and the displayed brightness barely moves:
@@ -64,7 +64,7 @@ pub const FAINTEST: f64 = 1.0e-13;
 /// 0.4 — so a linear mapping renders everything natural as exactly zero.
 ///
 /// A logarithm was the first attempt and overcorrected badly: it put the Kuiper belt at 0.46,
-/// and since the ship is *inside* that shell the result was a grey haze over the entire sky. The
+/// and since the ship is *inside* that shell the result was a gray haze over the entire sky. The
 /// compression has to leave the ordering intact without flattening it. A fourth root gives a
 /// belt 0.001, a Kuiper belt 0.013 and a half-built swarm 0.80: a trace, a haze, and a
 /// structure, which is the right reading of all three.
@@ -256,12 +256,12 @@ fn node_spacing(nodes: &[(f64, f64)]) -> f64 {
     (hi - lo) / (nodes.len() - 1) as f64
 }
 
-fn cell(centre: f64, width: f64) -> Vec<f64> {
+fn cell(center: f64, width: f64) -> Vec<f64> {
     if width <= 0.0 {
-        return vec![centre];
+        return vec![center];
     }
     (0..CELL_SUBDIVISIONS)
-        .map(|k| centre - width * 0.5 + width * (k as f64 + 0.5) / CELL_SUBDIVISIONS as f64)
+        .map(|k| center - width * 0.5 + width * (k as f64 + 0.5) / CELL_SUBDIVISIONS as f64)
         .collect()
 }
 
@@ -345,7 +345,7 @@ pub const RADIAL: usize = 96;
 ///
 /// A ring is not a shell: it has radial structure and no latitude. Drawing it as a shell at one
 /// radius would put Saturn's rings on a circle, and they span a factor of 1.8 in radius with a
-/// division in the middle that is the most recognisable thing about them.
+/// division in the middle that is the most recognizable thing about them.
 ///
 /// Unit scale is the outer edge, so the transform is one number.
 pub fn build_ring(rings: &lc_world::rings::RingSystem) -> Mesh {
@@ -396,13 +396,13 @@ pub fn build_ring(rings: &lc_world::rings::RingSystem) -> Mesh {
 ///
 /// A single number where a body gets one per surface type, because a population is a
 /// distribution and has no surface. Dark, which is what a rubble pile is; the exact value only
-/// sets how much of the optical colour is the star's rather than the material's own glow, and
+/// sets how much of the optical color is the star's rather than the material's own glow, and
 /// the display level is fixed separately.
 const ALBEDO: f64 = 0.1;
 
 /// What the brightest display channel is drawn at when a sightline is completely full.
 ///
-/// The old flat tint, kept as a level so the change is a change of *colour* and not of
+/// The old flat tint, kept as a level so the change is a change of *color* and not of
 /// brightness. It has to be a display decision: a belt's real surface brightness is four
 /// decades under a star's and renders as nothing at all in every normalised preset, which is
 /// true photometrically and useless as a picture — the same argument [`opacity_of`] settles for
@@ -421,7 +421,7 @@ pub struct Lighting<'a> {
 /// What a fully-filled sightline through the population radiates, per band.
 ///
 /// Two terms, and which one wins is the whole of why a belt looks different in different bands.
-/// In the optical it is starlight the material scatters, so a belt is the colour of its star. At
+/// In the optical it is starlight the material scatters, so a belt is the color of its star. At
 /// ten microns it is the material's own two-hundred-kelvin glow, which the star has none of, and
 /// a belt goes from a barely-there haze to the brightest thing in the frame. Both scale with
 /// `band_response`, which is emissivity and absorptivity at once — Kirchhoff, and the reason one
@@ -449,7 +449,7 @@ pub fn source_radiance(population: &Population, lighting: Lighting) -> em_spectr
 /// The per-band `(source, extinction)` pairs the shader reads, and the mapping's own columns.
 ///
 /// The source is normalised so the brightest display channel lands at [`DISPLAY_LEVEL`]: the
-/// bands set the *colour* and the march sets the amount, and separating them is what keeps a
+/// bands set the *color* and the march sets the amount, and separating them is what keeps a
 /// population legible in a preset its light barely reaches while still saying which preset it
 /// is being seen in.
 fn band_columns(
@@ -470,8 +470,8 @@ fn band_columns(
     let material = std::array::from_fn(|i| {
         let band = em_spectra::Band::ALL[i];
         // The opacity mapping again, on what this band actually meets. For a population of
-        // solid bodies every band gets the same answer, which is right: a metre of rock is a
-        // metre of rock from B to 21 cm. Dust is where it separates.
+        // solid bodies every band gets the same answer, which is right: a meter of rock is a
+        // meter of rock from B to 21 cm. Dust is where it separates.
         let response = population.band_response[band].clamp(0.0, 1.0) as f64;
         let seen = (opacity_of(covering * response) * opacity / opacity_of(covering).max(f32::MIN_POSITIVE))
             .clamp(0.0, 1.0);
@@ -493,7 +493,7 @@ pub fn uniforms(
     field: Field,
     lighting: Lighting,
 ) -> PopulationUniform {
-    // No `tint`: the colour is the per-band source run through the instrument's own mapping.
+    // No `tint`: the color is the per-band source run through the instrument's own mapping.
     // It used to be one of two hard-coded constants chosen by a reddening test on
     // `band_response`, which was both blind to the sensor and backwards — `extinction::RATIO`
     // is *largest* in B for dust, so the test that meant to catch dust never did.
@@ -900,11 +900,11 @@ mod tests {
         assert!(flat.latitude.last().unwrap() < &0.05, "{:?}", flat.latitude.last());
         assert!(round.latitude.iter().all(|v| (*v - 1.0).abs() < 1e-6), "isotropic is flat");
 
-        // Which the field then delivers: from the centre, every direction out of a cloud meets
+        // Which the field then delivers: from the center, every direction out of a cloud meets
         // the same material, and that is exactly what the apple core could not do.
-        let centre = DVec3::ZERO;
-        let plane = depth_along(&round, centre, DVec3::X, 4000);
-        let pole = depth_along(&round, centre, DVec3::Z, 4000);
+        let center = DVec3::ZERO;
+        let plane = depth_along(&round, center, DVec3::X, 4000);
+        let pole = depth_along(&round, center, DVec3::Z, 4000);
         assert!(plane > 0.0 && (plane / pole - 1.0).abs() < 0.02, "{plane:.4} and {pole:.4}");
     }
 
@@ -960,12 +960,12 @@ mod tests {
         assert!(row.iter().cloned().fold(0.0f32, f32::max) > 0.99, "peak-normalised");
     }
 
-    /// The thing the sensor presets are named for. A metre of rock is a metre of rock from B to
+    /// The thing the sensor presets are named for. A meter of rock is a meter of rock from B to
     /// 21 cm, so a belt of solid bodies is equally opaque in every band; dust is not, and at
     /// 21 cm a sightline through it finds almost nothing there.
     ///
     /// Before this, `band_response` reached the renderer only as a choice between two hard-coded
-    /// tints, so "dust penetration" penetrated nothing and every preset drew the same grey.
+    /// tints, so "dust penetration" penetrated nothing and every preset drew the same gray.
     #[test]
     fn a_band_the_material_barely_meets_is_a_band_it_barely_blocks() {
         let mapping = em_spectra::presets::natural();
@@ -980,7 +980,7 @@ mod tests {
         assert!(first > 0.0, "a belt blocks something: {first}");
         assert!(
             rock.iter().all(|s| (s / first - 1.0).abs() < 1.0e-6),
-            "solid bodies are grey across the bands: {rock:?}",
+            "solid bodies are gray across the bands: {rock:?}",
         );
 
         let dust = extinction(&dusty(population(Inclination::uniform_angle(0.0, 0.2, 12), 1e9)));
@@ -994,7 +994,7 @@ mod tests {
         }
     }
 
-    /// And the colour follows the instrument. A belt shines by scattered starlight in the
+    /// And the color follows the instrument. A belt shines by scattered starlight in the
     /// optical and by its own two-hundred-kelvin glow at ten microns, so the preset that looks
     /// at ten microns finds something the natural one cannot.
     #[test]
@@ -1014,14 +1014,14 @@ mod tests {
             [channel(0), channel(1), channel(2)]
         };
 
-        // Natural is scattered starlight across three neighbouring optical bands, so a belt
-        // comes out near the colour of its star rather than any colour of its own.
+        // Natural is scattered starlight across three neighboring optical bands, so a belt
+        // comes out near the color of its star rather than any color of its own.
         let natural = displayed(&em_spectra::presets::natural());
         let (hi, lo) = (
             natural.iter().cloned().fold(0.0f32, f32::max),
             natural.iter().cloned().fold(f32::MAX, f32::min),
         );
-        assert!(hi / lo < 2.0, "a sun-lit belt is not strongly coloured in the optical: {natural:?}");
+        assert!(hi / lo < 2.0, "a sun-lit belt is not strongly colored in the optical: {natural:?}");
 
         // Thermal puts ten microns in red, and a two-hundred-kelvin belt against a sun-like
         // reference has nothing anywhere else.
@@ -1041,7 +1041,7 @@ mod tests {
 
     /// The mapping is a fourth root because the quantity spans fourteen decades. A logarithm
     /// overcorrected -- it put the Kuiper belt at 0.46, and since the ship is inside that shell
-    /// the sky became a grey wash.
+    /// the sky became a gray wash.
     #[test]
     fn the_opacity_mapping_keeps_three_populations_apart() {
         let belt = opacity_of(2.6e-12);
@@ -1066,7 +1066,7 @@ mod tests {
         let p = population(Inclination::uniform_angle(0.0, 0.2, 12), 1e6);
         let star = DVec3::new(1.0, 2.0, -0.5);
         let at_star = transform(star, star, &p);
-        assert!(at_star.translation.length() < 1e-6, "the ship at the star sees it centred");
+        assert!(at_star.translation.length() < 1e-6, "the ship at the star sees it centered");
         assert!((at_star.scale.x - (p.thermal_radius() / UNIT_M) as f32).abs() < 1e-3);
 
         let away = transform(star, star + DVec3::X * 1e-4, &p);

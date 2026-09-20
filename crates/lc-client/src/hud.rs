@@ -55,8 +55,8 @@ pub fn arc(coast: &crate::coast::Coast) -> String {
 }
 
 /// A distance in whatever unit makes it readable.
-fn span(metres: f64) -> String {
-    match metres {
+fn span(meters: f64) -> String {
+    match meters {
         m if m < 1.0e6 => format!("{:.0} km", m / 1.0e3),
         m if m < 1.0e9 => format!("{:.0} thousand km", m / 1.0e6),
         m if m < 1.0e11 => format!("{:.2} million km", m / 1.0e9),
@@ -68,7 +68,7 @@ fn span(metres: f64) -> String {
 /// the approach is still being flown, and how much space there is between the two hulls.
 ///
 /// No percentage, because there is nothing to be a percentage of — a pursuit re-plans whenever
-/// its quarry does something new. And between the hulls rather than between centres, because
+/// its quarry does something new. And between the hulls rather than between centers, because
 /// that is what a closeness is set in; see `lc_world::pursuit::Closeness`.
 pub fn pursuit(
     session: &Session,
@@ -86,15 +86,15 @@ pub fn pursuit(
     let Some(quarry) = quarry else {
         return format!("{doing} ship {} — {how}", pursuit.quarry.0);
     };
-    let centres_m =
+    let centers_m =
         session.ship.motion.position_ly.distance(quarry.position_ly) * crate::system::M_PER_LY;
-    let clear_m = (centres_m - 0.5 * (session.ship.length_m + quarry.length_m)).max(0.0);
+    let clear_m = (centers_m - 0.5 * (session.ship.length_m + quarry.length_m)).max(0.0);
     format!("{doing} {} — {} between hulls — {how}", quarry.name, near(clear_m))
 }
 
-/// A short distance, finely enough to see a kilometre-and-a-quarter wander.
-fn near(metres: f64) -> String {
-    match metres {
+/// A short distance, finely enough to see a kilometer-and-a-quarter wander.
+fn near(meters: f64) -> String {
+    match meters {
         m if m < 1.0e3 => format!("{m:.0} m"),
         m if m < 1.0e5 => format!("{:.1} km", m / 1.0e3),
         m => span(m),
@@ -250,12 +250,17 @@ mod tests {
         assert_eq!(lines(&s, &ui).exposure, "auto");
     }
 
-    /// The development default is itself non-canonical, and has to say so: a sixty-times
-    /// clock that looked normal would make every duration on screen a lie.
+    /// A rate that is not the world's has to say so: a sixty-times clock that looked normal
+    /// would make every duration on screen a lie.
+    ///
+    /// The default is the design rate and therefore says nothing, which is the point of it —
+    /// a warning that is always on is a warning nobody reads.
     #[test]
     fn a_non_canonical_clock_rate_is_announced() {
         let (mut ui, mut s) = fixture();
-        assert_eq!(lines(&s, &ui).warning.unwrap(), "1 year / minute", "the test rate must be flagged");
+        assert!(lines(&s, &ui).warning.is_none(), "the default is the world's own rate");
+        apply(Action::SetTimeRate(60.0), &mut ui, &mut s);
+        assert_eq!(lines(&s, &ui).warning.unwrap(), "1 year / minute", "a fast clock is flagged");
         apply(Action::SetTimeRate(64.0), &mut ui, &mut s);
         let off_ladder = lines(&s, &ui).warning.expect("one off the ladder must be flagged");
         assert_eq!(off_ladder, "1 year / 56 seconds");

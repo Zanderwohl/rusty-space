@@ -39,7 +39,7 @@ pub fn sample(system: &System, index: BodyIndex, resolution: usize) -> Option<Pa
 /// Sample the arc in force at `at`, over the stretch of time that arc is actually flown.
 ///
 /// An arc bounded by events — one leg of a patched chain — is drawn between them, so a
-/// capture by a moon shows the piece of hyperbola travelled rather than a whole conic. An
+/// capture by a moon shows the piece of hyperbola traveled rather than a whole conic. An
 /// unbounded arc, which is every ordinary orbit in a system, is drawn as a full revolution
 /// exactly as before.
 pub fn sample_segment(
@@ -78,7 +78,7 @@ pub fn sample_segment(
         match (start, end) {
             (Some(start), None) => (start - periapsis, start - periapsis + span),
             (None, Some(end)) => (end - periapsis - span, end - periapsis),
-            // The ordinary case: one revolution from periapsis, or a hyperbola centred on it.
+            // The ordinary case: one revolution from periapsis, or a hyperbola centered on it.
             (None, None) if closed => (TimeDelta::from_seconds(0.0), period),
             // `(Some, Some)` is handled above; this is the unbounded open arc.
             _ => (span * -0.5, span * 0.5),

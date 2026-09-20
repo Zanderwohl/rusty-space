@@ -29,18 +29,18 @@ use crate::system::System;
 pub struct Impact {
     pub body: BodyIndex,
     pub time: Instant,
-    /// Simulation-space position at contact, metres.
+    /// Simulation-space position at contact, meters.
     pub position: DVec3,
-    /// Measured from the body's centre: the point on the surface that was struck. Its
+    /// Measured from the body's center: the point on the surface that was struck. Its
     /// direction is the site, its length the radius.
     pub local_position: DVec3,
-    /// Velocity relative to the body, metres a second. What an impact is judged by — a
+    /// Velocity relative to the body, meters a second. What an impact is judged by — a
     /// touchdown and a lithobraking differ only in this.
     pub relative_velocity: DVec3,
 }
 
 impl Impact {
-    /// Closing speed at contact, metres a second.
+    /// Closing speed at contact, meters a second.
     pub fn speed_m_s(&self) -> f64 {
         self.relative_velocity.length()
     }
@@ -71,10 +71,10 @@ const MIN_STEP_SECONDS: f64 = 1.0e-3;
 /// Ceiling on the march, so a long window cannot become an unbounded loop.
 const MAX_STEPS: usize = 1_000_000;
 
-/// Contact is refined to here. A millimetre a second of closing speed times this is nothing.
+/// Contact is refined to here. A millimeter a second of closing speed times this is nothing.
 const CONTACT_TOLERANCE_SECONDS: f64 = 1.0e-3;
 
-/// Height above `body`'s surface, metres: negative below it.
+/// Height above `body`'s surface, meters: negative below it.
 ///
 /// `None` when either the traveller or the body is not analytic at `time`.
 pub fn surface_distance(
@@ -84,8 +84,8 @@ pub fn surface_distance(
     time: Instant,
 ) -> Option<f64> {
     let (at, _) = traveller.state_at(time)?;
-    let (centre, _) = propagate::state_at(system, body, time)?;
-    Some((at - centre).length() - system.radius(body))
+    let (center, _) = propagate::state_at(system, body, time)?;
+    Some((at - center).length() - system.radius(body))
 }
 
 /// The first contact with `body` inside `window`, if there is one.
@@ -166,7 +166,7 @@ pub fn candidates_at(system: &System, traveller: &dyn Traveller, time: Instant) 
 
 /// How far the march may advance without risking stepping over contact.
 ///
-/// The traveller cannot reach the surface before it has covered `above` metres, and it cannot
+/// The traveller cannot reach the surface before it has covered `above` meters, and it cannot
 /// cover them faster than its greatest possible speed. That speed is bounded by energy: a
 /// two-body arc about this body trades height for speed at `v^2 = v0^2 + 2 mu (1/r - 1/r0)`,
 /// which is largest at the surface.
@@ -180,8 +180,8 @@ fn safe_step(
     mu: f64,
 ) -> Option<TimeDelta> {
     let (at, velocity) = traveller.state_at(time)?;
-    let (centre, carried) = propagate::state_at(system, body, time)?;
-    let separation = (at - centre).length().max(radius);
+    let (center, carried) = propagate::state_at(system, body, time)?;
+    let separation = (at - center).length().max(radius);
     let closing = (velocity - carried).length();
     // The `max(0.0)` is not redundant: `separation` is floored at the radius, so at the
     // surface the term is exactly zero and rounding can take it just below.
@@ -220,12 +220,12 @@ fn contact(
     time: Instant,
 ) -> Option<Impact> {
     let (position, velocity) = traveller.state_at(time)?;
-    let (centre, carried) = propagate::state_at(system, body, time)?;
+    let (center, carried) = propagate::state_at(system, body, time)?;
     Some(Impact {
         body,
         time,
         position,
-        local_position: position - centre,
+        local_position: position - center,
         relative_velocity: velocity - carried,
     })
 }
@@ -240,7 +240,7 @@ mod tests {
     /// See the flyby note in [`crate::crossing`]'s tests: Earth's frame is not inertial, and a
     /// pass that takes hours has a geometry set by that rather than by where it was aimed. At
     /// these numbers the approach takes five hundred seconds and Earth's own path bends by
-    /// seven hundred metres, against a radius of six thousand kilometres.
+    /// seven hundred meters, against a radius of six thousand kilometers.
     const SPEED: f64 = 200_000.0;
     const STANDOFF_M: f64 = 1.0e8;
 
@@ -289,7 +289,7 @@ mod tests {
         let hit = impact_with(&system, &line, earth, window).expect("it hits");
         assert_eq!(hit.body, earth);
         let height = hit.local_position.length() - EARTH_RADIUS_M;
-        // A millisecond of bisection tolerance is two hundred metres at this speed.
+        // A millisecond of bisection tolerance is two hundred meters at this speed.
         assert!(height.abs() < 300.0, "{height} m off the surface");
         assert!(height >= 0.0, "a contact is reported before the surface, never through it");
 

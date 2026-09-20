@@ -23,10 +23,10 @@ pub struct Event {
 }
 
 /// The exact local-frame values. Stored beside the global grid rather than derived from it:
-/// the grid resolves 150 metres and a system's own frame does not.
+/// the grid resolves 150 meters and a system's own frame does not.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Local {
-    /// Metres from the system origin.
+    /// Meters from the system origin.
     pub position_m: [f64; 3],
     /// Seconds from the system epoch.
     pub t_s: f64,
@@ -394,7 +394,7 @@ mod tests {
         assert_eq!([row.get::<_, i64>(2), row.get::<_, i64>(3), row.get::<_, i64>(4)], written.g);
         assert_eq!(row.get::<_, Option<i64>>(5), Some(77));
         let local = written.local.unwrap();
-        // Exactly. A local frame that came back rounded would be the 150 metres of the grid
+        // Exactly. A local frame that came back rounded would be the 150 meters of the grid
         // reintroduced by the storage that exists to avoid it.
         assert_eq!(row.get::<_, f64>(6), local.position_m[0]);
         assert_eq!(row.get::<_, f64>(7), local.position_m[1]);

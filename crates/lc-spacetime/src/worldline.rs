@@ -1,4 +1,4 @@
-//! Worldlines, and the retarded-time solve that is the centre of the whole design.
+//! Worldlines, and the retarded-time solve that is the center of the whole design.
 
 use glam::DVec3;
 use smallvec::SmallVec;
@@ -28,7 +28,7 @@ pub trait Worldline {
         true
     }
 
-    /// A ball containing this worldline over `[t0, t1]`: a centre and a radius, both in
+    /// A ball containing this worldline over `[t0, t1]`: a center and a radius, both in
     /// light-microseconds.
     ///
     /// Used to bound arrival times without solving for them, so it must *contain* the motion —
@@ -448,7 +448,7 @@ mod tests {
         assert!((t_a - 310.0).abs() < 1e-9, "{t_a}");
     }
 
-    /// Light that passed before the observer existed, and light still travelling when it
+    /// Light that passed before the observer existed, and light still traveling when it
     /// stopped, both come back as nothing rather than as a time outside the worldline.
     #[test]
     fn light_outside_a_worldline_s_life_never_arrives() {
@@ -478,10 +478,10 @@ mod tests {
         let statics = Static::new(DVec3::new(7.0, 7.0, 7.0));
         for (t0, t1) in [(0.0, 1000.0), (-500.0, -100.0), (42.0, 42.0)] {
             for w in [&inertial as &dyn Worldline, &statics as &dyn Worldline] {
-                let (centre, radius) = w.bounding_ball(t0, t1);
+                let (center, radius) = w.bounding_ball(t0, t1);
                 for step in 0..=16 {
                     let t = t0 + (t1 - t0) * step as f64 / 16.0;
-                    let out = (w.position_at(t) - centre).length();
+                    let out = (w.position_at(t) - center).length();
                     assert!(out <= radius + 1e-9, "escaped its ball by {}", out - radius);
                 }
             }
@@ -500,10 +500,10 @@ mod tests {
                 (f64::NEG_INFINITY, f64::INFINITY)
             }
         }
-        let (centre, radius) = Wanderer.bounding_ball(0.0, 400.0);
+        let (center, radius) = Wanderer.bounding_ball(0.0, 400.0);
         for step in 0..=64 {
             let t = 400.0 * step as f64 / 64.0;
-            assert!((Wanderer.position_at(t) - centre).length() <= radius + 1e-9);
+            assert!((Wanderer.position_at(t) - center).length() <= radius + 1e-9);
         }
     }
 }

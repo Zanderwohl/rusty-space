@@ -1,4 +1,4 @@
-# Observation and signalling
+# Observation and signaling
 
 Everything a player learns about a distant system arrives through one of these channels.
 Each is subject to light delay, and each has a detection threshold that turns into a
@@ -12,7 +12,7 @@ A telescope points at a star and records flux over time. The flux is
 ### Sensitivity
 
 Photon-limited. With aperture area `A`, throughput `eta`, integration time `T`, and source
-photon flux `F` (photons per square metre per second):
+photon flux `F` (photons per square meter per second):
 
 ```
 N     = F * A * eta * T
@@ -68,7 +68,7 @@ tiers that nobody had to invent.
 
 The silicon row is the important one. **All four optical bands come free with one detector**,
 so the entry-level telescope is not a one-band instrument — it sees B, V, R and I, which is
-enough for natural colour, enough to find M dwarfs where they are actually bright, and enough
+enough for natural color, enough to find M dwarfs where they are actually bright, and enough
 to attempt the reddening-versus-temperature separation of
 [04-stellar-photometry.md](04-stellar-photometry.md). It just cannot finish that separation for
 red stars, which is what the K-band tier is for.
@@ -119,8 +119,8 @@ Two observers watching the same star with different instruments are looking at d
 not different renderings of the same data. That is not a UI problem; it is the same asymmetry
 the game already has with time, one column wider.
 
-It is also load-bearing. The grey-versus-reddening diagnostic of
-[04-stellar-photometry.md](04-stellar-photometry.md) needs colour to exist at all, and needs K
+It is also load-bearing. The gray-versus-reddening diagnostic of
+[04-stellar-photometry.md](04-stellar-photometry.md) needs color to exist at all, and needs K
 to be conclusive about red stars. **A silicon camera can usually tell a swarm from a dust
 cloud, and fails exactly where most stars are**, because the reddening vector and the stellar
 locus nearly coincide over the K-to-M range. No amount of integration time fixes that; the
@@ -315,7 +315,7 @@ find t_a such that   t_a = t_send + |x_target(t_a) - x_send|
 ```
 
 using the sender's *predicted* worldline for the target, which is built from observations
-that are themselves old. A target that manoeuvres after the light left, but before it
+that are themselves old. A target that maneuveres after the light left, but before it
 arrives, is missed. For a ship 4 ly away this means the aim is based on where the target was
 4 years ago, extrapolated 4 years forward — 8 years of prediction error. Stationary
 installations are easy to hit; ships under thrust are not.
@@ -441,7 +441,7 @@ Resolving 35 cm features on a planet ten light-years away is not a game mechanic
 times the photons of a single measurement at the same SNR, so collecting area scales as the
 square of the linear resolution wanted. Angular resolution is free; surface brightness is not.
 That is the correct limiter, it is physical, and it makes imaging an endgame investment
-measured in square kilometres of aperture rather than in baseline length.
+measured in square kilometers of aperture rather than in baseline length.
 
 ### Within a system
 
@@ -463,8 +463,8 @@ Coherent combination needs the path difference known to about `lambda / 10`:
 | optical | 4 ly | 5.5e-8 m | 1.5e-24 |
 | 21 cm | 4 ly | 2.1e-2 m | 5.6e-19 |
 
-Knowing an interstellar baseline to 55 nanometres is not a matter of effort. Knowing it to
-2 centimetres is the same class of problem terrestrial VLBI already solves, and the game has
+Knowing an interstellar baseline to 55 nanometers is not a matter of effort. Knowing it to
+2 centimeters is the same class of problem terrestrial VLBI already solves, and the game has
 an advantage real VLBI does not: every station's position comes from the simulation, and
 every station's proper time is already related to server time by the engine.
 
@@ -489,7 +489,7 @@ fits the premise better than anything else on the list.
 
 ## Instrument placement and the double delay
 
-A telescope at another star does not give a player a live view of that star's neighbourhood.
+A telescope at another star does not give a player a live view of that star's neighborhood.
 It gives a view delayed by the telescope-to-target distance, and then the *report* is delayed
 by the telescope-to-player distance. Total lag is the sum, not the maximum.
 

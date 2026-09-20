@@ -64,7 +64,7 @@ Planets, moons, individual large structures. Evaluate `f_i(n, t_r)` directly.
 
 ```
 1. propagate occluder i to t_r            (em_sim, Keplerian, closed form)
-2. project its centre onto the plane normal to n
+2. project its center onto the plane normal to n
 3. b = impact parameter, in units of R_star
 4. f_i = overlap area of two discs, weighted by a limb-darkening profile
 ```
@@ -356,11 +356,11 @@ disagree about what a star did and a light curve stops being reproducible.
 Seven. The first four are the Johnson-Cousins optical run, which is what a real observatory
 has; the last three each buy something the optical bands cannot.
 
-| band | centre | why it is there |
+| band | center | why it is there |
 |---|---|---|
-| B | 445 nm | the most extinction-sensitive band; half of the colour index |
+| B | 445 nm | the most extinction-sensitive band; half of the color index |
 | V | 551 nm | the workhorse; magnitudes and depths are quoted here |
-| R | 658 nm | natural colour becomes measured rather than inferred |
+| R | 658 nm | natural color becomes measured rather than inferred |
 | I | 806 nm | where M dwarfs actually peak, and cheap dust penetration |
 | K | 2.19 um | breaks the reddening degeneracy; sees through dust that V cannot |
 | thermal IR | 10 um | waste heat |
@@ -387,7 +387,7 @@ between noticing a rival and identifying one.
 
 ### Occlusion is not achromatic
 
-Adding a radio band forces a correction to the occlusion model. Geometric blocking is grey —
+Adding a radio band forces a correction to the occlusion model. Geometric blocking is gray —
 a solid body removes the same fraction at every wavelength — but **dust is not**. Interstellar
 extinction follows roughly `A_lambda ~ 1/lambda` through the optical and falls away to nothing
 in the radio:
@@ -412,9 +412,9 @@ itself the observable**:
 
 | dip shape | occluder |
 |---|---|
-| grey — same depth in every band | solid: planet, collector, swarm element, megastructure |
+| gray — same depth in every band | solid: planet, collector, swarm element, megastructure |
 | reddening — much deeper in B than K, absent in radio | dust, debris, a natural cloud |
-| grey in the optical with an IR excess | solid, and absorbing rather than merely blocking — engineering |
+| gray in the optical with an IR excess | solid, and absorbing rather than merely blocking — engineering |
 
 A civilisation that wants its swarm mistaken for a dust cloud has to make it reddening, which
 means making it out of small particles, which means giving up the structural integrity that
@@ -423,7 +423,7 @@ one.
 
 ### Temperature, and the reddening degeneracy
 
-`B - V` is the standard colour index and gives effective temperature directly. Ballesteros'
+`B - V` is the standard color index and gives effective temperature directly. Ballesteros'
 formula is accurate enough and cheap:
 
 ```
@@ -433,13 +433,13 @@ Teff = 4600 * ( 1/(0.92*(B-V) + 1.70) + 1/(0.92*(B-V) + 0.62) )
 Checked against real values: `B-V = 0.65` returns 5778 K for the Sun against an actual 5772 K,
 `0.00` returns 10 125 K for an A0, `+1.40` returns 3950 K for an M0.
 
-**One colour index cannot separate a cool star from a reddened one.** Dust and temperature move
+**One color index cannot separate a cool star from a reddened one.** Dust and temperature move
 `B - V` the same direction, so an A0 at 10 125 K behind `E(B-V) = 0.3` reads as 7462 K, an F
 star. This is the real degeneracy of real photometry, and it is a deception vector: a
 civilisation that wants to look like something else can lean on it.
 
-Breaking it needs a second colour, so that reddening and cooling can be told apart by
-*direction* rather than magnitude. In a colour-colour diagram the reddening vector points one
+Breaking it needs a second color, so that reddening and cooling can be told apart by
+*direction* rather than magnitude. In a color-color diagram the reddening vector points one
 way, fixed by the extinction law, and the stellar locus runs another. Where the two are not
 parallel, photometry separates them; where they are, nothing does.
 
@@ -541,7 +541,7 @@ An object moves between paths when its coherence does.
 |---|---|
 | discrete -> population | the group's expected count on the disc `m` approaches 1, so individual events overlap and stop being separable |
 | discrete -> population | the body's period exceeds any observable baseline, so its coherence is unusable |
-| population -> discrete | a player selects specific elements for a manoeuvre; they leave the distribution and become tracked bodies until they rejoin |
+| population -> discrete | a player selects specific elements for a maneuvere; they leave the distribution and become tracked bodies until they rejoin |
 
 The threshold is observational as well as computational: a sufficiently good telescope can
 separate events that a poor one cannot. Resolve this by keeping the statistical description
@@ -620,7 +620,7 @@ alone would leave them at and both are bright at ten microns on their night side
 the same one a swarm has — an excess over the equilibrium blackbody, steady, no flicker — and it
 is the reason this is worth writing down rather than leaving in the renderer.
 
-The temperature is the grey equilibrium one cut by the **Bond** albedo and raised by the
+The temperature is the gray equilibrium one cut by the **Bond** albedo and raised by the
 internal heat, both as fourth powers. Bond, not geometric: a different quantity and not a
 different estimate of one. Jupiter's are 0.34 and 0.50, and using the wrong one moves its
 temperature by six per cent.
@@ -663,6 +663,6 @@ For a swarm covering half the sphere at one astronomical unit around a sun-like 
 | K | down by half; re-emission is under a percent |
 | 10 um | **up by a factor of 135**, steady |
 
-Isotropic, circular and grey together are the signature, and no natural population has all three.
+Isotropic, circular and gray together are the signature, and no natural population has all three.
 An isotropic natural population is an Oort cloud, which is eccentric and made of dust, and dust
 reddens where panels do not.

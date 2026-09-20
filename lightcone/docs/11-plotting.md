@@ -80,10 +80,10 @@ a plain log scale cannot show them. `Time` is its own scale because axis ticks w
 calendar units and the labels must say which, given that this project has three different
 clocks in play.
 
-## Colour maps
+## Color maps
 
 Perceptually uniform, as small tables. Viridis and magma for sequential data, and a diverging
-map centred on zero for residuals. A non-uniform map — the rainbow — invents structure that is
+map centered on zero for residuals. A non-uniform map — the rainbow — invents structure that is
 not in the data, which in a game about inferring structure from noisy measurements is an
 actual correctness problem, not a matter of taste.
 
@@ -106,7 +106,7 @@ so a debug view of a star's shell is the shell, not a copy of it.
 
 ![HR diagram of 107 859 HYG stars](../images/hr-diagram.png)
 
-Density mode over the bundled catalogue: 107 859 stars binned to cells and coloured by count.
+Density mode over the bundled catalogue: 107 859 stars binned to cells and colored by count.
 The main sequence, the red giant clump, the subgiant branch joining them, the M dwarf tail and
 a faint white dwarf sequence are all where they should be, and the vertical striping near
 `B-V` 1.4 is real quantisation in HYG's source catalogues rather than a rendering artifact.

@@ -8,7 +8,7 @@
 //!
 //! | Quantity            | Unit                   |
 //! |---------------------|------------------------|
-//! | Distance            | metres                 |
+//! | Distance            | meters                 |
 //! | Mass                | kilograms              |
 //! | Time                | see [`time`]           |
 //! | Velocity            | m/s                    |

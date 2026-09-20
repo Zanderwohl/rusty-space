@@ -26,7 +26,7 @@ pub fn from_speed(speed_m_s: f64, seed: u64) -> f64 {
 ///
 /// Scales as `10^[Fe/H]`: a tenth of the metals is a tenth of the rock, which is a smaller
 /// belt, a thinner Kuiper analogue and fewer volatiles. This is what makes metal-rich systems
-/// worth travelling to, from real catalogue data rather than a sprinkled bonus.
+/// worth traveling to, from real catalogue data rather than a sprinkled bonus.
 pub fn solid_mass_factor(feh: f64) -> f64 {
     10f64.powf(feh)
 }

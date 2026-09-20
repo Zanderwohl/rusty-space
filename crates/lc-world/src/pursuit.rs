@@ -18,7 +18,7 @@
 //! left — and dead-reckons forward from there. That is a navigator's job done with a
 //! navigator's information, and it is also the only version that does not put faster-than-light
 //! knowledge into the pursuer's own trajectory, which the player watches. A target that
-//! manoeuvres is therefore chased on stale information until its news arrives, which across a
+//! maneuveres is therefore chased on stale information until its news arrives, which across a
 //! system is seconds to hours.
 //!
 //! **Only for a quarry that is coasting.** One under thrust has left the frame a plan arrives at
@@ -33,10 +33,10 @@ use crate::system::M_PER_LY;
 
 /// How many combined hull lengths a craft hangs back at.
 ///
-/// Combined, because the room two ships need is set by both of them: fifty kilometres of ship
-/// alongside another fifty is a different proposition from fifty alongside five hundred metres.
+/// Combined, because the room two ships need is set by both of them: fifty kilometers of ship
+/// alongside another fifty is a different proposition from fifty alongside five hundred meters.
 /// Five of them is close enough to be formation flying and far enough that neither is
-/// manoeuvring inside the other's hull.
+/// maneuvering inside the other's hull.
 ///
 /// A **proper** distance, measured in the frame the two of them end up sharing. Anything else
 /// would have two ships closing at speed park closer together than two at rest, because the
@@ -55,21 +55,21 @@ pub const DRIFT_ALLOWANCE: f64 = 2.0;
 /// away, as a multiple of the standoff.
 ///
 /// A quarry holding its course stays inside it forever and the plan runs to completion. One
-/// that manoeuvres leaves it and is re-solved against. One under *sustained* thrust is not a
+/// that maneuveres leaves it and is re-solved against. One under *sustained* thrust is not a
 /// rendezvous's business at all: re-solving a plan that ends at rest against it every tick
 /// tracked the burn's position and drew the pursuer braking twenty times a second, so it is
 /// escorted instead — see [`crate::escort`], which uses this same fraction on its own model of
 /// the quarry.
 pub const REPLAN_FRACTION: f64 = 0.25;
 
-/// How far apart two hulls hang about when they are close enough to see each other, metres of
+/// How far apart two hulls hang about when they are close enough to see each other, meters of
 /// clear space between them.
 ///
-/// Between the hulls rather than between their centres, so a fifty-kilometre ship is not
-/// parked inside by a small one sidling up to "a kilometre".
+/// Between the hulls rather than between their centers, so a fifty-kilometer ship is not
+/// parked inside by a small one sidling up to "a kilometer".
 pub const INTIMATE_CLEARANCE_M: f64 = 1_000.0;
 
-/// How far either side of the intimate standoff a craft may wander before it corrects, metres.
+/// How far either side of the intimate standoff a craft may wander before it corrects, meters.
 pub const INTIMATE_SLACK_M: f64 = 250.0;
 
 /// How close to the standoff counts as being on it, as a fraction of it. Inside this an order
@@ -80,7 +80,7 @@ pub const ON_STATION_FRACTION: f64 = 0.05;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Closeness {
     /// [`STANDOFF_LENGTHS`] combined hull lengths: formation flying, where neither is
-    /// manoeuvring inside the other's hull.
+    /// maneuvering inside the other's hull.
     #[default]
     Company,
     /// Within sight of the other's hull: [`INTIMATE_CLEARANCE_M`] of space between them, held
@@ -89,7 +89,7 @@ pub enum Closeness {
 }
 
 impl Closeness {
-    /// The proper distance between centres a craft of `mine` metres keeps from one of `theirs`.
+    /// The proper distance between centers a craft of `mine` meters keeps from one of `theirs`.
     pub fn standoff_m(self, mine: f64, theirs: f64) -> f64 {
         match self {
             Closeness::Company => (mine + theirs) * STANDOFF_LENGTHS,
@@ -97,7 +97,7 @@ impl Closeness {
         }
     }
 
-    /// The nearest and furthest a craft on station may be before it closes again, metres.
+    /// The nearest and furthest a craft on station may be before it closes again, meters.
     ///
     /// A deadband and not a tolerance; see [`DRIFT_ALLOWANCE`].
     pub fn band_m(self, standoff_m: f64) -> (f64, f64) {
@@ -108,7 +108,7 @@ impl Closeness {
     }
 
     /// How far the quarry may stray from a standing plan's model of it before the plan is
-    /// re-solved, metres. See [`REPLAN_FRACTION`].
+    /// re-solved, meters. See [`REPLAN_FRACTION`].
     ///
     /// Half the slack when intimate, so the correction lands inside the band rather than on its
     /// edge.
@@ -161,7 +161,7 @@ impl Sighting {
     /// Where the quarry would be now if it has held its course since.
     ///
     /// Dead reckoning, and the only kind of extrapolation a pursuer is entitled to: it uses
-    /// what arrived and nothing else. Wrong exactly when the quarry has manoeuvred since, which
+    /// what arrived and nothing else. Wrong exactly when the quarry has maneuvered since, which
     /// is what [`REPLAN_FRACTION`] notices when the news of that finally lands.
     ///
     /// World coordinates throughout, so this is a straight line and needs no boost: an inertial
@@ -357,9 +357,9 @@ impl Rendezvous {
     ///
     /// Built as *the quarry's position plus an offset* rather than transformed straight out of
     /// the frame, and that is a numerical decision rather than a stylistic one. The two forms
-    /// are the same algebra with the `γt'` term cancelled by hand, and that term is enormous:
+    /// are the same algebra with the `γt'` term canceled by hand, and that term is enormous:
     /// shedding `0.99c` at five gravities takes years and carries the frame's anchor event tens
-    /// of light-years away, so the direct form recovers a five-kilometre standoff by
+    /// of light-years away, so the direct form recovers a five-kilometer standoff by
     /// subtracting two numbers of order fifty light-years and gets about a hundred bits of
     /// signal. See [`boost::separation_in_world`].
     pub fn state_at(&self, now_s: f64) -> (DVec3, DVec3) {
@@ -419,7 +419,7 @@ impl Rendezvous {
     }
 }
 
-/// How far a craft of `mine` metres hangs back from one of `theirs` in company, metres.
+/// How far a craft of `mine` meters hangs back from one of `theirs` in company, meters.
 pub fn standoff_m(mine: f64, theirs: f64) -> f64 {
     Closeness::Company.standoff_m(mine, theirs)
 }
@@ -529,7 +529,7 @@ mod tests {
     use super::*;
 
     const KM: f64 = 1.0e3 / M_PER_LY;
-    /// Two five-hundred-metre hulls in company.
+    /// Two five-hundred-meter hulls in company.
     const STANDOFF: f64 = (500.0 + 500.0) * STANDOFF_LENGTHS;
 
     fn quarry(at_km: f64, beta: DVec3) -> Sighting {
@@ -619,10 +619,10 @@ mod tests {
         assert!(plan.frame_at(hour).distance(reckoned) < 1.0e-15);
     }
 
-    /// A quarry holding its course never diverges from the plan, and one that manoeuvres does
-    /// so at once. That difference is the whole manoeuvre response.
+    /// A quarry holding its course never diverges from the plan, and one that maneuveres does
+    /// so at once. That difference is the whole maneuvere response.
     #[test]
-    fn only_a_manoeuvre_throws_a_plan_away() {
+    fn only_a_maneuvere_throws_a_plan_away() {
         let held = quarry(1_000.0, DVec3::Y * 1.0e-5);
         let plan = approach(&pursuer(), STANDOFF, &held, 0.0, Drive::DEFAULT).expect("a plan");
         let motive = Motive::Rendezvous(plan.clone());
@@ -699,10 +699,10 @@ mod tests {
         assert!((gap_m - STANDOFF).abs() < 1.0, "ended {gap_m} m off, wanted {STANDOFF}");
     }
 
-    /// **Intimate is a kilometre of clear space**, whatever the two hulls measure: the distance
-    /// between centres grows by half of each, and the slack does not grow at all.
+    /// **Intimate is a kilometer of clear space**, whatever the two hulls measure: the distance
+    /// between centers grows by half of each, and the slack does not grow at all.
     #[test]
-    fn intimate_is_a_kilometre_between_hulls() {
+    fn intimate_is_a_kilometer_between_hulls() {
         let small = Closeness::Intimate.standoff_m(500.0, 500.0);
         assert_eq!(small, 1_500.0);
         let large = Closeness::Intimate.standoff_m(500.0, 50_000.0);
@@ -755,7 +755,7 @@ mod tests {
     /// The top of the range is worth reading twice. At `0.9999c` the Lorentz factor is seventy,
     /// shedding that much relative velocity at five gravities takes the better part of a
     /// century, and the frame's anchor event finishes some hundreds of light-years astern — and
-    /// the standoff still comes out to a part in ten thousand of five kilometres. That is the
+    /// the standoff still comes out to a part in ten thousand of five kilometers. That is the
     /// algebraic cancellation in [`boost::separation_in_world`] doing its job; without it this
     /// case has no significant figures left at all.
     #[test]

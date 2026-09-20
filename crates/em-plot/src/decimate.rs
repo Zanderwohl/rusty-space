@@ -46,7 +46,7 @@ impl Envelope {
 
 /// Min/max decimation: for each pixel column, the vertical extent of the samples in it.
 ///
-/// This is not an optimisation, it is the correct algorithm. A light curve has millions of
+/// This is not an optimization, it is the correct algorithm. A light curve has millions of
 /// samples against a few hundred pixels, and subsampling — taking every nth point — aliases:
 /// a transit one sample wide disappears at some zoom levels and reappears at others, which
 /// makes a chart that lies about whether a planet is there. Taking the extent instead

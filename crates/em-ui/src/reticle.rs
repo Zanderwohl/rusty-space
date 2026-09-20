@@ -76,22 +76,22 @@ pub enum Marker {
 /// the arrow goes to the left edge, pointing away from it. So `w <= 0` never divides: it takes
 /// the direction straight from `clip.xy`, whose sign was right all along.
 pub fn place(clip: Vec4, radius_px: f32, viewport: Vec2, frame: Frame<'_>) -> Marker {
-    let centre = (frame.safe.max + frame.safe.min) * 0.5;
+    let center = (frame.safe.max + frame.safe.min) * 0.5;
 
     if clip.w <= 0.0 {
         // Behind the camera, or exactly abeam. The projected point is meaningless; the way to
         // turn is not, and it is the sign `clip.xy` already carries.
         let direction = to_screen_direction(clip.x, clip.y);
-        return Marker::Off { at: on_edge(centre, direction, frame), direction };
+        return Marker::Off { at: on_edge(center, direction, frame), direction };
     }
 
     let at = to_screen(clip, viewport);
     if frame.safe.contains(at) {
         return Marker::On { at, radius_px };
     }
-    let direction = (at - centre).normalize_or_zero();
+    let direction = (at - center).normalize_or_zero();
     let direction = if direction == Vec2::ZERO { Vec2::X } else { direction };
-    Marker::Off { at: on_edge(centre, direction, frame), direction }
+    Marker::Off { at: on_edge(center, direction, frame), direction }
 }
 
 /// Where a label of `size` goes for a thing at `anchor` of `radius_px`, in the safe rect.
@@ -101,7 +101,7 @@ pub fn place(clip: Vec4, radius_px: f32, viewport: Vec2, frame: Frame<'_>) -> Ma
 /// left; and if none of them fit the first is clamped in. `preferred` is tried before all of those, which is how an off-screen arrow gets its
 /// label on the inward side rather than stacked above it.
 ///
-/// Returns the label's **centre**.
+/// Returns the label's **center**.
 pub fn place_label(
     anchor: Vec2,
     radius_px: f32,
@@ -119,11 +119,11 @@ pub fn place_label(
         let reach = d.x.abs() * size.x * 0.5 + d.y.abs() * size.y * 0.5;
         anchor + d * (radius_px.max(0.0) + gap_px + reach)
     };
-    let fits = |centre: Vec2| {
+    let fits = |center: Vec2| {
         let half = size * 0.5;
-        let box_ = Rect::from_corners(centre - half, centre + half);
-        (centre - half).cmpge(frame.safe.min).all()
-            && (centre + half).cmple(frame.safe.max).all()
+        let box_ = Rect::from_corners(center - half, center + half);
+        (center - half).cmpge(frame.safe.min).all()
+            && (center + half).cmple(frame.safe.max).all()
             // "Does not fit" covers "is covered", which is what keeps a label off a notice box.
             && frame.is_clear(box_)
     };
@@ -133,7 +133,7 @@ pub fn place_label(
         .into_iter()
         .chain(LADDER)
         .map(offset)
-        .find(|centre| fits(*centre))
+        .find(|center| fits(*center))
         .unwrap_or_else(|| clamp_into(first, size, frame.safe))
 }
 
@@ -262,7 +262,7 @@ pub fn brackets(at: Vec2, radius_px: f32, arm_px: f32) -> Vec<[Vec2; 2]> {
 /// An arrowhead pointing along `direction`, with its **tip at `at`**.
 ///
 /// The tip, not the middle. `at` comes from [`place`], which puts it on the safe rect, and the
-/// whole reason for that inset is that the arrow be visible: a triangle centred there reaches
+/// whole reason for that inset is that the arrow be visible: a triangle centered there reaches
 /// `size_px` past the border and loses its point off the edge of the window.
 pub fn arrow(at: Vec2, direction: Vec2, size_px: f32) -> Vec<[Vec2; 2]> {
     let d = direction.normalize_or_zero();
@@ -287,7 +287,7 @@ fn to_screen_direction(x: f32, y: f32) -> Vec2 {
 ///
 /// Drawn back along its own ray rather than slid sideways, so the arrow keeps pointing where
 /// the thing actually is — it only moves closer to the middle.
-fn on_edge(centre: Vec2, direction: Vec2, frame: Frame<'_>) -> Vec2 {
+fn on_edge(center: Vec2, direction: Vec2, frame: Frame<'_>) -> Vec2 {
     let half = (frame.safe.max - frame.safe.min) * 0.5;
     // The smaller of the two axis crossings is the one the ray actually meets.
     let scale = |d: f32, extent: f32| if d.abs() > 1e-6 { (extent / d).abs() } else { f32::MAX };
@@ -297,11 +297,11 @@ fn on_edge(centre: Vec2, direction: Vec2, frame: Frame<'_>) -> Vec2 {
     for taken in frame.occupied {
         let grown =
             Rect::from_corners(taken.min - Vec2::splat(clearance), taken.max + Vec2::splat(clearance));
-        if let Some(entry) = entry_along(centre, direction, grown) {
+        if let Some(entry) = entry_along(center, direction, grown) {
             reach = reach.min(entry);
         }
     }
-    (centre + direction * reach.max(0.0)).clamp(frame.safe.min, frame.safe.max)
+    (center + direction * reach.max(0.0)).clamp(frame.safe.min, frame.safe.max)
 }
 
 /// Where a ray from `origin` along `direction` first enters `rect`, if it does ahead of the
@@ -309,7 +309,7 @@ fn on_edge(centre: Vec2, direction: Vec2, frame: Frame<'_>) -> Vec2 {
 ///
 /// `None` when it misses, when the rectangle is behind, and — deliberately — when the origin is
 /// already inside it. Something covering the middle of the view cannot be escaped by moving
-/// inward, and collapsing every arrow onto the centre is worse than drawing over it.
+/// inward, and collapsing every arrow onto the center is worse than drawing over it.
 fn entry_along(origin: Vec2, direction: Vec2, rect: Rect) -> Option<f32> {
     let slab = |o: f32, d: f32, lo: f32, hi: f32| -> Option<(f32, f32)> {
         if d.abs() < 1.0e-6 {
@@ -325,9 +325,9 @@ fn entry_along(origin: Vec2, direction: Vec2, rect: Rect) -> Option<f32> {
     (near <= far && near > 0.0).then_some(near)
 }
 
-fn clamp_into(centre: Vec2, size: Vec2, safe: Rect) -> Vec2 {
+fn clamp_into(center: Vec2, size: Vec2, safe: Rect) -> Vec2 {
     let half = size * 0.5;
-    centre.clamp(safe.min + half, (safe.max - half).max(safe.min + half))
+    center.clamp(safe.min + half, (safe.max - half).max(safe.min + half))
 }
 
 #[cfg(test)]
@@ -375,7 +375,7 @@ mod tests {
     /// projection, not a reading of the code.
     #[test]
     fn something_behind_the_camera_points_the_way_it_actually_is() {
-        // Five metres behind the camera and two to the right.
+        // Five meters behind the camera and two to the right.
         let behind = Vec4::new(2.716, 0.0, -1.0, -5.0);
         let Marker::Off { at, direction } = place(behind, 0.0, VIEW, Frame::bare(safe())) else {
             panic!("behind the camera is not on screen")
@@ -428,11 +428,11 @@ mod tests {
     fn a_label_sits_above_what_it_names_when_there_is_room() {
         let at = Vec2::new(640.0, 360.0);
         let size = Vec2::new(80.0, 18.0);
-        let centre = place_label(at, 30.0, size, Frame::bare(safe()), LABEL_GAP_PX, None);
-        assert_eq!(centre.x, at.x, "centred over it");
-        assert!(centre.y < at.y - 30.0, "above the top of it: {centre}");
+        let center = place_label(at, 30.0, size, Frame::bare(safe()), LABEL_GAP_PX, None);
+        assert_eq!(center.x, at.x, "centered over it");
+        assert!(center.y < at.y - 30.0, "above the top of it: {center}");
         // Clear of the thing by the gap, and no further.
-        assert!((at.y - 30.0 - LABEL_GAP_PX - size.y * 0.5 - centre.y).abs() < 1.0e-3);
+        assert!((at.y - 30.0 - LABEL_GAP_PX - size.y * 0.5 - center.y).abs() < 1.0e-3);
     }
 
     /// Against the top of the screen it goes below instead, rather than off the edge.
@@ -440,9 +440,9 @@ mod tests {
     fn a_label_with_no_room_above_falls_below() {
         let at = Vec2::new(640.0, 20.0);
         let size = Vec2::new(80.0, 18.0);
-        let centre = place_label(at, 12.0, size, Frame::bare(safe()), LABEL_GAP_PX, None);
-        assert!(centre.y > at.y, "it should have dropped below: {centre}");
-        assert!(safe().contains(centre));
+        let center = place_label(at, 12.0, size, Frame::bare(safe()), LABEL_GAP_PX, None);
+        assert!(center.y > at.y, "it should have dropped below: {center}");
+        assert!(safe().contains(center));
     }
 
     /// In a corner, with neither above nor below available, it goes to the side.
@@ -450,8 +450,8 @@ mod tests {
     fn a_label_boxed_in_goes_sideways_and_then_is_clamped() {
         let size = Vec2::new(80.0, 18.0);
         let corner = Vec2::new(60.0, 18.0);
-        let centre = place_label(corner, 40.0, size, Frame::bare(safe()), LABEL_GAP_PX, None);
-        assert!(safe().contains(centre), "{centre} escaped the border");
+        let center = place_label(corner, 40.0, size, Frame::bare(safe()), LABEL_GAP_PX, None);
+        assert!(safe().contains(center), "{center} escaped the border");
 
         // A viewport too small for the label at all still returns something inside it.
         let tiny = safe_rect(Vec2::new(40.0, 30.0), EDGE_INSET_PX);
@@ -466,9 +466,9 @@ mod tests {
         let pointing_left = Vec2::new(-1.0, 0.0);
         let at = Vec2::new(safe.min.x, 360.0);
         let size = Vec2::new(90.0, 18.0);
-        let centre = place_label(at, 12.0, size, Frame::bare(safe), LABEL_GAP_PX, Some(-pointing_left));
-        assert!(centre.x > at.x, "the label should be inboard of the arrow: {centre}");
-        assert!(safe.contains(centre));
+        let center = place_label(at, 12.0, size, Frame::bare(safe), LABEL_GAP_PX, Some(-pointing_left));
+        assert!(center.x > at.x, "the label should be inboard of the arrow: {center}");
+        assert!(safe.contains(center));
     }
 
     /// The reported problem: a strip across the top of the window is not part of the outer
@@ -522,18 +522,18 @@ mod tests {
         };
 
         assert_eq!(direction, free_dir, "the direction is the message; it may not change");
-        let centre = (safe().max + safe().min) * 0.5;
+        let center = (safe().max + safe().min) * 0.5;
         assert!(
-            centre.distance(pushed) < centre.distance(free),
+            center.distance(pushed) < center.distance(free),
             "it should have come inward: {pushed} against {free}",
         );
         // And it is on the same ray, not merely nearer.
-        let along = (pushed - centre).normalize_or_zero();
+        let along = (pushed - center).normalize_or_zero();
         assert!(along.distance(direction) < 1.0e-3, "{along} left the ray {direction}");
     }
 
     /// Something covering the middle cannot be escaped by moving inward, so it is ignored
-    /// rather than collapsing every arrow onto the centre.
+    /// rather than collapsing every arrow onto the center.
     #[test]
     fn a_covering_rectangle_does_not_collapse_the_arrow() {
         let everything = [Rect::from_corners(Vec2::ZERO, VIEW)];
@@ -541,8 +541,8 @@ mod tests {
         let Marker::Off { at, .. } = place(in_front(4.0, 0.0, 1.0), 0.0, VIEW, frame) else {
             panic!("off screen")
         };
-        let centre = (safe().max + safe().min) * 0.5;
-        assert!(centre.distance(at) > 100.0, "{at} collapsed onto {centre}");
+        let center = (safe().max + safe().min) * 0.5;
+        assert!(center.distance(at) > 100.0, "{at} collapsed onto {center}");
     }
 
     /// A label goes where it is not covered, which is the same ladder doing more work. This is

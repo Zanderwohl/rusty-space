@@ -73,7 +73,7 @@ fn paint(c: Rgba) -> Paint<'static> {
 }
 
 /// Draw a string with the built-in bitmap font. Returns the width used.
-fn text(pixmap: &mut Pixmap, at: (f32, f32), s: &str, size: f32, anchor: Anchor, colour: Rgba) {
+fn text(pixmap: &mut Pixmap, at: (f32, f32), s: &str, size: f32, anchor: Anchor, color: Rgba) {
     let scale = ((size / GLYPH_H as f32).round() as i32).max(1);
     let advance = (GLYPH_W as i32 + 1) * scale;
     let width = s.chars().count() as i32 * advance;
@@ -95,7 +95,7 @@ fn text(pixmap: &mut Pixmap, at: (f32, f32), s: &str, size: f32, anchor: Anchor,
                 }
                 let x = (gx + col as i32 * scale) as f32;
                 let y = (top + r as i32 * scale) as f32;
-                fill_quad(pixmap, x, y, x + scale as f32, y + scale as f32, colour);
+                fill_quad(pixmap, x, y, x + scale as f32, y + scale as f32, color);
             }
         }
     }
@@ -113,7 +113,7 @@ pub fn render(
 
     for layer in layers {
         for q in &layer.quads {
-            fill_quad(&mut pixmap, q.min.x, q.min.y, q.max.x, q.max.y, q.colour);
+            fill_quad(&mut pixmap, q.min.x, q.min.y, q.max.x, q.max.y, q.color);
         }
         for line in &layer.polylines {
             let mut pb = PathBuilder::new();
@@ -131,11 +131,11 @@ pub fn render(
             }
             if let Some(path) = pb.finish() {
                 let stroke = Stroke { width: line.width.max(0.5), line_cap: LineCap::Butt, ..Stroke::default() };
-                pixmap.stroke_path(&path, &paint(line.colour), &stroke, Transform::identity(), None);
+                pixmap.stroke_path(&path, &paint(line.color), &stroke, Transform::identity(), None);
             }
         }
         for l in &layer.labels {
-            text(&mut pixmap, (l.at.x, l.at.y), &l.text, l.size, l.anchor, l.colour);
+            text(&mut pixmap, (l.at.x, l.at.y), &l.text, l.size, l.anchor, l.color);
         }
     }
     Some(pixmap)
@@ -188,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn alpha_accumulates_toward_the_colour() {
+    fn alpha_accumulates_toward_the_color() {
         let mut pm = Pixmap::new(8, 8).unwrap();
         pm.fill(Color::WHITE);
         let faint = Rgba(0.0, 0.0, 0.0, 0.25);

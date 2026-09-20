@@ -4,7 +4,7 @@ use std::fmt::Write;
 
 use crate::primitives::{Anchor, Primitives, Rgba};
 
-fn colour(c: Rgba) -> String {
+fn color(c: Rgba) -> String {
     format!(
         "rgb({},{},{})",
         (c.0.clamp(0.0, 1.0) * 255.0).round() as u8,
@@ -31,8 +31,8 @@ pub fn render(primitives: &[&Primitives], width: f32, height: f32) -> String {
                 q.min.y,
                 q.max.x - q.min.x,
                 q.max.y - q.min.y,
-                colour(q.colour),
-                q.colour.3
+                color(q.color),
+                q.color.3
             );
         }
         for line in &p.polylines {
@@ -43,9 +43,9 @@ pub fn render(primitives: &[&Primitives], width: f32, height: f32) -> String {
                 "<polyline points=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{:.2}\" \
                  stroke-opacity=\"{:.3}\"/>",
                 pts.join(" "),
-                colour(line.colour),
+                color(line.color),
                 line.width,
-                line.colour.3
+                line.color.3
             );
         }
         for l in &p.labels {
@@ -61,7 +61,7 @@ pub fn render(primitives: &[&Primitives], width: f32, height: f32) -> String {
                 l.at.x,
                 l.at.y,
                 l.size,
-                colour(l.colour),
+                color(l.color),
                 escape(&l.text)
             );
         }
@@ -131,7 +131,7 @@ mod tests {
             text: "a < b & c".into(),
             size: 10.0,
             anchor: Anchor::Start,
-            colour: Rgba::BLACK,
+            color: Rgba::BLACK,
         });
         let svg = render(&[&p], 10.0, 10.0);
         assert!(svg.contains("a &lt; b &amp; c"));

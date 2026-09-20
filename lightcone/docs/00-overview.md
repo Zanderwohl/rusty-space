@@ -46,7 +46,7 @@ In:
 - Special relativity. Light delay, Doppler, aberration, ship proper time.
 - Newtonian and Keplerian orbital mechanics, reusing `em-foundations` and `em-sim`.
 - Passive observation: photometry, transit detection, spectroscopy.
-- Active signalling: omnidirectional radio, tight-beam, and the detectability difference.
+- Active signaling: omnidirectional radio, tight-beam, and the detectability difference.
 - Resource extraction, construction, self-replicating probes.
 - One authoritative server. Browser (WASM) and native desktop clients.
 
@@ -78,7 +78,7 @@ Out:
 | risk | where it is addressed |
 |---|---|
 | Light-cone queries over a large event table are not indexable in general | [02-event-store.md](02-event-store.md) — query sources, not events |
-| f64 metres lose precision at interstellar range | [01-spacetime.md](01-spacetime.md) — integer light-microsecond grid |
+| f64 meters lose precision at interstellar range | [01-spacetime.md](01-spacetime.md) — integer light-microsecond grid |
 | Per-element occultation does not scale to swarms of 1e6+ | [04-stellar-photometry.md](04-stellar-photometry.md) — populations are distributions, not rosters |
 | Browser targets restrict shaders and transport | [07-rendering.md](07-rendering.md), [08-networking.md](08-networking.md) |
 | Client-side prediction must agree with the server bit-for-bit where rules depend on it | [08-networking.md](08-networking.md) — shared `libm` |

@@ -74,7 +74,7 @@ pub struct Progress {
     /// Mass in the step under way that is in neither the loadout nor the store: a module half
     /// built, or (negative) the half of one already taken apart.
     pub in_hand_kg: f64,
-    /// What cancelling now would return to storage, joules. Negative for a dismantling under way,
+    /// What canceling now would return to storage, joules. Negative for a dismantling under way,
     /// whose refund so far goes back into the module.
     pub reversal_j: f64,
     /// The step under way, and how far through it is.
@@ -365,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn cancelling_keeps_what_finished_and_returns_most_of_what_did_not() {
+    fn canceling_keeps_what_finished_and_returns_most_of_what_did_not() {
         let from = Loadout::STARTING;
         let refit = plan(from, Loadout { engines: 7, ..from }, 30.0).unwrap();
         let half_week = 3.5 * 86_400.0;

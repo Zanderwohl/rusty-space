@@ -109,10 +109,10 @@ impl Inclination {
         Self { bins: out }
     }
 
-    /// A band of half-width `spread` about `centre`, in radians.
-    pub fn band(centre: f64, spread: f64, bins: usize) -> Self {
-        let lo = (centre - spread).max(0.0);
-        let hi = (centre + spread).min(std::f64::consts::FRAC_PI_2);
+    /// A band of half-width `spread` about `center`, in radians.
+    pub fn band(center: f64, spread: f64, bins: usize) -> Self {
+        let lo = (center - spread).max(0.0);
+        let hi = (center + spread).min(std::f64::consts::FRAC_PI_2);
         Self::uniform_angle(lo, hi, bins)
     }
 

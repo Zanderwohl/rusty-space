@@ -206,7 +206,7 @@ impl Balance {
         loadout.engines as f64 * self.engine_thrust_n / mass_kg / G0
     }
 
-    /// The hull length whose ovoid holds `slots` slots, metres.
+    /// The hull length whose ovoid holds `slots` slots, meters.
     pub fn length_m(&self, slots: u32) -> f64 {
         (slots as f64 * self.slot_volume_m3 / OVOID_M3_PER_CUBIC_M).cbrt()
     }
@@ -573,7 +573,7 @@ mod tests {
     use glam::DVec3;
 
     #[test]
-    fn the_reference_hull_is_exactly_twenty_slots_and_five_hundred_metres() {
+    fn the_reference_hull_is_exactly_twenty_slots_and_five_hundred_meters() {
         let b = Balance::DEFAULT;
         assert!((b.length_m(20) - 500.0).abs() < 1.0e-9, "{}", b.length_m(20));
         let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);

@@ -187,7 +187,7 @@ impl Snapshot {
     }
 }
 
-/// Metres a second from a fraction of `c`.
+/// Meters a second from a fraction of `c`.
 fn velocity_m_s(beta: DVec3) -> DVec3 {
     beta * C_M_S
 }
@@ -697,9 +697,9 @@ mod tests {
         let until = now + 3_600.0;
         run(&mut ship, &mut system, now, until, 438.0);
         run(&mut there, &mut other, now, until, 438.0);
-        // A metre, against an orbit twelve thousand kilometres across.
+        // A meter, against an orbit twelve thousand kilometers across.
         let apart = (ship.position_ly - there.position_ly).length() * crate::system::M_PER_LY;
-        assert!(apart < 1.0, "the arcs are {apart} metres apart after an hour");
+        assert!(apart < 1.0, "the arcs are {apart} meters apart after an hour");
     }
 
     /// With no system there is nothing for a conic to be about, so it degrades to a line —

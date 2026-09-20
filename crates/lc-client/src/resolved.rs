@@ -149,7 +149,7 @@ pub fn sample_scene(
     bodies: Res<crate::starfield::Bodies>,
     eye: Res<crate::hull::Eye>,
     uplink: Res<crate::uplink::Uplink>,
-    camera: Query<(&Projection, &Camera), With<Camera3d>>,
+    camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     mut last: Local<Option<(usize, f32)>>,
 ) {
     let rad_per_px = crate::starfield::camera_scale(&camera);
@@ -337,7 +337,7 @@ pub fn update_resolved(
     mut resolved: ResMut<Resolved>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodySurfaceMaterial>>,
-    camera: Query<(&Projection, &Camera), With<Camera3d>>,
+    camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     existing: Query<(Entity, &ResolvedBody)>,
     mut placed: Query<(&mut Transform, &MeshMaterial3d<BodySurfaceMaterial>, &ResolvedBody)>,
 ) {
@@ -418,7 +418,9 @@ mod tests {
 
     fn body(radius_m: f64, at: DVec3) -> Drawable {
         Drawable {
+            mass_kg: 0.0,
             name: "test".into(),
+            kind: lc_world::navigation::Kind::Planet,
             rings: None,
             surface: Surface::Rock,
             pole: DVec3::Z,
@@ -434,7 +436,7 @@ mod tests {
     fn giant() -> Drawable {
         let mut b = body(6.99e7, DVec3::X * 1.0e-9);
         b.surface = Surface::GasGiant;
-        // The grey balance at 5.2 AU, which is what `equilibrium_temperature` would give.
+        // The gray balance at 5.2 AU, which is what `equilibrium_temperature` would give.
         b.equilibrium_k = 122.0;
         b.effective_k = Surface::GasGiant.effective_temperature(122.0);
         b
@@ -615,7 +617,7 @@ mod tests {
     }
 
     /// The point of metering the bodies: a planet large enough to be the picture is exposed
-    /// for, and the same planet at a different distance from its star is not the same colour.
+    /// for, and the same planet at a different distance from its star is not the same color.
     ///
     /// A body's surface radiance does not change as the ship approaches it — only its size on
     /// screen does — so this is a statement about the reference following the subject.

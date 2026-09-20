@@ -17,7 +17,7 @@ use crate::server::{Server, refusal_for};
 use crate::transport::Transport;
 
 /// The slowest cap a course is lowered to before it is refused, as a fraction of `c`. About
-/// three kilometres a second: slower than this is not a flight anyone ordered.
+/// three kilometers a second: slower than this is not a flight anyone ordered.
 pub const SLOWEST_BETA: f64 = 1.0e-5;
 
 /// Halvings of the cap, fixed rather than to a tolerance so a replay lands on the same one.

@@ -776,7 +776,7 @@ fn load_motive_selection(conn: &Connection, motive_id: i64, motive_type: &str) -
 
 /// A column the chosen shape/rotation/epoch type requires. NULL means the row was
 /// written by an incompatible schema, not that the value is zero: an absent
-/// `semi_major_axis` used to load as a body orbiting one metre from its primary, and an
+/// `semi_major_axis` used to load as a body orbiting one meter from its primary, and an
 /// absent `epoch_julian_day` silently reassigned a fitted element set to J2000.
 fn required(value: Option<f64>, column: &str, kind: &str) -> Result<f64, SqliteSaveError> {
     value.ok_or_else(|| {

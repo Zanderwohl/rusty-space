@@ -64,7 +64,7 @@ solution, a light-delay schedule — is wrong with it.
 **The threshold is angular, not metric.** A tween is worth having when the offset is smaller
 than the things on screen, and is worse than a cut when it is not: a slow slide across a
 light-second reads as the whole universe moving. So: slew while the offset subtends less than
-about a degree at the current view; above that, cut. A metre threshold cannot work in a game
+about a degree at the current view; above that, cut. A meter threshold cannot work in a game
 whose scales span from a low orbit to the Oort cloud.
 
 ### Adjust — an intent the server did not take as offered
@@ -191,7 +191,7 @@ not, and the way that showed up was not a clock complaint — it was a ship that
 The client runs its own clock between frames, because it draws far faster than anything arrives.
 Nothing corrected it, and the rate ladder let a player multiply it by 3600. So the client's
 clock ran away, every order it sent came back stamped in its own past, and folding an order from
-the past means folding a manoeuvre that has already finished: the ship jumps to its destination.
+the past means folding a maneuvere that has already finished: the ship jumps to its destination.
 Meanwhile the server still believed the ship was in transit, so every order about the system the
 client thought it had reached was refused.
 
@@ -213,7 +213,7 @@ Two halves, both needed:
 
 A correction that fires **every second and never fixes anything** is not drift — it is a rate
 mismatch, because the client re-diverges as fast as it is pulled back. That is the alarm working
-and is worth recognising on sight; the size of the correction names the ratio.
+and is worth recognizing on sight; the size of the correction names the ratio.
 
 The slack exists for the honest case, which is not cheating: a browser tab in the background has
 its frames throttled, so its clock nearly stops while the world does not. It comes back hours

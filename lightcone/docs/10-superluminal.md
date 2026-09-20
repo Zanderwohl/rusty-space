@@ -80,7 +80,7 @@ happens at one coordinate and its light reaches an observer once.
 
 ## The paradox question, and why this design is already immune
 
-Superluminal signalling normally permits closed causal loops: A causes B across a spacelike
+Superluminal signaling normally permits closed causal loops: A causes B across a spacelike
 interval, B causes C across a spacelike interval in a different frame, and C precedes A in
 the original frame.
 
@@ -126,7 +126,7 @@ Segregating superluminal sources is what keeps the cursor cheap. There are ~1e5 
 almost all of them are stars, which never move superluminally. Keep a separate small set for
 the ones that can, solve those the expensive way, and the common path is unchanged.
 
-Estimated shape: one module rewritten with care, one rendering feature added, one optimisation
+Estimated shape: one module rewritten with care, one rendering feature added, one optimization
 weakened, one invariant restated. Bounded, and more interesting than difficult.
 
 ## The cost that is not technical

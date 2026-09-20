@@ -1,6 +1,6 @@
 # Rendering
 
-Bevy 0.17, wgpu, WGSL. One shader set for native and browser.
+Bevy 0.19, wgpu, WGSL. One shader set for native and browser.
 
 ## View modes
 
@@ -8,6 +8,7 @@ Bevy 0.17, wgpu, WGSL. One shader set for native and browser.
 |---|---|---|
 | observer view | every object at its **retarded** state, as seen from the player's ship | players, default and usually only |
 | god view | every object at coordinate time `t`, no delay | development, replays, spectators |
+| aggregate | several observers' sightings folded together | nobody yet; `Provenance::Aggregate` exists and no provider does |
 
 Observer view is the game. Each drawable is evaluated at its own retarded time, solved
 against the camera's worldline, so a distant ship appears where it was when its light left
@@ -31,8 +32,8 @@ be patched and the server is the only thing that decides what data leaves it. Tr
 that requests god-view data without the capability as a client to disconnect.
 
 **God view draws causality explicitly.** For every event still in flight, draw a line from the
-event's coordinate to each observer it is currently travelling toward, with the fraction
-travelled shown along it. The single most common class of bug in this design is an observer
+event's coordinate to each observer it is currently traveling toward, with the fraction
+traveled shown along it. The single most common class of bug in this design is an observer
 learning something early or late, and it is invisible in any view that only shows positions.
 Rendered this way it is obvious: a line that reaches an observer before the client reacted, or
 a reception with no line feeding it, is the bug drawn on screen.
@@ -89,8 +90,8 @@ Three tiers, each with its own scale factor and camera:
 
 | tier | range | unit on the GPU | contents |
 |---|---|---|---|
-| surface | < 1e4 m | metres | a ship, a station, a structure's geometry |
-| system | 1e4 to 1e14 m | scaled metres | planets, orbits, trajectories, in-system traffic |
+| surface | < 1e4 m | meters | a ship, a station, a structure's geometry |
+| system | 1e4 to 1e14 m | scaled meters | planets, orbits, trajectories, in-system traffic |
 | interstellar | > 1e14 m | light-years | stars as points, systems as markers, light cones |
 
 Render tiers back to front into the same target with separate depth ranges, or composite
@@ -98,11 +99,47 @@ separate passes. Reverse-Z with an infinite far plane, per tier, keeps depth pre
 usable; the standard forward-Z projection wastes almost all of its precision near the near
 plane, which at these scale ratios means z-fighting on everything past a planet.
 
+## The map view
+
+A second `Camera3d` on its own `RenderLayers`, rendering into an `Image` that egui shows. It
+carries **no `Hdr`, no bloom and no tone map**: the sky is a photograph and is metered like one,
+and a diagram is not. The wireframe shader's emissive range is aimed at the display instead.
+
+It reuses `BodyWireframeMaterial` and adds no shader of its own. With no suns the shader's
+day/night factor is one, which is exactly an unlit wireframe, and line weight already rides in
+vertex-color alpha — so a grid line, an equator and a decade ring differ by a vertex attribute
+rather than by a material.
+
+### Three cameras, and what each one costs
+
+The client draws with three: the map's, the sky's, and one for the interface. The third exists
+because the map is a mode of the main view rather than a window over it, so the sky's camera
+takes a viewport of its own — the corner square — while the map is up.
+
+- **Which camera egui draws on is not left to spawn order.** `bevy_egui` gives its primary
+  context to the first camera an application creates, and two `Startup` systems have no order
+  between them. When the map won, the entire interface was drawn into a 512-pixel texture while
+  the window showed the sky with nothing on it.
+- **The interface is laid out inside its camera's viewport.** That is why it has a camera of its
+  own rather than riding on the sky's: the frame the sky camera is given shrinks to 190 points
+  square in the map's mode, and it took the readout, the strips and every window down into the
+  corner with it.
+- **Two cameras on one window share the texture they draw into only when their format, sample
+  count and usages all match**, and `Hdr` is what decides the format. So the interface's camera
+  carries `Hdr` although it draws no scene: without it, it got a texture of its own that nothing
+  ever cleared, and every frame's interface was laid over the last until the words were a smear
+  with the loading screen still under them a thousand frames later.
+- **`RenderTarget` is a component**, not a field on `Camera`. Left off, the camera renders over
+  the primary window on a layer with nothing on it and clears the frame to black.
+- **A render target that is resized needs `COPY_SRC`.** `Image::new_target_texture` does not set
+  it and `Image::resize` copies the old contents forward, so the first resize is a validation
+  failure named `copy_image_on_resize` — several seconds after the thing that caused it.
+
 ## Star rendering
 
 ![The sky at rest](../images/starfield.png)
 
-Stars are points with a physically-derived colour and brightness, not billboards with a
+Stars are points with a physically-derived color and brightness, not billboards with a
 fixed sprite. The existing path is `src/presentation/local_starfield*.rs` with
 `src/catalog/spectral_color.rs`, driven by the HYG catalogue.
 
@@ -168,7 +205,7 @@ much of it arrives, and that is a radius:
 R_eff = R_star * R_body * sqrt(p * phase) / d
 ```
 
-from equating `pi R_eff^2 B / D^2` with the standard `L p R^2 / (4 pi d^2 D^2)`. Exact for a grey
+from equating `pi R_eff^2 B / D^2` with the standard `L p R^2 / (4 pi d^2 D^2)`. Exact for a gray
 reflector, and checked against a measured magnitude rather than asserted: Jupiter at opposition
 comes out at -2.72 against an observed -2.70.
 
@@ -184,14 +221,14 @@ The body's own thermal emission goes in the same slot a swarm's does, because it
 physics: it absorbs starlight and re-radiates at the temperature its orbit sets. So a planet is
 warm in the thermal preset without any separate machinery.
 
-What this does not carry is a coloured albedo. Mars comes out the Sun's colour rather than its
-own, because the model says reflected light has the star's spectrum. A per-body albedo colour is
-the next thing this wants, and the preset carries a visualisation colour rather than a measured
+What this does not carry is a colored albedo. Mars comes out the Sun's color rather than its
+own, because the model says reflected light has the star's spectrum. A per-body albedo color is
+the next thing this wants, and the preset carries a visualisation color rather than a measured
 albedo, so it wants a real table too.
 
 ### Where the bodies come from
 
-Nothing is modelled here. `em-sim` holds and propagates systems, `em_sim::presets` already
+Nothing is modeled here. `em-sim` holds and propagates systems, `em_sim::presets` already
 carries the solar system — 230 bodies, moons and comets, fitted against JPL — and
 `lc_world::sky::generate` already emits a generated system in the form `em-sim` consumes. The
 client joins them: the real data where there is real data, a generated system otherwise.
@@ -225,7 +262,7 @@ Within a pass the source and its glare are also separate: the quad covers the gl
 core is a fraction of it. A single filled disc made a star a hundred and sixty pixels across
 into a flat white ball with its actual disc swamped inside.
 
-The reason for the split is that the observer moves. Baking a colour is right when the only
+The reason for the split is that the observer moves. Baking a color is right when the only
 input is a catalogue magnitude and wrong when aberration, Doppler shift, the band matrix and the
 exposure all change while the ship flies: re-uploading four `vec4`s per star per frame does not
 scale to the target count, and computing them from a temperature costs nothing.
@@ -345,9 +382,9 @@ that had to be measured off a screenshot.
 
 ### A population is different in every band
 
-**Decided: `band_response` sets the extinction, not just a colour.** A population carries a
+**Decided: `band_response` sets the extinction, not just a color.** A population carries a
 per-band response, and until now it reached the renderer only as a choice between two hard-coded
-tints — so every sensor preset drew the same grey, and "dust penetration" penetrated nothing.
+tints — so every sensor preset drew the same gray, and "dust penetration" penetrated nothing.
 Measured, the envelope was bit-identical in all six presets while the star field behind it
 changed.
 
@@ -358,7 +395,7 @@ A band changes two separate things about a population, and both of them matter:
   mechanism the dust-penetration preset is named for, and it is the per-band extinction
   coefficient the march multiplies its one column integral by.
 - **What the material that is there looks like.** In the optical a belt shines by scattered
-  starlight, so it is the colour of its star; at ten microns it shines by its own two-hundred-
+  starlight, so it is the color of its star; at ten microns it shines by its own two-hundred-
   kelvin glow, which the star has none of. Both scale with `band_response` — emissivity and
   absorptivity are the same number, which is why one array serves both.
 
@@ -366,7 +403,7 @@ The march is unchanged and so is its cost: it produces one column of material an
 optical depth is that column times that band's own coefficient, so seven bands cost what one
 did. Only the conversion at the end differs, and it is seven exponentials and a matrix.
 
-**The level is a display decision; only the colour is physics.** A belt's real surface
+**The level is a display decision; only the color is physics.** A belt's real surface
 brightness is four decades under a star's and renders as nothing at all in every normalised
 preset — true photometrically and useless as a picture, which is the argument the fourth root
 already settles for the opacity. So the source spectrum is normalised to put the brightest
@@ -385,12 +422,12 @@ What that buys, measured on the same frame with the same belt made of rock and o
 Rock reads warm in the optical, red in the thermal — it is warm — and bright at 21 cm, where a
 cold body is relatively much brighter than a sun-like reference. Dust reads blue in the optical
 because it interacts more in B, loses the thermal channel where its response is 0.06, and at
-21 cm is simply not there. That last row is the grey-versus-reddening diagnostic of
+21 cm is simply not there. That last row is the gray-versus-reddening diagnostic of
 [04-stellar-photometry.md](04-stellar-photometry.md), arrived at from the physics rather than
 from an `if`.
 
 **No drawn population is dusty yet.** The generated belts and swarms are `PerBand::splat(1.0)`,
-which is right — a metre of rock is a metre of rock from B to 21 cm — and the one dusty
+which is right — a meter of rock is a meter of rock from B to 21 cm — and the one dusty
 population the generator makes is the Oort cloud, which is below the visibility floor. So the
 mechanism is correct, tested, and currently invisible in play. It becomes visible the moment
 anything dusty is drawn, and a debris belt's *dust* component, which is what infrared astronomy
@@ -424,7 +461,7 @@ of its thresholds are set between specific pairs rather than chosen:
 | Saturn 5.7e26 kg against Neptune 1.0e26 | mass | an ice giant is one because it never got the hydrogen |
 
 Sorting the giants by *temperature* was the first attempt and put Saturn, at 90 K, in with
-Uranus. True about its temperature and wrong about everything a person would recognise.
+Uranus. True about its temperature and wrong about everything a person would recognize.
 
 Two families of surface cover it: latitude bands for anything gaseous, mottling for everything
 solid. The band warp has to stay well under the band spacing — at a quarter of a period it stops
@@ -444,7 +481,7 @@ has the star's spectrum, and a blackbody at its own effective temperature, which
 at all. A surface at `T` has radiance `B(T)` whichever way it is turned, and that is the whole
 reason a gas giant's night side is as bright at ten microns as its day side.
 
-The effective temperature is the grey equilibrium one cut by the **Bond** albedo and raised by
+The effective temperature is the gray equilibrium one cut by the **Bond** albedo and raised by
 the internal heat. Bond, not geometric — a different quantity, not a different estimate of one:
 Jupiter's are 0.34 and 0.50, and using the wrong one puts its temperature out by six per cent.
 Against the measured values this is good to a couple of per cent for Jupiter and Saturn. The ice
@@ -482,7 +519,7 @@ leaves the face-on case untouched because at `n` of one it is `t`.
 
 A ring is not a shell. It has radial structure and no latitude, so it gets a flat annulus with
 each vertex's opacity from the optical depth *at that radius*. Saturn's rings span a factor of
-1.8 in radius with a division in the middle that is the most recognisable thing about them;
+1.8 in radius with a division in the middle that is the most recognizable thing about them;
 drawn as a shell at one radius they would be a circle.
 
 Both shapes go through one material, and the difference is a vertex normal: a shell's is its own
@@ -512,7 +549,7 @@ everything natural is exactly zero and only a technosignature shows — true pho
 useless as a picture, for the same reason a linear tone map of sixty stops renders a black sky.
 
 A logarithm was the first attempt and overcorrected badly: it put a Kuiper belt at 0.46, and
-since the ship is *inside* that shell the result was a grey wash over the whole sky. A fourth
+since the ship is *inside* that shell the result was a gray wash over the whole sky. A fourth
 root gives 0.001, 0.013 and 0.80 — a trace, a haze and a structure, which is the right reading
 of all three.
 
@@ -555,7 +592,7 @@ Single scattering — `exp(-tau)` to the star and a Henyey-Greenstein phase — 
 belt read as lit rather than as glowing, and the star's position is already known.
 
 Individual elements are drawn only when they have been promoted out of the population — when a
-player selects specific members for a manoeuvre — at which point there are a handful of them
+player selects specific members for a maneuvere — at which point there are a handful of them
 and they are ordinary bodies.
 
 ## Performance shape
@@ -617,9 +654,9 @@ affordance; `--shot` does it.
 they are told about other people, and neither is visible from inside it.
 
 A hull is one ovoid at a size: five long by three across by one deep, from
-`lc_world::craft::BEAM_PER_LENGTH` and its neighbour, over a designed range of five hundred
-metres to fifty kilometres. It is drawn by the resolved-body material with the contrast set to
-zero, which turns the generated surface off and leaves a flat grey lit by the system's own star
+`lc_world::craft::BEAM_PER_LENGTH` and its neighbor, over a designed range of five hundred
+meters to fifty kilometers. It is drawn by the resolved-body material with the contrast set to
+zero, which turns the generated surface off and leaves a flat gray lit by the system's own star
 and metered into the same exposure as everything else. Shape is a constant rather than a field
 because nothing yet lets one craft differ from another in it; the *length* is on the wire, so
 ships varying in size costs no protocol version.
@@ -629,11 +666,11 @@ current motive is *aiming* at — see `lc_world::attitude` — which is the thru
 thrust. Proper acceleration, so a ballistic arc counts as unpowered rather than pointing at
 whatever it is falling towards. The visible consequence is the right one: a crossing is burn,
 flip and burn, so for its whole second half the ship points back the way it came while still
-travelling forward at a large fraction of `c`.
+traveling forward at a large fraction of `c`.
 
 **The turn is not instant, and it is not free.** A hull swings its nose at
-`attitude::rate_rad_s`, which goes as `1/L` — a five-hundred-metre ship flips in a minute and a
-fifty-kilometre one takes nearly two hours. So `flight::Cruise` holds the drive out between the
+`attitude::rate_rad_s`, which goes as `1/L` — a five-hundred-meter ship flips in a minute and a
+fifty-kilometer one takes nearly two hours. So `flight::Cruise` holds the drive out between the
 boost and the brake for at least `Drive::flip_s`, and the ship covers that ground at its peak
 speed. It also comes about *before* it lights anything: a crossing begins with a `Phase::Turn`
 in which the ship drifts at whatever it had, facing round to its first burn. A ship told to go
@@ -646,12 +683,12 @@ turning, which is the property the coast exists to buy.
 
 A craft never has *no* attitude: where nothing is deciding one it keeps the one it has, so a
 ship that has just braked to a halt goes on pointing where it finished rather than snapping to
-whichever way its last millimetre a second happened to go.
+whichever way its last millimeter a second happened to go.
 
 **Arriving is not stopping.** A station is an orbit and an orbit moves, so a crossing planned
 onto one ends *on* its velocity: the last burn is held at one angle — `flight::Injection` — that
 kills the speed the ship came in with and imparts the speed it is joining, both at once, rather
-than braking to a dead halt and finding kilometres a second out of nowhere on the next step. The
+than braking to a dead halt and finding kilometers a second out of nowhere on the next step. The
 nose is visibly neither straight back down the track nor across it, but between. The form is
 Newtonian and only offered below `flight::INJECTION_MAX_BETA`; an interstellar crossing brakes
 to rest the exact way, as it always did.
@@ -661,7 +698,7 @@ another is not a straight line in the world: Earth covers a whole orbit radius w
 flies it, so in world coordinates the destination is running away and there is no arrival time to
 find. `lc_world::transfer` plans it relative to the body instead — the frame tracked rather than
 anchored, since both ends hold the same system and can place the body analytically — which turns
-a forty-five-thousand-kilometre miss into a millimetre. What the flight readout shows for one is
+a forty-five-thousand-kilometer miss into a millimeter. What the flight readout shows for one is
 in that frame, so it says which body the speed is *past*.
 
 ### The camera still does not translate
@@ -671,14 +708,14 @@ the hull along the view, and every pass that read the ship's position now reads 
 starfield uniform, the bodies, the resolved spheres, the envelopes and the reticle. The ship
 becomes the one thing drawn at an offset from the render origin.
 
-This is not bookkeeping. At the far end of the zoom a fifty-kilometre hull is thirteen thousand
-kilometres from the eye, which is a couple of pixels of parallax against a small moon; drawing
+This is not bookkeeping. At the far end of the zoom a fifty-kilometer hull is thirteen thousand
+kilometers from the eye, which is a couple of pixels of parallax against a small moon; drawing
 the sky from the ship and the moon from the camera would have put the two a measurable distance
 apart with nothing in the code to say why.
 
 ### Both zoom stops are angles
 
-Stored in **hull lengths**, not metres, so the number is scale-free: a player who changes ships
+Stored in **hull lengths**, not meters, so the number is scale-free: a player who changes ships
 keeps the framing rather than finding themselves inside a bigger one. The near stop puts the
 hull at the width of the window and the far one at five pixels across, below which a shape is a
 smudge and backing further off reads as the ship vanishing rather than as distance. For the
@@ -711,31 +748,31 @@ same nozzle means.
 **The shape is a display model and the light is not.** How many hull lengths the cone runs and
 how far it flares are choices; the temperature is then *forced*, because the power has to go
 somewhere and a blackbody of that area radiating it has exactly one temperature. A
-five-hundred-metre ship at five gravities comes out around fifty thousand kelvin, blue-white,
-and a fifty-kilometre one is hotter still. Nobody picks that.
+five-hundred-meter ship at five gravities comes out around fifty thousand kelvin, blue-white,
+and a fifty-kilometer one is hotter still. Nobody picks that.
 
 The one thing that is neither is the **brightness**. The gas is optically thin by an amount
 nothing here models, so what reaches the eye is some fraction of the blackbody radiance, and
 that fraction is a fudge: the core is placed a fixed number of stops above the exposure's
 reference so it overflows the window while the falloff carries the edges back down through it.
-Scale it from the colour instead and a plume is a white rectangle — fifty thousand kelvin is ten
+Scale it from the color instead and a plume is a white rectangle — fifty thousand kelvin is ten
 decades over a planet and no window holds both.
 
 That overflow **leaves as an HDR value** rather than clipping, the same bargain the starfield
 makes with a star twenty stops over. It has to, and the reason is the tone curve's own shape:
 hue and saturation are held constant and only the value is scaled, so a clipped plume returns
-one flat colour for every ray that is over the top — measured, `(135,147,202)` through the deep
+one flat color for every ray that is over the top — measured, `(135,147,202)` through the deep
 middle against `(134,147,202)` at the near-nozzle throat, which is the same pixel. The column
 depth between those two rays differs by decades and none of it was reaching the screen.
 
-**Inside the window the curve keeps the colour; past it, each channel is on its own.** That is
+**Inside the window the curve keeps the color; past it, each channel is on its own.** That is
 the one place this tone map and a sensor part company, and the plume is where it matters. A
 channel does not know what the other two are doing; it saturates when *it* is full. Under
 `natural` the plume's three are within a stop and a half of each other and spending the overflow
-along one chroma is nearly right. Under a false-colour mapping they are decades apart — ten
+along one chroma is nearly right. Under a false-color mapping they are decades apart — ten
 microns, two microns and green are three quite different questions to ask a fifty-thousand-kelvin
 gas, and in `thermal` they span nearly four stops. Asking only the brightest and reporting its
-answer as the colour of all three is how the hottest object in the frame came back a flat
+answer as the color of all three is how the hottest object in the frame came back a flat
 saturated blue. Per channel, the blue fills first, then green, then red, and the core goes white
 the way something too bright to photograph does. Measured at the core, `natural` goes 0.15 → 0.08
 and `thermal` 0.37 → 0.16, while the flanks hold or gain — `thermal`'s go 0.70 → 0.89. `survey`
@@ -769,7 +806,7 @@ fragment integrates the density along its own ray, which is where the feathered 
 from — a ray grazing the side crosses almost nothing. Two traps, both paid for:
 
 - The march runs **from the fragment back toward the eye**, not forward from the eye. A plume is
-  metres long an astronomical unit from the render origin, so the eye is of order `1e8` in the
+  meters long an astronomical unit from the render origin, so the eye is of order `1e8` in the
   proxy's own units and `eye + direction * t` asks `f32` for a point near the origin as the
   difference of two numbers near `1e8`, where its spacing is about eight. Every sample comes out
   quantised to nothing and the plume does not appear at all.
@@ -782,13 +819,13 @@ from — a ray grazing the side crosses almost nothing. Two traps, both paid for
 
 A drive burns fuel-rich, and what leaves the injector unmixed is drawn out by the flow into
 filaments of cooler, sootier gas running the length of the plume. So a sample is **two gases**
-rather than one: the march carries two columns, and the fragment colours them separately. Summing
+rather than one: the march carries two columns, and the fragment colors them separately. Summing
 one column and tinting it afterwards averages the streaks away before they can be seen.
 
 The division of labour is the same one as everywhere else here. *That* the streaks are darker and
 redder is physics — a cooler blackbody, band-mapped exactly as the core is — with one honest
 correction: soot is the only constituent of a plume that is not optically thin, so it radiates as
-a greybody, at some emissivity below one. That emissivity is also what makes the streaks visible
+a graybody, at some emissivity below one. That emissivity is also what makes the streaks visible
 at all. Above about ten thousand kelvin the visible band is on the Rayleigh-Jeans side of the
 peak, where radiance goes as `T` and not as `T⁴`, and a streak six per cent down is a plume with
 no streaks in it.
@@ -799,10 +836,10 @@ Two things about the noise, both found the hard way:
   coordinate is constant along a streamline — a parcel a third of the way out stays a third of
   the way out while the cone flares around it — so the pattern is filaments that run the length
   of the plume and widen with it, rather than dirt hanging still in the proxy while the ship
-  manoeuvres round it.
+  maneuveres round it.
 - Filaments and not sheets. Using only the *direction* across the cone makes each lane a full
   radial sheet, and a ray down the middle crosses every angle there is, averages the lot and
-  comes out the colour of clean gas. The plume had a striped fringe and a blank middle.
+  comes out the color of clean gas. The plume had a striped fringe and a blank middle.
 
 The pattern travels aft with the **simulation** clock, and how fast is a display model — a third
 one, beside the length and the flare. It has to be: the gas crosses the plume in milliseconds and
@@ -823,7 +860,7 @@ The age of the light is a column and not a footnote. It is taken from the **rang
 light-year is a year of travel by definition, so the distance to where the light left is its
 age, and taking it that way needs no agreement with the server about what time it is.
 Differencing the timestamps instead measures the clock skew between the two ends, which at a
-frozen client rate put a ship eight kilometres away five minutes in the past.
+frozen client rate put a ship eight kilometers away five minutes in the past.
 
 ## Checking a renderer without a window
 
@@ -831,8 +868,8 @@ frozen client rate put a ship eight kilometres away five minutes in the past.
 
 The client's session state drawn straight to a PNG by `em-plot`: four thousand catalogue
 stars shaded through the current band mapping, and the light curve the telescope has
-accumulated. The galactic plane is visible as the band across the sky map, star colours come
-from their own temperatures, and the curve is labelled with what it actually is — light from
+accumulated. The galactic plane is visible as the band across the sky map, star colors come
+from their own temperatures, and the curve is labeled with what it actually is — light from
 Proxima that left 4.2 years ago, plotted against **emission** time rather than arrival.
 
 ```bash
@@ -884,11 +921,11 @@ pub struct BandMapping {
 | preset | mapping | shows |
 |---|---|---|
 | natural | R, V, B to display R, G, B | what a human would see, measured rather than inferred |
-| deep natural | R+I, V, B | natural colour with M dwarfs at their real brightness |
-| thermal | 10 um, K, V | industry and waste heat; a rival's swarm becomes a colour |
+| deep natural | R+I, V, B | natural color with M dwarfs at their real brightness |
+| thermal | 10 um, K, V | industry and waste heat; a rival's swarm becomes a color |
 | dust penetration | 21 cm, 10 um, K | through clouds that are opaque in V |
-| composition | K, V, B | the grey-versus-reddening diagnostic, made visible: dust reads orange, a swarm reads neutral |
-| survey | V as luminance, 10 um as chroma | a monochrome sky in which only excess heat is coloured |
+| composition | K, V, B | the gray-versus-reddening diagnostic, made visible: dust reads orange, a swarm reads neutral |
+| survey | V as luminance, 10 um as chroma | a monochrome sky in which only excess heat is colored |
 
 ### A wide mapping has to be normalised
 
@@ -899,12 +936,12 @@ beat its own star's visible light before it shows at all. Everything under about
 stays invisible. The physics was right and the mapping could not show it.
 
 `BandMapping::direct_normalised` weights each channel by `1 / B_band(5772 K)`, so a sun-like star
-comes out neutral and an excess in any band is a colour. That is what a false-colour astronomical
+comes out neutral and an excess in any band is a color. That is what a false-color astronomical
 image does and why they are readable. `thermal`, `dust_penetration` and `composition` all use it.
 
 `natural` does not, and must not: B, V and R sit close enough together that a blackbody is
 already nearly neutral across them, and the small departure from neutral is the star's real
-colour.
+color.
 
 **The natural preset is the default and exists for the player, not for the science.** It buys
 no information the others do not, and a human looking at a sky that looks like a sky is worth
@@ -915,10 +952,10 @@ Photometric B, V and R are narrower than the CIE matching functions and `x-bar` 
 secondary lobe a direct map misses, so direct assignment **fails to converge to neutral near
 white**: measured against the CIE route, a 5772 K star comes out about 1.5 times as saturated
 as it should be. At the extremes the two agree within a few percent — a 2500 K or 20 000 K
-star is strongly coloured either way.
+star is strongly colored either way.
 
 So the CIE route — integrate the optical bands against the matching functions, convert XYZ to
-sRGB — is worth it for the natural preset, where a colour cast on a sun-like star is exactly
+sRGB — is worth it for the natural preset, where a color cast on a sun-like star is exactly
 what a player would notice, and not worth it anywhere else.
 
 The composition preset is the one worth building first. It turns the photometric diagnostic
@@ -928,11 +965,11 @@ chromatically is that the difference is visible.
 ### Bloom is a fourth channel
 
 The tone-mapping decision below already routes overflow into glow, so halo radius is a display
-dimension that reads independently of pixel colour. Assigning it a band of its own is nearly
+dimension that reads independently of pixel color. Assigning it a band of its own is nearly
 free, and thermal IR is the obvious candidate: a structure radiating waste heat gets a halo
 that a cold body of the same brightness does not.
 
-Realistic ceiling for simultaneously legible channels is about five — three colour, one bloom,
+Realistic ceiling for simultaneously legible channels is about five — three color, one bloom,
 one riding in fine luminance detail, since acuity is far higher in luminance than in chroma.
 Past that, viewers stop reading it as information. Temporal cycling of channels is excluded: it
 is nauseating and it destroys the ability to read a static frame, which is most of what this
@@ -941,7 +978,7 @@ game asks.
 ### Sensors are hardware
 
 **Decided: the available band set is a property of the viewing instrument.** The ship's own
-suite starts narrow — V alone, a greyscale sky — and widens as sensors are built. Looking
+suite starts narrow — V alone, a grayscale sky — and widens as sensors are built. Looking
 through a remote telescope uses that telescope's bands, so the view changes depending on which
 instrument the player is looking through.
 
@@ -956,7 +993,7 @@ than a UI hazard.
 ### What is deliberately not built
 
 Full spectral rendering — dozens of bins, spectral transport, dispersion — buys nothing here.
-There is no refraction worth modelling and the occlusion model is band-integrated by
+There is no refraction worth modeling and the occlusion model is band-integrated by
 construction. Generating more spectral resolution than the photometry has is inventing data.
 
 Integration cost stays low because the scene is emissive-dominated: stars, point sources,
@@ -980,7 +1017,7 @@ Two things that only became clear once it was implemented:
 - **Below the window, a point source is small rather than black.** The two-or-three-stop
   window is for surface brightness. A star field spans far more than that, so a shaded value
   carries its true signed offset from the reference, and the renderer maps that to size across
-  about fourteen stops while colour stays inside the window.
+  about fourteen stops while color stays inside the window.
 
 Physical flux in this game spans something like sixty stops, from a star at 1 AU to the
 faintest thing worth drawing. No tone curve maps that to a display. The mapping is therefore
@@ -1042,7 +1079,7 @@ Two practical constraints:
 - `u-v` plane and correlation displays for interferometry, which are charts rather than scenes
   and therefore belong to [11-plotting.md](11-plotting.md), but need a place in the UI.
 - Whether the layered-swarm shader needs a second appearance for dust, given that dust is
-  chromatic and a swarm is grey. Probably yes, and it is the visual form of the diagnostic in
+  chromatic and a swarm is gray. Probably yes, and it is the visual form of the diagnostic in
   [04-stellar-photometry.md](04-stellar-photometry.md).
 - How to present an unavailable band. Masking it to zero makes a scene look dark rather than
   uninstrumented, and the difference matters when the player is deciding what to build.

@@ -96,6 +96,99 @@ impl Panel {
     }
 }
 
+/// Which mode of play the main view is showing.
+///
+/// The map is not a window over the world: it is the other thing the same screen can be, and
+/// whichever one is not in force is the thumbnail in the corner. Windows float above either.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ViewMode {
+    /// The sky, through the ship's own camera.
+    #[default]
+    World,
+    /// Where everything is: a reference plane, decade rings, and what stands off it.
+    Map,
+}
+
+impl ViewMode {
+    pub fn other(self) -> Self {
+        match self {
+            ViewMode::World => ViewMode::Map,
+            ViewMode::Map => ViewMode::World,
+        }
+    }
+}
+
+/// What the map's camera is centered on.
+///
+/// Three states and not an `Option`, which is what this was and what made "center on the
+/// ship" a button that did nothing at all. `None` has to mean *leave the camera where it is*,
+/// because that is what a pan needs; following the observer is a third thing, and folding it
+/// into the same `None` meant the ship was the one object on the map you could not center on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MapFocus {
+    /// Wherever it was last left. A pan puts it here.
+    Free,
+    /// The observer, which is where a map should open.
+    #[default]
+    Observer,
+    /// Whatever holds the ship — a moon's planet, a planet's star — followed as the ship
+    /// crosses from one sphere of influence into the next.
+    ///
+    /// A mode and not the body it resolves to today, which is the whole of the difference:
+    /// [`MapFocus::Item`] on Earth stays on Earth after the ship has left it.
+    Primary(Frame),
+    /// Something in the snapshot, followed as it moves.
+    Item(em_map::ItemKey),
+}
+
+/// Which frame the map is drawn in while it is centered on the primary.
+///
+/// The reference line is the primary's center to the ship's. [`Frame::Local`] holds the camera
+/// against that line, so the ship keeps its place on screen and everything else goes round it;
+/// [`Frame::Fixed`] measures against the reference plane's own axes, and the ship is what moves.
+///
+/// Only on the primary. About the ship there is no line to hold — the two ends are the same
+/// point — and about a named body the ship is not one of the ends.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Frame {
+    #[default]
+    Fixed,
+    Local,
+}
+
+impl Frame {
+    pub fn label(self) -> &'static str {
+        match self {
+            Frame::Fixed => "fixed",
+            Frame::Local => "local",
+        }
+    }
+}
+
+/// What the map is showing, and from where.
+///
+/// One field on [`UiState`] rather than six, because every part of it moves together: a plane
+/// toggle that left the camera's angles measured against the old basis would be a plane toggle
+/// that tilted nothing.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MapView {
+    pub orbit: em_map::Orbit,
+    pub plane: em_map::Plane,
+    /// A key rather than a position: Saturn moves, and a camera pointed at where it was is a
+    /// camera that drifts off it over an afternoon.
+    pub focus: MapFocus,
+    /// Where the reference line pointed when the camera was last turned with it, radians.
+    ///
+    /// Held so the turn can be the *change* in that bearing: the camera's azimuth stays the one
+    /// number every drag and every ray is measured in, which is what keeps a rotating frame
+    /// from needing a second copy of the camera.
+    ///
+    /// `None` whenever nothing is being tracked, so entering the local frame turns nothing and
+    /// leaving it leaves the camera where it is.
+    pub bearing: Option<f64>,
+    pub source: crate::map_source::Source,
+}
+
 /// Which craft the camera is behind.
 ///
 /// One variant, and an enum anyway. What the camera does is going to grow — a chase view along
@@ -109,7 +202,7 @@ pub enum CameraPerspective {
     /// **The eye moves; the observer does not.** Everything the client works out about *light*
     /// — retarded times, aberration, what a contact looked like when it left — is still solved
     /// from the player's own ship, because that is the craft the session has a worldline for.
-    /// Across a scene, where the cast is kilometres apart, the difference is microseconds and
+    /// Across a scene, where the cast is kilometers apart, the difference is microseconds and
     /// there is nothing to see. Across the Oort cloud it would be hours, and this would be a
     /// lie. Watching from a craft you are not on is a development view until the observer can
     /// move too.
@@ -187,7 +280,7 @@ pub const NOTIFICATION_LIMIT: usize = 6;
 /// Clock multipliers a development build offers, and what each one means to watch.
 ///
 /// The multiplier is against the design rate of one Julian year per real hour, so 60 is a year
-/// a minute. Labelled by period rather than by factor because a factor is not something anyone
+/// a minute. Labeled by period rather than by factor because a factor is not something anyone
 /// can feel, and these exist to be chosen by eye — a crossing to Proxima takes four and a half
 /// hours at 1x, four and a half minutes at 60x, and forty-five seconds at 360x.
 /// The ladder, as multiples of [`crate::session::TIME_RATE`].
@@ -263,12 +356,17 @@ pub fn rate_step(rate: f64, up: bool) -> f64 {
     RATE_LADDER[next.min(RATE_LADDER.len() - 1)].0
 }
 
-/// Development default for the clock multiplier: a Julian year a minute rather than an hour.
+/// The clock multiplier a session starts at: **the design rate**, one Julian year an hour.
 ///
-/// A four light-year crossing then takes four minutes of real time instead of four hours,
-/// which is the difference between watching the sky move and taking it on faith. The server
-/// owns the rate in a real session and this multiplier does not exist there.
-pub const TEST_TIME_RATE: f64 = 60.0;
+/// The same number a shard runs at, and the same one [`crate::uplink::SERVER_RATE`] names. A
+/// single-player session is a server with one player, so it has no business running at a
+/// different speed from one — and the offline default used to be sixty times the server's,
+/// which is the whole of the bug behind "clock corrected by 140 hours" firing every second at
+/// a client that had joined without touching a key.
+///
+/// Speeding it up is what `--rate` is for, and what the ladder in the interface is for. Both
+/// are development affordances, and a shard refuses them: the rate is the world's.
+pub const DESIGN_TIME_RATE: f64 = 1.0;
 
 #[derive(Clone, Debug)]
 pub struct UiState {
@@ -287,6 +385,18 @@ pub struct UiState {
     pub focus: Option<crate::navigation::Target>,
     pub course: Option<crate::navigation::Course>,
     pub look: Look,
+    /// Which mode of play the main view is showing. See [`ViewMode`].
+    pub view: ViewMode,
+    /// The map's camera, plane and source. See [`MapView`].
+    pub map: MapView,
+    /// Whether this client may ask for the god view.
+    ///
+    /// Read once from the ticket, at boot, because that is the only place the ticket is. Held
+    /// here so `action::apply` can refuse as well as the panel declining to offer — a control
+    /// that is merely absent is a control the next development flag reaches anyway.
+    ///
+    /// Advisory. See [`crate::map_source::may_see_everything`] for what it is not.
+    pub may_see_everything: bool,
     /// How far the orbit camera stands off, in hull lengths.
     ///
     /// A multiple rather than a distance, so it means the same framing whatever the player is
@@ -371,6 +481,9 @@ impl Default for UiState {
             focus: None,
             course: None,
             look: Look::default(),
+            view: ViewMode::default(),
+            map: MapView::default(),
+            may_see_everything: false,
             perspective: None,
             boom_lengths: crate::hull::DEFAULT_BOOM_LENGTHS,
             distant: crate::starfield::DISTANT,
@@ -381,7 +494,7 @@ impl Default for UiState {
             preset: 0,
             integration_s: 1.0e4,
             god_view: false,
-            time_rate: TEST_TIME_RATE,
+            time_rate: DESIGN_TIME_RATE,
             notifications: Vec::new(),
             reading: Reading::default(),
             refit_draft: None,
@@ -427,7 +540,7 @@ impl UiState {
         self.raise(Notification { text: text.into(), at, from: None });
     }
 
-    /// Somebody said something. Shown in the events box in the colour the interface reserves
+    /// Somebody said something. Shown in the events box in the color the interface reserves
     /// for it, and clicking it opens the conversation.
     pub fn heard(&mut self, from: lc_proto::ShipId, text: impl Into<String>, at: f64) {
         self.raise(Notification { text: text.into(), at, from: Some(from) });

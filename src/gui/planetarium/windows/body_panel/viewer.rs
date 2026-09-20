@@ -226,7 +226,7 @@ fn body_details(ui: &mut Ui, system: &System, index: BodyIndex) {
             Appearance::DebugBall(ball) => {
                 fields::text_row(ui, "Kind", "", "Ball", "Wireframe sphere");
                 fields::text_row(ui, "Radius", "", &fields::distance(ball.radius), &fields::distance_hint(ball.radius));
-                fields::text_row(ui, "Colour", "", &format!("{}, {}, {}", ball.color.r, ball.color.g, ball.color.b), "");
+                fields::text_row(ui, "Color", "", &format!("{}, {}, {}", ball.color.r, ball.color.g, ball.color.b), "");
                 if !ball.highlight_latitudes.is_empty() {
                     let latitudes: Vec<String> =
                         ball.highlight_latitudes.iter().map(|l| format!("{l:.1}°")).collect();
@@ -243,7 +243,7 @@ fn body_details(ui: &mut Ui, system: &System, index: BodyIndex) {
                     &format!("{:.2}", star.absolute_magnitude),
                     &format!("{:.3e} lm", star.intensity()),
                 );
-                fields::text_row(ui, "Colour", "", &format!("{}, {}, {}", star.color.r, star.color.g, star.color.b), "");
+                fields::text_row(ui, "Color", "", &format!("{}, {}, {}", star.color.r, star.color.g, star.color.b), "");
             }
         });
     });
@@ -272,7 +272,7 @@ fn orbit_grid(ui: &mut Ui, system: &System, index: BodyIndex, kepler: &KeplerMot
         fields::text_row(
             ui,
             "Periapsis",
-            "Closest approach, measured from the primary's centre",
+            "Closest approach, measured from the primary's center",
             &fields::distance(periapsis),
             &altitude_hint(periapsis, primary_radius),
         );
@@ -280,7 +280,7 @@ fn orbit_grid(ui: &mut Ui, system: &System, index: BodyIndex, kepler: &KeplerMot
             Some(apoapsis) => fields::text_row(
                 ui,
                 "Apoapsis",
-                "Furthest point, measured from the primary's centre",
+                "Furthest point, measured from the primary's center",
                 &fields::distance(apoapsis),
                 &altitude_hint(apoapsis, primary_radius),
             ),

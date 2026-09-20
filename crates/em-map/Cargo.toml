@@ -1,0 +1,16 @@
+[package]
+name = "em-map"
+version = "0.1.0"
+edition = "2024"
+description = "What a spatial map draws: snapshots, reference planes, decade rings, an orbit camera."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[dependencies]
+# The frames. The galactic pole is a published equatorial direction and this crate is not a
+# second place that knows how to rotate one.
+em-foundations = { path = "../em-foundations" }
+# Decade ticks. `Scale::Log10` already chooses powers of ten and already handles a range whose
+# lower bound is zero, which is exactly what a map centered on one of its own items hits.
+em-plot = { path = "../em-plot" }
+glam = { version = "0.32", features = ["serde"] }

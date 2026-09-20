@@ -46,7 +46,7 @@ pub const HISTORY_S: f64 = 2.0 * crate::system::LOCAL_SHELL_LY * crate::flight::
 ///
 /// A bound on the memory, and the reason [`Flight::defined_over`] has a near end at all. Most
 /// craft have one or two: a ship holding a station has not changed what it is doing since it
-/// arrived. A craft that manoeuvres more often than this inside [`HISTORY_S`] forgets its
+/// arrived. A craft that maneuveres more often than this inside [`HISTORY_S`] forgets its
 /// oldest stretches, and the observers far enough away to have wanted them stop seeing it —
 /// which is the safe way to be unable to answer.
 pub const HISTORY_STRETCHES: usize = 256;
@@ -64,7 +64,7 @@ pub const HISTORY_STRETCHES: usize = 256;
 /// microns, and which band a player is looking through decides whether they can see it.
 pub const HULL_K: f64 = 400.0;
 
-/// The span of hull lengths the game is designed around, metres. Nothing enforces it; it is
+/// The span of hull lengths the game is designed around, meters. Nothing enforces it; it is
 /// what the camera, the reticle and the point-source crossover are expected to cope with.
 pub const LENGTH_RANGE_M: (f64, f64) = (500.0, 50_000.0);
 
@@ -102,7 +102,7 @@ impl Kind {
             }
             // Neither of these is going anywhere in a hurry once it is placed, and neither
             // carries a torch to do it with — a station-keeping thruster throws mass at a
-            // few hundred kilometres a second, so a beacon correcting itself is a thing you
+            // few hundred kilometers a second, so a beacon correcting itself is a thing you
             // would have to be close to see.
             Kind::Relay | Kind::Beacon => crate::flight::Drive {
                 accel_g: 1.0,
@@ -117,7 +117,7 @@ impl Kind {
         }
     }
 
-    /// How long a hull of this kind is by default, metres. A craft may be given another.
+    /// How long a hull of this kind is by default, meters. A craft may be given another.
     pub fn length_m(self) -> f64 {
         match self {
             Kind::Ship => 500.0,
@@ -127,7 +127,7 @@ impl Kind {
         }
     }
 
-    /// What a hull of this kind averages over its whole volume, kilograms per cubic metre.
+    /// What a hull of this kind averages over its whole volume, kilograms per cubic meter.
     ///
     /// An average and not a material: most of a craft is empty, and what fills the rest differs
     /// by what the craft is for. A crewed ship carries decks, tankage and shielding; a probe is
@@ -164,7 +164,7 @@ pub struct Craft {
     /// What a player calls it. `None` until someone does.
     pub name: Option<String>,
     pub motion: ShipState,
-    /// How long the hull is, metres. Defaults to the kind's, and is a field rather than a
+    /// How long the hull is, meters. Defaults to the kind's, and is a field rather than a
     /// lookup because two ships of one kind are allowed to be different sizes — see
     /// [`LENGTH_RANGE_M`], which is the span the camera and the reticle are built for.
     pub length_m: f64,
@@ -324,7 +324,7 @@ impl Craft {
 
     /// `drive`, turning at *this hull's* rate rather than at whatever was stamped on it.
     ///
-    /// Every manoeuvre is planned through here, because the slew rate is a plan parameter — a
+    /// Every maneuvere is planned through here, because the slew rate is a plan parameter — a
     /// crossing holds its coast open for the flip — and the only honest source for it is the
     /// hull that is flying. Stamped on rather than stored, for the reason [`Craft::mass_kg`]
     /// gives: a kept copy is a copy that can disagree with the ship it belongs to, and
@@ -337,11 +337,11 @@ impl Craft {
         crate::flight::Drive { slew_rate_rad_s: self.slew_rate_rad_s(), ..drive }
     }
 
-    /// How much hull there is, cubic metres.
+    /// How much hull there is, cubic meters.
     ///
-    /// The ovoid [`BEAM_PER_LENGTH`] and its neighbour describe, so a craft's volume follows
-    /// from the one number that says how big it is. Cubic in the length: a fifty-kilometre ship
-    /// is a million times the ship a five-hundred-metre one is, which is worth knowing before
+    /// The ovoid [`BEAM_PER_LENGTH`] and its neighbor describe, so a craft's volume follows
+    /// from the one number that says how big it is. Cubic in the length: a fifty-kilometer ship
+    /// is a million times the ship a five-hundred-meter one is, which is worth knowing before
     /// being surprised by what it weighs.
     pub fn volume_m3(&self) -> f64 {
         let half = self.length_m * 0.5;
@@ -433,7 +433,7 @@ impl Craft {
         }
     }
 
-    /// How far it is from its system's primary at `t`, metres. `None` between systems.
+    /// How far it is from its system's primary at `t`, meters. `None` between systems.
     pub fn star_distance_m_at(&self, t: f64) -> Option<f64> {
         let system = self.system.as_deref()?;
         let star = system.star_position_at(t)?;
@@ -643,7 +643,7 @@ impl Craft {
     /// bodies goes; a crossing does not, because leaving is what one is for.
     pub fn enter(&mut self, system: Option<Arc<LocalSystem>>, now_s: f64) {
         // Only on the way *out*. A craft that had no system has nothing defined against one,
-        // so entering must leave its motive alone -- dropping it there cancelled a station the
+        // so entering must leave its motive alone -- dropping it there canceled a station the
         // caller had just set for the system it was being put into.
         let left = match (&self.system, &system) {
             (None, _) => false,
@@ -1257,7 +1257,7 @@ mod tests {
     /// A motive is a closed form total in `t`, so the *current* one answers about times before
     /// it was ever flown — and `Drifting` extrapolates backwards, so a burn would move the ship
     /// in the past and change how fast it was going there. Every retarded solve reads that, so
-    /// an observer a light-hour away would see a manoeuvre the instant it happened.
+    /// an observer a light-hour away would see a maneuvere the instant it happened.
     #[test]
     fn a_burn_does_not_rewrite_where_the_ship_was_an_hour_ago() {
         let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
@@ -1315,7 +1315,7 @@ mod tests {
     /// The memory is bounded, and running off the end is answered by refusing rather than by
     /// guessing — which is what [`Flight::defined_over`] tells the solver.
     #[test]
-    fn a_craft_that_manoeuvres_forever_forgets_its_oldest_stretches() {
+    fn a_craft_that_maneuveres_forever_forgets_its_oldest_stretches() {
         let mut craft = drifting(DVec3::ZERO, 0.0);
         for k in 1..=(HISTORY_STRETCHES + 40) {
             let at = k as f64;

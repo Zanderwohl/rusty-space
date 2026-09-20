@@ -4,7 +4,7 @@
 //! shape that can be asked questions — how far does it reach in *this* direction, does it
 //! contain *this* point, which body owns *this* position — and into a hierarchy query.
 //!
-//! Everything is in metres, in simulation space (right-handed, Z-up, ecliptic of J2000).
+//! Everything is in meters, in simulation space (right-handed, Z-up, ecliptic of J2000).
 //!
 //! # Adding a model
 //!
@@ -42,23 +42,23 @@ pub enum SoiModel {
     LaplaceAngled,
     /// Bondi accretion radius, for a black hole.
     Bondi { velocity_dispersion: f64 },
-    /// An explicit radius in metres, for a scripted or authored override.
+    /// An explicit radius in meters, for a scripted or authored override.
     Fixed(f64),
 }
 
 /// A body's sphere of influence, frozen at one instant.
 ///
-/// Radii are in metres from [`centre`](Self::centre). Built by [`soi_now`] or [`soi_at`];
+/// Radii are in meters from [`center`](Self::center). Built by [`soi_now`] or [`soi_at`];
 /// the fields are public so a caller can build one by hand for a hypothetical.
 #[derive(Debug, Clone, Copy)]
 pub struct Soi {
     pub body: BodyIndex,
     pub model: SoiModel,
     /// The body's position in simulation space.
-    pub centre: DVec3,
+    pub center: DVec3,
     /// Unit vector from the body toward its primary. [`DVec3::ZERO`] when there is none.
     pub to_primary: DVec3,
-    /// Live distance to the primary, metres.
+    /// Live distance to the primary, meters.
     pub separation: f64,
     pub semi_major_axis: f64,
     pub eccentricity: f64,
@@ -68,7 +68,7 @@ pub struct Soi {
 }
 
 impl Soi {
-    /// Radius toward `dir`, metres. `dir` need not be normalised; a zero vector is read as
+    /// Radius toward `dir`, meters. `dir` need not be normalised; a zero vector is read as
     /// "across the primary line", where every model is at its widest.
     pub fn radius_toward(&self, dir: DVec3) -> f64 {
         let cos = if dir.length_squared() > 0.0 && self.to_primary.length_squared() > 0.0 {
@@ -103,7 +103,7 @@ impl Soi {
         if matches!(self.model, SoiModel::None) {
             return false;
         }
-        let offset = point - self.centre;
+        let offset = point - self.center;
         offset.length() <= self.radius_toward(offset)
     }
 
@@ -199,9 +199,9 @@ pub fn soi_at_with(system: &System, i: BodyIndex, time: Instant, model: SoiModel
         return None;
     }
     let primary = primary_at(system, i, time)?;
-    let centre = propagate::position_at(system, i, time)?;
+    let center = propagate::position_at(system, i, time)?;
     let primary_position = propagate::position_at(system, primary, time)?;
-    build(system, i, model, centre, primary_position, primary, time)
+    build(system, i, model, center, primary_position, primary, time)
 }
 
 /// The primary in force at `time`, resolved from the motive rather than the derived parent
@@ -215,12 +215,12 @@ fn build(
     system: &System,
     i: BodyIndex,
     model: SoiModel,
-    centre: DVec3,
+    center: DVec3,
     primary_position: DVec3,
     primary: BodyIndex,
     time: Instant,
 ) -> Option<Soi> {
-    let offset = primary_position - centre;
+    let offset = primary_position - center;
     let separation = offset.length();
 
     // The Laplace and Hill-at-periapsis forms are written in terms of the orbit, not the
@@ -235,7 +235,7 @@ fn build(
     let soi = Soi {
         body: i,
         model,
-        centre,
+        center,
         to_primary: if separation > 0.0 { offset / separation } else { DVec3::ZERO },
         separation,
         semi_major_axis,
@@ -397,7 +397,7 @@ mod tests {
         assert!((along / across - 0.8706).abs() < 1e-3, "{along:e} / {across:e}");
         assert!((soi.min_radius() - along).abs() < 1.0);
         // Away from the primary is the same squash: it is a surface of revolution, and
-        // symmetric about the plane through the centre.
+        // symmetric about the plane through the center.
         assert!((soi.radius_toward(-soi.to_primary) - along).abs() < 1.0);
         assert!((soi.radius_toward(soi.to_primary.any_orthogonal_vector()) - across).abs() < 1.0);
     }
@@ -411,7 +411,7 @@ mod tests {
             SoiModel::Laplace,
             SoiModel::LaplaceIntegrated,
             // Slow enough that the accretion radius clears Earth's surface. At a real
-            // galactic-centre dispersion it would be 40 km, i.e. underground.
+            // galactic-center dispersion it would be 40 km, i.e. underground.
             SoiModel::Bondi { velocity_dispersion: 1.0e3 },
             SoiModel::Fixed(1.0e9),
         ] {
@@ -428,11 +428,11 @@ mod tests {
         let soi = soi_of(&s, "Earth", SoiModel::LaplaceAngled);
         let across = soi.to_primary.any_orthogonal_vector().normalize();
 
-        assert!(soi.contains(soi.centre + soi.to_primary * soi.min_radius() * 0.99));
-        assert!(!soi.contains(soi.centre + across * soi.bounding_radius() * 1.01));
-        assert!(soi.contains(soi.centre + across * soi.bounding_radius() * 0.999));
+        assert!(soi.contains(soi.center + soi.to_primary * soi.min_radius() * 0.99));
+        assert!(!soi.contains(soi.center + across * soi.bounding_radius() * 1.01));
+        assert!(soi.contains(soi.center + across * soi.bounding_radius() * 0.999));
         // The point that separates the two models: inside the sphere, outside the squash.
-        let probe = soi.centre + soi.to_primary * soi.bounding_radius() * 0.95;
+        let probe = soi.center + soi.to_primary * soi.bounding_radius() * 0.95;
         assert!(!soi.contains(probe), "the bounding sphere is not the shape");
     }
 
@@ -463,7 +463,7 @@ mod tests {
 
     /// Nesting is the whole point: a moon's sphere sits inside its planet's.
     #[test]
-    fn a_moon_owns_the_space_at_its_own_centre() {
+    fn a_moon_owns_the_space_at_its_own_center() {
         let s = built();
         let luna = s.by_name("Luna").expect("the bundled system has Luna");
         let t = s.time();
@@ -481,7 +481,7 @@ mod tests {
         let s = built();
         let earth = s.by_name("Earth").unwrap();
 
-        // Earth's radius is 6371 km; a metre-scale sphere is meaningless.
+        // Earth's radius is 6371 km; a meter-scale sphere is meaningless.
         assert!(soi_now_with(&s, earth, SoiModel::Fixed(1.0)).is_none());
         assert!(soi_now_with(&s, earth, SoiModel::Fixed(s.radius(earth) * 0.5)).is_none());
         // Just outside the surface still counts.
@@ -497,6 +497,6 @@ mod tests {
         let predicted = soi_at(&s, earth, s.time()).unwrap();
         assert!((now.bounding_radius() - predicted.bounding_radius()).abs()
             < now.bounding_radius() * 1e-9);
-        assert!((now.centre - predicted.centre).length() < 1.0);
+        assert!((now.center - predicted.center).length() < 1.0);
     }
 }

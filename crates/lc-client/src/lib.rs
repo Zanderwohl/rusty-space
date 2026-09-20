@@ -20,6 +20,7 @@ pub mod bookshelf;
 pub mod chat;
 pub mod curve;
 pub mod demos;
+pub mod dev;
 pub mod entry;
 pub mod envelope;
 pub mod faces;
@@ -28,6 +29,9 @@ pub mod hull;
 pub mod input;
 pub mod library;
 pub mod link;
+pub mod map;
+pub mod map_panel;
+pub mod map_source;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod local;
 pub mod menu;

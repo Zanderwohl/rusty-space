@@ -3197,6 +3197,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "em-map"
+version = "0.1.0"
+dependencies = [
+ "em-foundations",
+ "em-plot",
+ "glam",
+]
+
+[[package]]
 name = "em-plot"
 version = "0.1.0"
 dependencies = [
@@ -4979,6 +4988,7 @@ dependencies = [
  "console_error_panic_hook",
  "directories",
  "em-foundations",
+ "em-map",
  "em-plot",
  "em-render",
  "em-sim",

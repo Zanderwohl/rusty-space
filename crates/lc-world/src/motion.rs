@@ -338,7 +338,7 @@ impl ShipState {
     ///
     /// A station and a conic are positions relative to bodies that are no longer there, so they
     /// go. A **crossing does not**: it is a straight line between two points of the world, and
-    /// leaving a system is exactly what one is for. Dropping it here cancelled every
+    /// leaving a system is exactly what one is for. Dropping it here canceled every
     /// interstellar flight at the moment it cleared the shell, and the ship then coasted the
     /// rest of the way with its clock running at the coordinate rate.
     pub fn leave_system(&mut self, now_s: f64) {
@@ -629,7 +629,7 @@ pub fn facing(state: &ShipState, hull_m: f64, now_s: f64) -> Option<DVec3> {
 /// coasting ship does not turn: there is nothing to point at, and attitude control is not free.
 ///
 /// **Not the velocity.** An earlier version pointed a coasting ship along its motion, which
-/// left a ship that had just braked to a halt facing whichever way its last millimetre a second
+/// left a ship that had just braked to a halt facing whichever way its last millimeter a second
 /// happened to go.
 pub fn facing_at(state: &ShipState, hull_m: f64, now_s: f64) -> DVec3 {
     let rate = crate::attitude::rate_rad_s(hull_m);
@@ -890,7 +890,7 @@ pub fn repatch_due(state: &ShipState, system: &LocalSystem, now_s: f64) -> Optio
 /// model measures in light-years because that is the unit a galaxy is. This is the join.
 pub const LIGHT_US_PER_LY: f64 = JULIAN_YEAR_S * 1.0e6;
 
-/// How fast a ship is going, metres a second, world frame.
+/// How fast a ship is going, meters a second, world frame.
 pub fn velocity_m_s(state: &ShipState, system: Option<&LocalSystem>, now_s: f64) -> DVec3 {
     let beta = state_at(state, system, now_s).map(|(_, beta)| beta).unwrap_or(state.beta);
     beta * crate::flight::C_M_S
@@ -1030,7 +1030,7 @@ mod tests {
         let (here, _) = state_at(&ship, Some(&system), arrival).unwrap();
         assert!(
             (from_now.0 - here).length() * crate::system::M_PER_LY > 1.0e6,
-            "a quarter of a low orbit is a thousand kilometres and more",
+            "a quarter of a low orbit is a thousand kilometers and more",
         );
     }
 
@@ -1347,7 +1347,7 @@ mod tests {
         // And it met the station: at the instant the transfer ends, in the same place and at the
         // same velocity. Asked of the transfer at *its* arrival rather than of the ship a step
         // later, because the station is going round a corner the whole time and a second of that
-        // is a metre a second.
+        // is a meter a second.
         let (met_at, met_beta) = transfer.state_at(&system, arrival).expect("a place");
         let joining = crate::coast::beta_of(station.velocity_at(&system, arrival).unwrap());
         let miss_m = met_at.distance(station.place_at(&system, arrival).unwrap())
@@ -1385,7 +1385,7 @@ mod tests {
         }
         let Motive::Holding(station) = ship.motive.clone() else { panic!("{:?}", ship.motive) };
         // **Arriving is not stopping.** The crossing ends *on* the station's velocity, which for
-        // an orbit of Earth is most of Earth's twenty-nine kilometres a second round the sun. A
+        // an orbit of Earth is most of Earth's twenty-nine kilometers a second round the sun. A
         // ship that braked to a dead halt here would have to find all of that from nowhere
         // between two samples, which is what the free injection used to be.
         let joining = crate::coast::beta_of(station.velocity_at(&system, now).unwrap());
@@ -1497,7 +1497,7 @@ mod tests {
     /// **Burn, flip and burn, seen from outside.**
     ///
     /// The whole of why the nose follows the drive rather than the velocity: for the second
-    /// half of a crossing the ship is pointing back the way it came while still travelling
+    /// half of a crossing the ship is pointing back the way it came while still traveling
     /// forward at a large fraction of `c`. A hull drawn along its velocity would spend that
     /// half facing the wrong way, and nothing about the picture would say it was braking.
     ///
@@ -1577,7 +1577,7 @@ mod tests {
     /// free — so it keeps whatever the last order left it pointing at.
     ///
     /// An earlier version pointed a coasting ship along its motion, which left a ship that had
-    /// just braked to a halt facing whichever way its last millimetre a second happened to go.
+    /// just braked to a halt facing whichever way its last millimeter a second happened to go.
     #[test]
     fn a_coasting_ship_keeps_the_attitude_it_was_left_with() {
         let Some(system) = sol() else { return };

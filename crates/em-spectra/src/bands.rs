@@ -29,21 +29,21 @@ pub enum Band {
 
 pub struct BandSpec {
     pub name: &'static str,
-    pub centre_m: f64,
+    pub center_m: f64,
     /// Nominal FWHM. The radio entry is a receiver bandwidth, not a filter width.
     pub width_m: f64,
 }
 
 const SPECS: [BandSpec; BANDS] = [
-    BandSpec { name: "B", centre_m: 445e-9, width_m: 94e-9 },
-    BandSpec { name: "V", centre_m: 551e-9, width_m: 88e-9 },
-    BandSpec { name: "R", centre_m: 658e-9, width_m: 138e-9 },
-    BandSpec { name: "I", centre_m: 806e-9, width_m: 149e-9 },
-    BandSpec { name: "K", centre_m: 2190e-9, width_m: 390e-9 },
-    BandSpec { name: "10um", centre_m: 10e-6, width_m: 5e-6 },
+    BandSpec { name: "B", center_m: 445e-9, width_m: 94e-9 },
+    BandSpec { name: "V", center_m: 551e-9, width_m: 88e-9 },
+    BandSpec { name: "R", center_m: 658e-9, width_m: 138e-9 },
+    BandSpec { name: "I", center_m: 806e-9, width_m: 149e-9 },
+    BandSpec { name: "K", center_m: 2190e-9, width_m: 390e-9 },
+    BandSpec { name: "10um", center_m: 10e-6, width_m: 5e-6 },
     // Derived from HI_LINE_HZ rather than transcribed: a nine-digit literal is 2.3 Hz off.
     // Width is a nominal 1 MHz receiver bandwidth as d(lambda) = lambda^2 dnu / c.
-    BandSpec { name: "21cm", centre_m: C / HI_LINE_HZ, width_m: 1.486e-4 },
+    BandSpec { name: "21cm", center_m: C / HI_LINE_HZ, width_m: 1.486e-4 },
 ];
 
 impl Band {
@@ -69,8 +69,8 @@ impl Band {
     }
 
     #[inline]
-    pub const fn centre_m(self) -> f64 {
-        self.spec().centre_m
+    pub const fn center_m(self) -> f64 {
+        self.spec().center_m
     }
 
     #[inline]
@@ -79,14 +79,14 @@ impl Band {
     }
 
     #[inline]
-    pub fn centre_hz(self) -> f64 {
-        C / self.centre_m()
+    pub fn center_hz(self) -> f64 {
+        C / self.center_m()
     }
 
     /// Inclusive wavelength limits of the nominal top-hat.
     #[inline]
     pub fn limits_m(self) -> (f64, f64) {
-        let (c, w) = (self.centre_m(), self.width_m());
+        let (c, w) = (self.center_m(), self.width_m());
         (c - w / 2.0, c + w / 2.0)
     }
 }
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn the_radio_band_sits_on_the_hydrogen_line() {
-        let f = Band::Radio.centre_hz();
+        let f = Band::Radio.center_hz();
         assert!((f - HI_LINE_HZ).abs() < 1.0, "{f} Hz should be the HI line");
     }
 
@@ -233,7 +233,7 @@ mod tests {
     #[test]
     fn bands_are_ordered_by_increasing_wavelength() {
         for pair in Band::ALL.windows(2) {
-            assert!(pair[0].centre_m() < pair[1].centre_m());
+            assert!(pair[0].center_m() < pair[1].center_m());
         }
     }
 

@@ -499,10 +499,10 @@ fn kepler_editor(
             });
         }
         KeplerShape::Apsides(shape) => {
-            dirty.orbit |= fields::row(ui, "Periapsis", "Closest approach, from the primary's centre", |ui| {
+            dirty.orbit |= fields::row(ui, "Periapsis", "Closest approach, from the primary's center", |ui| {
                 fields::sci_drag(ui, &mut shape.periapsis, "m")
             });
-            dirty.orbit |= fields::row(ui, "Apoapsis", "Furthest point, from the primary's centre", |ui| {
+            dirty.orbit |= fields::row(ui, "Apoapsis", "Furthest point, from the primary's center", |ui| {
                 fields::sci_drag(ui, &mut shape.apoapsis, "m")
             });
         }

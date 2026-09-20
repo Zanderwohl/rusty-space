@@ -23,7 +23,7 @@ pub const INJECTION_MAX_BETA: f64 = 0.05;
 ///
 /// A station is an orbit and an orbit moves, so arriving at one is not arriving at rest. The
 /// crossing used to stop dead at the injection point and pick the orbit's velocity up for
-/// nothing — kilometres a second, appearing between two samples. This is that velocity being
+/// nothing — kilometers a second, appearing between two samples. This is that velocity being
 /// paid for, and paid for in *one* burn aimed at the difference of the two rather than in a
 /// brake followed by a second burn across it. The ship turns once, to the angle that does both
 /// jobs at once.

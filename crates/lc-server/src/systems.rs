@@ -42,7 +42,7 @@ pub enum Sort {
 }
 
 impl Sort {
-    /// Unrecognised is the default, never an error: a 400 is the wrong answer to a typo in a
+    /// Unrecognized is the default, never an error: a 400 is the wrong answer to a typo in a
     /// URL somebody edited.
     pub fn from_slug(slug: &str) -> Sort {
         match slug {
@@ -330,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unrecognised_ordering_is_the_default() {
+    fn an_unrecognized_ordering_is_the_default() {
         assert_eq!(Sort::from_slug("nonsense"), Sort::Name);
         assert_eq!(Sort::from_slug(""), Sort::Name);
         assert_eq!(Sort::from_slug("ships"), Sort::Ships);

@@ -1,5 +1,6 @@
 pub mod conversions;
 pub mod equatorial;
+pub mod galactic;
 pub mod transformation;
 pub mod observation;
 

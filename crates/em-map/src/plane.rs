@@ -1,0 +1,205 @@
+//! The surface everything is measured above and below.
+
+use em_foundations::reference_frame::galactic;
+use glam::DVec3;
+
+use crate::snapshot::M_PER_LY;
+
+/// Which plane the map lays its rings in.
+///
+/// Two, because there are two questions: where a moon sits in its system is about the
+/// ecliptic, and where a system sits among the rest is about the disc of the galaxy.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Plane {
+    #[default]
+    Ecliptic,
+    Galactic,
+}
+
+impl Plane {
+    pub fn other(self) -> Self {
+        match self {
+            Self::Ecliptic => Self::Galactic,
+            Self::Galactic => Self::Ecliptic,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Ecliptic => "ecliptic",
+            Self::Galactic => "galactic",
+        }
+    }
+
+    /// The plane's normal, a unit vector in simulation space. The ecliptic's is `+Z` by
+    /// construction and not by coincidence: simulation space is the ecliptic of J2000.
+    pub fn normal(self) -> DVec3 {
+        match self {
+            Self::Ecliptic => DVec3::Z,
+            Self::Galactic => galactic::north_pole(),
+        }
+    }
+
+    /// A right-handed orthonormal basis `(u, v, n)`, with `n` the normal.
+    ///
+    /// `u` is where a ring's zero bearing points and where azimuth is measured from, so it
+    /// must be fixed rather than derived from the view.
+    pub fn basis(self) -> (DVec3, DVec3, DVec3) {
+        match self {
+            Self::Ecliptic => (DVec3::X, DVec3::Y, DVec3::Z),
+            Self::Galactic => galactic::basis(),
+        }
+    }
+
+    /// How far `at_ly` stands above the plane through `origin_ly`, meters. Signed.
+    ///
+    /// Anchored at what the map is looking at rather than a galaxy's own zero point: at every
+    /// scale this draws the difference is invisible, and the offset would cost precision.
+    pub fn height_m(self, at_ly: DVec3, origin_ly: DVec3) -> f64 {
+        (at_ly - origin_ly).dot(self.normal()) * M_PER_LY
+    }
+
+    /// Where a ray meets the plane, or `None` when it runs along it or points away. Zooming
+    /// toward the cursor is built from this.
+    pub fn intersect(self, from_ly: DVec3, direction: DVec3, origin_ly: DVec3) -> Option<DVec3> {
+        let n = self.normal();
+        let along = direction.dot(n);
+        // A ray within a thousandth of parallel names a point far enough away that holding it
+        // still would throw the camera across the system.
+        if along.abs() < 1.0e-3 {
+            return None;
+        }
+        let t = (origin_ly - from_ly).dot(n) / along;
+        (t > 0.0 && t.is_finite()).then(|| from_ly + direction * t)
+    }
+
+    /// Which way `offset` points within the plane, radians, measured the way an [`crate::Orbit`]
+    /// measures its azimuth.
+    ///
+    /// `None` for an offset along the normal, which points nowhere in the plane and would name
+    /// an arbitrary bearing. The tolerance is relative: what matters is whether the in-plane
+    /// part is a real fraction of the offset, not how long the offset is.
+    pub fn bearing(self, offset: DVec3) -> Option<f64> {
+        let (u, v, _) = self.basis();
+        let (along_u, along_v) = (offset.dot(u), offset.dot(v));
+        let flat = (along_u * along_u + along_v * along_v).sqrt();
+        (flat > offset.length() * 1.0e-6).then(|| along_v.atan2(along_u))
+    }
+
+    /// Where a drop-line from `at_ly` meets the plane: the point straight below it.
+    pub fn foot_ly(self, at_ly: DVec3, origin_ly: DVec3) -> DVec3 {
+        let n = self.normal();
+        at_ly - n * (at_ly - origin_ly).dot(n)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A bearing is what the camera's azimuth is measured against, so the two have to agree:
+    /// a camera at the bearing of a thing looks at it along the plane.
+    #[test]
+    fn a_bearing_is_the_azimuth_that_points_at_it() {
+        for plane in [Plane::Ecliptic, Plane::Galactic] {
+            let (u, v, n) = plane.basis();
+            assert!(plane.bearing(u).unwrap().abs() < 1.0e-12, "the axis it is measured from");
+            assert!((plane.bearing(v).unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1.0e-12);
+            assert_eq!(plane.bearing(n), None, "straight up points nowhere in the plane");
+            assert_eq!(plane.bearing(DVec3::ZERO), None);
+
+            // The azimuth an orbit would use for the same direction, which is the claim.
+            for turns in [0.1, 0.5, 2.5, -1.7] {
+                let azimuth = turns;
+                let mut orbit = crate::Orbit::default();
+                orbit.azimuth = azimuth;
+                orbit.elevation = 0.0;
+                let toward = orbit.offset_direction(plane);
+                let seen = plane.bearing(toward).expect("an in-plane direction");
+                let apart = (seen - azimuth).sin().abs();
+                assert!(apart < 1.0e-9, "{plane:?} at {azimuth}: read back {seen}");
+                // And a long offset reads the same as a short one.
+                let far = plane.bearing(toward * 1.0e12).expect("still in the plane");
+                assert!((far - seen).abs() < 1.0e-9, "scale changed the bearing");
+            }
+        }
+    }
+
+    /// What a light-year's worth of `f64` is worth, in meters.
+    ///
+    /// The mantissa is 53 bits, so a position in light-years resolves about a meter per
+    /// light-year of magnitude. A flat meter tolerance passes near the origin and fails at
+    /// Alpha Centauri, which reads as a bug in the plane and is the representation.
+    fn floor_m(magnitude_ly: f64) -> f64 {
+        (magnitude_ly.abs().max(1.0) * M_PER_LY * 4.0 * f64::EPSILON).max(1.0)
+    }
+
+    /// Both planes and both signs. A galactic drop-line using `+Z` lands in the ecliptic and
+    /// looks plausible from most angles.
+    #[test]
+    fn a_drop_line_ends_in_the_plane_it_was_dropped_to() {
+        let origin = DVec3::new(4.2, -1.0, 0.7);
+        for plane in [Plane::Ecliptic, Plane::Galactic] {
+            for offset in [DVec3::new(0.1, 0.2, 0.3), DVec3::new(-0.4, 0.05, -0.9)] {
+                let at = origin + offset;
+                let foot = plane.foot_ly(at, origin);
+                let left = plane.height_m(foot, origin);
+                let floor = floor_m(at.length());
+                assert!(left.abs() < floor, "{plane:?}: foot is {left} m off, floor is {floor}");
+            }
+        }
+    }
+
+    /// And the foot is directly below, not merely somewhere in the plane.
+    #[test]
+    fn the_foot_is_straight_below_what_it_hangs_from() {
+        let origin = DVec3::ZERO;
+        for plane in [Plane::Ecliptic, Plane::Galactic] {
+            let at = DVec3::new(0.3, -0.2, 0.5);
+            let drop = plane.foot_ly(at, origin) - at;
+            assert!(drop.cross(plane.normal()).length() < 1e-12, "{plane:?}: not vertical");
+        }
+    }
+
+    /// Something already in the plane has nowhere to fall, and the host must draw no line.
+    #[test]
+    fn something_in_the_plane_has_no_drop_at_all() {
+        let origin = DVec3::new(1.0, 2.0, 3.0);
+        for plane in [Plane::Ecliptic, Plane::Galactic] {
+            let (u, v, _) = plane.basis();
+            let at = origin + u * 0.4 - v * 0.9;
+            assert!(plane.height_m(at, origin).abs() < floor_m(at.length()));
+            assert!((plane.foot_ly(at, origin) - at).length() < 1e-12);
+        }
+    }
+
+    /// Height is signed, so a body below the plane drops upward.
+    #[test]
+    fn below_the_plane_is_negative() {
+        let plane = Plane::Ecliptic;
+        assert!(plane.height_m(DVec3::Z, DVec3::ZERO) > 0.0);
+        assert!(plane.height_m(-DVec3::Z, DVec3::ZERO) < 0.0);
+    }
+
+    /// The two planes differ, which is the point of the toggle. A `Galactic` wired to `+Z`
+    /// passes every other test here.
+    #[test]
+    fn the_two_planes_disagree() {
+        let tilt = Plane::Ecliptic.normal().dot(Plane::Galactic.normal()).acos().to_degrees();
+        assert!((tilt - 60.19).abs() < 0.01, "{tilt}°");
+
+        let at = DVec3::new(0.0, 0.0, 1.0);
+        let a = Plane::Ecliptic.height_m(at, DVec3::ZERO);
+        let b = Plane::Galactic.height_m(at, DVec3::ZERO);
+        assert!((a - b).abs() > 0.4 * M_PER_LY, "a point reads the same height in both");
+    }
+
+    #[test]
+    fn a_basis_is_orthonormal_and_right_handed() {
+        for plane in [Plane::Ecliptic, Plane::Galactic] {
+            let (u, v, n) = plane.basis();
+            assert!((u.cross(v).dot(n) - 1.0).abs() < 1e-12, "{plane:?} is left-handed");
+            assert!((n - plane.normal()).length() < 1e-12, "{plane:?}: basis and normal differ");
+        }
+    }
+}

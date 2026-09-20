@@ -59,7 +59,7 @@ impl UniverseFile {
         match SaveFormat::from_path(path) {
             Some(SaveFormat::Toml) => Self::load_from_path_toml(path),
             Some(SaveFormat::Sqlite) => Self::load_from_path_sqlite(path),
-            None => Err(format!("{path:?} has no recognised save extension")),
+            None => Err(format!("{path:?} has no recognized save extension")),
         }
     }
 

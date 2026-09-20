@@ -45,16 +45,19 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--burst <n>` | photograph `n` **consecutive** frames — the only way to see a flicker |
 | `--at <body>` / `--station <course>` | stand off a body, or start on a station |
 | `--lift <deg>` | raise the ship out of the ecliptic about the star, keeping its distance |
-| `--panel <name>` / `--tune` | open a panel |
+| `--panel <name>` / `--tune` | open a panel. `--panel map` is the exception: the map is a mode of the main view, so this is a pin holding it there |
 | `--book <id>` | open a book from `crates/lc-client/assets/books/<id>.epub`; `--chapter <n>` and `--pages <n>` move within it |
 | `--menu` | hold at the main menu, so `--shot` photographs that instead of the sky |
 | `--signin` | hold at the sign-in modal, which draws over the menu and no action can reach |
 | `--password` | hold at the password form, the one egui surface inside the menu |
 | `--turn <deg>` / `--pitch <deg>` | turn the view, the only way to put something off screen |
 | `--zoom <notches>` | move the orbit camera; both its stops are clamps, so ask for far too much |
+| `--map <bearing:elevation:au>` | pin the map's camera. A pin, so two shots of it are the same shot |
+| `--map-plane <ecliptic\|galactic>` | which plane the map lays its rings in |
+| `--map-focus <ship\|primary\|local\|star\|free>` | what the map's camera locks onto. A pin: `--map` on its own holds the ship, so a hand on the mouse cannot pan a shot two runs are meant to agree about |
 | `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `closing`, `chase`. Brings its own shard |
 | `--demo-cam <yaw:pitch:booms>` | pin the camera for the run, so two shots of a scene are the same shot |
-| `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable. Offline only — a shard states its own |
+| `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable. Offline only — a shard states its own. **The default is the design rate**, so a run without this flag is as slow as the game |
 
 `--turn`, `--pitch` and `--zoom` are applied **last**, after anything that aims — `--fly` ends
 by pointing the view at what it is flying to, and pushed first the turn was simply undone.
@@ -92,7 +95,7 @@ Each of these cost real time. None of them are visible from the code that hits t
   before it was ever flown. `Craft` keeps a history of the stretches it has flown for exactly
   this reason — without one, changing a motive rewrites the craft's whole past, and every
   retarded solve reads the new motion at the old time. That shipped once and leaked every
-  manoeuvre instantly to every client in the system. Change a motive only through
+  maneuvere instantly to every client in the system. Change a motive only through
   `Craft`'s own methods; they are what record it.
 - `Cleared::clear` gates **when** a message may be sent and says nothing about how its content
   was computed. A message can pass the gate and still be a fact from the future.
@@ -110,14 +113,14 @@ Each of these cost real time. None of them are visible from the code that hits t
 - `Camera::world_to_viewport` **errors** for anything behind the camera, so nothing built on it
   can point at what is behind you. Work in clip space and keep `w`: `clip.w` is `-view.z`, so
   behind the camera it is negative while `clip.x` keeps the sign of `view.x`. Dividing anyway
-  mirrors the point through the centre. See `em_ui::reticle::place`.
+  mirrors the point through the center. See `em_ui::reticle::place`.
 
 - Depth is **reversed**. `clip.z = clip.w` is the *near* plane. Background geometry wants a
   tiny positive value, not zero — the buffer clears to zero and the test is strictly greater.
 - `AlphaMode::Add` is *premultiplied*: `src + dst*(1-alpha)`. For pure additive the fragment
   must return **alpha 0**, or it overwrites and two coplanar meshes flicker on sort order.
-- Render positions are f32 relative to the camera: about **six metres** at a hundred thousand
-  kilometres. Never place the camera on a surface — an infinitely thin sheet containing the
+- Render positions are f32 relative to the camera: about **six meters** at a hundred thousand
+  kilometers. Never place the camera on a surface — an infinitely thin sheet containing the
   camera swings wildly from frame to frame.
 - Two runs stopped at frame `n` and frame `n+1` are **not** consecutive frames. They have
   accumulated different wall time. Use `--burst`.
@@ -129,6 +132,32 @@ Each of these cost real time. None of them are visible from the code that hits t
   after the laptop moved to another are 1280x720 and 2560x1440, and a patch measured at fixed
   pixel coordinates then samples two different parts of the picture. It reads exactly like a
   regression and is not one. Measure in fractions of the frame.
+- **A second camera turns every `.single()` camera query into an early return.** Seven systems
+  in `lc-client` wanted "the camera"; adding the map's did not draw a wrong picture, it drew no
+  picture — the view froze, the stars sized to zero and nothing was pickable, with nothing in the
+  build to say why. `SkyCamera` is the disambiguator. `bevy_egui` has the same shape of problem
+  one layer up: it gives its primary context to the **first camera created**, and two `Startup`
+  systems have no order between them, so the whole interface went into a 512-pixel texture.
+- **The interface is laid out inside the viewport of the camera that holds its egui context.**
+  Give that camera a viewport of its own and the readout, the strips and every window go with
+  it: the whole interface arrived in a 190-point square in the bottom left, over a black
+  window. A camera whose frame moves cannot also be the one the interface is drawn on.
+- **Two cameras on one window share the texture they draw into only when their format, sample
+  count and usages all match**, and `Hdr` decides the format. A second camera that does not
+  match gets a texture of its own, and `ClearColorConfig::None` means nothing ever clears it:
+  every frame is laid over the last. It reads as smeared text and stale windows, with the
+  loading screen still underneath a thousand frames later, and there is nothing in the log.
+- **A render target that will be resized needs `COPY_SRC`.** `Image::new_target_texture` sets
+  three usages and not that one, and `Image::resize` copies the old contents forward. The first
+  resize is a wgpu validation failure, and it takes the application down long after the frame
+  that caused it. `RenderTarget` is also a *component* in Bevy 0.19, not a field on `Camera`;
+  left off, the camera clears the primary window to black.
+- **A line is a tube, so it has a width the geometry does not know about.** Two consequences,
+  both found by looking. A camera closer to a plane than a tube's angular radius is *inside* the
+  nearest ring, and the inside of a tube is a solid wall — an edge-on map came out as a
+  rectangle of flat green. And a tube's thickness has to be set by its **near** end: every point
+  of a ring is equidistant from the center, but a spoke runs from the eye to the rim, and a
+  width that is a pixel at the far end is eighty at the near one.
 - WGSL reserves more words than you expect. `from` and `target` are both reserved and both are
   natural names in a ray marcher; the error arrives from the pipeline cache at run time, not
   from `cargo build`.
@@ -170,7 +199,7 @@ Each of these cost real time. None of them are visible from the code that hits t
 - **`cargo fmt` is not run on the game workspace.** CI fmt-checks `auth/` and `web/` only, and
   the game's code is hand-formatted — `cargo fmt --all` at the repository root rewrites 204
   files and 22 000 lines, burying a change in churn. Format the files you write to match their
-  neighbours and leave the rest alone.
+  neighbors and leave the rest alone.
 
 **The administration console**
 
@@ -211,7 +240,7 @@ Each of these cost real time. None of them are visible from the code that hits t
   no way to guess the address of anything — including `/signout`, which existed the whole time
   and is a **POST**: `SameSite=Lax` sends the session on a cross-site top-level navigation when
   the method is safe, and never on a cross-site POST, so the method is the whole of the
-  defence. A link to it would not work and is asserted against.
+  defense. A link to it would not work and is asserted against.
   `views::refusal` takes a way out; `views::wrong` is for store failures, where there is
   nothing useful to offer.
 - **A session that can only be refused should not exist.** Check the level before sealing one,

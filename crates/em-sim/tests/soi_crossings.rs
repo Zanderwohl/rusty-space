@@ -61,9 +61,9 @@ fn a_crossing_lands_on_the_boundary_facing_the_right_way() {
 
     for crossing in influence::crossings(&s, craft, earth, window) {
         let soi = influence::soi_at(&s, earth, crossing.time).unwrap();
-        let offset = crossing.position - soi.centre;
+        let offset = crossing.position - soi.center;
         let error = offset.length() - soi.radius_toward(offset);
-        // A metre on a 9.25e8 m boundary; the bisection tolerance is a millisecond of
+        // A meter on a 9.25e8 m boundary; the bisection tolerance is a millisecond of
         // flight, and the craft moves under a km/s out here.
         assert!(error.abs() < 1.0, "off the boundary by {error:e} m");
 
@@ -99,7 +99,7 @@ fn the_search_runs_backwards_as_well_as_forwards() {
         "previous and next must be adjacent");
 }
 
-/// Luna's sphere is not sitting still — it is going round Earth at a kilometre a second.
+/// Luna's sphere is not sitting still — it is going round Earth at a kilometer a second.
 /// Catching this one means the search really is evaluating the boundary at each instant
 /// rather than freezing it at the current time.
 #[test]

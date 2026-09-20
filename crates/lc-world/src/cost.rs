@@ -38,7 +38,7 @@ pub fn rapidity_between(from: DVec3, to: DVec3) -> f64 {
 ///
 /// An escort alongside a burning quarry burns for as long as the quarry does, which no plan
 /// bounds: its quarry's acceleration is counted as well as the approach, by magnitude, which
-/// overstates a push that is partly cancelled by the approach and never understates one.
+/// overstates a push that is partly canceled by the approach and never understates one.
 pub fn lit_rapidity(state: &ShipState, now_s: f64) -> f64 {
     match &state.motive {
         Motive::Crossing(cruise) => cruise.lit_rapidity_at(now_s),

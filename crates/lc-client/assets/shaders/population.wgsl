@@ -73,7 +73,7 @@ const PROFILE_RADIAL: i32 = 1;
 /// Steps per sightline.
 ///
 /// Fixed rather than derived from the span, because a step count that varies between
-/// neighbouring pixels quantises them differently and the seam is visible. The span is clipped
+/// neighboring pixels quantises them differently and the seam is visible. The span is clipped
 /// to the material before it is divided, so a thin belt gets the same thirty-two steps
 /// concentrated in the thin part.
 ///
@@ -197,7 +197,7 @@ fn slab_span(origin: vec3<f32>, direction: vec3<f32>, half_height: f32) -> vec2<
     return vec2<f32>(min(a, b), max(a, b));
 }
 
-/// A per-pixel offset in `0..1`, so the steps of neighbouring pixels do not line up and the
+/// A per-pixel offset in `0..1`, so the steps of neighboring pixels do not line up and the
 /// quantisation reads as film grain rather than as shells. Deliberately not a function of
 /// time: two frames of a `--burst` have to be comparable.
 fn dither(pixel: vec2<f32>) -> f32 {
@@ -242,7 +242,7 @@ fn volume(in: VertexOutput) -> vec4<f32> {
         let band = material.band_material[b];
         rgb = rgb + material.band_to_display[b].rgb * band.x * (1.0 - exp(-band.y * column));
     }
-    // Premultiplied: the blend is additive, so alpha leaves as zero and the colour carries it.
+    // Premultiplied: the blend is additive, so alpha leaves as zero and the color carries it.
     return vec4<f32>(rgb, 0.0);
 }
 

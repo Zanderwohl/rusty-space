@@ -2,17 +2,17 @@
 //!
 //! A shard states what each client can see once a tick, and a tick is 438 coordinate seconds at
 //! the design rate. Held still for that long, a craft in low orbit falls tens of thousands of
-//! kilometres behind where it is — and behind a ship flying formation with it, which is drawn
+//! kilometers behind where it is — and behind a ship flying formation with it, which is drawn
 //! at its own present every frame.
 //!
 //! So a sighting is **reckoned**: along its conic inside a system, a straight line outside one,
 //! to the instant whose light reaches the observer now. Never later — the event drawn is always
-//! one whose light has arrived. What it gets wrong is a manoeuvre since the light left, for at
+//! one whose light has arrived. What it gets wrong is a maneuvere since the light left, for at
 //! most a tick, until the next statement says so.
 //!
 //! Backwards too. A client whose clock is behind the shard's is sent samples from its own
 //! future, and holding one until its time comes was the same jump as never reckoning at all:
-//! a clock twenty seconds behind in low orbit is a thousand kilometres.
+//! a clock twenty seconds behind in low orbit is a thousand kilometers.
 
 use glam::DVec3;
 
@@ -102,7 +102,7 @@ fn light_time_along_line(seen: &Sighting, observer_ly: DVec3, now_s: f64) -> f64
     let a = (1.0 - b.length_squared()).max(f64::EPSILON);
     let along = d.dot(b);
     let root = (along * along + a * d.length_squared()).sqrt();
-    // Whichever form adds rather than cancels: a contact metres away has both terms near zero.
+    // Whichever form adds rather than cancels: a contact meters away has both terms near zero.
     let years = if along >= 0.0 {
         (along + root) / a
     } else if root - along > 0.0 {
@@ -140,7 +140,7 @@ mod tests {
     }
 
     /// A client whose clock is behind the shard's is drawn the craft where it was at that
-    /// clock, not where the sample is: holding the sample was a thousand-kilometre jump.
+    /// clock, not where the sample is: holding the sample was a thousand-kilometer jump.
     #[test]
     fn a_sample_from_the_future_is_reckoned_back_to_now() {
         let seen = drifting(DVec3::ZERO, DVec3::Y * 1e-4);

@@ -52,8 +52,8 @@ fn the_sky_costs_the_same_moving_as_it_does_at_rest() {
 
     println!("sky at rest: {at_rest:?}   at 0.2c: {moving:?}");
 
-    // Asserted only in an optimised build, because that is the one the claim is about: a
-    // browser runs optimised wasm, and an unoptimised build is ten times slower, so a bound it
+    // Asserted only in an optimized build, because that is the one the claim is about: a
+    // browser runs optimized wasm, and an unoptimized build is ten times slower, so a bound it
     // could meet would be no bound at all. Before the spectra were reused this was 7.2 ms.
     #[cfg(not(debug_assertions))]
     assert!(

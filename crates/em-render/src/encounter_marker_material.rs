@@ -33,7 +33,7 @@ impl Default for EncounterMarkerUniform {
         Self {
             plane_x: Vec4::X,
             plane_y: Vec4::Y,
-            // Red, as the reticle colour that means "something happens here".
+            // Red, as the reticle color that means "something happens here".
             base_color: Vec4::new(1.0, 0.18, 0.14, 1.0),
             ring_radii: Vec4::new(0.016, 0.026, 0.036, 0.0),
             tube_radius: 0.0012,

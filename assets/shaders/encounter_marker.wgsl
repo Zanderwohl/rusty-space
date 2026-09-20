@@ -46,11 +46,11 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
 
     let world_from_local = mesh_functions::get_world_from_local(vertex.instance_index);
-    let centre = mesh_functions::mesh_position_local_to_world(
+    let center = mesh_functions::mesh_position_local_to_world(
         world_from_local, vec4<f32>(0.0, 0.0, 0.0, 1.0)).xyz;
 
     // The camera sits at the render origin in this app's camera-relative scheme.
-    let distance = max(length(centre - view.world_position.xyz), 1e-9);
+    let distance = max(length(center - view.world_position.xyz), 1e-9);
 
     // Angle times distance is a constant number of pixels, whatever the zoom.
     let ring = u32(vertex.station.z + 0.5);
@@ -66,7 +66,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let cos_phi = vertex.station.x;
     let sin_phi = vertex.station.y;
     let radial = material.plane_x.xyz * cos_phi + material.plane_y.xyz * sin_phi;
-    let point = centre + radial * radius;
+    let point = center + radial * radius;
 
     // Tube frame: around the circle, the two directions perpendicular to its tangent are
     // the outward radial and the plane's own normal.

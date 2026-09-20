@@ -23,7 +23,7 @@ use lc_world::navigation::Target;
 use lc_world::sky::StarId;
 
 use crate::action::Action;
-use crate::app::{Game, Ui};
+use crate::app::{Game, SkyCamera, Ui};
 use crate::input::Requested;
 use crate::starfield::{Bodies, radians_per_pixel};
 use crate::system::M_PER_LY;
@@ -141,21 +141,9 @@ struct Sighted {
     radius_px: f32,
     rank: u8,
     /// The curves it is drawn along, clip space, for anything that is not a point. A swarm is
-    /// picked and marked along these rather than at a centre it does not have.
+    /// picked and marked along these rather than at a center it does not have.
     outline: Option<Vec<Vec<Vec4>>>,
 }
-
-/// How many points a swarm's curves are sampled at.
-///
-/// Sixty-four is a fifth of a degree of error against a true circle at the widest, which is far
-/// below a pixel at any distance the thing is drawn at.
-const SWARM_SAMPLES: usize = 64;
-
-/// How many cross-sections are drawn round the torus.
-///
-/// Four reads as a donut and no more; the two edge circles carry the shape and these say which
-/// way round it is thick.
-const SWARM_CROSS_SECTIONS: usize = 4;
 
 /// Find what the cursor is on, mark what is selected, and act on a click.
 #[allow(clippy::too_many_arguments)]
@@ -166,13 +154,18 @@ fn survey(
     eye: Res<crate::hull::Eye>,
     uplink: Res<crate::uplink::Uplink>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    camera: Query<(&Projection, &Transform), With<Camera3d>>,
+    camera: Query<(&Projection, &Transform), With<SkyCamera>>,
     buttons: Res<ButtonInput<MouseButton>>,
     egui: Res<EguiWantsInput>,
     mut picked: ResMut<Picked>,
     mut out: MessageWriter<Requested>,
 ) {
     *picked = Picked::default();
+    // Nothing on the sky is being pointed at from the map's mode: the world is a thumbnail in
+    // the corner there, and every mark below is measured against the whole window.
+    if ui.view != crate::ui::ViewMode::World {
+        return;
+    }
     let Ok(window) = windows.single() else { return };
     let Ok((Projection::Perspective(perspective), camera_at)) = camera.single() else { return };
     let viewport = Vec2::new(window.width(), window.height());
@@ -421,64 +414,26 @@ fn swarm_name(population: &lc_world::population::Population) -> String {
     )
 }
 
-/// The population in curves: its inner and outer edges, and cross-sections round it.
+/// The wire shape of a swarm: two edge circles and four cross-sections.
 ///
-/// The same shape [`crate::envelope::profile_of`] builds the density field over, from the same
-/// [`Extent`](lc_world::population::Extent) — a shell between two radii, cut off at the widest
-/// inclination. The skeleton and the thing it is drawn over cannot be allowed to drift apart,
-/// and they did: this traced the elliptical tube the old surface shader used, whose corners are
-/// several degrees of latitude away from where the material actually stops.
-///
-/// It degenerates correctly: an isotropic cloud reaches a right angle, its cross-sections close
-/// into full meridians and the whole thing reads as the shell it is.
+/// `em_map::outline` owns the shape, because the map draws the same one as geometry and two
+/// answers to "where does this belt stop" is one too many. What is here is the conversion: the
+/// population's extent, and a center relative to the ship in meters.
 fn swarm_outlines(
     star_ly: DVec3,
     ship_ly: DVec3,
     population: &lc_world::population::Population,
 ) -> Vec<Vec<DVec3>> {
     let Some(extent) = population.extent() else { return Vec::new() };
-    let (u, v) = lc_world::navigation::basis(population.pole);
-    let pole = population.pole.normalize_or_zero();
-    let centre = (star_ly - ship_ly) * M_PER_LY;
-
-    let ring = |radius: f64, lift: f64| -> Vec<DVec3> {
-        (0..=SWARM_SAMPLES)
-            .map(|i| {
-                let theta = std::f64::consts::TAU * i as f64 / SWARM_SAMPLES as f64;
-                centre + (u * theta.cos() + v * theta.sin()) * radius + pole * lift
-            })
-            .collect()
-    };
-
-    let mut out = vec![ring(extent.inner_m, 0.0), ring(extent.outer_m, 0.0)];
-
-    // The cross-section, in a plane containing the pole: out along the far edge, in across the
-    // top, back along the near edge, out across the bottom. Four legs of a closed loop, and
-    // `SWARM_SAMPLES` is divisible by four.
-    let arc = SWARM_SAMPLES / 4;
-    let half_angle = extent.half_angle_rad;
-    for k in 0..SWARM_CROSS_SECTIONS {
-        let phi = std::f64::consts::TAU * k as f64 / SWARM_CROSS_SECTIONS as f64;
-        let outward = u * phi.cos() + v * phi.sin();
-        let at = |radius: f64, latitude: f64| {
-            centre + (outward * latitude.cos() + pole * latitude.sin()) * radius
-        };
-        let leg = |steps: usize, f: &dyn Fn(f64) -> DVec3| {
-            (0..steps).map(|i| f(i as f64 / steps as f64)).collect::<Vec<_>>()
-        };
-        let mut curve = Vec::with_capacity(SWARM_SAMPLES + 1);
-        curve.extend(leg(arc, &|t| at(extent.outer_m, -half_angle + 2.0 * half_angle * t)));
-        curve.extend(leg(arc, &|t| {
-            at(extent.outer_m + (extent.inner_m - extent.outer_m) * t, half_angle)
-        }));
-        curve.extend(leg(arc, &|t| at(extent.inner_m, half_angle - 2.0 * half_angle * t)));
-        curve.extend(leg(arc, &|t| {
-            at(extent.inner_m + (extent.outer_m - extent.inner_m) * t, -half_angle)
-        }));
-        curve.push(curve[0]);
-        out.push(curve);
-    }
-    out
+    em_map::outline::torus(
+        (star_ly - ship_ly) * M_PER_LY,
+        population.pole,
+        em_map::outline::Extent {
+            inner: extent.inner_m,
+            outer: extent.outer_m,
+            half_angle_rad: extent.half_angle_rad,
+        },
+    )
 }
 
 /// Every curve of an outline, projected and cut at the camera plane.
@@ -502,7 +457,15 @@ fn draw(mut contexts: EguiContexts, picked: Res<Picked>, windows: Query<&Window,
     );
     // What the interface has taken. `available_rect` accounts for docked panels and nothing
     // else, so every floating window and notice has to be named here or a mark lands on one.
-    let occupied = occupied_rects(context);
+    let occupied: Vec<bevy::math::Rect> = occupied_rects(context, &[])
+        .into_iter()
+        .map(|rect| {
+            bevy::math::Rect::from_corners(
+                Vec2::new(rect.min.x, rect.min.y),
+                Vec2::new(rect.max.x, rect.max.y),
+            )
+        })
+        .collect();
     let frame = Frame::with(safe, &occupied, ARROW_PX);
 
     // Foreground, not background. Panels paint in `Order::Background` and floating notices in
@@ -518,14 +481,14 @@ fn draw(mut contexts: EguiContexts, picked: Res<Picked>, windows: Query<&Window,
     for mark in &picked.contacts {
         paint(&painter, mark, viewport, frame, CONTACT, false);
     }
-    for (mark, colour, bracketed) in [
+    for (mark, color, bracketed) in [
         (picked.hover.as_ref(), HOVER, false),
         (picked.selected.as_ref(), SELECTED, true),
     ]
     .into_iter()
-    .filter_map(|(mark, colour, bracketed)| Some((mark?, colour, bracketed)))
+    .filter_map(|(mark, color, bracketed)| Some((mark?, color, bracketed)))
     {
-        paint(&painter, mark, viewport, frame, colour, bracketed);
+        paint(&painter, mark, viewport, frame, color, bracketed);
     }
 }
 
@@ -546,20 +509,17 @@ const SKELETON_FADE: f32 = 0.45;
 /// [`egui::Context::available_rect`]. This is the rest of the interface: windows, notices,
 /// tooltips — everything that floats over the view and that `available_rect` says nothing
 /// about. The overlay's own layer is skipped, or it would exclude itself.
-fn occupied_rects(context: &egui::Context) -> Vec<bevy::math::Rect> {
+/// Also read by [`crate::map_panel`], which keeps the map's scale rule out from under the same
+/// boxes — and passes its own corner in `except`, since a surface does not float over itself.
+pub(crate) fn occupied_rects(context: &egui::Context, except: &[egui::Id]) -> Vec<egui::Rect> {
     context.memory(|memory| {
         memory
             .areas()
             .visible_layer_ids()
             .iter()
             .filter(|layer| layer.order < egui::Order::Foreground)
+            .filter(|layer| !except.contains(&layer.id))
             .filter_map(|layer| memory.area_rect(layer.id))
-            .map(|rect| {
-                bevy::math::Rect::from_corners(
-                    Vec2::new(rect.min.x, rect.min.y),
-                    Vec2::new(rect.max.x, rect.max.y),
-                )
-            })
             .collect()
     })
 }
@@ -569,16 +529,16 @@ fn paint(
     mark: &Mark,
     viewport: Vec2,
     frame: Frame<'_>,
-    colour: egui::Color32,
+    color: egui::Color32,
     bracketed: bool,
 ) {
-    let stroke = egui::Stroke::new(1.0_f32, colour);
+    let stroke = egui::Stroke::new(1.0_f32, color);
 
     // The skeleton first, under whatever marks the anchor. A swarm is a shell and has no
     // outline of its own on screen; this is the circle its elements are drawn from, which is
     // the only line in it a player can be said to be pointing at.
     if let Some(outline) = &mark.outline {
-        let faint = egui::Stroke::new(1.0_f32, colour.gamma_multiply(SKELETON_FADE));
+        let faint = egui::Stroke::new(1.0_f32, color.gamma_multiply(SKELETON_FADE));
         let runs = screen_runs(outline, viewport);
         draw_segments(painter, &reticle::path_segments(&runs), faint);
     }
@@ -606,14 +566,14 @@ fn paint(
     }
     // Measured before it is placed, because where it fits depends on how wide it is.
     let font = egui::FontId::proportional(LABEL_SIZE);
-    let galley = painter.layout_no_wrap(mark.label.clone(), font, colour);
+    let galley = painter.layout_no_wrap(mark.label.clone(), font, color);
     let size = Vec2::new(galley.size().x, galley.size().y);
-    let centre =
+    let center =
         reticle::place_label(anchor, radius_px, size, frame, reticle::LABEL_GAP_PX, preferred);
     painter.galley(
-        egui::pos2(centre.x - size.x * 0.5, centre.y - size.y * 0.5),
+        egui::pos2(center.x - size.x * 0.5, center.y - size.y * 0.5),
         galley,
-        colour,
+        color,
     );
 }
 
@@ -768,21 +728,21 @@ mod tests {
         let e = belt.extent().unwrap();
         let (inner, outer, half_angle) = (e.inner_m, e.outer_m, e.half_angle_rad);
         // Inside the system, which is the only place anyone sees one. Putting the star light-
-        // years off instead costs metres of cancellation against an AU-scale radius, and the
+        // years off instead costs meters of cancellation against an AU-scale radius, and the
         // first version of this test read that as a geometry error.
         let star = DVec3::splat(1.0e-5);
         let curves = swarm_outlines(star, DVec3::ZERO, &belt);
-        assert_eq!(curves.len(), 2 + SWARM_CROSS_SECTIONS);
+        assert_eq!(curves.len(), 2 + em_map::outline::CROSS_SECTIONS);
 
-        let centre = (star - DVec3::ZERO) * M_PER_LY;
+        let center = (star - DVec3::ZERO) * M_PER_LY;
         for (which, curve) in curves.iter().enumerate() {
-            assert_eq!(curve.len(), SWARM_SAMPLES + 1, "curve {which} is not closed");
+            assert_eq!(curve.len(), em_map::outline::SAMPLES + 1, "curve {which} is not closed");
             assert!(
                 curve[0].distance(*curve.last().unwrap()) < 1.0e3,
                 "curve {which} has a seam",
             );
             for at in curve {
-                let local = *at - centre;
+                let local = *at - center;
                 // Distance from the *star*, not from the pole: the material is a shell between
                 // two radii, so that is the quantity that is bounded. A point at the inner edge
                 // and a high latitude is legitimately closer to the axis than `inner`.
@@ -802,7 +762,7 @@ mod tests {
 
         // The first two are flat: the edges of the plane.
         for edge in &curves[..2] {
-            assert!(edge.iter().all(|at| (*at - centre).dot(belt.pole).abs() < 1.0e3));
+            assert!(edge.iter().all(|at| (*at - center).dot(belt.pole).abs() < 1.0e3));
         }
     }
 

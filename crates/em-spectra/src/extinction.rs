@@ -10,7 +10,7 @@ pub const RATIO: PerBand<f64> = PerBand::new([1.32, 1.00, 0.75, 0.48, 0.11, 0.06
 
 /// Mean visual extinction per kiloparsec in the galactic plane, magnitudes.
 ///
-/// Reference only. Sightline extinction is not modelled: occlusion currently lives on a
+/// Reference only. Sightline extinction is not modeled: occlusion currently lives on a
 /// source's own emission shell, and extended interstellar dust is deferred with the special
 /// zones it belongs to.
 pub const A_V_PER_KPC: f64 = 1.8;
@@ -27,17 +27,17 @@ pub fn transmission(band: Band, a_v: f64) -> f64 {
     10f64.powf(-0.4 * extinction_mag(band, a_v))
 }
 
-/// Colour excess `E(b1 - b2)` produced by `a_v` magnitudes of extinction.
+/// Color excess `E(b1 - b2)` produced by `a_v` magnitudes of extinction.
 #[inline]
-pub fn colour_excess(b1: Band, b2: Band, a_v: f64) -> f64 {
+pub fn color_excess(b1: Band, b2: Band, a_v: f64) -> f64 {
     a_v * (RATIO[b1] - RATIO[b2])
 }
 
-/// A colour axis of a colour-colour diagram.
+/// A color axis of a color-color diagram.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Colour(pub Band, pub Band);
+pub struct Color(pub Band, pub Band);
 
-impl Colour {
+impl Color {
     pub const BV: Self = Self(Band::B, Band::V);
     pub const VI: Self = Self(Band::V, Band::I);
     pub const VK: Self = Self(Band::V, Band::K);
@@ -49,7 +49,7 @@ impl Colour {
     }
 }
 
-/// A main-sequence reference point. Colours are approximate, adequate for locus geometry.
+/// A main-sequence reference point. Colors are approximate, adequate for locus geometry.
 #[derive(Clone, Copy, Debug)]
 pub struct MsPoint {
     pub class: &'static str,
@@ -59,12 +59,12 @@ pub struct MsPoint {
 }
 
 impl MsPoint {
-    pub fn colour(&self, c: Colour) -> f64 {
+    pub fn color(&self, c: Color) -> f64 {
         match c {
-            Colour::BV => self.bv,
-            Colour::VI => self.vi,
-            Colour::VK => self.vk,
-            _ => panic!("no tabulated colour for {c:?}"),
+            Color::BV => self.bv,
+            Color::VI => self.vi,
+            Color::VK => self.vk,
+            _ => panic!("no tabulated color for {c:?}"),
         }
     }
 }
@@ -83,14 +83,14 @@ pub const MAIN_SEQUENCE: [MsPoint; 11] = [
     MsPoint { class: "M5V", bv: 1.61, vi: 2.89, vk: 5.96 },
 ];
 
-/// Direction of the reddening vector in an `(x, y)` colour-colour diagram, degrees.
-pub fn reddening_angle_deg(x: Colour, y: Colour) -> f64 {
+/// Direction of the reddening vector in an `(x, y)` color-color diagram, degrees.
+pub fn reddening_angle_deg(x: Color, y: Color) -> f64 {
     y.reddening().atan2(x.reddening()).to_degrees()
 }
 
 /// Direction of the stellar locus between two reference points, degrees.
-pub fn locus_angle_deg(x: Colour, y: Colour, a: &MsPoint, b: &MsPoint) -> f64 {
-    (b.colour(y) - a.colour(y)).atan2(b.colour(x) - a.colour(x)).to_degrees()
+pub fn locus_angle_deg(x: Color, y: Color, a: &MsPoint, b: &MsPoint) -> f64 {
+    (b.color(y) - a.color(y)).atan2(b.color(x) - a.color(x)).to_degrees()
 }
 
 /// Angle between the reddening vector and the locus, degrees.
@@ -98,13 +98,13 @@ pub fn locus_angle_deg(x: Colour, y: Colour, a: &MsPoint, b: &MsPoint) -> f64 {
 /// This is what decides whether photometry can tell a reddened star from a cool one. Near
 /// zero the two are degenerate and no integration time helps, because the information is not
 /// in the measurement.
-pub fn degeneracy_separation_deg(x: Colour, y: Colour, a: &MsPoint, b: &MsPoint) -> f64 {
+pub fn degeneracy_separation_deg(x: Color, y: Color, a: &MsPoint, b: &MsPoint) -> f64 {
     (locus_angle_deg(x, y, a, b) - reddening_angle_deg(x, y)).abs()
 }
 
 /// Length of the reddening vector per unit `A_V` in a diagram — how far one magnitude of
 /// extinction moves a star, and therefore the signal available against measurement noise.
-pub fn reddening_displacement(x: Colour, y: Colour) -> f64 {
+pub fn reddening_displacement(x: Color, y: Color) -> f64 {
     x.reddening().hypot(y.reddening())
 }
 
@@ -151,10 +151,10 @@ mod tests {
 
     #[test]
     fn the_reddening_vector_matches_the_extinction_law() {
-        assert!((Colour::BV.reddening() - 0.32).abs() < 1e-12);
-        assert!((Colour::VI.reddening() - 0.52).abs() < 1e-12);
-        assert!((Colour::VK.reddening() - 0.89).abs() < 1e-12);
-        let slope = Colour::BV.reddening() / Colour::VI.reddening();
+        assert!((Color::BV.reddening() - 0.32).abs() < 1e-12);
+        assert!((Color::VI.reddening() - 0.52).abs() < 1e-12);
+        assert!((Color::VK.reddening() - 0.89).abs() < 1e-12);
+        let slope = Color::BV.reddening() / Color::VI.reddening();
         assert!((slope - 0.6154).abs() < 1e-3, "{slope}");
     }
 
@@ -163,13 +163,13 @@ mod tests {
     /// zone the locus runs along the reddening vector in both diagrams.
     #[test]
     fn adding_k_does_not_rescue_the_blind_zone() {
-        let vi = reddening_displacement(Colour::VI, Colour::BV);
-        let vk = reddening_displacement(Colour::VK, Colour::BV);
+        let vi = reddening_displacement(Color::VI, Color::BV);
+        let vk = reddening_displacement(Color::VK, Color::BV);
         assert!((vk / vi - 1.55).abs() < 0.02, "V-K reach is {}x, not 1.55", vk / vi);
 
         let (k0, m0) = (ms("K0V"), ms("M0V"));
-        for (label, x) in [("V-I", Colour::VI), ("V-K", Colour::VK)] {
-            let sep = degeneracy_separation_deg(x, Colour::BV, k0, m0);
+        for (label, x) in [("V-I", Color::VI), ("V-K", Color::VK)] {
+            let sep = degeneracy_separation_deg(x, Color::BV, k0, m0);
             assert!(sep < 1.0, "{label} over K0-M0 is {sep} deg, and should be degenerate");
         }
     }
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn the_blind_zone_is_late_k_to_early_m() {
         // Hot and solar-type stars separate; K0 through M0 does not.
-        let sep = |a, b| degeneracy_separation_deg(Colour::VI, Colour::BV, ms(a), ms(b));
+        let sep = |a, b| degeneracy_separation_deg(Color::VI, Color::BV, ms(a), ms(b));
         for (a, b) in [("A0V", "A5V"), ("F0V", "F5V"), ("G5V", "K0V")] {
             assert!(sep(a, b) > 9.0, "{a}->{b} should separate: {}", sep(a, b));
         }
@@ -189,10 +189,10 @@ mod tests {
     }
 
     #[test]
-    fn colour_excess_reddens_a_star_toward_a_cooler_reading() {
-        use crate::colour_index::teff_from_bv;
+    fn color_excess_reddens_a_star_toward_a_cooler_reading() {
+        use crate::color_index::teff_from_bv;
         let intrinsic = 0.0; // A0
-        let reddened = intrinsic + colour_excess(Band::B, Band::V, 0.9375);
+        let reddened = intrinsic + color_excess(Band::B, Band::V, 0.9375);
         assert!((reddened - 0.30).abs() < 1e-3, "{reddened}");
         assert!((teff_from_bv(reddened) - 7462.0).abs() < 5.0, "an A0 must read as an F star");
     }

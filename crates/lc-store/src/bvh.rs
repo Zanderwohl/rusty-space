@@ -50,18 +50,18 @@ impl Bounds {
     /// The bound the whole traversal rests on: nothing inside the box can reach anywhere the
     /// observer might be in less than this. It must never come out *larger* than the true
     /// shortest distance, or a reception is dropped rather than delayed.
-    pub fn distance_to_ball(self, (centre, radius): (DVec3, f64)) -> f64 {
-        let nearest = centre.clamp(self.min, self.max);
-        (nearest - centre).length() - radius.max(0.0)
+    pub fn distance_to_ball(self, (center, radius): (DVec3, f64)) -> f64 {
+        let nearest = center.clamp(self.min, self.max);
+        (nearest - center).length() - radius.max(0.0)
     }
 
     /// Longest distance from this box to any point of a ball. The mirror of
     /// [`Bounds::distance_to_ball`], and it must never come out *smaller* than the truth: it is
     /// used to decide that a subtree's light has already gone past, and an under-estimate would
     /// discard one that had not.
-    pub fn farthest_from_ball(self, (centre, radius): (DVec3, f64)) -> f64 {
-        let low = (self.min - centre).abs();
-        let high = (self.max - centre).abs();
+    pub fn farthest_from_ball(self, (center, radius): (DVec3, f64)) -> f64 {
+        let low = (self.min - center).abs();
+        let high = (self.max - center).abs();
         low.max(high).length() + radius.max(0.0)
     }
 
@@ -253,14 +253,14 @@ mod tests {
     #[test]
     fn the_distance_to_a_ball_is_never_longer_than_the_truth() {
         let bounds = Bounds { min: DVec3::new(-10.0, -20.0, -5.0), max: DVec3::new(10.0, 20.0, 5.0) };
-        for (centre, radius) in [
+        for (center, radius) in [
             (DVec3::new(100.0, 0.0, 0.0), 0.0),
             (DVec3::new(100.0, 0.0, 0.0), 40.0),
             (DVec3::ZERO, 0.0),
             (DVec3::new(0.0, 0.0, 3.0), 1.0),
             (DVec3::new(-60.0, 55.0, 12.0), 7.0),
         ] {
-            let bound = bounds.distance_to_ball((centre, radius));
+            let bound = bounds.distance_to_ball((center, radius));
             // Against a sweep of the box: no point of it is nearer to the ball than the bound.
             let mut nearest = f64::INFINITY;
             for i in 0..=8 {
@@ -270,14 +270,14 @@ mod tests {
                             + (bounds.max - bounds.min)
                                 * DVec3::new(i as f64, j as f64, k as f64)
                                 / 8.0;
-                        nearest = nearest.min((at - centre).length() - radius);
+                        nearest = nearest.min((at - center).length() - radius);
                     }
                 }
             }
             assert!(bound <= nearest + 1e-9, "{bound} overstates {nearest}");
 
             // And the far bound, which must never under-state for the same reason reversed.
-            let far = bounds.farthest_from_ball((centre, radius));
+            let far = bounds.farthest_from_ball((center, radius));
             let mut furthest: f64 = 0.0;
             for i in 0..=8 {
                 for j in 0..=8 {
@@ -286,7 +286,7 @@ mod tests {
                             + (bounds.max - bounds.min)
                                 * DVec3::new(i as f64, j as f64, k as f64)
                                 / 8.0;
-                        furthest = furthest.max((at - centre).length() + radius);
+                        furthest = furthest.max((at - center).length() + radius);
                     }
                 }
             }

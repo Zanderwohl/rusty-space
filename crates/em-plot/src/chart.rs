@@ -87,7 +87,7 @@ impl<'a> Chart<'a> {
 
         out.polylines.push(Polyline {
             points: vec![Point::new(left, self.area.y), Point::new(left, bottom), Point::new(right, bottom)],
-            colour: self.style.axis,
+            color: self.style.axis,
             width: self.style.line_width,
         });
 
@@ -97,7 +97,7 @@ impl<'a> Chart<'a> {
             let at = self.px(v, self.y.range.0);
             out.polylines.push(Polyline {
                 points: vec![Point::new(at.x, bottom), Point::new(at.x, bottom + 4.0)],
-                colour: self.style.axis,
+                color: self.style.axis,
                 width: self.style.line_width,
             });
             out.labels.push(Label {
@@ -105,7 +105,7 @@ impl<'a> Chart<'a> {
                 text: xf.apply(v),
                 size: self.style.text_size,
                 anchor: Anchor::Middle,
-                colour: self.style.axis,
+                color: self.style.axis,
             });
         }
         let yt = self.y.scale.ticks(self.y.range, self.y.ticks);
@@ -114,7 +114,7 @@ impl<'a> Chart<'a> {
             let at = self.px(self.x.range.0, v);
             out.polylines.push(Polyline {
                 points: vec![Point::new(left - 4.0, at.y), Point::new(left, at.y)],
-                colour: self.style.axis,
+                color: self.style.axis,
                 width: self.style.line_width,
             });
             out.labels.push(Label {
@@ -122,7 +122,7 @@ impl<'a> Chart<'a> {
                 text: yf.apply(v),
                 size: self.style.text_size,
                 anchor: Anchor::End,
-                colour: self.style.axis,
+                color: self.style.axis,
             });
         }
         out
@@ -152,7 +152,7 @@ impl<'a> Chart<'a> {
             let (lo, hi) = (self.px(self.x.range.0, c.min), self.px(self.x.range.0, c.max));
             out.polylines.push(Polyline {
                 points: vec![Point::new(x, lo.y), Point::new(x, hi.y)],
-                colour: self.style.series,
+                color: self.style.series,
                 width: self.style.line_width,
             });
         }
@@ -163,7 +163,7 @@ impl<'a> Chart<'a> {
     ///
     /// A dense envelope is a solid block, which is honest about the extremes and silent about
     /// everything between them. The mean track is what puts the shape back.
-    pub fn mean_track(&self, points: &[(f64, f64)], colour: Rgba) -> Primitives {
+    pub fn mean_track(&self, points: &[(f64, f64)], color: Rgba) -> Primitives {
         let means = decimate::means(points, self.x.range, self.area.width.max(1.0) as u32);
         if means.len() < 2 {
             return Primitives::default();
@@ -175,7 +175,7 @@ impl<'a> Chart<'a> {
             })
             .collect();
         Primitives {
-            polylines: vec![Polyline { points: pts, colour, width: self.style.line_width }],
+            polylines: vec![Polyline { points: pts, color, width: self.style.line_width }],
             ..Primitives::default()
         }
     }
@@ -334,12 +334,12 @@ mod tests {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Marker {
     pub size: f32,
-    pub colour: Rgba,
+    pub color: Rgba,
 }
 
 impl Marker {
-    pub fn new(size: f32, colour: Rgba) -> Self {
-        Self { size, colour }
+    pub fn new(size: f32, color: Rgba) -> Self {
+        Self { size, color }
     }
 }
 
@@ -350,15 +350,15 @@ impl Chart<'_> {
     /// that the picture is decided by draw order rather than by the data, and
     /// [`Chart::density`] is the honest answer.
     pub fn scatter(&self, points: &[(f64, f64)], marker: Marker) -> Primitives {
-        self.scatter_with(points, marker.size, |_, _| marker.colour)
+        self.scatter_with(points, marker.size, |_, _| marker.color)
     }
 
-    /// Scatter with a colour per point, for showing a third variable.
+    /// Scatter with a color per point, for showing a third variable.
     pub fn scatter_with(
         &self,
         points: &[(f64, f64)],
         size: f32,
-        colour_of: impl Fn(usize, (f64, f64)) -> Rgba,
+        color_of: impl Fn(usize, (f64, f64)) -> Rgba,
     ) -> Primitives {
         let half = size.max(0.5) / 2.0;
         let (x0, y0) = (self.area.x, self.area.y);
@@ -375,13 +375,13 @@ impl Chart<'_> {
             quads.push(Quad {
                 min: Point::new(p.x - half, p.y - half),
                 max: Point::new(p.x + half, p.y + half),
-                colour: colour_of(i, (vx, vy)),
+                color: color_of(i, (vx, vy)),
             });
         }
         Primitives { quads, ..Primitives::default() }
     }
 
-    /// Bin points into cells and colour each by how many landed in it.
+    /// Bin points into cells and color each by how many landed in it.
     ///
     /// The scatter equivalent of min/max decimation: output is one quad per occupied cell
     /// rather than one per point, so a million points cost the same as ten thousand, and
@@ -428,7 +428,7 @@ impl Chart<'_> {
             quads.push(Quad {
                 min,
                 max: Point::new(min.x + cell, min.y + cell),
-                colour: map.sample(t),
+                color: map.sample(t),
             });
         }
         Primitives { quads, ..Primitives::default() }
@@ -473,7 +473,7 @@ mod scatter_tests {
     }
 
     #[test]
-    fn scatter_can_colour_each_point_separately() {
+    fn scatter_can_color_each_point_separately() {
         let m = Monospace::default();
         let c = chart(&m);
         let points: Vec<(f64, f64)> = (0..10).map(|i| (i as f64 / 10.0, 0.5)).collect();
@@ -481,7 +481,7 @@ mod scatter_tests {
             ColorMap::Viridis.sample(i as f64 / 9.0)
         });
         assert_eq!(s.quads.len(), 10);
-        assert_ne!(s.quads[0].colour, s.quads[9].colour);
+        assert_ne!(s.quads[0].color, s.quads[9].color);
     }
 
     #[test]
@@ -502,7 +502,7 @@ mod scatter_tests {
     }
 
     #[test]
-    fn density_colours_a_concentration_differently_from_a_sparse_cell() {
+    fn density_colors_a_concentration_differently_from_a_sparse_cell() {
         let m = Monospace::default();
         let c = chart(&m);
         let mut points = vec![(0.25, 0.25); 5000];
@@ -510,8 +510,8 @@ mod scatter_tests {
         let d = c.density(&points, 4.0, ColorMap::Viridis, 1.0);
         assert_eq!(d.quads.len(), 2);
         let peak = ColorMap::Viridis.sample(1.0);
-        assert!(d.quads.iter().any(|q| q.colour == peak), "the busy cell should hit the top");
-        assert!(d.quads.iter().any(|q| q.colour != peak));
+        assert!(d.quads.iter().any(|q| q.color == peak), "the busy cell should hit the top");
+        assert!(d.quads.iter().any(|q| q.color != peak));
     }
 
     #[test]

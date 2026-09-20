@@ -135,9 +135,9 @@ impl Shell {
                         if m <= 0.0 {
                             continue;
                         }
-                        let grey = m * p.single_event_depth(star);
+                        let gray = m * p.single_event_depth(star);
                         for b in Band::ALL {
-                            deficit[b] += (grey * p.band_response[b] as f64) as f32;
+                            deficit[b] += (gray * p.band_response[b] as f64) as f32;
                         }
                         count += m;
                         weighted_crossing += m * p.crossing_time(star);

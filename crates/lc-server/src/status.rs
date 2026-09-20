@@ -54,7 +54,7 @@ pub struct Fit {
 pub struct Status {
     pub ship_id: i64,
     pub name: Option<String>,
-    /// Hull length, metres.
+    /// Hull length, meters.
     pub length_m: f64,
     /// Coordinate microseconds; the freshness of everything else here.
     pub saved_t: i64,

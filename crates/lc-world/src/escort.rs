@@ -10,7 +10,7 @@
 //!
 //! **So the plan is made in the quarry's accelerating frame.** In that frame the quarry holds
 //! still, and a pursuer holding station beside it is one thrusting at exactly the quarry's
-//! acceleration. What is left over for manoeuvring is the difference: a ten-g ship escorting a
+//! acceleration. What is left over for maneuvering is the difference: a ten-g ship escorting a
 //! five-g one has five g to close with, and closing is an ordinary burn-flip-burn with that.
 //! Out in the world the two add back together, and the picture is the one a pilot would expect:
 //! full thrust to catch up, easing as the gap closes, and settling at the quarry's own
@@ -22,7 +22,7 @@
 //! acceleration along a fixed line is a hyperbola, and it is evaluated in closed form at any
 //! speed. The pursuer's *offset* from it is treated as ordinary motion in the quarry's
 //! instantaneous rest frame, which ignores corrections of order `aL/c²` — about one part in a
-//! million for five gravities across two million kilometres. Two further simplifications, both
+//! million for five gravities across two million kilometers. Two further simplifications, both
 //! named where they apply: the acceleration's direction is used unrotated in every rest frame,
 //! which is exact when a quarry burns along its own velocity (a quarry running for somewhere
 //! does); and the drive is held at the quarry's acceleration while the pursuer's nose comes
@@ -278,7 +278,7 @@ impl Escort {
 /// The obvious version is not. Averaging the coordinate acceleration over a tick and scaling
 /// it up by `γ³` at the newer sighting overshoots by the speed gained during the tick — a few
 /// parts in a hundred thousand at a hundredth of `c`, which sounds like nothing and put an
-/// escort's quarry forty kilometres from where it was within ten ticks, and growing.
+/// escort's quarry forty kilometers from where it was within ten ticks, and growing.
 ///
 /// Measured over one sighting interval, so a quarry that turned round between two sightings is
 /// misread for one of them and put right by the next.
@@ -293,7 +293,7 @@ pub fn acceleration_of(previous: &Sighting, latest: &Sighting) -> Option<DVec3> 
 
 /// Plan taking up station `standoff_m` off a quarry believed to be accelerating at `accel`.
 ///
-/// A quarry pulling harder than the drive can match is **followed**, not refused: it is modelled
+/// A quarry pulling harder than the drive can match is **followed**, not refused: it is modeled
 /// as burning at all but [`SPARE_FLOOR`] of the pursuer's drive, so the pursuer copies the burn
 /// as nearly as it can and falls behind by the difference. That model diverges from what is seen
 /// and is re-solved, and the gap closes again once the quarry eases off. Refusing instead gave

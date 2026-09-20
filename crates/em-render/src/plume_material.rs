@@ -8,7 +8,7 @@
 //!
 //! The gas is not uniform either. A drive burns fuel-rich, and the flow combs whatever leaves
 //! the injector unmixed into lengthwise streaks of cooler, sootier gas, so a sample is two gases
-//! with two colours rather than one scaled. The streaks travel aft with [`PlumeUniform::churn`],
+//! with two colors rather than one scaled. The streaks travel aft with [`PlumeUniform::churn`],
 //! whose phase the host advances on *simulation* time — a stopped clock is a still plume.
 //!
 //! Local space is the proxy's: the axis is `+y` running from `-0.5` at the nozzle to `+0.5` at
@@ -42,7 +42,7 @@ pub struct PlumeUniform {
     /// The exhaust's own light, band-mapped to linear display red, green and blue. `w` unused.
     ///
     /// A blackbody at the plume's temperature, exactly as a hull or a world is — a drive's
-    /// output is thermal and this is where it goes. It is the *whole* of the plume's colour:
+    /// output is thermal and this is where it goes. It is the *whole* of the plume's color:
     /// there is nothing out here to reflect and nothing lighting it.
     pub glow: Vec4,
     /// `(throat, mouth, edge, taper)`, the first two as fractions of the proxy's radius.
@@ -68,7 +68,7 @@ pub struct PlumeUniform {
     pub exposure: Vec4,
     /// What the fuel-rich streaks radiate, on the same scale as [`Self::glow`]. `w` unused.
     ///
-    /// A cooler greybody: unmixed fuel burns colder than the core and the soot it leaves is the
+    /// A cooler graybody: unmixed fuel burns colder than the core and the soot it leaves is the
     /// one part of a plume that is not optically thin, so it emits less than a blackbody as well
     /// as redder. Both of those are the host's to work out — this is only where the answer goes.
     pub soot: Vec4,

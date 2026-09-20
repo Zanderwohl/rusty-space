@@ -1,4 +1,4 @@
-//! Perceptually uniform colour maps.
+//! Perceptually uniform color maps.
 //!
 //! Uniform matters here beyond taste: a rainbow map invents banding that is not in the data,
 //! and this is a game about inferring structure from noisy measurements.
@@ -9,11 +9,11 @@ use crate::primitives::Rgba;
 pub enum ColorMap {
     Viridis,
     Magma,
-    /// Blue through white to red, centred on the middle of the range. For residuals.
+    /// Blue through white to red, centered on the middle of the range. For residuals.
     Diverging,
 }
 
-// Sampled colour values, not approximations of anything; clippy reads 0.318 as 1/pi.
+// Sampled color values, not approximations of anything; clippy reads 0.318 as 1/pi.
 #[allow(clippy::approx_constant)]
 const VIRIDIS: [[f32; 3]; 11] = [
     [0.267, 0.005, 0.329], [0.283, 0.141, 0.458], [0.254, 0.265, 0.530],
@@ -101,7 +101,7 @@ mod tests {
     fn the_diverging_map_is_neutral_in_the_middle() {
         let mid = ColorMap::Diverging.sample(0.5);
         assert!((mid.0 - mid.1).abs() < 0.05 && (mid.1 - mid.2).abs() < 0.05, "{mid:?}");
-        assert!(mid.0 > 0.8, "the centre should be light");
+        assert!(mid.0 > 0.8, "the center should be light");
         assert!(ColorMap::Diverging.sample(0.0).2 > ColorMap::Diverging.sample(0.0).0);
         assert!(ColorMap::Diverging.sample(1.0).0 > ColorMap::Diverging.sample(1.0).2);
     }

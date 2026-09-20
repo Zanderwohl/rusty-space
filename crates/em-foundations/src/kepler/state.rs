@@ -1,13 +1,13 @@
 //! Orbital elements and Cartesian state, and the conversion each way.
 //!
-//! Angles in radians, distances metres, velocities m/s, `mu` in m³/s².
+//! Angles in radians, distances meters, velocities m/s, `mu` in m³/s².
 
 use glam::{DMat3, DVec3};
 
 use super::anomaly;
 use crate::common::unit_circle_xy;
 
-/// Classical orbital elements, in radians and metres.
+/// Classical orbital elements, in radians and meters.
 ///
 /// `true_anomaly` places the body on the orbit; propagation needs an epoch and mean
 /// motion, owned by the layer above.

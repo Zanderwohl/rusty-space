@@ -1,15 +1,15 @@
 //! Moving between two stations about one body.
 //!
 //! A crossing is a straight line in the world, and that is the wrong shape for going from one
-//! orbit of Earth to another. Earth runs at thirty kilometres a second; over the twenty minutes
-//! such a transfer takes it covers thirty thousand kilometres, which is the whole size of the
+//! orbit of Earth to another. Earth runs at thirty kilometers a second; over the twenty minutes
+//! such a transfer takes it covers thirty thousand kilometers, which is the whole size of the
 //! orbits involved. Planned in the world frame the destination is *fleeing*, the ship's own
 //! co-motion is thrown away by the match, and the arrival time has no fixed point to find — see
 //! [`crate::navigation::plan`], which lands a transfer about Earth tens of thousands of
-//! kilometres out and cannot be damped into landing any closer.
+//! kilometers out and cannot be damped into landing any closer.
 //!
 //! So it is planned in the body's frame instead, where nothing is fleeing: the station goes
-//! round its orbit at a few kilometres a second and the brachistochrone
+//! round its orbit at a few kilometers a second and the brachistochrone
 //! [`crate::flight`] already solves comes out as a transfer. The same idea as
 //! [`crate::pursuit`], which plans in a quarry's frame for the same reason.
 //!
@@ -18,10 +18,10 @@
 //! ends hold the same system and can place it analytically at any time, so this stores *which
 //! body* and asks. The body's own acceleration therefore costs nothing — no drift accumulates
 //! against a frozen velocity — which matters, because over a transfer about Earth a frozen one
-//! would be five kilometres out by arrival.
+//! would be five kilometers out by arrival.
 //!
 //! **Galilean, and bounded to where that is true.** The frame's speed is a body's orbital speed:
-//! fifty kilometres a second at the very most, which is under two parts in ten thousand of `c`.
+//! fifty kilometers a second at the very most, which is under two parts in ten thousand of `c`.
 //! Composing velocities by adding them is then exact to a part in a hundred million, and the
 //! aberration of the nose is twenty arcseconds. [`crate::pursuit`] needs the real boost because a
 //! chase can run at `0.99c`; this cannot, because it only exists inside a sphere of influence.
@@ -217,7 +217,7 @@ mod tests {
         let (at, beta) = transfer.state_at(&system, arrival_s).expect("a place");
         let wanted = aimed.place_at(&system, arrival_s).unwrap();
         let miss_m = at.distance(wanted) * M_PER_LY;
-        // Millimetres, against the forty-five thousand kilometres the world frame misses by.
+        // Millimeters, against the forty-five thousand kilometers the world frame misses by.
         assert!(miss_m < 1.0, "missed by {miss_m:e} m");
 
         // Earth really did run the whole way across the orbit while this was flown, which is the

@@ -133,7 +133,7 @@ CSS and a markdown pipeline suit each other.
 web/static/
   styles/
     application.scss     # the only entry point; @use everything below
-    _tokens.scss         # colour, type scale, spacing, as custom properties
+    _tokens.scss         # color, type scale, spacing, as custom properties
     _base.scss           # element selectors: headings, p, a, lists, table, code
     _layout.scss         # .page, .column, .rail, .stack, .cluster
     _components.scss     # .post-card, .post-meta, .tag-list, .callout, .figure
@@ -160,12 +160,12 @@ nothing else. Body and interface text stay on a system stack, which costs nothin
 arrival — the point of these pages.
 
 It is worth the one exception because the game's title screen is set in the same face, so the
-site and the client are recognisably one product. 184 KB of WOFF2 converted from the upstream
+site and the client are recognizably one product. 184 KB of WOFF2 converted from the upstream
 TTF and otherwise untouched, `font-display: swap`, and behind the immutable `/v/<build>/` header
 it is fetched once a year.
 
-Nabla is a colour font and paints its own palette, so `color` does not reach it.
-`@font-palette-values` picks one of its author's two neutral palettes per colour scheme. A
+Nabla is a color font and paints its own palette, so `color` does not reach it.
+`@font-palette-values` picks one of its author's two neutral palettes per color scheme. A
 browser too old for that draws the default palette; one too old for COLRv1 draws the layers
 flattened into `color`. Both are legible, which is the whole requirement.
 
@@ -359,7 +359,7 @@ only ever uses the nearest 6 000 of them, so the shipped chunk holds 8 000 — a
 `SKY_LIMIT`, so raising that does not silently shorten the sky.
 
 **What is stored is what cannot be recomputed.** Radius, temperature, mu, mass and metallicity
-all follow from colour index, luminosity and velocity, so they are absent and derived on load.
+all follow from color index, luminosity and velocity, so they are absent and derived on load.
 `StarRecord::assemble` is that derivation and both importers go through it; the chunk cannot
 disagree with the code that made it, because there is only one.
 
@@ -374,7 +374,7 @@ different sky:
 | zero as the "no group" sentinel collided with HYG's Sun, whose `comp_primary` really is 0 | the Sun acquired a phantom companion |
 | a rename shadowed the star's own key with the group's inside a struct literal | every identity in a decoded chunk was wrong, and every star still looked like a star |
 
-Colour index is stored as thousandths rather than `f32`: exact for every value HYG publishes,
+Color index is stored as thousandths rather than `f32`: exact for every value HYG publishes,
 two bytes instead of four, and it is what fixes the boundary. Grouping carries a presence bit
 in the component byte, because no key value is free to mean "absent".
 
@@ -461,7 +461,7 @@ room. Two of the numbers moved a long way from the guess and both are worth keep
 
 - The **sky** was estimated at 1.5 MB compressed and is 0.25. Two thirds of that came from
   packing only the stars the client uses; the rest from storing inputs rather than results.
-- The **wasm** is still 94% of the download, so it is the only figure worth optimising. `bevy`
+- The **wasm** is still 94% of the download, so it is the only figure worth optimizing. `bevy`
   is on default features here; trimming those is the obvious next lever and was deliberately
   not pulled in W3, where the goal was a build that runs.
 
@@ -719,7 +719,7 @@ The renderer emits none of them: a post body is `_base.scss` and nothing else, w
 the section above predicted and the reason to have predicted it.
 
 Syntax highlighting is **classes, not inline styles** — `ClassedHTMLGenerator` with a `syn-`
-prefix — so code changes colour with the rest of the page. An inline `style="color:…"` would
+prefix — so code changes color with the rest of the page. An inline `style="color:…"` would
 have been the same in both themes and no rule could have overridden it.
 
 Three bugs worth keeping, because none of them look like what they are:

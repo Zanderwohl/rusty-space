@@ -91,7 +91,7 @@ pub fn draw_reticle(
     let rad_per_px = 2.0 * (perspective.fov * 0.5).tan() / viewport.y.max(1.0);
     let distance_scale = view_settings.distance_factor();
 
-    let mark = |id: &str, colour: egui::Color32, bracketed: bool| {
+    let mark = |id: &str, color: egui::Color32, bracketed: bool| {
         let Some(index) = system.0.by_name(id) else { return };
         let at = system.0.position(index).to_render_relative(distance_scale, freecam.bevy_pos);
         // Clip space, not a viewport position: the whole point is to be able to say where
@@ -103,7 +103,7 @@ pub fn draw_reticle(
         } else {
             0.0
         };
-        paint(&painter, clip, radius_px, id, viewport, frame, colour, bracketed);
+        paint(&painter, clip, radius_px, id, viewport, frame, color, bracketed);
     };
 
     if let Some(id) = &focused.current_body_id {
@@ -124,10 +124,10 @@ fn paint(
     label: &str,
     viewport: Vec2,
     frame: Frame<'_>,
-    colour: egui::Color32,
+    color: egui::Color32,
     bracketed: bool,
 ) {
-    let stroke = egui::Stroke::new(1.0_f32, colour);
+    let stroke = egui::Stroke::new(1.0_f32, color);
     let (anchor, reach, preferred, name_it) = match reticle::place(clip, radius_px, viewport, frame)
     {
         Marker::On { at, radius_px } => {
@@ -143,7 +143,7 @@ fn paint(
         }
         Marker::Off { at, direction } => {
             draw(painter, &reticle::arrow(at, direction, ARROW_PX), stroke);
-            // Off screen it has no label from anywhere else, and an unlabelled arrow says
+            // Off screen it has no label from anywhere else, and an unlabeled arrow says
             // only that *something* is out there.
             (at, ARROW_PX, Some(-direction), true)
         }
@@ -153,10 +153,10 @@ fn paint(
         return;
     }
     // Measured before it is placed, because where it fits depends on how wide it is.
-    let galley = painter.layout_no_wrap(label.to_string(), egui::FontId::proportional(LABEL_SIZE), colour);
+    let galley = painter.layout_no_wrap(label.to_string(), egui::FontId::proportional(LABEL_SIZE), color);
     let size = Vec2::new(galley.size().x, galley.size().y);
-    let centre = reticle::place_label(anchor, reach, size, frame, reticle::LABEL_GAP_PX, preferred);
-    painter.galley(egui::pos2(centre.x - size.x * 0.5, centre.y - size.y * 0.5), galley, colour);
+    let center = reticle::place_label(anchor, reach, size, frame, reticle::LABEL_GAP_PX, preferred);
+    painter.galley(egui::pos2(center.x - size.x * 0.5, center.y - size.y * 0.5), galley, color);
 }
 
 fn draw(painter: &egui::Painter, segments: &[[Vec2; 2]], stroke: egui::Stroke) {

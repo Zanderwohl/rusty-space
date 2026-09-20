@@ -801,7 +801,7 @@ fn fold(
 /// How loudly a connection state should be shown.
 ///
 /// The words live here and the palette lives in the interface, so "what does this state mean"
-/// and "what colour is that" stay separable. Every variant carries text: colour is never the
+/// and "what color is that" stay separable. Every variant carries text: color is never the
 /// only signal — see `lightcone/docs/18-ui-style.md`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Note {
@@ -950,7 +950,7 @@ mod tests {
     /// A ship that was *doing* something comes back doing it.
     ///
     /// The welcome used to carry a point, so a player who signed out of an orbit signed back
-    /// into a drift — and drifted two and a half million kilometres off it in a day while the
+    /// into a drift — and drifted two and a half million kilometers off it in a day while the
     /// interface said LINKED.
     #[test]
     fn a_welcome_puts_the_ship_back_on_the_station_it_was_holding() {
@@ -1046,15 +1046,20 @@ mod tests {
     }
 
     /// **The bug behind "clock corrected by 140 hours", every second.** Refusing to let a
-    /// player *change* the rate was not enough: the client's own default is sixty times the
+    /// player *change* the rate was not enough: the client's own default was sixty times the
     /// server's, so a joined client ran away from it without anybody touching a key — and the
     /// correction fired every second and never fixed anything, because it re-diverged as fast
     /// as it was pulled back.
+    ///
+    /// The default is the design rate now, so the two agree before anything is sent. This
+    /// still has to hold: `--rate` and the ladder can both leave a client running fast, and
+    /// joining has to bring it back whatever put it there.
     #[test]
     fn joining_adopts_the_servers_rate() {
         let (mut uplink, mut game, mut ui) = app();
-        ui.0.time_rate = crate::ui::TEST_TIME_RATE;
-        assert!(ui.0.time_rate > SERVER_RATE, "premise: the default outruns the server");
+        // Sixty: what the offline default used to be, and what `--rate 60` still does.
+        ui.0.time_rate = 60.0;
+        assert!(ui.0.time_rate > SERVER_RATE, "premise: this outruns the server");
 
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
 
@@ -1111,18 +1116,17 @@ mod tests {
         assert!(uplink.applied.is_none(), "it complained about nothing");
     }
 
-    /// The arithmetic that made the number recognisable, kept so the correspondence is pinned
+    /// The arithmetic that made the number recognizable, kept so the correspondence is pinned
     /// rather than remembered: a multiplier of one is the server's 8766 coordinate seconds per
-    /// real second, and the old default was sixty of those — 143.7 coordinate hours a second,
-    /// which is what the report said.
+    /// real second, and the offline default used to be sixty of those — 143.7 coordinate hours
+    /// a second, which is what the report said. It is one now, and this records what it cost.
     #[test]
     fn the_servers_rate_is_the_one_the_clocks_agree_at() {
         assert_eq!(crate::session::TIME_RATE * SERVER_RATE, 8766.0);
         // And a world that says sixty is a Julian year a minute, which is the number this
         // codebase already reaches for when it wants to watch something happen.
         assert!((crate::session::TIME_RATE * 60.0 * 60.0 - 31_557_600.0).abs() < 1.0);
-        let gained_per_second =
-            crate::session::TIME_RATE * (crate::ui::TEST_TIME_RATE - SERVER_RATE);
+        let gained_per_second = crate::session::TIME_RATE * (60.0 - SERVER_RATE);
         assert!(
             (gained_per_second / 3600.0 - 143.7).abs() < 0.1,
             "{} coordinate hours a second",
@@ -1212,9 +1216,9 @@ mod tests {
         assert!(uplink.contacts.is_empty(), "a dropped contact was kept");
     }
 
-    /// **The flicker this exists for.** Two craft a kilometre and a half apart in low orbit of
+    /// **The flicker this exists for.** Two craft a kilometer and a half apart in low orbit of
     /// Jupiter, and a statement once a server tick — 438 coordinate seconds at the design rate,
-    /// three frames at sixty. Held still, the contact fell up to twenty thousand kilometres
+    /// three frames at sixty. Held still, the contact fell up to twenty thousand kilometers
     /// behind the ship between statements and snapped back on each one. Reckoned, the range
     /// reads the formation.
     #[test]
@@ -1616,7 +1620,7 @@ mod tests {
         for state in states {
             let (_, words) = note(&state, None).expect("something to show");
             assert!(!words.is_empty());
-            // Colour is never the only signal, so the words have to carry it alone.
+            // Color is never the only signal, so the words have to carry it alone.
             assert!(
                 words.chars().any(|c| c.is_ascii_uppercase()),
                 "{words} reads as nothing",

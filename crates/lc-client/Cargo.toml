@@ -8,6 +8,7 @@ authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 
 [dependencies]
 em-foundations = { path = "../em-foundations" }
+em-map = { path = "../em-map" }
 em-plot = { path = "../em-plot", features = ["raster"] }
 em-render = { path = "../em-render" }
 em-spectra = { path = "../em-spectra" }

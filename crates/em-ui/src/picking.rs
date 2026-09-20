@@ -58,10 +58,10 @@ pub mod rank {
 /// Which candidate the cursor is on, if any.
 ///
 /// In reach when the cursor is within `slack_px` of the thing as drawn. Among those, the lowest
-/// [`rank`](Candidate::rank) wins outright; within a rank, the one whose *centre* is nearest.
+/// [`rank`](Candidate::rank) wins outright; within a rank, the one whose *center* is nearest.
 ///
-/// Nearest centre rather than nearest edge, which is what makes a small body in front of a
-/// large one selectable: a big disc's centre is far from wherever you clicked on it, so a moon
+/// Nearest center rather than nearest edge, which is what makes a small body in front of a
+/// large one selectable: a big disc's center is far from wherever you clicked on it, so a moon
 /// three pixels from the cursor beats the planet behind it without needing a rule of its own.
 pub fn pick(candidates: &[Candidate], cursor: Vec2, slack_px: f32) -> Option<u64> {
     candidates
@@ -134,7 +134,7 @@ mod tests {
     fn a_moon_in_front_of_its_planet_is_selectable() {
         let scene = [
             at(1, 400.0, 400.0, 380.0, rank::BODY), // the planet, filling the view
-            at(2, 420.0, 390.0, 3.0, rank::BODY),   // the moon, near its centre
+            at(2, 420.0, 390.0, 3.0, rank::BODY),   // the moon, near its center
         ];
         assert_eq!(pick(&scene, Vec2::new(421.0, 391.0), SLACK_PX), Some(2));
         // And the planet is still what you get everywhere else on it.
@@ -144,7 +144,7 @@ mod tests {
 
     /// Rank beats distance outright, which is what keeps a swarm from swallowing a system.
     #[test]
-    fn a_planet_beats_a_swarm_the_cursor_is_dead_centre_on() {
+    fn a_planet_beats_a_swarm_the_cursor_is_dead_center_on() {
         let scene = [
             at(1, 300.0, 300.0, 0.0, rank::SWARM), // the band, right under the cursor
             at(2, 308.0, 300.0, 2.0, rank::BODY),  // a planet, eight pixels off

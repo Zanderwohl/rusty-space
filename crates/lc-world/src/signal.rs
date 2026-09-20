@@ -19,14 +19,14 @@ use glam::DVec3;
 /// and "wide" would be hiding the trade rather than posing it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Transmitter {
-    /// Metres. 0.03 m is 10 GHz, inside the free-space microwave window.
+    /// Meters. 0.03 m is 10 GHz, inside the free-space microwave window.
     pub wavelength_m: f64,
-    /// The launching aperture's diameter, metres.
+    /// The launching aperture's diameter, meters.
     pub aperture_m: f64,
 }
 
 impl Transmitter {
-    /// What a crewed ship carries: a thirty-metre dish at 10 GHz, which is a milliradian.
+    /// What a crewed ship carries: a thirty-meter dish at 10 GHz, which is a milliradian.
     ///
     /// The numbers are the second row of the table in `lightcone/docs/05-observation.md`, and
     /// they are the ones that make the point: a milliradian across four light-years is a spot
@@ -105,7 +105,7 @@ impl Beam {
 /// find `t_a` with `t_a = t_send + |x_target(t_a) - x_send|`, where `x_target` is the sender's
 /// *prediction*. It is built from a sighting, which is already old, and extrapolated forward
 /// by the flight time, which is longer still — so a beam aimed across four light-years rests on
-/// eight years of guesswork and a quarry that manoeuvres in the meantime is missed. That is the
+/// eight years of guesswork and a quarry that maneuveres in the meantime is missed. That is the
 /// mechanic. Stations are easy to hit; ships under thrust are not.
 ///
 /// Every position is light-microseconds and every time is microseconds, so `c = 1` and `beta`
@@ -149,7 +149,7 @@ mod tests {
         assert_eq!(Beam::OMNI.gain(), 1.0);
         let narrow = Beam::along(DVec3::X, 1.0e-3);
         assert!((narrow.gain() - 4.0e6).abs() / 4.0e6 < 1.0e-6, "{}", narrow.gain());
-        // An optical link is a microradian, and there the cancelling form has lost four
+        // An optical link is a microradian, and there the canceling form has lost four
         // decimal places. This is why the identity is spelled the way it is.
         let optical = Beam::along(DVec3::X, 1.0e-6);
         assert!((optical.gain() - 4.0e12).abs() / 4.0e12 < 1.0e-9, "{}", optical.gain());

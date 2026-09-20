@@ -76,13 +76,13 @@ impl RingSystem {
 
     /// As a population, for the parts of the model that take one.
     ///
-    /// Rings are flat to about a part in ten million — metres thick across a hundred thousand
-    /// kilometres — so the inclination spread is nominal rather than measured. It exists so the
+    /// Rings are flat to about a part in ten million — meters thick across a hundred thousand
+    /// kilometers — so the inclination spread is nominal rather than measured. It exists so the
     /// distribution is not degenerate.
     pub fn population(&self, pole: DVec3) -> Population {
         let (inner, outer) = (self.inner_m(), self.outer_m());
-        // One square metre a particle, so the count is the cross-section. Real ring particles
-        // run from centimetres to metres and nothing here depends on which.
+        // One square meter a particle, so the count is the cross-section. Real ring particles
+        // run from centimeters to meters and nothing here depends on which.
         let cross_section = 1.0;
         Population {
             pole,
@@ -204,7 +204,7 @@ mod tests {
         let p = s.population(pole);
         assert_eq!(p.pole, pole);
         assert!(p.count > 0.0 && p.covering_fraction() > 0.0);
-        // Flat: a ring is metres thick across a hundred thousand kilometres.
+        // Flat: a ring is meters thick across a hundred thousand kilometers.
         assert!(p.inclination.sky_density(0.0) > p.inclination.sky_density(0.01) * 100.0);
     }
 

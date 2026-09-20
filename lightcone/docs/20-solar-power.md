@@ -23,8 +23,8 @@ wait is what makes collectors worth building.
 - **Size cuts both ways.** Collecting area goes as the square of hull length, while slots, mass,
   storage and living drain go as the cube. A bigger ship collects more in total and less per
   module, and has to be closer in to break even.
-- **Heat is not modelled yet.** Nothing stops a ship from skimming the photosphere. A heat limit
-  will reshape sun-diving later, and until then the effective refuelling point is about 0.1 AU,
+- **Heat is not modeled yet.** Nothing stops a ship from skimming the photosphere. A heat limit
+  will reshape sun-diving later, and until then the effective refueling point is about 0.1 AU,
   because that is what the anchor below is set against.
 
 ### Collecting area is the hull's shadow

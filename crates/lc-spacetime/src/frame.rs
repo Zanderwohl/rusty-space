@@ -9,15 +9,15 @@ use glam::DVec3;
 use crate::coord::{Coord, LIGHT_MICROSECOND_M, OutOfBounds};
 use crate::units::{MICROS_PER_SECOND, Micros, Span};
 
-/// Metres to light-microseconds.
+/// Meters to light-microseconds.
 #[inline]
-pub fn metres_to_light_micros(m: f64) -> f64 {
+pub fn meters_to_light_micros(m: f64) -> f64 {
     m / LIGHT_MICROSECOND_M
 }
 
-/// Light-microseconds to metres.
+/// Light-microseconds to meters.
 #[inline]
-pub fn light_micros_to_metres(lus: f64) -> f64 {
+pub fn light_micros_to_meters(lus: f64) -> f64 {
     lus * LIGHT_MICROSECOND_M
 }
 
@@ -25,7 +25,7 @@ pub fn light_micros_to_metres(lus: f64) -> f64 {
 /// time base calls zero.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SystemFrame {
-    /// Global grid position of the system's barycentre.
+    /// Global grid position of the system's barycenter.
     pub origin: Coord,
 }
 
@@ -34,7 +34,7 @@ impl SystemFrame {
         Self { origin }
     }
 
-    /// Local metres to a global grid coordinate, for indexing. Rounding costs up to 150 m,
+    /// Local meters to a global grid coordinate, for indexing. Rounding costs up to 150 m,
     /// or 0.5 us; the local value stays authoritative.
     pub fn to_global(&self, t: Micros, local_m: DVec3) -> Result<Coord, OutOfBounds> {
         let l = local_m / LIGHT_MICROSECOND_M;
@@ -46,7 +46,7 @@ impl SystemFrame {
         )
     }
 
-    /// A global grid coordinate to local metres about the barycentre.
+    /// A global grid coordinate to local meters about the barycenter.
     pub fn to_local(&self, global: Coord) -> DVec3 {
         DVec3::new(
             (global.x - self.origin.x) as f64,
@@ -92,12 +92,12 @@ mod tests {
     }
 
     #[test]
-    fn metres_and_light_microseconds_round_trip() {
+    fn meters_and_light_microseconds_round_trip() {
         let m = 1.495_978_707e11; // 1 AU, by definition
-        let lus = metres_to_light_micros(m);
+        let lus = meters_to_light_micros(m);
         // 1 AU is 499.005 light-seconds, so 4.99e8 light-microseconds.
         assert!((lus / 1e6 - 499.004_783_8).abs() < 1e-6, "1 AU is {} light-s", lus / 1e6);
-        assert!((light_micros_to_metres(lus) - m).abs() < 1e-3);
+        assert!((light_micros_to_meters(lus) - m).abs() < 1e-3);
     }
 
     #[test]
@@ -111,7 +111,7 @@ mod tests {
     }
 
     #[test]
-    fn the_barycentre_is_the_local_origin() {
+    fn the_barycenter_is_the_local_origin() {
         let f = frame();
         assert_eq!(f.to_local(f.origin), DVec3::ZERO);
     }

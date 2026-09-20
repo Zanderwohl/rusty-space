@@ -25,7 +25,7 @@ shell does three jobs:
    crossing it outward carries whatever the system's contents did to it.
 2. **Simulation boundary.** Everything inside is one simulation domain with one writer.
    Domains interact only through light crossing the shell and objects crossing the shell.
-3. **Coordinate boundary.** Local f64 metres are valid inside the shell and only inside it.
+3. **Coordinate boundary.** Local f64 meters are valid inside the shell and only inside it.
 
 Sizing. The shell sits outside the system's outermost population — in the solar system's
 case the Oort cloud, at roughly 1e5 AU = 1.58 ly, against a nearest star 4.25 ly away, so
@@ -49,10 +49,10 @@ beyond the latency of the crossing.
 
 ## Multi-star systems
 
-**Decided: a binary is a barycentre with two children.** The barycentre carries the system,
+**Decided: a binary is a barycenter with two children.** The barycenter carries the system,
 and each star is a body orbiting it, which is a hierarchical two-body decomposition that
 `em-sim` already propagates without modification. Planets orbit either a star (S-type) or the
-barycentre (P-type), and the same decomposition covers both.
+barycenter (P-type), and the same decomposition covers both.
 
 Consequences worth planning for:
 
@@ -67,7 +67,7 @@ Consequences worth planning for:
   it comes from real catalogue data.
 - Close binaries whose separation is comparable to their radii need more than two-body
   Keplerian motion. Exclude contact and near-contact systems from generation rather than
-  modelling them.
+  modeling them.
 
 ## Systems and star data
 
@@ -93,7 +93,7 @@ assumptions and should be watched rather than solved now:
 
 | feature | what it stresses |
 |---|---|
-| globular cluster | shell overlap. 1e5 stars in 10 pc gives a mean separation near 1 ly, against a nominal shell radius of 1.58 ly, so the clamp runs constantly and each shell touches many neighbours |
+| globular cluster | shell overlap. 1e5 stars in 10 pc gives a mean separation near 1 ly, against a nominal shell radius of 1.58 ly, so the clamp runs constantly and each shell touches many neighbors |
 | stellar nursery | dust that belongs to no system. The occlusion model puts populations inside a shell; extended interstellar dust needs path extinction instead, which is a different calculation |
 | authored structures | generation is currently seeded and deterministic; authored content is neither, so both paths must coexist |
 
@@ -115,7 +115,7 @@ Per-star derived data, generated once at world creation:
 |---|---|
 | mass, radius, effective temperature | spectral class lookup, `src/catalog/spectral.rs` |
 | luminosity | radius and temperature, Stefan-Boltzmann |
-| shell radius | mass, clamped against neighbours |
+| shell radius | mass, clamped against neighbors |
 | planet set | procedural, seeded by the star's catalogue ID |
 
 Planet generation is procedural and deterministic from a seed, so the same world ID always
@@ -185,7 +185,7 @@ The catalogue does not carry `[Fe/H]`, so metallicity is synthesised rather than
 from galactic position — thin disc, thick disc, halo — plus the star's kinematics, which HYG
 does carry as proper motion and radial velocity. Halo stars move fast relative to the local
 standard of rest and are metal-poor; that correlation is strong enough to generate from and it
-costs nothing. This also makes metal-rich systems worth travelling to, which is a resource
+costs nothing. This also makes metal-rich systems worth traveling to, which is a resource
 gradient derived from real data rather than sprinkled on top.
 
 The Oort cloud earns its record for reasons that have nothing to do with light. It is
@@ -210,12 +210,12 @@ The element count is an `f64` and may be fractional. Nothing enumerates the memb
 Construction adds to the count and to the cross-section; losses subtract. Both are events.
 
 An element leaves the population only when a player selects it for something specific — a
-manoeuvre, a transfer, a detachment — at which point it becomes a tracked body until it
+maneuvere, a transfer, a detachment — at which point it becomes a tracked body until it
 rejoins. Bulk operations on a swarm are operations on the distribution's parameters, so
 reconfiguring a million collectors is one event carrying a new inclination spread, not a
 million events.
 
-This is a hard rule, not an optimisation. A design where a player can address individual
+This is a hard rule, not an optimization. A design where a player can address individual
 swarm members as entities has an unbounded object count, an unbounded source table, and an
 observation cost that scales with someone else's industry.
 

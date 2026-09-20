@@ -11,6 +11,7 @@ someone a day. This file is the conventions.
 |---|---|---|
 | `crates/em-foundations` | orbital mechanics, reference frames, epochs | glam, serde, num-traits, scilib |
 | `crates/em-sim` | simulation state and propagation | em-foundations; `bevy_ecs` only behind the `bevy` feature |
+| `crates/em-map` | what a spatial map draws; no engine | glam, em-plot, em-foundations |
 | `crates/em-ui` | Bevy-native menu widgets, in a palette the caller picks | bevy |
 | `.` (`exotic-matters`) | the app: rendering, egui, persistence | anything |
 
@@ -32,6 +33,7 @@ Two invariants worth checking after any structural change:
 ```bash
 cargo tree -p em-foundations | grep -i bevy          # must be empty
 cargo tree -p em-sim --no-default-features | grep -i bevy   # must be empty
+cargo tree -p em-map | grep -i bevy                          # must be empty
 cargo test -p em-sim --no-default-features           # the headless suite
 ```
 
@@ -44,8 +46,8 @@ cargo test -p em-sim --no-default-features           # the headless suite
 opt-level = 3
 ```
 
-So a debug build already runs Bevy, glam and the rest fully optimised — only this
-workspace's own code is unoptimised, and it is a thin layer over them. A release build
+So a debug build already runs Bevy, glam and the rest fully optimized — only this
+workspace's own code is unoptimized, and it is a thin layer over them. A release build
 adds `lto = true` and `codegen-units = 1`, which costs many minutes of link time for a
 speedup you will not notice while testing a change.
 

@@ -3,9 +3,9 @@
 //! [`crate::pursuit`] reckons a quarry forward in a straight line, and plans in a frame that
 //! does not fall. Between the stars that is exactly right. Inside a system it is not: a quarry
 //! in low orbit of Jupiter is bent off that line at nearly two gravities, and a pursuer whose
-//! plan ignores gravity is off by ninety kilometres a hundred seconds in. Re-solving against
-//! that kept it wandering a relative orbit tens to thousands of kilometres across, and a
-//! five-kilometre hull could not get inside a hundred thousand.
+//! plan ignores gravity is off by ninety kilometers a hundred seconds in. Re-solving against
+//! that kept it wandering a relative orbit tens to thousands of kilometers across, and a
+//! five-kilometer hull could not get inside a hundred thousand.
 //!
 //! **So the quarry is reckoned along its conic, and the approach is planned in the frame that
 //! falls with it** — [`crate::transfer`]'s idea, with a sighting in place of a body. Both craft
@@ -15,13 +15,13 @@
 //! drifting off by the difference between two orbits.
 //!
 //! **The frame is still a sighting.** The conic is solved from where the quarry was seen and
-//! how fast, so this tells a client nothing its own eyes could not; a quarry that manoeuvres
+//! how fast, so this tells a client nothing its own eyes could not; a quarry that maneuveres
 //! leaves its conic and is re-solved against when the news arrives, as a rendezvous is.
 //!
 //! **Galilean, and bounded to where that is true**, for the reason [`crate::transfer`] gives:
-//! [`GALILEAN_BETA`] is three hundred kilometres a second. And the frame is not inertial, so a
+//! [`GALILEAN_BETA`] is three hundred kilometers a second. And the frame is not inertial, so a
 //! pursuer holding an offset in it is thrusting against the difference between its own fall and
-//! the quarry's — a tidal term, milligravities a thousand kilometres off, the same thing
+//! the quarry's — a tidal term, milligravities a thousand kilometers off, the same thing
 //! [`crate::motion::thrust_g`] waves away for a ship holding a station.
 
 use glam::DVec3;
@@ -150,7 +150,7 @@ impl Consort {
     }
 
     /// The crew's seconds since this was taken up. Past the approach they age at the world's
-    /// rate, being at rest beside a quarry going a few tens of kilometres a second.
+    /// rate, being at rest beside a quarry going a few tens of kilometers a second.
     pub fn proper_s_at(&self, now_s: f64) -> f64 {
         let end = self.cruise.start_s + self.cruise.duration_s();
         if now_s > end {
@@ -160,7 +160,7 @@ impl Consort {
         }
     }
 
-    /// How far off its conic a fresh sighting puts the quarry, metres. `None` when the conic
+    /// How far off its conic a fresh sighting puts the quarry, meters. `None` when the conic
     /// can no longer be placed, which is as good as not being on it.
     pub fn divergence_m(&self, system: &LocalSystem, seen: &Sighting) -> Option<f64> {
         let (at, _) = place(&self.frame, system, seen.emitted_s)?;
@@ -243,9 +243,9 @@ mod tests {
         Drive { accel_g: 5.0, slew_rate_rad_s: 0.05, ..Drive::DEFAULT }
     }
 
-    /// **The report this exists for.** A pursuer ten kilometres off a quarry in low orbit of
-    /// Jupiter closes to a kilometre and a half and is still there an orbit later, to a few
-    /// metres — where a plan that ignored the planet was off by ninety kilometres in a hundred
+    /// **The report this exists for.** A pursuer ten kilometers off a quarry in low orbit of
+    /// Jupiter closes to a kilometer and a half and is still there an orbit later, to a few
+    /// meters — where a plan that ignored the planet was off by ninety kilometers in a hundred
     /// seconds.
     #[test]
     fn it_closes_to_intimate_range_in_orbit_and_stays() {
@@ -296,7 +296,7 @@ mod tests {
         assert_eq!(plan.recipe().solve(&system, pursuer.attitude), Some(plan));
     }
 
-    /// Past a few hundred kilometres a second it is a job for the boost, not for this.
+    /// Past a few hundred kilometers a second it is a job for the boost, not for this.
     #[test]
     fn a_fast_quarry_is_not_reckoned_along_a_conic() {
         let system = sol();

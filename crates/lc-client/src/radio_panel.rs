@@ -19,12 +19,12 @@ use crate::input::Requested;
 use crate::panels::{ask, duration};
 use crate::ui::Channel;
 
-/// Somebody talking. The one colour in the interface that means a person rather than a reading.
+/// Somebody talking. The one color in the interface that means a person rather than a reading.
 pub(crate) const RADIO: egui::Color32 = egui::Color32::from_rgb(120, 220, 140);
 
 /// The face a log is set in: Geo, and only here.
 ///
-/// What crossed the gap is set apart from the window showing it, the way a colour already sets
+/// What crossed the gap is set apart from the window showing it, the way a color already sets
 /// it apart — the list on the left, the composer and every marker the client adds stay in the
 /// interface face, because those are this ship talking to its pilot rather than a ship talking
 /// to another ship.
@@ -396,10 +396,10 @@ fn log_area(ui: &mut egui::Ui, id: &str, height: f32, add: impl FnOnce(&mut egui
 /// does something to the line, and a log is prose. This is the name itself, underlined while
 /// the cursor is on it — which is the oldest affordance there is for "this goes somewhere" and
 /// is the one thing a label can do without becoming a widget.
-pub(crate) fn clickable_name(ui: &mut egui::Ui, text: &str, colour: egui::Color32) -> egui::Response {
+pub(crate) fn clickable_name(ui: &mut egui::Ui, text: &str, color: egui::Color32) -> egui::Response {
     let face = logged(ui);
     let response = ui.add(
-        egui::Label::new(egui::RichText::new(text).color(colour).font(face))
+        egui::Label::new(egui::RichText::new(text).color(color).font(face))
             .sense(egui::Sense::click()),
     );
     if response.hovered() {
@@ -408,7 +408,7 @@ pub(crate) fn clickable_name(ui: &mut egui::Ui, text: &str, colour: egui::Color3
         let rect = response.rect;
         ui.painter().line_segment(
             [rect.left_bottom(), rect.right_bottom()],
-            egui::Stroke::new(1.0_f32, colour),
+            egui::Stroke::new(1.0_f32, color),
         );
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -417,12 +417,12 @@ pub(crate) fn clickable_name(ui: &mut egui::Ui, text: &str, colour: egui::Color3
 /// Who said it. Named rather than arrowed: the default font has no U+2192 and draws a tofu box
 /// for it, and a name reads better in a log than a direction does.
 fn speaker(ui: &mut egui::Ui, name: &str, mine: bool) {
-    let colour = match mine {
+    let color = match mine {
         true => egui::Color32::from_rgb(170, 190, 200),
         false => RADIO,
     };
     let face = logged(ui);
-    ui.label(egui::RichText::new(format!("{name}:")).color(colour).font(face));
+    ui.label(egui::RichText::new(format!("{name}:")).color(color).font(face));
 }
 
 /// What a message's tooltip says: when this ship learnt of it, and how loud it was.
@@ -445,7 +445,7 @@ fn reception(line: &crate::chat::Line) -> String {
 /// The message itself. `to` names who it went to, for a line this ship sent to somebody — a
 /// broadcast has nobody to name, and one that arrived came *from* the name already shown.
 fn body_of(ui: &mut egui::Ui, line: &crate::chat::Line, mine: bool, to: Option<&str>) {
-    let colour = match mine {
+    let color = match mine {
         true => egui::Color32::from_rgb(170, 190, 200),
         false => RADIO,
     };
@@ -460,7 +460,7 @@ fn body_of(ui: &mut egui::Ui, line: &crate::chat::Line, mine: bool, to: Option<&
             .weak(),
         ),
         (_, true) => ui.label(said("sent this ship its key".to_string()).color(RADIO)),
-        (Some(body), _) => ui.label(said(body.clone()).color(colour)),
+        (Some(body), _) => ui.label(said(body.clone()).color(color)),
         // Heard and unreadable, which is worth showing rather than hiding: a player can see
         // that somebody in earshot is talking in private.
         (None, _) => ui.label(said("(encrypted, and not for this ship)".to_string()).weak()),
@@ -490,7 +490,7 @@ fn unacknowledged(ui: &mut egui::Ui, sends: usize) -> egui::Response {
     ];
     let painter = ui.painter();
     painter.add(egui::Shape::convex_polygon(points, amber, egui::Stroke::NONE));
-    // The bar and dot of an exclamation mark, in the window's own background colour so the
+    // The bar and dot of an exclamation mark, in the window's own background color so the
     // triangle reads as a warning sign rather than a plain arrowhead.
     let ink = ui.visuals().window_fill;
     painter.line_segment(

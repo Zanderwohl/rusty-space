@@ -10,7 +10,7 @@
 //
 // The gas is not uniform. A drive burns fuel-rich, and what leaves the injector unmixed is
 // drawn out by the flow into lengthwise streaks of cooler, sootier gas — so every sample is
-// split into two gases with two colours rather than scaled by one, and the streaks travel down
+// split into two gases with two colors rather than scaled by one, and the streaks travel down
 // the plume with the clock.
 
 #import bevy_pbr::{
@@ -108,16 +108,16 @@ fn value_noise(p: vec3<f32>, period: f32) -> f32 {
 /// How fuel-rich the gas is at a point: zero is burnt clean, one is a streak of soot.
 ///
 /// Sampled on `(where the point sits across the cone, how far along it is)` — the cross-section
-/// **in units of the local radius** rather than in metres. That coordinate is constant along a
+/// **in units of the local radius** rather than in meters. That coordinate is constant along a
 /// streamline, because a parcel that leaves the injector a third of the way out stays a third of
 /// the way out while the cone flares around it. So the pattern is a bundle of filaments running
-/// the length of the plume, widening with it, and travelling aft as the phase slides. Sampling
+/// the length of the plume, widening with it, and traveling aft as the phase slides. Sampling
 /// the raw position instead gives blobs of dirt hanging still in the proxy while the ship
-/// manoeuvres round them.
+/// maneuveres round them.
 ///
 /// **Filaments and not sheets.** The first go used only the *direction* across the cone, which
 /// makes each lane a full radial sheet — and a ray down the middle of the plume crosses every
-/// angle there is, averages the lot, and comes out the colour of clean gas. Only the grazing
+/// angle there is, averages the lot, and comes out the color of clean gas. Only the grazing
 /// rays at the silhouette kept any contrast, so the plume had a fringe and a blank middle.
 /// Localising a lane in the cross-section means every ray crosses a few of them and none of it
 /// averages flat.
@@ -145,7 +145,7 @@ fn richness(p: vec3<f32>, radius: f32, along: f32) -> f32 {
 /// Zero outside the length, and a smooth falloff to the side rather than a wall — a plume in
 /// vacuum has no boundary, it just runs out of gas.
 ///
-/// The split conserves the column: the streaks move gas from one colour to the other and never
+/// The split conserves the column: the streaks move gas from one color to the other and never
 /// destroy it, so the core stays where the exposure was set for it and the plume does not dim
 /// when the churn is turned up.
 fn gas(p: vec3<f32>) -> vec2<f32> {
@@ -164,7 +164,7 @@ fn gas(p: vec3<f32>) -> vec2<f32> {
     // column came out a hundred times deeper at the nozzle than at the mouth, which put every
     // part of the plume above the top of the exposure window and turned the whole cone into one
     // flat saturated shape. Bounded by one here, so the depth a ray accumulates is of order the
-    // distance it travelled and the brightness scale below means something.
+    // distance it traveled and the brightness scale below means something.
     let fading = pow(max(1.0 - along, 0.0), material.shape.w);
     let amount = profile * fading;
     // Most samples of a convex volume are outside it. Sixteen hashes each is worth skipping.
@@ -185,7 +185,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // The ray, in the proxy's own space. Back faces are what is drawn, so this fragment is on
     // the wall *behind* the gas and the march runs from here back toward the eye.
     //
-    // **Backwards, and that is not a preference.** A plume is metres long and sits an
+    // **Backwards, and that is not a preference.** A plume is meters long and sits an
     // astronomical unit from the render origin, so the eye is of order `1e8` in the proxy's own
     // units — and `eye + direction * t` then asks `f32` for a point near the origin as the
     // difference of two numbers near `1e8`, where its spacing is about eight. Every position
@@ -216,7 +216,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // frame, so what reaches the eye is the sum of what every part of it puts out.
     //
     // Two columns rather than one, because the ray crosses two gases and they are not the same
-    // colour. Summing the depth first and colouring it afterwards would average the streaks
+    // color. Summing the depth first and coloring it afterwards would average the streaks
     // away — a ray through the flank crosses several lanes and the mean of a lane and the gas
     // beside it is the gas beside it.
     let step = span / f32(STEPS);
@@ -252,16 +252,16 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // saturation are held constant by the curve, so a brighter part of the plume was only a
     // brighter lavender and the deep middle looked like the thin edge. Carried past one, the
     // display transform desaturates the core toward white and bloom haloes it, while the
-    // edges stay inside the window with their colour intact.
+    // edges stay inside the window with their color intact.
     //
-    // **Inside the window the curve keeps the colour; past it, each channel is on its own.**
+    // **Inside the window the curve keeps the color; past it, each channel is on its own.**
     // That is the one place a sensor and this tone map part company, and the plume is where it
     // matters: a channel does not know what the other two are doing, so it saturates when *it*
-    // is full. Under a false-colour mapping the three are decades apart — in `thermal` this
+    // is full. Under a false-color mapping the three are decades apart — in `thermal` this
     // plume's channels span nearly four stops around their own luminance, because ten microns,
     // two microns and green are three quite different questions to ask a fifty-thousand-kelvin
     // gas. Scaling one chroma by one overflow asks only the brightest of them and reports the
-    // answer as the colour of all three, which is how the hottest object in the frame came back
+    // answer as the color of all three, which is how the hottest object in the frame came back
     // a flat saturated blue. Per channel, the blue fills first, then green, then red, and the
     // core goes white the way something too bright to photograph does.
     //

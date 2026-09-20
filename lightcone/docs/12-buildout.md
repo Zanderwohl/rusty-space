@@ -1,6 +1,6 @@
 # Buildout plan
 
-Ten phases. The organising constraint is not effort but **context**: this project is larger
+Ten phases. The organizing constraint is not effort but **context**: this project is larger
 than any one working session can hold, so each phase is written to be started cold.
 
 Every phase states what must already exist, what it delivers, how you know it is done, what it
@@ -36,7 +36,7 @@ existing app, so it can run in parallel throughout.
 | `coord.rs` | `Coord { t, x, y, z }` in `i64` microseconds and light-microseconds, the `2^60` construction invariant |
 | `interval.rs` | `interval2` in `i128`, `Separation`, `precedes` |
 | `worldline.rs` | the `Worldline` trait, `retarded_times` returning a `SmallVec`, `is_subluminal` |
-| `frame.rs` | system-local `f64` metres to and from the global grid; `propagation_time` to `em_foundations::Instant` |
+| `frame.rs` | system-local `f64` meters to and from the global grid; `propagation_time` to `em_foundations::Instant` |
 | `units.rs` | newtypes, and no arithmetic that can mix a duration with an instant |
 | `doppler.rs`, `proper_time.rs` | shift, aberration, gamma, hyperbolic motion |
 
@@ -61,7 +61,7 @@ why `retarded_times` returns a collection.
 **Before:** nothing. Independent of 1a.
 
 **Deliver:** `crates/em-spectra`, engine-free, per [06-crate-layout.md](06-crate-layout.md).
-Bands, blackbody, extinction curves, colour index, CIE conversion, `BandMapping` and presets.
+Bands, blackbody, extinction curves, color index, CIE conversion, `BandMapping` and presets.
 `BANDS` is defined here and nowhere else.
 
 **Done when:**
@@ -161,7 +161,7 @@ every system.
 - 120 000 catalogue stars load through the provider with synthetic IDs, and no HYG number
   appears anywhere but a provenance field.
 - The same seed produces a byte-identical system, twice, in separate processes.
-- Binaries generate as a barycentre with two children and propagate.
+- Binaries generate as a barycenter with two children and propagate.
 - A second provider implementation exists, even if it only returns three hand-written stars.
   The interface is not proven by one implementation.
 
@@ -176,7 +176,7 @@ every system.
 **Before:** nothing. Runs in parallel with everything; touches the existing app.
 
 **Deliver:** the five-step extraction in [06-crate-layout.md](06-crate-layout.md), and
-`em-plot` core with min/max decimation, scales, colour maps and an SVG test backend.
+`em-plot` core with min/max decimation, scales, color maps and an SVG test backend.
 
 **Revised during the phase.** The five-step list assumed materials, meshes, cameras, markers
 and paths all extract. Measuring the coupling showed they do not: material and geometry
@@ -208,7 +208,7 @@ camera-relative rendering, retarded-time sampling per the distance rule, band-to
 presets, the population envelope shader, tone mapping with glow, and a light-curve panel.
 
 **Done when you can show it to someone:** fly to a star, point a telescope, watch a transit in
-the curve, switch to the thermal preset, and see a swarm that was invisible in natural colour.
+the curve, switch to the thermal preset, and see a swarm that was invisible in natural color.
 
 **Do not:** add WASM, networking, or god view. God view is compiled out of this build from the
 start rather than added and later removed.
@@ -251,7 +251,7 @@ gate.
 light delay and not before — with a test that asserts the negative case, that nothing arrives
 early. Every outbound message passes through one function and there is no second emit path.
 
-**Do not:** optimise. Correctness of the filter is the whole deliverable.
+**Do not:** optimize. Correctness of the filter is the whole deliverable.
 
 **Read:** [08-networking.md](08-networking.md).
 

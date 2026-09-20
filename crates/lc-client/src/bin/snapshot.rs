@@ -55,12 +55,12 @@ fn run(output: &str, catalogue: Option<&str>) -> Result<String, String> {
         .with_bands(BandMask::ALL)
         .cooled_to(45.0);
 
-    // Point at the nearest modelled system we are not effectively inside. The catalogue
+    // Point at the nearest modeled system we are not effectively inside. The catalogue
     // puts the Sun about an astronomical unit away, which is not an interstellar target.
     let target = session
         .stars
         .iter()
-        .take(lc_client::session::MODELLED_STARS)
+        .take(lc_client::session::MODELED_STARS)
         .find(|s| s.position_ly.length() > 1.0)
         .map(|s| s.id)
         .unwrap_or(session.stars[0].id);
@@ -121,15 +121,15 @@ fn run(output: &str, catalogue: Option<&str>) -> Result<String, String> {
                 (p.y.atan2(p.x).to_degrees(), p.z.clamp(-1.0, 1.0).asin().to_degrees())
             })
             .collect();
-        let colours: Vec<Rgba> = members
+        let colors: Vec<Rgba> = members
             .iter()
             .map(|s| {
-                let c = lc_client::session::point_colour(&s.shaded);
+                let c = lc_client::session::point_color(&s.shaded);
                 Rgba(c.x, c.y, c.z, 0.9)
             })
             .collect();
         let size = 1.0 + bucket as f32 * 1.4;
-        layers.push(sky_chart.scatter_with(&points, size, |i, _| colours[i]));
+        layers.push(sky_chart.scatter_with(&points, size, |i, _| colors[i]));
     }
 
     // --- light curve -----------------------------------------------------------------
@@ -171,8 +171,8 @@ fn run(output: &str, catalogue: Option<&str>) -> Result<String, String> {
 
     // --- furniture -------------------------------------------------------------------
     let mut text = Primitives::default();
-    let mut say = |x: f32, y: f32, s: String, size: f32, anchor, colour| {
-        text.labels.push(Label { at: Point::new(x, y), text: s, size, anchor, colour });
+    let mut say = |x: f32, y: f32, s: String, size: f32, anchor, color| {
+        text.labels.push(Label { at: Point::new(x, y), text: s, size, anchor, color });
     };
     say(WIDTH as f32 / 2.0, 34.0, "LIGHTCONE FRONTIER - OBSERVER SNAPSHOT".into(), 20.0, Anchor::Middle, FG);
     say(90.0, 54.0, format!("SKY - {} STARS", sky.len()), 13.0, Anchor::Start, FG);

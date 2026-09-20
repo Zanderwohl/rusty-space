@@ -465,8 +465,8 @@ fn keys(ui: &mut egui::Ui, state: &Ui, shelf: &Shelf, out: &mut MessageWriter<Re
 /// egui makes a label selectable by default, and a selectable label eats the drag that would
 /// otherwise move the window — so the one surface a player grabs to move the thing is the one
 /// that refuses to be grabbed. Nothing printed on the bezel is text anyone wants to copy.
-pub(crate) fn engraved(words: impl Into<String>, size: f32, colour: Color32) -> egui::Label {
-    egui::Label::new(egui::RichText::new(words.into()).size(size).color(colour)).selectable(false)
+pub(crate) fn engraved(words: impl Into<String>, size: f32, color: Color32) -> egui::Label {
+    egui::Label::new(egui::RichText::new(words.into()).size(size).color(color)).selectable(false)
 }
 
 pub(crate) fn key(ui: &mut egui::Ui, label: &str, hint: &str) -> egui::Response {
@@ -511,7 +511,7 @@ fn page(
         waiting(ui, shelf, setting);
         return;
     }
-    // Centred inside whatever the window gives, rather than filling it.
+    // Centered inside whatever the window gives, rather than filling it.
     let full = ui.available_width();
     let width = full.min(MAX_MEASURE);
     let margin = (full - width) / 2.0;
@@ -779,8 +779,8 @@ fn decode(
     };
     let rgba = image.to_rgba8();
     let size = [rgba.width() as usize, rgba.height() as usize];
-    let colours = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
-    Some(ctx.load_texture(path, colours, egui::TextureOptions::LINEAR))
+    let colors = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+    Some(ctx.load_texture(path, colors, egui::TextureOptions::LINEAR))
 }
 
 /// The foot of the page: where this is, in the two units that mean anything.

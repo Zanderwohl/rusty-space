@@ -74,7 +74,7 @@ was added to avoid.
 
 So the menu generates four thousand main-sequence stars from a fixed seed: isotropic, uniform
 in volume out to four hundred light-years, masses from an inverted Salpeter IMF and effective
-temperature from the same mass so the colours agree with the sizes. Fixed rather than random
+temperature from the same mass so the colors agree with the sizes. Fixed rather than random
 per launch, because a backdrop that differs each time reads as a bug in the sky.
 
 The field turns at one radian a minute, in yaw only. `Look` carries no roll by construction, and
@@ -124,6 +124,9 @@ with.
 | scenarios | — | scenes to stage. Development only, and every button does nothing without a shard started for it |
 | refit | `R` | module counts and hull slots as sliders, what applying them would cost and take, and the refit under way. See [19-ship-fitting.md](19-ship-fitting.md) |
 | dev actions | `F5` | energy for the ship. Development only; a shard refuses it |
+
+The map is not in that table. It is the **other mode of the main view** — see below — and `M`
+switches to it rather than opening anything.
 
 Panels are windows rather than menu pages because the clock never stops: a player has to be
 able to watch a curve and fly at the same time.
@@ -247,7 +250,7 @@ besides, per [07-rendering.md](07-rendering.md).
 | entry | why |
 |---|---|
 | God view toggle | `#[cfg(feature = "godview")]` |
-| causality overlay | lines from in-flight events to the observers they are travelling toward. The one bug class — an observer learning early or late — that no other view shows |
+| causality overlay | lines from in-flight events to the observers they are traveling toward. The one bug class — an observer learning early or late — that no other view shows |
 | **time-rate multiplier** | a transit at 8766x takes real hours. Dev only: the server owns the rate, and a client that can change it is a client that can cheat |
 | scale tier and camera distance | the three-tier reduction is invisible until it is wrong |
 | retarded-solver statistics | roots found, Newton iterations, bracket expansions |
@@ -271,9 +274,9 @@ restart are a development annoyance that becomes a shipping bug.
 The band mapping is an **information channel**, not decoration. The composition preset works by
 showing dust as orange and a solid occulter as neutral, which is the diagnostic
 [05-observation.md](05-observation.md) and phase 3 built the observation model around. A player
-who cannot separate those two colours cannot play that part of the game.
+who cannot separate those two colors cannot play that part of the game.
 
-**Every colour-carried readout gets a numeric twin.** The deficit ratio between two bands is a
+**Every color-carried readout gets a numeric twin.** The deficit ratio between two bands is a
 number as well as a hue; a star's temperature is a number as well as a tint. This is cheap now
 and structural later.
 
@@ -309,7 +312,12 @@ UiState        open panels, selected target, exposure offset, preset index
 action::apply  the only thing that mutates UiState
 hud::lines()   what the readout says, as plain strings
 panels::*      egui systems that draw UiState and emit Actions
+dev.rs         the development entry: the flags, and the pins that hold them
 ```
+
+`dev.rs` is apart from `app.rs` because it is the part that grows with every flag, and because
+what it does is one thing: put the world into a stated pose and photograph it. None of it is
+reachable from the interface.
 
 Anything that decides *what* to show is a function over `Session` and `UiState`, testable with
 no window — which is the only way any of it gets verified, since a window cannot be inspected
@@ -330,6 +338,7 @@ Omit the path for the three authored sample stars.
 |---|---|
 | `Esc` | close the top panel, then the menu |
 | `T` `Y` `F` `F3` `F4` | telescope, system, flight, debug, starfield tuning |
+| `M` | switch the main view between the world and the map |
 | arrows, right-drag | look |
 | | the cursor is pinned while the right button is held, and released on let go |
 | `L` | look at the selection |
@@ -340,7 +349,7 @@ Omit the path for the three authored sample stars.
 | `,` `.` | clock rate down, up along the ladder |
 
 The clock rate is a development control and the server owns it in a real session. It is
-labelled by period rather than by factor — `1 year / 10 s`, not `360x` — because a factor is
+labeled by period rather than by factor — `1 year / 10 s`, not `360x` — because a factor is
 not something anyone can feel, and the head-up display flags any rate off the design one so a
 fast clock never looks normal.
 
@@ -366,15 +375,18 @@ seven hours twenty times a second having never drifted at all.
 | `--shot <path>` | photograph the sky through the real pipeline, then quit |
 | `--fly` | cross to the nearest interstellar star |
 | `--band <n>` | band preset |
-| `--rate <n>` | clock multiplier against one year per hour: `360` is a year per ten seconds |
+| `--rate <n>` | clock multiplier against one year per hour: `360` is a year per ten seconds. Without it a session runs at the world's own rate |
 | `--watch` | target the nearest system and open the telescope |
 | `--swarm` | target the nearest star carrying a swarm |
 | `--curve <n>` | which band the light curve measures |
+| `--map <bearing:elevation:au>` | pin the map's camera. A light-year is 63 241 astronomical units |
+| `--map-plane <ecliptic\|galactic>` | which plane the map lays its rings in |
+| `--map-focus <ship\|primary\|local\|star\|free>` | what the map's camera locks onto; `local` is the primary in the frame that turns with the ship. A pin, like `--map`, which holds the ship on its own |
 | `--tune` | open the starfield tuning panel |
 | `--frames <n>` | frames before the shutter |
 | `--at <body>` | stand off a named body of the local system |
 | `--station <course>` | put the ship straight on a station: `orbit:Earth`, `polar:Mars:high`, `rings:Saturn`, `l2:Earth`, `belt:0`, `leave` |
-| `--panel <name>` | open a panel by name |
+| `--panel <name>` | open a panel by name. `--panel map` holds the main view in the map's mode instead, since the map is not a panel |
 | `--burst <n>` | photograph `n` consecutive frames, numbered. For flicker: two runs stopped at frame `n` and frame `n+1` have accumulated different wall time and are not consecutive at all |
 | `--demo <name>` | stage a scene, and bring a shard to run it in |
 | `--demo-cam <yaw:pitch:booms>` | pin the camera for the run |
@@ -389,7 +401,7 @@ recording setup.
 `--demo` is the exception that proves the rule, and it is worth saying why. It cannot be an
 action, because what it asks for is a craft placed somewhere by fiat and that is the one thing
 no client may ask for — every order on the wire is a request a ship makes about itself. So it
-is a message of its own, honoured only by a shard started for it, and the scene it names is
+is a message of its own, honored only by a shard started for it, and the scene it names is
 staged on the side that decides what happened. See `lc_world::scenario` for the scenes and
 `lc_server::director` for the runner.
 
@@ -406,13 +418,13 @@ point a scene is composed from, a free fly-around — and each of those is a dif
 
 **A scene says where to stand, and how fast to run.** Both are fields on it rather than things
 to pass in: it knows what it is about, and a rendezvous is two different events seen from its
-two ends. `approach` and `closing` are the same two ships doing the same manoeuvre, watched from
+two ends. `approach` and `closing` are the same two ships doing the same maneuvere, watched from
 one end and then the other.
 
 **The eye moves and the observer does not**, which is the boundary to know about. Everything the
 client works out about light — retarded times, aberration, what a contact looked like when it
 left — is still solved from the player's own ship, because that is the craft the session has a
-worldline for. Across a scene, where the cast is kilometres apart, the difference is
+worldline for. Across a scene, where the cast is kilometers apart, the difference is
 microseconds and there is nothing to see. Across the Oort cloud it would be hours. Watching from
 a craft you are not on is a development view until the observer can move too, which is why the
 only way to reach it is a flag and a panel that does nothing in a shipped build.
@@ -440,7 +452,7 @@ out of the body's own pole, a belt at the radius that actually carries its light
 
 Three things the shapes buy:
 
-- **An altitude is in radii above the surface**, not kilometres, so `low` means the same thing
+- **An altitude is in radii above the surface**, not kilometers, so `low` means the same thing
   at Deimos and at Jupiter — bodies four orders apart in size.
 - **A polar orbit is one whose normal is perpendicular to the body's pole**, and an equatorial
   one has the pole for its normal. One line either way, and the same `Orbit` draws a ring
@@ -486,7 +498,7 @@ and eighty-nine are not, so the list shows the former until you ask for `all`.
 Picking one opens its **courses**: equatorial and polar orbits at three altitudes, the two
 collinear libration points if it has a parent, above the rings if it has rings, and leaving the
 system if it is the star. What is offered is what exists — a moon of nothing has no libration
-points, and rather than grey the option out it is not there. A test flies every option every
+points, and rather than gray the option out it is not there. A test flies every option every
 major body offers and fails if any of them fails to resolve, so the list cannot lie.
 
 Arming a course and flying it are separate: **Go** is what commits, and it uses the ship's own
@@ -500,7 +512,7 @@ in the first slot and nothing else changes.
 
 ### Cutting the engine does not stop the ship
 
-**Decided: cancelling keeps the velocity, and inside a system that velocity is an orbit.**
+**Decided: canceling keeps the velocity, and inside a system that velocity is an orbit.**
 
 The `×` beside the flight readout cuts the drive, with no confirmation — the action is not
 destructive and a dialogue between a player and their own throttle is worse than the mistake it
@@ -516,7 +528,7 @@ that cannot be wrong.
 
 A torch ship makes this less forgiving than it sounds. Five gravities passes solar escape
 velocity in minutes, so cutting out of a brachistochrone halfway to Earth leaves an eccentricity
-of a hundred and sixty — a near-straight line out of the system. Cancelling off a station gives
+of a hundred and sixty — a near-straight line out of the system. Canceling off a station gives
 back the orbit the station was holding, which is the case the readout is really for.
 
 Two things it cannot do:
@@ -525,7 +537,7 @@ Two things it cannot do:
   straight down the line to it: the angular momentum is zero and the orbital plane is
   undefined, so no conic can be written. It refuses, and a refusal leaves the ship drifting at
   the velocity it has, which is none. Standing still is the wrong physics and the right
-  behaviour; falling into the star over the following two months is neither.
+  behavior; falling into the star over the following two months is neither.
 - **Parabolic is nudged off.** Both anomaly solvers divide by the distance from `e = 1`, and a
   state landing exactly there is an accident of arithmetic rather than a trajectory anyone
   chose.
@@ -553,23 +565,23 @@ The ring station started out mid-annulus, in the ring plane — which is what "e
 sounds like, and it was unusable. A ring is drawn as a surface with no thickness. With the ship
 inside the annulus that surface passes through the camera: the nearest geometry is at no
 distance at all, and the camera's own offset from the plane is smaller than f32 render
-positions can hold — about six metres at Saturn. The rings swung between a hairline and a
+positions can hold — about six meters at Saturn. The rings swung between a hairline and a
 bright wedge from one frame to the next, and nine and a half per cent of the screen changed
 every frame at real time.
 
 A ring station now stands a quarter outside the outer edge, in a plane tipped a quarter turn
 out of theirs, so the rings read as rings and the orbit still closes them to a line twice a
-turn. Outside the annulus the same six metres of jitter is six metres in a hundred and forty
-thousand kilometres, and the flicker falls by a factor of four thousand — from 87,704 changed
+turn. Outside the annulus the same six meters of jitter is six meters in a hundred and forty
+thousand kilometers, and the flicker falls by a factor of four thousand — from 87,704 changed
 pixels a frame to twenty, which is what a star field crossing pixel boundaries costs anyway.
 
 Edge-on from *outside* still shimmers on the one-pixel line the rings collapse to. That is
 ordinary geometric aliasing of a thin bright edge, it is bounded, and it is 141 pixels.
 
-### The near plane is fifteen metres
+### The near plane is fifteen meters
 
 A low orbit is a fraction of a planetary radius above the surface, and the render unit is an
-astronomical unit. The camera's near plane stood at a million and a half metres, which is
+astronomical unit. The camera's near plane stood at a million and a half meters, which is
 further from Earth than a low orbit is: the sphere was clipped away entirely while its own
 billboard still drew, so a planet filling the sky rendered as a dot. Reversed float depth costs
 nothing for the range — its precision is relative — but the constant the star field writes is
@@ -596,7 +608,7 @@ labels, and egui draws text better than a twelve-pixel bitmap font.
 
 The band the curve measures is chosen separately from the display mapping. They are different
 questions — one is what the instrument integrates, the other is how three numbers become a
-colour — and the screenshot above is the reason they have to be separate: the display is in the
+color — and the screenshot above is the reason they have to be separate: the display is in the
 thermal preset and the curve is in the thermal *band*, and only the second one is what makes the
 excess a number.
 
@@ -626,8 +638,279 @@ belongs in `DISTANT` or `LOCAL` where it can be read and reasoned about.
 WASM, networking, and God view in any shipped build. The last is compiled out from the start
 rather than added and later removed.
 
-## Open
+## The map
 
-- Whether the sky map is a window or the world seen from a ship. Likely both, in the manner of
-  Space Engine: a view through a camera, and a three-dimensional stellar map centred on the
-  observer. The flat map is the cheaper first version and the two want different camera code.
+**A mode of play, not an accessory.** The main view under the readout is either the world seen
+through the ship's camera or the map, and `M` switches between them. Windows float over either
+one, so a curve or a conversation can be read with the map behind it.
+
+**Whichever mode is not in force is the square in the bottom left**, and a click on the square
+swaps them. It is in the same place in both, which is what makes the click one control rather
+than two: the map in the corner while flying, the world in the corner while reading the map.
+The world's own camera takes that square as its viewport, so the corner is the live view and
+not a picture of one.
+
+**A thumbnail is not a viewfinder.** Both ends of the boom are angles, so the corner square is
+the tighter frame — and clamping the framing against it would pull the player's own view in on
+the way to the map and not give it back on the way out. So the boom is held to the view the
+player is being shown, and left alone while the world is a thumbnail. For the same reason
+nothing on the sky is picked or marked from the map's mode: every mark is measured against the
+whole window.
+
+The map's own controls — the reference plane, the source, and what the camera is centered on —
+sit in **one strip directly under the readout**, shown only in that mode. Everything on it says
+what the map is a map *of*, which is why it is a strip to glance at rather than a panel to work
+down.
+
+**Both, and one camera.** The question this section used to pose — a window or the world seen
+from a ship — is answered by having the sky be the view through the camera and the map be a
+second camera on its own render layer, drawing into an image that egui shows. So it is real
+geometry with real depth rather than a projection painted by egui, which is what lets it reuse
+the wireframe spheres Exotic Matters draws bodies with. The flat map was the cheaper first
+version and was never built, because the expensive one turned out to be a fortnight rather than
+a quarter.
+
+It draws a **snapshot**: a flat list of things and where they are, with a label saying how it
+was arrived at. One observer's instruments, several folded together, and a coordinate-time
+reading with no light delay are three providers and one type, so switching perspective is
+choosing a function rather than writing a second renderer. That is the whole reason the seam is
+in `em-map` and not in the ECS.
+
+**The rings and the spokes are centered on the ship, always.** Not on whatever the camera is
+looking at: a decade ring answers "how far is that from *me*", and the whole game is the ship's
+perspective. Center the camera on a star and the scale stays where you are, which is what makes
+the offset between the two readable instead of hiding it.
+
+### The scale is drawn, because there is no fixed one
+
+Fifteen orders of magnitude of zoom means the map has no scale of its own, so a rule is drawn
+in the bottom right of whichever surface is up: a bar of a round length, labeled in a unit a
+reader holds — `5 Gm`, `2 AU`, `1 ly`. Where the label is a small whole number of its own unit
+the bar is ticked into that many parts, so five ticks on a `5 Gm` bar are a gigametre each and
+the reader gets a second scale for nothing.
+
+Astronomical units and light-years sit among the metric prefixes because this is a map of space:
+between a gigametre and an astronomical unit there is nothing anyone measures in, and `150 Gm`
+is a worse answer than `1 AU` to the same question.
+
+The rule is lifted clear of anything floating across the bottom of the surface — the events box
+takes that same corner with the same inset, and a scale rule under it is not one.
+
+**The camera is perspective, so there is no one scale even within a frame.** The rule asks the
+reference plane how far a pixel reaches at the rule's own height down the viewport, which is
+where the bar is drawn — taking it from the middle of the view would be wrong by the depth
+between the two. Edge-on, where the ray meets no plane, it falls back to the stand-off.
+
+**The wheel zooms toward what the cursor is over, when the camera is free.** The pointer names
+a ray, the ray meets the reference plane, and that place is held still while the camera comes in
+— so a body is reached by putting the pointer on it and scrolling. The eye scales about the
+anchor, which is what keeps it on the same pixel rather than merely nearer. Edge-on, where the
+ray runs along the plane and meets nothing, it falls back to an ordinary zoom.
+
+**Locked on the ship or on a body, it zooms toward that instead.** A held center is a statement
+about what the map is *of*, and the wheel aiming somewhere else would quietly undo the thing
+that was asked for. So the pointer only decides in the mode where the center is nobody's in
+particular.
+
+Moving the focus that way is a pan by another name, so it gives up following — but only when the
+focus actually moves. Scaling about the center through itself changes nothing, so the wheel over
+a locked center does not cost the lock.
+
+What the camera looks at is a separate thing with four states. **Free** is wherever a pan left
+it; **the ship**, **the primary** and **a body** lock the center and hold it every frame until
+the next pan, which drops back to free. A left-drag is that pan.
+
+**The primary is a mode and not the body it resolves to today.** It is whatever holds the ship
+— a moon's planet, a planet's star — and it follows the ship across a sphere of influence into
+the next, where centering on Earth by name stays on Earth after the ship has gone. It is the
+same body the readout names while coasting, because both ask the system the same question.
+
+It is centered in one of **two frames**, which is the pair beside it. **Fixed** measures the
+camera against the reference plane's own axes and the ship goes round; **local** holds the
+camera against the line from the primary's center to the ship's, so the ship keeps its place on
+screen and the system turns behind it. That is the view that makes an orbit legible: in the
+fixed frame a low orbit is a ship going round a disc several times a second, and in the local
+one it is a stationary ship with a planet rotating under it.
+
+The turn is written into the camera's own azimuth, as the change in that line's bearing — not
+held as a second copy of the camera. So a drag, a cursor ray and a label all go on being
+measured in the one number, and leaving the frame leaves the camera exactly where the turning
+left it rather than snapping back. The
+button is grayed where nothing holds the ship, which is between the stars; it is not hidden,
+because a control that vanishes shuffles the two either side of it out from under the cursor.
+
+The reference plane is the **local ecliptic or the disc of the galaxy**, and the toggle tilts
+the whole view because the camera's own angles are measured in the plane's basis. Concentric
+rings mark order-of-magnitude distances; anything off the plane hangs from a dashed drop-line.
+The reach is a fixed sphere of twenty-five light-years — a reach that moved with the zoom would
+change what exists as well as what is framed.
+
+### A body too small to be a sphere is a symbol
+
+A wireframe sphere drawn small is a dozen sub-pixel tubes laid over each other: the most
+expensive thing on the layer to draw and the least legible, and at a system's scale most of
+what is on the map is that size. Below the symbol's own size it is a circle facing the eye
+instead — a sixteenth of the sphere's geometry, and a shape rather than a smudge.
+
+**The symbol is a share of the view, not a count of pixels.** One texture is drawn into a
+190-point corner and into a whole screen, so a fixed size right for one is wrong for the other:
+twenty pixels suited the full view and left the corner a pile of overlapping rings with no grid
+visible behind them. Two percent of the viewport's height, floored at twice a
+line's own width — and at that floor a ring has no inside left and is simply a dot, which is
+the honest answer for a surface with no room for more.
+
+**One number is both the threshold and the size the symbol is drawn at**, which is the point of
+having one: a body shrinks until it reaches it and then holds, so nothing jumps at the
+crossover. It also means a small surface resolves fewer things into spheres, which is correct
+for the same reason.
+
+**And a mark is sized by what it weighs — two per decade, so ten times the mass is twice the
+radius.** Full size at the mass floor and above, so anything worth a name is drawn whole, and
+shrinking below it: a rock still shows, it just shows as a rock. Eight orders of magnitude of
+mass cannot be eight orders of pixels, and a logarithm is the only honest way to hold a range
+like that in one picture. It is measured against the heaviest thing in the whole snapshot
+rather than the heaviest on screen, because a name may come and go as the view moves and a size
+may not — bodies that resized every time the star left the frame would pulse.
+
+Two floors hold the bottom of it: a quarter of full size in `em_map::weight`, and twice a
+line's width in pixels, which is usually the one that binds. In the corner square, where every
+mark is already at the pixel floor, there is no room to vary at all.
+
+**The crossover is the surface's size and not the mark's, which is the one place the no-jump
+rule gives way.** A body heavy enough to be drawn whole still holds its size across it; a
+lighter one steps *down* to the mark its mass earned. The alternative was letting a rock stay a
+sphere until it was three pixels across, and a three-pixel wireframe sphere is the smudge all
+of this exists to be rid of.
+
+**A ship is a filled dot, at every zoom there is.** It has a hull size and the map is not where
+anyone reads it off; a contact that grew a model on approach would be the one thing here
+drawing a shape nobody sent. It keeps its amber, which is the one channel the map has that a
+list does not, and it is the one solid thing on a layer of wireframe — so shape says it too,
+and color is not carrying it alone.
+
+It is a handle swap and not a respawn. Zooming in on a body crosses the threshold without
+changing the set of things drawn, the same way a body drifting off the plane gains a dash.
+
+### The plane is drawn, never filled
+
+Rings and radial spokes, all of them tubes with a real radius. Nothing in the map is a surface,
+which is most of what keeps `AGENTS.md`'s warning about a camera on an infinitely thin sheet
+from applying at all — and the map's whole point is the edge-on view, where what is above the
+plane and what is below it are finally distinguishable.
+
+Two numbers had to be found by looking, and both are about the same thing: a line is a tube, so
+it has a width the geometry does not know about.
+
+- **The camera is never exactly in the plane.** The floor is three degrees, not the tenth of a
+  degree it started at, because a tube drawn 1.6 pixels wide has an angular radius of about
+  three milliradians — and a camera closer to the plane than that is *inside* the nearest ring.
+  The inside of a tube is a solid wall, so the first edge-on photograph was a rectangle of flat
+  green with nothing in it.
+- **A spoke's thickness is set by its near end.** Every point of a ring is the same distance
+  from the center, so one tube radius serves all of it. A spoke runs from near the eye out to
+  its rim, and a constant width that is a pixel at the far end is eighty at the near one.
+  Scaled to the outermost decade, twelve spokes were twelve solid wedges across the view.
+
+### The corner square, and one set of gestures
+
+The map is one texture on whichever surface it has — the whole view, or the corner square while
+the world is being flown. Transforms are camera-relative, so an entity belongs to exactly one
+camera and two independently aimed views would need two sets of them. There has never been a
+second framing to want.
+
+Both surfaces take the same gestures — **right-drag turns, left-drag pans, the wheel zooms** —
+through one function, because two views of one thing that answer a drag differently is worse
+than either answer. A click is the extra one, and it swaps the modes.
+
+**The right button turns whichever view is under it.** It is the sky's look button, and the map
+is the other mode of the same screen, so one button meaning opposite things on the two of them
+is worse than either meaning. Read the other way round, that is also why a right-drag on the
+corner square showing the **world** turns the ship's view, exactly as the same drag on the sky
+would and by the same radians per pixel: the square answers for what it is showing. Panning is
+what the button that was left over does, and over the world it does nothing — there the left
+button belongs to picking.
+
+The keyboard is the exception, and deliberately: the arrow keys turn the view only while the
+world is the screen. A pointer is on a surface and can be answered by it; a key is not.
+
+**Nothing paints in the square while the map is the view.** The world's camera is drawing into
+exactly those pixels, so the image is painted as the pieces around the square and a name that
+would land on it is dropped: a name alone over the world reads as a name for the world.
+
+**The ship's own view controls are held to the world's mode.** In the map's mode a drag over the
+map would otherwise turn the ship behind it, and two modes would be fighting over one pointer.
+The corner square is where the ship's view can still be turned, because that is where it is.
+In the world's mode the corner costs what every panel costs: egui takes the pointer over it, so
+hovering the square stops the boom zooming and a right-press begun there turns the map rather
+than the view. The square is the only surface that is never closed, and it is 190 points.
+
+### Belts, rings and clouds are drawn as themselves
+
+A population is an outline — two edge circles and four cross-sections — in **its own** plane
+rather than the reference one, and it traces the edge of the material: the inclination sweeps
+every element through the same latitude band, so the cross-section is an annular sector and not
+an ellipse. It degenerates correctly, which is the reason for the shape: an isotropic cloud
+reaches a right angle, its cross-sections close into meridians, and the Oort cloud reads as the
+shell it is while the asteroid belt reads as a donut.
+
+`em_map::outline` owns it and the reticle draws the same one over the sky when a swarm is
+selected. Two answers to "where does this belt stop" is one too many, and the half-angle travels
+with the two radii for the same reason — without it a belt and a cloud are the same pair of
+numbers.
+
+### The heaviest name wins the pixels
+
+A planetary system has fifty names in it and a panel has room for six, so the map names what it
+can and drops the rest. The rule is **mass**: Jupiter is named and the moons crowding it are
+not, and where the moons have room it is the Galileans that get it. Nothing in the layout knows
+about primaries or satellites — a hierarchy is what mass already says, and encoding it twice is
+two answers to one question.
+
+Ships outrank every body there is and are written in their own amber, the same amber their mark
+is drawn in. **Every craft is named, this one included** — by the name the account carries,
+which is the name every other client has for it, and not a word for "you". A map that draws
+five ships and names four of them has a hole in it where the reader is. It is laid out before
+everything else: two craft at one pixel is one name, and the one worth keeping is the reader's
+— the other is the thing they can point at to ask about.
+
+**Nothing on the map is white.** The palette has two phosphors, and this ship is drawn in the
+same amber as the rest, as the same filled dot. Drawn as a white circle it was a white outline
+around whichever contact happened to be beside it, which at these scales is most of them: ten
+kilometres is well under a pixel at a hundredth of an astronomical unit. What says which craft
+is the reader's is the rings, which are drawn from it.
+
+The amber is `em_ui::vfd::AMBER`, at the **same perceptual lightness as the interface's green**
+— Oklab `L`, asserted in a test rather than eyeballed. A ship and a body are two kinds of
+thing, not one more important than the other, so only their hue says which is which. Against
+that constraint it is as chromatic as sRGB reaches, which is what keeps it amber rather than
+cream.
+
+**A name that would leave the viewport is dropped, not dragged to the rim.** An arrow at the
+edge names something the reader cannot see and spends the pixels of something they can.
+
+A label sits at one anchor and gets no second try on the other side of its symbol. A name that
+hops when a neighbour drifts past reads as a twitch, and a map of moving things would twitch
+constantly. Ties are broken by key for the same reason: two bodies of equal mass must not trade
+places between frames.
+
+The text is egui over the image rather than geometry on the layer, per `18-ui-style.md`, and
+the projection is `em_map::camera::Orbit::project` — the exact inverse of the ray the cursor is
+cast with, which is a round-trip test rather than two functions hoping to agree.
+
+**And a floor, because the collision rule thins a crowd and says nothing about an empty view.**
+Without one a lone asteroid in open space is named as readily as a planet, and the inner system
+came out a field of catalogue designations. A thing must weigh at least a hundred-millionth of
+the heaviest thing **on screen** to be worth a name. That bar is set from the case that has to
+work — Earth beside the Sun, three parts in a million — and sits well under it, because what it
+is really aimed at is the gap between the smallest planet and the largest asteroid: Mercury is
+1.7e-7 of the Sun and Ceres 4.7e-10, a factor of three hundred, and a floor in the middle of
+that keeps all eight planets and drops every numbered rock.
+
+On screen, not in the snapshot: pan the star off the edge and the question becomes what is worth
+naming beside whatever is left, which is how one ratio serves a map spanning fifteen orders of
+magnitude. Jupiter's irregular moons lose their names to Jupiter for the same reason its
+Galileans keep theirs.
+
+## Open
+- Nothing here is clickable. A name is a good thing to be able to point at, and `pick.rs`
+  already knows how to turn a screen position into a selection.

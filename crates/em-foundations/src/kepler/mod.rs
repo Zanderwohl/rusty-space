@@ -8,7 +8,7 @@ pub mod mean_anomaly {
 
     /// Mean anomaly at `current_time`, propagated from the epoch value.
     ///
-    /// Angles in radians, μ in m³/s², `a` in metres, both times in seconds since J2000.
+    /// Angles in radians, μ in m³/s², `a` in meters, both times in seconds since J2000.
     pub fn definition(mean_anomaly_at_epoch: f64,
                       gravitational_parameter: f64,
                       semi_major_axis: f64,
@@ -275,7 +275,7 @@ pub mod true_anomaly {
         }
     }
 
-    /// Equation of the centre to `e^3`:
+    /// Equation of the center to `e^3`:
     ///
     /// `v ~= M + (2e - e^3/4) sin M + (5/4)e^2 sin 2M + (13/12)e^3 sin 3M`
     ///

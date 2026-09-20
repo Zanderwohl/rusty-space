@@ -55,10 +55,10 @@ impl LagrangePoint {
         }
     }
 
-    /// How far from `body` its point of this kind sits, metres, at a coordinate time.
+    /// How far from `body` its point of this kind sits, meters, at a coordinate time.
     ///
     /// The root of Lagrange's quintic, not the Hill radius. The two differ by a third of a per
-    /// cent at Sun-Earth — five thousand kilometres — and, worse, the Hill radius is the *same*
+    /// cent at Sun-Earth — five thousand kilometers — and, worse, the Hill radius is the *same*
     /// number for L1 and L2, which puts them symmetrically either side of the body. They are
     /// not symmetric: L2 is the further out.
     pub fn standoff_m(self, system: &LocalSystem, body: &str, seconds: f64) -> Option<f64> {
@@ -229,7 +229,7 @@ impl From<lc_proto::LagrangePoint> for LagrangePoint {
 
 /// Altitudes the interface offers, in radii above the surface.
 ///
-/// Radii rather than kilometres because the same three numbers then mean the same thing at
+/// Radii rather than kilometers because the same three numbers then mean the same thing at
 /// Deimos and at Jupiter, which differ by four orders in size.
 pub const ALTITUDES: [(f64, &str); 3] = [(0.2, "low"), (2.0, "high"), (20.0, "distant")];
 
@@ -239,9 +239,9 @@ pub const ALTITUDES: [(f64, &str); 3] = [(0.2, "low"), (2.0, "high"), (20.0, "di
 /// Outside the rings, not in them. A ring is drawn as a surface with no thickness, so inside
 /// the annulus the sheet passes through the camera: the nearest geometry is at no distance at
 /// all, and the camera's own offset from the plane is below what f32 render positions can hold
-/// — six metres or so at Saturn. The rings then swing between a hairline and a bright wedge
+/// — six meters or so at Saturn. The rings then swing between a hairline and a bright wedge
 /// from one frame to the next. Outside the annulus, edge-on is a clean line and the jitter is
-/// six metres in a hundred and forty thousand kilometres.
+/// six meters in a hundred and forty thousand kilometers.
 ///
 /// Tipped, because a ring seen from within its own plane is a line whichever side of it you
 /// stand. A quarter turn of tilt opens them, and the orbit still crosses the plane twice a
@@ -258,7 +258,7 @@ pub const DEPARTURE_MARGIN: f64 = 1.05;
 /// Rounds of aiming at where the target will be rather than where it is.
 ///
 /// Flip-and-burn time goes as the square root of distance, so re-aiming contracts fast: three
-/// rounds hold a planet to metres. One round is not enough — Earth moves a fiftieth of an
+/// rounds hold a planet to meters. One round is not enough — Earth moves a fiftieth of an
 /// astronomical unit during a crossing from Mars.
 pub const ARRIVAL_ROUNDS: usize = 3;
 
@@ -275,13 +275,13 @@ impl Waypoint {
         match self {
             Waypoint::Fixed(at) => Some(*at),
             Waypoint::Orbit(orbit) => {
-                let (centre, mu) = orbit.centre_of_at(system, seconds)?;
+                let (center, mu) = orbit.center_of_at(system, seconds)?;
                 if orbit.radius_m <= 0.0 || mu <= 0.0 {
                     return None;
                 }
                 let theta = orbit.angle_at(seconds, mu);
                 let (u, v) = basis(orbit.pole);
-                Some(centre + (u * theta.cos() + v * theta.sin()) * orbit.radius_m / M_PER_LY)
+                Some(center + (u * theta.cos() + v * theta.sin()) * orbit.radius_m / M_PER_LY)
             }
             Waypoint::Libration(libration) => libration.at(system, seconds),
             Waypoint::Lagrange { body, point } => {
@@ -310,15 +310,15 @@ impl Waypoint {
         }
     }
 
-    /// How fast the station is moving, metres a second, world frame.
+    /// How fast the station is moving, meters a second, world frame.
     ///
     /// **An orbit's is analytic**: the body's velocity as em-sim states it, plus the circle's.
     /// That is the convention [`crate::coast::Coast`] reads and writes a velocity in, so a ship
     /// cutting its drive on a station goes onto that very circle, and a craft reckoning a quarry
     /// on one along a conic — see [`crate::consort`] — stays on it. Differencing positions
-    /// instead read em-sim's own inconsistency between the two back in (nine metres a second
+    /// instead read em-sim's own inconsistency between the two back in (nine meters a second
     /// about Jupiter), and at four light-years out, where a light-year coordinate is only good to
-    /// eight metres, it read a metre and a half a second of rounding as well.
+    /// eight meters, it read a meter and a half a second of rounding as well.
     ///
     /// Anything else is differenced: a closed form, but several different ones, and the same
     /// central difference serves all of them.
@@ -346,9 +346,9 @@ impl Waypoint {
     /// nearest point is the one the orbit will be presenting when the ship gets there.
     pub fn nearest_to(&self, from_ly: DVec3, system: &LocalSystem, at_s: f64) -> Self {
         let Waypoint::Orbit(orbit) = self else { return self.clone() };
-        let Some((centre, mu)) = orbit.centre_of_at(system, at_s) else { return self.clone() };
+        let Some((center, mu)) = orbit.center_of_at(system, at_s) else { return self.clone() };
         let (u, v) = basis(orbit.pole);
-        let approach = from_ly - centre;
+        let approach = from_ly - center;
         // Dropping the component along the pole leaves the direction the circle can actually
         // reach. A ship directly over the pole has no nearest point and gets a fixed one.
         let want = approach.dot(v).atan2(approach.dot(u));
@@ -365,7 +365,7 @@ impl Waypoint {
     pub fn focus(&self, system: &LocalSystem, seconds: f64) -> Option<DVec3> {
         match self {
             Waypoint::Fixed(_) => system.star_position_at(seconds),
-            Waypoint::Orbit(orbit) => Some(orbit.centre_of_at(system, seconds)?.0),
+            Waypoint::Orbit(orbit) => Some(orbit.center_of_at(system, seconds)?.0),
             Waypoint::Lagrange { body, .. } => system.body_position_at(body, seconds),
             Waypoint::Libration(l) => system.body_position_at(&l.body, seconds),
         }
@@ -380,7 +380,7 @@ impl Waypoint {
             return Some(libration.period_s());
         }
         let Waypoint::Orbit(orbit) = self else { return None };
-        let (_, mu) = orbit.centre_of_at(system, seconds)?;
+        let (_, mu) = orbit.center_of_at(system, seconds)?;
         (mu > 0.0 && orbit.radius_m > 0.0)
             .then(|| std::f64::consts::TAU * (orbit.radius_m.powi(3) / mu).sqrt())
     }
@@ -397,11 +397,11 @@ impl Orbit {
         self.rate(mu) * seconds + self.phase_rad
     }
 
-    /// How fast a craft on it is moving, metres a second, world frame. See
+    /// How fast a craft on it is moving, meters a second, world frame. See
     /// [`Waypoint::velocity_at`].
     fn velocity_at(&self, system: &LocalSystem, seconds: f64) -> Option<DVec3> {
-        let (_, mu) = self.centre_of_at(system, seconds)?;
-        let index = self.centre_index(system)?;
+        let (_, mu) = self.center_of_at(system, seconds)?;
+        let index = self.center_index(system)?;
         let (_, carried) = system.body_state_at(index, seconds)?;
         if self.radius_m <= 0.0 || mu <= 0.0 {
             return None;
@@ -412,26 +412,26 @@ impl Orbit {
         Some(carried + along * self.rate(mu) * self.radius_m)
     }
 
-    fn centre_index(&self, system: &LocalSystem) -> Option<em_sim::id::BodyIndex> {
+    fn center_index(&self, system: &LocalSystem) -> Option<em_sim::id::BodyIndex> {
         match &self.about {
             Anchor::Star => Some(system.primary()),
             Anchor::Body(name) => system.body_named(name),
         }
     }
 
-    /// Where the orbit is centred, light-years, and the `mu` that sets its rate.
+    /// Where the orbit is centered, light-years, and the `mu` that sets its rate.
     ///
-    /// `G m` of the centre, not `System::mu`, which is the `mu` of the orbit the centre itself
+    /// `G m` of the center, not `System::mu`, which is the `mu` of the orbit the center itself
     /// is on — `G(M_sun + M_earth)` for Earth. Using it put a low Earth orbit at eleven seconds.
-    fn centre_of_at(&self, system: &LocalSystem, seconds: f64) -> Option<(DVec3, f64)> {
-        let index = self.centre_index(system)?;
+    fn center_of_at(&self, system: &LocalSystem, seconds: f64) -> Option<(DVec3, f64)> {
+        let index = self.center_index(system)?;
         let (at_m, _) = system.body_state_at(index, seconds)?;
         let at = system.origin_ly + at_m / M_PER_LY;
         Some((at, system.sim().gravitational_constant() * system.sim().mass(index)))
     }
 }
 
-/// Metres in an astronomical unit.
+/// Meters in an astronomical unit.
 pub const AU: f64 = 1.495_978_707e11;
 
 /// `pole` tipped by `angle`, about an axis in the plane it is normal to.
@@ -613,6 +613,19 @@ impl Kind {
     }
 }
 
+/// What a belt or a cloud is called: what it is, and how far out it sits.
+///
+/// Derived from the population rather than stored, because a population has no name of its
+/// own — and in one place rather than two, because the map and the inventory list the same
+/// bands and a second copy of this format string is a second answer waiting to happen.
+pub fn band_designation(population: &crate::population::Population) -> String {
+    format!(
+        "{} at {:.1} AU",
+        if is_flat(population) { "belt" } else { "cloud" },
+        population.thermal_radius() / AU
+    )
+}
+
 /// What a destination is, as little as the interface needs to name one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
@@ -626,7 +639,7 @@ pub enum Target {
 pub struct Entry {
     pub designation: String,
     pub kind: Kind,
-    /// Metres from whatever it orbits, so a moon reads against its planet and a planet against
+    /// Meters from whatever it orbits, so a moon reads against its planet and a planet against
     /// the star. Taken at load and never recomputed: a list that reorders itself while a player
     /// is reading it is worse than one that is a few per cent stale.
     pub orbit_radius_m: f64,
@@ -681,7 +694,7 @@ pub fn roman(n: usize) -> String {
 ///
 /// The list is what exists, not what is sensible: a body with no parent has no libration points
 /// and one without rings has nowhere above them, and neither appears rather than appearing
-/// greyed. Whether a course can be flown is [`Course::resolve`]'s business and it is asked
+/// grayed. Whether a course can be flown is [`Course::resolve`]'s business and it is asked
 /// again when the player presses Go.
 pub fn options_for(system: &LocalSystem, target: &Target) -> Vec<(String, Course)> {
     let mut out = Vec::new();
@@ -735,13 +748,13 @@ pub fn options_for(system: &LocalSystem, target: &Target) -> Vec<(String, Course
 /// crossing is planned to end *on* the velocity the station will have — see
 /// [`Cruise::plan_onto`]. The last burn is then one burn at one angle that kills the speed the
 /// ship came in with and imparts the one it is joining, rather than a brake to a dead stop and a
-/// few kilometres a second appearing out of nothing on the next step. That velocity is a third
+/// few kilometers a second appearing out of nothing on the next step. That velocity is a third
 /// thing the arrival time decides, so it iterates here with the other two.
 ///
 /// **This plans in the world frame, and that is the limit of it.** A station about a moving body
 /// runs away at the body's own speed, so the fixed point above only settles while the primary
 /// covers less than the orbit's own radius during the transfer. Neptune covers a third of one
-/// and a transfer between two of its orbits lands within half a kilometre; Jupiter covers half
+/// and a transfer between two of its orbits lands within half a kilometer; Jupiter covers half
 /// and lands within a hundred and fifty; Earth covers the whole of one and does not converge at
 /// all, and Luna is worse. Damping the iteration does not help, because the trouble is not the
 /// step size — it is that [`Waypoint::nearest_to`] is asked which side of a circle is nearest to
@@ -749,7 +762,7 @@ pub fn options_for(system: &LocalSystem, target: &Target) -> Vec<(String, Course
 ///
 /// So a ship already inside the destination body's sphere of influence does not come here at
 /// all: [`crate::transfer`] plans it in that body's frame, where nothing is running away, and
-/// lands it within millimetres. This is what is left — everything flown between one place in a
+/// lands it within millimeters. This is what is left — everything flown between one place in a
 /// system and another, where the world frame is the right one.
 #[allow(clippy::too_many_arguments)]
 pub fn plan(
@@ -930,15 +943,15 @@ mod tests {
         assert!((5000.0..9000.0).contains(&period), "{period} seconds");
 
         // Both the ship and Earth read at the same instant. Reading one at `t` and the other
-        // out of the arena is how a circular orbit comes out fifty thousand kilometres wide.
+        // out of the arena is how a circular orbit comes out fifty thousand kilometers wide.
         let earth = system.body_named("Earth").unwrap();
         let mut seen = Vec::new();
         for step in 0..4 {
             let t = period * step as f64 / 4.0;
             let at = waypoint.place_at(&system, t).unwrap();
-            let centre =
+            let center =
                 system.origin_ly + system.body_state_at(earth, t).unwrap().0 / M_PER_LY;
-            seen.push((at, at.distance(centre) * M_PER_LY));
+            seen.push((at, at.distance(center) * M_PER_LY));
         }
         let radius = seen[0].1;
         for (_, r) in &seen {
@@ -949,7 +962,7 @@ mod tests {
     }
 
     /// L1 is sunward of the body and L2 is behind it, both at about the Hill radius. Earth's is
-    /// 1.5 million kilometres, which is a number people know.
+    /// 1.5 million kilometers, which is a number people know.
     #[test]
     fn the_libration_points_straddle_the_body() {
         let system = sol();
@@ -985,7 +998,7 @@ mod tests {
         let wanted = waypoint.place_at(&system, cruise.duration_s()).unwrap();
         let landed = cruise.at(cruise.duration_s()).position_ly;
         let miss = landed.distance(wanted) * M_PER_LY;
-        assert!(miss < 6.371e6, "missed by {miss:e} metres, more than a planetary radius");
+        assert!(miss < 6.371e6, "missed by {miss:e} meters, more than a planetary radius");
 
         // And the naive aim is far worse, which is why the rounds are there.
         let naive = Cruise::plan(from, waypoint.place_at(&system, 0.0).unwrap(), 0.0, Drive::DEFAULT);
@@ -1000,7 +1013,7 @@ mod tests {
     ///
     /// Neptune, because the planner works in the world frame — see [`plan`] — and Neptune runs
     /// only a third of one of these orbits during the transfer. Earth runs a whole one, and the
-    /// same transfer about Earth lands tens of thousands of kilometres out.
+    /// same transfer about Earth lands tens of thousands of kilometers out.
     #[test]
     fn a_transfer_between_two_orbits_of_one_body_arrives_moving_with_the_second() {
         let system = sol();
@@ -1035,7 +1048,7 @@ mod tests {
         let short_m_s = (end.beta - joining).length() * crate::flight::C_M_S;
         assert!(short_m_s < 1.0, "arrived {short_m_s} m/s away from the station's velocity");
 
-        // Which is a real amount of velocity, not a rounding: Neptune's own five kilometres a
+        // Which is a real amount of velocity, not a rounding: Neptune's own five kilometers a
         // second round the sun and the station's round Neptune. It used to appear out of nothing
         // on the step after arrival.
         assert!(

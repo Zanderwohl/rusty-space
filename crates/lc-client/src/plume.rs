@@ -8,14 +8,14 @@
 //! **The shape is a display model and the light is not.** How long the cone is drawn and how
 //! far it flares are choices, made here and tunable; the temperature is then forced, because
 //! the power has to go somewhere and a blackbody of that area at that temperature is the only
-//! surface that radiates it. So a plume's colour is a consequence rather than a setting, and a
-//! fifty-kilometre ship's drive comes out blue-white next to a tug's orange without anyone
+//! surface that radiates it. So a plume's color is a consequence rather than a setting, and a
+//! fifty-kilometer ship's drive comes out blue-white next to a tug's orange without anyone
 //! choosing that.
 //!
 //! The streaks follow the same division. *That* the gas is uneven is physics — a drive burns
 //! fuel-rich and the flow combs what leaves the injector unmixed into lanes — and so is what
-//! those lanes radiate, which is a cooler greybody worked out here and handed over as a second
-//! colour. How fast they travel is not: see [`CHURN_EXPONENT`].
+//! those lanes radiate, which is a cooler graybody worked out here and handed over as a second
+//! color. How fast they travel is not: see [`CHURN_EXPONENT`].
 
 use bevy::prelude::*;
 use em_render::plume_material::{CHURN_PERIOD, PlumeMaterial, PlumeUniform};
@@ -27,7 +27,7 @@ use lc_proto::ShipId;
 use crate::session::Session;
 use crate::system::{M_PER_LY, UNIT_M};
 
-/// The Stefan-Boltzmann constant, watts per square metre per kelvin to the fourth.
+/// The Stefan-Boltzmann constant, watts per square meter per kelvin to the fourth.
 pub const SIGMA: f64 = 5.670_374_419e-8;
 
 /// How long a plume is at the drive's own rated acceleration, in hull lengths.
@@ -64,7 +64,7 @@ pub const SIDES: u32 = 24;
 
 /// How far above the exposure's reference the core of a plume sits, in stops.
 ///
-/// **The one number that is not physics.** A plume's colour is forced — see
+/// **The one number that is not physics.** A plume's color is forced — see
 /// [`temperature_k`] — but its *brightness* is not, because the gas is optically thin by an
 /// amount nothing here models: what reaches the eye is a fraction of the blackbody radiance,
 /// and that fraction is the fudge. Four stops over the reference puts the core past the top of
@@ -73,7 +73,7 @@ pub const SIDES: u32 = 24;
 /// edges back down through the window and the cone has a shape.
 ///
 /// Left as a multiple of the reference rather than an absolute, so it holds when the exposure
-/// moves. Set it from the colour instead and a hot plume is a white rectangle: a blackbody at
+/// moves. Set it from the color instead and a hot plume is a white rectangle: a blackbody at
 /// fifty thousand kelvin is ten decades over a planet, and there is no window that holds both.
 pub const CORE_STOPS: f64 = 4.0;
 
@@ -83,18 +83,18 @@ pub const CORE_STOPS: f64 = 4.0;
 /// so most of the cone has nowhere left to go inside it. Clipped there, the whole column came
 /// back as one flat lavender: the tone curve holds hue and saturation constant and scales only
 /// the value, so a ray through the deep middle and a ray grazing the flank — which differ by
-/// decades of column depth — drew the same colour, and the plume read as a cut-out rather than
+/// decades of column depth — drew the same color, and the plume read as a cut-out rather than
 /// as a volume.
 ///
 /// Letting the overflow out as HDR is what the starfield already does with a star twenty stops
 /// over, and for the same reason: the excess becomes a halo rather than a whiter white. The
 /// display transform desaturates the middle toward white, bloom spreads it, and the thin edges
-/// stay inside the window with their colour.
+/// stay inside the window with their color.
 ///
 /// The sky uses a quarter. A plume wants an order more, and the case that decides it is
 /// `thermal`: clipped, its core sat at a saturation of 0.37, and one stop of gain only brings
 /// that to 0.33 — still a flat blue shape. Three brings it to 0.16 against a flank of 0.89,
-/// which is a white-hot core in a coloured cone with the sooty lanes reading against it. Six
+/// which is a white-hot core in a colored cone with the sooty lanes reading against it. Six
 /// buys 0.09 and nothing else, every channel's peak already being at 255. A plume wants more
 /// than the sky does because it is a near object filling a good part of the frame rather than a
 /// point a few pixels across, so its overflow has somewhere to go.
@@ -121,7 +121,7 @@ pub const SOOT_FRACTION: f64 = 0.6;
 ///
 /// The only place in this file something is *not* a blackbody, and it is the honest correction
 /// rather than a fudge: soot is the one constituent of a plume that is optically thick, so it
-/// radiates as a greybody. It also guarantees the streaks read. A temperature ratio alone does
+/// radiates as a graybody. It also guarantees the streaks read. A temperature ratio alone does
 /// not: at fifty thousand kelvin the visible band is on the Rayleigh-Jeans side, where radiance
 /// goes as `T` and not as `T^4`, so a plume that hot would have shown streaks six per cent
 /// darker than the gas around them and looked exactly as smooth as before.
@@ -154,14 +154,14 @@ pub struct Plume(pub Option<ShipId>);
 pub struct Plumes {
     proxy: Option<Handle<Mesh>>,
     drawn: Vec<Option<ShipId>>,
-    /// How far aft the streaks have travelled, in lattice cells, wrapped at [`CHURN_PERIOD`].
+    /// How far aft the streaks have traveled, in lattice cells, wrapped at [`CHURN_PERIOD`].
     phase: f64,
     /// The coordinate clock last frame. `None` until the first, which therefore advances by
     /// nothing rather than by however long the client spent loading.
     clock_s: Option<f64>,
 }
 
-/// How long the exhaust runs and how wide it is at each end, metres.
+/// How long the exhaust runs and how wide it is at each end, meters.
 ///
 /// The length answers to the throttle and the width does not: a nozzle is a nozzle whatever is
 /// going through it, and what changes when a drive is pushed is how far the gas gets before it
@@ -172,7 +172,7 @@ pub fn extent(length_m: f64, throttle: f64) -> (f64, f64, f64) {
     (long, throat, throat * EXPANSION)
 }
 
-/// The lateral area of the cone the gas fills, square metres.
+/// The lateral area of the cone the gas fills, square meters.
 ///
 /// What the power has to radiate through, which is what sets the temperature. A frustum's
 /// slant surface: `π (r0 + r1) √(L² + (r1 − r0)²)`.
@@ -185,7 +185,7 @@ pub fn radiating_area_m2(long_m: f64, throat_m: f64, mouth_m: f64) -> f64 {
 ///
 /// Stefan-Boltzmann, inverted. Nothing is being fitted here: the drive makes `power_w`, the gas
 /// is the only thing to carry it, and a blackbody of this area radiating that much has exactly
-/// one temperature. Which is why the colour cannot be set — push a bigger ship harder and the
+/// one temperature. Which is why the color cannot be set — push a bigger ship harder and the
 /// plume goes blue whether or not anybody wanted it to.
 pub fn temperature_k(power_w: f64, area_m2: f64) -> f64 {
     if power_w <= 0.0 || area_m2 <= 0.0 {
@@ -196,9 +196,9 @@ pub fn temperature_k(power_w: f64, area_m2: f64) -> f64 {
 
 /// How far the churn travels this frame, in plume lengths.
 ///
-/// Measured in plume *lengths* rather than metres, so a fifty-kilometre ship's exhaust and a
+/// Measured in plume *lengths* rather than meters, so a fifty-kilometer ship's exhaust and a
 /// tug's churn at the same rate on the screen. The camera frames on the hull, so that is the
-/// comparison that matters; in metres per second the big one is a hundred times the faster,
+/// comparison that matters; in meters per second the big one is a hundred times the faster,
 /// which is also true.
 pub fn churn_step(real_s: f64, simulated_s: f64) -> f64 {
     if real_s <= 0.0 || simulated_s <= 0.0 {
@@ -227,7 +227,7 @@ pub fn seed(of: Option<ShipId>) -> f64 {
 
 /// A craft with its drive lit, reduced to what the proxy needs.
 struct Burning {
-    /// From the eye, in simulation axes, metres.
+    /// From the eye, in simulation axes, meters.
     offset_m: DVec3,
     /// The hull's own length, so the nozzle can be put at its tail.
     hull_m: f64,
@@ -308,10 +308,10 @@ fn uniforms(lit: &Burning, session: &Session, eye_local: Vec3, phase: f64) -> Pl
     let area = radiating_area_m2(lit.long_m, lit.throat_m, lit.mouth_m);
     let kelvin = temperature_k(lit.power_w, area);
     let glow = shine(session, kelvin);
-    // The same mapping at a lower temperature, so the streaks' colour is as forced as the
+    // The same mapping at a lower temperature, so the streaks' color is as forced as the
     // core's and the ratio between them is the physics rather than a tint.
     let soot = shine(session, kelvin * SOOT_FRACTION) * SOOT_EMISSIVITY;
-    // Scaled so the core lands where [`CORE_STOPS`] says, whatever the colour came out as.
+    // Scaled so the core lands where [`CORE_STOPS`] says, whatever the color came out as.
     // Against the clean gas, which is what the core is made of: the streaks are faded out
     // toward the axis, so calibrating against a mixture would move the exposure with the churn.
     let luminance = glow.dot(Vec3::new(0.2126, 0.7152, 0.0722)) as f64;
@@ -333,7 +333,7 @@ fn uniforms(lit: &Burning, session: &Session, eye_local: Vec3, phase: f64) -> Pl
         soot: soot.extend(0.0),
         churn: Vec4::new(phase as f32, CHURN_ACROSS, CHURN_ALONG, CHURN_BITE),
         // The march sums a density with no units, so the brightness is a scale rather than a
-        // measurement — the *colour* is the physics and this only says how much of it there is.
+        // measurement — the *color* is the physics and this only says how much of it there is.
         exposure: Vec4::new(
             session.tone.surface_reference,
             session.tone.stops,
@@ -367,8 +367,8 @@ pub fn update_plumes(
     let now = game.0.coordinate_time_s();
     let simulated = plumes.clock_s.map_or(0.0, |was| now - was);
     plumes.clock_s = Some(now);
-    let travelled = churn_step(time.delta_secs_f64(), simulated) * CHURN_ALONG as f64;
-    plumes.phase = (plumes.phase + travelled).rem_euclid(CHURN_PERIOD as f64);
+    let traveled = churn_step(time.delta_secs_f64(), simulated) * CHURN_ALONG as f64;
+    plumes.phase = (plumes.phase + traveled).rem_euclid(CHURN_PERIOD as f64);
 
     if keys != plumes.drawn {
         for (entity, _) in &existing {
@@ -395,8 +395,8 @@ pub fn update_plumes(
     for (mut transform, material, marker) in placed.iter_mut() {
         let Some((_, lit)) = want.iter().find(|(id, _)| *id == marker.0) else { continue };
         let wall = lit.mouth_m * MARGIN;
-        // The nozzle is at the hull's tail — half a hull aft of its centre — and the proxy's
-        // own centre is half a plume further aft again. Measuring from the hull's centre put
+        // The nozzle is at the hull's tail — half a hull aft of its center — and the proxy's
+        // own center is half a plume further aft again. Measuring from the hull's center put
         // the gas half inside the ship.
         let tail = lit.offset_m
             - lit.facing * (lit.hull_m * 0.5 + lit.long_m * 0.5);
@@ -447,7 +447,7 @@ mod tests {
         assert!((mouth / throat - EXPANSION).abs() < 1.0e-9, "that is the expansion ratio");
     }
 
-    /// **The colour is forced, not chosen.** The power has to go somewhere, and a blackbody of
+    /// **The color is forced, not chosen.** The power has to go somewhere, and a blackbody of
     /// that area radiating it has exactly one temperature.
     #[test]
     fn a_bigger_ship_burns_hotter_without_anyone_deciding_to() {
@@ -555,16 +555,16 @@ mod tests {
     /// Why the overflow is spent per channel rather than along one chroma.
     ///
     /// Under a natural mapping the plume's three channels are close enough that a single
-    /// overflow along the chroma is nearly right. Under a false-colour one they are decades
+    /// overflow along the chroma is nearly right. Under a false-color one they are decades
     /// apart — ten microns, two microns and green are three quite different questions to ask a
     /// fifty-thousand-kelvin gas — and asking only the brightest of them reports its answer as
-    /// the colour of all three. That is how the hottest object in the frame came back a flat
+    /// the color of all three. That is how the hottest object in the frame came back a flat
     /// saturated blue.
     ///
     /// This is the premise rather than the rendering, which no test can reach. If a preset is
     /// retuned until it fails, the shader's per-channel overflow is what to revisit.
     #[test]
-    fn a_false_colour_mapping_pulls_the_plume_s_channels_decades_apart() {
+    fn a_false_color_mapping_pulls_the_plume_s_channels_decades_apart() {
         let radiance = PerBand::new(std::array::from_fn(|i| {
             blackbody::band_radiance(Band::ALL[i], 50_000.0) as f32
         }));

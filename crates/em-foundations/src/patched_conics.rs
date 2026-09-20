@@ -1,6 +1,6 @@
 //! Spheres of influence: where one attractor's pull dominates another's.
 //!
-//! Every radius here is in metres, measured from the smaller body's centre, and each
+//! Every radius here is in meters, measured from the smaller body's center, and each
 //! takes the masses in the same order — the body whose sphere this is, then the primary
 //! it orbits.
 
