@@ -14,6 +14,7 @@ use crate::action::Action;
 use crate::app::{Game, Ui};
 use crate::input::Requested;
 use crate::map::Map;
+#[cfg(feature = "godview")]
 use crate::map_source::Source;
 use crate::panels::ask;
 use crate::ui::Panel;
@@ -243,16 +244,13 @@ fn controls(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<
                 ask(out, Action::SetMapPlane(plane));
             }
         }
-        ui.separator();
-        ui.label(em_map::rings::label_m(state.map.orbit.distance_m()));
-        ui.separator();
-        // How old the picture is, which is the premise and belongs on every surface that
-        // shows a position. See `13-client-shell.md`.
-        ui.weak(match state.map.source {
-            Source::Observed => "as seen from here",
-            #[cfg(feature = "godview")]
-            Source::God => "coordinate time, no light delay",
-        });
+        // Light delay is the premise everywhere in the client and needs no caption; a picture
+        // taken without it is the one that has to say so. See `13-client-shell.md`.
+        #[cfg(feature = "godview")]
+        if state.map.source == Source::God {
+            ui.separator();
+            ui.weak("coordinate time, no light delay");
+        }
     });
 
     #[cfg(feature = "godview")]
