@@ -713,6 +713,24 @@ having one: a body shrinks until it reaches it and then holds, so nothing jumps 
 crossover. It also means a small surface resolves fewer things into spheres, which is correct
 for the same reason.
 
+**And a mark is sized by what it weighs — two per decade, so ten times the mass is twice the
+radius.** Full size at the mass floor and above, so anything worth a name is drawn whole, and
+shrinking below it: a rock still shows, it just shows as a rock. Eight orders of magnitude of
+mass cannot be eight orders of pixels, and a logarithm is the only honest way to hold a range
+like that in one picture. It is measured against the heaviest thing in the whole snapshot
+rather than the heaviest on screen, because a name may come and go as the view moves and a size
+may not — bodies that resized every time the star left the frame would pulse.
+
+Two floors hold the bottom of it: a quarter of full size in `em_map::weight`, and twice a
+line's width in pixels, which is usually the one that binds. On the minimap, where every mark
+is already at the pixel floor, there is no room to vary at all.
+
+**The crossover is the surface's size and not the mark's, which is the one place the no-jump
+rule gives way.** A body heavy enough to be drawn whole still holds its size across it; a
+lighter one steps *down* to the mark its mass earned. The alternative was letting a rock stay a
+sphere until it was three pixels across, and a three-pixel wireframe sphere is the smudge all
+of this exists to be rid of.
+
 **A ship is a filled dot, at every zoom there is.** It has a hull size and the map is not where
 anyone reads it off; a contact that grew a model on approach would be the one thing here
 drawing a shape nobody sent. It keeps its amber, which is the one channel the map has that a

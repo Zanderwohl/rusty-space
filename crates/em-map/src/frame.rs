@@ -27,6 +27,13 @@ pub struct Placement {
     pub label: String,
     /// Carried from [`crate::MapItem::weight`]: what decides which of two names fit.
     pub weight: f64,
+    /// How big this one's mark is drawn, as a fraction of the full size. See
+    /// [`crate::weight::scale`] — ten times the mass is twice the radius.
+    ///
+    /// **Against the heaviest thing in the whole snapshot, not the heaviest on screen.** A
+    /// name may come and go as the view moves and a size may not: bodies that resized every
+    /// time the star left the frame would pulse.
+    pub symbol_scale: f32,
     pub at: Vec3,
     /// Where a drop-line from [`Placement::at`] meets the plane. Equal to `at` for something
     /// already in it, which is the host's signal to draw no line at all.
@@ -127,6 +134,8 @@ pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Plane, meters_per_u
         .filter(|ring| ring.radius.is_finite() && ring.radius <= MAX_RENDER_UNITS)
         .collect();
 
+    let mass_floor =
+        crate::weight::heaviest(snapshot.items.iter().map(|i| i.weight)) * crate::weight::FLOOR;
     let mut placements = Vec::with_capacity(snapshot.items.len());
     for item in &snapshot.items {
         let at = relative(item.position_ly);
@@ -146,6 +155,7 @@ pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Plane, meters_per_u
             kind: item.kind,
             label: item.label.clone(),
             weight: item.weight,
+            symbol_scale: crate::weight::scale(item.weight, mass_floor),
             at,
             foot,
             radius: (item.radius_m / meters_per_unit) as f32,

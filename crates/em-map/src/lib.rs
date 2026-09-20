@@ -32,6 +32,7 @@ pub mod plane;
 pub mod rings;
 pub mod rule;
 pub mod snapshot;
+pub mod weight;
 
 pub use camera::Orbit;
 pub use frame::{Annulus, MapFrame, Placement, RingPlacement, compose};

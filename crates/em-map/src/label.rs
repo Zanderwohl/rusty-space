@@ -41,7 +41,7 @@ pub struct Layout {
     /// The clearance kept between two of them.
     pub gap: f32,
     /// How light a thing may be and still be named, as a fraction of the heaviest thing on
-    /// screen.
+    /// screen. [`crate::weight::FLOOR`] is the value this was tuned at.
     ///
     /// **The collision rule thins a crowd and has nothing to say about an empty view**, so
     /// without this a lone asteroid in open space is named as readily as a planet. Relative
@@ -62,8 +62,7 @@ pub fn lay_out(candidates: Vec<Candidate>, viewport: Vec2, layout: Layout) -> Ve
     // naming beside whatever is left.
     let mut inside: Vec<Candidate> =
         candidates.into_iter().filter(|c| box_of(c, layout.offset, viewport).is_some()).collect();
-    let heaviest =
-        inside.iter().map(|c| c.weight).filter(|w| w.is_finite()).fold(0.0f64, f64::max);
+    let heaviest = crate::weight::heaviest(inside.iter().map(|c| c.weight));
     let floor = heaviest * layout.floor;
     // A ship's weight is infinite and sets no bar — it would silence the whole map — and
     // something that never stated a mass is not silenced by a comparison it is not in.

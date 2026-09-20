@@ -262,11 +262,22 @@ impl Viewport {
         }
     }
 
+    /// How big one item's mark is, in pixels: the surface's own size, scaled by what the
+    /// thing weighs, and never under the floor a shape needs to be a shape in.
+    ///
+    /// The pixel floor usually binds before [`em_map::weight::MIN_SCALE`] does — on a panel
+    /// whose marks are eight pixels it takes over about a decade under the mass floor, and on
+    /// the minimap, where the marks are already at the floor, there is no room to vary at all.
+    fn mark_px(self, placement: &Placement) -> f32 {
+        (self.point_px * placement.symbol_scale).max(POINT_FLOOR_PX)
+    }
+
     /// A circle's line, as a fraction of its own radius: the one member of the family that is
-    /// an answer rather than a cap that occasionally binds. Both the symbol and its line are
-    /// fixed pixel sizes, so the distance and the scale in [`tube_target`] cancel exactly.
-    fn point_tube_fraction(self) -> f32 {
-        LINE_PX / (self.point_px * 0.5)
+    /// an answer rather than a cap that occasionally binds. Both the mark and its line are
+    /// fixed pixel sizes, so the distance and the scale in [`tube_target`] cancel exactly —
+    /// but the mark's size is per item, so this is too.
+    fn point_tube_fraction(self, mark_px: f32) -> f32 {
+        LINE_PX / (mark_px * 0.5)
     }
 }
 
@@ -496,7 +507,7 @@ fn place(
         // Zooming in on a body crosses the threshold without changing the set that is drawn,
         // so the level of detail is a handle swap here and not a respawn. Same as a drop-line
         // gaining a dash.
-        let (wanted, fraction) = mesh_for(form_of(placement, view), &map, view);
+        let (wanted, fraction) = mesh_for(form_of(placement, view), placement, &map, view);
         if mesh.0 != *wanted {
             mesh.0 = wanted.clone();
         }
@@ -621,7 +632,13 @@ fn at_of(placement: &Placement) -> Vec3 {
 }
 
 /// A body is a sphere at its own size once it is worth more than [`Viewport::point_px`]
-/// across, and a circle of exactly that below it.
+/// across, and a mark below it.
+///
+/// **The threshold is the surface's size and not the mark's**, which is the one place the
+/// no-jump rule gives way: a body heavy enough to be drawn whole still holds its size across
+/// the crossover, and a lighter one steps *down* to the mark its mass earned. The alternative
+/// was to let a rock stay a sphere until it was three pixels across, and a three-pixel
+/// wireframe sphere is the smudge all of this exists to be rid of.
 ///
 /// **A ship is a filled dot, at every zoom there is.** It is a mark on a chart rather than a
 /// body seen: its hull size is not what anyone reads off a map, and a contact that grew a
@@ -638,9 +655,9 @@ fn form_of(placement: &Placement, view: Viewport) -> Form {
     }
 }
 
-/// The render-unit radius of a symbol drawn [`Viewport::point_px`] across at `distance`.
-fn point_radius(distance: f32, view: Viewport) -> f32 {
-    (distance * view.rad_per_px * view.point_px * 0.5).max(f32::MIN_POSITIVE)
+/// The render-unit radius of a mark drawn `mark_px` across at `distance`.
+fn point_radius(distance: f32, rad_per_px: f32, mark_px: f32) -> f32 {
+    (distance * rad_per_px * mark_px * 0.5).max(f32::MIN_POSITIVE)
 }
 
 /// A circle is a symbol rather than an object, so it faces the eye — which is the render
@@ -664,20 +681,22 @@ fn item_transform(placement: &Placement, view: Viewport) -> Transform {
             ),
             scale: Vec3::splat(placement.radius),
         },
-        // Both symbols are flat and face the eye, and both are drawn at the one size.
+        // Both marks are flat and face the eye, and both are drawn at the size this one's
+        // mass has earned.
         Form::Circle | Form::Dot => Transform {
             translation: at,
             rotation: face_camera(at),
-            scale: Vec3::splat(point_radius(at.length(), view)),
+            scale: Vec3::splat(point_radius(at.length(), view.rad_per_px, view.mark_px(placement))),
         },
     }
 }
 
 /// The mesh a form is drawn with, and the cap its tube is sized under.
-fn mesh_for(form: Form, map: &Map, view: Viewport) -> (&Handle<Mesh>, f32) {
+fn mesh_for<'a>(form: Form, placement: &Placement, map: &'a Map, view: Viewport)
+    -> (&'a Handle<Mesh>, f32) {
     match form {
         Form::Sphere => (&map.sphere, SPHERE_TUBE_FRACTION),
-        Form::Circle => (&map.point, view.point_tube_fraction()),
+        Form::Circle => (&map.point, view.point_tube_fraction(view.mark_px(placement))),
         Form::Dot => (&map.dot, DOT_TUBE_FRACTION),
     }
 }
@@ -802,7 +821,7 @@ fn spawn_scene(
 
     for placement in &frame.placements {
         let at = item_transform(placement, view);
-        let (mesh, fraction) = mesh_for(form_of(placement, view), map, view);
+        let (mesh, fraction) = mesh_for(form_of(placement, view), placement, map, view);
         commands.spawn((
             Mesh3d(mesh.clone()),
             MeshMaterial3d(materials.add(line_material(
@@ -1031,6 +1050,7 @@ mod tests {
             key: ItemKey::from_name("a body"),
             kind,
             weight: 0.0,
+            symbol_scale: 1.0,
             label: "a body".into(),
             at: glam::Vec3::new(0.0, distance, 0.0),
             foot: glam::Vec3::new(0.0, distance, 0.0),
@@ -1062,6 +1082,53 @@ mod tests {
             (drawn / on - 1.0).abs() < 0.05,
             "a circle of {drawn} where the sphere it replaced was {on}",
         );
+    }
+
+    /// **A lighter thing gets a smaller mark, and never one too small to be a shape.**
+    ///
+    /// Two per decade is the whole relationship; the pixel floor is what keeps the bottom of
+    /// it drawable, and on most surfaces it takes over before the mass scale runs out.
+    #[test]
+    fn a_lighter_mark_is_smaller_but_never_vanishes() {
+        let view = viewport();
+        let marked = |scale: f32| {
+            let mut placement = body_at(40.0, 0.0);
+            placement.symbol_scale = scale;
+            view.mark_px(&placement)
+        };
+        assert!(marked(1.0) > marked(0.5), "half the scale should draw smaller");
+        assert!(marked(0.5) >= POINT_FLOOR_PX, "and never under a shape's worth of pixels");
+        assert_eq!(marked(1.0), view.point_px, "and a full weight is the surface's own size");
+        for scale in [em_map::weight::MIN_SCALE, 0.0, 1.0e-9] {
+            assert!(marked(scale) >= POINT_FLOOR_PX, "{scale} drew {}", marked(scale));
+        }
+        // And the line thickens to match, or a small mark is a hairline ring nobody can see.
+        assert!(
+            view.point_tube_fraction(marked(0.5)) > view.point_tube_fraction(marked(1.0)),
+            "a smaller mark wants a thicker line, as a fraction of itself",
+        );
+    }
+
+    /// **The one place the no-jump rule gives way, and it gives way downward.**
+    ///
+    /// The crossover is the surface's own size for everyone, so a body too light to be drawn
+    /// whole steps down to its mark rather than holding. Stepping *up* would be a body
+    /// getting bigger as it recedes.
+    #[test]
+    fn a_light_body_steps_down_at_the_crossover_and_never_up() {
+        let view = viewport();
+        let distance = 40.0;
+        let on = view.point_px * 0.5 * view.rad_per_px * distance;
+        for scale in [1.0f32, 0.5, em_map::weight::MIN_SCALE] {
+            let mut under = body_at(distance, on * 0.99);
+            under.symbol_scale = scale;
+            assert_eq!(form_of(&under, view), Form::Circle, "{scale} should be a mark");
+            let drawn = item_transform(&under, view).scale.x;
+            assert!(
+                drawn <= on * 1.001,
+                "a mark at scale {scale} drew {drawn}, bigger than the {on} sphere it replaced",
+            );
+        }
     }
 
     /// **A symbol is the same share of every surface it is drawn on.**
@@ -1097,7 +1164,7 @@ mod tests {
     fn a_dot_is_never_displaced() {
         let view = viewport();
         for distance in [1.0e-3f32, 1.0, 40.0, 1.0e5] {
-            let scale = point_radius(distance, view);
+            let scale = point_radius(distance, view.rad_per_px, view.point_px);
             let target =
                 tube_target(scale, view.rad_per_px, distance, DOT_TUBE_FRACTION, LINE_PX);
             assert!(

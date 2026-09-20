@@ -57,12 +57,9 @@ const RULE_SAMPLE_NDC_Y: f64 = -0.75;
 const LABEL_GAP_PX: f32 = 4.0;
 /// How light a body may be and still be named, against the heaviest thing on screen.
 ///
-/// Set from the case that has to work: **Earth beside the Sun**, which is three parts in a
-/// million. Well below it, because the gap this is really aimed at is the one between the
-/// smallest planet and the largest asteroid — Mercury is 1.7e-7 of the Sun and Ceres 4.7e-10,
-/// a factor of three hundred — and a floor in the middle of that keeps all eight planets
-/// while dropping every numbered rock. See [`em_map::label::Layout::floor`].
-const LABEL_FLOOR: f64 = 1.0e-8;
+/// The same number that decides how big its mark is drawn, because it is the same comparison:
+/// see [`em_map::weight::FLOOR`] for where it comes from.
+const LABEL_FLOOR: f64 = em_map::weight::FLOOR;
 /// The amber a contact's name is written in, which is the amber its mark is drawn in.
 const SHIP_LABEL: bevy::prelude::Color = bevy::prelude::Color::srgb(0.95, 0.70, 0.25);
 const LABEL_CLEARANCE_PX: f32 = 6.0;
