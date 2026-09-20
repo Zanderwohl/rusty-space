@@ -35,8 +35,9 @@ pub struct Placement {
     /// How big it looks from the eye, radians. Compared against the viewport's radians per
     /// pixel, this is what decides a sphere from a point.
     pub angular_radius: f32,
-    /// Inner and outer radius in render units, for something shaped like a ring.
-    pub annulus: Option<(f32, f32)>,
+    /// How far a ring or a shell reaches, in render units, with the half-angle that says
+    /// which of the two it is.
+    pub annulus: Option<Annulus>,
     /// Spin axis or ring normal, simulation axes, unit length.
     pub pole: Vec3,
 }
@@ -46,6 +47,27 @@ impl Placement {
     /// zero-length tube is a degenerate mesh rather than an invisible one.
     pub fn has_drop_line(&self) -> bool {
         (self.at - self.foot).length_squared() > f32::EPSILON
+    }
+}
+
+/// A population's reach, in render units.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Annulus {
+    pub inner: f32,
+    pub outer: f32,
+    pub half_angle_rad: f32,
+}
+
+impl Annulus {
+    /// The shape normalized to an outer radius of one, which is what a mesh is built from: the
+    /// host scales it by [`Annulus::outer`] rather than rebuilding it per zoom.
+    pub fn unit(&self) -> crate::outline::Extent {
+        let outer = self.outer.max(f32::MIN_POSITIVE) as f64;
+        crate::outline::Extent {
+            inner: (self.inner as f64 / outer).clamp(0.0, 1.0),
+            outer: 1.0,
+            half_angle_rad: self.half_angle_rad as f64,
+        }
     }
 }
 
@@ -113,8 +135,10 @@ pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Plane, meters_per_u
             foot,
             radius: (item.radius_m / meters_per_unit) as f32,
             angular_radius: (item.radius_m / range_m) as f32,
-            annulus: item.annulus_m.map(|(inner, outer)| {
-                ((inner / meters_per_unit) as f32, (outer / meters_per_unit) as f32)
+            annulus: item.annulus_m.map(|a| Annulus {
+                inner: (a.inner / meters_per_unit) as f32,
+                outer: (a.outer / meters_per_unit) as f32,
+                half_angle_rad: a.half_angle_rad as f32,
             }),
             pole: item.pole.normalize_or(DVec3::Z).as_vec3(),
         });

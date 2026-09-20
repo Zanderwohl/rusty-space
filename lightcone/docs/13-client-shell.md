@@ -691,9 +691,20 @@ correct and is exactly why the whole gesture is the map's.
 Every panel in the interface already costs this. The minimap is the only one that is never
 closed, which is the whole of the difference, and it is a corner of 190 points.
 
-## Open
+### Belts, rings and clouds are drawn as themselves
 
-- Belts and rings are carried in a snapshot as an annulus and still drawn as a point. They want
-  a ring of their own, in the population's plane rather than the reference one.
+A population is an outline — two edge circles and four cross-sections — in **its own** plane
+rather than the reference one, and it traces the edge of the material: the inclination sweeps
+every element through the same latitude band, so the cross-section is an annular sector and not
+an ellipse. It degenerates correctly, which is the reason for the shape: an isotropic cloud
+reaches a right angle, its cross-sections close into meridians, and the Oort cloud reads as the
+shell it is while the asteroid belt reads as a donut.
+
+`em_map::outline` owns it and the reticle draws the same one over the sky when a swarm is
+selected. Two answers to "where does this belt stop" is one too many, and the half-angle travels
+with the two radii for the same reason — without it a belt and a cloud are the same pair of
+numbers.
+
+## Open
 - Nothing is labeled yet. The geometry is placed; the names that go beside it are screen-space
   work for `em_ui::reticle`, which already has the clip-space placement for it.

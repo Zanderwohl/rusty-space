@@ -145,18 +145,6 @@ struct Sighted {
     outline: Option<Vec<Vec<Vec4>>>,
 }
 
-/// How many points a swarm's curves are sampled at.
-///
-/// Sixty-four is a fifth of a degree of error against a true circle at the widest, which is far
-/// below a pixel at any distance the thing is drawn at.
-const SWARM_SAMPLES: usize = 64;
-
-/// How many cross-sections are drawn round the torus.
-///
-/// Four reads as a donut and no more; the two edge circles carry the shape and these say which
-/// way round it is thick.
-const SWARM_CROSS_SECTIONS: usize = 4;
-
 /// Find what the cursor is on, mark what is selected, and act on a click.
 #[allow(clippy::too_many_arguments)]
 fn survey(
@@ -421,64 +409,26 @@ fn swarm_name(population: &lc_world::population::Population) -> String {
     )
 }
 
-/// The population in curves: its inner and outer edges, and cross-sections round it.
+/// The wire shape of a swarm: two edge circles and four cross-sections.
 ///
-/// The same shape [`crate::envelope::profile_of`] builds the density field over, from the same
-/// [`Extent`](lc_world::population::Extent) — a shell between two radii, cut off at the widest
-/// inclination. The skeleton and the thing it is drawn over cannot be allowed to drift apart,
-/// and they did: this traced the elliptical tube the old surface shader used, whose corners are
-/// several degrees of latitude away from where the material actually stops.
-///
-/// It degenerates correctly: an isotropic cloud reaches a right angle, its cross-sections close
-/// into full meridians and the whole thing reads as the shell it is.
+/// `em_map::outline` owns the shape, because the map draws the same one as geometry and two
+/// answers to "where does this belt stop" is one too many. What is here is the conversion: the
+/// population's extent, and a center relative to the ship in meters.
 fn swarm_outlines(
     star_ly: DVec3,
     ship_ly: DVec3,
     population: &lc_world::population::Population,
 ) -> Vec<Vec<DVec3>> {
     let Some(extent) = population.extent() else { return Vec::new() };
-    let (u, v) = lc_world::navigation::basis(population.pole);
-    let pole = population.pole.normalize_or_zero();
-    let center = (star_ly - ship_ly) * M_PER_LY;
-
-    let ring = |radius: f64, lift: f64| -> Vec<DVec3> {
-        (0..=SWARM_SAMPLES)
-            .map(|i| {
-                let theta = std::f64::consts::TAU * i as f64 / SWARM_SAMPLES as f64;
-                center + (u * theta.cos() + v * theta.sin()) * radius + pole * lift
-            })
-            .collect()
-    };
-
-    let mut out = vec![ring(extent.inner_m, 0.0), ring(extent.outer_m, 0.0)];
-
-    // The cross-section, in a plane containing the pole: out along the far edge, in across the
-    // top, back along the near edge, out across the bottom. Four legs of a closed loop, and
-    // `SWARM_SAMPLES` is divisible by four.
-    let arc = SWARM_SAMPLES / 4;
-    let half_angle = extent.half_angle_rad;
-    for k in 0..SWARM_CROSS_SECTIONS {
-        let phi = std::f64::consts::TAU * k as f64 / SWARM_CROSS_SECTIONS as f64;
-        let outward = u * phi.cos() + v * phi.sin();
-        let at = |radius: f64, latitude: f64| {
-            center + (outward * latitude.cos() + pole * latitude.sin()) * radius
-        };
-        let leg = |steps: usize, f: &dyn Fn(f64) -> DVec3| {
-            (0..steps).map(|i| f(i as f64 / steps as f64)).collect::<Vec<_>>()
-        };
-        let mut curve = Vec::with_capacity(SWARM_SAMPLES + 1);
-        curve.extend(leg(arc, &|t| at(extent.outer_m, -half_angle + 2.0 * half_angle * t)));
-        curve.extend(leg(arc, &|t| {
-            at(extent.outer_m + (extent.inner_m - extent.outer_m) * t, half_angle)
-        }));
-        curve.extend(leg(arc, &|t| at(extent.inner_m, half_angle - 2.0 * half_angle * t)));
-        curve.extend(leg(arc, &|t| {
-            at(extent.inner_m + (extent.outer_m - extent.inner_m) * t, -half_angle)
-        }));
-        curve.push(curve[0]);
-        out.push(curve);
-    }
-    out
+    em_map::outline::torus(
+        (star_ly - ship_ly) * M_PER_LY,
+        population.pole,
+        em_map::outline::Extent {
+            inner: extent.inner_m,
+            outer: extent.outer_m,
+            half_angle_rad: extent.half_angle_rad,
+        },
+    )
 }
 
 /// Every curve of an outline, projected and cut at the camera plane.
@@ -772,11 +722,11 @@ mod tests {
         // first version of this test read that as a geometry error.
         let star = DVec3::splat(1.0e-5);
         let curves = swarm_outlines(star, DVec3::ZERO, &belt);
-        assert_eq!(curves.len(), 2 + SWARM_CROSS_SECTIONS);
+        assert_eq!(curves.len(), 2 + em_map::outline::CROSS_SECTIONS);
 
         let center = (star - DVec3::ZERO) * M_PER_LY;
         for (which, curve) in curves.iter().enumerate() {
-            assert_eq!(curve.len(), SWARM_SAMPLES + 1, "curve {which} is not closed");
+            assert_eq!(curve.len(), em_map::outline::SAMPLES + 1, "curve {which} is not closed");
             assert!(
                 curve[0].distance(*curve.last().unwrap()) < 1.0e3,
                 "curve {which} has a seam",

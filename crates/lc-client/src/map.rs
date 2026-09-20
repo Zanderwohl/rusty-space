@@ -137,6 +137,10 @@ pub struct MapRingOf(pub usize);
 #[derive(Component)]
 pub struct MapDropOf(pub ItemKey);
 
+/// A belt, a ring system or a cloud, drawn as its own outline rather than as a point.
+#[derive(Component)]
+pub struct MapAnnulusOf(pub ItemKey);
+
 /// The reference plane's spokes. One entity.
 #[derive(Component)]
 pub struct MapSpokes;
@@ -299,24 +303,30 @@ fn place(
     mut map: ResMut<Map>,
     mut ui: ResMut<Ui>,
     mut materials: ResMut<Assets<BodyWireframeMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut camera: Query<(&mut Transform, &mut Projection), (With<MapCamera>, Without<MapDrawn>)>,
     existing: Query<Entity, With<MapDrawn>>,
     mut items: Query<
         (&MapItemOf, &mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
-        (Without<MapCamera>, Without<MapDropOf>, Without<MapRingOf>, Without<MapSpokes>),
+        (Without<MapCamera>, Without<MapDropOf>, Without<MapRingOf>, Without<MapAnnulusOf>, Without<MapSpokes>),
     >,
     mut drops: Query<
         (&MapDropOf, &mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
-        (Without<MapCamera>, Without<MapItemOf>, Without<MapRingOf>, Without<MapSpokes>),
+        (Without<MapCamera>, Without<MapItemOf>, Without<MapRingOf>, Without<MapSpokes>, Without<MapAnnulusOf>),
     >,
     mut rings: Query<
         (&MapRingOf, &mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
-        (Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>, Without<MapSpokes>),
+        (Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>, Without<MapSpokes>, Without<MapAnnulusOf>),
     >,
     mut spokes: Query<
         (&mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
         (With<MapSpokes>, Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>,
-            Without<MapRingOf>),
+            Without<MapRingOf>, Without<MapAnnulusOf>),
+    >,
+    mut annuli: Query<
+        (&MapAnnulusOf, &mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
+        (Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>, Without<MapRingOf>,
+            Without<MapSpokes>),
     >,
 ) {
     let Ok((mut transform, mut projection)) = camera.single_mut() else { return };
@@ -368,7 +378,8 @@ fn place(
         for entity in &existing {
             commands.entity(entity).despawn();
         }
-        spawn_scene(&mut commands, &map, &frame, standoff, rad_per_px, &mut materials);
+        spawn_scene(&mut commands, &map, &frame, standoff, rad_per_px, &mut meshes,
+            &mut materials);
         map.drawn = wanted;
         map.rings_drawn = frame.rings.len();
         map.frame = Some(frame);
@@ -394,6 +405,13 @@ fn place(
         *at = ring_transform(&frame, ring.radius);
         set_thickness(&mut materials, material, ring.radius, rad_per_px,
             at.translation.length().max(ring.radius), LINE_TUBE_FRACTION);
+    }
+    for (of, mut at, material) in annuli.iter_mut() {
+        let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
+        let Some(annulus) = placement.annulus else { continue };
+        *at = annulus_transform(placement, annulus);
+        set_thickness(&mut materials, material, annulus.outer, rad_per_px,
+            nearest_reach(at.translation.length(), annulus, standoff), LINE_TUBE_FRACTION);
     }
     if let Ok((mut at, material)) = spokes.single_mut() {
         *at = ring_transform(&frame, standoff * SPOKE_REACH);
@@ -429,6 +447,51 @@ pub fn focus_position(focus: crate::ui::MapFocus, snapshot: &MapSnapshot) -> Opt
         crate::ui::MapFocus::Free => None,
         crate::ui::MapFocus::Observer => snapshot.observer().map(|o| o.position_ly),
         crate::ui::MapFocus::Item(key) => snapshot.item(key).map(|i| i.position_ly),
+    }
+}
+
+/// How close a ring or a shell comes to the camera, in render units.
+///
+/// **A tube's width is set by the nearest part of its own mesh, never the furthest.** A ring
+/// gets away with one number because every point of it is the same distance off; anything with
+/// a radial extent does not, and the Oort cloud is the extreme case — a shell from 633 render
+/// units out to 181 000, sized against the far edge, came back with a tube 585 units thick
+/// while its inner edge passed 574 from the camera. The camera was inside it and the map went
+/// flat green, which is the same failure the plane's spokes had and the same cause.
+///
+/// Floored at the camera's own clearance over the reference plane, so a view from *inside* a
+/// belt still draws it as a hairline rather than shrinking it to nothing.
+fn nearest_reach(center_at: f32, annulus: em_map::Annulus, standoff: f32) -> f32 {
+    let nearest = if center_at < annulus.inner {
+        annulus.inner - center_at
+    } else if center_at > annulus.outer {
+        center_at - annulus.outer
+    } else {
+        0.0
+    };
+    nearest.max(standoff * em_map::camera::ELEVATION_FLOOR.sin() as f32)
+}
+
+/// The outline mesh for a population, normalized so its outer edge is one unit.
+///
+/// Built in simulation axes with the pole on `+Z` and converted here, so it arrives with the
+/// pole on `+Y` — which is what [`ring_transform`] and [`annulus_transform`] rotate from. The
+/// shape depends only on the inner-to-outer ratio and the half-angle, so it survives every
+/// zoom: what changes is the scale it is drawn at.
+fn annulus_mesh(annulus: em_map::Annulus) -> Mesh {
+    let curves: Vec<Vec<Vec3>> = em_map::outline::torus(DVec3::ZERO, DVec3::Z, annulus.unit())
+        .into_iter()
+        .map(|curve| curve.into_iter().map(render).collect())
+        .collect();
+    wire_mesh::tube_curves(&curves, BASE_TUBE_RADIUS, 4, 0.8)
+}
+
+/// A population sits at its own center, in its own plane, at its own size.
+fn annulus_transform(placement: &Placement, annulus: em_map::Annulus) -> Transform {
+    Transform {
+        translation: at_of(placement),
+        rotation: Quat::from_rotation_arc(Vec3::Y, render(placement.pole.as_dvec3()).normalize()),
+        scale: Vec3::splat(annulus.outer.max(f32::MIN_POSITIVE)),
     }
 }
 
@@ -525,6 +588,7 @@ fn spawn_scene(
     frame: &MapFrame,
     standoff: f32,
     rad_per_px: f32,
+    meshes: &mut Assets<Mesh>,
     materials: &mut Assets<BodyWireframeMaterial>,
 ) {
     let layer = RenderLayers::layer(MAP_LAYER);
@@ -577,6 +641,20 @@ fn spawn_scene(
             MapDrawn,
             MapItemOf(placement.key),
         ));
+        if let Some(annulus) = placement.annulus {
+            let at = annulus_transform(placement, annulus);
+            let target = tube_target(annulus.outer, rad_per_px,
+                nearest_reach(at.translation.length(), annulus, standoff), LINE_TUBE_FRACTION);
+            commands.spawn((
+                Mesh3d(meshes.add(annulus_mesh(annulus))),
+                MeshMaterial3d(materials.add(line_material(POPULATION, target))),
+                at,
+                NoFrustumCulling,
+                layer.clone(),
+                MapDrawn,
+                MapAnnulusOf(placement.key),
+            ));
+        }
         if placement.has_drop_line() {
             let at = drop_transform(placement);
             let target = tube_target(1.0, rad_per_px, at.translation.length(),
@@ -619,6 +697,7 @@ fn line_material(color: Color, target_tube_radius: f32) -> BodyWireframeMaterial
 const RING: Color = em_ui::vfd::TEXT_DIM;
 const SPOKE: Color = em_ui::vfd::TEXT_DIM;
 const DROP: Color = em_ui::vfd::BUTTON_BORDER;
+const POPULATION: Color = em_ui::vfd::TEXT_DIM;
 
 fn color_of(kind: ItemKind) -> Color {
     match kind {
@@ -755,6 +834,49 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// **A belt's tube never reaches the camera either.**
+    ///
+    /// The fourth time this family of bug appeared, and the same cause as the plane's spokes:
+    /// a width set by the far side of something that spans a range of distances. The Oort
+    /// cloud is the extreme case — a shell from 633 render units to 181 000 — and sized
+    /// against its outer edge it came back 585 units thick while its inner edge passed 574
+    /// from the camera.
+    #[test]
+    fn an_annulus_never_swallows_the_camera() {
+        let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
+        let cases = [
+            // The Oort cloud, as the solar system's generator actually produces it.
+            (em_map::Annulus { inner: 6.33e2, outer: 1.81e5, half_angle_rad: 1.57 }, 59.2, 60.0),
+            // The asteroid belt, seen from outside and from within.
+            (em_map::Annulus { inner: 2.1, outer: 3.3, half_angle_rad: 0.2 }, 59.2, 60.0),
+            (em_map::Annulus { inner: 2.1, outer: 3.3, half_angle_rad: 0.2 }, 0.5, 1.0),
+            // And a camera sitting inside the band itself.
+            (em_map::Annulus { inner: 2.1, outer: 3.3, half_angle_rad: 0.2 }, 2.7, 3.0),
+        ];
+        for (annulus, center_at, standoff) in cases {
+            let reach = nearest_reach(center_at, annulus, standoff);
+            let world = annulus.outer
+                * tube_target(annulus.outer, rad_per_px, reach, LINE_TUBE_FRACTION);
+            assert!(
+                world < reach,
+                "outer {:e}: tube {world:e} against a reach of {reach:e}",
+                annulus.outer,
+            );
+        }
+    }
+
+    /// And the reach is the *near* edge, which is the whole of the fix.
+    #[test]
+    fn the_reach_is_measured_to_the_near_edge() {
+        let shell = em_map::Annulus { inner: 600.0, outer: 1.0e5, half_angle_rad: 1.57 };
+        // Inside the cavity: the near edge is the inner one.
+        assert!((nearest_reach(60.0, shell, 60.0) - 540.0).abs() < 1.0);
+        // Outside it altogether: the near edge is the outer one.
+        assert!((nearest_reach(1.2e5, shell, 60.0) - 2.0e4).abs() < 1.0);
+        // Within the band, floored so a belt seen from inside is still a hairline.
+        assert!(nearest_reach(1000.0, shell, 60.0) > 0.0);
     }
 
     /// And the material's own default is *not* good enough, which is what the bug was: the

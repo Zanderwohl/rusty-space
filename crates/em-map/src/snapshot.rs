@@ -90,8 +90,11 @@ pub struct MapItem {
     pub radius_m: f64,
     /// Spin axis, or the normal of a ring or belt. Ecliptic north where nothing says otherwise.
     pub pole: DVec3,
-    /// Inner and outer radius in meters, for something shaped like a ring rather than a ball.
-    pub annulus_m: Option<(f64, f64)>,
+    /// How far it reaches, for something shaped like a ring or a shell rather than a ball.
+    ///
+    /// Meters, and it carries the half-angle as well as the two radii: without it a cloud and
+    /// a belt are the same pair of numbers, and one of them is a shell.
+    pub annulus_m: Option<crate::outline::Extent>,
 }
 
 impl MapItem {
@@ -103,7 +106,7 @@ impl MapItem {
 
     /// A belt, a cloud or a ring system, about `position_ly` and in the plane of `pole`.
     pub fn annulus(key: ItemKey, label: impl Into<String>, position_ly: DVec3, pole: DVec3,
-        inner_m: f64, outer_m: f64) -> Self {
+        extent: crate::outline::Extent) -> Self {
         Self {
             key,
             label: label.into(),
@@ -111,7 +114,11 @@ impl MapItem {
             position_ly,
             radius_m: 0.0,
             pole,
-            annulus_m: Some((inner_m.min(outer_m), inner_m.max(outer_m))),
+            annulus_m: Some(crate::outline::Extent {
+                inner: extent.inner.min(extent.outer),
+                outer: extent.inner.max(extent.outer),
+                ..extent
+            }),
         }
     }
 }
@@ -157,7 +164,7 @@ impl MapSnapshot {
             // An annulus is drawn out to its own edge, so it sets the extent even when its
             // center is the focus. Without this a system framed on its star is framed on
             // nothing, because every belt's center is the star.
-            let outer = d + item.annulus_m.map_or(item.radius_m, |(_, o)| o);
+            let outer = d + item.annulus_m.map_or(item.radius_m, |a| a.outer);
             near = near.min(d);
             far = far.max(outer);
         }
@@ -242,7 +249,8 @@ pub(crate) mod tests {
     /// Without that, framing a system on its star frames it on nothing.
     #[test]
     fn an_annulus_sets_the_extent_from_its_edge() {
-        let belt = MapItem::annulus(ItemKey(1), "belt", DVec3::ZERO, DVec3::Z, 3.0e11, 5.0e11);
+        let belt = MapItem::annulus(ItemKey(1), "belt", DVec3::ZERO, DVec3::Z,
+            crate::outline::Extent { inner: 3.0e11, outer: 5.0e11, half_angle_rad: 0.2 });
         let snapshot = MapSnapshot::observed(0.0, vec![belt]);
         let (near, far) = snapshot.extent_m(DVec3::ZERO);
         assert_eq!(near, 0.0);

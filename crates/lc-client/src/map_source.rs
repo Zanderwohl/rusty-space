@@ -221,8 +221,13 @@ fn push_local_system(items: &mut Vec<MapItem>, session: &Session) {
             name,
             origin,
             population.pole,
-            extent.inner_m,
-            extent.outer_m,
+            em_map::outline::Extent {
+                inner: extent.inner_m,
+                outer: extent.outer_m,
+                // Without this a belt and a cloud are the same pair of radii, and one of them
+                // is a shell. `lc_world::navigation::is_flat` reads the same number.
+                half_angle_rad: extent.half_angle_rad,
+            },
         ));
     }
 }

@@ -386,6 +386,22 @@ pub fn drop_line(dashes: u32, tube_radius: f32, tube_sides: u32, brightness: f32
     buffers.into_mesh()
 }
 
+/// One mesh from a set of polylines, each drawn as a closed or open tube.
+///
+/// What a population's outline is: two edge circles and four cross-sections, which is six
+/// curves and one draw. `em_map::outline` decides the curves and this turns them into
+/// geometry.
+pub fn tube_curves(curves: &[Vec<Vec3>], tube_radius: f32, tube_sides: u32, brightness: f32)
+    -> Mesh {
+    let mut buffers = Buffers::default();
+    for curve in curves {
+        // Already closed by the caller, which repeats its first point — so an open tube, or
+        // the joining quad would be laid over the repeat.
+        buffers.add(curve, brightness, tube_radius, tube_sides, false);
+    }
+    buffers.into_mesh()
+}
+
 /// Several tubes accumulating into one mesh, keeping the index offset right.
 #[derive(Default)]
 struct Buffers {
@@ -607,6 +623,27 @@ mod tests {
         heights.sort_by(f32::total_cmp);
         heights.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
         assert_eq!(heights.len(), 12, "six dashes have twelve ends");
+    }
+
+    /// A set of curves becomes one mesh, and an empty set is still a wireframe rather than a
+    /// panic.
+    #[test]
+    fn curves_become_one_tube_mesh() {
+        let square: Vec<Vec3> = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)]
+            .iter()
+            .map(|(x, z)| Vec3::new(*x, 0.0, *z))
+            .collect();
+        let one = tube_curves(std::slice::from_ref(&square), 0.01, 4, 1.0);
+        let two = tube_curves(&[square.clone(), square], 0.01, 4, 1.0);
+        assert_eq!(positions(&two).len(), 2 * positions(&one).len());
+        assert!(
+            two.indices().unwrap().iter().all(|i| (i as usize) < positions(&two).len()),
+            "the second curve's indices were not offset",
+        );
+
+        let empty = tube_curves(&[], 0.01, 4, 1.0);
+        assert!(positions(&empty).is_empty());
+        assert!(empty.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
     }
 
     /// Asking for nothing must not produce a mesh that divides by zero or wraps.

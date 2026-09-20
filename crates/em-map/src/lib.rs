@@ -26,12 +26,13 @@
 
 pub mod camera;
 pub mod frame;
+pub mod outline;
 pub mod plane;
 pub mod rings;
 pub mod snapshot;
 
 pub use camera::Orbit;
-pub use frame::{MapFrame, Placement, RingPlacement, compose};
+pub use frame::{Annulus, MapFrame, Placement, RingPlacement, compose};
 pub use plane::Plane;
 pub use rings::Ring;
 pub use snapshot::{ItemKey, ItemKind, MapItem, MapSnapshot, Provenance};
