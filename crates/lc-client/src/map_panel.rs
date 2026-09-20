@@ -303,8 +303,8 @@ fn whole(
 /// square and anything painted here would be painted over it.
 ///
 /// The cost is real and worth stating. A drag begun on the square belongs to it wherever the
-/// cursor goes afterwards, so a right-press begun in the corner pans the map instead of turning
-/// the view. Every panel in the interface costs this; the square is the one never closed.
+/// cursor goes afterwards, so a right-press begun in the corner turns the map instead of the
+/// view. Every panel in the interface costs this; the square is the one never closed.
 fn square_area(ctx: &egui::Context, square: egui::Rect, map: Option<&Map>) -> egui::Response {
     egui::Area::new(corner_id())
         // Middle, not Foreground: an open window has to cover this.
@@ -550,11 +550,27 @@ fn controls(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<
     });
 }
 
-/// Drag and wheel over the full surface: left turns, right pans.
+/// What a drag on the map does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Drag {
+    Turn,
+    Pan,
+}
+
+/// **The right button turns whatever view is under it.** It is the sky's look button, and one
+/// button meaning opposite things on the two modes of the same screen is worse than either
+/// meaning. Everything else pans.
+fn drag_of(right: bool) -> Drag {
+    match right {
+        true => Drag::Turn,
+        false => Drag::Pan,
+    }
+}
+
+/// Drag and wheel over the full surface: right turns, left pans.
 ///
-/// Right is also the sky's look button, so a right-press that starts on either map surface
-/// pans the map and not the view. `grab_cursor` stands down while egui wants the pointer, and
-/// the drag belongs to the widget it began on.
+/// A right-press that starts on the map turns the map and not the ship, because a drag belongs
+/// to the widget it began on and `grab_cursor` stands down while egui wants the pointer.
 fn read_input(
     ctx: &egui::Context,
     response: &egui::Response,
@@ -565,21 +581,18 @@ fn read_input(
 ) {
     if response.dragged() {
         let delta = response.drag_delta();
-        // Right as well as middle: the corner square is too small to hold a modifier over.
-        let panning = response.dragged_by(egui::PointerButton::Secondary)
-            || response.dragged_by(egui::PointerButton::Middle)
-            || ctx.input(|i| i.modifiers.shift);
-        if panning {
-            let span = rect.width().max(rect.height()).max(1.0) as f64;
-            ask(out, Action::PanMap {
-                right: -delta.x as f64 / span * PAN_PER_VIEWPORT,
-                ahead: delta.y as f64 / span * PAN_PER_VIEWPORT,
-            });
-        } else {
-            ask(out, Action::TurnMap {
+        match drag_of(response.dragged_by(egui::PointerButton::Secondary)) {
+            Drag::Pan => {
+                let span = rect.width().max(rect.height()).max(1.0) as f64;
+                ask(out, Action::PanMap {
+                    right: -delta.x as f64 / span * PAN_PER_VIEWPORT,
+                    ahead: delta.y as f64 / span * PAN_PER_VIEWPORT,
+                });
+            }
+            Drag::Turn => ask(out, Action::TurnMap {
                 azimuth: -delta.x as f64 * TURN_PER_POINT,
                 elevation: delta.y as f64 * TURN_PER_POINT,
-            });
+            }),
         }
     }
     read_wheel_only(ctx, response, rect, view, map, out);
@@ -743,6 +756,16 @@ mod tests {
         let taken = uv(rect, quarter);
         assert_eq!(taken.min, egui::pos2(0.0, 0.0));
         assert_eq!(taken.max, egui::pos2(0.5, 0.5));
+    }
+
+    /// **The look button means the same thing on both modes of the screen.** Both halves are
+    /// pinned here, because the pair is the claim: move the sky's look to another button and
+    /// this says so rather than leaving the map turning on the one the sky no longer uses.
+    #[test]
+    fn the_look_button_turns_whichever_view_is_under_it() {
+        assert_eq!(crate::input::LOOK_BUTTON, bevy::input::mouse::MouseButton::Right);
+        assert_eq!(drag_of(true), Drag::Turn, "which is egui's secondary");
+        assert_eq!(drag_of(false), Drag::Pan);
     }
 
     /// The wheel does not break a lock. Zooming toward the pointer moves the focus and

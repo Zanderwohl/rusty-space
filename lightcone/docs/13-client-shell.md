@@ -713,7 +713,7 @@ a locked center does not cost the lock.
 
 What the camera looks at is a separate thing with three states. **Free** is wherever a pan left
 it; **the ship** and **a body** lock the center and hold it every frame until the next pan,
-which drops back to free. A right-drag is that pan.
+which drops back to free. A left-drag is that pan.
 
 The reference plane is the **local ecliptic or the disc of the galaxy**, and the toggle tilts
 the whole view because the camera's own angles are measured in the plane's basis. Concentric
@@ -794,9 +794,13 @@ the world is being flown. Transforms are camera-relative, so an entity belongs t
 camera and two independently aimed views would need two sets of them. There has never been a
 second framing to want.
 
-Both surfaces take the same gestures — **left-drag turns, right-drag pans, the wheel zooms** —
+Both surfaces take the same gestures — **right-drag turns, left-drag pans, the wheel zooms** —
 through one function, because two views of one thing that answer a drag differently is worse
 than either answer. A click is the extra one, and it swaps the modes.
+
+**The right button turns whichever view is under it.** It is the sky's look button, and the map
+is the other mode of the same screen, so one button meaning opposite things on the two of them
+is worse than either meaning. Panning is what the button that was left over does.
 
 **Nothing paints in the square while the map is the view.** The world's camera is drawing into
 exactly those pixels, so the image is painted as the pieces around the square and a name that
@@ -805,8 +809,8 @@ would land on it is dropped: a name alone over the world reads as a name for the
 **The ship's own view controls are held to the world's mode.** In the map's mode a drag over the
 map would otherwise turn the ship behind it, and two modes would be fighting over one pointer.
 In the world's mode the corner costs what every panel costs: egui takes the pointer over it, so
-hovering the square stops the boom zooming and a right-press begun there pans the map. The
-square is the only surface that is never closed, and it is 190 points.
+hovering the square stops the boom zooming and a right-press begun there turns the map rather
+than the view. The square is the only surface that is never closed, and it is 190 points.
 
 ### Belts, rings and clouds are drawn as themselves
 

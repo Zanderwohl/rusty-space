@@ -31,12 +31,13 @@ makes egui *want* the pointer, and `crate::input`'s wheel and cursor grab both a
 down when it does — so a drag on the map does not also fly the ship, with no new coordination
 and no flag.
 
-Which button matters, and giving one away has a price. **Left** turns the map and **right**
-pans it — and right is also the sky's look button, so a right-press that starts on a map
-surface turns the map and not the view. The grab is asked for once, on the press, and
-`grab_cursor` stands down while egui wants the pointer. That is a drag belonging to the widget
-it began on, which is right; what makes it worth saying is that the map's corner square is never
-closed, so that corner always answers.
+Which button matters. **Right** turns the map, because right is the sky's look button and the
+map is the other mode of the same screen: one button meaning opposite things on the two of them
+is worse than either meaning. So a right-press that starts on a map surface turns the map and
+not the sky behind it. The grab is asked for once, on the press, and `grab_cursor` stands down
+while egui wants the pointer. That is a drag belonging to the widget it began on, which is
+right; what makes it worth saying is that the map's corner square is never closed, so that
+corner always answers.
 
 ## One surface at a time
 
