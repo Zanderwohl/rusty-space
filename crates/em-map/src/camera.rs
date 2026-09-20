@@ -138,30 +138,43 @@ impl Orbit {
             .normalize_or(forward)
     }
 
+    /// Where a camera-relative offset lands on the viewport, in normalized device
+    /// coordinates. The exact inverse of [`Orbit::ray`].
+    ///
+    /// `offset` is in simulation axes from the eye. `None` for anything at or behind the plane
+    /// of the eye; [`Orbit::clip`] is the form that can still answer for those.
+    pub fn project(&self, plane: Plane, offset: DVec3, fov_y: f64, aspect: f64)
+        -> Option<glam::DVec2> {
+        let clip = self.clip(plane, offset, fov_y, aspect);
+        if !(clip.w > 0.0) || !clip.w.is_finite() {
+            return None;
+        }
+        Some(glam::DVec2::new(clip.x / clip.w, clip.y / clip.w))
+    }
+
+    /// The same projection with the perspective divide **not** applied.
+    ///
+    /// `w` is the depth along the view direction, so it is negative behind the eye while `x`
+    /// and `y` keep their signs — which is the whole reason this exists. Dividing anyway
+    /// mirrors a thing behind the camera through the middle of the view, and an edge marker
+    /// built from that points away from what it is marking. `z` is unused: nothing here reads
+    /// depth back.
+    pub fn clip(&self, plane: Plane, offset: DVec3, fov_y: f64, aspect: f64) -> glam::DVec4 {
+        let (forward, right, up) = self.view_basis(plane);
+        let tan_half = (fov_y * 0.5).tan();
+        glam::DVec4::new(
+            offset.dot(right) / (tan_half * aspect),
+            offset.dot(up) / tan_half,
+            0.0,
+            offset.dot(forward),
+        )
+    }
+
     /// The camera's own orthonormal frame: forward, screen right, screen up.
     ///
     /// Not the plane's normal for up. [`Orbit::orientation`] hands out the normal because
     /// `look_to` wants it and orthonormalizes it; at any elevation but zero the normal is not
     /// perpendicular to forward, so anything casting rays has to orthonormalize too.
-    /// Where a camera-relative offset lands on the viewport, in normalized device
-    /// coordinates. The exact inverse of [`Orbit::ray`].
-    ///
-    /// `offset` is in simulation axes from the eye. `None` for anything at or behind the plane
-    /// of the eye, which the caller drops rather than marking at the edge.
-    pub fn project(&self, plane: Plane, offset: DVec3, fov_y: f64, aspect: f64)
-        -> Option<glam::DVec2> {
-        let (forward, right, up) = self.view_basis(plane);
-        let depth = offset.dot(forward);
-        if !(depth > 0.0) || !depth.is_finite() {
-            return None;
-        }
-        let tan_half = (fov_y * 0.5).tan();
-        Some(glam::DVec2::new(
-            offset.dot(right) / (depth * tan_half * aspect),
-            offset.dot(up) / (depth * tan_half),
-        ))
-    }
-
     pub fn view_basis(&self, plane: Plane) -> (DVec3, DVec3, DVec3) {
         let (forward, normal) = self.orientation(plane);
         let right = forward.cross(normal).normalize_or(DVec3::X);
@@ -239,6 +252,42 @@ mod tests {
                 let (forward, ..) = orbit.view_basis(plane);
                 assert!(orbit.project(plane, -forward, fov, aspect).is_none());
                 assert!(orbit.project(plane, DVec3::ZERO, fov, aspect).is_none());
+            }
+        }
+    }
+
+    /// **Behind the eye keeps its sign.** A marker at the edge of the view is built from the
+    /// undivided form, and dividing through a negative `w` mirrors the point across the middle
+    /// — which puts the arrow on the wrong edge, pointing away from what it marks.
+    #[test]
+    fn the_undivided_form_still_says_which_way_a_thing_lies() {
+        let fov = std::f64::consts::FRAC_PI_4;
+        let orbit = Orbit::framing(DVec3::ZERO, M_PER_AU);
+        let (forward, right, up) = orbit.view_basis(Plane::Ecliptic);
+
+        // Behind and to the right: `w` is negative and `x` is positive, which is the pair a
+        // caller reads. Dividing gives a negative `x` and an arrow at the left edge.
+        let behind = -forward * 2.0 + right * 0.5 + up * 0.25;
+        let clip = orbit.clip(Plane::Ecliptic, behind, fov, 1.6);
+        assert!(clip.w < 0.0, "{clip:?}");
+        assert!(clip.x > 0.0 && clip.y > 0.0, "{clip:?}");
+        assert!(orbit.project(Plane::Ecliptic, behind, fov, 1.6).is_none());
+    }
+
+    /// And in front it is the projection, exactly. Two functions hoping to agree is the bug
+    /// this pair exists to rule out: the labels project and the marks clip, over one picture.
+    #[test]
+    fn dividing_the_clip_is_the_projection() {
+        let fov = std::f64::consts::FRAC_PI_4;
+        let orbit = Orbit { focus_ly: DVec3::new(0.3, -0.2, 0.05), azimuth: 0.9,
+            elevation: 0.4, log_distance_m: 12.0 };
+        for plane in [Plane::Ecliptic, Plane::Galactic] {
+            for ndc in [glam::DVec2::ZERO, glam::DVec2::new(0.9, -0.4)] {
+                let offset = orbit.ray(plane, ndc, fov, 1.6) * 3.0;
+                let clip = orbit.clip(plane, offset, fov, 1.6);
+                let divided = glam::DVec2::new(clip.x / clip.w, clip.y / clip.w);
+                let projected = orbit.project(plane, offset, fov, 1.6).expect("in front");
+                assert!((divided - projected).length() < 1.0e-12, "{plane:?} {ndc:?}");
             }
         }
     }
