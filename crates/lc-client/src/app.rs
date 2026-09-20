@@ -115,6 +115,10 @@ pub struct DevEntry {
     /// Put the ship straight onto a station, by [`crate::navigation::Course::parse`] spelling.
     /// The same courses the interface offers, without the crossing in between.
     pub station: Option<String>,
+    /// Center the map on the local star, which needs a system loaded and so cannot be an
+    /// action parsed at the entry.
+    pub map_focus_star: bool,
+
     /// Where the map's camera stands: bearing and elevation in degrees, stand-off in
     /// astronomical units. A light-year is 63 241 of them.
     ///
@@ -226,6 +230,7 @@ impl Plugin for ClientPlugin {
                     // After the framing, because a pin overrules everything including that.
                     pin_camera.run_if(in_state(AppState::InGame)),
                     pin_map_camera.run_if(in_state(AppState::InGame)),
+                    focus_map_star.run_if(in_state(AppState::InGame)),
                     // The clock is deliberately not gated on any panel or overlay. See
                     // lightcone/docs/13-client-shell.md: the game does not pause.
                     advance_clock.run_if(in_state(AppState::InGame)),
@@ -656,6 +661,15 @@ fn pin_camera(dev: Res<DevEntry>, mut ui: ResMut<Ui>) {
     ui.look.yaw = yaw_deg.to_radians();
     ui.look.pitch = pitch_deg.to_radians();
     ui.boom_lengths = booms;
+}
+
+/// Center the map on the local star once there is one to center on.
+fn focus_map_star(dev: Res<DevEntry>, game: Res<Game>, mut ui: ResMut<Ui>) {
+    if !dev.map_focus_star {
+        return;
+    }
+    let Some(system) = game.0.system.as_ref() else { return };
+    ui.map.focus = crate::ui::MapFocus::Item(em_map::ItemKey::from_id("star", system.star.get()));
 }
 
 /// The same, for the map. See [`DevEntry::map_camera`].

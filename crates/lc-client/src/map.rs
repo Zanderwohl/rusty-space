@@ -542,7 +542,8 @@ fn drop_transform(placement: &Placement) -> Transform {
 fn ring_transform(frame: &MapFrame, radius: f32) -> Transform {
     let normal = render(frame.plane_normal.as_dvec3()).normalize();
     Transform {
-        translation: render(frame.focus.as_dvec3()),
+        // The ship, not the focus: the scale is the observer's. See `MapFrame::rings_at`.
+        translation: render(frame.rings_at.as_dvec3()),
         rotation: Quat::from_rotation_arc(Vec3::Y, normal),
         scale: Vec3::splat(radius.max(f32::MIN_POSITIVE)),
     }

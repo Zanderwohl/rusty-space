@@ -374,6 +374,7 @@ seven hours twenty times a second having never drifted at all.
 | `--curve <n>` | which band the light curve measures |
 | `--map <bearing:elevation:au>` | pin the map's camera. A light-year is 63 241 astronomical units |
 | `--map-plane <ecliptic\|galactic>` | which plane the map lays its rings in |
+| `--map-focus <ship\|star\|free>` | what the map's camera locks onto |
 | `--tune` | open the starfield tuning panel |
 | `--frames <n>` | frames before the shutter |
 | `--at <body>` | stand off a named body of the local system |
@@ -645,6 +646,15 @@ was arrived at. One observer's instruments, several folded together, and a coord
 reading with no light delay are three providers and one type, so switching perspective is
 choosing a function rather than writing a second renderer. That is the whole reason the seam is
 in `em-map` and not in the ECS.
+
+**The rings and the spokes are centered on the ship, always.** Not on whatever the camera is
+looking at: a decade ring answers "how far is that from *me*", and the whole game is the ship's
+perspective. Center the camera on a star and the scale stays where you are, which is what makes
+the offset between the two readable instead of hiding it.
+
+What the camera looks at is a separate thing with three states. **Free** is wherever a pan left
+it; **the ship** and **a body** lock the center and hold it every frame until the next pan,
+which drops back to free. A right-drag is that pan.
 
 The reference plane is the **local ecliptic or the disc of the galaxy**, and the toggle tilts
 the whole view because the camera's own angles are measured in the plane's basis. Concentric
