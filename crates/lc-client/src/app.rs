@@ -115,6 +115,15 @@ pub struct DevEntry {
     /// Put the ship straight onto a station, by [`crate::navigation::Course::parse`] spelling.
     /// The same courses the interface offers, without the crossing in between.
     pub station: Option<String>,
+    /// Where the map's camera stands: bearing and elevation in degrees, stand-off in
+    /// astronomical units. A light-year is 63 241 of them.
+    ///
+    /// A **pin**, written every frame after the dispatcher, for the reason `--demo-cam` is
+    /// one: `--turn` and `--pitch` are actions and race whatever else aims the view, and two
+    /// runs of the same command came back framed differently. Two shots meant to be compared
+    /// have to be the same shot.
+    pub map_camera: Option<(f64, f64, f64)>,
+
     /// Degrees to lift the ship out of the ecliptic, about the star, keeping its distance.
     ///
     /// Every station the interface offers is in the plane, and every population's pole is the
@@ -216,6 +225,7 @@ impl Plugin for ClientPlugin {
                     open_the_radio.run_if(in_state(AppState::InGame)),
                     // After the framing, because a pin overrules everything including that.
                     pin_camera.run_if(in_state(AppState::InGame)),
+                    pin_map_camera.run_if(in_state(AppState::InGame)),
                     // The clock is deliberately not gated on any panel or overlay. See
                     // lightcone/docs/13-client-shell.md: the game does not pause.
                     advance_clock.run_if(in_state(AppState::InGame)),
@@ -646,6 +656,17 @@ fn pin_camera(dev: Res<DevEntry>, mut ui: ResMut<Ui>) {
     ui.look.yaw = yaw_deg.to_radians();
     ui.look.pitch = pitch_deg.to_radians();
     ui.boom_lengths = booms;
+}
+
+/// The same, for the map. See [`DevEntry::map_camera`].
+fn pin_map_camera(dev: Res<DevEntry>, mut ui: ResMut<Ui>) {
+    let Some((azimuth_deg, elevation_deg, au)) = dev.map_camera else { return };
+    ui.map.orbit.azimuth = azimuth_deg.to_radians();
+    // Through `turn` from zero rather than written, so the two clamps apply: a pinned
+    // elevation of zero is a view in the plane, and the camera is never in the plane.
+    ui.map.orbit.elevation = 0.0;
+    ui.map.orbit.turn(0.0, elevation_deg.to_radians());
+    ui.map.orbit.set_distance_m(au * em_map::snapshot::M_PER_AU);
 }
 
 /// Photograph the sky through the real pipeline, then quit.

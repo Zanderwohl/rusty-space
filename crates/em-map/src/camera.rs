@@ -18,10 +18,17 @@ pub const ELEVATION_LIMIT: f64 = std::f64::consts::FRAC_PI_2 - 1.0e-3;
 /// disc from re-teaching it.
 ///
 /// An angle rather than a distance, so the stand-off it buys scales by itself: `d · sin` of
-/// this is 300 000 km at one astronomical unit and two meters at a kilometer, which is a few
-/// render units of whatever tier is in force either way. A tenth of a degree, so a view meant
-/// to be edge-on still reads as edge-on.
-pub const ELEVATION_FLOOR: f64 = 2.0e-3;
+/// this is a fixed fraction of the view at every scale.
+///
+/// **It has to exceed the angular half-width of a drawn line, and the first value did not.**
+/// A line is a tube, and a tube a host draws at 1.6 pixels has an angular radius of about
+/// three milliradians from the camera. At a floor of two, the camera cleared the plane by less
+/// than that and sat *inside* the nearest ring — and the inside of a tube is a solid wall, so
+/// an edge-on map came out as a rectangle of flat green with nothing in it.
+///
+/// Three degrees. Still edge-on to look at, and a whole order of magnitude clear of any tube
+/// the host is likely to draw.
+pub const ELEVATION_FLOOR: f64 = 5.0e-2;
 
 /// Decades of stand-off per notch of wheel.
 ///

@@ -81,6 +81,12 @@ const FAR_MULTIPLE: f32 = 1.0e6;
 /// Divisions of a decade ring. Enough that the largest one does not read as a polygon.
 const RING_SEGMENTS: u32 = 128;
 
+/// How far the spokes reach, as a fraction of the stand-off.
+///
+/// Short of the camera, deliberately. Reaching exactly the stand-off put the rim of one spoke
+/// at precisely the eye, so an edge-on view was taken from inside a tube.
+const SPOKE_REACH: f32 = 0.5;
+
 /// Radial spokes in the reference plane.
 ///
 /// **Sized to the stand-off, not to the outermost ring.** Every point of a ring is the same
@@ -372,7 +378,7 @@ fn place(
             at.translation.length().max(ring.radius), LINE_TUBE_FRACTION);
     }
     if let Ok((mut at, material)) = spokes.single_mut() {
-        *at = ring_transform(&frame, standoff);
+        *at = ring_transform(&frame, standoff * SPOKE_REACH);
         set_thickness(&mut materials, material, standoff, rad_per_px, standoff,
             LINE_TUBE_FRACTION);
     }
@@ -478,7 +484,7 @@ fn spawn_scene(
     commands.spawn((
         Mesh3d(map.spokes.clone()),
         MeshMaterial3d(materials.add(line_material(SPOKE))),
-        ring_transform(frame, standoff),
+        ring_transform(frame, standoff * SPOKE_REACH),
         NoFrustumCulling,
         layer.clone(),
         MapDrawn,
