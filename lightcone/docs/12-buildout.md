@@ -368,6 +368,12 @@ for how `lc-store` applies and tests its schema.
 
 ### 11d — Conclusions
 
+**Built.** Protocol 31, save format 7, knowledge format 2. Transits only, for now: the hypotheses
+are *nothing transiting*, *rocky planet* and *giant planet*, because a transit is the one thing
+the generator places that photometry sees on a period. Swarms and belts, which it also places,
+are the next hypotheses; their first two moments are already what `emission::invert_moments`
+inverts. The starting ship carries no data module, so the balance it was tuned to is unchanged.
+
 **Before:** 11c.
 
 **Deliver:** the data module and knowledge fullness — a `Loadout` count, `data_per_module`, and

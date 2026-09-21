@@ -83,8 +83,7 @@ it does, exactly as `lc_ships` does for motion.
 | duty and report marks | the ship checkpoint, `persist::Saved::instruments`, save format 6 |
 | what is written | only what changed since the last checkpoint: `Knowledge::take_changes` hands over the files touched, without their samples, and the samples taken |
 
-Two things are true for now and will not stay true. **Every sample is loaded at start**, because
-nothing consumes them yet; 11d is what bounds that. And **the store is not partitioned by shard**:
+One thing is true for now and will not stay true: **the store is not partitioned by shard**:
 a shard loads every craft's knowledge and keeps what belongs to the craft it adopted, the same way
 it already loads every ship.
 
@@ -174,7 +173,35 @@ The checkpoint in `lc_ships` grows to hold what a craft is committed to as well 
 its duty, its reporting marks per recipient, and — once relays exist — the bundles it has
 custody of. A shard that restarts resumes all of it.
 
+### As built: reading a log
+
+| what | where |
+|---|---|
+| the search | `knowledge::transit`: box least squares over period, phase and duration, bands combined by inverse variance, scatter beyond the error bars found from the median absolute deviation and allowed for |
+| the probability | a marginal likelihood — the box's likelihood ratio averaged over every period, phase, duration and depth, weighted by a prior measured from the generator's own ladder (`sky::generate::ladder`) over the world's stars, with orientation integrated exactly. A planet the generator cannot make has zero prior and cannot be concluded |
+| a lone deep dip | a planet too wide to transit twice in the log fits under a box at almost any period, and would win. Dips far out of the noise that no period repeats are set aside before the search, and a period is only believed if every transit it predicts that the log covers is there |
+| when it is read | `Knowledge::due`: after 96 new samples and half as many again as last time, so all the reads of a long watch cost a few times the last. A shard reads one log a tick, taking craft in turn |
+| settled | the leading hypothesis at 99%: a planet after three transits; *nothing transiting* only when the data argue against a planet twentyfold **and** the log is long enough that one at periods it could not yet search is unlikely too — thrown away sooner, a log could never find a planet wider than itself |
+| what is kept | `Digest`: the settled search's odds and folds at the planet's period and two either side at its error, so later samples refine it. The samples go, from memory and, at the next checkpoint, from `lc_samples` |
+| what travels | `Conclusion`, in a report's part, with its evidence, its covering and `discarded_s`. A replica drops its copy of the log when it hears its original did |
+
+### As built: room
+
+A byte here is a game unit — a fixed size per record, near what postcard writes — so counting is
+cheap and does not move with an encoding. `data_per_module` is one year of a thirty-minute stare
+in every band, about 2.1 MB; a craft with no data modules has `ONBOARD_DATA_BYTES`, 1 MiB, which
+holds the charts, a first sweep and a couple of months of one star. The shard recounts a craft's
+room when its loadout changes, after its log is read, and otherwise one craft a tick; samples keep
+the count between recounts. The client shows the room and never enforces it: the shard is what
+decides what was kept.
+
 ## Open
+
+- **Reading is on the tick thread.** A read is a search over thousands of periods, well under a
+  second in a release build and one log a tick, but it is the first thing on the shard whose cost
+  grows with how long a player has been watching. It belongs on a worker once shards are busy.
+- **A craft with no shard does not read its logs.** The offline client runs the instruments but
+  not the pipeline.
 
 - **How often processing runs**, and whether it costs anything. Compute is free on the server
   but it need not be free in the game; a probe with no processor might only be able to forward

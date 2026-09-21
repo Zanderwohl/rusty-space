@@ -90,6 +90,8 @@ pub enum Action {
     WatchSelected,
     /// Call the selected star something. A name is this ship's, not the star's.
     NameSelected(String),
+    /// Keep a star's raw log whatever is concluded from it, or let it go once it has been read.
+    RetainRaw(StarId, bool),
     /// Send what this ship has learnt since it last reported to `to`.
     SendReport {
         to: Option<lc_proto::ShipId>,
@@ -352,6 +354,13 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             Some(_) => effects.push(Effect::Notify("nothing detected there to name".into())),
             None => effects.push(Effect::Notify("nothing selected to name".into())),
         },
+        Action::RetainRaw(id, keep) => {
+            if session.remote {
+                effects.push(Effect::Send(lc_proto::Order::RetainRaw { subject: lc_proto::Subject::Star(id.get()), keep }));
+            } else {
+                session.knowledge.retain_raw(id, keep);
+            }
+        }
         Action::WatchSelected => match ui.selected {
             Some(id) => {
                 let mut targets = match &session.observatory.duty {
@@ -1281,6 +1290,9 @@ mod tests {
         let report = Action::SendReport { to, aim: lc_proto::Aim::Omni, secrecy: lc_proto::Secrecy::Open };
         let sent = orders(&apply(report, &mut ui, &mut s));
         assert!(matches!(sent.as_slice(), [lc_proto::Order::SendReport { to: Some(_), .. }]));
+        let sent = orders(&apply(Action::RetainRaw(id, true), &mut ui, &mut s));
+        assert!(matches!(sent.as_slice(), [lc_proto::Order::RetainRaw { keep: true, .. }]), "{sent:?}");
+        assert!(!s.knowledge.retained(id), "kept when the shard says so, not before");
     }
 
 

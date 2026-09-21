@@ -24,7 +24,8 @@ A hull is divided into **slots**, and each module fills one. There are four kind
 | **engine** | a fixed thrust each; acceleration is total thrust over mass |
 | **data** | holds a craft's knowledge — files and raw logs — up to `data_per_module` each, with a fullness exactly as storage has; see [24-standing-instruments.md](24-standing-instruments.md) |
 
-A `Loadout` is four counts and a slot total. It belongs to a `Craft`, not to its `ShipState`:
+A `Loadout` is five counts and a slot total. The starting ship has no data module: it watches on
+the onboard store, and building one is a refit like any other. It belongs to a `Craft`, not to its `ShipState`:
 `motion::apply` is pure motion and stays that way. Only a player's ship gets a loadout. Craft a
 scene stages have none and keep flying on `Kind::drive()`, so the director and every demo work
 as they do now.
@@ -218,7 +219,7 @@ keeps the welcome's shape and puts the numbers next to what they govern.
 | `engine_thrust_n` | 7.24 × 10¹⁰ N | 1 g of the starting ship, full, per engine, so five engines give today's 5 g |
 | `drone_power_w` | 2.31 × 10¹⁹ W | one drone builds one module in a week of proper time — about 69 s of real time at the design rate |
 | `living_drain_w` | 4.43 × 10¹⁵ W | one living module drains 1 ME a century |
-| `data_per_module` | *anchored* | sized so a surveyed sky's files fit comfortably and raw logs are what fill it |
+| `data_per_module` | 2.1 MB | a year of a thirty-minute stare in every band: a surveyed sky's files fit several times over, and raw logs are what fill it. A craft with none still has a 1 MiB onboard store |
 | `transmit_gain` | *anchored* | physical link-budget energy to stored energy; see [23-factions.md](23-factions.md#cost) |
 | `hull_density` | 50 kg/m³ | frame mass per slot, and so what growing the hull costs |
 | `slot_volume_m3` | 392 699 | |

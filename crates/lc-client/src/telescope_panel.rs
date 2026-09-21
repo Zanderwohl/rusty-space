@@ -9,6 +9,7 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use em_spectra::presets;
 use lc_world::knowledge::Distance;
+use lc_world::knowledge::conclusion::Kind;
 use lc_world::knowledge::survey::Duty;
 use lc_world::sky::StarId;
 
@@ -37,6 +38,7 @@ pub fn telescope(
     ui.separator();
 
     duty(ui, game, out);
+    room(ui, game);
     ui.separator();
 
     ui.label(format!("Detected: {} stars", game.knowledge.stars().count()));
@@ -67,7 +69,70 @@ pub fn telescope(
     ui.separator();
 
     provenance(ui, game);
+    conclusion(ui, game, out);
     curve(ui, state, game, out, plot);
+}
+
+/// How much of the room aboard what this ship knows takes.
+fn room(ui: &mut egui::Ui, game: &Game) {
+    let now = game.coordinate_time_s();
+    let capacity = game
+        .ship
+        .fitting()
+        .map_or(lc_world::fitting::ONBOARD_DATA_BYTES, |f| f.balance.data_capacity(&f.loadout_at(now)));
+    let used = game.knowledge.bytes();
+    let mb = |bytes: f64| bytes / 1_048_576.0;
+    ui.label(format!("Data: {:.2} of {:.2} MB", mb(used), mb(capacity)));
+    if used >= capacity {
+        ui.colored_label(
+            egui::Color32::from_rgb(230, 150, 60),
+            "Full: the telescope still measures, but nothing keeps the samples. Reading a log into a conclusion frees its room.",
+        );
+    }
+}
+
+/// What this ship has concluded from the log of whatever is under the crosshair.
+///
+/// A probability with its evidence, never a verdict: see
+/// `lightcone/docs/24-standing-instruments.md`.
+fn conclusion(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
+    let Some(id) = game.pointing.filter(|id| game.knowledge.knows(*id)) else { return };
+    let day = 86_400.0;
+    match game.knowledge.conclusion(id) {
+        None => {
+            ui.weak("The log has not been read yet.");
+        }
+        Some(c) => {
+            for h in c.hypotheses.iter().filter(|h| h.probability >= 0.005) {
+                let percent = h.probability * 100.0;
+                match h.kind {
+                    Kind::Quiet => ui.label(format!("nothing transiting — {percent:.0}%")),
+                    Kind::Planet { class, transit } => ui.label(format!(
+                        "{}, P = {:.4} ± {:.4} d, depth {:.1e} — {percent:.0}%",
+                        class.name(),
+                        transit.period_s / day,
+                        transit.period_sigma_s / day,
+                        transit.depth,
+                    )),
+                };
+            }
+            let whose = if c.observer == game.knowledge.owner { "this ship's" } else { "another craft's" };
+            ui.weak(format!(
+                "From {} of {whose} samples in {} bands, periods {:.1} to {:.1} d searched.",
+                c.evidence.samples,
+                c.evidence.bands.count_ones(),
+                c.evidence.periods_s.0 / day,
+                c.evidence.periods_s.1 / day,
+            ));
+            if c.discarded_s.is_some() {
+                ui.weak("The log behind it has been thrown away; only the conclusion is left.");
+            }
+        }
+    }
+    let mut keep = game.knowledge.retained(id);
+    if ui.checkbox(&mut keep, "Keep the raw log").changed() {
+        ask(out, Action::RetainRaw(id, keep));
+    }
 }
 
 /// What the telescope is committed to, and how to commit it to something else.
