@@ -73,6 +73,27 @@ A blob rather than columns because the file is what is read and written, whole, 
 shape will keep changing for a while; a format version on the row lets old files be read after
 it does, exactly as `lc_ships` does for motion.
 
+### Data modules, and fullness
+
+What a craft knows takes room aboard. A **data module** ([19-ship-fitting.md](19-ship-fitting.md))
+holds `data_per_module`, and a craft's knowledge has a fullness against its total exactly as
+stored energy does against storage.
+
+The capacity is anchored so that the *files* — bearings, names, notes, conclusions — of a
+thoroughly surveyed neighbourhood fit comfortably, and the *logs* are what fill it. That puts the
+pressure where the design wants it:
+
+- **full, a craft stops recording raw samples**: the telescope keeps measuring and nothing keeps
+  the lines, and the panel says so. Files are never dropped for room — losing what you know
+  because you learnt something else would be a worse mechanic than refusing to learn more;
+- **consuming a log into a conclusion frees its room**, so processing is how a craft keeps
+  watching;
+- **"retain raw" costs room for as long as it is set**, which is what makes keeping a log a
+  decision.
+
+A craft with no data modules still has a small fixed onboard store, enough for its files and very
+little else, so a ship stripped for speed still knows where it is.
+
 ## Logs become conclusions
 
 A star log is raw lines: a flux, an error bar, an arrival time. At first a player looks at them

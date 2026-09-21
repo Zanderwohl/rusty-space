@@ -362,7 +362,8 @@ for how `lc-store` applies and tests its schema.
 
 **Before:** 11c.
 
-**Deliver:** a processing pass that turns a subject's log into conclusions — hypotheses with
+**Deliver:** the data module and knowledge fullness — a `Loadout` count, `data_per_module`, and
+logs that stop recording when full. A processing pass that turns a subject's log into conclusions — hypotheses with
 probabilities, parameters and evidence — and keeps sufficient statistics while deleting the
 samples consumed. A per-subject "retain raw" flag. Conclusions travel in reports.
 
@@ -398,7 +399,9 @@ sending in the old generation until the new key reaches them.
 
 **Before:** 11e.
 
-**Deliver:** bundles with origin, TTL and path; manual relay of any received report; automatic
+**Deliver:** first, transmission cost — every transmission draws stored energy by link-budget
+physics times `transmit_gain`, at a range the sender chooses, and that range sets its fan-out.
+Then bundles with origin, TTL and path; manual relay of any received report; automatic
 flooding of faction bundles with echo-only-new and split horizon; custody; routing tables of
 light-time cost advertised in reports, aged as they travel.
 
@@ -444,6 +447,8 @@ could have known of it.
 | key theft and forged identity | breaks the one guarantee factions keep, so it wants designing as its own mechanic |
 | commanding assets | certificates carry the capability already; there are no assets to command yet |
 | navigation on believed positions | deferred by decision; see [22-provenance.md](22-provenance.md) |
+| data rate limits | deferred by decision; the transmission-cost formula already takes the size |
+| out-of-game invitations | need the identity broker to carry an invite between accounts |
 
 ## Where a design error is most likely to surface
 

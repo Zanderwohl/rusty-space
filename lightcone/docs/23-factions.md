@@ -150,6 +150,16 @@ current key and a certificate. It should be **sealed to the invitee's ship key**
 have to be, and the interface allows the mistake while naming it: an open invitation hands the
 faction key to every craft in earshot.
 
+**A new craft belongs to nothing.** It starts unaffiliated, and the only way in is an invitation
+somebody sends.
+
+The one exception is an invitation from outside the game: a player invites a friend by email or
+the like, and when the friend creates an account, their first craft is created **already holding
+what that invitation would have delivered** — the key, the certificate, the faction's name — as if
+it had landed the instant the craft existed. It is the single place the game lets anything skip
+light delay, and it is honest about why: the invitation was not sent through space. It is not
+built yet; it needs the identity broker to carry an invite from one account to the next.
+
 There is no acceptance step the server enforces. Holding the key makes a craft able to read the
 channel; whether it considers itself a member, and whether anybody else does, is a social fact
 recorded in what it says next.
@@ -220,10 +230,36 @@ in range at the same time.
 
 ### Cost
 
-Every forwarded bundle is a transmission and spends energy from the same budget as everything
-else. A relay policy is therefore a budget as well as a rule: how much of its power a craft is
-willing to spend carrying other people's news. A faction that floods everything is loud,
-expensive and visible across the sky.
+**Every transmission costs stored energy**, relayed or not, by real physics scaled by one
+constant — the same arrangement solar income uses
+([20-solar-power.md](20-solar-power.md#balance)).
+
+The physics is a link budget. Delivering `bits` of data to a receiver of effective area `A` at
+distance `d`, with enough energy per bit `E_b` to clear its noise floor, takes
+
+```
+E = bits * E_b * 4 pi d^2 / (A * gain)
+```
+
+where `gain` is 1 for a shout and `4 pi / Omega` for a beam of solid angle `Omega`. Everything in
+that line is a mechanic already: range costs as its square, a beam is millions of times cheaper
+than a shout on axis, and a report costs in proportion to its size. The **range is the sender's
+choice** — enough to reach the addressee where it is believed to be, or a radius for a broadcast —
+and the same choice sets how far the signal is heard, which is the fan-out rule of
+[02-event-store.md](02-event-store.md#delivery-scheduling): a louder transmitter is heard by more
+craft and costs more.
+
+Real numbers are absurdly small against a module-energy of 1.4e25 J, so the energy drawn is that
+physical energy times `transmit_gain`, a `Balance` setting derived from a named anchor the way
+`solar_gain` is — for example, "an omnidirectional report of sixty-four stars to one light-year
+costs a hundredth of a storage module". Retuning is a change to the anchor.
+
+Until data rates exist, `bits` is the size of what is sent and nothing limits how fast it goes;
+rate limits are deferred by decision.
+
+A relay policy is therefore a budget as well as a rule: how much of its storage a craft will
+spend carrying other people's news. A faction that floods everything is loud, expensive and
+visible across the sky.
 
 ### Swarms relay as populations
 
@@ -373,7 +409,10 @@ content lives in the receiver's knowledge from the moment it lands.
 - **The spacing law** behind planet letters: which of the generator's quantities define the
   expected innermost orbit and the neighbour ratio, and whether small bodies and moons get a
   scheme of their own beyond discovery time.
-- **Whether flooding should be the default at all**, or opt-in, given what it costs in power and
-  in visibility. Measure it with twenty craft before deciding.
+- **Whether flooding should be the default at all**, or opt-in, given what it costs in stored
+  energy and in visibility. Measure it with twenty craft, with transmission costing, before
+  deciding.
+- **The anchors** for `transmit_gain` and `data_per_module`: one sentence each, chosen when the
+  steps that use them are built, and written down beside the solar anchor.
 - **Key theft**, dictionaries, and commanding assets: deferred by decision, and each sits on top
   of the certificates above without changing them.
