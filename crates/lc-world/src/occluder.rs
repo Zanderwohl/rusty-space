@@ -152,8 +152,12 @@ mod tests {
         if b <= (1.0 - ratio).abs() {
             return PI * ratio.min(1.0).powi(2);
         }
-        let a1 = ((b * b + 1.0 - ratio * ratio) / (2.0 * b)).clamp(-1.0, 1.0).acos();
-        let a2 = ((b * b + ratio * ratio - 1.0) / (2.0 * b * ratio)).clamp(-1.0, 1.0).acos();
+        let a1 = ((b * b + 1.0 - ratio * ratio) / (2.0 * b))
+            .clamp(-1.0, 1.0)
+            .acos();
+        let a2 = ((b * b + ratio * ratio - 1.0) / (2.0 * b * ratio))
+            .clamp(-1.0, 1.0)
+            .acos();
         let tri = 0.5
             * ((-b + 1.0 + ratio) * (b + 1.0 - ratio) * (b - 1.0 + ratio) * (b + 1.0 + ratio))
                 .max(0.0)
@@ -190,7 +194,10 @@ mod tests {
         let ratio = 0.1;
         let flat = transit_depth(0.0, ratio, (0.0, 0.0));
         let darkened = transit_depth(0.0, ratio, (0.4, 0.26));
-        assert!(darkened > flat * 1.15, "center is brighter: {darkened} vs {flat}");
+        assert!(
+            darkened > flat * 1.15,
+            "center is brighter: {darkened} vs {flat}"
+        );
     }
 
     #[test]

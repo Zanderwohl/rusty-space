@@ -22,12 +22,18 @@ pub struct Target {
 
 impl Target {
     pub fn new(frame: SystemFrame, initial: EmissionModel) -> Self {
-        Self { frame, history: vec![(frame.origin.t, initial)] }
+        Self {
+            frame,
+            history: vec![(frame.origin.t, initial)],
+        }
     }
 
     /// Append a model that takes effect at `from`. Later than every existing entry.
     pub fn changes_at(&mut self, from: Micros, model: EmissionModel) {
-        assert!(from >= self.history.last().unwrap().0, "history must be appended in order");
+        assert!(
+            from >= self.history.last().unwrap().0,
+            "history must be appended in order"
+        );
         self.history.push((from, model));
     }
 
@@ -67,7 +73,11 @@ pub struct BandMeasurement {
 impl BandMeasurement {
     /// How many sigma the measured change stands from zero. Negative for an excess.
     pub fn significance(&self) -> f64 {
-        if self.uncertainty > 0.0 { self.measured_deficit / self.uncertainty } else { 0.0 }
+        if self.uncertainty > 0.0 {
+            self.measured_deficit / self.uncertainty
+        } else {
+            0.0
+        }
     }
 
     /// Flux actually arriving, over what the bare star would give. Above one where re-emission
@@ -129,7 +139,11 @@ pub fn observe(
     if distance_m <= 0.0 {
         return None;
     }
-    let direction = if to_observer.length_squared() > 0.0 { to_observer.normalize() } else { DVec3::X };
+    let direction = if to_observer.length_squared() > 0.0 {
+        to_observer.normalize()
+    } else {
+        DVec3::X
+    };
 
     let model = target.model_at(Micros::new(t_r as i64));
     let local_t = target.frame.local_seconds(t_r);
@@ -174,7 +188,12 @@ pub fn observe(
         })
     }));
 
-    Some(Observation { retarded_time: t_r, light_travel, direction, bands })
+    Some(Observation {
+        retarded_time: t_r,
+        light_travel,
+        direction,
+        bands,
+    })
 }
 
 #[cfg(test)]
@@ -213,7 +232,10 @@ mod tests {
     }
 
     fn big_scope() -> Instrument {
-        Instrument::BASELINE.with_aperture(1e4).with_bands(BandMask::ALL).cooled_to(40.0)
+        Instrument::BASELINE
+            .with_aperture(1e4)
+            .with_bands(BandMask::ALL)
+            .cooled_to(40.0)
     }
 
     /// Steps 1 to 3 of the phase: what arrives describes the system at the retarded time.
@@ -226,9 +248,15 @@ mod tests {
         for t in [30.5, 40.0, 100.0] {
             let obs = observe(&target, observer_at(t), &big_scope(), 1e4, 7).unwrap();
             let age = obs.age_seconds() / YEAR_S;
-            assert!((age - 30.0).abs() < 1e-6, "light is {age} years old, expected 30");
+            assert!(
+                (age - 30.0).abs() < 1e-6,
+                "light is {age} years old, expected 30"
+            );
             let emitted_at = obs.retarded_time / LIGHT_YEAR_US;
-            assert!((emitted_at - (t - 30.0)).abs() < 1e-6, "emitted at {emitted_at}");
+            assert!(
+                (emitted_at - (t - 30.0)).abs() < 1e-6,
+                "emitted at {emitted_at}"
+            );
         }
     }
 
@@ -246,12 +274,21 @@ mod tests {
 
         let scope = big_scope();
         let deficit_at = |t: f64| {
-            observe(&target, observer_at(t), &scope, 1e6, 11).unwrap().band(Band::V).unwrap().true_deficit
+            observe(&target, observer_at(t), &scope, 1e6, 11)
+                .unwrap()
+                .band(Band::V)
+                .unwrap()
+                .true_deficit
         };
 
         // Before the light of the change can have arrived, nothing has changed.
         for t in [0.5, 10.0, 20.0, 39.0, 39.9999] {
-            assert_eq!(deficit_at(t), 0.0, "the swarm was visible {} years early", 40.0 - t);
+            assert_eq!(
+                deficit_at(t),
+                0.0,
+                "the swarm was visible {} years early",
+                40.0 - t
+            );
         }
         // After, it has.
         for t in [40.001, 45.0, 100.0] {
@@ -280,8 +317,15 @@ mod tests {
         let scope = big_scope();
         let n = observe(&target, near, &scope, 1e6, 3).unwrap();
         let f = observe(&target, far, &scope, 1e6, 3).unwrap();
-        assert!(n.band(Band::V).unwrap().true_deficit > 0.0, "the probe sees the swarm");
-        assert_eq!(f.band(Band::V).unwrap().true_deficit, 0.0, "the distant observer does not");
+        assert!(
+            n.band(Band::V).unwrap().true_deficit > 0.0,
+            "the probe sees the swarm"
+        );
+        assert_eq!(
+            f.band(Band::V).unwrap().true_deficit,
+            0.0,
+            "the distant observer does not"
+        );
         assert!(n.age_seconds() < f.age_seconds());
     }
 
@@ -298,7 +342,9 @@ mod tests {
         }
 
         let mut gray_model = EmissionModel::new(star, 5);
-        gray_model.populations.push(swarm(1.5e6, PerBand::splat(1.0)));
+        gray_model
+            .populations
+            .push(swarm(1.5e6, PerBand::splat(1.0)));
         let mut dust_model = EmissionModel::new(star, 5);
         dust_model.populations.push(swarm(1.5e6, dust_response));
 
@@ -316,7 +362,10 @@ mod tests {
         // In V the two are the same measurement, and there is no second band to compare.
         let (gv, dv) = (g1.band(Band::V).unwrap(), d1.band(Band::V).unwrap());
         assert!((gv.true_deficit / dv.true_deficit - 1.0).abs() < 1e-12);
-        assert!(g1.deficit_ratio(Band::B, Band::V).is_none(), "V alone has no ratio to form");
+        assert!(
+            g1.deficit_ratio(Band::B, Band::V).is_none(),
+            "V alone has no ratio to form"
+        );
 
         let (g2, d2) = (
             observe(&gray, at, &optical, 1e8, 1).unwrap(),
@@ -324,8 +373,14 @@ mod tests {
         );
         let gray_ratio = g2.deficit_ratio(Band::B, Band::V).unwrap();
         let dust_ratio = d2.deficit_ratio(Band::B, Band::V).unwrap();
-        assert!((gray_ratio - 1.0).abs() < 0.05, "a solid occulter is gray: {gray_ratio}");
-        assert!((dust_ratio - 1.32).abs() < 0.1, "dust reddens: {dust_ratio}");
+        assert!(
+            (gray_ratio - 1.0).abs() < 0.05,
+            "a solid occulter is gray: {gray_ratio}"
+        );
+        assert!(
+            (dust_ratio - 1.32).abs() < 0.1,
+            "dust reddens: {dust_ratio}"
+        );
     }
 
     #[test]
@@ -334,7 +389,12 @@ mod tests {
         let mut model = EmissionModel::new(star, 2);
         model.bodies.push(Body {
             occluder: Occluder::new(6.371e6),
-            motion: Box::new(CircularOrbit { radius_m: AU, pole: DVec3::Z, phase0: 0.0, mu: star.mu }),
+            motion: Box::new(CircularOrbit {
+                radius_m: AU,
+                pole: DVec3::Z,
+                phase0: 0.0,
+                mu: star.mu,
+            }),
         });
         let target = Target::new(frame_at_ly(30.0), model);
         let scope = big_scope();
@@ -345,10 +405,17 @@ mod tests {
             .map(|k| {
                 let t = base + k as f64 * period_us / 4000.0;
                 let at = Coord::new(Micros::new(t as i64), 0, 0, 0).unwrap();
-                observe(&target, at, &scope, 1.0, 4).unwrap().band(Band::V).unwrap().true_deficit
+                observe(&target, at, &scope, 1.0, 4)
+                    .unwrap()
+                    .band(Band::V)
+                    .unwrap()
+                    .true_deficit
             })
             .fold(0.0, f64::max);
-        assert!((deepest - 1.0186e-4).abs() < 5e-6, "transit depth {deepest}");
+        assert!(
+            (deepest - 1.0186e-4).abs() < 5e-6,
+            "transit depth {deepest}"
+        );
     }
 
     #[test]
@@ -359,7 +426,11 @@ mod tests {
         let at = observer_at(20.0);
         let scope = big_scope();
         let sigma = |exposure: f64| {
-            observe(&target, at, &scope, exposure, 1).unwrap().band(Band::V).unwrap().uncertainty
+            observe(&target, at, &scope, exposure, 1)
+                .unwrap()
+                .band(Band::V)
+                .unwrap()
+                .uncertainty
         };
         assert!((sigma(100.0) / sigma(10_000.0) - 10.0).abs() < 0.01);
     }
@@ -374,7 +445,11 @@ mod tests {
         let scope = big_scope();
         let sigma = |ly: f64| {
             let at = Coord::new(Micros::new(((ly + 1.0) * LIGHT_YEAR_US) as i64), 0, 0, 0).unwrap();
-            observe(&build(ly), at, &scope, 1e6, 1).unwrap().band(Band::V).unwrap().uncertainty
+            observe(&build(ly), at, &scope, 1e6, 1)
+                .unwrap()
+                .band(Band::V)
+                .unwrap()
+                .uncertainty
         };
         // Ten times further is a hundred times fewer photons, so ten times the noise.
         assert!((sigma(100.0) / sigma(10.0) - 10.0).abs() < 0.05);
@@ -389,11 +464,24 @@ mod tests {
         let warm = big_scope().cooled_to(290.0);
         let cold = big_scope().cooled_to(40.0);
         let sigma = |i: &Instrument| {
-            observe(&target, at, i, 1e4, 1).unwrap().band(Band::ThermalIr).unwrap().uncertainty
+            observe(&target, at, i, 1e4, 1)
+                .unwrap()
+                .band(Band::ThermalIr)
+                .unwrap()
+                .uncertainty
         };
-        assert!(sigma(&warm) / sigma(&cold) > 1e3, "self-emission must swamp the signal");
+        assert!(
+            sigma(&warm) / sigma(&cold) > 1e3,
+            "self-emission must swamp the signal"
+        );
         // And it costs nothing in V.
-        let v = |i: &Instrument| observe(&target, at, i, 1e4, 1).unwrap().band(Band::V).unwrap().uncertainty;
+        let v = |i: &Instrument| {
+            observe(&target, at, i, 1e4, 1)
+                .unwrap()
+                .band(Band::V)
+                .unwrap()
+                .uncertainty
+        };
         assert!((v(&warm) / v(&cold) - 1.0).abs() < 1e-9);
     }
 
@@ -405,7 +493,10 @@ mod tests {
         let too_early = Coord::new(Micros::new(Span::from_seconds(1).get()), 0, 0, 0).unwrap();
         let obs = observe(&target, too_early, &big_scope(), 1.0, 1);
         assert!(obs.is_some(), "a static star has always been emitting");
-        assert!(obs.unwrap().retarded_time < 0.0, "so the light on arrival left before t = 0");
+        assert!(
+            obs.unwrap().retarded_time < 0.0,
+            "so the light on arrival left before t = 0"
+        );
     }
 
     /// A swarm covering `coverage` of the sphere at one astronomical unit.
@@ -436,14 +527,27 @@ mod tests {
 
         let extra = model.reradiated();
         let occulted = model.deficit(DVec3::X, 0.0);
-        assert!(occulted[Band::V] > 0.3, "V should be well down, got {}", occulted[Band::V]);
-        assert!(extra[Band::V] < 1e-9, "and nothing warm emits visible light");
-        assert!(extra[Band::ThermalIr] > 50.0,
-            "ten microns should be swamped, got {}", extra[Band::ThermalIr]);
+        assert!(
+            occulted[Band::V] > 0.3,
+            "V should be well down, got {}",
+            occulted[Band::V]
+        );
+        assert!(
+            extra[Band::V] < 1e-9,
+            "and nothing warm emits visible light"
+        );
+        assert!(
+            extra[Band::ThermalIr] > 50.0,
+            "ten microns should be swamped, got {}",
+            extra[Band::ThermalIr]
+        );
 
         // And the two are the same population: occultation is gray, so V and I agree.
         let ratio = occulted[Band::I] / occulted[Band::V];
-        assert!((ratio - 1.0).abs() < 0.02, "solid occultation is gray, got {ratio}");
+        assert!(
+            (ratio - 1.0).abs() < 0.02,
+            "solid occultation is gray, got {ratio}"
+        );
     }
 
     /// The diagnostic, not merely the signature: transits move and waste heat does not. A swarm
@@ -457,12 +561,22 @@ mod tests {
         let mut visible = Vec::new();
         for k in 0..64 {
             let t = k as f64 * 3.0e6;
-            assert_eq!(model.reradiated()[Band::ThermalIr], steady, "heat does not flicker");
+            assert_eq!(
+                model.reradiated()[Band::ThermalIr],
+                steady,
+                "heat does not flicker"
+            );
             visible.push(model.deficit(DVec3::X, t)[Band::V]);
         }
         let mean = visible.iter().sum::<f32>() / visible.len() as f32;
-        let spread = visible.iter().map(|v| (v - mean).abs()).fold(0.0f32, f32::max);
-        assert!(spread > 0.0, "the visible deficit should move, and it did not");
+        let spread = visible
+            .iter()
+            .map(|v| (v - mean).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            spread > 0.0,
+            "the visible deficit should move, and it did not"
+        );
         assert!(mean > 0.0);
     }
 
@@ -473,7 +587,9 @@ mod tests {
         model.populations.push(swarm_of(0.5));
         let target = Target::new(SystemFrame::new(Coord::ORIGIN), model);
         let far = Coord::new(Micros::new(400_000_000_000), 300_000_000, 0, 0).unwrap();
-        let instrument = Instrument::BASELINE.with_aperture(20.0).with_bands(BandMask::ALL);
+        let instrument = Instrument::BASELINE
+            .with_aperture(20.0)
+            .with_bands(BandMask::ALL);
         let obs = observe(&target, far, &instrument, 1.0e5, 0x5117).expect("an observation");
 
         let v = obs.band(Band::V).expect("a V measurement");
@@ -481,8 +597,18 @@ mod tests {
         assert!(v.relative_flux() < 1.0, "the visible is a shadow");
 
         let ir = obs.band(Band::ThermalIr).expect("a thermal measurement");
-        assert!(ir.reradiated > 1.0, "the thermal band is a source, got {}", ir.reradiated);
-        assert!(ir.relative_flux() > 1.0, "and it arrives brighter than the bare star");
-        assert!(ir.measured_deficit < 0.0, "a net excess reads as a negative deficit");
+        assert!(
+            ir.reradiated > 1.0,
+            "the thermal band is a source, got {}",
+            ir.reradiated
+        );
+        assert!(
+            ir.relative_flux() > 1.0,
+            "and it arrives brighter than the bare star"
+        );
+        assert!(
+            ir.measured_deficit < 0.0,
+            "a net excess reads as a negative deficit"
+        );
     }
 }

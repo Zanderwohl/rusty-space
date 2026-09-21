@@ -28,9 +28,15 @@ pub enum ShellError {
 impl std::fmt::Display for ShellError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Version { found, expected } => write!(f, "shell format {found}, expected {expected}"),
-            Self::Bands { found, expected } => write!(f, "shell has {found} bands, expected {expected}"),
-            Self::Length { found, expected } => write!(f, "shell has {found} floats, expected {expected}"),
+            Self::Version { found, expected } => {
+                write!(f, "shell format {found}, expected {expected}")
+            }
+            Self::Bands { found, expected } => {
+                write!(f, "shell has {found} bands, expected {expected}")
+            }
+            Self::Length { found, expected } => {
+                write!(f, "shell has {found} floats, expected {expected}")
+            }
         }
     }
 }
@@ -64,15 +70,40 @@ const PHI: f64 = 1.618_033_988_749_895;
 fn icosahedron() -> ([DVec3; 12], [[usize; 3]; 20]) {
     let v = |x: f64, y: f64, z: f64| DVec3::new(x, y, z).normalize();
     let verts = [
-        v(-1.0, PHI, 0.0), v(1.0, PHI, 0.0), v(-1.0, -PHI, 0.0), v(1.0, -PHI, 0.0),
-        v(0.0, -1.0, PHI), v(0.0, 1.0, PHI), v(0.0, -1.0, -PHI), v(0.0, 1.0, -PHI),
-        v(PHI, 0.0, -1.0), v(PHI, 0.0, 1.0), v(-PHI, 0.0, -1.0), v(-PHI, 0.0, 1.0),
+        v(-1.0, PHI, 0.0),
+        v(1.0, PHI, 0.0),
+        v(-1.0, -PHI, 0.0),
+        v(1.0, -PHI, 0.0),
+        v(0.0, -1.0, PHI),
+        v(0.0, 1.0, PHI),
+        v(0.0, -1.0, -PHI),
+        v(0.0, 1.0, -PHI),
+        v(PHI, 0.0, -1.0),
+        v(PHI, 0.0, 1.0),
+        v(-PHI, 0.0, -1.0),
+        v(-PHI, 0.0, 1.0),
     ];
     let faces = [
-        [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
-        [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
-        [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
-        [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+        [0, 11, 5],
+        [0, 5, 1],
+        [0, 1, 7],
+        [0, 7, 10],
+        [0, 10, 11],
+        [1, 5, 9],
+        [5, 11, 4],
+        [11, 10, 2],
+        [10, 7, 6],
+        [7, 1, 8],
+        [3, 9, 4],
+        [3, 4, 2],
+        [3, 2, 6],
+        [3, 6, 8],
+        [3, 8, 9],
+        [4, 9, 5],
+        [2, 4, 11],
+        [6, 2, 10],
+        [8, 6, 7],
+        [9, 8, 1],
     ];
     (verts, faces)
 }
@@ -146,24 +177,41 @@ impl Shell {
                     for b in Band::ALL {
                         data[at + 1 + b.index()] = deficit[b];
                     }
-                    data[at + 1 + BANDS] =
-                        if count > 0.0 { (weighted_crossing / count) as f32 } else { 0.0 };
+                    data[at + 1 + BANDS] = if count > 0.0 {
+                        (weighted_crossing / count) as f32
+                    } else {
+                        0.0
+                    };
                 }
             }
         }
-        Self { version: FORMAT_VERSION, level, bands: BANDS as u8, data }
+        Self {
+            version: FORMAT_VERSION,
+            level,
+            bands: BANDS as u8,
+            data,
+        }
     }
 
     pub fn check(&self) -> Result<(), ShellError> {
         if self.version != FORMAT_VERSION {
-            return Err(ShellError::Version { found: self.version, expected: FORMAT_VERSION });
+            return Err(ShellError::Version {
+                found: self.version,
+                expected: FORMAT_VERSION,
+            });
         }
         if self.bands as usize != BANDS {
-            return Err(ShellError::Bands { found: self.bands, expected: BANDS as u8 });
+            return Err(ShellError::Bands {
+                found: self.bands,
+                expected: BANDS as u8,
+            });
         }
         let expected = self.vertex_count() * CHANNELS;
         if self.data.len() != expected {
-            return Err(ShellError::Length { found: self.data.len(), expected });
+            return Err(ShellError::Length {
+                found: self.data.len(),
+                expected,
+            });
         }
         Ok(())
     }
@@ -208,10 +256,14 @@ impl Shell {
             let fj = (v.floor() as usize).min(n.saturating_sub(1));
             let (fu, fv) = (u - fi as f64, v - fj as f64);
             let base = f * per_face;
-            let idx = |i: usize, j: usize| base + Self::lattice_index(n, i.min(n), j.min(n - i.min(n)));
+            let idx =
+                |i: usize, j: usize| base + Self::lattice_index(n, i.min(n), j.min(n - i.min(n)));
 
             let (corners, weights) = if fu + fv <= 1.0 {
-                ([idx(fi, fj), idx(fi + 1, fj), idx(fi, fj + 1)], [1.0 - fu - fv, fu, fv])
+                (
+                    [idx(fi, fj), idx(fi + 1, fj), idx(fi, fj + 1)],
+                    [1.0 - fu - fv, fu, fv],
+                )
             } else {
                 (
                     [idx(fi + 1, fj), idx(fi, fj + 1), idx(fi + 1, fj + 1)],
@@ -265,7 +317,10 @@ mod tests {
             let overhead = s.vertex_count() as f64 / s.unique_vertex_count() as f64 - 1.0;
             assert!(overhead < 0.45, "level {level} overhead {overhead}");
             if level == 5 {
-                assert!((overhead - 0.095).abs() < 0.005, "level 5 overhead is {overhead}");
+                assert!(
+                    (overhead - 0.095).abs() < 0.005,
+                    "level 5 overhead is {overhead}"
+                );
             }
         }
     }
@@ -301,7 +356,10 @@ mod tests {
                 let dir = Shell::direction(corners, n, i, j);
                 let direct = pop.mean_deficit(dir, &Star::SOL) as f32;
                 let got = shell.sample(dir).deficit[Band::V];
-                assert!((got - direct).abs() <= direct.abs() * 1e-5, "{got} vs {direct}");
+                assert!(
+                    (got - direct).abs() <= direct.abs() * 1e-5,
+                    "{got} vs {direct}"
+                );
             }
         }
     }
@@ -324,8 +382,14 @@ mod tests {
             let on_edge = (c[0] * (1.0 - t) + c[1] * t).normalize();
             let inward = (on_edge + (c[2] - on_edge) * 1e-7).normalize();
             let outward = (on_edge - (c[2] - on_edge) * 1e-7).normalize();
-            let (a, b) = (shell.sample(inward).deficit[Band::V], shell.sample(outward).deficit[Band::V]);
-            assert!((a - b).abs() < peak * 1e-5, "seam at t={t}: {a} vs {b}, peak {peak}");
+            let (a, b) = (
+                shell.sample(inward).deficit[Band::V],
+                shell.sample(outward).deficit[Band::V],
+            );
+            assert!(
+                (a - b).abs() < peak * 1e-5,
+                "seam at t={t}: {a} vs {b}, peak {peak}"
+            );
         }
     }
 
@@ -347,7 +411,10 @@ mod tests {
         let s = shell.sample(DVec3::X);
         assert!(s.deficit[Band::B] > s.deficit[Band::V]);
         assert!(s.deficit[Band::V] > s.deficit[Band::K]);
-        assert!(s.deficit[Band::Radio] < s.deficit[Band::V] * 1e-6, "radio sees through dust");
+        assert!(
+            s.deficit[Band::Radio] < s.deficit[Band::V] * 1e-6,
+            "radio sees through dust"
+        );
     }
 
     #[test]

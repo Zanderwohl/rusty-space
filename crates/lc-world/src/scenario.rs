@@ -205,28 +205,40 @@ pub const TRAFFIC: Scenario = Scenario {
             kind: Kind::Ship,
             length_m: 500.0,
             accel_g: 5.0,
-            start: Start::Beside { lengths: 16.0, bearing: [1.0, 0.28, 0.0] },
+            start: Start::Beside {
+                lengths: 16.0,
+                bearing: [1.0, 0.28, 0.0],
+            },
         },
         Member {
             name: "Harrier",
             kind: Kind::Ship,
             length_m: 2_200.0,
             accel_g: 5.0,
-            start: Start::Beside { lengths: 16.0, bearing: [1.0, 0.0, 0.28] },
+            start: Start::Beside {
+                lengths: 16.0,
+                bearing: [1.0, 0.0, 0.28],
+            },
         },
         Member {
             name: "Bittern",
             kind: Kind::Ship,
             length_m: 10_600.0,
             accel_g: 5.0,
-            start: Start::Beside { lengths: 16.0, bearing: [1.0, -0.28, 0.0] },
+            start: Start::Beside {
+                lengths: 16.0,
+                bearing: [1.0, -0.28, 0.0],
+            },
         },
         Member {
             name: "Albatross",
             kind: Kind::Ship,
             length_m: 50_000.0,
             accel_g: 5.0,
-            start: Start::Beside { lengths: 16.0, bearing: [1.0, 0.0, -0.28] },
+            start: Start::Beside {
+                lengths: 16.0,
+                bearing: [1.0, 0.0, -0.28],
+            },
         },
     ],
     beats: &[],
@@ -255,7 +267,10 @@ pub const MEETING: Scenario = Scenario {
         kind: Kind::Ship,
         length_m: 5_000.0,
         accel_g: 5.0,
-        start: Start::Alongside { of: Slot::Pov, lengths: 12.0 },
+        start: Start::Alongside {
+            of: Slot::Pov,
+            lengths: 12.0,
+        },
     }],
     // Nothing happens, and that is the scene. Two ships holding the same orbit a fixed arc
     // apart, with a planet filling the window behind them: what a chase *ends* at, without the
@@ -336,7 +351,11 @@ pub const CLOSING: Scenario = Scenario {
         accel_g: 5.0,
         start: Start::Holding("orbit:Jupiter:high"),
     }],
-    beats: &[Beat { after_s: 0.0, actor: Slot::Pov, act: Act::Chase(Slot::Cast(0)) }],
+    beats: &[Beat {
+        after_s: 0.0,
+        actor: Slot::Pov,
+        act: Act::Chase(Slot::Cast(0)),
+    }],
 };
 
 /// Three months of running, in fifteen seconds of watching.
@@ -370,13 +389,24 @@ pub const CHASE: Scenario = Scenario {
         kind: Kind::Ship,
         length_m: 500.0,
         accel_g: 5.0,
-        start: Start::Beside { lengths: 40.0, bearing: [1.0, 0.1, 0.0] },
+        start: Start::Beside {
+            lengths: 40.0,
+            bearing: [1.0, 0.1, 0.0],
+        },
     }],
     beats: &[
-        Beat { after_s: 0.0, actor: Slot::Cast(0), act: Act::Fly("belt:2") },
+        Beat {
+            after_s: 0.0,
+            actor: Slot::Cast(0),
+            act: Act::Fly("belt:2"),
+        },
         // Late enough that the quarry is plainly running, early enough that its light is still
         // minutes rather than hours away.
-        Beat { after_s: 3_600.0, actor: Slot::Pov, act: Act::Chase(Slot::Cast(0)) },
+        Beat {
+            after_s: 3_600.0,
+            actor: Slot::Pov,
+            act: Act::Chase(Slot::Cast(0)),
+        },
     ],
 };
 
@@ -395,9 +425,7 @@ mod tests {
                 .chain(scene.cast)
                 .filter_map(|m| match m.start {
                     Start::Holding(spelling) => Some(spelling),
-                    Start::AsFound
-                    | Start::Alongside { .. }
-                    | Start::Beside { .. } => None,
+                    Start::AsFound | Start::Alongside { .. } | Start::Beside { .. } => None,
                 });
             let flown = scene.beats.iter().filter_map(|b| match b.act {
                 Act::Fly(spelling) => Some(spelling),
@@ -422,22 +450,32 @@ mod tests {
                 _ => vec![beat.actor],
             });
             for slot in slots {
-                assert!(scene.member(slot).is_some(), "{}: nobody in {slot:?}", scene.name);
+                assert!(
+                    scene.member(slot).is_some(),
+                    "{}: nobody in {slot:?}",
+                    scene.name
+                );
             }
         }
         // And the same for a start measured against somebody else. A craft placed alongside
         // nobody is a craft left at the origin, which is empty interstellar space.
         for scene in Scenario::ALL {
             for member in std::iter::once(&scene.pov).chain(scene.cast) {
-                let Start::Alongside { of, .. } = member.start else { continue };
+                let Start::Alongside { of, .. } = member.start else {
+                    continue;
+                };
                 assert!(
                     scene.member(of).is_some(),
                     "{}: {} stands beside nobody",
                     scene.name,
                     member.name,
                 );
-                assert!(of != Slot::Pov || !std::ptr::eq(member, &scene.pov),
-                    "{}: {} stands beside itself", scene.name, member.name);
+                assert!(
+                    of != Slot::Pov || !std::ptr::eq(member, &scene.pov),
+                    "{}: {} stands beside itself",
+                    scene.name,
+                    member.name
+                );
             }
         }
     }
@@ -453,7 +491,11 @@ mod tests {
                 "{}: {times:?} is not in order",
                 scene.name,
             );
-            assert!(times.iter().all(|t| *t >= 0.0), "{}: a beat before the scene", scene.name);
+            assert!(
+                times.iter().all(|t| *t >= 0.0),
+                "{}: a beat before the scene",
+                scene.name
+            );
         }
     }
 
@@ -474,7 +516,11 @@ mod tests {
     /// watch from a craft the server never placed — and would silently get its own ship.
     #[test]
     fn a_slot_names_the_craft_the_director_places() {
-        assert_eq!(Scenario::craft_for(Slot::Pov), None, "the player's own is the shard's to know");
+        assert_eq!(
+            Scenario::craft_for(Slot::Pov),
+            None,
+            "the player's own is the shard's to know"
+        );
         assert_eq!(Scenario::craft_for(Slot::Cast(0)), Some(BASE_ID));
         assert_eq!(Scenario::craft_for(Slot::Cast(3)), Some(BASE_ID + 3));
     }
@@ -493,7 +539,12 @@ mod tests {
                     member.name,
                     member.length_m,
                 );
-                assert!(member.accel_g > 0.0, "{}: {} cannot move", scene.name, member.name);
+                assert!(
+                    member.accel_g > 0.0,
+                    "{}: {} cannot move",
+                    scene.name,
+                    member.name
+                );
             }
         }
     }
@@ -503,14 +554,27 @@ mod tests {
     #[test]
     fn no_scene_shadows_another() {
         for scene in Scenario::ALL {
-            assert_eq!(Scenario::named(scene.name).map(|s| s.name), Some(scene.name));
-            assert_eq!(scene.name, scene.name.to_lowercase(), "a name typed at a shell");
+            assert_eq!(
+                Scenario::named(scene.name).map(|s| s.name),
+                Some(scene.name)
+            );
+            assert_eq!(
+                scene.name,
+                scene.name.to_lowercase(),
+                "a name typed at a shell"
+            );
         }
         assert!(Scenario::named("nonesuch").is_none());
         // Ambiguity refuses rather than picking the first declared.
-        let shared = Scenario::ALL.iter().filter(|s| s.name.starts_with('c')).count();
+        let shared = Scenario::ALL
+            .iter()
+            .filter(|s| s.name.starts_with('c'))
+            .count();
         if shared > 1 {
-            assert!(Scenario::named("c").is_none(), "an ambiguous prefix resolved");
+            assert!(
+                Scenario::named("c").is_none(),
+                "an ambiguous prefix resolved"
+            );
         }
     }
 
@@ -523,9 +587,9 @@ mod tests {
     #[test]
     fn every_course_resolves_against_the_system_it_is_staged_in() {
         use crate::sky::{CatalogueStar, StarProvider};
-        let Ok(provider) = crate::sky::hyg::HygProvider::load(
-            "../../assets/catalogs/hygdata_v42_dist_sort.csv",
-        ) else {
+        let Ok(provider) =
+            crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
+        else {
             return;
         };
         for scene in Scenario::ALL {
@@ -539,14 +603,12 @@ mod tests {
                 .unwrap_or_else(|| panic!("{}: {} has no system", scene.name, scene.star));
             let here = system.origin_ly;
 
-            let starts = std::iter::once(&scene.pov).chain(scene.cast).filter_map(|m| {
-                match m.start {
+            let starts = std::iter::once(&scene.pov)
+                .chain(scene.cast)
+                .filter_map(|m| match m.start {
                     Start::Holding(spelling) => Some(spelling),
-                    Start::AsFound
-                    | Start::Alongside { .. }
-                    | Start::Beside { .. } => None,
-                }
-            });
+                    Start::AsFound | Start::Alongside { .. } | Start::Beside { .. } => None,
+                });
             let flown = scene.beats.iter().filter_map(|b| match b.act {
                 Act::Fly(spelling) => Some(spelling),
                 _ => None,
@@ -566,7 +628,13 @@ mod tests {
     /// The chase is the one scene whose whole point is a difference in acceleration.
     #[test]
     fn the_chase_is_a_chase() {
-        assert!(CHASE.pov.accel_g > CHASE.cast[0].accel_g, "the quarry is not being caught");
-        assert!(CHASE.rate > 1.0, "three months at the design rate is a quarter of an hour");
+        assert!(
+            CHASE.pov.accel_g > CHASE.cast[0].accel_g,
+            "the quarry is not being caught"
+        );
+        assert!(
+            CHASE.rate > 1.0,
+            "three months at the design rate is a quarter of an hour"
+        );
     }
 }

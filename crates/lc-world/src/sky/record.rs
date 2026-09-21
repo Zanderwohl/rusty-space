@@ -56,7 +56,10 @@ impl StarRecord {
 
         Some(CatalogueStar {
             id,
-            provenance: Provenance { source: source.into(), key: self.key },
+            provenance: Provenance {
+                source: source.into(),
+                key: self.key,
+            },
             name: self.name.clone(),
             position_ly: self.position_ly,
             velocity: self.velocity,
@@ -69,7 +72,10 @@ impl StarRecord {
             luminosity_solar: self.luminosity_solar,
             mass_solar,
             metallicity: metallicity::from_speed(self.velocity.length(), id.get()),
-            component: Component { index: self.component_index, group: self.group },
+            component: Component {
+                index: self.component_index,
+                group: self.group,
+            },
         })
     }
 }
@@ -132,7 +138,11 @@ mod tests {
     #[test]
     fn a_solar_record_assembles_to_a_solar_star() {
         let s = sol().assemble("test").expect("Sol assembles");
-        assert!((s.star.teff_k - 5772.0).abs() < 40.0, "Teff {}", s.star.teff_k);
+        assert!(
+            (s.star.teff_k - 5772.0).abs() < 40.0,
+            "Teff {}",
+            s.star.teff_k
+        );
         assert!((s.star.radius_m / em_spectra::stellar::SOLAR_RADIUS - 1.0).abs() < 0.05);
         assert!((s.mass_solar - 1.0).abs() < 0.05);
     }
@@ -166,7 +176,10 @@ mod tests {
         assert_eq!(skipped, 0);
         assert_eq!(stars[0].component.group, Some(7));
         assert_eq!(stars[1].component.group, Some(7));
-        assert_eq!(stars[2].component.group, None, "a lone member keeps no group");
+        assert_eq!(
+            stars[2].component.group, None,
+            "a lone member keeps no group"
+        );
     }
 
     #[test]
@@ -179,6 +192,9 @@ mod tests {
         let (stars, skipped) = assemble_all("test", &rs);
         assert_eq!(skipped, 1);
         assert_eq!(stars.len(), 1);
-        assert_eq!(stars[0].component.group, None, "grouping must follow the survivors");
+        assert_eq!(
+            stars[0].component.group, None,
+            "grouping must follow the survivors"
+        );
     }
 }

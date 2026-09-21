@@ -170,7 +170,11 @@ fn hyperbola(accel: DVec3, tau: f64) -> (f64, DVec3, DVec3) {
     let along = accel / alpha;
     let rapidity = alpha * tau;
     let half = (0.5 * rapidity).sinh();
-    (rapidity.sinh() / alpha, along * (2.0 * half * half / alpha), along * rapidity.tanh())
+    (
+        rapidity.sinh() / alpha,
+        along * (2.0 * half * half / alpha),
+        along * rapidity.tanh(),
+    )
 }
 
 impl Escort {
@@ -240,7 +244,11 @@ impl Escort {
             boost::velocity_from_frame(aim, quarry_beta).normalize_or_zero()
         };
         let since_s = self.quarry.since_t + self.quarry.world_elapsed(self.cruise.start_s);
-        flight::Aim { to, from: None, since_s }
+        flight::Aim {
+            to,
+            from: None,
+            since_s,
+        }
     }
 
     /// The crew's seconds since the escort was taken up. Past the approach they age at the
@@ -318,24 +326,40 @@ pub fn escort(
     }
     let accel = followed(accel, drive);
     let spare_g = drive.accel_g - accel.length() * C_M_S / G0;
-    let burning =
-        Burning { position_ly: seen.position_ly, beta: seen.beta, accel, since_t: seen.emitted_s };
+    let burning = Burning {
+        position_ly: seen.position_ly,
+        beta: seen.beta,
+        accel,
+        since_t: seen.emitted_s,
+    };
     // Everything below is measured beside the quarry as it is *now*, on the hyperbola the
     // sighting and the acceleration put it on.
     let tau = burning.tau_at(now_s);
     let (quarry, quarry_beta) = burning.at_tau(tau);
     let separation = (pursuer.position_ly - quarry) * JULIAN_YEAR_S;
-    let offset = boost::to_frame(Event { t: 0.0, x: separation }, quarry_beta).x;
+    let offset = boost::to_frame(
+        Event {
+            t: 0.0,
+            x: separation,
+        },
+        quarry_beta,
+    )
+    .x;
     let standoff_ls = standoff_m / C_M_S;
     // The pursuer's side, as for a rendezvous. A pursuer somehow exactly on the quarry takes
     // station astern of the burn rather than nowhere.
-    let side = offset.try_normalize().unwrap_or(-accel.normalize_or(DVec3::X));
+    let side = offset
+        .try_normalize()
+        .unwrap_or(-accel.normalize_or(DVec3::X));
     Ok(Station {
         from_ly: offset / JULIAN_YEAR_S,
         beta0: boost::velocity_to_frame(pursuer.beta, quarry_beta),
         to_ly: side * standoff_ls / JULIAN_YEAR_S,
         start_s: tau,
-        drive: Drive { accel_g: spare_g, ..drive },
+        drive: Drive {
+            accel_g: spare_g,
+            ..drive
+        },
         quarry: burning,
         target: seen.target,
     }
@@ -347,7 +371,11 @@ pub fn escort(
 pub fn followed(accel: DVec3, drive: Drive) -> DVec3 {
     let pull_g = accel.length() * C_M_S / G0;
     let most_g = drive.accel_g * (1.0 - SPARE_FLOOR);
-    if pull_g > most_g { accel * (most_g / pull_g) } else { accel }
+    if pull_g > most_g {
+        accel * (most_g / pull_g)
+    } else {
+        accel
+    }
 }
 
 /// The least spare thrust an approach is planned with, as a fraction of the drive. A quarry
@@ -376,7 +404,11 @@ mod tests {
     }
 
     fn ten_g() -> Drive {
-        Drive { accel_g: 10.0, slew_rate_rad_s: 1.0, ..Drive::DEFAULT }
+        Drive {
+            accel_g: 10.0,
+            slew_rate_rad_s: 1.0,
+            ..Drive::DEFAULT
+        }
     }
 
     /// The quarry's worldline is the textbook hyperbola: from rest, after `τ` of its own time,
@@ -384,17 +416,37 @@ mod tests {
     #[test]
     fn a_burning_quarry_follows_its_hyperbola() {
         let seen = quarry(0.0, DVec3::ZERO);
-        let plan = escort(&ShipState::at(DVec3::X * -1.0e4 * KM_LY), STANDOFF, &seen, DVec3::X * FIVE_G, 0.0, ten_g())
-            .expect("a plan");
+        let plan = escort(
+            &ShipState::at(DVec3::X * -1.0e4 * KM_LY),
+            STANDOFF,
+            &seen,
+            DVec3::X * FIVE_G,
+            0.0,
+            ten_g(),
+        )
+        .expect("a plan");
         let tau = 3.0e6;
         let world_t = plan.quarry.world_elapsed(tau);
         let (at, beta) = plan.quarry.at(world_t);
         let k = FIVE_G * tau;
         let want_ly = (k.cosh() - 1.0) / FIVE_G / JULIAN_YEAR_S;
-        assert!((at.x - want_ly).abs() < 1.0e-12 * want_ly.max(1.0), "{} against {want_ly}", at.x);
-        assert!((beta.x - k.tanh()).abs() < 1.0e-12, "{} against {}", beta.x, k.tanh());
+        assert!(
+            (at.x - want_ly).abs() < 1.0e-12 * want_ly.max(1.0),
+            "{} against {want_ly}",
+            at.x
+        );
+        assert!(
+            (beta.x - k.tanh()).abs() < 1.0e-12,
+            "{} against {}",
+            beta.x,
+            k.tanh()
+        );
         // And the world time really is `sinh(ατ)/α`, which is the inversion checked end to end.
-        assert!((plan.quarry.tau_at(world_t) - tau).abs() < 1.0e-6 * tau, "{}", plan.quarry.tau_at(world_t));
+        assert!(
+            (plan.quarry.tau_at(world_t) - tau).abs() < 1.0e-6 * tau,
+            "{}",
+            plan.quarry.tau_at(world_t)
+        );
     }
 
     /// **The report this exists for**, in the numbers it was put in: a five-g pursuer behind a
@@ -411,27 +463,46 @@ mod tests {
             s
         };
         let four_g = DVec3::X * 4.0 * G0 / C_M_S;
-        let five_g_drive = Drive { accel_g: 5.0, ..ten_g() };
+        let five_g_drive = Drive {
+            accel_g: 5.0,
+            ..ten_g()
+        };
         let plan = escort(&pursuer, STANDOFF, &seen, four_g, 0.0, five_g_drive).expect("a plan");
         let start = plan.quarry.since_t + plan.quarry.world_elapsed(plan.cruise.start_s);
-        let end = plan.quarry.since_t + plan.quarry.world_elapsed(plan.cruise.start_s + plan.cruise.duration_s());
+        let end = plan.quarry.since_t
+            + plan
+                .quarry
+                .world_elapsed(plan.cruise.start_s + plan.cruise.duration_s());
         assert!(end > start, "the approach has no length");
         let (mut peak, mut least) = (0.0f64, f64::INFINITY);
         for k in 0..=400 {
             let t = start + (end - start) * k as f64 / 400.0;
             let thrust = plan.thrust_at(t);
             let (_, beta) = plan.state_at(t);
-            assert!(thrust.dot(DVec3::X) > 0.0, "braking at {k}/400: {thrust} while moving {beta}");
+            assert!(
+                thrust.dot(DVec3::X) > 0.0,
+                "braking at {k}/400: {thrust} while moving {beta}"
+            );
             let g = plan.thrust_g(t);
             assert!(g <= 5.0 + 1.0e-6, "{g} g is more drive than the ship has");
             peak = peak.max(g);
             least = least.min(g);
         }
-        assert!(peak > 4.99, "it never used its spare thrust: peaked at {peak} g");
-        assert!((least - 3.0).abs() < 0.01, "the relative brake should ease to three g: {least}");
+        assert!(
+            peak > 4.99,
+            "it never used its spare thrust: peaked at {peak} g"
+        );
+        assert!(
+            (least - 3.0).abs() < 0.01,
+            "the relative brake should ease to three g: {least}"
+        );
         // Alongside, it burns at exactly the quarry's four.
         let later = end + 3.0e5;
-        assert!((plan.thrust_g(later) - 4.0).abs() < 1.0e-9, "{} g at parity", plan.thrust_g(later));
+        assert!(
+            (plan.thrust_g(later) - 4.0).abs() < 1.0e-9,
+            "{} g at parity",
+            plan.thrust_g(later)
+        );
         assert!(plan.has_closed(later));
     }
 
@@ -441,8 +512,12 @@ mod tests {
     fn alongside_it_stays_alongside() {
         let seen = quarry(0.0, DVec3::ZERO);
         let pursuer = ShipState::at(DVec3::X * -5.0e4 * KM_LY);
-        let plan = escort(&pursuer, STANDOFF, &seen, DVec3::X * FIVE_G, 0.0, ten_g()).expect("a plan");
-        let end = plan.quarry.since_t + plan.quarry.world_elapsed(plan.cruise.start_s + plan.cruise.duration_s());
+        let plan =
+            escort(&pursuer, STANDOFF, &seen, DVec3::X * FIVE_G, 0.0, ten_g()).expect("a plan");
+        let end = plan.quarry.since_t
+            + plan
+                .quarry
+                .world_elapsed(plan.cruise.start_s + plan.cruise.duration_s());
         let standoff_ly = pursuit::standoff_m(500.0, 500.0) / M_PER_LY;
         for extra in [0.0, 1.0e5, 1.0e6] {
             let t = end + extra;
@@ -450,9 +525,15 @@ mod tests {
             let (quarry_at, quarry_beta) = plan.quarry.at(t);
             let gap_ly = boost::separation_in_frame((at - quarry_at) * JULIAN_YEAR_S, quarry_beta)
                 / JULIAN_YEAR_S;
-            assert!((gap_ly - standoff_ly).abs() < 1.0e-3 * standoff_ly, "{gap_ly} ly apart after {extra} s");
+            assert!(
+                (gap_ly - standoff_ly).abs() < 1.0e-3 * standoff_ly,
+                "{gap_ly} ly apart after {extra} s"
+            );
             let relative = boost::velocity_to_frame(beta, quarry_beta);
-            assert!(relative.length() < 1.0e-9, "drifting at {relative} after {extra} s");
+            assert!(
+                relative.length() < 1.0e-9,
+                "drifting at {relative} after {extra} s"
+            );
         }
     }
 
@@ -462,12 +543,28 @@ mod tests {
     #[test]
     fn a_held_burn_does_not_diverge() {
         let seen = quarry(0.0, DVec3::ZERO);
-        let plan = escort(&ShipState::at(DVec3::X * -5.0e4 * KM_LY), STANDOFF, &seen, DVec3::X * FIVE_G, 0.0, ten_g())
-            .expect("a plan");
+        let plan = escort(
+            &ShipState::at(DVec3::X * -5.0e4 * KM_LY),
+            STANDOFF,
+            &seen,
+            DVec3::X * FIVE_G,
+            0.0,
+            ten_g(),
+        )
+        .expect("a plan");
         let later_s = plan.quarry.world_elapsed(2.0e5);
         let (at, beta) = plan.quarry.at(later_s);
-        let fresh = Sighting { position_ly: at, beta, emitted_s: later_s, ..seen };
-        assert!(plan.divergence(&fresh) * M_PER_LY < 1.0, "{} m", plan.divergence(&fresh) * M_PER_LY);
+        let fresh = Sighting {
+            position_ly: at,
+            beta,
+            emitted_s: later_s,
+            ..seen
+        };
+        assert!(
+            plan.divergence(&fresh) * M_PER_LY < 1.0,
+            "{} m",
+            plan.divergence(&fresh) * M_PER_LY
+        );
     }
 
     /// What two sightings measure is proper acceleration, not the coordinate rate the velocity
@@ -476,12 +573,24 @@ mod tests {
     #[test]
     fn acceleration_is_exact_across_a_long_interval() {
         let seen = quarry(0.0, DVec3::ZERO);
-        let plan = escort(&ShipState::at(DVec3::X * -5.0e4 * KM_LY), STANDOFF, &seen, DVec3::X * FIVE_G, 0.0, ten_g())
-            .expect("a plan");
+        let plan = escort(
+            &ShipState::at(DVec3::X * -5.0e4 * KM_LY),
+            STANDOFF,
+            &seen,
+            DVec3::X * FIVE_G,
+            0.0,
+            ten_g(),
+        )
+        .expect("a plan");
         let sighting_at = |tau: f64| {
             let t = plan.quarry.world_elapsed(tau);
             let (at, beta) = plan.quarry.at(t);
-            Sighting { position_ly: at, beta, emitted_s: t, ..seen }
+            Sighting {
+                position_ly: at,
+                beta,
+                emitted_s: t,
+                ..seen
+            }
         };
         // A tick at twenty times the design rate apart, early and late in a burn.
         for tau in [2.0e5, 5.0e6] {
@@ -499,18 +608,37 @@ mod tests {
     #[test]
     fn acceleration_is_read_as_proper() {
         let seen = quarry(0.0, DVec3::ZERO);
-        let plan = escort(&ShipState::at(DVec3::X * -5.0e4 * KM_LY), STANDOFF, &seen, DVec3::X * FIVE_G, 0.0, ten_g())
-            .expect("a plan");
+        let plan = escort(
+            &ShipState::at(DVec3::X * -5.0e4 * KM_LY),
+            STANDOFF,
+            &seen,
+            DVec3::X * FIVE_G,
+            0.0,
+            ten_g(),
+        )
+        .expect("a plan");
         let sighting_at = |tau: f64| {
             let t = plan.quarry.world_elapsed(tau);
             let (at, beta) = plan.quarry.at(t);
-            Sighting { position_ly: at, beta, emitted_s: t, ..seen }
+            Sighting {
+                position_ly: at,
+                beta,
+                emitted_s: t,
+                ..seen
+            }
         };
         // Deep into the burn, where the quarry is well past half of `c`.
         let (a, b) = (sighting_at(5.0e6), sighting_at(5.0e6 + 10.0));
-        assert!(b.beta.length() > 0.5, "premise: fast enough to tell the two apart");
+        assert!(
+            b.beta.length() > 0.5,
+            "premise: fast enough to tell the two apart"
+        );
         let measured = acceleration_of(&a, &b).expect("two sightings");
-        assert!((measured.length() / FIVE_G - 1.0).abs() < 1.0e-3, "{} g", measured.length() * C_M_S / G0);
+        assert!(
+            (measured.length() / FIVE_G - 1.0).abs() < 1.0e-3,
+            "{} g",
+            measured.length() * C_M_S / G0
+        );
     }
 
     /// **Copying, not giving up.** A quarry pulling as hard as the pursuer can, or harder, is
@@ -522,7 +650,10 @@ mod tests {
         for pull_g in [10.0, 15.0] {
             let pull = DVec3::X * pull_g * G0 / C_M_S;
             let plan = escort(&pursuer, STANDOFF, &seen, pull, 0.0, ten_g()).expect("followed");
-            assert!(plan.quarry.accel.dot(pull) > 0.0, "not along the quarry's burn");
+            assert!(
+                plan.quarry.accel.dot(pull) > 0.0,
+                "not along the quarry's burn"
+            );
             let late = plan.quarry.since_t + plan.quarry.world_elapsed(1.0e3);
             for t in [0.0, late] {
                 let g = plan.thrust_g(t);

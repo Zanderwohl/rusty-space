@@ -178,8 +178,11 @@ mod tests {
         let provider =
             crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
                 .ok()?;
-        let sun: CatalogueStar =
-            provider.stars().iter().find(|s| s.name.as_deref() == Some("Sol"))?.clone();
+        let sun: CatalogueStar = provider
+            .stars()
+            .iter()
+            .find(|s| s.name.as_deref() == Some("Sol"))?
+            .clone();
         let mut system = LocalSystem::for_star(&sun)?;
         system.advance_to(0.0);
         Some(system)
@@ -202,7 +205,11 @@ mod tests {
             orbit.standoff_m / KM,
         );
         // Three times longer than it is wide, which is what the amplitude ratio means.
-        assert!((orbit.amplitude_ratio - 3.19).abs() < 0.05, "{}", orbit.amplitude_ratio);
+        assert!(
+            (orbit.amplitude_ratio - 3.19).abs() < 0.05,
+            "{}",
+            orbit.amplitude_ratio
+        );
         assert!(
             (orbit.extent_m() / KM - 1_883_000.0).abs() < 60_000.0,
             "{} km along track",
@@ -220,7 +227,12 @@ mod tests {
         let Some(system) = sol() else { return };
         let one = Libration::about(&system, "Earth", LagrangePoint::L1, 0.0).expect("L1");
         let two = Libration::about(&system, "Earth", LagrangePoint::L2, 0.0).expect("L2");
-        assert!(one.standoff_m < two.standoff_m, "{} against {}", one.standoff_m, two.standoff_m);
+        assert!(
+            one.standoff_m < two.standoff_m,
+            "{} against {}",
+            one.standoff_m,
+            two.standoff_m
+        );
 
         let sun = system.star_position_ly();
         let earth = system.body_position_ly("Earth").expect("Earth");
@@ -230,7 +242,10 @@ mod tests {
             here.distance(sun) < earth.distance(sun),
             "L1 is between Earth and the Sun",
         );
-        assert!(there.distance(sun) > earth.distance(sun), "L2 is behind Earth");
+        assert!(
+            there.distance(sun) > earth.distance(sun),
+            "L2 is behind Earth"
+        );
     }
 
     /// It is an orbit, not a point: over a turn it goes round and comes back.
@@ -251,7 +266,10 @@ mod tests {
 
         // Half a turn is across the orbit: the radial component has flipped sign.
         assert!(start.x * half.x < 0.0, "{} and {}", start.x, half.x);
-        assert!((start.x + half.x).abs() < orbit.radial_m * 1.0e-6, "it is not a half turn");
+        assert!(
+            (start.x + half.x).abs() < orbit.radial_m * 1.0e-6,
+            "it is not a half turn"
+        );
 
         // A full turn of the in-plane motion comes back in plane, exactly.
         assert!((full.x - start.x).abs() < orbit.radial_m * 1.0e-6);
@@ -260,13 +278,17 @@ mod tests {
         // Lissajous does not close and a halo has to be forced to.
         assert!(
             (full.z - start.z).abs() > orbit.vertical_m * 0.01,
-            "a Lissajous that closed exactly would be a halo: {} m", (full.z - start.z).abs(),
+            "a Lissajous that closed exactly would be a halo: {} m",
+            (full.z - start.z).abs(),
         );
 
         // And it stays in the neighborhood of the point all the way round.
         for step in 0..16 {
             let at = orbit.offset_m(period * step as f64 / 16.0).length();
-            assert!(at < orbit.extent_m(), "step {step}: {at:e} m from the point");
+            assert!(
+                at < orbit.extent_m(),
+                "step {step}: {at:e} m from the point"
+            );
         }
 
         // The along-track axis really is the long one, by the amplitude ratio.
@@ -290,7 +312,11 @@ mod tests {
         let now = orbit.at(&system, ahead).expect("a place");
         for present in [-1.0e7, ahead, 5.0e7] {
             let stale = system.propagated_to(present);
-            assert_eq!(orbit.at(&stale, ahead), Some(now), "the clock at {present} changed it");
+            assert_eq!(
+                orbit.at(&stale, ahead),
+                Some(now),
+                "the clock at {present} changed it"
+            );
         }
     }
 
@@ -329,18 +355,29 @@ mod tests {
             (overlapped, widest)
         };
 
-        let point =
-            crate::navigation::Waypoint::Lagrange { body: "Earth".into(), point: LagrangePoint::L2 };
+        let point = crate::navigation::Waypoint::Lagrange {
+            body: "Earth".into(),
+            point: LagrangePoint::L2,
+        };
         let (at_point, widest_at_point) = survey(&|t| point.place_at(&system, t));
-        assert_eq!(at_point, 64, "the point is on the line at every instant, by construction");
+        assert_eq!(
+            at_point, 64,
+            "the point is on the line at every instant, by construction"
+        );
         // Not zero: the direction is normalised out of positions of order 1e11 meters, and a
         // millionth of a degree at this range is four centimeters.
-        assert!(widest_at_point < 1.0e-4, "{widest_at_point} degrees off the line");
+        assert!(
+            widest_at_point < 1.0e-4,
+            "{widest_at_point} degrees off the line"
+        );
 
         let orbit = Libration::about(&system, "Earth", LagrangePoint::L2, 0.0).expect("L2");
         let (in_orbit, widest_in_orbit) = survey(&|t| orbit.at(&system, t));
         assert!(in_orbit <= 4, "{in_orbit} of 64 samples in the shadow");
-        assert!(widest_in_orbit > 25.0, "only {widest_in_orbit} degrees off the line");
+        assert!(
+            widest_in_orbit > 25.0,
+            "only {widest_in_orbit} degrees off the line"
+        );
     }
 
     /// The companion and the hangout measure the same standoff, because they now solve the

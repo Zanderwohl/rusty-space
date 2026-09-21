@@ -48,7 +48,10 @@ pub fn poisson(h: u64, mean: f64) -> u32 {
     if mean <= 0.0 {
         return 0;
     }
-    debug_assert!(mean < 30.0, "inversion is the wrong algorithm above a mean of ~30");
+    debug_assert!(
+        mean < 30.0,
+        "inversion is the wrong algorithm above a mean of ~30"
+    );
     let target = uniform(h);
     let mut cumulative = (-mean).exp();
     let mut term = cumulative;
@@ -81,7 +84,10 @@ mod tests {
             buckets[(u * 10.0) as usize] += 1;
         }
         for b in buckets {
-            assert!((b as f64 - 10_000.0).abs() < 500.0, "bucket {b} is not flat");
+            assert!(
+                (b as f64 - 10_000.0).abs() < 500.0,
+                "bucket {b} is not flat"
+            );
         }
     }
 
@@ -101,7 +107,10 @@ mod tests {
             let n = 200_000;
             let total: u64 = (0..n).map(|i| poisson(hash(&[i, 11]), lambda) as u64).sum();
             let got = total as f64 / n as f64;
-            assert!((got / lambda - 1.0).abs() < 0.05, "lambda {lambda}: got {got}");
+            assert!(
+                (got / lambda - 1.0).abs() < 0.05,
+                "lambda {lambda}: got {got}"
+            );
         }
         assert_eq!(poisson(hash(&[1]), 0.0), 0);
     }

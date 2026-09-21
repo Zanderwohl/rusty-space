@@ -40,7 +40,11 @@ pub fn transitions(craft: &Craft, after_s: f64, until_s: f64) -> Vec<Transition>
     let mut began = f64::NEG_INFINITY;
     for (until, doing) in craft.stretches() {
         candidates.push(began);
-        candidates.extend(phase_changes_s(doing).into_iter().filter(|t| *t >= began && *t < until));
+        candidates.extend(
+            phase_changes_s(doing)
+                .into_iter()
+                .filter(|t| *t >= began && *t < until),
+        );
         began = until;
     }
     candidates.retain(|t| *t > after_s && *t <= until_s);
@@ -70,7 +74,11 @@ pub fn transitions(craft: &Craft, after_s: f64, until_s: f64) -> Vec<Transition>
 fn power_w(craft: &Craft, s: f64) -> f64 {
     let doing = craft.motion_at(s);
     let accel_g = motion::thrust_g(doing, s);
-    if accel_g <= 0.0 { 0.0 } else { doing.drive.jet_power_w(craft.mass_kg(), accel_g) }
+    if accel_g <= 0.0 {
+        0.0
+    } else {
+        doing.drive.jet_power_w(craft.mass_kg(), accel_g)
+    }
 }
 
 /// World instants at which a motive's thrust can change. Empty for one that never burns.
@@ -116,11 +124,19 @@ mod tests {
     }
 
     fn order(craft: &mut Craft, at_t: f64, change: Change) {
-        craft.apply(&Event { ship: ShipId(1), at_t, change }).unwrap();
+        craft
+            .apply(&Event {
+                ship: ShipId(1),
+                at_t,
+                change,
+            })
+            .unwrap();
     }
 
     fn cruise(craft: &Craft) -> crate::flight::Cruise {
-        let Motive::Crossing(cruise) = &craft.motion.motive else { panic!("not a crossing") };
+        let Motive::Crossing(cruise) = &craft.motion.motive else {
+            panic!("not a crossing")
+        };
         cruise.clone()
     }
 
@@ -139,7 +155,11 @@ mod tests {
 
         // Split across two windows, the same four and none twice.
         let middle = 0.5 * (flip + brake);
-        let halves = [transitions(&craft, 0.0, middle), transitions(&craft, middle, arrive + 100.0)].concat();
+        let halves = [
+            transitions(&craft, 0.0, middle),
+            transitions(&craft, middle, arrive + 100.0),
+        ]
+        .concat();
         assert_eq!(halves, found);
     }
 
@@ -164,7 +184,10 @@ mod tests {
         // Behind it, so it has to come about first.
         let mut craft = crossing(10.0, -DVec3::X);
         let [lit, ..] = cruise(&craft).phase_changes_s();
-        assert!(lit > 10.0, "premise: the ship has to come about before it lights");
+        assert!(
+            lit > 10.0,
+            "premise: the ship has to come about before it lights"
+        );
         order(&mut craft, 10.0 + 0.5 * (lit - 10.0), Change::CutDrive);
         assert_eq!(transitions(&craft, 0.0, lit + 1_000.0), []);
     }

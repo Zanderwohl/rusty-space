@@ -122,7 +122,10 @@ pub struct AuthoredStars {
 
 impl AuthoredStars {
     pub fn new(name: impl Into<String>, stars: Vec<CatalogueStar>) -> Self {
-        Self { name: name.into(), stars }
+        Self {
+            name: name.into(),
+            stars,
+        }
     }
 
     /// Three stars, enough to exercise anything that consumes a provider.
@@ -132,7 +135,10 @@ impl AuthoredStars {
             let mass = em_spectra::stellar::main_sequence_mass_solar(lum);
             CatalogueStar {
                 id: StarId::synthesise("authored", key),
-                provenance: Provenance { source: "authored".into(), key },
+                provenance: Provenance {
+                    source: "authored".into(),
+                    key,
+                },
                 name: Some(format!("Authored {key}")),
                 position_ly: DVec3::new(ly, 0.0, 0.0),
                 velocity: DVec3::ZERO,
@@ -145,10 +151,20 @@ impl AuthoredStars {
                 luminosity_solar: lum,
                 mass_solar: mass,
                 metallicity: 0.0,
-                component: Component { index: 1, group: None },
+                component: Component {
+                    index: 1,
+                    group: None,
+                },
             }
         };
-        Self::new("authored", vec![make(1, 4.2, 3000.0, 0.0017), make(2, 11.0, 5772.0, 1.0), make(3, 25.0, 9500.0, 25.0)])
+        Self::new(
+            "authored",
+            vec![
+                make(1, 4.2, 3000.0, 0.0017),
+                make(2, 11.0, 5772.0, 1.0),
+                make(3, 25.0, 9500.0, 25.0),
+            ],
+        )
     }
 }
 
@@ -167,10 +183,19 @@ mod tests {
 
     #[test]
     fn ids_are_stable_and_provider_scoped() {
-        assert_eq!(StarId::synthesise("hyg", 71456), StarId::synthesise("hyg", 71456));
-        assert_ne!(StarId::synthesise("hyg", 71456), StarId::synthesise("hyg", 71457));
+        assert_eq!(
+            StarId::synthesise("hyg", 71456),
+            StarId::synthesise("hyg", 71456)
+        );
+        assert_ne!(
+            StarId::synthesise("hyg", 71456),
+            StarId::synthesise("hyg", 71457)
+        );
         // The same catalogue key under a different provider is a different star.
-        assert_ne!(StarId::synthesise("hyg", 1), StarId::synthesise("authored", 1));
+        assert_ne!(
+            StarId::synthesise("hyg", 1),
+            StarId::synthesise("authored", 1)
+        );
         // And an id is not the key wearing a hat.
         assert_ne!(StarId::synthesise("hyg", 71456).get(), 71456);
     }

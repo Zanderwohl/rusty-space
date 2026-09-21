@@ -4,7 +4,7 @@
 //! looks at one, and a seed is eight bytes; what a player *changes* becomes an event, and
 //! replaying those over this baseline reconstructs the system exactly.
 
-use em_sim::appearance::{Appearance, DebugBall, AppearanceColor};
+use em_sim::appearance::{Appearance, AppearanceColor, DebugBall};
 use em_sim::body::BodyInfo;
 use em_sim::motive::kepler::{
     EccentricitySMA, KeplerEpoch, KeplerEulerAngles, KeplerMotive, KeplerRotation,
@@ -64,7 +64,10 @@ impl GeneratedSystem {
 /// Generate the system around one catalogue star.
 pub fn system_for(star: &CatalogueStar) -> GeneratedSystem {
     let seed = star.seed();
-    let name = star.name.clone().unwrap_or_else(|| format!("Star {:016x}", star.id.get()));
+    let name = star
+        .name
+        .clone()
+        .unwrap_or_else(|| format!("Star {:016x}", star.id.get()));
     let mut system = GeneratedSystem {
         stars: vec![(name.clone(), star.star, star.mass_solar)],
         separation_m: 0.0,
@@ -83,8 +86,10 @@ pub fn system_for(star: &CatalogueStar) -> GeneratedSystem {
 /// Keplerian motion.
 pub fn binary_for(primary: &CatalogueStar, secondary: &CatalogueStar) -> GeneratedSystem {
     let mut system = system_for(primary);
-    let secondary_name =
-        secondary.name.clone().unwrap_or_else(|| format!("Star {:016x}", secondary.id.get()));
+    let secondary_name = secondary
+        .name
+        .clone()
+        .unwrap_or_else(|| format!("Star {:016x}", secondary.id.get()));
     let seed = rng::hash(&[primary.seed(), secondary.id.get()]);
 
     // Wide enough that neither star fills its Roche lobe, and wide enough not to scatter the
@@ -93,7 +98,9 @@ pub fn binary_for(primary: &CatalogueStar, secondary: &CatalogueStar) -> Generat
     let floor = 20.0 * (primary.star.radius_m + secondary.star.radius_m);
     system.separation_m = (widest_planet * 4.0).max(floor).max(20.0 * AU)
         * rng::uniform_in(rng::hash(&[seed, 1]), 1.0, 6.0);
-    system.stars.push((secondary_name, secondary.star, secondary.mass_solar));
+    system
+        .stars
+        .push((secondary_name, secondary.star, secondary.mass_solar));
     system
 }
 
@@ -116,10 +123,17 @@ fn planets(seed: u64, star: &CatalogueStar) -> Vec<Planet> {
             rng::uniform_in(h(3), 5.0, 400.0) * factor
         };
         // Rocky bodies scale as M^0.27, gas giants barely at all.
-        let radius_earths =
-            if rocky { mass_earths.powf(0.27) } else { 4.0 * mass_earths.powf(0.08) };
+        let radius_earths = if rocky {
+            mass_earths.powf(0.27)
+        } else {
+            4.0 * mass_earths.powf(0.08)
+        };
         out.push(Planet {
-            name: format!("{} {}", star.name.as_deref().unwrap_or("b"), (b'b' + k as u8) as char),
+            name: format!(
+                "{} {}",
+                star.name.as_deref().unwrap_or("b"),
+                (b'b' + k as u8) as char
+            ),
             semi_major_m: a,
             eccentricity: rng::uniform_in(h(4), 0.0, 0.12),
             inclination_deg: rng::gaussian(h(5)) * 2.0,
@@ -139,7 +153,10 @@ fn planets(seed: u64, star: &CatalogueStar) -> Vec<Planet> {
 fn populations(seed: u64, star: &CatalogueStar, planets: &[Planet]) -> Vec<Population> {
     let factor = metallicity::solid_mass_factor(star.metallicity);
     let scale = AU * star.luminosity_solar.max(1e-4).sqrt();
-    let outer = planets.last().map(|p| p.semi_major_m).unwrap_or(5.0 * scale);
+    let outer = planets
+        .last()
+        .map(|p| p.semi_major_m)
+        .unwrap_or(5.0 * scale);
 
     let mut dust_response = PerBand::splat(0.0f32);
     for b in em_spectra::Band::ALL {
@@ -244,7 +261,11 @@ fn swarm(seed: u64, star: &CatalogueStar) -> Option<Population> {
 fn debug_ball(radius: f64, rgb: (u16, u16, u16)) -> Appearance {
     Appearance::DebugBall(DebugBall {
         radius,
-        color: AppearanceColor { r: rgb.0, g: rgb.1, b: rgb.2 },
+        color: AppearanceColor {
+            r: rgb.0,
+            g: rgb.1,
+            b: rgb.2,
+        },
         highlight_latitudes: Vec::new(),
     })
 }
@@ -260,7 +281,15 @@ fn info(id: &str, mass: f64, major: bool, tags: &[&str]) -> BodyInfo {
     }
 }
 
-fn kepler(primary: &str, a: f64, e: f64, inc_deg: f64, node_deg: f64, anomaly_deg: f64, mu: Option<f64>) -> KeplerMotive {
+fn kepler(
+    primary: &str,
+    a: f64,
+    e: f64,
+    inc_deg: f64,
+    node_deg: f64,
+    anomaly_deg: f64,
+    mu: Option<f64>,
+) -> KeplerMotive {
     KeplerMotive {
         primary_id: primary.to_string(),
         shape: KeplerShapeEcc(a, e),
@@ -269,7 +298,9 @@ fn kepler(primary: &str, a: f64, e: f64, inc_deg: f64, node_deg: f64, anomaly_de
             longitude_of_ascending_node: node_deg,
             argument_of_periapsis: 0.0,
         }),
-        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 { mean_anomaly: anomaly_deg }),
+        epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
+            mean_anomaly: anomaly_deg,
+        }),
         anomalistic_period: None,
         gravitational_parameter: mu,
     }
@@ -399,7 +430,11 @@ mod tests {
             let sys = system_for(s);
             let mut prev = 0.0;
             for p in &sys.planets {
-                assert!(p.semi_major_m > prev, "{} is not outside its neighbor", p.name);
+                assert!(
+                    p.semi_major_m > prev,
+                    "{} is not outside its neighbor",
+                    p.name
+                );
                 prev = p.semi_major_m;
                 assert!((0.0..0.2).contains(&p.eccentricity));
                 assert!(p.radius_m > 0.0 && p.mass_kg > 0.0);
@@ -413,10 +448,16 @@ mod tests {
         let sys = system_for(&sun_like());
         assert_eq!(sys.populations.len(), 3);
         let oort = sys.populations.last().unwrap();
-        assert!(oort.semi_major.mean() > 1000.0 * AU, "the Oort cloud must be far out");
+        assert!(
+            oort.semi_major.mean() > 1000.0 * AU,
+            "the Oort cloud must be far out"
+        );
         // Invisible, which is the correct answer and costs one record to say.
         let deficit = oort.mean_deficit(DVec3::X, &sys.stars[0].1);
-        assert!(deficit < 1e-10, "an Oort cloud should not be detectable: {deficit}");
+        assert!(
+            deficit < 1e-10,
+            "an Oort cloud should not be detectable: {deficit}"
+        );
     }
 
     #[test]
@@ -426,8 +467,16 @@ mod tests {
         rich.metallicity = 0.3;
         poor.metallicity = -1.5;
         let (r, p) = (system_for(&rich), system_for(&poor));
-        let mass = |s: &GeneratedSystem| s.populations.iter().map(|x| x.count * x.cross_section).sum::<f64>();
-        assert!(mass(&r) / mass(&p) > 20.0, "metal-poor systems must be thin on solids");
+        let mass = |s: &GeneratedSystem| {
+            s.populations
+                .iter()
+                .map(|x| x.count * x.cross_section)
+                .sum::<f64>()
+        };
+        assert!(
+            mass(&r) / mass(&p) > 20.0,
+            "metal-poor systems must be thin on solids"
+        );
     }
 
     #[test]
@@ -436,9 +485,15 @@ mod tests {
         let mut sim = build(&sys);
         assert_eq!(sim.len(), sys.planets.len() + 1);
         for days in [0.0, 100.0, 3650.0] {
-            em_sim::propagate::evaluate_at(&mut sim, Instant::from_seconds_since_j2000(days * 86_400.0));
+            em_sim::propagate::evaluate_at(
+                &mut sim,
+                Instant::from_seconds_since_j2000(days * 86_400.0),
+            );
             for i in sim.indices() {
-                assert!(sim.position(i).is_finite(), "a body left the universe at day {days}");
+                assert!(
+                    sim.position(i).is_finite(),
+                    "a body left the universe at day {days}"
+                );
             }
         }
     }
@@ -453,7 +508,9 @@ mod tests {
         assert!(sys.separation_m > 0.0);
 
         let mut sim = build(&sys);
-        let barycenter = sim.by_name(&format!("{} Barycenter", sys.name)).expect("barycenter");
+        let barycenter = sim
+            .by_name(&format!("{} Barycenter", sys.name))
+            .expect("barycenter");
         let a = sim.by_name(&sys.stars[0].0).expect("primary");
         let b = sim.by_name(&sys.stars[1].0).expect("secondary");
 
@@ -471,12 +528,18 @@ mod tests {
         // Circular, so the separation holds.
         let first = separations[0];
         for s in &separations {
-            assert!((s / first - 1.0).abs() < 1e-6, "separation drifted: {separations:?}");
+            assert!(
+                (s / first - 1.0).abs() < 1e-6,
+                "separation drifted: {separations:?}"
+            );
         }
         // The heavier star sits closer in.
         em_sim::propagate::evaluate_at(&mut sim, Instant::J2000);
         let heavier_first = sys.stars[0].2 > sys.stars[1].2;
-        assert_eq!(heavier_first, sim.position(a).length() < sim.position(b).length());
+        assert_eq!(
+            heavier_first,
+            sim.position(a).length() < sim.position(b).length()
+        );
     }
 
     #[test]
@@ -484,7 +547,11 @@ mod tests {
         let stars = AuthoredStars::sample();
         let sys = binary_for(&stars.stars()[1], &stars.stars()[2]);
         for p in &sys.planets {
-            assert!(p.semi_major_m * 3.0 < sys.separation_m, "{} is not safely inside", p.name);
+            assert!(
+                p.semi_major_m * 3.0 < sys.separation_m,
+                "{} is not safely inside",
+                p.name
+            );
         }
     }
 }

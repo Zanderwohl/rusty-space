@@ -106,12 +106,19 @@ impl Refit {
             let holds = |refund: f64, after: &Loadout| {
                 stored + refund <= balance.capacity_j(after) * (1.0 + 1.0e-12)
             };
-            let wants = |module: Module, loadout: &Loadout| loadout.count(module) < target.count(module);
-            let spares = |module: Module, loadout: &Loadout| loadout.count(module) > target.count(module);
+            let wants =
+                |module: Module, loadout: &Loadout| loadout.count(module) < target.count(module);
+            let spares =
+                |module: Module, loadout: &Loadout| loadout.count(module) > target.count(module);
 
             let mut chosen: Option<(Step, f64)> = None;
             let room = current.free_slots() > 0;
-            for module in [Module::Drone, Module::Storage, Module::Engine, Module::Living] {
+            for module in [
+                Module::Drone,
+                Module::Storage,
+                Module::Engine,
+                Module::Living,
+            ] {
                 if chosen.is_none() && wants(module, &current) && room && affords(module_j) {
                     chosen = Some((Step::Build(module), module_j));
                 }
@@ -132,7 +139,12 @@ impl Refit {
                 }
             }
             if chosen.is_none() {
-                for module in [Module::Living, Module::Engine, Module::Storage, Module::Drone] {
+                for module in [
+                    Module::Living,
+                    Module::Engine,
+                    Module::Storage,
+                    Module::Drone,
+                ] {
                     if chosen.is_some() || !spares(module, &current) {
                         continue;
                     }
@@ -145,7 +157,11 @@ impl Refit {
             }
             let Some((step, gross_j)) = chosen else {
                 let blocked_by_capacity = Module::ALL.iter().any(|m| spares(*m, &current));
-                return Err(if blocked_by_capacity { Shortage::Capacity } else { Shortage::Energy });
+                return Err(if blocked_by_capacity {
+                    Shortage::Capacity
+                } else {
+                    Shortage::Energy
+                });
             };
 
             let duration_s = gross_j / power;
@@ -169,11 +185,21 @@ impl Refit {
                 }
             }
             stored = (stored - drain * duration_s).max(0.0);
-            steps.push(Planned { step, begins_s: elapsed, duration_s, gross_j, after });
+            steps.push(Planned {
+                step,
+                begins_s: elapsed,
+                duration_s,
+                gross_j,
+                after,
+            });
             elapsed += duration_s;
             current = after;
         }
-        Ok(Self { order, recovery: balance.recovery, steps })
+        Ok(Self {
+            order,
+            recovery: balance.recovery,
+            steps,
+        })
     }
 
     pub fn order(&self) -> Order {
@@ -254,7 +280,12 @@ mod tests {
     const B: Balance = Balance::DEFAULT;
 
     fn order(from: Loadout, target: Loadout, stored_me: f64) -> Order {
-        Order { from, target, stored_j: stored_me * B.module_energy_j(), start_s: 100.0 }
+        Order {
+            from,
+            target,
+            stored_j: stored_me * B.module_energy_j(),
+            start_s: 100.0,
+        }
     }
 
     fn plan(from: Loadout, target: Loadout, stored_me: f64) -> Result<Refit, Shortage> {
@@ -271,7 +302,11 @@ mod tests {
     #[test]
     fn short_of_energy_it_takes_apart_before_it_builds() {
         let from = Loadout::STARTING;
-        let target = Loadout { living: 0, engines: 6, ..from };
+        let target = Loadout {
+            living: 0,
+            engines: 6,
+            ..from
+        };
         let refit = plan(from, target, 0.0).unwrap();
         let steps: Vec<_> = refit.steps().collect();
         assert_eq!(steps[0], Step::Dismantle(Module::Living));
@@ -284,15 +319,32 @@ mod tests {
     #[test]
     fn with_energy_to_spare_it_builds_first() {
         let from = Loadout::STARTING;
-        let target = Loadout { living: 1, engines: 6, ..from };
+        let target = Loadout {
+            living: 1,
+            engines: 6,
+            ..from
+        };
         let steps: Vec<_> = plan(from, target, 30.0).unwrap().steps().collect();
-        assert_eq!(steps, [Step::Build(Module::Engine), Step::Dismantle(Module::Living)]);
+        assert_eq!(
+            steps,
+            [Step::Build(Module::Engine), Step::Dismantle(Module::Living)]
+        );
     }
 
     #[test]
     fn short_of_slots_it_takes_apart_before_it_builds() {
-        let from = Loadout { storage: 6, drones: 2, living: 2, engines: 10, slots: 20 };
-        let target = Loadout { living: 0, engines: 12, ..from };
+        let from = Loadout {
+            storage: 6,
+            drones: 2,
+            living: 2,
+            engines: 10,
+            slots: 20,
+        };
+        let target = Loadout {
+            living: 0,
+            engines: 12,
+            ..from
+        };
         let steps: Vec<_> = plan(from, target, 20.0).unwrap().steps().collect();
         assert_eq!(steps[0], Step::Dismantle(Module::Living));
     }
@@ -300,14 +352,32 @@ mod tests {
     #[test]
     fn drones_come_first_and_go_last() {
         let from = Loadout::STARTING;
-        let more = plan(from, Loadout { drones: 4, engines: 7, ..from }, 30.0).unwrap();
+        let more = plan(
+            from,
+            Loadout {
+                drones: 4,
+                engines: 7,
+                ..from
+            },
+            30.0,
+        )
+        .unwrap();
         let steps: Vec<_> = more.steps().collect();
         assert_eq!(&steps[..2], [Step::Build(Module::Drone); 2]);
         // And the engines after them are built twice as fast.
         let first = more.steps[0].duration_s;
         assert!((more.steps[2].duration_s / first - 0.5).abs() < 1.0e-12);
 
-        let fewer = plan(from, Loadout { drones: 1, engines: 4, ..from }, 20.0).unwrap();
+        let fewer = plan(
+            from,
+            Loadout {
+                drones: 1,
+                engines: 4,
+                ..from
+            },
+            20.0,
+        )
+        .unwrap();
         let steps: Vec<_> = fewer.steps().collect();
         assert_eq!(steps.last(), Some(&Step::Dismantle(Module::Drone)));
     }
@@ -321,25 +391,52 @@ mod tests {
         // With a little room it goes through.
         assert!(plan(from, Loadout { engines: 3, ..from }, 27.0).is_ok());
         // Taking apart storage while full of energy cannot be done either.
-        assert_eq!(plan(from, Loadout { storage: 5, ..from }, 30.0).unwrap_err(), Shortage::Capacity);
+        assert_eq!(
+            plan(from, Loadout { storage: 5, ..from }, 30.0).unwrap_err(),
+            Shortage::Capacity
+        );
     }
 
     #[test]
     fn an_impossible_target_says_what_it_is_short_of() {
         let from = Loadout::STARTING;
         assert_eq!(
-            plan(from, Loadout { engines: 20, ..from }, 30.0).unwrap_err(),
+            plan(
+                from,
+                Loadout {
+                    engines: 20,
+                    ..from
+                },
+                30.0
+            )
+            .unwrap_err(),
             Shortage::Unbuildable
         );
-        assert_eq!(plan(from, Loadout { drones: 0, ..from }, 30.0).unwrap_err(), Shortage::Unbuildable);
-        let bare = Loadout { storage: 0, drones: 1, living: 0, engines: 0, slots: 20 };
-        assert_eq!(plan(bare, Loadout { engines: 1, ..bare }, 0.0).unwrap_err(), Shortage::Energy);
+        assert_eq!(
+            plan(from, Loadout { drones: 0, ..from }, 30.0).unwrap_err(),
+            Shortage::Unbuildable
+        );
+        let bare = Loadout {
+            storage: 0,
+            drones: 1,
+            living: 0,
+            engines: 0,
+            slots: 20,
+        };
+        assert_eq!(
+            plan(bare, Loadout { engines: 1, ..bare }, 0.0).unwrap_err(),
+            Shortage::Energy
+        );
     }
 
     #[test]
     fn the_hull_grows_before_it_is_filled_and_shrinks_once_emptied() {
         let from = Loadout::STARTING;
-        let bigger = Loadout { engines: 12, slots: 22, ..from };
+        let bigger = Loadout {
+            engines: 12,
+            slots: 22,
+            ..from
+        };
         let steps: Vec<_> = plan(from, bigger, 30.0).unwrap().steps().collect();
         assert_eq!(&steps[..2], [Step::Grow, Step::Grow]);
         let smaller = Loadout { slots: 15, ..from };
@@ -350,13 +447,25 @@ mod tests {
     #[test]
     fn the_timing_adds_up() {
         let from = Loadout::STARTING;
-        let refit = plan(from, Loadout { engines: 6, living: 3, ..from }, 30.0).unwrap();
+        let refit = plan(
+            from,
+            Loadout {
+                engines: 6,
+                living: 3,
+                ..from
+            },
+            30.0,
+        )
+        .unwrap();
         let week = 7.0 * 86_400.0;
         // Two drones, two modules: a week in all.
         assert!((refit.duration_s() / week - 1.0).abs() < 1.0e-12);
         let halfway = refit.at(100.0 + week * 0.25);
         assert_eq!(halfway.finished, 0);
-        assert_eq!(halfway.current.map(|(s, _)| s), Some(Step::Build(Module::Engine)));
+        assert_eq!(
+            halfway.current.map(|(s, _)| s),
+            Some(Step::Build(Module::Engine))
+        );
         assert!((halfway.consumed_j / (0.5 * B.module_energy_j()) - 1.0).abs() < 1.0e-12);
         assert!((halfway.in_hand_kg * C2 - halfway.consumed_j).abs() < 1.0e-3 * halfway.consumed_j);
         let done = refit.at(100.0 + week);

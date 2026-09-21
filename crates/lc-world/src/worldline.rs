@@ -59,7 +59,12 @@ impl<'a> Flight<'a> {
     /// True only of a craft that has never changed its motive. Anything the world has run is
     /// built by [`crate::craft::Craft::worldline`], which carries the real history.
     pub fn new(state: &'a ShipState, system: Option<&'a LocalSystem>) -> Self {
-        Self { state, system, past: &[], known_from_s: f64::NEG_INFINITY }
+        Self {
+            state,
+            system,
+            past: &[],
+            known_from_s: f64::NEG_INFINITY,
+        }
     }
 
     pub fn with_past(
@@ -68,7 +73,12 @@ impl<'a> Flight<'a> {
         past: &'a [Past],
         known_from_s: f64,
     ) -> Self {
-        Self { state, system, past, known_from_s }
+        Self {
+            state,
+            system,
+            past,
+            known_from_s,
+        }
     }
 
     /// What the ship was doing at a coordinate second.

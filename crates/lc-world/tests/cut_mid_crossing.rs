@@ -16,7 +16,9 @@ fn crossing_craft() -> Craft {
     // Four light-years out along +X, which is the shape of a real crossing.
     let to = DVec3::new(4.0, 0.0, 0.0);
     let drive = Kind::Ship.drive();
-    craft.motion.begin_crossing(Cruise::plan(DVec3::ZERO, to, 0.0, drive), None);
+    craft
+        .motion
+        .begin_crossing(Cruise::plan(DVec3::ZERO, to, 0.0, drive), None);
     craft.motion.drive = drive;
     craft
 }
@@ -24,7 +26,9 @@ fn crossing_craft() -> Craft {
 #[test]
 fn a_cut_part_way_through_a_crossing_stops_the_burn() {
     let mut craft = crossing_craft();
-    let Motive::Crossing(cruise) = &craft.motion.motive else { panic!("premise: crossing") };
+    let Motive::Crossing(cruise) = &craft.motion.motive else {
+        panic!("premise: crossing")
+    };
     let duration = cruise.duration_s();
 
     // Two percent of the way, which is where the report cut.
@@ -39,7 +43,11 @@ fn a_cut_part_way_through_a_crossing_stops_the_burn() {
     let _ = motion::apply(
         &mut craft.motion,
         craft.system.as_deref(),
-        &Event { ship: ShipId(0), at_t: at, change: Change::CutDrive },
+        &Event {
+            ship: ShipId(0),
+            at_t: at,
+            change: Change::CutDrive,
+        },
     );
 
     assert!(
@@ -49,7 +57,10 @@ fn a_cut_part_way_through_a_crossing_stops_the_burn() {
     );
 
     // And it keeps the velocity it had, which is what a cut is — not a stop.
-    assert!(craft.motion.beta.length() > 0.0, "the cut stopped the ship dead");
+    assert!(
+        craft.motion.beta.length() > 0.0,
+        "the cut stopped the ship dead"
+    );
     assert!(
         (craft.motion.position_ly - under_way).length() < 1.0e-9,
         "the cut moved the ship",
@@ -60,13 +71,19 @@ fn a_cut_part_way_through_a_crossing_stops_the_burn() {
 #[test]
 fn the_frames_after_a_cut_in_flight_are_cheap() {
     let mut craft = crossing_craft();
-    let Motive::Crossing(cruise) = &craft.motion.motive else { panic!("premise") };
+    let Motive::Crossing(cruise) = &craft.motion.motive else {
+        panic!("premise")
+    };
     let at = cruise.duration_s() * 0.02;
     craft.advance(at, at);
     let _ = motion::apply(
         &mut craft.motion,
         craft.system.as_deref(),
-        &Event { ship: ShipId(0), at_t: at, change: Change::CutDrive },
+        &Event {
+            ship: ShipId(0),
+            at_t: at,
+            change: Change::CutDrive,
+        },
     );
 
     let step = 8766.0 / 60.0;
@@ -78,7 +95,10 @@ fn the_frames_after_a_cut_in_flight_are_cheap() {
     }
     let each = started.elapsed() / 60;
     println!("a frame after a cut in flight costs {each:?}");
-    assert!(each < std::time::Duration::from_millis(4), "{each:?} is most of a frame");
+    assert!(
+        each < std::time::Duration::from_millis(4),
+        "{each:?} is most of a frame"
+    );
 }
 
 /// Ordering a crossing while one is already under way, to somewhere further along.
@@ -90,7 +110,9 @@ fn the_frames_after_a_cut_in_flight_are_cheap() {
 #[test]
 fn a_crossing_ordered_in_flight_keeps_the_speed_already_built() {
     let mut craft = crossing_craft();
-    let Motive::Crossing(cruise) = &craft.motion.motive else { panic!("premise") };
+    let Motive::Crossing(cruise) = &craft.motion.motive else {
+        panic!("premise")
+    };
     let at = cruise.duration_s() * 0.10;
     craft.advance(at, at);
 
@@ -105,7 +127,10 @@ fn a_crossing_ordered_in_flight_keeps_the_speed_already_built() {
         &Event {
             ship: ShipId(0),
             at_t: at,
-            change: Change::Cross { to_ly: further, drive: Kind::Ship.drive() },
+            change: Change::Cross {
+                to_ly: further,
+                drive: Kind::Ship.drive(),
+            },
         },
     )
     .expect("a crossing from a moving start");
@@ -136,7 +161,10 @@ fn a_crossing_ordered_from_an_orbit_keeps_its_speed() {
         &Event {
             ship: ShipId(0),
             at_t: 0.0,
-            change: Change::Cross { to_ly: DVec3::new(4.0, 0.0, 0.0), drive: Kind::Ship.drive() },
+            change: Change::Cross {
+                to_ly: DVec3::new(4.0, 0.0, 0.0),
+                drive: Kind::Ship.drive(),
+            },
         },
     )
     .expect("a crossing from an orbit");
@@ -158,7 +186,9 @@ fn a_crossing_ordered_from_an_orbit_keeps_its_speed() {
 #[test]
 fn a_hard_sideways_re_aim_sheds_across_the_line_rather_than_losing_it() {
     let mut craft = crossing_craft();
-    let Motive::Crossing(cruise) = &craft.motion.motive else { panic!("premise") };
+    let Motive::Crossing(cruise) = &craft.motion.motive else {
+        panic!("premise")
+    };
     let at = cruise.duration_s() * 0.10;
     craft.advance(at, at);
     let moving = craft.motion.beta.length();
@@ -170,7 +200,10 @@ fn a_hard_sideways_re_aim_sheds_across_the_line_rather_than_losing_it() {
         &Event {
             ship: ShipId(0),
             at_t: at,
-            change: Change::Cross { to_ly: DVec3::new(0.0, 3.0, 0.0), drive: Kind::Ship.drive() },
+            change: Change::Cross {
+                to_ly: DVec3::new(0.0, 3.0, 0.0),
+                drive: Kind::Ship.drive(),
+            },
         },
     )
     .expect("accepted");
@@ -185,7 +218,9 @@ fn a_hard_sideways_re_aim_sheds_across_the_line_rather_than_losing_it() {
     );
 
     // And the match is real: it takes time, and by the end of it the ship is on the line.
-    let Motive::Crossing(plan) = &craft.motion.motive else { panic!("still crossing") };
+    let Motive::Crossing(plan) = &craft.motion.motive else {
+        panic!("still crossing")
+    };
     // At the end, not near it: a brake still has speed at 99.9% of the way through.
     let arrived = plan.at(at + plan.duration_s());
     assert!(
@@ -222,11 +257,17 @@ fn a_crossing_to_a_star_you_are_already_inside_does_not_fly_you_outward() {
         &Event {
             ship: ShipId(0),
             at_t: 0.0,
-            change: Change::Cross { to_ly: star, drive: Kind::Ship.drive() },
+            change: Change::Cross {
+                to_ly: star,
+                drive: Kind::Ship.drive(),
+            },
         },
     );
 
-    assert!(outcome.is_err(), "it accepted a crossing to a star it was already inside");
+    assert!(
+        outcome.is_err(),
+        "it accepted a crossing to a star it was already inside"
+    );
     craft.advance(60.0, 60.0);
     let moved = (craft.motion.position_ly - was).length();
     assert!(moved < 1.0e-9, "the ship moved {moved} light-years anyway");
@@ -242,7 +283,10 @@ fn a_crossing_to_a_star_further_than_the_standoff_still_flies() {
         &Event {
             ship: ShipId(0),
             at_t: 0.0,
-            change: Change::Cross { to_ly: DVec3::new(4.0, 0.0, 0.0), drive: Kind::Ship.drive() },
+            change: Change::Cross {
+                to_ly: DVec3::new(4.0, 0.0, 0.0),
+                drive: Kind::Ship.drive(),
+            },
         },
     )
     .expect("four light-years is a crossing");
@@ -257,7 +301,11 @@ fn an_in_system_course_keeps_the_speed_the_ship_has() {
     use lc_world::sky::{AuthoredStars, StarProvider};
     use lc_world::system::LocalSystem;
 
-    let star = AuthoredStars::sample().stars().first().cloned().expect("a star");
+    let star = AuthoredStars::sample()
+        .stars()
+        .first()
+        .cloned()
+        .expect("a star");
     let system = std::sync::Arc::new(LocalSystem::for_star(&star).expect("a system"));
     let mut craft = Craft::at(CraftId(1), Kind::Ship, star.position_ly);
     craft.enter(Some(system), 0.0);
@@ -271,12 +319,18 @@ fn an_in_system_course_keeps_the_speed_the_ship_has() {
         &Event {
             ship: ShipId(0),
             at_t: 0.0,
-            change: Change::SetCourse { course: Course::LeaveSystem, drive: Kind::Ship.drive() },
+            change: Change::SetCourse {
+                course: Course::LeaveSystem,
+                drive: Kind::Ship.drive(),
+            },
         },
     )
     .expect("leaving a system is a course");
 
     craft.advance(1.0, 1.0);
     let after = craft.motion.beta.length();
-    assert!(after > moving * 0.5, "a course from {moving}c left the ship at {after}c");
+    assert!(
+        after > moving * 0.5,
+        "a course from {moving}c left the ship at {after}c"
+    );
 }
