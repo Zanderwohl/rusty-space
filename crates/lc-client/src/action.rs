@@ -726,12 +726,19 @@ fn apply_to(ui: &mut UiState, session: &mut Session, action: Action, effects: &m
 ///
 /// Not simply the first: the catalogue carries the Sun at about an astronomical unit, and
 /// "nearest star" has to mean one that is somewhere else.
+/// The nearest star this ship has a position for, other than the one it is sitting in.
+///
+/// Out of what is *known*: the key picks a target to watch, and a target nobody has detected
+/// is not one the ship could name, let alone point at.
 fn nearest_interstellar(session: &Session) -> Option<StarId> {
+    let here = session.ship.motion.position_ly;
     session
-        .stars
-        .iter()
-        .find(|s| session.distance_to(s) > INTERSTELLAR_LY)
-        .map(|s| s.id)
+        .knowledge
+        .beliefs()
+        .filter_map(|b| Some((b.star, b.distance.from(here)?)))
+        .filter(|(_, ly)| *ly > INTERSTELLAR_LY)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(id, _)| id)
 }
 
 fn aim(ui: &UiState, session: &Session) -> Option<Look> {
@@ -838,10 +845,11 @@ mod tests {
     use crate::ui::{RATE_LADDER, rate_label};
 
     fn fixture() -> (UiState, Session) {
-        (
-            UiState::default(),
-            Session::new(&AuthoredStars::sample(), 3),
-        )
+        let mut session = Session::new(&AuthoredStars::sample(), 3);
+        // Charted, because a ship leaves port with charts and most of these tests are about
+        // something else. `session::tests` is where an unsurveyed sky is the subject.
+        session.issue_charts(30.0);
+        (UiState::default(), session)
     }
 
     /// The map is a mode of the main view, so the key that shows it puts it away again and

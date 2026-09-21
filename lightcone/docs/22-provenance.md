@@ -1,0 +1,242 @@
+# Provenance
+
+The premise of the game is that information travels at `c`, and the premise has a corollary
+the rest of these documents assume without ever stating: **nobody has a view of the world.**
+A player has a pile of measurements. Each was taken somewhere, at some time, by some
+instrument, and reached them by some route. What they call the universe is a fold over that
+pile, and another player folding a different pile is not wrong.
+
+[05-observation.md](05-observation.md) is what an instrument measures.
+[03-world-model.md](03-world-model.md) names the "known-world snapshot" and leaves it at that.
+This document is the shape of the pile: what a record is, what a belief made of records is,
+how records move between craft, and what a craft that has not looked at something knows about
+it, which is nothing.
+
+## The rule
+
+**A star nobody aboard has detected is absent.** Not dimmed, not greyed out, not listed
+without a distance: absent. The catalogue is the world; it is not what anyone knows of the
+world, and the client must never read it where a player can see the answer.
+
+This was the thing most obviously wrong before this document existed. The client held 6000
+catalogue stars, drew all of them on the map at their true positions, listed the nearest forty
+in the telescope panel, and kept exactly one light curve — which it threw away the moment the
+telescope moved. Knowledge was free and memory was not, which is precisely backwards.
+
+## What a record is
+
+Four kinds, and the distinctions between them are load-bearing.
+
+| record | what it says | carries |
+|---|---|---|
+| sighting | something was detected in this direction, this bright | witness, arrival time, observer position, bearing and its sigma, band, flux and its sigma |
+| sample | the flux of a known source changed by this much | witness, arrival time, signed deficit, sigma |
+| claim | somebody states a distance | witness, the distance, when they said it |
+| lineage | how any of the above got here | a hop per handover: from, to, sent, received |
+
+A **witness** is whoever took the measurement — a ship, a probe, a telescope, a charting
+office nobody has met. It is not whoever holds the record. `Knowledge::owner` is the holder;
+every record says who made it, and the two differ for everything that arrived by radio.
+
+A **hop** is one handover. A sighting a probe made and relayed twice has two hops, and the
+craft holding it knows it is third-hand without having to be told separately.
+
+**Arrival time is recorded; emission time is derived.** This is the part that surprises. A
+telescope knows exactly when the light landed on it. When the light *left* is the arrival time
+minus the distance, and the distance is a measurement that may not exist yet — so a curve of a
+star whose parallax nobody has taken is plotted against arrival, and the interface says so. An
+epoch is not a property of a measurement. It is a conclusion drawn from two of them.
+
+## Distance is the whole mechanic
+
+One bearing is a direction. It stays a direction forever, however long you stare, from however
+big a mirror.
+
+Two bearings taken a baseline `B` apart differ by `B / d` radians, and that difference is the
+only way anything here learns how far away anything else is. So:
+
+- A ship parked at a station measures no distances at all.
+- A ship in a wide orbit measures them over a fraction of a year, as its own orbit swings it
+  across the baseline.
+- A ship under way measures them in hours, because a crossing at a fifth of `c` opens a
+  baseline of light-days in a day.
+- Two craft a light-year apart measure in one exchange what one craft would need a century of
+  orbiting to reach — which is what makes a second ship worth more than a second telescope.
+
+Precision follows from the same formula. With angular error `sigma`, a distance `d` comes out
+to `sigma_d = d^2 sigma / B`: quadratic in range, linear in the error, and improved only by
+moving further. Three consequences worth keeping:
+
+| | |
+|---|---|
+| a chart's error grows with range | so the far edge of a charted volume is the vague part, and it is vague in *depth* rather than in direction |
+| a lower bound is a real result | no parallax found over baseline `B` means the star is further than about `B / 2 sigma`, which is information and is shown as such |
+| luminosity is downstream of distance | flux is measured; `L = 4 pi d^2 F` is inferred, so a star with no parallax has no known output, and therefore no known kind |
+
+### How it is solved
+
+Least squares over every bearing held, in a frame whose `z` is the mean bearing, as a
+**centered regression of transverse position on slope**. The obvious formulation — the normal
+system `sum (I - u u^T) x = sum (I - u u^T) p` — is numerically hopeless here: its smallest
+eigenvalue *is* the parallax squared, which at an AU of baseline over 25 light-years is 1e-12
+of the others, and inverting that in f64 returns noise. Centering the slopes puts the same
+information in small numbers that subtract cleanly.
+
+Bearings are kept per star per witness, capped, and the cap drops **the closest pair** rather
+than the oldest. A reservoir that kept the most recent sixteen would throw away the baseline
+and with it the distance; sixteen well-spread bearings measure a parallax as well as a
+thousand.
+
+## A sky has blind spots
+
+Two things stop a survey seeing something, and only one of them is depth.
+
+**Coverage.** A telescope looks at one field at a time. A sweep visits fields in a fixed order
+and each gets its dwell, so what has been covered is a function of how long the instrument has
+been at it. A star is found when the sweep reaches the patch of sky it happens to be in — which
+is why the sky fills in gradually and in a pattern, rather than appearing when a panel opens.
+An all-sky pass at two degrees a field and a minute a dwell is about a week of in-game time.
+
+**Glare.** A fainter source inside a brighter one's scattered-light halo is not detected at all.
+With a scatter fraction `k` and resolution `theta`, the faint source is lost within
+
+```
+theta_block = theta * sqrt(k * F_bright / F_faint)
+```
+
+and the same formula covers both cases that matter:
+
+| geometry | ratio | blind radius, 4 m^2 mirror |
+|---|---|---|
+| a neighbouring star, 4 ly off, against one at 100 ly | 6e2 | under a milliarcsecond — a close pair, not a blind spot |
+| the sun the telescope is orbiting, at 1 AU, against a star at 100 ly | 4e13 | a few degrees |
+| the same sun against something genuinely faint | 1e16+ | tens of degrees |
+
+So a ship inside a system has a hole in its sky around its own star, and the hole is bigger for
+fainter targets. It is not a rule anybody wrote down; it falls out of one constant. And it
+moves: the star's direction from a ship in orbit sweeps right round over a year, so the way to
+fill the hole is to survey the same sky at a different time from a different place — which is
+what observatories actually do.
+
+Both are beaten by the same thing: **resolution is a baseline, not an aperture.** Instruments
+combining into one image resolve `lambda / B` for the widest separation `B` between elements,
+so a swarm spread over ten kilometers sees into a glare a single four-square-meter mirror
+cannot, and a swarm spread over an AU is another four orders of magnitude past that. The
+collecting area adds at the same time, which is depth. This is why telescope swarms are a
+build target rather than a bigger number.
+
+What depth is *not* is the binding constraint nearby. A four square meter mirror clears the
+detection threshold on a sun-like star most of the way across the galaxy in a minute of
+exposure. Inside a few hundred light-years a survey is limited by where it has pointed and
+what is in the way, exactly as [05-observation.md](05-observation.md) says.
+
+## Duties
+
+An instrument does one thing at a time, and which thing decides what its owner can learn.
+
+| duty | what it is for | what it costs |
+|---|---|---|
+| stare | one star, the whole exposure: the deepest curve and, from a moving ship, a parallax | everything else in the sky |
+| sweep | fields in order across a region or the whole sky: finds what nobody has detected | depth per target, as `sqrt(N)` |
+| watch | a rotation of targets, one dwell each: several systems under observation for years | depth again, and a curve full of gaps |
+
+A watch is the swarm-monitoring regime. Every target is sampled every `dwell * targets` of
+coordinate time, which is an unevenly sampled series with holes in it — which is why the period
+finders in [05-observation.md](05-observation.md) are Lomb-Scargle and BLS rather than an FFT.
+
+Exposure is **elapsed coordinate time**, never a number typed into a panel and never one sample
+per rendered frame. A measurement labelled with an integration it did not get is a lie about its
+own error bars, and at the design rate a frame is two minutes of in-game time, so the difference
+is not subtle.
+
+## Beliefs, and where they are drawn
+
+A belief is a fold over one star's records: the latest bearing, the best distance, how bright,
+how many sightings by how many witnesses, the shortest route any of it took, and when this craft
+learnt of it.
+
+Two rules about which distance wins.
+
+**A measurement of your own beats a claim, whatever the error bars.** One is a thing this craft
+can check and the other is a thing it was told. When a craft triangulates a star it had only
+been told about, the chart stops being what it believes — and the difference between them is
+visible on the map as a mark that moves.
+
+**A claim is held on its witness's name.** That is what makes a charting office, a faction
+catalogue, and a probe reporting a conclusion rather than its raw data all the same mechanism,
+and what will make a lying faction possible without any new machinery.
+
+The map draws **believed positions**, which are not true positions. A star charted at a percent
+of its range sits a percent off, and a star with no distance is not on the map at all: it has a
+direction and no place to be. The sky view is where it is visible — light arrives whether or not
+anyone has identified its source — and the telescope is what turns it from a light into a star.
+
+## Starting from nothing
+
+A new ship is not issued the sky. It is issued the **charts of the volume it launched from**:
+claims from a charting office it will never meet, one hop of lineage, error growing with range,
+and nothing at all past the edge. Everything beyond that is sky the player surveys or is told
+about.
+
+This is a game decision as much as a physical one. A player who starts with 6000 stars has
+nothing to do with a telescope; a player who starts with nothing has no reason to fly anywhere.
+Twenty light-years of somebody else's parallax programme is a map with an edge on it, and an
+edge is the thing that makes a frontier.
+
+## Moving records between craft
+
+A report is what one craft sends another: everything it has **learnt** since some time, by its
+own clock, rather than everything measured since then — a decade-old sighting relayed yesterday
+is news to whoever is hearing it now.
+
+Receiving one stamps every item with a hop and folds it in. Two properties make this safe to do
+automatically, which is what a faction needs:
+
+- **Idempotent.** The same sighting arriving twice by two routes is one sighting; a series only
+  grows at its end, so replaying it adds nothing.
+- **Attributed.** Nothing loses its witness by being passed on. A craft can always say who
+  measured something and how many hands it went through, which is what lets a player distrust a
+  source without distrusting everything.
+
+Automatic forwarding — a faction's relays passing on whatever they receive — needs no further
+mechanism than a rule about when to call `report` and who to aim it at. The bandwidth question
+is real and is not answered here: a full report of a surveyed sky is megabytes, and a beam has a
+data rate. Sending conclusions instead of measurements is what a claim is for.
+
+## What is built
+
+In `lc-world::knowledge`, engine-free and tested:
+
+| module | holds |
+|---|---|
+| `knowledge` | `Witness`, `Hop`, `Sighting`, `Sample`, `Series`, `Claim`, `Belief`, `Knowledge`, `Report` |
+| `knowledge::astrometry` | bearings, centroid precision, the triangulation, `Distance` |
+| `knowledge::survey` | `Optics`, detection and glare, the `Sweep` and its field order, `Duty` |
+
+In `lc-client`: the session carries a `Knowledge` and a `Duty`; the telescope records into it
+per star, per band and per witness; the map and the target list read out of it; a ship is issued
+charts on entering the game; and noise is seeded from `(witness, star, arrival time)` so a
+server can recompute exactly what an instrument saw, which is what
+[05-observation.md](05-observation.md) asks for and what nothing implemented before.
+
+## What is not, and in what order
+
+1. **Reports over the radio.** The format exists and nothing transmits one. It wants a message
+   kind in `lc-proto`, the delivery path in `lc-server`, and a rule for what a relay forwards.
+   This is the next piece and it is what makes a probe worth launching.
+2. **Persistence.** A `Knowledge` lives in the client session and dies with it.
+   [03-world-model.md](03-world-model.md) already says where it belongs: per observer, in
+   Postgres, as a fold over received events.
+3. **Server authority.** Detection is computed client-side from the catalogue it holds. The
+   deterministic seed makes a claim checkable, and nothing checks one yet.
+4. **Navigation on beliefs.** A crossing still aims at the catalogue position. It ought to aim
+   at the believed one and arrive off by the error on it — which for a charted star is far wider
+   than the shell it is aiming into, so the crossing has to refine the fix as its own baseline
+   opens. That is a mechanic of its own: the approach where you find out the star is not quite
+   where you thought.
+5. **Instruments that are not the ship.** `Optics::joined` models a swarm acting as one and
+   nothing builds one. Telescopes as structures, with their own worldlines and their own
+   witness ids, are what turn every number here into something to spend resources on.
+6. **Bodies, swarms and craft as subjects.** Knowledge is per star today. A planet detected in
+   a light curve, a swarm inferred from a spectral knee, and a ship seen once and lost are all
+   the same shape of record and none of them have one.

@@ -49,12 +49,14 @@ pub mod session;
 pub mod signin_ui;
 pub mod sky_asset;
 pub mod starfield;
+pub mod telescope_panel;
 pub mod tonemap;
 pub mod ui;
 pub mod uplink;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod vault;
 pub mod view;
+pub mod watch;
 
 /// The game ticket this client will present when it opens a socket.
 ///

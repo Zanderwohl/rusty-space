@@ -76,7 +76,7 @@ impl Distance {
 pub fn triangulate(bearings: &[Bearing]) -> Distance {
     let weight = |b: &Bearing| 1.0 / (b.sigma_rad * b.sigma_rad).max(f64::MIN_POSITIVE);
     let total: f64 = bearings.iter().map(weight).sum();
-    if bearings.len() < 2 || !(total > 0.0) {
+    if bearings.len() < 2 || total <= 0.0 {
         return Distance::Unknown;
     }
     let z = bearings
@@ -122,7 +122,7 @@ pub fn triangulate(bearings: &[Bearing]) -> Distance {
     let mut sy_cov = 0.0;
     let mut spread = 0.0;
     let mut intercepts = [(0.0, 0.0); 2];
-    for axis in 0..2 {
+    for (axis, intercept) in intercepts.iter_mut().enumerate() {
         let yv = |r: &Row| r.q[axis] - r.s[axis] * r.q.z;
         let (s_mean, y_mean) = (mean(&|r| r.s[axis]), mean(&|r| yv(r)));
         let q_mean = mean(&|r| r.q[axis]);
@@ -132,12 +132,12 @@ pub fn triangulate(bearings: &[Bearing]) -> Distance {
             sy_cov += r.w * ds * (yv(r) - y_mean);
             spread += r.w * (r.q[axis] - q_mean).powi(2);
         }
-        intercepts[axis] = (s_mean, y_mean);
+        *intercept = (s_mean, y_mean);
     }
     // Twice the distance at which the transverse baseline would show a parallax at the
     // threshold: what "no parallax found" rules out.
     let floor_ly = spread.sqrt() / PARALLAX_SNR;
-    if !(s_var > 0.0) {
+    if s_var <= 0.0 {
         return if floor_ly > 0.0 {
             Distance::AtLeast(floor_ly)
         } else {
@@ -147,7 +147,7 @@ pub fn triangulate(bearings: &[Bearing]) -> Distance {
     let depth = -sy_cov / s_var;
     // Residuals scale with depth because the noise is angular.
     let sigma = depth.abs() / s_var.sqrt();
-    if !(depth > 0.0) || depth < PARALLAX_SNR * sigma {
+    if depth <= 0.0 || depth < PARALLAX_SNR * sigma {
         return if floor_ly > 0.0 {
             Distance::AtLeast(floor_ly)
         } else {

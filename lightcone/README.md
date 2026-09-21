@@ -50,6 +50,7 @@ cross-reference except where a shared crate is the subject.
 | [19-ship-fitting.md](docs/19-ship-fitting.md) | modules, energy as mass, the drive as a rocket, and refits |
 | [20-solar-power.md](docs/20-solar-power.md) | hulls collect starlight: the shadow-area integral, the anchor, and segments of constant income |
 | [21-library.md](docs/21-library.md) | the shelf of public-domain books, and the ereader window that costs the player nothing |
+| [22-provenance.md](docs/22-provenance.md) | what a craft knows and how it came to know it: records, lineage, parallax, and the blind spots in a sky |
 
 ## Status
 

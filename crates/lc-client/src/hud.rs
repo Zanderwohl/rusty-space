@@ -193,10 +193,11 @@ mod tests {
     use crate::action::{Action, apply};
 
     fn fixture() -> (UiState, Session) {
-        (
-            UiState::default(),
-            Session::new(&AuthoredStars::sample(), 3),
-        )
+        let mut session = Session::new(&AuthoredStars::sample(), 3);
+        // Charted, because a ship leaves port with charts and most of these tests are about
+        // something else. `session::tests` is where an unsurveyed sky is the subject.
+        session.issue_charts(30.0);
+        (UiState::default(), session)
     }
 
     /// The pursuit reads where a crossing's progress would, and in hull clearance.

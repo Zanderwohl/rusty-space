@@ -64,6 +64,9 @@ fn run(output: &str, catalogue: Option<&str>) -> Result<String, String> {
         .find(|s| s.position_ly.length() > 1.0)
         .map(|s| s.id)
         .unwrap_or(session.stars[0].id);
+    // A ship leaves port with charts, so the curve below has a distance behind it and can be
+    // plotted against the time the light left. Without them it would be against arrival.
+    session.issue_charts(lc_client::session::CHARTED_LY);
     session.point_at(Some(target));
     let name = session
         .star(target)

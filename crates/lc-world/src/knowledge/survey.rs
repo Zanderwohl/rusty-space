@@ -118,7 +118,7 @@ pub fn hidden_by(sky: &[Source], index: usize, resolution_rad: f64) -> Option<St
         .enumerate()
         .filter(|(i, s)| *i != index && s.flux_w_m2 > target.flux_w_m2)
         .find(|(_, s)| {
-            let separation = s.toward.angle_between(target.toward) as f64;
+            let separation = s.toward.angle_between(target.toward);
             separation < glare_radius_rad(resolution_rad, s.flux_w_m2, target.flux_w_m2)
         })
         .map(|(_, s)| s.star)
@@ -511,7 +511,7 @@ mod tests {
         let sky = [source(1, truth, flux)];
         let seen = look(&optics, &sky, 0, 60.0, DVec3::ZERO, 1.0e6, Witness(1)).unwrap();
         assert_eq!(seen.band, Band::V);
-        let error = seen.bearing.toward.angle_between(truth) as f64;
+        let error = seen.bearing.toward.angle_between(truth);
         assert!(
             error < 5.0 * seen.bearing.sigma_rad,
             "{error} vs {}",

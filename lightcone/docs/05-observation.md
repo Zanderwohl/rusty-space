@@ -4,6 +4,11 @@ Everything a player learns about a distant system arrives through one of these c
 Each is subject to light delay, and each has a detection threshold that turns into a
 gameplay cost.
 
+What an observer *does* with those channels — how measurements are held, whose they are, how
+they reach anyone else, and why a star nobody has looked at is absent rather than merely
+unmeasured — is [22-provenance.md](22-provenance.md). This document is the physics of the
+measurement; that one is the bookkeeping the game is made of.
+
 ## Photometry
 
 A telescope points at a star and records flux over time. The flux is
@@ -156,7 +161,8 @@ a measurement and its uncertainty, and the player decides what to believe.** It 
 uncertainty, and being wrong sometimes is the mechanic working.
 
 Server-side confirmation still applies where a rule depends on a discovery, and it is
-consistent with this: noise is seeded on `(telescope, star, time bucket)`, so the server can
+consistent with this: noise is seeded on `(witness, star, arrival time)` — implemented in
+`lc_world::knowledge::survey::look`, so the server can
 recompute exactly what the instrument saw and check the claim against it. The player's
 uncertainty is real; the server's is not.
 

@@ -8,13 +8,10 @@ use glam::{DVec3, Vec3};
 use lc_spacetime::{Coord, Micros, frame::SystemFrame, units::Span};
 use lc_world::craft::{Craft, CraftId, Fleet, Kind};
 use lc_world::instrument::Instrument;
-use lc_world::knowledge::survey::{self, Duty, Optics, Source, Sweep};
-use lc_world::knowledge::{
-    Bearing, Belief, Claim, Distance, Hop, Knowledge, Sample, Sighting, Witness,
-};
+use lc_world::knowledge::survey::Duty;
+use lc_world::knowledge::{Belief, Knowledge, Sample, Witness};
 use lc_world::motion::{self, Motive};
 use lc_world::observation::{Observation, Target, observe};
-use lc_world::rng;
 use lc_world::sky::{CatalogueStar, StarId, StarProvider, generate};
 
 use crate::curve::LightCurve;
@@ -37,10 +34,6 @@ const LY_PER_LUS: f64 = 299.792458 / 9.460_730_472_580_8e15;
 /// its own 290 K housing glows straight into the band a swarm lives in. A ship that is a mind
 /// with no eyes builds the sensor it needs.
 pub const SHIP_SENSOR: Instrument = Instrument::SHIP;
-
-/// Who the charts a ship launches with came from. Not this ship, and not any craft it will
-/// ever meet: a name for "somebody else measured this and we are taking their word".
-pub const CHARTS: Witness = Witness(u64::MAX);
 
 /// Fractional error on a charted distance. One percent at the edge of the charted volume,
 /// which is a good office and still visible as a scatter on the map.
@@ -142,17 +135,17 @@ pub struct Session {
     /// and is the whole reason there is nothing to reconcile yet. Predicting locally and
     /// correcting is `lightcone/docs/17-reconciliation.md`, and is a later piece of work.
     pub remote: bool,
-    targets: HashMap<StarId, Target>,
+    pub(crate) targets: HashMap<StarId, Target>,
     /// Coordinate time the last photometric sample was taken at, and the last time the sweep
     /// was asked what it had covered. Both are how a duty turns elapsed time into exposure
     /// rather than producing one measurement per rendered frame.
-    sampled_s: f64,
-    swept_s: f64,
+    pub(crate) sampled_s: f64,
+    pub(crate) swept_s: f64,
     /// Which turn of a watch rotation the last sample came from.
-    slot: i64,
+    pub(crate) slot: i64,
     /// Band luminosity per star, watts, in the survey band. A star's own output does not
     /// change; only the distance to it does, so this is computed once and divided by `r^2`.
-    luminosity: HashMap<StarId, f64>,
+    pub(crate) luminosity: HashMap<StarId, f64>,
 }
 
 impl Session {
@@ -338,8 +331,14 @@ impl Session {
     /// Begin a crossing to a star, stopping [`STANDOFF_LY`](crate::flight::STANDOFF_LY)
     /// short of it.
     ///
-    /// The catalogue position is treated as fixed: nothing in this model has proper motion
-    /// yet, so aiming at where it is recorded and aiming at where it will be are the same.
+    /// **Still to the catalogue position, which is a known gap.** A ship ought to fly to where
+    /// it believes a star is and arrive off by the error on that belief — which for a charted
+    /// distance is a percent of the range, far wider than the shell it is aiming into, and so
+    /// needs the crossing itself to refine the fix as the baseline opens. That is a piece of
+    /// work of its own; see `lightcone/docs/22-provenance.md`.
+    ///
+    /// The position is treated as fixed: nothing in this model has proper motion yet, so
+    /// aiming at where it is recorded and aiming at where it will be are the same.
     pub fn fly_to(&mut self, id: StarId) -> Option<&Cruise> {
         let to_ly = self.star(id)?.position_ly;
         let drive = self.ship.motion.drive;
@@ -518,7 +517,7 @@ impl Session {
 
     /// Aim without saying what the instrument is doing there, which a rotation needs: a watch
     /// points at each target in turn and is still a watch.
-    fn aim(&mut self, id: Option<StarId>) {
+    pub(crate) fn aim(&mut self, id: Option<StarId>) {
         self.pointing = id;
         if let Some(id) = id
             && !self.targets.contains_key(&id)
@@ -561,215 +560,6 @@ impl Session {
             self.knowledge.measured(id, witness, band, sample);
         }
         Some(obs)
-    }
-
-    /// What the ship looks through, and how far apart its elements are.
-    ///
-    /// One hull, so the baseline is the mirror. A swarm of telescopes flying in formation is
-    /// [`Optics::joined`], and the difference is what it can see next to something bright.
-    pub fn optics(&self) -> Optics {
-        Optics::of(self.telescope)
-    }
-
-    /// Every star as a point source arriving here, in the band the survey works in.
-    ///
-    /// Order matches [`Session::stars`], because a detection is indexed into this and the
-    /// glare test needs the whole sky to compare against.
-    fn sky_sources(&mut self, band: Band) -> Vec<Source> {
-        let stars = std::mem::take(&mut self.stars);
-        let here = self.ship.motion.position_ly;
-        let sources = stars
-            .iter()
-            .map(|star| {
-                let luminosity = *self.luminosity.entry(star.id).or_insert_with(|| {
-                    let unit = survey::flux_from(&star.star, band, M_PER_LY);
-                    4.0 * std::f64::consts::PI * M_PER_LY * M_PER_LY * unit
-                });
-                let offset = star.position_ly - here;
-                let distance_m = offset.length() * M_PER_LY;
-                let flux = if distance_m > 0.0 {
-                    luminosity / (4.0 * std::f64::consts::PI * distance_m * distance_m)
-                } else {
-                    0.0
-                };
-                Source {
-                    star: star.id,
-                    toward: offset.normalize_or_zero(),
-                    flux_w_m2: flux,
-                }
-            })
-            .collect();
-        self.stars = stars;
-        sources
-    }
-
-    /// Run whatever the telescope is committed to, for however much coordinate time has passed.
-    ///
-    /// Exposure is elapsed coordinate time, not a number typed into a panel: a measurement
-    /// labelled with an integration it did not get is a lie about its own error bars. At the
-    /// design rate a rendered frame is a couple of minutes of it, so a sample lands whenever
-    /// the integration is actually complete.
-    pub fn tick_instruments(&mut self, integration_s: f64) {
-        let now = self.coordinate_time_s();
-        match self.duty.clone() {
-            Duty::Idle => {}
-            Duty::Stare(id) => {
-                let elapsed = now - self.sampled_s;
-                if elapsed >= integration_s.max(1.0) {
-                    self.aim(Some(id));
-                    self.observe(elapsed);
-                    self.fix_position(id, elapsed, now);
-                    self.sampled_s = now;
-                }
-            }
-            duty @ Duty::Watch { .. } => {
-                let Duty::Watch { dwell_s, .. } = duty else {
-                    return;
-                };
-                let Some(slot) = duty.slot_at(now) else {
-                    return;
-                };
-                let previous = std::mem::replace(&mut self.slot, slot);
-                // The turn that just ended is the only one with a full dwell behind it, and
-                // on the first tick there is no such turn.
-                if previous != slot && previous != i64::MIN {
-                    if let Some(id) = duty.target_at(now - dwell_s.max(1.0)) {
-                        self.aim(Some(id));
-                        self.observe(dwell_s);
-                        self.fix_position(id, dwell_s, now);
-                    }
-                }
-                self.aim(duty.target_at(now));
-            }
-            Duty::Sweep(sweep) => {
-                self.sweep(&sweep, self.swept_s, now);
-                self.swept_s = now;
-            }
-        }
-    }
-
-    /// File a bearing to a star the telescope is already pointed at.
-    ///
-    /// A stare measures where something is as well as how bright it is, which is why watching
-    /// one star from a moving ship eventually gives its distance without any survey at all.
-    fn fix_position(&mut self, id: StarId, exposure_s: f64, now_s: f64) {
-        let Some(band) = self.optics().band() else {
-            return;
-        };
-        let sky = self.sky_sources(band);
-        let Some(index) = sky.iter().position(|s| s.star == id) else {
-            return;
-        };
-        let optics = self.optics();
-        let seen = survey::look(
-            &optics,
-            &sky,
-            index,
-            exposure_s,
-            self.ship.motion.position_ly,
-            now_s,
-            self.knowledge.owner,
-        );
-        if let Some(seen) = seen {
-            self.knowledge.sighted(id, seen);
-        }
-    }
-
-    /// Collect whatever fields the sweep finished between two coordinate times.
-    fn sweep(&mut self, sweep: &Sweep, from_s: f64, to_s: f64) {
-        let Some(band) = self.optics().band() else {
-            return;
-        };
-        let plan = sweep.plan();
-        let here = self.ship.motion.position_ly;
-        let due: Vec<(usize, f64)> = self
-            .stars
-            .iter()
-            .enumerate()
-            .filter_map(|(i, star)| {
-                let toward = (star.position_ly - here).normalize_or_zero();
-                plan.observed_between(toward, from_s, to_s)
-                    .map(|at| (i, at))
-            })
-            .collect();
-        if due.is_empty() {
-            return;
-        }
-        let sky = self.sky_sources(band);
-        let optics = self.optics();
-        let witness = self.knowledge.owner;
-        for (index, at) in due {
-            if let Some(seen) =
-                survey::look(&optics, &sky, index, sweep.exposure_s(), here, at, witness)
-            {
-                self.knowledge.sighted(sky[index].star, seen);
-            }
-        }
-    }
-
-    /// Issue the charts a ship leaves port with.
-    ///
-    /// A craft does not start from nothing — it starts from somebody else's parallax
-    /// programme, which is exactly as good as whoever ran it and does not extend past where
-    /// they were looking. So the nearby sky arrives as [`Claim`]s from a charting office the
-    /// ship has never met, held on that office's word until the ship measures one for itself,
-    /// and everything beyond `reach_ly` is sky nobody aboard has ever detected.
-    ///
-    /// [`Claim`]: lc_world::knowledge::Claim
-    pub fn issue_charts(&mut self, reach_ly: f64) {
-        let Some(band) = self.optics().band() else {
-            return;
-        };
-        let now = self.coordinate_time_s();
-        let from = self.ship.motion.position_ly;
-        let hop = Hop {
-            from: CHARTS,
-            to: self.knowledge.owner,
-            sent_s: now,
-            received_s: now,
-        };
-        let sources = self.sky_sources(band);
-        let stars = std::mem::take(&mut self.stars);
-        for (star, source) in stars.iter().zip(sources.iter()) {
-            let offset = star.position_ly - from;
-            let distance = offset.length();
-            if distance > reach_ly || distance <= 0.0 {
-                continue;
-            }
-            // A catalogue distance is a parallax like any other, so its error grows with
-            // range; a percent at the far edge of the charted volume is a generous office.
-            let sigma_ly = CHART_ERROR * distance;
-            let slip = rng::gaussian(rng::hash(&[star.id.get(), 0x0_c_4_a_7]));
-            self.knowledge.sighted(
-                star.id,
-                Sighting {
-                    witness: CHARTS,
-                    observed_s: now,
-                    bearing: Bearing {
-                        observer_ly: from,
-                        toward: source.toward,
-                        sigma_rad: sigma_ly / distance,
-                    },
-                    band,
-                    flux: source.flux_w_m2,
-                    flux_sigma: source.flux_w_m2 * CHART_ERROR,
-                    lineage: vec![hop],
-                },
-            );
-            self.knowledge.told(
-                star.id,
-                Claim {
-                    witness: CHARTS,
-                    distance: Distance::Measured {
-                        position_ly: from + offset.normalize() * (distance + slip * sigma_ly),
-                        sigma_ly,
-                    },
-                    stated_s: now,
-                    lineage: vec![hop],
-                },
-            );
-        }
-        self.stars = stars;
     }
 
     /// What is believed about a star, or nothing if it has never been detected.
@@ -962,7 +752,7 @@ fn full_spectrum() -> Instrument {
 }
 
 /// Meters in a light-year.
-const M_PER_LY: f64 = 9.460_730_472_580_8e15;
+pub(crate) const M_PER_LY: f64 = 9.460_730_472_580_8e15;
 
 fn geometry(radius_m: f64, distance_m: f64) -> f64 {
     std::f64::consts::PI * radius_m * radius_m / (distance_m * distance_m)
@@ -1094,8 +884,11 @@ mod tests {
     use super::*;
     use crate::flight::STANDOFF_LY;
 
+    /// A ship with the charts of its home volume, which is how one leaves port.
     fn session() -> Session {
-        Session::new(&AuthoredStars::sample(), 3)
+        let mut session = Session::new(&AuthoredStars::sample(), 3);
+        session.issue_charts(30.0);
+        session
     }
 
     #[test]
@@ -1469,7 +1262,10 @@ mod tests {
             star.position_ly = axis * 4.2;
             stars.push(star);
         }
-        Session::new(&AuthoredStars::new("spread", stars), 3)
+        let mut session = Session::new(&AuthoredStars::new("spread", stars), 3);
+        // Deliberately uncharted: the tests below are about a ship finding things out.
+        session.knowledge = lc_world::knowledge::Knowledge::new(Witness(0));
+        session
     }
 
     #[test]
@@ -1508,7 +1304,9 @@ mod tests {
     fn a_sweep_finds_stars_field_by_field() {
         let mut s = spread();
         let now = s.coordinate_time_s();
-        s.take_up(Duty::Sweep(Sweep::all_sky(now)));
+        s.take_up(Duty::Sweep(lc_world::knowledge::survey::Sweep::all_sky(
+            now,
+        )));
         assert!(s.knowledge.is_empty());
 
         // An all-sky pass at a minute a field is about a week of coordinate time.

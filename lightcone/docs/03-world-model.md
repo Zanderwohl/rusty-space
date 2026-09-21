@@ -233,7 +233,9 @@ round-trip latency to another system makes direct control impossible.
 | orders | a program, not a queue of clicks |
 | known-world snapshot | what this ship has actually observed |
 
-The **known-world snapshot** is the important one. A ship far from its owner has a different
+The **known-world snapshot** is the important one, and it now has a document of its own:
+[22-provenance.md](22-provenance.md), which is where records, lineage and what a parallax costs
+are written down. A ship far from its owner has a different
 view of the universe than the owner does. When it reports back, the report is itself a
 signal subject to delay, so the owner learns what the probe knew at the probe's emission
 time, not what the probe knows now. Two ships can hold contradictory and simultaneously
