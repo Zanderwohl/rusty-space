@@ -92,7 +92,7 @@ impl Act {
             | Order::Refit { .. }
             | Order::CancelRefit => Act::Command,
             // Separate from flying so a shard can silence somebody without grounding them.
-            Order::Say { .. } | Order::OfferKey { .. } => Act::Speak,
+            Order::Say { .. } | Order::OfferKey { .. } | Order::SendReport { .. } => Act::Speak,
         }
     }
 }

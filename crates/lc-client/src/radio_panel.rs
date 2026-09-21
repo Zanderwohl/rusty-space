@@ -637,6 +637,28 @@ fn compose(
         {
             ask(out, Action::OfferKey { to: with, aim });
         }
+        // A report is a transmission and not a message: aimed and sealed the same way, and
+        // filed at the far end as knowledge rather than as something somebody said.
+        if ui
+            .button("send survey")
+            .on_hover_text(
+                "everything learnt since the last report to them, oldest first; \
+                 what it teaches is theirs from the moment the light lands",
+            )
+            .clicked()
+        {
+            ask(
+                out,
+                Action::SendReport {
+                    to: with,
+                    aim,
+                    secrecy: match *seal {
+                        true => lc_proto::Secrecy::Sealed,
+                        false => lc_proto::Secrecy::Open,
+                    },
+                },
+            );
+        }
         // One craft, one standing answer. Never on the public channel: a ship that answered
         // every broadcast it heard would announce its position to everything in range.
         if let Some(with) = with {

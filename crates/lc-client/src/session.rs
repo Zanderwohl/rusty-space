@@ -111,6 +111,8 @@ pub struct Session {
     pub knowledge: Knowledge,
     /// What the telescope is committed to doing.
     pub duty: Duty,
+    /// How far through its own backlog this craft has reported, per recipient.
+    pub reporting: crate::watch::Reporting,
     /// The ship: where it is, how fast, and which of the four ways it is moving.
     ///
     /// `lc-world`'s, not the client's. The server is authoritative over this and the client
@@ -170,6 +172,7 @@ impl Session {
             pointing: None,
             knowledge: Knowledge::new(Witness(0)),
             duty: Duty::Idle,
+            reporting: crate::watch::Reporting::default(),
             ship: Craft::at(CraftId(0), Kind::Ship, DVec3::ZERO),
             scene: Scene::default(),
             system: None,
@@ -1308,7 +1311,7 @@ mod tests {
         s.issue_charts(5.0);
         assert_eq!(s.knowledge.len(), 3, "everything inside 5 ly is charted");
         let belief = s.belief(s.stars[0].id).unwrap();
-        assert!(!belief.measured_here, "a chart is somebody's word");
+        assert!(!belief.triangulated, "a chart is somebody's word");
         assert_eq!(belief.hops, 1, "and it says so");
         let believed = s.believed_position(s.stars[0].id).unwrap();
         assert!(
@@ -1366,7 +1369,7 @@ mod tests {
             s.tick_instruments(1.0);
         }
         let belief = s.belief(id).expect("staring at a star detects it");
-        assert!(!belief.measured_here, "a ship at rest measures no parallax");
+        assert!(!belief.triangulated, "a ship at rest measures no parallax");
         assert!(belief.sightings >= 2);
 
         for k in 1..6 {
@@ -1375,7 +1378,7 @@ mod tests {
             s.tick_instruments(1.0);
         }
         let belief = s.belief(id).expect("still detected");
-        assert!(belief.measured_here, "{:?}", belief.distance);
+        assert!(belief.triangulated, "{:?}", belief.distance);
         let position = belief.distance.position_ly().unwrap();
         assert!(
             position.distance(s.stars[0].position_ly) < 0.1,

@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 27;
+pub const PROTOCOL_VERSION: u32 = 28;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -48,7 +48,11 @@ pub enum Course {
     /// Burn, flip and burn to a point, light-years from the world origin.
     To([f64; 3]),
     /// Circular orbit at an altitude given in radii above the surface.
-    Orbit { body: String, altitude_radii: f64, plane: Plane },
+    Orbit {
+        body: String,
+        altitude_radii: f64,
+        plane: Plane,
+    },
     /// The libration point itself.
     Lagrange { body: String, point: LagrangePoint },
     /// A libration orbit about the point, which is what a real mission flies.
@@ -110,8 +114,16 @@ pub enum Anchor {
 pub enum Waypoint {
     /// Light-years from the world origin.
     Fixed([f64; 3]),
-    Orbit { about: Anchor, radius_m: f64, pole: [f64; 3], phase_rad: f64 },
-    Lagrange { body: String, point: LagrangePoint },
+    Orbit {
+        about: Anchor,
+        radius_m: f64,
+        pole: [f64; 3],
+        phase_rad: f64,
+    },
+    Lagrange {
+        body: String,
+        point: LagrangePoint,
+    },
     /// The orbit *about* a collinear point, which is what a craft there actually flies.
     Libration {
         body: String,
@@ -277,73 +289,6 @@ pub struct Motion {
     pub motive: Motive,
 }
 
-/// Where a transmission is pointed.
-///
-/// Not a power setting in disguise. An omnidirectional pulse and a beam of the same wattage
-/// carry the same energy; the beam concentrates it, so it is heard further along its axis and
-/// not at all off it. What that buys and what it costs is `lc_world::signal` and
-/// `lightcone/docs/05-observation.md`.
-///
-/// Not `Eq`, because [`Aim::Bearing`] carries floats. Nothing compares two aims for equality;
-/// the interface compares its own choice of aim, which is a separate type for that reason.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub enum Aim {
-    /// In every direction. Reaches everyone in range, and tells all of them where you are.
-    #[default]
-    Omni,
-    /// At where a craft is **predicted** to be when the light lands.
-    ///
-    /// The prediction is built from the sender's own sighting of it, which is already old, and
-    /// then extrapolated forward by the flight time. A quarry that maneuveres in between is
-    /// missed. Refused with [`Refusal::NotInSight`] for a craft the sender has never seen.
-    Ship(ShipId),
-    /// At a star, by catalogue id: the whole system, for when you do not know where in it they
-    /// are. A star does not maneuvere, so this always lands — on everybody there.
-    Star(u64),
-    /// Straight back along a bearing, as a unit vector in world axes.
-    ///
-    /// What a **directional antenna** can do that nothing else here can: answer a beam without
-    /// knowing who sent it or where they are, because the dish already knows which way the
-    /// signal came in. No sighting is needed and none is consulted.
-    ///
-    /// It is a bearing and not a target, so it is aimed at where the sender *was* when the
-    /// light left them — not where they will be when the answer arrives. A craft that has been
-    /// under thrust since is missed, and by more the further away it is. Appended last.
-    Bearing([f64; 3]),
-}
-
-/// Whether anyone but the addressee can read it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Secrecy {
-    /// Plain. Anyone whose receiver the signal reaches can read it, addressed to them or not.
-    #[default]
-    Open,
-    /// For the addressee alone. Everyone else hears that *something* was sent and gets no
-    /// body — which is the truth about a signal you cannot decrypt, not a courtesy.
-    ///
-    /// Requires the sender to hold the addressee's key. See [`Order::OfferKey`].
-    Sealed,
-}
-
-/// What makes two transmissions the *same message*.
-///
-/// A resend is a second pulse of light and a second event — it really happened, at its own
-/// coordinate, and the store records both. What it is not is a second thing somebody said, so
-/// the receiver collapses them into one line by this.
-///
-/// **Not a sequence number.** The two ends do not agree about how many messages exist, because
-/// half of them are in flight, so a counter would have to be reconciled and there is nothing to
-/// reconcile it with. This only has to be unique to the sender, which a hash of who sent it,
-/// when, and what it said already is.
-pub type MessageKey = u64;
-
-/// The longest message body, in bytes.
-///
-/// A bound on what one client can make a server store and fan out to every receiver in range,
-/// not a claim about bandwidth. A signal that carries a megabyte and one that carries a
-/// sentence take the same time to cross a light-year.
-pub const MESSAGE_LIMIT: usize = 512;
-
 /// What a client asks its ship to do.
 ///
 /// Deliberately few. Every order has to become an event with a coordinate, and an order that
@@ -364,7 +309,11 @@ pub enum Order {
     /// The acceleration is asked for, not stated: it is clamped to what the craft's own drive
     /// can do, so a client cannot ask for a better ship than it has. The speed cap likewise, to
     /// what its stored energy can pay for.
-    SetCourse { course: Course, accel_g: f64, max_beta: f64 },
+    SetCourse {
+        course: Course,
+        accel_g: f64,
+        max_beta: f64,
+    },
     /// Cross to another star, at this acceleration.
     ///
     /// The star is named by **catalogue id**, not by position. A position would let a client
@@ -375,7 +324,11 @@ pub enum Order {
     ///
     /// Separate from [`Order::SetCourse`] because a `Course` names somewhere inside the local
     /// system and this is the one thing a ship does that is not about one.
-    Cross { star: u64, accel_g: f64, max_beta: f64 },
+    Cross {
+        star: u64,
+        accel_g: f64,
+        max_beta: f64,
+    },
     /// Cut the engine. Not a stop — whatever velocity it had, it keeps, on whatever conic that
     /// puts it on.
     CutDrive,
@@ -393,7 +346,10 @@ pub enum Order {
     /// light has not arrived.
     ///
     /// Sent again for the same quarry with another closeness, it closes in or stands off.
-    Intercept { ship_id: ShipId, closeness: Closeness },
+    Intercept {
+        ship_id: ShipId,
+        closeness: Closeness,
+    },
     /// Give up a standing [`Order::Intercept`], with no further corrections: the drive is cut
     /// and the ship keeps whatever velocity the approach or the station left it with, on whatever
     /// conic that is.
@@ -417,7 +373,13 @@ pub enum Order {
     ///
     /// A broadcast cannot be sealed. There is nobody for it to be sealed *to*, and the server
     /// refuses the combination rather than quietly sending it in the open. Appended last.
-    Say { to: Option<ShipId>, aim: Aim, secrecy: Secrecy, body: String, idem: MessageKey },
+    Say {
+        to: Option<ShipId>,
+        aim: Aim,
+        secrecy: Secrecy,
+        body: String,
+        idem: MessageKey,
+    },
     /// Put your public key on the air, so `to` can seal messages to you.
     ///
     /// A message like any other, and that is the mechanic rather than an implementation note:
@@ -427,6 +389,19 @@ pub enum Order {
     /// `to` is `None` to offer it to **whoever hears it**, which is what the public channel
     /// does: anyone in range can answer in private from then on.
     OfferKey { to: Option<ShipId>, aim: Aim },
+    /// Send what this craft has learnt: a serialized `lc_world::knowledge::Report`.
+    ///
+    /// A transmission like any other — aimed, sealed or not, and subject to the same light
+    /// delay — but not a conversation. It is not filed in a transcript, it is never
+    /// acknowledged automatically, and what it does at the far end is fold into the receiver's
+    /// knowledge. Appended last.
+    SendReport {
+        to: Option<ShipId>,
+        aim: Aim,
+        secrecy: Secrecy,
+        report: String,
+        idem: MessageKey,
+    },
 }
 
 /// A client's request. Never authoritative about anything.
@@ -453,6 +428,10 @@ pub mod kind {
     /// Somebody said something. The payload is a [`super::Spoken`] as JSON, **redacted per
     /// receiver**: a sealed message reaches an eavesdropper with no body at all.
     pub const MESSAGE: i16 = 5;
+    /// Somebody sent what they have learnt. The payload is a [`super::Reported`] as JSON,
+    /// **redacted per receiver** exactly as a message is: a sealed report reaches an
+    /// eavesdropper as the fact that a report went out, with nothing in it.
+    pub const REPORT: i16 = 7;
     /// Somebody put their public key on the air. The payload is a [`super::Spoken`] too, with
     /// an empty body — it lands in the same conversation, because that is where a player looks
     /// for it. Receiving one is what puts the source in the receiver's keyring.
@@ -466,97 +445,6 @@ pub struct DriveChange {
     pub power_w: f64,
     /// Unit vector the nose pointed along.
     pub facing: [f64; 3],
-}
-
-/// What a [`kind::MESSAGE`] or [`kind::KEY`] event carries, as JSON in the payload.
-///
-/// **Written once and redacted on the way out.** The event stored is the whole message; the
-/// copy each receiver is handed has its body removed unless that receiver may read it. Doing it
-/// at release rather than at write is what keeps one event one event — a sealed message
-/// duplicated per receiver would be several events with one emission time, and the whole model
-/// rests on an event being a point.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Spoken {
-    /// Who it was addressed to, or `None` for a broadcast. Everyone else in earshot is an
-    /// eavesdropper.
-    pub to: Option<i64>,
-    /// Whether it went out as a beam rather than in every direction.
-    ///
-    /// A byte the transmitter sets, which is how a receiver can answer in the mode it was
-    /// spoken to in without knowing anything about the sender. Pair it with the bearing the
-    /// signal arrived on — [`Sighting::direction`] — and a dish can reply down the same line it
-    /// listened on. See [`Aim::Bearing`].
-    #[serde(default)]
-    pub beamed: bool,
-    /// Which message this is, across however many times it was transmitted. See
-    /// [`MessageKey`]; a receiver that has this one already shows one line, not two.
-    #[serde(default)]
-    pub idem: MessageKey,
-    /// Whether it was sealed. True on a copy with no body is somebody else's mail; true on one
-    /// *with* a body means you are the addressee.
-    pub sealed: bool,
-    /// `None` when this receiver may not read it.
-    pub body: Option<String>,
-    /// Event ids of the addressee's last messages that the sender had received when this went
-    /// out, newest last.
-    ///
-    /// By identifier rather than by count, because the sender and the addressee do not agree
-    /// about how many messages exist: half of them are still in flight. An identifier names one
-    /// message and means the same thing at both ends. See [`ACK_DEPTH`].
-    #[serde(default)]
-    pub acks: Vec<i64>,
-}
-
-/// How many of the addressee's messages an outgoing one acknowledges.
-///
-/// Enough that a reply covers a burst, small enough that the payload stays a payload. There is
-/// no retransmission behind it and there cannot be: a message that did not arrive is light that
-/// went somewhere else, and nothing at either end can notice.
-pub const ACK_DEPTH: usize = 10;
-
-/// One message in a ship's own record of a conversation.
-///
-/// Both halves of it — what this ship said, and what reached it — because a transcript with one
-/// side missing is not a transcript. The two are not symmetric and the type says so: a message
-/// this ship sent has no arrival time, because a sender never hears its own signal.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Said {
-    pub event_id: i64,
-    /// Which message this is. A backlog carries one entry per *transmission*, so a message
-    /// sent three times is three entries sharing this and the client folds them into one.
-    ///
-    /// Named apart from [`Said::key`], which is a different thing entirely: that one says the
-    /// message *is* a public key being handed over.
-    pub idem: MessageKey,
-    /// The other craft in this conversation: who it went to, or who it came from. `None` for a
-    /// broadcast this ship sent, which is in nobody's conversation and only in the public log.
-    pub with: Option<ShipId>,
-    /// Who it was **addressed** to, which is not always who it reached. `None` is a broadcast.
-    ///
-    /// Distinct from [`Said::with`] and carried alongside it, because a transcript holds
-    /// everything that landed on this ship — traffic between two *other* craft included. For
-    /// that, `with` is the sender and this is somebody else entirely, and telling the two apart
-    /// is the difference between a conversation and something overheard. Appended last.
-    pub to: Option<ShipId>,
-    /// What to call them. Carried because a backlog names craft that are nowhere in sight, and
-    /// there is no contact to read a name off.
-    pub with_name: String,
-    /// True when this ship sent it.
-    pub mine: bool,
-    /// True when it was a key offer rather than something somebody typed.
-    pub key: bool,
-    pub sealed: bool,
-    /// `None` when this ship may not read it.
-    pub body: Option<String>,
-    pub acks: Vec<i64>,
-    /// Coordinate microseconds it was transmitted.
-    pub sent_t: i64,
-    /// Coordinate microseconds the light landed. `None` for one this ship sent.
-    pub arrive_t: Option<i64>,
-    /// How loud it was when it landed, in the units the noise floor is compared against.
-    /// `None` for one this ship sent, and for one recorded before the store kept the reading.
-    /// Appended last.
-    pub strength: Option<f32>,
 }
 
 /// One event arriving at one observer: what the client is actually told.
@@ -873,7 +761,10 @@ pub enum Outbound {
     /// It says nothing this ship is not entitled to: every message here either left it or
     /// landed on it, and a sealed one it is not the addressee of has no body, exactly as it had
     /// none when it arrived. Appended last.
-    Backlog { messages: Vec<Said>, keys: Vec<ShipId> },
+    Backlog {
+        messages: Vec<Said>,
+        keys: Vec<ShipId>,
+    },
     /// What there is to read, and where the shelf is.
     ///
     /// Appended last, like every variant added since: the discriminants above are what the
@@ -1000,20 +891,29 @@ pub enum Inbound {
     /// server and worth sixty seconds. The server verifies it against a published key without
     /// calling the broker — see `lightcone/docs/16-identity.md`. A connection that sends
     /// anything else first is closed rather than refused: there is nobody to refuse.
-    Hello { protocol: u32, ticket: String },
+    Hello {
+        protocol: u32,
+        ticket: String,
+    },
     Act(Intent),
     /// Reconnecting: replay from the last reception this client actually has.
-    ResumeFrom { arrive_t: i64 },
+    ResumeFrom {
+        arrive_t: i64,
+    },
     /// Put a named scene in the world.
     ///
     /// Appended last on purpose: every other variant keeps the discriminant its golden was
     /// pinned at. Refused outright by a shard, which is not started for this — a client that
     /// could stage a scene could put a craft wherever it liked, which is the one thing no
     /// client may do. See `lc_server::director`.
-    Stage { scenario: String },
+    Stage {
+        scenario: String,
+    },
     /// Put energy in this client's ship. Development only, refused by a shard for the reason
     /// `Stage` is. Appended last.
-    Grant { joules: f64 },
+    Grant {
+        joules: f64,
+    },
     /// Where the player has got to. Debounced by the client: a page turn every few seconds must
     /// not be a message every few seconds.
     SetReading(Bookmark),
@@ -1038,6 +938,11 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 /// a format that is not self-describing cannot notice a field that moved, so this is what
 /// notices.
 pub mod golden;
+mod radio;
+
+pub use radio::{
+    ACK_DEPTH, Aim, MESSAGE_LIMIT, MessageKey, REPORT_LIMIT, Reported, Said, Secrecy, Spoken,
+};
 
 #[cfg(test)]
 mod tests {
@@ -1140,7 +1045,11 @@ mod tests {
     fn cross() -> Inbound {
         Inbound::Act(Intent {
             ship_id: ShipId(42),
-            order: Order::Cross { star: 0x0123_4567_89ab_cdef, accel_g: 3.0, max_beta: 0.5 },
+            order: Order::Cross {
+                star: 0x0123_4567_89ab_cdef,
+                accel_g: 3.0,
+                max_beta: 0.5,
+            },
             issued_at_client_t: 1_000_000,
         })
     }
@@ -1210,8 +1119,15 @@ mod tests {
 
     /// A ship holding station on a quarry under thrust: the rendezvous numbers and one more.
     fn escort() -> Outbound {
-        let Outbound::Welcome { client_id, protocol, ship_id, now_t, name, rate, ship } =
-            rendezvous()
+        let Outbound::Welcome {
+            client_id,
+            protocol,
+            ship_id,
+            now_t,
+            name,
+            rate,
+            ship,
+        } = rendezvous()
         else {
             unreachable!("the rendezvous fixture is a welcome")
         };
@@ -1248,13 +1164,28 @@ mod tests {
 
     /// The rendezvous numbers again, in a frame that falls.
     fn consort() -> Outbound {
-        let Outbound::Welcome { client_id, protocol, ship_id, now_t, name, rate, ship } =
-            rendezvous()
+        let Outbound::Welcome {
+            client_id,
+            protocol,
+            ship_id,
+            now_t,
+            name,
+            rate,
+            ship,
+        } = rendezvous()
         else {
             unreachable!("the rendezvous fixture is a welcome")
         };
         let Motive::Rendezvous {
-            from_ly, beta0, to_ly, start_s, drive, frame_from_ly, frame_beta, since_t, target,
+            from_ly,
+            beta0,
+            to_ly,
+            start_s,
+            drive,
+            frame_from_ly,
+            frame_beta,
+            since_t,
+            target,
             clock_base_s,
         } = ship.motive.clone()
         else {
@@ -1269,8 +1200,16 @@ mod tests {
             rate,
             ship: Motion {
                 motive: Motive::Consort {
-                    from_ly, beta0, to_ly, start_s, drive, frame_from_ly, frame_beta, since_t,
-                    target, clock_base_s,
+                    from_ly,
+                    beta0,
+                    to_ly,
+                    start_s,
+                    drive,
+                    frame_from_ly,
+                    frame_beta,
+                    since_t,
+                    target,
+                    clock_base_s,
                 },
                 ..ship
             },
@@ -1278,7 +1217,13 @@ mod tests {
     }
 
     fn fitted() -> Outbound {
-        let loadout = Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20 };
+        let loadout = Loadout {
+            storage: 6,
+            drones: 2,
+            living: 2,
+            engines: 5,
+            slots: 20,
+        };
         Outbound::Fitted {
             ship_id: ShipId(42),
             fitting: Fitting {
@@ -1303,7 +1248,10 @@ mod tests {
                 solar_w: 2.5e17,
                 refit: Some(RefitOrder {
                     from: loadout,
-                    target: Loadout { engines: 7, ..loadout },
+                    target: Loadout {
+                        engines: 7,
+                        ..loadout
+                    },
                     stored_j: 4.2e26,
                     start_s: 1.0e6,
                 }),
@@ -1314,7 +1262,24 @@ mod tests {
     fn intercept() -> Inbound {
         Inbound::Act(Intent {
             ship_id: ShipId(42),
-            order: Order::Intercept { ship_id: ShipId(7), closeness: Closeness::Intimate },
+            order: Order::Intercept {
+                ship_id: ShipId(7),
+                closeness: Closeness::Intimate,
+            },
+            issued_at_client_t: 1_000_000,
+        })
+    }
+
+    fn send_report() -> Inbound {
+        Inbound::Act(Intent {
+            ship_id: ShipId(42),
+            order: Order::SendReport {
+                to: Some(ShipId(7)),
+                aim: Aim::Ship(ShipId(7)),
+                secrecy: Secrecy::Open,
+                report: "{}".into(),
+                idem: 0x0fed_cba9_8765_4321,
+            },
             issued_at_client_t: 1_000_000,
         })
     }
@@ -1346,7 +1311,10 @@ mod tests {
             "Inbound::Act changed shape at protocol version {PROTOCOL_VERSION}",
         );
         assert_eq!(
-            encode(&Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: "a.b.c".into() }),
+            encode(&Inbound::Hello {
+                protocol: PROTOCOL_VERSION,
+                ticket: "a.b.c".into()
+            }),
             golden::HELLO,
             "Inbound::Hello changed shape at protocol version {PROTOCOL_VERSION}",
         );
@@ -1400,6 +1368,11 @@ mod tests {
             golden::SAY,
             "Order::Say changed shape at protocol version {PROTOCOL_VERSION}",
         );
+        assert_eq!(
+            encode(&send_report()),
+            golden::SEND_REPORT,
+            "Order::SendReport changed shape at protocol version {PROTOCOL_VERSION}",
+        );
 
         // The shelf. Appended variants, so their discriminants are the only new numbers here.
         let shelf = Outbound::Library {
@@ -1451,16 +1424,28 @@ mod tests {
             rendezvous(),
             escort(),
             accepted(),
-            Outbound::Clock { now_t: 1_000_000, rate: 1.0 },
-            Outbound::Refused { ship_id: ShipId(-3), reason: Refusal::NotYours },
+            Outbound::Clock {
+                now_t: 1_000_000,
+                rate: 1.0,
+            },
+            Outbound::Refused {
+                ship_id: ShipId(-3),
+                reason: Refusal::NotYours,
+            },
             Outbound::WrongProtocol { server: 9 },
             Outbound::Pursuing {
                 ship_id: ShipId(42),
-                pursuit: Pursuit { quarry: ShipId(7), closeness: Closeness::Intimate },
+                pursuit: Pursuit {
+                    quarry: ShipId(7),
+                    closeness: Closeness::Intimate,
+                },
             },
             consort(),
             fitted(),
-            Outbound::Refused { ship_id: ShipId(1), reason: Refusal::Short(Shortfall::Capacity) },
+            Outbound::Refused {
+                ship_id: ShipId(1),
+                reason: Refusal::Short(Shortfall::Capacity),
+            },
             Outbound::Backlog {
                 messages: vec![Said {
                     event_id: 9,
@@ -1479,15 +1464,24 @@ mod tests {
                 }],
                 keys: vec![ShipId(7)],
             },
-            Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NoKey },
+            Outbound::Refused {
+                ship_id: ShipId(42),
+                reason: Refusal::NoKey,
+            },
         ];
         for message in out {
             let bytes = encode(&message);
             assert_eq!(decode::<Outbound>(&bytes).unwrap(), message);
         }
         let inbound = [
-            Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: "a.b.c".into() },
-            Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: String::new() },
+            Inbound::Hello {
+                protocol: PROTOCOL_VERSION,
+                ticket: "a.b.c".into(),
+            },
+            Inbound::Hello {
+                protocol: PROTOCOL_VERSION,
+                ticket: String::new(),
+            },
             act(),
             cross(),
             intercept(),
@@ -1498,18 +1492,44 @@ mod tests {
             }),
             Inbound::Act(Intent {
                 ship_id: ShipId(1),
-                order: Order::Burn { beta: [0.1, -0.2, 0.3] },
+                order: Order::Burn {
+                    beta: [0.1, -0.2, 0.3],
+                },
                 issued_at_client_t: i64::MIN,
             }),
             Inbound::ResumeFrom { arrive_t: -1 },
             Inbound::Grant { joules: 1.5e25 },
             Inbound::Act(Intent {
                 ship_id: ShipId(1),
-                order: Order::Refit { target: Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20 } },
+                order: Order::Refit {
+                    target: Loadout {
+                        storage: 6,
+                        drones: 2,
+                        living: 2,
+                        engines: 5,
+                        slots: 20,
+                    },
+                },
                 issued_at_client_t: 0,
             }),
-            Inbound::Act(Intent { ship_id: ShipId(1), order: Order::CancelRefit, issued_at_client_t: 0 }),
+            Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: Order::CancelRefit,
+                issued_at_client_t: 0,
+            }),
             say(),
+            send_report(),
+            Inbound::Act(Intent {
+                ship_id: ShipId(42),
+                order: Order::SendReport {
+                    to: None,
+                    aim: Aim::Omni,
+                    secrecy: Secrecy::Open,
+                    report: String::new(),
+                    idem: 0,
+                },
+                issued_at_client_t: 0,
+            }),
             Inbound::Act(Intent {
                 ship_id: ShipId(42),
                 order: Order::Say {
@@ -1523,7 +1543,10 @@ mod tests {
             }),
             Inbound::Act(Intent {
                 ship_id: ShipId(42),
-                order: Order::OfferKey { to: Some(ShipId(7)), aim: Aim::Omni },
+                order: Order::OfferKey {
+                    to: Some(ShipId(7)),
+                    aim: Aim::Omni,
+                },
                 issued_at_client_t: 0,
             }),
         ];
@@ -1555,7 +1578,10 @@ mod tests {
             Cleared::<Presence>::clear(at(now + 1), now),
             Err(Withheld::StillInFlight),
         );
-        assert!(Cleared::<Presence>::clear(at(now), now).is_ok(), "exactly on the cone");
+        assert!(
+            Cleared::<Presence>::clear(at(now), now).is_ok(),
+            "exactly on the cone"
+        );
         assert!(Cleared::<Presence>::clear(at(now - 1), now).is_ok());
     }
 
@@ -1591,7 +1617,10 @@ mod tests {
             Cleared::<Sighting>::clear(sighting(now, 0.5), now, 1.0),
             Err(Withheld::BelowNoiseFloor),
         );
-        assert!(Cleared::<Sighting>::clear(sighting(now, 1.0), now, 1.0).is_ok(), "exactly at the floor");
+        assert!(
+            Cleared::<Sighting>::clear(sighting(now, 1.0), now, 1.0).is_ok(),
+            "exactly at the floor"
+        );
         // In flight *and* faint is reported as in flight: the causality test comes first and
         // is the one that may never be relaxed.
         assert_eq!(
@@ -1600,4 +1629,3 @@ mod tests {
         );
     }
 }
-

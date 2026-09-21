@@ -243,6 +243,39 @@ mechanism than a rule about when to call `report` and who to aim it at. The band
 is real and is not answered here: a full report of a surveyed sky is megabytes, and a beam has a
 data rate. Sending conclusions instead of measurements is what a claim is for.
 
+## Reports on the air
+
+A report is a transmission, not a conversation, and the difference is the whole of how it
+behaves.
+
+| | a message | a report |
+|---|---|---|
+| event kind | `MESSAGE` | `REPORT` |
+| what it is | something somebody said | what somebody has learnt |
+| filed as | a line in a transcript, kept for ever | records folded into the receiver's knowledge |
+| acknowledged | yes, and automatically if asked | never — two craft reporting to each other would trade surveys for ever |
+| sealed | to one addressee | the same rule, the same keyring |
+| overheard | an eavesdropper sees that something was sent | an eavesdropper **reads an open report**, which is why sealing one is worth the key |
+
+Everything else it inherits: it is aimed or shouted, it crosses at `c`, the shard schedules it
+to whoever the beam covers, and it arrives when its light does.
+
+**Reports drain a backlog.** A sender keeps a mark per recipient — how far through its own
+learning it has told them — and each transmission carries the oldest
+[`ENTRIES_PER_REPORT`](../../crates/lc-world/src/knowledge/mod.rs) stars past that mark. The
+mark only moves when the shard says the transmission happened, so a refused report is one that
+is still owed. A craft with nothing new to say sends nothing, which is the correct amount of
+radio traffic for having learnt nothing.
+
+**Nothing is filed as a conversation.** A transcript is read long after everything in it has
+arrived; a report is folded the moment it lands and its content lives in the receiver's
+knowledge from then on. Putting surveys in `lc_messages` would hand every sign-in a backlog of
+megabytes of somebody else's astrometry. The cost of that decision is honest and worth naming:
+**a report that lands while its receiver is offline is replayed from the delivery table on
+reconnect and folded then** — and if the receiver's knowledge is not persisted, a report that
+arrived before the last snapshot is gone. That is the persistence item below, not a separate
+problem.
+
 ## What is built
 
 In `lc-world::knowledge`, engine-free and tested:
@@ -261,9 +294,11 @@ server can recompute exactly what an instrument saw, which is what
 
 ## What is not, and in what order
 
-1. **Reports over the radio.** The format exists and nothing transmits one. It wants a message
-   kind in `lc-proto`, the delivery path in `lc-server`, and a rule for what a relay forwards.
-   This is the next piece and it is what makes a probe worth launching.
+1. **Automatic forwarding.** A craft reports when a player presses the button. A faction's
+   relays should report on their own — on a schedule, or when they have learnt enough to be
+   worth the power — and the machinery is all here: the merge is idempotent, the lineage
+   accumulates, and a relay's report of somebody else's records is just its own backlog. What
+   is missing is the policy and the faction to hang it on.
 2. **Persistence.** A `Knowledge` lives in the client session and dies with it.
    [03-world-model.md](03-world-model.md) already says where it belongs: per observer, in
    Postgres, as a fold over received events.

@@ -28,8 +28,8 @@
 
 use glam::DVec3;
 use lc_proto::{
-    ACK_DEPTH, Aim, MESSAGE_LIMIT, MessageKey, Order, Outbound, Refusal, Said, Secrecy, ShipId,
-    Spoken,
+    ACK_DEPTH, Aim, MESSAGE_LIMIT, MessageKey, Order, Outbound, Refusal, Reported, Said, Secrecy,
+    ShipId, Spoken,
 };
 use lc_world::craft::CraftId;
 use lc_world::motion::LIGHT_US_PER_LY;
@@ -68,7 +68,9 @@ pub(crate) struct Transmission {
     pub kind: i16,
     pub payload: String,
     pub beam: Beam,
-    pub said: Utterance,
+    /// The transcript line, for the kinds that make one. `None` for a survey report, which is
+    /// a transmission and not something anybody said.
+    pub said: Option<Utterance>,
     /// The order as applied, which for these two is the order as sent: there is nothing about
     /// a message the server clamps.
     pub applied: Order,
@@ -134,18 +136,56 @@ impl<J: Journal> Server<J> {
                     kind: lc_proto::kind::KEY,
                     payload: serde_json::to_string(&spoken).unwrap_or_else(|_| "{}".into()),
                     beam,
-                    said: Utterance {
+                    said: Some(Utterance {
                         to: *to,
                         idem: 0,
                         sealed: false,
                         key: true,
                         body: String::new(),
                         acks: Vec::new(),
-                    },
+                    }),
                     applied: order.clone(),
                 })
             }
-            // Unreachable: `act` sends only the two above here.
+            Order::SendReport {
+                to,
+                aim,
+                secrecy,
+                report,
+                idem,
+            } => {
+                if report.len() > lc_proto::REPORT_LIMIT || report.is_empty() || *to == Some(from) {
+                    return Err(Refusal::Impossible);
+                }
+                let sealed = matches!(secrecy, Secrecy::Sealed);
+                let beam = self.beam_for(id, aim, at)?;
+                match *to {
+                    // Sealing needs somebody to seal it to, the same rule a message follows.
+                    None if sealed => return Err(Refusal::Impossible),
+                    Some(addressee) if sealed && !self.holds_key(id, addressee, at) => {
+                        return Err(Refusal::NoKey);
+                    }
+                    _ => {}
+                }
+                let reported = Reported {
+                    to: to.map(|t| t.0),
+                    beamed: !beam.is_omni(),
+                    idem: *idem,
+                    sealed,
+                    body: Some(report.clone()),
+                };
+                Ok(Transmission {
+                    kind: lc_proto::kind::REPORT,
+                    payload: serde_json::to_string(&reported).unwrap_or_else(|_| "{}".into()),
+                    beam,
+                    // No utterance: a report is not a conversation. Nothing files it in a
+                    // transcript, nothing acknowledges it, and what it does at the far end is
+                    // fold into what that craft knows. See `lightcone/docs/22-provenance.md`.
+                    said: None,
+                    applied: order.clone(),
+                })
+            }
+            // Unreachable: `act` sends only the orders above here.
             _ => Err(Refusal::Impossible),
         }
     }
@@ -179,14 +219,14 @@ impl<J: Journal> Server<J> {
             kind: lc_proto::kind::MESSAGE,
             payload: serde_json::to_string(&spoken).unwrap_or_else(|_| "{}".into()),
             beam,
-            said: Utterance {
+            said: Some(Utterance {
                 to,
                 idem,
                 sealed,
                 key: false,
                 body: body.to_string(),
                 acks,
-            },
+            }),
             applied: Order::Say {
                 to,
                 aim: *aim,
@@ -528,6 +568,15 @@ impl<J: Journal> Server<J> {
 /// Anything but a message passes through untouched, and a payload that will not parse does too:
 /// this is a filter on what is released, not a validator of what was written.
 pub(crate) fn redact(kind: i16, payload: &str, observer: ShipId) -> String {
+    if kind == lc_proto::kind::REPORT {
+        let Ok(mut reported) = serde_json::from_str::<Reported>(payload) else {
+            return payload.to_string();
+        };
+        if reported.sealed && reported.to != Some(observer.0) {
+            reported.body = None;
+        }
+        return serde_json::to_string(&reported).unwrap_or_else(|_| payload.to_string());
+    }
     if kind != lc_proto::kind::MESSAGE && kind != lc_proto::kind::KEY {
         return payload.to_string();
     }
@@ -585,6 +634,173 @@ mod tests {
             secrecy,
             body: body.into(),
             idem: next_key(),
+        }
+    }
+
+    fn reports(messages: &[Outbound]) -> Vec<Reported> {
+        sightings(messages)
+            .into_iter()
+            .filter(|s| s.kind == lc_proto::kind::REPORT)
+            .filter_map(|s| serde_json::from_str(&s.payload).ok())
+            .collect()
+    }
+
+    /// A survey crosses two light-hours like anything else, and an eavesdropper reads an open
+    /// one — which is the whole reason to seal one.
+    #[tokio::test]
+    async fn a_report_travels_at_c_and_is_sealed_like_a_message() {
+        let mut wire = Loopback::new();
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let (ada, bry, nosy) = (ClientId(1), ClientId(2), ClientId(3));
+        let far = DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0);
+        server.admit(ada, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+        server.admit(bry, crate::world::still(ShipId(2), far), 0.0);
+        server.admit(
+            nosy,
+            crate::world::still(ShipId(3), far + DVec3::new(0.0, 1.0e8, 0.0)),
+            0.0,
+        );
+
+        let survey = |secrecy: Secrecy| Order::SendReport {
+            to: Some(ShipId(2)),
+            aim: Aim::Omni,
+            secrecy,
+            report: "{\"from\":{\"0\":1},\"sent_s\":0.0,\"entries\":[]}".into(),
+            idem: next_key(),
+        };
+        wire.client_says(
+            ada,
+            Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: survey(Secrecy::Open),
+                issued_at_client_t: 0,
+            }),
+        );
+        server.tick(&mut wire).await.unwrap();
+        assert!(
+            wire.take(ada)
+                .iter()
+                .any(|m| matches!(m, Outbound::Accepted { .. })),
+            "a report is an order like any other",
+        );
+        // Nothing has arrived anywhere: the light is still crossing.
+        assert!(reports(&wire.take(bry)).is_empty());
+
+        while server.now_t() < TWO_LIGHT_HOURS as i64 + TICK_US {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let landed = reports(&wire.take(bry));
+        assert_eq!(landed.len(), 1, "it should land once, when its light does");
+        assert!(landed[0].body.is_some(), "the addressee reads it");
+        let overheard = reports(&wire.take(nosy));
+        assert_eq!(
+            overheard.len(),
+            1,
+            "a shout is heard by whoever is in range"
+        );
+        assert!(
+            overheard[0].body.is_some(),
+            "and an open report is readable"
+        );
+
+        // The same again, sealed. Bry holds no key of Ada's, so it is refused rather than
+        // quietly sent in the open.
+        wire.client_says(
+            ada,
+            Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: survey(Secrecy::Sealed),
+                issued_at_client_t: 0,
+            }),
+        );
+        server.tick(&mut wire).await.unwrap();
+        assert!(
+            wire.take(ada).iter().any(|m| matches!(
+                m,
+                Outbound::Refused {
+                    reason: Refusal::NoKey,
+                    ..
+                }
+            )),
+            "sealing needs a key that has arrived",
+        );
+    }
+
+    /// A report is not a conversation: nothing files one in a transcript, so a ship signing in
+    /// again is not handed everything anybody ever surveyed at it.
+    #[tokio::test]
+    async fn a_report_is_not_filed_as_a_conversation() {
+        let mut wire = Loopback::new();
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let (ada, bry) = (ClientId(1), ClientId(2));
+        server.admit(ada, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+        server.admit(
+            bry,
+            crate::world::still(ShipId(2), DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0)),
+            0.0,
+        );
+        wire.client_says(
+            ada,
+            Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: Order::SendReport {
+                    to: Some(ShipId(2)),
+                    aim: Aim::Omni,
+                    secrecy: Secrecy::Open,
+                    report: "{\"from\":{\"0\":1},\"sent_s\":0.0,\"entries\":[]}".into(),
+                    idem: next_key(),
+                },
+                issued_at_client_t: 0,
+            }),
+        );
+        server.tick(&mut wire).await.unwrap();
+        server.write_conversations().await.unwrap();
+        let backlog = server.backlog(ShipId(1), server.now_t()).await.unwrap();
+        match backlog {
+            Some(Outbound::Backlog { messages, .. }) => {
+                assert!(
+                    messages.is_empty(),
+                    "a survey is not something anybody said"
+                )
+            }
+            None => {}
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// An empty report and an oversized one are both refused, and neither is written.
+    #[tokio::test]
+    async fn a_report_has_to_fit_and_has_to_say_something() {
+        let mut wire = Loopback::new();
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let ada = ClientId(1);
+        server.admit(ada, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+        for report in [String::new(), "x".repeat(lc_proto::REPORT_LIMIT + 1)] {
+            wire.client_says(
+                ada,
+                Inbound::Act(Intent {
+                    ship_id: ShipId(1),
+                    order: Order::SendReport {
+                        to: Some(ShipId(2)),
+                        aim: Aim::Omni,
+                        secrecy: Secrecy::Open,
+                        report,
+                        idem: next_key(),
+                    },
+                    issued_at_client_t: 0,
+                }),
+            );
+            server.tick(&mut wire).await.unwrap();
+            assert!(
+                wire.take(ada).iter().any(|m| matches!(
+                    m,
+                    Outbound::Refused {
+                        reason: Refusal::Impossible,
+                        ..
+                    }
+                )),
+                "that report should have been refused",
+            );
         }
     }
 

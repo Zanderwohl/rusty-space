@@ -593,6 +593,10 @@ impl<J: Journal> Server<J> {
         // seen in every direction, because a plume and a hull are not pointed at anyone.
         let mut beam = Beam::OMNI;
         let mut utterance: Option<crate::radio::Utterance> = None;
+        // Whether this order put something on the air. Not `utterance.is_some()`: a survey
+        // report is a transmission with no transcript line, and a transmitter still does not
+        // hear itself.
+        let mut transmitted = false;
 
         let (kind, power_w, payload, applied) = match &intent.order {
             Order::Transmit { power_w } => {
@@ -824,13 +828,14 @@ impl<J: Journal> Server<J> {
                     Order::CancelRefit,
                 )
             }
-            Order::Say { .. } | Order::OfferKey { .. } => {
+            Order::Say { .. } | Order::OfferKey { .. } | Order::SendReport { .. } => {
                 // The whole of it in `crate::radio`, because everything a transmission needs
                 // to decide — the keyring, the aim, the acknowledgement window — is that
                 // module's and none of it is this one's.
                 let spoken = self.compose(id, intent.ship_id, &intent.order, at)?;
                 beam = spoken.beam;
-                utterance = Some(spoken.said);
+                transmitted = true;
+                utterance = spoken.said;
                 (
                     spoken.kind,
                     crate::radio::SIGNAL_POWER_W,
@@ -870,7 +875,7 @@ impl<J: Journal> Server<J> {
             // because a sender that heard itself would have every message twice in its own
             // transcript: once as its own, and once as an arrival from a stranger with its
             // own identifier. Everything else a ship does, it does go on seeing.
-            if utterance.is_some() && observer.id == id {
+            if transmitted && observer.id == id {
                 continue;
             }
             if let Some(scheduled) = schedule(&event, &beam, observer) {

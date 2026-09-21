@@ -102,6 +102,12 @@ pub enum Action {
     WatchSelected,
     /// Call the selected star something. A name is this ship's, not the star's.
     NameSelected(String),
+    /// Send what this ship has learnt since it last reported to `to`.
+    SendReport {
+        to: Option<lc_proto::ShipId>,
+        aim: lc_proto::Aim,
+        secrecy: lc_proto::Secrecy,
+    },
     /// Stop whatever the telescope is committed to.
     StopSurvey,
 
@@ -573,6 +579,44 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                     aim,
                     secrecy,
                     body,
+                    idem,
+                }));
+            }
+        }
+        Action::SendReport { to, aim, secrecy } => {
+            let key = to.map_or(0, |t| t.0);
+            let since = session.reporting.since(key);
+            let now = session.coordinate_time_s();
+            let report =
+                session
+                    .knowledge
+                    .report_upto(since, now, lc_world::knowledge::ENTRIES_PER_REPORT);
+            let through = report.learnt_through();
+            let body = serde_json::to_string(&report).unwrap_or_default();
+            if !session.remote {
+                effects.push(Effect::Notify("no server, so nobody to report to".into()));
+            } else if report.is_empty() || through.is_none() {
+                effects.push(Effect::Notify("nothing new to report".into()));
+            } else if body.len() > lc_proto::REPORT_LIMIT {
+                // The slice is bounded by star count and a star's file is not, so a long
+                // enough watch on one of them can still overflow a transmission.
+                effects.push(Effect::Notify(
+                    "that report is too large to transmit".into(),
+                ));
+            } else {
+                let idem =
+                    lc_world::rng::hash(&[key as u64, (now * 1.0e6) as u64, report.stars() as u64])
+                        .max(1);
+                session.reporting.sent(idem, key, through.unwrap_or(now));
+                effects.push(Effect::Notify(format!(
+                    "reporting {} stars",
+                    report.stars()
+                )));
+                effects.push(Effect::Send(lc_proto::Order::SendReport {
+                    to,
+                    aim,
+                    secrecy,
+                    report: body,
                     idem,
                 }));
             }
@@ -1400,6 +1444,67 @@ mod tests {
         assert!(
             matches!(effects.as_slice(), [Effect::Notify(t)] if t.contains("nothing detected"))
         );
+    }
+
+    /// A report is a slice of a backlog, and the mark only moves when the shard says the
+    /// transmission happened. Two reports in a row with nothing learnt in between is one
+    /// report and then nothing to say.
+    #[test]
+    fn reporting_drains_a_backlog_once_the_shard_accepts_it() {
+        let (mut ui, mut s) = fixture();
+        s.remote = true;
+        let to = Some(lc_proto::ShipId(7));
+        let sent = |effects: &[Effect]| {
+            effects.iter().find_map(|e| match e {
+                Effect::Send(lc_proto::Order::SendReport { report, idem, .. }) => {
+                    Some((report.clone(), *idem))
+                }
+                _ => None,
+            })
+        };
+        let effects = apply(
+            Action::SendReport {
+                to,
+                aim: lc_proto::Aim::Omni,
+                secrecy: lc_proto::Secrecy::Open,
+            },
+            &mut ui,
+            &mut s,
+        );
+        let (body, idem) = sent(&effects).expect("the charts are worth reporting");
+        let report: lc_world::knowledge::Report = serde_json::from_str(&body).unwrap();
+        assert!(report.stars() > 0);
+
+        // Nothing has been accepted yet, so the same backlog is still owed.
+        let again = apply(
+            Action::SendReport {
+                to,
+                aim: lc_proto::Aim::Omni,
+                secrecy: lc_proto::Secrecy::Open,
+            },
+            &mut ui,
+            &mut s,
+        );
+        let (repeat, _) = sent(&again).expect("still owed");
+        assert_eq!(
+            serde_json::from_str::<lc_world::knowledge::Report>(&repeat)
+                .unwrap()
+                .stars(),
+            report.stars(),
+        );
+
+        s.reporting.accepted(idem);
+        let after = apply(
+            Action::SendReport {
+                to,
+                aim: lc_proto::Aim::Omni,
+                secrecy: lc_proto::Secrecy::Open,
+            },
+            &mut ui,
+            &mut s,
+        );
+        assert!(sent(&after).is_none(), "nothing new since");
+        assert!(matches!(after.as_slice(), [Effect::Notify(t)] if t.contains("nothing new")));
     }
 
     /// The charts a ship launches with carry the charting office's names, with the office's

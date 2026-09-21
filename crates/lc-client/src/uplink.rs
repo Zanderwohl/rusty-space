@@ -647,6 +647,44 @@ fn fold(
                     uplink.owed.push((from, aim));
                 }
             }
+            // A report is not something anybody said, so it is not filed in a conversation and
+            // never answered automatically. What it does is fold into what this craft knows,
+            // stamped with the moment its light landed — which is where every record in it
+            // gains the hop that says it came from over there. See
+            // `lightcone/docs/22-provenance.md`.
+            for sighting in seen.iter().filter(|s| s.kind == lc_proto::kind::REPORT) {
+                let Ok(reported) = serde_json::from_str::<lc_proto::Reported>(&sighting.payload)
+                else {
+                    continue;
+                };
+                let from = ShipId(sighting.source_id);
+                let who = uplink.name_of(from);
+                let arrived_s = sighting.arrive_t as f64 * 1e-6;
+                let Some(body) = reported.body.as_deref() else {
+                    ui.0.heard(from, format!("{who} sent a sealed report"), arrived_s);
+                    continue;
+                };
+                let Ok(report) = serde_json::from_str::<lc_world::knowledge::Report>(body) else {
+                    ui.0.heard(
+                        from,
+                        format!("{who} sent a report that made no sense"),
+                        arrived_s,
+                    );
+                    continue;
+                };
+                let stars = report.stars();
+                let before = game.0.knowledge.len();
+                game.0.knowledge.receive(&report, arrived_s);
+                let fresh = game.0.knowledge.len().saturating_sub(before);
+                ui.0.heard(
+                    from,
+                    match fresh {
+                        0 => format!("{who}: a report on {stars} stars, nothing new"),
+                        n => format!("{who}: a report on {stars} stars, {n} of them new"),
+                    },
+                    arrived_s,
+                );
+            }
             for sighting in seen.iter().filter(|s| s.kind == lc_proto::kind::DRIVE) {
                 let Ok(change) = serde_json::from_str::<lc_proto::DriveChange>(&sighting.payload)
                 else {
@@ -685,6 +723,19 @@ fn fold(
                 uplink.chasing = None;
             }
             let said = match &order {
+                Order::SendReport {
+                    to, idem, report, ..
+                } => {
+                    game.0.reporting.accepted(*idem);
+                    let stars = serde_json::from_str::<lc_world::knowledge::Report>(report)
+                        .map(|r| r.stars())
+                        .unwrap_or(0);
+                    let who = to.map(|t| uplink.name_of(t));
+                    Some(match who {
+                        Some(who) => format!("reported {stars} stars to {who}"),
+                        None => format!("broadcast a report on {stars} stars"),
+                    })
+                }
                 Order::SetCourse {
                     course,
                     accel_g,
@@ -1510,6 +1561,126 @@ mod tests {
         Outbound::Sightings(vec![
             lc_proto::Cleared::<Sighting>::clear(sighting, 4_000_000, 0.0).unwrap(),
         ])
+    }
+
+    /// A report landing is not a line in a conversation. It is a fold into what this ship
+    /// knows, stamped with the moment its light arrived — and every record in it picks up the
+    /// hop that says whose it was.
+    #[test]
+    fn a_report_arriving_is_folded_into_what_this_ship_knows() {
+        use lc_world::knowledge::{Bearing, Knowledge, Sighting as Seen, Witness};
+
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+
+        let star = lc_world::sky::StarId::synthesise("probe", 4);
+        let mut theirs = Knowledge::new(Witness(7));
+        for k in 0..6u64 {
+            let at = glam::DVec3::new(k as f64 * 0.3, 0.0, 0.0);
+            theirs.sighted(
+                star,
+                Seen {
+                    witness: Witness(7),
+                    observed_s: k as f64,
+                    bearing: Bearing {
+                        observer_ly: at,
+                        toward: (glam::DVec3::new(0.0, 12.0, 0.0) - at).normalize(),
+                        sigma_rad: 1e-9,
+                    },
+                    band: em_spectra::Band::V,
+                    flux: 1e-12,
+                    flux_sigma: 1e-15,
+                    lineage: Vec::new(),
+                },
+            );
+        }
+        theirs.name_it(star, "Hearthlight", 6.0);
+        let report = theirs.report(f64::NEG_INFINITY, 1.0);
+
+        assert!(!game.0.knowledge.knows(star), "nobody aboard has seen it");
+        let reported = lc_proto::Reported {
+            to: Some(0),
+            beamed: false,
+            idem: 3,
+            sealed: false,
+            body: Some(serde_json::to_string(&report).unwrap()),
+        };
+        let sighting = Sighting {
+            event_id: 21,
+            source_id: 7,
+            arrive_t: 4_000_000,
+            emitted_t: 1_000_000,
+            direction: [1.0, 0.0, 0.0],
+            strength: 1.0,
+            kind: lc_proto::kind::REPORT,
+            payload: serde_json::to_string(&reported).unwrap(),
+        };
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            Outbound::Sightings(vec![
+                lc_proto::Cleared::<Sighting>::clear(sighting, 4_000_000, 0.0).unwrap(),
+            ]),
+        );
+
+        let belief = game.0.belief(star).expect("the report taught it");
+        assert_eq!(belief.hops, 1, "second hand, and it says so");
+        assert!(
+            belief.triangulated,
+            "their raw bearings came with it, so this ship can solve the parallax itself",
+        );
+        assert_eq!(belief.witnesses, 1, "and the witness is still the probe");
+        assert_eq!(
+            game.0.name_of(star),
+            "Hearthlight",
+            "including what they call it"
+        );
+        assert_eq!(belief.learnt_s, 4.0, "learnt when the light landed");
+        assert!(
+            ui.0.notifications.iter().any(|n| n.text.contains("report")),
+            "a report arriving is worth a line in the events box",
+        );
+    }
+
+    /// A sealed report for somebody else arrives as the fact of it. An eavesdropper learns
+    /// that a survey went past and nothing about what is in it.
+    #[test]
+    fn a_sealed_report_teaches_an_eavesdropper_nothing() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let reported = lc_proto::Reported {
+            to: Some(9),
+            beamed: false,
+            idem: 4,
+            sealed: true,
+            body: None,
+        };
+        let sighting = Sighting {
+            event_id: 22,
+            source_id: 7,
+            arrive_t: 4_000_000,
+            emitted_t: 1_000_000,
+            direction: [1.0, 0.0, 0.0],
+            strength: 1.0,
+            kind: lc_proto::kind::REPORT,
+            payload: serde_json::to_string(&reported).unwrap(),
+        };
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            Outbound::Sightings(vec![
+                lc_proto::Cleared::<Sighting>::clear(sighting, 4_000_000, 0.0).unwrap(),
+            ]),
+        );
+        assert!(game.0.knowledge.is_empty(), "nothing was learnt from it");
+        assert!(
+            ui.0.notifications
+                .iter()
+                .any(|n| n.text.contains("sealed report")),
+            "but that it happened is not a secret",
+        );
     }
 
     /// A message arriving is two things at once: a line in the transcript, and a green line in

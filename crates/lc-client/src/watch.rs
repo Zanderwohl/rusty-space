@@ -16,6 +16,47 @@ use lc_world::sky::StarId;
 
 use crate::session::{CHART_ERROR, M_PER_LY, Session};
 
+/// What a craft has told somebody, and what it is waiting to hear was accepted.
+///
+/// Reports drain a backlog, so the sender has to remember how far it has got with each
+/// recipient — and it may only advance that mark when the shard says the transmission
+/// happened, or a refused report would be one nobody ever sends again.
+#[derive(Clone, Debug, Default)]
+pub struct Reporting {
+    /// Coordinate seconds through which this craft has reported, per recipient. The key is
+    /// `0` for a broadcast: what was shouted to nobody in particular is its own backlog.
+    told: std::collections::HashMap<i64, f64>,
+    /// The report on the air to each recipient, as `(key, what it would advance the mark to)`.
+    ///
+    /// One at a time per recipient, so a craft that keeps pressing send supersedes rather than
+    /// accumulates. A report the shard refuses leaves the mark where it was and the next one
+    /// carries the same backlog, which is the behaviour a failed transmission should have.
+    pending: std::collections::HashMap<i64, (u64, f64)>,
+}
+
+impl Reporting {
+    /// What a report to this recipient should resume from.
+    pub fn since(&self, to: i64) -> f64 {
+        self.told.get(&to).copied().unwrap_or(f64::NEG_INFINITY)
+    }
+
+    /// Note a report that has gone to the shard but has not been accepted yet.
+    pub fn sent(&mut self, idem: u64, to: i64, through: f64) {
+        self.pending.insert(to, (idem, through));
+    }
+
+    /// The shard says it went out: this craft has now reported through that instant.
+    pub fn accepted(&mut self, idem: u64) {
+        let Some((&to, &(_, through))) = self.pending.iter().find(|(_, (key, _))| *key == idem)
+        else {
+            return;
+        };
+        self.pending.remove(&to);
+        let mark = self.told.entry(to).or_insert(f64::NEG_INFINITY);
+        *mark = mark.max(through);
+    }
+}
+
 /// Who the charts a ship launches with came from. Not this ship, and not any craft it will
 /// ever meet: a name for "somebody else measured this and we are taking their word".
 pub const CHARTS: Witness = Witness(u64::MAX);

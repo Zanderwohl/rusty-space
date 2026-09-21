@@ -220,6 +220,16 @@ fn provenance(ui: &mut egui::Ui, game: &Game) {
         1 => ui.label("Relayed once; somebody else did the looking."),
         n => ui.label(format!("Relayed {n} times.")),
     };
+    // A distance worked out from bearings is one this ship can check. A stated one is not,
+    // however narrow the error bars on it are.
+    match (&belief.distance, belief.triangulated) {
+        (Distance::Unknown, _) => ui.weak("No parallax yet: this is a direction."),
+        (Distance::AtLeast(ly), _) => ui.weak(format!(
+            "No parallax over the baseline so far, so it is past {ly:.1} ly."
+        )),
+        (Distance::Measured { .. }, true) => ui.weak("Distance solved from bearings held here."),
+        (Distance::Measured { .. }, false) => ui.weak("Distance on somebody else's word."),
+    };
     // The age is the distance, so a star without a parallax has no age either: what is on the
     // screen is old by an unknown amount, and saying so is more honest than a number.
     match belief.light_age_s() {

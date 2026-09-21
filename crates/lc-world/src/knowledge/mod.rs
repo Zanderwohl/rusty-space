@@ -257,8 +257,13 @@ pub struct Belief {
     /// The most recent bearing, from wherever that witness was.
     pub bearing: Bearing,
     pub distance: Distance,
-    /// Whether that distance is this craft's own triangulation rather than somebody's word.
-    pub measured_here: bool,
+    /// Whether the distance was worked out from bearings this craft holds — its own, or
+    /// somebody's raw measurements relayed to it — rather than taken from a stated number.
+    ///
+    /// Raw bearings from a probe are still a measurement: they can be re-solved, combined with
+    /// this craft's own, and checked. A [`Claim`] cannot be, which is the distinction. Whose
+    /// bearings they were is [`Belief::witnesses`] and [`Belief::hops`].
+    pub triangulated: bool,
     pub band: Band,
     pub flux: f64,
     /// Coordinate seconds the most recent light held arrived — at its witness, not here.
@@ -352,7 +357,7 @@ impl StarFile {
                 (false, Some(claim)) => claim.distance,
                 _ => measured,
             },
-            measured_here: taken,
+            triangulated: taken,
             band: latest.band,
             flux: latest.flux,
             observed_s: latest.observed_s,
@@ -974,7 +979,7 @@ mod tests {
             },
         );
         let belief = k.belief(star).unwrap();
-        assert!(!belief.measured_here, "held on somebody's word");
+        assert!(!belief.triangulated, "held on somebody's word");
         assert_eq!(
             belief.distance.position_ly(),
             Some(DVec3::new(0.0, 0.0, 9.0))
@@ -984,7 +989,7 @@ mod tests {
             k.sighted(star, s);
         }
         let belief = k.belief(star).unwrap();
-        assert!(belief.measured_here);
+        assert!(belief.triangulated);
         assert!(
             belief.distance.position_ly().unwrap().distance(truth) < 0.05,
             "the chart was wrong"
