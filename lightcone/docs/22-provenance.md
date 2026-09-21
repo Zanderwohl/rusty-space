@@ -260,6 +260,11 @@ behaves.
 Everything else it inherits: it is aimed or shouted, it crosses at `c`, the shard schedules it
 to whoever the beam covers, and it arrives when its light does.
 
+**A craft is named by its shard, and its records follow.** Everything a ship measures before
+it has been told which ship it is gets filed under a placeholder; the welcome rebrands it.
+Without that, two craft would both be witness zero and the first report between them would
+file one crew's bearings as the other's own.
+
 **Reports drain a backlog.** A sender keeps a mark per recipient — how far through its own
 learning it has told them — and each transmission carries the oldest
 [`ENTRIES_PER_REPORT`](../../crates/lc-world/src/knowledge/mod.rs) stars past that mark. The

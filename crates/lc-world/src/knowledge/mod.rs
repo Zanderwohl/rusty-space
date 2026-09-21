@@ -443,6 +443,56 @@ impl Knowledge {
         }
     }
 
+    /// Take a new identity, carrying this craft's own records over to it.
+    ///
+    /// A ship does not know what it is called until a shard tells it, and everything it
+    /// measured before then is stamped with the placeholder. Left alone, two craft would both
+    /// be witness zero and their records would collide the first time either reported to the
+    /// other — one ship's bearings filed as the other's own, and a dedup that threw away real
+    /// measurements because they shared a witness and an instant.
+    pub fn rebrand(&mut self, owner: Witness) {
+        let was = self.owner;
+        if was == owner {
+            return;
+        }
+        self.owner = owner;
+        for file in self.files.values_mut() {
+            for sighting in file.sightings.iter_mut().filter(|s| s.witness == was) {
+                sighting.witness = owner;
+            }
+            for series in file.series.iter_mut().filter(|s| s.witness == was) {
+                series.witness = owner;
+            }
+            for naming in file.names.iter_mut().filter(|n| n.witness == was) {
+                naming.witness = owner;
+            }
+            for claim in file.claims.iter_mut().filter(|c| c.witness == was) {
+                claim.witness = owner;
+            }
+            // Hops name the ends of a handover, so a craft that has renamed itself must not
+            // keep telling people its old name.
+            for hop in file
+                .sightings
+                .iter_mut()
+                .flat_map(|s| s.lineage.iter_mut())
+                .chain(file.series.iter_mut().flat_map(|s| s.lineage.iter_mut()))
+                .chain(file.names.iter_mut().flat_map(|n| n.lineage.iter_mut()))
+                .chain(file.claims.iter_mut().flat_map(|c| c.lineage.iter_mut()))
+            {
+                if hop.from == was {
+                    hop.from = owner;
+                }
+                if hop.to == was {
+                    hop.to = owner;
+                }
+            }
+        }
+        let stars: Vec<StarId> = self.files.keys().copied().collect();
+        for star in stars {
+            self.refresh(star);
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.files.len()
     }
@@ -1102,6 +1152,54 @@ mod tests {
             along_x,
             "a direction, not a distance"
         );
+    }
+
+    /// A craft is issued its name by a shard, after it has already measured things. Both
+    /// ships starting as witness zero is what would make two crews' records collide.
+    #[test]
+    fn taking_a_name_carries_this_craft_own_records_over() {
+        let star = star_id(31);
+        let mut k = Knowledge::new(Witness(0));
+        for s in looks(0, DVec3::new(0.0, 0.0, 6.0), 4, 0.0) {
+            k.sighted(star, s);
+        }
+        k.name_it(star, "Ours", 5.0);
+        k.measured(
+            star,
+            Witness(0),
+            Band::V,
+            Sample {
+                observed_s: 1.0,
+                deficit: 0.0,
+                sigma: 0.1,
+            },
+        );
+        // Somebody else's record, which must not be touched.
+        k.told(
+            star,
+            Claim {
+                witness: Witness(9),
+                distance: Distance::AtLeast(1.0),
+                stated_s: 0.0,
+                lineage: Lineage::new(),
+            },
+        );
+
+        k.rebrand(Witness(42));
+        assert_eq!(k.owner, Witness(42));
+        let file = k.file(star).unwrap();
+        assert!(file.sightings().iter().all(|s| s.witness == Witness(42)));
+        assert_eq!(file.names()[0].witness, Witness(42));
+        assert_eq!(
+            file.claims()[0].witness,
+            Witness(9),
+            "somebody else's stays theirs"
+        );
+        assert!(
+            k.own_series(star, Band::V).is_some(),
+            "its own photometry follows it"
+        );
+        assert_eq!(k.belief(star).unwrap().witnesses, 1);
     }
 
     #[test]

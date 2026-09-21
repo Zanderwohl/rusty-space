@@ -553,6 +553,11 @@ fn fold(
             // Which craft this is, so a message addressed to it can be told from one that
             // merely reached it. See `crate::chat::Chat::me`.
             uplink.chat.i_am(ship_id);
+            // And which witness its measurements are by. Everything it looked at before the
+            // shard named it was filed under the placeholder; `rebrand` carries those over.
+            game.0
+                .knowledge
+                .rebrand(lc_world::knowledge::Witness(ship_id.0 as u64));
             uplink.state = State::Joined(Joined {
                 client_id,
                 ship_id,
@@ -1561,6 +1566,32 @@ mod tests {
         Outbound::Sightings(vec![
             lc_proto::Cleared::<Sighting>::clear(sighting, 4_000_000, 0.0).unwrap(),
         ])
+    }
+
+    /// A craft files its own measurements under the placeholder until a shard names it. Two
+    /// ships both reporting as witness zero would each file the other's bearings as their own.
+    #[test]
+    fn a_welcome_tells_this_craft_whose_measurements_its_own_are() {
+        let (mut uplink, mut game, mut ui) = app();
+        let star = game.0.stars[0].id;
+        game.0.point_at(Some(star));
+        game.0.advance(1.0);
+        game.0.tick_instruments(1.0);
+        assert_eq!(game.0.knowledge.owner, lc_world::knowledge::Witness(0));
+
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let me = uplink.joined().expect("welcomed").ship_id;
+        assert_eq!(
+            game.0.knowledge.owner,
+            lc_world::knowledge::Witness(me.0 as u64),
+        );
+        assert!(
+            game.0
+                .knowledge
+                .own_series(star, em_spectra::Band::V)
+                .is_some(),
+            "what it measured before it was named is still its own",
+        );
     }
 
     /// A report landing is not a line in a conversation. It is a fold into what this ship
