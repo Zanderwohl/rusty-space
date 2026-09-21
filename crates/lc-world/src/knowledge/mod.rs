@@ -20,6 +20,7 @@ pub mod conclusion;
 pub mod names;
 pub mod observatory;
 pub mod record;
+pub mod room;
 pub mod subject;
 pub mod survey;
 pub mod transit;
@@ -39,6 +40,9 @@ pub use subject::{BodyId, Subject};
 /// widest spread rather than the most recent: dropping the closest pair costs the least
 /// baseline. Sixteen well-spread bearings measure a parallax as well as a thousand.
 pub const BEARINGS_KEPT: usize = 16;
+
+/// What one photometric sample takes aboard, bytes: a time, a value and an error.
+pub const SAMPLE_BYTES: f64 = 24.0;
 
 fn sigma_of(claim: &Claim) -> f64 {
     match claim.distance {
@@ -283,6 +287,10 @@ pub struct Knowledge {
     changed: std::collections::BTreeSet<Subject>,
     unsaved: Vec<Logged>,
     consumed: Vec<Consumed>,
+    /// Room aboard, and how much of it is in use: see [`room`]. Not part of what a craft knows.
+    capacity_bytes: f64,
+    occupied_bytes: f64,
+    unkept: u64,
 }
 
 impl PartialEq for Knowledge {
@@ -300,6 +308,9 @@ impl Knowledge {
             changed: Default::default(),
             unsaved: Vec::new(),
             consumed: Vec::new(),
+            capacity_bytes: f64::INFINITY,
+            occupied_bytes: 0.0,
+            unkept: 0,
         }
     }
 
@@ -568,6 +579,9 @@ impl Knowledge {
     /// File a photometric sample this craft measured itself.
     pub fn measured(&mut self, subject: impl Into<Subject>, witness: Witness, band: Band, sample: Sample) {
         let subject = subject.into();
+        if !self.make_room() {
+            return;
+        }
         let file = self.files.entry(subject).or_default();
         let added = match file.series.iter_mut().find(|s| s.witness == witness && s.band == band) {
             Some(series) => series.push(sample),
@@ -681,6 +695,12 @@ impl Knowledge {
                 self.concluded(subject, Conclusion { lineage, ..conclusion.clone() });
             }
             for series in &part.series {
+                // A relayed log is a log: a full craft does not keep it. Checked per series
+                // rather than per sample, so one report can take a craft a little over.
+                if self.is_full() {
+                    self.unkept += series.len() as u64;
+                    continue;
+                }
                 let file = self.files.entry(subject).or_default();
                 let (taken, lineage) =
                     match file.series.iter_mut().find(|s| s.witness == series.witness && s.band == series.band) {
@@ -693,6 +713,7 @@ impl Knowledge {
                             (series.samples().to_vec(), lineage)
                         }
                     };
+                self.occupied_bytes += taken.len() as f64 * SAMPLE_BYTES;
                 for sample in taken {
                     let learnt_s = learnt_s(&lineage, sample.observed_s);
                     self.unsaved.push(Logged { subject, witness: series.witness, band: series.band, sample, learnt_s });

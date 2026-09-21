@@ -291,7 +291,7 @@ mod tests {
 
     #[test]
     fn short_of_slots_it_takes_apart_before_it_builds() {
-        let from = Loadout { storage: 6, drones: 2, living: 2, engines: 10, slots: 20 };
+        let from = Loadout { storage: 6, drones: 2, living: 2, engines: 10, slots: 20, data: 0 };
         let target = Loadout { living: 0, engines: 12, ..from };
         let steps: Vec<_> = plan(from, target, 20.0).unwrap().steps().collect();
         assert_eq!(steps[0], Step::Dismantle(Module::Living));
@@ -332,7 +332,7 @@ mod tests {
             Shortage::Unbuildable
         );
         assert_eq!(plan(from, Loadout { drones: 0, ..from }, 30.0).unwrap_err(), Shortage::Unbuildable);
-        let bare = Loadout { storage: 0, drones: 1, living: 0, engines: 0, slots: 20 };
+        let bare = Loadout { storage: 0, drones: 1, living: 0, engines: 0, slots: 20, data: 0 };
         assert_eq!(plan(bare, Loadout { engines: 1, ..bare }, 0.0).unwrap_err(), Shortage::Energy);
     }
 

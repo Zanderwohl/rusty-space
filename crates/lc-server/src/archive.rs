@@ -354,6 +354,12 @@ mod tests {
         let held: usize = knowledge.file(target.id).unwrap().series().iter().map(|s| s.len()).sum();
         assert_eq!(left, held);
         assert!(held < written.samples.len() / 2, "most of the log is gone: {held} of {}", written.samples.len());
+
+        // A craft with no data modules watches on its onboard store, and reading its log into a
+        // conclusion is what kept it from filling.
+        assert_eq!(knowledge.capacity_bytes(), lc_world::fitting::ONBOARD_DATA_BYTES);
+        assert!(knowledge.occupied_bytes() < knowledge.capacity_bytes() / 2.0);
+        assert_eq!(knowledge.unkept(), 0);
     }
 
     #[test]

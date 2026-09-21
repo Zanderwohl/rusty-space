@@ -30,10 +30,11 @@ pub enum Module {
     Drone,
     Living,
     Engine,
+    Data,
 }
 
 impl Module {
-    pub const ALL: [Module; 4] = [Module::Storage, Module::Drone, Module::Living, Module::Engine];
+    pub const ALL: [Module; 5] = [Module::Storage, Module::Drone, Module::Living, Module::Engine, Module::Data];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -41,6 +42,7 @@ impl Module {
             Module::Drone => "worker drones",
             Module::Living => "living space",
             Module::Engine => "engines",
+            Module::Data => "data storage",
         }
     }
 }
@@ -53,11 +55,12 @@ pub struct Loadout {
     pub living: u32,
     pub engines: u32,
     pub slots: u32,
+    pub data: u32,
 }
 
 impl Loadout {
     /// What a new ship is given, and what a ship saved before fittings existed comes back as.
-    pub const STARTING: Self = Self { storage: 6, drones: 2, living: 2, engines: 5, slots: 20 };
+    pub const STARTING: Self = Self { storage: 6, drones: 2, living: 2, engines: 5, slots: 20, data: 0 };
 
     pub fn count(&self, module: Module) -> u32 {
         match module {
@@ -65,6 +68,7 @@ impl Loadout {
             Module::Drone => self.drones,
             Module::Living => self.living,
             Module::Engine => self.engines,
+            Module::Data => self.data,
         }
     }
 
@@ -74,11 +78,12 @@ impl Loadout {
             Module::Drone => &mut self.drones,
             Module::Living => &mut self.living,
             Module::Engine => &mut self.engines,
+            Module::Data => &mut self.data,
         }
     }
 
     pub const fn modules(&self) -> u32 {
-        self.storage + self.drones + self.living + self.engines
+        self.storage + self.drones + self.living + self.engines + self.data
     }
 
     pub fn free_slots(&self) -> u32 {
@@ -118,7 +123,19 @@ pub struct Balance {
     /// starlight on a real hull would take billions of years to pay for one. See
     /// `lightcone/docs/20-solar-power.md`.
     pub solar_gain: f64,
+    /// Bytes of knowledge one data module holds. See [`DATA_ANCHOR_S`].
+    pub data_per_module: f64,
 }
+
+/// What [`Balance::data_per_module`] is anchored to: one module holds a year of a
+/// thirty-minute stare in every band. Room for a surveyed sky's files several times over, so
+/// that raw logs are what fill it — see `lightcone/docs/24-standing-instruments.md`.
+pub const DATA_ANCHOR_S: f64 = crate::flight::JULIAN_YEAR_S;
+const DATA_ANCHOR_CADENCE_S: f64 = 1800.0;
+
+/// Bytes a craft holds with no data modules at all: the charts and a first sweep, and very
+/// little log. A ship stripped for speed still knows where it is.
+pub const ONBOARD_DATA_BYTES: f64 = 1_048_576.0;
 
 /// The distance, AU from a Sun-like star, at which the starting ship broadside fills from empty in
 /// [`SOLAR_ANCHOR_S`], net of its living drain. What [`Balance::solar_gain`] is derived from.
@@ -163,6 +180,9 @@ impl Balance {
             module_density_kg_m3,
             solar_efficiency,
             solar_gain: wanted_w / (solar_efficiency * flux * broadside_m2),
+            data_per_module: DATA_ANCHOR_S / DATA_ANCHOR_CADENCE_S
+                * em_spectra::Band::ALL.len() as f64
+                * crate::knowledge::SAMPLE_BYTES,
         }
     };
 
@@ -187,6 +207,11 @@ impl Balance {
     pub fn dry_mass_kg(&self, loadout: &Loadout) -> f64 {
         loadout.modules() as f64 * self.module_mass_kg()
             + loadout.slots as f64 * self.slot_structure_kg()
+    }
+
+    /// Bytes of knowledge a craft with this loadout can hold.
+    pub fn data_capacity(&self, loadout: &Loadout) -> f64 {
+        ONBOARD_DATA_BYTES + loadout.data as f64 * self.data_per_module
     }
 
     pub fn capacity_j(&self, loadout: &Loadout) -> f64 {
@@ -455,13 +480,13 @@ impl Fitting {
 
 impl From<lc_proto::Loadout> for Loadout {
     fn from(l: lc_proto::Loadout) -> Self {
-        Self { storage: l.storage, drones: l.drones, living: l.living, engines: l.engines, slots: l.slots }
+        Self { storage: l.storage, drones: l.drones, living: l.living, engines: l.engines, slots: l.slots, data: l.data }
     }
 }
 
 impl From<Loadout> for lc_proto::Loadout {
     fn from(l: Loadout) -> Self {
-        Self { storage: l.storage, drones: l.drones, living: l.living, engines: l.engines, slots: l.slots }
+        Self { storage: l.storage, drones: l.drones, living: l.living, engines: l.engines, slots: l.slots, data: l.data }
     }
 }
 
@@ -479,6 +504,7 @@ impl From<lc_proto::Balance> for Balance {
             module_density_kg_m3: b.module_density_kg_m3,
             solar_efficiency: b.solar_efficiency,
             solar_gain: b.solar_gain,
+            data_per_module: b.data_per_module,
         }
     }
 }
@@ -497,6 +523,7 @@ impl From<Balance> for lc_proto::Balance {
             module_density_kg_m3: b.module_density_kg_m3,
             solar_efficiency: b.solar_efficiency,
             solar_gain: b.solar_gain,
+            data_per_module: b.data_per_module,
         }
     }
 }

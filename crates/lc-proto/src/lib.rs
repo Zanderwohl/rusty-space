@@ -822,6 +822,7 @@ pub struct Loadout {
     pub living: u32,
     pub engines: u32,
     pub slots: u32,
+    pub data: u32,
 }
 
 /// The shard's tunables. Mirrors `lc_world::fitting::Balance`; stated so a client's refit
@@ -839,6 +840,7 @@ pub struct Balance {
     pub module_density_kg_m3: f64,
     pub solar_efficiency: f64,
     pub solar_gain: f64,
+    pub data_per_module: f64,
 }
 
 /// A refit as the arguments it is planned from. Mirrors `lc_world::refit::Order`.
@@ -1160,7 +1162,7 @@ mod tests {
     }
 
     fn fitted() -> Outbound {
-        let loadout = Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20 };
+        let loadout = Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20, data: 0 };
         Outbound::Fitted {
             ship_id: ShipId(42),
             fitting: Fitting {
@@ -1176,6 +1178,7 @@ mod tests {
                     module_density_kg_m3: 395.8,
                     solar_efficiency: 0.7,
                     solar_gain: 1.18e9,
+                    data_per_module: 2.1e6,
                 },
                 loadout,
                 stored_j: 4.2e26,
@@ -1412,7 +1415,7 @@ mod tests {
             Inbound::Grant { joules: 1.5e25 },
             Inbound::Act(Intent {
                 ship_id: ShipId(1),
-                order: Order::Refit { target: Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20 } },
+                order: Order::Refit { target: Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20, data: 0 } },
                 issued_at_client_t: 0,
             }),
             Inbound::Act(Intent { ship_id: ShipId(1), order: Order::CancelRefit, issued_at_client_t: 0 }),

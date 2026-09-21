@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use lc_proto::{Order, Outbound, Refusal, ShipId};
 use lc_world::craft::CraftId;
+use lc_world::fitting::ONBOARD_DATA_BYTES;
 use lc_world::knowledge::observatory::{self, CHARTED_LY, Observatory, Sky, Station};
 use lc_world::knowledge::survey::Duty;
 use lc_world::knowledge::transit::Prior;
@@ -59,6 +60,8 @@ pub(crate) struct Instruments {
     prior: Option<Prior>,
     /// The craft whose log was read last, so the next read goes to the one after it.
     reader: Option<CraftId>,
+    /// The craft whose room was last recounted from scratch, likewise.
+    recounted: Option<CraftId>,
     landings: Vec<Landing>,
 }
 
@@ -106,6 +109,29 @@ impl<J: Journal> Server<J> {
         self.instruments.aboard.get_mut(&id).expect("just inserted")
     }
 
+    /// Room for knowledge aboard a craft now: its data modules and the onboard store.
+    fn data_capacity(&self, id: CraftId) -> f64 {
+        let now_s = self.now_t as f64 * 1.0e-6;
+        self.fleet
+            .get(id)
+            .and_then(|c| c.fitting())
+            .map_or(ONBOARD_DATA_BYTES, |f| f.balance.data_capacity(&f.loadout_at(now_s)))
+    }
+
+    /// Recount what a craft's knowledge takes if its room changed, or regardless.
+    ///
+    /// Samples keep the count as they arrive. Everything else — a sighting, a name, a log read
+    /// and thrown away — is noticed at a recount, which costs a pass over every file and so is
+    /// done when something changed and otherwise one craft a tick.
+    fn fit(&mut self, id: CraftId, recount: bool) {
+        let capacity = self.data_capacity(id);
+        if let Some(aboard) = self.instruments.aboard.get_mut(&id)
+            && (recount || aboard.knowledge.capacity_bytes() != capacity)
+        {
+            aboard.knowledge.fit_to(capacity);
+        }
+    }
+
     /// Advance every craft's duty to now.
     pub(crate) fn run_instruments(&mut self) {
         let now_s = self.now_t as f64 * 1.0e-6;
@@ -116,7 +142,15 @@ impl<J: Journal> Server<J> {
             .filter(|(_, a)| a.observatory.duty != Duty::Idle)
             .map(|(id, _)| *id)
             .collect();
+        let mut ids: Vec<CraftId> = self.instruments.aboard.keys().copied().collect();
+        ids.sort_unstable_by_key(|id| id.0);
+        let next = self.instruments.recounted.map_or(0, |r| ids.partition_point(|id| id.0 <= r.0));
+        if let Some(&id) = ids.get(next).or(ids.first()) {
+            self.fit(id, true);
+            self.instruments.recounted = Some(id);
+        }
         for id in busy {
+            self.fit(id, false);
             let Some(at) = self.station(id) else { continue };
             let stars = self.world.stars();
             let instruments = &mut self.instruments;
@@ -146,6 +180,7 @@ impl<J: Journal> Server<J> {
             aboard.knowledge.read_log(subject, observer, prior, now_s);
             instruments.reader = Some(id);
             reads += 1;
+            self.fit(id, true);
         }
     }
 
@@ -187,6 +222,8 @@ impl<J: Journal> Server<J> {
             }
             let Ok(report) = serde_json::from_str::<Report>(&landing.body) else { continue };
             let arrived_s = landing.arrive_t as f64 * 1.0e-6;
+            self.aboard(landing.observer);
+            self.fit(landing.observer, false);
             self.aboard(landing.observer).knowledge.receive(&report, arrived_s);
         }
     }

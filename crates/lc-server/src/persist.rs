@@ -63,6 +63,79 @@ pub struct SavedInstruments {
     pub reporting: lc_world::knowledge::Reporting,
 }
 
+/// [`Saved`] as format 6 wrote it, before ships had data modules.
+#[derive(Deserialize)]
+struct SavedV6 {
+    kind: u8,
+    name: Option<String>,
+    noise_floor: f32,
+    length_m: f64,
+    motion: lc_proto::Motion,
+    pursuit: Option<lc_proto::Pursuit>,
+    fitting: Option<FittingV6>,
+    instruments: Option<SavedInstruments>,
+}
+
+/// `lc_proto::Loadout` before data modules. A ship from then has none: modules do not appear
+/// in a hull because the game learnt about a new kind.
+#[derive(Deserialize)]
+struct LoadoutV6 {
+    storage: u32,
+    drones: u32,
+    living: u32,
+    engines: u32,
+    slots: u32,
+}
+
+impl From<LoadoutV6> for lc_proto::Loadout {
+    fn from(l: LoadoutV6) -> Self {
+        Self { storage: l.storage, drones: l.drones, living: l.living, engines: l.engines, slots: l.slots, data: 0 }
+    }
+}
+
+#[derive(Deserialize)]
+struct RefitOrderV6 {
+    from: LoadoutV6,
+    target: LoadoutV6,
+    stored_j: f64,
+    start_s: f64,
+}
+
+impl From<RefitOrderV6> for lc_proto::RefitOrder {
+    fn from(o: RefitOrderV6) -> Self {
+        Self { from: o.from.into(), target: o.target.into(), stored_j: o.stored_j, start_s: o.start_s }
+    }
+}
+
+/// `lc_proto::Fitting` as formats 5 and 6 wrote it. The balance is read to keep the bytes
+/// aligned and then dropped, as ever.
+#[derive(Deserialize)]
+struct FittingV6 {
+    _balance: [f64; 11],
+    loadout: LoadoutV6,
+    stored_j: f64,
+    since_s: f64,
+    rapidity_since: f64,
+    committed_j: f64,
+    solar_w: f64,
+    refit: Option<RefitOrderV6>,
+}
+
+impl From<FittingV6> for lc_proto::Fitting {
+    fn from(old: FittingV6) -> Self {
+        Self {
+            balance: Balance::DEFAULT.into(),
+            loadout: old.loadout.into(),
+            stored_j: old.stored_j,
+            since_s: old.since_s,
+            rapidity_since: old.rapidity_since,
+            committed_j: old.committed_j,
+            solar_w: old.solar_w,
+            refit: old.refit.map(Into::into),
+        }
+    }
+}
+
 /// [`Saved`] as format 5 wrote it, before a craft's instruments were kept.
 #[derive(Deserialize)]
 struct SavedV5 {
@@ -72,7 +145,7 @@ struct SavedV5 {
     length_m: f64,
     motion: lc_proto::Motion,
     pursuit: Option<lc_proto::Pursuit>,
-    fitting: Option<lc_proto::Fitting>,
+    fitting: Option<FittingV6>,
 }
 
 /// [`Saved`] as format 4 wrote it, before a fitting carried starlight.
@@ -92,26 +165,26 @@ struct SavedV4 {
 #[derive(Deserialize)]
 struct FittingV4 {
     _balance: [f64; 9],
-    loadout: lc_proto::Loadout,
+    loadout: LoadoutV6,
     stored_j: f64,
     since_s: f64,
     rapidity_since: f64,
     committed_j: f64,
-    refit: Option<lc_proto::RefitOrder>,
+    refit: Option<RefitOrderV6>,
 }
 
 impl From<FittingV4> for lc_proto::Fitting {
     fn from(old: FittingV4) -> Self {
         Self {
             balance: Balance::DEFAULT.into(),
-            loadout: old.loadout,
+            loadout: old.loadout.into(),
             stored_j: old.stored_j,
             since_s: old.since_s,
             rapidity_since: old.rapidity_since,
             committed_j: old.committed_j,
             // Starts at the next settlement, within a game day.
             solar_w: 0.0,
-            refit: old.refit,
+            refit: old.refit.map(Into::into),
         }
     }
 }
@@ -147,7 +220,7 @@ struct SavedV2 {
 /// otherwise** — deliberately not [`lc_proto::PROTOCOL_VERSION`], which moves for reasons that
 /// have nothing to do with how a craft is stored. Bumping it makes every existing row
 /// unreadable, which is the point and is also the cost.
-pub const SAVE_FORMAT: i32 = 6;
+pub const SAVE_FORMAT: i32 = 7;
 
 /// The oldest format still read. See [`decode`].
 pub const OLDEST_FORMAT: i32 = 2;
@@ -243,6 +316,19 @@ pub fn load(row: &Ship, system: Option<&lc_world::system::LocalSystem>) -> Resul
 pub fn decode(row: &Ship) -> Result<Saved, String> {
     match row.format {
         SAVE_FORMAT => lc_proto::decode(&row.state).map_err(|why| why.to_string()),
+        6 => {
+            let old: SavedV6 = lc_proto::decode(&row.state).map_err(|why| why.to_string())?;
+            Ok(Saved {
+                kind: old.kind,
+                name: old.name,
+                noise_floor: old.noise_floor,
+                length_m: old.length_m,
+                motion: old.motion,
+                pursuit: old.pursuit,
+                fitting: old.fitting.map(Into::into),
+                instruments: old.instruments,
+            })
+        }
         5 => {
             let old: SavedV5 = lc_proto::decode(&row.state).map_err(|why| why.to_string())?;
             Ok(Saved {
@@ -252,7 +338,7 @@ pub fn decode(row: &Ship) -> Result<Saved, String> {
                 length_m: old.length_m,
                 motion: old.motion,
                 pursuit: old.pursuit,
-                fitting: old.fitting,
+                fitting: old.fitting.map(Into::into),
                 instruments: None,
             })
         }
@@ -606,14 +692,22 @@ mod tests {
             module_density_kg_m3: f64,
         }
         #[derive(Serialize)]
+        struct OldLoadout {
+            storage: u32,
+            drones: u32,
+            living: u32,
+            engines: u32,
+            slots: u32,
+        }
+        #[derive(Serialize)]
         struct OldFitting {
             balance: OldBalance,
-            loadout: lc_proto::Loadout,
+            loadout: OldLoadout,
             stored_j: f64,
             since_s: f64,
             rapidity_since: f64,
             committed_j: f64,
-            refit: Option<lc_proto::RefitOrder>,
+            refit: Option<()>,
         }
         #[derive(Serialize)]
         struct Old {
@@ -645,7 +739,7 @@ mod tests {
                     slot_volume_m3: 392_699.0,
                     module_density_kg_m3: 395.8,
                 },
-                loadout: Loadout::STARTING.into(),
+                loadout: OldLoadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20 },
                 stored_j: 1.25e26,
                 since_s: 3.0,
                 rapidity_since: 0.0,
@@ -662,7 +756,7 @@ mod tests {
         };
         let back = load(&row, None).expect("a format 4 row reads");
         let fitting = back.fitting().expect("fitted");
-        assert_eq!(fitting.loadout, Loadout::STARTING);
+        assert_eq!(fitting.loadout, Loadout { data: 0, ..Loadout::STARTING }, "and no data module");
         assert_eq!(fitting.account().stored_j, 1.25e26);
         assert_eq!(fitting.solar_w(), 0.0);
     }
