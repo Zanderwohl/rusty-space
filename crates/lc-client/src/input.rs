@@ -123,9 +123,8 @@ pub fn grab_cursor(
     buttons: Res<ButtonInput<MouseButton>>,
     egui: Res<EguiWantsInput>,
     mut looking: ResMut<Looking>,
-    mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
-    let Ok(mut cursor) = cursor.single_mut() else { return };
     let want = grab_transition(
         looking.0,
         buttons.just_pressed(LOOK_BUTTON),

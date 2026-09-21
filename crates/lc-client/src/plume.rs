@@ -145,9 +145,11 @@ pub const TRAVERSES_AT_REAL_TIME: f64 = 0.12;
 /// stopped clock is a still plume, which is what every `--rate 0` photograph depends on.
 pub const CHURN_EXPONENT: f64 = 0.125;
 
-/// One craft's exhaust. `None` is the player's own ship, matching [`crate::hull::Hull`].
+/// One craft's exhaust, by its place in this frame's lit set — matching [`crate::hull::Hull`],
+/// and stable for the same reason: the set is compared against [`Plumes::drawn`] every frame
+/// and respawned whenever it differs.
 #[derive(Component)]
-pub struct Plume(pub Option<ShipId>);
+pub struct Plume(pub usize);
 
 /// The shared proxy, which craft currently have a plume, and where the churn has got to.
 #[derive(Resource, Default)]
@@ -359,7 +361,6 @@ pub fn update_plumes(
 ) {
     let look = ui.look.forward();
     let want = burning(&game.0, &uplink, &eye, look);
-    let keys: Vec<Option<ShipId>> = want.iter().map(|(id, _)| *id).collect();
 
     // Taken from the clock itself rather than from the rate knob, so a correction from the
     // server moves the churn with everything else and the churn does not need to know who owns
@@ -370,12 +371,14 @@ pub fn update_plumes(
     let traveled = churn_step(time.delta_secs_f64(), simulated) * CHURN_ALONG as f64;
     plumes.phase = (plumes.phase + traveled).rem_euclid(CHURN_PERIOD as f64);
 
-    if keys != plumes.drawn {
+    // Compared against the drawn set without building it: this runs every frame, and the keys
+    // are only wanted on the frame that respawns.
+    if !want.iter().map(|(id, _)| id).eq(plumes.drawn.iter()) {
         for (entity, _) in &existing {
             commands.entity(entity).despawn();
         }
         let proxy = plumes.proxy.get_or_insert_with(|| meshes.add(proxy())).clone();
-        for (id, _) in &want {
+        for index in 0..want.len() {
             commands.spawn((
                 Mesh3d(proxy.clone()),
                 MeshMaterial3d(materials.add(PlumeMaterial::default())),
@@ -383,17 +386,17 @@ pub fn update_plumes(
                 // Placed by hand at a scale where the mesh's own bounds say nothing about
                 // where it lands, exactly as a hull is.
                 bevy::camera::visibility::NoFrustumCulling,
-                Plume(*id),
+                Plume(index),
             ));
         }
-        plumes.drawn = keys;
+        plumes.drawn = want.iter().map(|(id, _)| *id).collect();
         // Placed next frame, when the spawns exist. One frame at the origin is one frame with
         // a plume inside the camera.
         return;
     }
 
     for (mut transform, material, marker) in placed.iter_mut() {
-        let Some((_, lit)) = want.iter().find(|(id, _)| *id == marker.0) else { continue };
+        let Some((id, lit)) = want.get(marker.0) else { continue };
         let wall = lit.mouth_m * MARGIN;
         // The nozzle is at the hull's tail — half a hull aft of its center — and the proxy's
         // own center is half a plume further aft again. Measuring from the hull's center put
@@ -412,7 +415,7 @@ pub fn update_plumes(
         // The eye is at the render origin, so where it sits in the proxy's own space is the
         // transform undone. The march needs it there and nowhere else.
         let eye_local = transform.to_matrix().inverse().transform_point3(Vec3::ZERO);
-        let phase = (plumes.phase + seed(marker.0)).rem_euclid(CHURN_PERIOD as f64);
+        let phase = (plumes.phase + seed(*id)).rem_euclid(CHURN_PERIOD as f64);
         let next = uniforms(lit, &game.0, eye_local, phase);
         if asset.uniforms != next {
             asset.uniforms = next;

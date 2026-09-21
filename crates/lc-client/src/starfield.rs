@@ -235,6 +235,15 @@ pub fn style_for(ui: &crate::ui::UiState, which: Which) -> PointStyle {
 #[derive(Component)]
 pub struct SkyMesh;
 
+/// How many stars fall inside the local shell.
+///
+/// The cheap half of [`partition`]: the split has to build a [`Point`] per star, which hashes a
+/// seed and draws a swarm apiece, and [`update_sky`] wants the number on every frame and the
+/// points on almost none.
+pub fn local_count(session: &Session) -> usize {
+    session.stars.iter().filter(|s| session.distance_to(s) < LOCAL_SHELL_LY).count()
+}
+
 /// Split the sky into the background and the system the ship is in.
 pub fn partition(session: &Session) -> (Vec<Point>, Vec<Point>) {
     let mut distant = Vec::with_capacity(session.stars.len());
@@ -553,11 +562,12 @@ pub fn update_sky(
     mut materials: ResMut<Assets<RelativisticStarfieldMaterial>>,
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
 ) {
-    let (distant_stars, local_stars) = partition(&session.0);
     // Membership as well as distance: crossing into a system moves a star from one pass to the
-    // other, and nothing about the ship's position alone says that happened.
+    // other, and nothing about the ship's position alone says that happened. Counted rather
+    // than partitioned, because the partition is only wanted on the frame that rebakes.
     let moved = session.ship.motion.position_ly.distance(sky.origin_ly) > REBAKE_LY;
-    if moved || local_stars.len() != sky.local.count {
+    if moved || local_count(&session.0) != sky.local.count {
+        let (distant_stars, local_stars) = partition(&session.0);
         sky.origin_ly = session.ship.motion.position_ly;
         sky.distant.count = distant_stars.len();
         sky.local.count = local_stars.len();

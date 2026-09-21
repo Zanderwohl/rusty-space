@@ -129,21 +129,28 @@ pub struct MapCamera;
 #[derive(Component)]
 pub struct MapDrawn;
 
-/// Which item an entity stands for, so a transform can be written without respawning.
+/// Which item an entity stands for, by its place in the frame's list, so a transform can be
+/// written without respawning.
+///
+/// An index rather than the key it could be looked up by: [`place`] respawns the whole layer
+/// whenever the key list changes, so while these entities exist `frame.placements` holds the
+/// same placements in the same order it did when they were spawned. That makes the index the
+/// cheap half of a lookup the scan would otherwise repeat for every entity, every frame.
 #[derive(Component)]
-pub struct MapItemOf(pub ItemKey);
+pub struct MapItemOf(pub usize);
 
 /// A decade ring, by its place in the frame's list.
 #[derive(Component)]
 pub struct MapRingOf(pub usize);
 
-/// The drop-line under an item.
+/// The drop-line under an item, by its placement's place in the frame's list.
 #[derive(Component)]
-pub struct MapDropOf(pub ItemKey);
+pub struct MapDropOf(pub usize);
 
-/// A belt, a ring system or a cloud, drawn as its own outline rather than as a point.
+/// A belt, a ring system or a cloud, drawn as its own outline rather than as a point. By its
+/// placement's place in the frame's list.
 #[derive(Component)]
-pub struct MapAnnulusOf(pub ItemKey);
+pub struct MapAnnulusOf(pub usize);
 
 /// The reference plane's spokes. One entity.
 #[derive(Component)]
@@ -163,7 +170,7 @@ pub struct Map {
     pub snapshot: MapSnapshot,
     /// What each item of the snapshot is, in the terms the rest of the interface selects
     /// things in. See [`crate::map_source::Picture`].
-    pub subjects: Vec<(ItemKey, crate::pick::Subject)>,
+    pub subjects: std::collections::HashMap<ItemKey, crate::pick::Subject>,
     /// Which item holds the ship, when the snapshot has one. Worked out beside the snapshot
     /// because that is where the session is.
     pub primary: Option<ItemKey>,
@@ -296,7 +303,7 @@ fn setup(
         wanted: UVec2::splat(INITIAL_SIDE),
         shown: false,
         snapshot: MapSnapshot::observed(0.0, Vec::new()),
-        subjects: Vec::new(),
+        subjects: std::collections::HashMap::new(),
         primary: None,
         frame: None,
         sphere: meshes.add(wire_mesh::generate_latlon_sphere(&[], BASE_TUBE_RADIUS, 4)),
@@ -397,7 +404,7 @@ fn place(
     mut ui: ResMut<Ui>,
     mut materials: ResMut<Assets<BodyWireframeMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut camera: Query<(&mut Transform, &mut Projection), (With<MapCamera>, Without<MapDrawn>)>,
+    camera: Single<(&mut Transform, &mut Projection), (With<MapCamera>, Without<MapDrawn>)>,
     existing: Query<Entity, With<MapDrawn>>,
     mut items: Query<
         (&MapItemOf, &mut Transform, &mut Mesh3d, &MeshMaterial3d<BodyWireframeMaterial>),
@@ -422,7 +429,7 @@ fn place(
             Without<MapSpokes>),
     >,
 ) {
-    let Ok((mut transform, mut projection)) = camera.single_mut() else { return };
+    let (mut transform, mut projection) = camera.into_inner();
     if !map.shown {
         for entity in &existing {
             commands.entity(entity).despawn();
@@ -478,7 +485,7 @@ fn place(
     }
 
     for (of, mut at, mut mesh, material) in items.iter_mut() {
-        let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
+        let Some(placement) = frame.placements.get(of.0) else { continue };
         *at = item_transform(placement, view);
         // Crossing the threshold does not change the set that is drawn, so the level of
         // detail is a handle swap rather than a respawn.
@@ -490,7 +497,7 @@ fn place(
             at.translation.length(), fraction, LINE_PX);
     }
     for (of, mut at, mut mesh, material) in drops.iter_mut() {
-        let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
+        let Some(placement) = frame.placements.get(of.0) else { continue };
         *at = drop_transform(placement);
         // Drifting off the plane gains dashes, not longer ones, so the mesh changes.
         let dashes = dash_count(at.scale.y, at.translation.length(), rad_per_px);
@@ -508,7 +515,7 @@ fn place(
             at.translation.length().max(ring.radius), LINE_TUBE_FRACTION, SCALE_PX);
     }
     for (of, mut at, material) in annuli.iter_mut() {
-        let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
+        let Some(placement) = frame.placements.get(of.0) else { continue };
         let Some(annulus) = placement.annulus else { continue };
         *at = annulus_transform(placement, annulus);
         set_thickness(&mut materials, material, annulus.outer, rad_per_px,
@@ -818,7 +825,7 @@ fn spawn_scene(
         MapSpokes,
     ));
 
-    for placement in &frame.placements {
+    for (index, placement) in frame.placements.iter().enumerate() {
         let at = item_transform(placement, view);
         let (mesh, fraction) = mesh_for(form_of(placement, view), placement, map, view);
         commands.spawn((
@@ -833,7 +840,7 @@ fn spawn_scene(
             NoFrustumCulling,
             layer.clone(),
             MapDrawn,
-            MapItemOf(placement.key),
+            MapItemOf(index),
         ));
         if let Some(annulus) = placement.annulus {
             let at = annulus_transform(placement, annulus);
@@ -848,7 +855,7 @@ fn spawn_scene(
                 NoFrustumCulling,
                 layer.clone(),
                 MapDrawn,
-                MapAnnulusOf(placement.key),
+                MapAnnulusOf(index),
             ));
         }
         if placement.has_drop_line() {
@@ -863,7 +870,7 @@ fn spawn_scene(
                 NoFrustumCulling,
                 layer.clone(),
                 MapDrawn,
-                MapDropOf(placement.key),
+                MapDropOf(index),
             ));
         }
     }
