@@ -47,7 +47,7 @@ fn a_ship_leaves_port_with_the_charts_of_its_own_volume_and_no_more() {
         .expect("something is charted");
     assert!(!far.triangulated);
     assert_eq!(far.hops, 1);
-    let truth = session.star(far.star).unwrap().position_ly;
+    let truth = session.star(far.star().unwrap()).unwrap().position_ly;
     let believed = far.distance.position_ly().unwrap();
     assert!(
         believed.distance(truth) > 0.0,

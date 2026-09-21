@@ -39,7 +39,7 @@ pub fn telescope(
     duty(ui, game, out);
     ui.separator();
 
-    ui.label(format!("Detected: {} stars", game.knowledge.len()));
+    ui.label(format!("Detected: {} stars", game.knowledge.stars().count()));
     egui::ScrollArea::vertical()
         .max_height(160.0)
         .show(ui, |ui| {
@@ -132,9 +132,9 @@ struct Detected {
 fn detected(game: &Game) -> Vec<Detected> {
     let mut lines: Vec<(f64, Detected)> = game
         .knowledge
-        .beliefs()
-        .map(|belief| {
-            let name = game.name_of(belief.star);
+        .stars()
+        .map(|(id, belief)| {
+            let name = game.name_of(id);
             let (order, distance) = match belief.distance {
                 Distance::Measured { sigma_ly, .. } => {
                     let ly = belief
@@ -149,7 +149,7 @@ fn detected(game: &Game) -> Vec<Detected> {
             (
                 order,
                 Detected {
-                    id: belief.star,
+                    id,
                     label: format!("{name} — {distance}"),
                 },
             )

@@ -553,10 +553,7 @@ impl Session {
     /// crew, the charts, or somebody who told them calls it, and a star nobody aboard has
     /// detected has no name here to give. See `lightcone/docs/22-provenance.md`.
     pub fn name_of(&self, id: StarId) -> String {
-        match self.knowledge.belief(id).and_then(|b| b.name.as_ref()) {
-            Some(naming) => naming.name.clone(),
-            None => "unidentified source".to_string(),
-        }
+        self.knowledge.name_of(id).unwrap_or_else(|| "unidentified source".to_string())
     }
 
     /// Give a star a name of this ship's own.

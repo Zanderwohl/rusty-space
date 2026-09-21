@@ -368,7 +368,7 @@ fn debug(
         Some(system) => ui.label(format!("in {} — {} bodies loaded", system.star_name, system.len())),
         None => ui.label("between systems"),
     };
-    ui.label(format!("stars detected: {}", game.knowledge.len()));
+    ui.label(format!("stars detected: {}", game.knowledge.stars().count()));
     ui.label(format!("curve samples: {}", game.curve().len()));
     ui.label(format!("coordinate time: {:.3} s", game.coordinate_time_s()));
     ui.separator();

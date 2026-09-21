@@ -307,6 +307,9 @@ The reporting, naming and survey machinery these build on already exists and is 
 
 ### 11a — Subjects
 
+**Built.** Notes, which the done-when below mentions, arrive in 11g; everything else is in
+`lc_world::knowledge`. Protocol version 29, because a report's shape changed.
+
 **Before:** `lc_world::knowledge`, keyed by `StarId`.
 
 **Deliver:** a `Subject` key — star, planet, small body, population, craft — and knowledge keyed

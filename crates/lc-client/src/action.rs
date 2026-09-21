@@ -714,8 +714,8 @@ fn nearest_interstellar(session: &Session) -> Option<StarId> {
     let here = session.ship.motion.position_ly;
     session
         .knowledge
-        .beliefs()
-        .filter_map(|b| Some((b.star, b.distance.from(here)?)))
+        .stars()
+        .filter_map(|(id, b)| Some((id, b.distance.from(here)?)))
         .filter(|(_, ly)| *ly > INTERSTELLAR_LY)
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(id, _)| id)

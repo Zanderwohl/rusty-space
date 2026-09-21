@@ -654,9 +654,10 @@ fn fold(
                     continue;
                 };
                 let stars = report.stars();
-                let before = game.0.knowledge.len();
+                // Counted as systems, which is what a report carries and what the line says.
+                let before = game.0.knowledge.stars().count();
                 game.0.knowledge.receive(&report, arrived_s);
-                let fresh = game.0.knowledge.len().saturating_sub(before);
+                let fresh = game.0.knowledge.stars().count().saturating_sub(before);
                 ui.0.heard(
                     from,
                     match fresh {

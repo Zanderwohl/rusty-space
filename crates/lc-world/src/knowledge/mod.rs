@@ -16,212 +16,25 @@ use serde::{Deserialize, Serialize};
 use crate::sky::StarId;
 
 pub mod astrometry;
+pub mod names;
+pub mod record;
+pub mod subject;
 pub mod survey;
 
 pub use astrometry::{Bearing, Distance};
+pub use names::designation;
+pub use record::{
+    Claim, Hop, Lineage, NameKind, Naming, Orbit, SAMPLES_KEPT, Sample, Series, Sighting, Witness,
+    learnt_s,
+};
+pub use subject::{BodyId, Subject};
 
-/// How many bearings per star per witness are kept.
+/// How many bearings per subject per witness are kept.
 ///
 /// Distance comes from the spread of the observing positions, so the reservoir keeps the
 /// widest spread rather than the most recent: dropping the closest pair costs the least
 /// baseline. Sixteen well-spread bearings measure a parallax as well as a thousand.
 pub const BEARINGS_KEPT: usize = 16;
-
-/// Photometric samples kept per star, per witness, per band.
-pub const SAMPLES_KEPT: usize = 4000;
-
-/// Whoever took a measurement: a ship, a probe, a telescope.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Witness(pub u64);
-
-/// One handover of a measurement from whoever held it to whoever holds it now.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
-pub struct Hop {
-    pub from: Witness,
-    pub to: Witness,
-    /// Coordinate seconds the report was transmitted.
-    pub sent_s: f64,
-    /// Coordinate seconds its light landed. Never earlier than `sent_s` by more than the
-    /// distance between the two, because that is what carried it.
-    pub received_s: f64,
-}
-
-/// The route a measurement took, oldest hop first. Empty for one this craft made itself.
-pub type Lineage = Vec<Hop>;
-
-/// When the holder learnt something measured at `observed_s`.
-pub fn learnt_s(lineage: &Lineage, observed_s: f64) -> f64 {
-    lineage.last().map(|h| h.received_s).unwrap_or(observed_s)
-}
-
-/// One detection of a star: which way, how bright, from where, by whom.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Sighting {
-    pub witness: Witness,
-    /// Coordinate seconds the light arrived. The light *left* `distance` years earlier, which
-    /// is not known until the distance is.
-    pub observed_s: f64,
-    pub bearing: Bearing,
-    pub band: Band,
-    /// Flux in `band`, W/m^2, as measured. Luminosity only follows once distance does.
-    pub flux: f64,
-    pub flux_sigma: f64,
-    pub lineage: Lineage,
-}
-
-impl Sighting {
-    pub fn learnt_s(&self) -> f64 {
-        learnt_s(&self.lineage, self.observed_s)
-    }
-
-    fn same_as(&self, other: &Self) -> bool {
-        self.witness == other.witness && self.observed_s.to_bits() == other.observed_s.to_bits()
-    }
-}
-
-/// One photometric measurement in a series.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
-pub struct Sample {
-    pub observed_s: f64,
-    /// Signed fractional change against the bare star: positive is a deficit.
-    pub deficit: f64,
-    pub sigma: f64,
-}
-
-/// A run of photometry on one star, in one band, by one witness.
-///
-/// Kept per witness because merging two observers' curves would splice series taken at
-/// different distances — and therefore of different epochs of the same star.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Series {
-    pub witness: Witness,
-    pub band: Band,
-    pub lineage: Lineage,
-    samples: Vec<Sample>,
-}
-
-impl Series {
-    pub fn new(witness: Witness, band: Band) -> Self {
-        Self {
-            witness,
-            band,
-            lineage: Lineage::new(),
-            samples: Vec::new(),
-        }
-    }
-
-    pub fn samples(&self) -> &[Sample] {
-        &self.samples
-    }
-
-    pub fn len(&self) -> usize {
-        self.samples.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.samples.is_empty()
-    }
-
-    pub fn last(&self) -> Option<&Sample> {
-        self.samples.last()
-    }
-
-    pub fn push(&mut self, sample: Sample) {
-        if self
-            .samples
-            .last()
-            .is_some_and(|s| sample.observed_s < s.observed_s)
-        {
-            return;
-        }
-        if self.samples.len() >= SAMPLES_KEPT {
-            self.samples.remove(0);
-        }
-        self.samples.push(sample);
-    }
-
-    /// Take whatever `other` has that this does not.
-    ///
-    /// Arrival order is the witness's own, so "later than the last held" is the whole test: a
-    /// series only ever grows at its end, and the same run arriving twice by two routes adds
-    /// nothing the second time.
-    pub fn absorb(&mut self, other: &Series) {
-        let from = self
-            .samples
-            .last()
-            .map(|s| s.observed_s)
-            .unwrap_or(f64::NEG_INFINITY);
-        for sample in other.samples.iter().filter(|s| s.observed_s > from) {
-            self.push(*sample);
-        }
-    }
-
-    /// Emission times and deficits, for a plot.
-    ///
-    /// The x axis is when the light *left*, which needs a distance; without one the samples
-    /// are returned against arrival time and the caller says so.
-    pub fn against_emission(&self, light_age_s: Option<f64>) -> Vec<(f64, f64)> {
-        let shift = light_age_s.unwrap_or(0.0);
-        self.samples
-            .iter()
-            .map(|s| (s.observed_s - shift, s.deficit))
-            .collect()
-    }
-}
-
-/// What somebody calls a star.
-///
-/// **Nothing has a name of its own.** A name is a thing an observer gave a star and may have
-/// passed on, so it travels like every other record: with a witness, a time and a lineage, and
-/// two crews may hold different names for the same light without either being wrong.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Naming {
-    pub witness: Witness,
-    pub name: String,
-    pub kind: NameKind,
-    pub stated_s: f64,
-    pub lineage: Lineage,
-}
-
-/// Whether a name was chosen or merely assigned.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NameKind {
-    /// Somebody decided to call it this.
-    Given,
-    /// What an instrument wrote down when it found it, so that the log has something to say.
-    /// Always beaten by a name somebody chose.
-    Designation,
-}
-
-/// A designation from the direction something was found in, ecliptic degrees.
-///
-/// Fixed at discovery rather than recomputed, because the bearing changes as the observer
-/// moves and a catalogue number that drifted would be no use for talking about.
-pub fn designation(toward: glam::DVec3) -> String {
-    let toward = toward.normalize_or(glam::DVec3::X);
-    let longitude = toward
-        .y
-        .atan2(toward.x)
-        .rem_euclid(std::f64::consts::TAU)
-        .to_degrees();
-    let latitude = toward.z.clamp(-1.0, 1.0).asin().to_degrees();
-    format!("{longitude:05.1}{latitude:+05.1}")
-}
-
-/// A distance somebody states, as opposed to bearings this craft can triangulate itself.
-///
-/// This is how a conclusion travels when the measurements behind it do not — a charting
-/// office's parallax programme, a faction's shared catalogue, a probe with more data than
-/// bandwidth. It is believed because of who said it, which is the honest way to hold it, and
-/// a craft's own triangulation overrides it the moment it has one.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Claim {
-    pub witness: Witness,
-    pub distance: Distance,
-    /// Coordinate seconds the claimant stated it.
-    pub stated_s: f64,
-    pub lineage: Lineage,
-}
 
 fn sigma_of(claim: &Claim) -> f64 {
     match claim.distance {
@@ -230,29 +43,23 @@ fn sigma_of(claim: &Claim) -> f64 {
     }
 }
 
-/// Which of two namings a craft goes by: a chosen name over a designation, its own over
+/// Which of two namings a craft goes by: a chosen name over an assigned one, its own over
 /// somebody else's, and the more recent over the older.
-fn better_name<'a>(held: Option<&'a Naming>, new: &'a Naming, owner: Witness) -> bool {
-    let rank = |n: &Naming| {
-        (
-            matches!(n.kind, NameKind::Given),
-            n.witness == owner,
-            n.stated_s,
-        )
-    };
+fn better_name(held: Option<&Naming>, new: &Naming, owner: Witness) -> bool {
+    let rank = |n: &Naming| (n.kind.chosen(), n.witness == owner, n.stated_s);
     match held {
         None => true,
         Some(held) => rank(new) > rank(held),
     }
 }
 
-/// What is believed about one star, folded from everything held about it.
+/// What is believed about something seen in the sky, folded from everything held about it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Belief {
-    pub star: StarId,
-    /// What this craft calls it, and who said so. `None` for something detected and not yet
-    /// written down anywhere — which the interface shows as an unnamed source rather than
-    /// inventing something.
+    pub subject: Subject,
+    /// The naming this craft goes by, and who said it. `None` for something detected and not
+    /// yet written down anywhere. A relative naming is only a suffix: what to *show* is
+    /// [`Knowledge::name_of`], which reads it after the star's own name.
     pub name: Option<Naming>,
     /// The most recent bearing, from wherever that witness was.
     pub bearing: Bearing,
@@ -277,6 +84,11 @@ pub struct Belief {
 }
 
 impl Belief {
+    /// The star this is a belief about, if it is one.
+    pub fn star(&self) -> Option<StarId> {
+        self.subject.as_star()
+    }
+
     /// Seconds the light had been travelling, once there is a distance to say so.
     pub fn light_age_s(&self) -> Option<f64> {
         self.distance
@@ -296,16 +108,17 @@ impl Belief {
     }
 }
 
-/// Everything held about one star.
+/// Everything held about one subject.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-pub struct StarFile {
+pub struct File {
     sightings: Vec<Sighting>,
     series: Vec<Series>,
     claims: Vec<Claim>,
     names: Vec<Naming>,
+    orbits: Vec<Orbit>,
 }
 
-impl StarFile {
+impl File {
     pub fn sightings(&self) -> &[Sighting] {
         &self.sightings
     }
@@ -322,11 +135,33 @@ impl StarFile {
         &self.names
     }
 
+    pub fn orbits(&self) -> &[Orbit] {
+        &self.orbits
+    }
+
     pub fn series_in(&self, band: Band) -> Option<&Series> {
         self.series.iter().find(|s| s.band == band)
     }
 
-    fn believe(&self, star: StarId, owner: Witness) -> Option<Belief> {
+    fn naming(&self, owner: Witness) -> Option<&Naming> {
+        let mut name: Option<&Naming> = None;
+        for naming in &self.names {
+            if better_name(name, naming, owner) {
+                name = Some(naming);
+            }
+        }
+        name
+    }
+
+    /// The orbit this craft goes by: its own statement if it has made one, otherwise the most
+    /// recent anybody made.
+    fn orbit(&self, owner: Witness) -> Option<&Orbit> {
+        self.orbits.iter().max_by(|a, b| {
+            (a.witness == owner, a.stated_s).partial_cmp(&(b.witness == owner, b.stated_s)).unwrap()
+        })
+    }
+
+    fn believe(&self, subject: Subject, owner: Witness) -> Option<Belief> {
         let latest = self
             .sightings
             .iter()
@@ -339,19 +174,10 @@ impl StarFile {
         // one is a measurement this craft can check and the other is a thing it was told.
         let measured = astrometry::triangulate(&bearings);
         let taken = matches!(measured, Distance::Measured { .. });
-        let claimed = self
-            .claims
-            .iter()
-            .min_by(|a, b| sigma_of(a).total_cmp(&sigma_of(b)));
-        let mut name: Option<&Naming> = None;
-        for naming in &self.names {
-            if better_name(name, naming, owner) {
-                name = Some(naming);
-            }
-        }
+        let claimed = self.claims.iter().min_by(|a, b| sigma_of(a).total_cmp(&sigma_of(b)));
         Some(Belief {
-            star,
-            name: name.cloned(),
+            subject,
+            name: self.naming(owner).cloned(),
             bearing: latest.bearing,
             distance: match (taken, claimed) {
                 (false, Some(claim)) => claim.distance,
@@ -361,61 +187,32 @@ impl StarFile {
             band: latest.band,
             flux: latest.flux,
             observed_s: latest.observed_s,
-            learnt_s: self
-                .sightings
-                .iter()
-                .map(Sighting::learnt_s)
-                .fold(f64::INFINITY, f64::min),
+            learnt_s: self.sightings.iter().map(Sighting::learnt_s).fold(f64::INFINITY, f64::min),
             sightings: self.sightings.len(),
             witnesses: witnesses.len(),
-            hops: self
-                .sightings
-                .iter()
-                .map(|s| s.lineage.len())
-                .min()
-                .unwrap_or(0),
+            hops: self.sightings.iter().map(|s| s.lineage.len()).min().unwrap_or(0),
         })
     }
 
     /// Keep the bearings that are farthest apart, which is what a parallax is made of.
     fn decimate(&mut self, witness: Witness) {
-        while self
-            .sightings
-            .iter()
-            .filter(|s| s.witness == witness)
-            .count()
-            > BEARINGS_KEPT
-        {
-            let held: Vec<usize> = (0..self.sightings.len())
-                .filter(|i| self.sightings[*i].witness == witness)
-                .collect();
+        while self.sightings.iter().filter(|s| s.witness == witness).count() > BEARINGS_KEPT {
+            let held: Vec<usize> =
+                (0..self.sightings.len()).filter(|i| self.sightings[*i].witness == witness).collect();
             // Never the newest: it is what the display reads, and a curve of one stale
             // bearing is worse than a slightly narrower baseline.
             let newest = *held
                 .iter()
-                .max_by(|a, b| {
-                    self.sightings[**a]
-                        .observed_s
-                        .total_cmp(&self.sightings[**b].observed_s)
-                })
+                .max_by(|a, b| self.sightings[**a].observed_s.total_cmp(&self.sightings[**b].observed_s))
                 .unwrap();
             let mut drop = (f64::INFINITY, held[0]);
             for (n, i) in held.iter().enumerate() {
                 for j in held.iter().skip(n + 1) {
-                    let gap = self.sightings[*i]
-                        .bearing
-                        .observer_ly
-                        .distance(self.sightings[*j].bearing.observer_ly);
-                    let older = if self.sightings[*i].observed_s < self.sightings[*j].observed_s {
-                        *i
-                    } else {
-                        *j
-                    };
-                    let loser = if older == newest {
-                        if *i == newest { *j } else { *i }
-                    } else {
-                        older
-                    };
+                    let gap =
+                        self.sightings[*i].bearing.observer_ly.distance(self.sightings[*j].bearing.observer_ly);
+                    let older =
+                        if self.sightings[*i].observed_s < self.sightings[*j].observed_s { *i } else { *j };
+                    let loser = if older == newest { if *i == newest { *j } else { *i } } else { older };
                     if gap < drop.0 {
                         drop = (gap, loser);
                     }
@@ -424,23 +221,38 @@ impl StarFile {
             self.sightings.remove(drop.1);
         }
     }
+
+    /// Everything here learnt after `since_s`, or `None` if nothing was.
+    fn since(&self, subject: Subject, since_s: f64) -> Option<Part> {
+        let fresh = |lineage: &Lineage, at: f64| learnt_s(lineage, at) > since_s;
+        let part = Part {
+            subject,
+            sightings: self.sightings.iter().filter(|s| s.learnt_s() > since_s).cloned().collect(),
+            series: self
+                .series
+                .iter()
+                .filter(|s| s.last().is_some_and(|x| fresh(&s.lineage, x.observed_s)))
+                .cloned()
+                .collect(),
+            claims: self.claims.iter().filter(|c| fresh(&c.lineage, c.stated_s)).cloned().collect(),
+            names: self.names.iter().filter(|n| fresh(&n.lineage, n.stated_s)).cloned().collect(),
+            orbits: self.orbits.iter().filter(|o| fresh(&o.lineage, o.stated_s)).cloned().collect(),
+        };
+        (!part.is_empty()).then_some(part)
+    }
 }
 
 /// One craft's view of the sky.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Knowledge {
     pub owner: Witness,
-    files: BTreeMap<StarId, StarFile>,
-    beliefs: BTreeMap<StarId, Belief>,
+    files: BTreeMap<Subject, File>,
+    beliefs: BTreeMap<Subject, Belief>,
 }
 
 impl Knowledge {
     pub fn new(owner: Witness) -> Self {
-        Self {
-            owner,
-            files: BTreeMap::new(),
-            beliefs: BTreeMap::new(),
-        }
+        Self { owner, files: BTreeMap::new(), beliefs: BTreeMap::new() }
     }
 
     /// Take a new identity, carrying this craft's own records over to it.
@@ -456,19 +268,17 @@ impl Knowledge {
             return;
         }
         self.owner = owner;
+        let swap = |w: &mut Witness| {
+            if *w == was {
+                *w = owner;
+            }
+        };
         for file in self.files.values_mut() {
-            for sighting in file.sightings.iter_mut().filter(|s| s.witness == was) {
-                sighting.witness = owner;
-            }
-            for series in file.series.iter_mut().filter(|s| s.witness == was) {
-                series.witness = owner;
-            }
-            for naming in file.names.iter_mut().filter(|n| n.witness == was) {
-                naming.witness = owner;
-            }
-            for claim in file.claims.iter_mut().filter(|c| c.witness == was) {
-                claim.witness = owner;
-            }
+            file.sightings.iter_mut().for_each(|s| swap(&mut s.witness));
+            file.series.iter_mut().for_each(|s| swap(&mut s.witness));
+            file.names.iter_mut().for_each(|n| swap(&mut n.witness));
+            file.claims.iter_mut().for_each(|c| swap(&mut c.witness));
+            file.orbits.iter_mut().for_each(|o| swap(&mut o.witness));
             // Hops name the ends of a handover, so a craft that has renamed itself must not
             // keep telling people its old name.
             for hop in file
@@ -478,21 +288,19 @@ impl Knowledge {
                 .chain(file.series.iter_mut().flat_map(|s| s.lineage.iter_mut()))
                 .chain(file.names.iter_mut().flat_map(|n| n.lineage.iter_mut()))
                 .chain(file.claims.iter_mut().flat_map(|c| c.lineage.iter_mut()))
+                .chain(file.orbits.iter_mut().flat_map(|o| o.lineage.iter_mut()))
             {
-                if hop.from == was {
-                    hop.from = owner;
-                }
-                if hop.to == was {
-                    hop.to = owner;
-                }
+                swap(&mut hop.from);
+                swap(&mut hop.to);
             }
         }
-        let stars: Vec<StarId> = self.files.keys().copied().collect();
-        for star in stars {
-            self.refresh(star);
+        let subjects: Vec<Subject> = self.files.keys().copied().collect();
+        for subject in subjects {
+            self.refresh(subject);
         }
     }
 
+    /// Subjects held: stars, and whatever else has been learnt about.
     pub fn len(&self) -> usize {
         self.files.len()
     }
@@ -501,53 +309,98 @@ impl Knowledge {
         self.files.is_empty()
     }
 
-    pub fn knows(&self, star: StarId) -> bool {
-        self.files.contains_key(&star)
+    pub fn knows(&self, subject: impl Into<Subject>) -> bool {
+        self.files.contains_key(&subject.into())
     }
 
-    pub fn file(&self, star: StarId) -> Option<&StarFile> {
-        self.files.get(&star)
+    pub fn file(&self, subject: impl Into<Subject>) -> Option<&File> {
+        self.files.get(&subject.into())
     }
 
-    pub fn belief(&self, star: StarId) -> Option<&Belief> {
-        self.beliefs.get(&star)
+    pub fn belief(&self, subject: impl Into<Subject>) -> Option<&Belief> {
+        self.beliefs.get(&subject.into())
     }
 
     pub fn beliefs(&self) -> impl Iterator<Item = &Belief> {
         self.beliefs.values()
     }
 
+    /// Beliefs about stars, which is what a map of the sky is drawn from.
+    pub fn stars(&self) -> impl Iterator<Item = (StarId, &Belief)> {
+        self.beliefs.values().filter_map(|b| Some((b.star()?, b)))
+    }
+
+    /// Everything held about a star's system: its planets, belts and the rest.
+    pub fn members(&self, star: StarId) -> impl Iterator<Item = (Subject, &File)> {
+        self.files
+            .iter()
+            .filter(move |(s, _)| s.star() == Some(star) && s.as_star().is_none())
+            .map(|(s, f)| (*s, f))
+    }
+
+    /// What this craft calls something, as a player should see it.
+    ///
+    /// A relative naming is read after the star's name — **this** craft's name for the star,
+    /// whoever assigned the suffix — so a planet a probe called "Kettle b" is shown as
+    /// "Hearthlight b" aboard a ship that calls the star Hearthlight, and follows the star when
+    /// it is renamed.
+    pub fn name_of(&self, subject: impl Into<Subject>) -> Option<String> {
+        let subject = subject.into();
+        let naming = self.files.get(&subject)?.naming(self.owner)?;
+        match naming.kind {
+            NameKind::Relative => {
+                let star = self.name_of(subject.star()?).unwrap_or_else(|| "?".into());
+                Some(format!("{star} {}", naming.name))
+            }
+            _ => Some(naming.name.clone()),
+        }
+    }
+
     /// File a sighting this craft made itself.
-    pub fn sighted(&mut self, star: StarId, sighting: Sighting) {
-        self.file_sighting(star, sighting);
+    pub fn sighted(&mut self, subject: impl Into<Subject>, sighting: Sighting) {
+        self.file_sighting(subject.into(), sighting);
     }
 
     /// File a distance somebody states. Nothing is taken on trust that a measurement of its
     /// own would not override.
-    pub fn told(&mut self, star: StarId, claim: Claim) {
-        let file = self.files.entry(star).or_default();
+    pub fn told(&mut self, subject: impl Into<Subject>, claim: Claim) {
+        let subject = subject.into();
+        let file = self.files.entry(subject).or_default();
         match file.claims.iter_mut().find(|c| c.witness == claim.witness) {
             Some(held) if held.stated_s >= claim.stated_s => {}
             Some(held) => *held = claim,
             None => file.claims.push(claim),
         }
-        self.refresh(star);
+        self.refresh(subject);
     }
 
-    /// File what somebody calls a star. One name per witness: renaming is stating a new one,
-    /// and the later statement is what that witness calls it now.
-    pub fn named(&mut self, star: StarId, naming: Naming) {
-        let file = self.files.entry(star).or_default();
+    /// File where somebody says a body orbits. One statement per witness, the later winning.
+    pub fn orbits(&mut self, subject: impl Into<Subject>, orbit: Orbit) {
+        let file = self.files.entry(subject.into()).or_default();
+        match file.orbits.iter_mut().find(|o| o.witness == orbit.witness) {
+            Some(held) if held.stated_s >= orbit.stated_s => {}
+            Some(held) => *held = orbit,
+            None => file.orbits.push(orbit),
+        }
+    }
+
+    /// File what somebody calls something. One name per witness: renaming is stating a new
+    /// one, and the later statement is what that witness calls it now.
+    pub fn named(&mut self, subject: impl Into<Subject>, naming: Naming) {
+        let subject = subject.into();
+        let file = self.files.entry(subject).or_default();
         match file.names.iter_mut().find(|n| n.witness == naming.witness) {
             Some(held) if held.stated_s > naming.stated_s => {}
+            // A rule's assignment is frozen; only a chosen name replaces it.
+            Some(held) if !held.kind.chosen() && !naming.kind.chosen() && held.witness == naming.witness => {}
             Some(held) => *held = naming,
             None => file.names.push(naming),
         }
-        self.refresh(star);
+        self.refresh(subject);
     }
 
-    /// Give a star this craft's own name for it.
-    pub fn name_it(&mut self, star: StarId, name: impl Into<String>, now_s: f64) {
+    /// Give something this craft's own name for it.
+    pub fn name_it(&mut self, subject: impl Into<Subject>, name: impl Into<String>, now_s: f64) {
         let naming = Naming {
             witness: self.owner,
             name: name.into(),
@@ -555,17 +408,62 @@ impl Knowledge {
             stated_s: now_s,
             lineage: Lineage::new(),
         };
-        self.named(star, naming);
+        self.named(subject, naming);
+    }
+
+    /// Record a planet this craft has found, and letter it.
+    ///
+    /// The orbit is filed as this craft's own statement and the letter as a relative naming,
+    /// placed against the letters this craft already goes by for the same star — see
+    /// [`names::planet_letter`]. A planet already lettered keeps its letter: nothing a rule
+    /// assigned is ever reassigned. Returns the letter.
+    pub fn found_planet(
+        &mut self,
+        star: StarId,
+        body: BodyId,
+        semi_major_au: f64,
+        luminosity_solar: f64,
+        now_s: f64,
+    ) -> String {
+        let subject = Subject::Body { star, body };
+        let owner = self.owner;
+        self.orbits(
+            subject,
+            Orbit { witness: owner, semi_major_au, stated_s: now_s, lineage: Lineage::new() },
+        );
+        if let Some(held) = self.files[&subject]
+            .names
+            .iter()
+            .find(|n| n.witness == owner && n.kind == NameKind::Relative)
+        {
+            return held.name.clone();
+        }
+        let placed: Vec<(String, f64)> = self
+            .members(star)
+            .filter(|(s, _)| *s != subject && matches!(s, Subject::Body { .. }))
+            .filter_map(|(_, file)| {
+                let naming = file.naming(owner).filter(|n| n.kind == NameKind::Relative)?;
+                Some((naming.name.clone(), file.orbit(owner)?.semi_major_au))
+            })
+            .collect();
+        let letter = names::planet_letter(&placed, semi_major_au, luminosity_solar, names::SPACING);
+        self.named(
+            subject,
+            Naming {
+                witness: owner,
+                name: letter.clone(),
+                kind: NameKind::Relative,
+                stated_s: now_s,
+                lineage: Lineage::new(),
+            },
+        );
+        letter
     }
 
     /// File a photometric sample this craft measured itself.
-    pub fn measured(&mut self, star: StarId, witness: Witness, band: Band, sample: Sample) {
-        let file = self.files.entry(star).or_default();
-        match file
-            .series
-            .iter_mut()
-            .find(|s| s.witness == witness && s.band == band)
-        {
+    pub fn measured(&mut self, subject: impl Into<Subject>, witness: Witness, band: Band, sample: Sample) {
+        let file = self.files.entry(subject.into()).or_default();
+        match file.series.iter_mut().find(|s| s.witness == witness && s.band == band) {
             Some(series) => series.push(sample),
             None => {
                 let mut series = Series::new(witness, band);
@@ -575,12 +473,10 @@ impl Knowledge {
         }
     }
 
-    /// Photometry this craft took itself, for one star and band.
-    pub fn own_series(&self, star: StarId, band: Band) -> Option<&Series> {
-        let file = self.files.get(&star)?;
-        file.series
-            .iter()
-            .find(|s| s.witness == self.owner && s.band == band)
+    /// Photometry this craft took itself, for one subject and band.
+    pub fn own_series(&self, subject: impl Into<Subject>, band: Band) -> Option<&Series> {
+        let file = self.files.get(&subject.into())?;
+        file.series.iter().find(|s| s.witness == self.owner && s.band == band)
     }
 
     /// Everything learnt after `since_s`, ready to transmit.
@@ -591,67 +487,28 @@ impl Knowledge {
         self.report_upto(since_s, sent_s, usize::MAX)
     }
 
-    /// The same, as much of it as `limit` stars will carry.
+    /// The same, as much of it as `limit` systems will carry.
     ///
-    /// A surveyed sky does not fit in one transmission and a link has a data rate, so a report
-    /// is a piece of a backlog: oldest first, and the sender resumes from
-    /// [`Report::learnt_through`] next time. Ties at that instant all go in the same report
-    /// rather than being cut in half, because the sender has only one number to resume from
-    /// and anything on the wrong side of it would never be sent at all.
+    /// A surveyed sky does not fit in one transmission, so a report is a piece of a backlog:
+    /// oldest first, and the sender resumes from [`Report::learnt_through`] next time. A system
+    /// is never split — its planets ride with its star — and ties at the cut all go in the same
+    /// report, because the sender has only one number to resume from and anything on the wrong
+    /// side of it would never be sent at all.
     pub fn report_upto(&self, since_s: f64, sent_s: f64, limit: usize) -> Report {
-        let mut entries = Vec::new();
-        for (star, file) in &self.files {
-            let sightings: Vec<Sighting> = file
-                .sightings
-                .iter()
-                .filter(|s| s.learnt_s() > since_s)
-                .cloned()
-                .collect();
-            let series: Vec<Series> = file
-                .series
-                .iter()
-                .filter(|s| {
-                    s.last()
-                        .is_some_and(|x| learnt_s(&s.lineage, x.observed_s) > since_s)
-                })
-                .cloned()
-                .collect();
-            let names: Vec<Naming> = file
-                .names
-                .iter()
-                .filter(|n| learnt_s(&n.lineage, n.stated_s) > since_s)
-                .cloned()
-                .collect();
-            let claims: Vec<Claim> = file
-                .claims
-                .iter()
-                .filter(|c| learnt_s(&c.lineage, c.stated_s) > since_s)
-                .cloned()
-                .collect();
-            if !sightings.is_empty()
-                || !series.is_empty()
-                || !claims.is_empty()
-                || !names.is_empty()
-            {
-                entries.push(Entry {
-                    star: *star,
-                    sightings,
-                    series,
-                    claims,
-                    names,
-                });
+        let mut systems: BTreeMap<Subject, Vec<Part>> = BTreeMap::new();
+        for (subject, file) in &self.files {
+            if let Some(part) = file.since(*subject, since_s) {
+                systems.entry(subject.system()).or_default().push(part);
             }
         }
+        let mut entries: Vec<Entry> =
+            systems.into_iter().map(|(system, parts)| Entry { system, parts }).collect();
         entries.sort_by(|a, b| a.learnt_through().total_cmp(&b.learnt_through()));
         if entries.len() > limit {
             let cut = entries[limit.saturating_sub(1)].learnt_through();
             entries.retain(|e| e.learnt_through() <= cut);
         }
-        Report {
-            from: self.owner,
-            sent_s,
-            entries,
-        }
+        Report { from: self.owner, sent_s, entries }
     }
 
     /// Fold in what somebody else sent, as of the moment its light landed.
@@ -659,35 +516,33 @@ impl Knowledge {
     /// Every item gains a hop, so where it came from survives however far it is passed on, and
     /// something already held by a shorter route is not taken twice.
     pub fn receive(&mut self, report: &Report, received_s: f64) {
-        let hop = Hop {
-            from: report.from,
-            to: self.owner,
-            sent_s: report.sent_s,
-            received_s,
+        let hop = Hop { from: report.from, to: self.owner, sent_s: report.sent_s, received_s };
+        let heard = |lineage: &Lineage| {
+            let mut lineage = lineage.clone();
+            lineage.push(hop);
+            lineage
         };
-        for entry in &report.entries {
-            for sighting in &entry.sightings {
-                let mut sighting = sighting.clone();
-                sighting.lineage.push(hop);
-                self.file_sighting(entry.star, sighting);
+        for part in report.entries.iter().flat_map(|e| e.parts.iter()) {
+            let subject = part.subject;
+            for sighting in &part.sightings {
+                let lineage = heard(&sighting.lineage);
+                self.file_sighting(subject, Sighting { lineage, ..sighting.clone() });
             }
-            for naming in &entry.names {
-                let mut naming = naming.clone();
-                naming.lineage.push(hop);
-                self.named(entry.star, naming);
+            for naming in &part.names {
+                let lineage = heard(&naming.lineage);
+                self.named(subject, Naming { lineage, ..naming.clone() });
             }
-            for claim in &entry.claims {
-                let mut claim = claim.clone();
-                claim.lineage.push(hop);
-                self.told(entry.star, claim);
+            for claim in &part.claims {
+                let lineage = heard(&claim.lineage);
+                self.told(subject, Claim { lineage, ..claim.clone() });
             }
-            for series in &entry.series {
-                let file = self.files.entry(entry.star).or_default();
-                match file
-                    .series
-                    .iter_mut()
-                    .find(|s| s.witness == series.witness && s.band == series.band)
-                {
+            for orbit in &part.orbits {
+                let lineage = heard(&orbit.lineage);
+                self.orbits(subject, Orbit { lineage, ..orbit.clone() });
+            }
+            for series in &part.series {
+                let file = self.files.entry(subject).or_default();
+                match file.series.iter_mut().find(|s| s.witness == series.witness && s.band == series.band) {
                     Some(held) => held.absorb(series),
                     None => {
                         let mut taken = series.clone();
@@ -696,14 +551,14 @@ impl Knowledge {
                     }
                 }
             }
-            self.refresh(entry.star);
+            self.refresh(subject);
         }
     }
 
-    fn file_sighting(&mut self, star: StarId, sighting: Sighting) {
+    fn file_sighting(&mut self, subject: Subject, sighting: Sighting) {
         let witness = sighting.witness;
         let owner = self.owner;
-        let file = self.files.entry(star).or_default();
+        let file = self.files.entry(subject).or_default();
         if file.sightings.iter().any(|s| s.same_as(&sighting)) {
             return;
         }
@@ -721,36 +576,68 @@ impl Knowledge {
         }
         file.sightings.push(sighting);
         file.decimate(witness);
-        self.refresh(star);
+        self.refresh(subject);
     }
 
-    fn refresh(&mut self, star: StarId) {
-        if let Some(belief) = self
-            .files
-            .get(&star)
-            .and_then(|f| f.believe(star, self.owner))
-        {
-            self.beliefs.insert(star, belief);
+    fn refresh(&mut self, subject: Subject) {
+        if let Some(belief) = self.files.get(&subject).and_then(|f| f.believe(subject, self.owner)) {
+            self.beliefs.insert(subject, belief);
         }
     }
 }
 
-/// How many stars one transmission carries.
+/// How many systems one transmission carries.
 ///
-/// A link has a data rate and a surveyed sky has thousands of entries, so a report is a slice
-/// of a backlog rather than a snapshot. Sixty-four stars is a few tens of kilobytes.
+/// A surveyed sky has thousands of entries, so a report is a slice of a backlog rather than a
+/// snapshot. Sixty-four systems is a few tens of kilobytes.
 pub const ENTRIES_PER_REPORT: usize = 64;
 
-/// Everything one report carries about one star.
+/// Everything one report carries about one subject.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Entry {
-    pub star: StarId,
+pub struct Part {
+    pub subject: Subject,
     pub sightings: Vec<Sighting>,
     pub series: Vec<Series>,
     /// Conclusions rather than measurements: see [`Claim`].
     pub claims: Vec<Claim>,
     /// What the sender and whoever told them call it: see [`Naming`].
     pub names: Vec<Naming>,
+    pub orbits: Vec<Orbit>,
+}
+
+impl Part {
+    fn is_empty(&self) -> bool {
+        self.sightings.is_empty()
+            && self.series.is_empty()
+            && self.claims.is_empty()
+            && self.names.is_empty()
+            && self.orbits.is_empty()
+    }
+
+    fn learnt_through(&self) -> f64 {
+        let sightings = self.sightings.iter().map(Sighting::learnt_s);
+        let claims = self.claims.iter().map(|c| learnt_s(&c.lineage, c.stated_s));
+        let names = self.names.iter().map(|n| learnt_s(&n.lineage, n.stated_s));
+        let orbits = self.orbits.iter().map(|o| learnt_s(&o.lineage, o.stated_s));
+        let series =
+            self.series.iter().filter_map(|s| s.last().map(|x| learnt_s(&s.lineage, x.observed_s)));
+        sightings.chain(claims).chain(names).chain(orbits).chain(series).fold(f64::NEG_INFINITY, f64::max)
+    }
+}
+
+/// Everything one report carries about one system: the star and whatever belongs to it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Entry {
+    /// The star, or a craft, that the parts are grouped under.
+    pub system: Subject,
+    pub parts: Vec<Part>,
+}
+
+impl Entry {
+    /// The most recent moment the sender learnt any of this.
+    pub fn learnt_through(&self) -> f64 {
+        self.parts.iter().map(Part::learnt_through).fold(f64::NEG_INFINITY, f64::max)
+    }
 }
 
 /// What one craft sends another. A message like any other: emitted somewhere, arriving later.
@@ -759,24 +646,6 @@ pub struct Report {
     pub from: Witness,
     pub sent_s: f64,
     pub entries: Vec<Entry>,
-}
-
-impl Entry {
-    /// The most recent moment the sender learnt any of this.
-    pub fn learnt_through(&self) -> f64 {
-        let sightings = self.sightings.iter().map(Sighting::learnt_s);
-        let claims = self.claims.iter().map(|c| learnt_s(&c.lineage, c.stated_s));
-        let names = self.names.iter().map(|n| learnt_s(&n.lineage, n.stated_s));
-        let series = self
-            .series
-            .iter()
-            .filter_map(|s| s.last().map(|x| learnt_s(&s.lineage, x.observed_s)));
-        sightings
-            .chain(claims)
-            .chain(names)
-            .chain(series)
-            .fold(f64::NEG_INFINITY, f64::max)
-    }
 }
 
 impl Report {
@@ -789,11 +658,10 @@ impl Report {
         self.entries
             .iter()
             .map(Entry::learnt_through)
-            .fold(None, |best: Option<f64>, t| {
-                Some(best.map_or(t, |b| b.max(t)))
-            })
+            .fold(None, |best: Option<f64>, t| Some(best.map_or(t, |b| b.max(t))))
     }
 
+    /// Systems it carries, which is what a transcript line counts.
     pub fn stars(&self) -> usize {
         self.entries.len()
     }
@@ -1200,6 +1068,130 @@ mod tests {
             "its own photometry follows it"
         );
         assert_eq!(k.belief(star).unwrap().witnesses, 1);
+    }
+
+    fn planet(star: StarId, key: &str) -> (BodyId, Subject) {
+        let body = BodyId::of(star, key);
+        (body, Subject::Body { star, body })
+    }
+
+    /// A planet is named after its star, and the star is whatever *this* craft calls it.
+    #[test]
+    fn a_planet_is_read_after_this_craft_name_for_its_star() {
+        let star = star_id(40);
+        let mut k = Knowledge::new(Witness(1));
+        k.name_it(star, "Kettle", 0.0);
+        let (body, subject) = planet(star, "one");
+        assert_eq!(k.found_planet(star, body, 0.7, 1.0, 1.0), "b");
+        assert_eq!(k.name_of(subject).as_deref(), Some("Kettle b"));
+
+        k.name_it(star, "The Kettle", 2.0);
+        assert_eq!(k.name_of(subject).as_deref(), Some("The Kettle b"), "it follows the star");
+
+        k.name_it(subject, "Spout", 3.0);
+        assert_eq!(k.name_of(subject).as_deref(), Some("Spout"), "until somebody names it");
+    }
+
+    /// A letter is frozen: a better orbit later does not move it.
+    #[test]
+    fn a_letter_once_assigned_is_never_reassigned() {
+        let star = star_id(41);
+        let mut k = Knowledge::new(Witness(1));
+        let (body, subject) = planet(star, "one");
+        assert_eq!(k.found_planet(star, body, 0.7, 1.0, 0.0), "b");
+        assert_eq!(k.found_planet(star, body, 4.3, 1.0, 5.0), "b");
+        assert_eq!(k.file(subject).unwrap().orbits()[0].semi_major_au, 4.3, "the orbit is updated");
+    }
+
+    #[test]
+    fn letters_this_craft_already_uses_leave_room_for_the_next() {
+        let star = star_id(42);
+        let mut k = Knowledge::new(Witness(1));
+        let (outer, _) = planet(star, "outer");
+        let (inner, _) = planet(star, "inner");
+        let (between, _) = planet(star, "between");
+        assert_eq!(k.found_planet(star, outer, 1.28, 1.0, 0.0), "c");
+        assert_eq!(k.found_planet(star, inner, 0.7, 1.0, 1.0), "b");
+        assert_eq!(k.found_planet(star, between, 0.9, 1.0, 2.0), "bb", "no single letter left");
+    }
+
+    /// Everything about a system rides with its star: one entry, however many planets.
+    #[test]
+    fn a_report_carries_a_system_as_one_entry() {
+        let star = star_id(43);
+        let mut probe = Knowledge::new(Witness(2));
+        probe.sighted(star, sighting(2, DVec3::ZERO, DVec3::X, 0.0));
+        probe.name_it(star, "Kettle", 1.0);
+        for (key, a) in [("one", 0.7), ("two", 1.28), ("three", 2.35)] {
+            let (body, _) = planet(star, key);
+            probe.found_planet(star, body, a, 1.0, 2.0);
+        }
+        let report = probe.report(f64::NEG_INFINITY, 3.0);
+        assert_eq!(report.stars(), 1, "one system, not four entries");
+        assert_eq!(report.entries[0].parts.len(), 4, "the star and its three planets");
+
+        // Capped by systems: a second star's system does not split the first.
+        let other = star_id(44);
+        probe.sighted(other, sighting(2, DVec3::ZERO, DVec3::Y, 10.0));
+        let first = probe.report_upto(f64::NEG_INFINITY, 11.0, 1);
+        assert_eq!(first.stars(), 1);
+        assert_eq!(first.entries[0].parts.len(), 4);
+    }
+
+    /// The whole of 11a: a receiver sees another craft's planets named after its own name for
+    /// the star, and renaming the star renames them.
+    #[test]
+    fn a_receiver_reads_somebody_else_planets_after_its_own_star_name() {
+        let star = star_id(45);
+        let mut probe = Knowledge::new(Witness(2));
+        probe.sighted(star, sighting(2, DVec3::ZERO, DVec3::X, 0.0));
+        probe.name_it(star, "Kettle", 1.0);
+        let (body, subject) = planet(star, "one");
+        probe.found_planet(star, body, 1.28, 1.0, 2.0);
+        assert_eq!(probe.name_of(subject).as_deref(), Some("Kettle c"));
+
+        let mut ship = Knowledge::new(Witness(1));
+        ship.sighted(star, sighting(1, DVec3::Y * 0.1, DVec3::X, 0.5));
+        ship.name_it(star, "Hearthlight", 0.6);
+        ship.receive(&probe.report(f64::NEG_INFINITY, 3.0), 10.0);
+
+        assert_eq!(ship.name_of(star).as_deref(), Some("Hearthlight"), "ours, not theirs");
+        assert_eq!(ship.name_of(subject).as_deref(), Some("Hearthlight c"));
+        let orbit = &ship.file(subject).unwrap().orbits()[0];
+        assert_eq!(orbit.witness, Witness(2), "the orbit is still the probe's statement");
+        assert_eq!(orbit.lineage.len(), 1);
+
+        ship.name_it(star, "Home", 11.0);
+        assert_eq!(ship.name_of(subject).as_deref(), Some("Home c"));
+
+        // And its own later find is lettered around the letter it was told.
+        let (inner, inner_subject) = planet(star, "inner");
+        assert_eq!(ship.found_planet(star, inner, 0.7, 1.0, 12.0), "b");
+        assert_eq!(ship.name_of(inner_subject).as_deref(), Some("Home b"));
+    }
+
+    #[test]
+    fn a_planet_nobody_named_the_star_of_still_has_a_name() {
+        let star = star_id(46);
+        let mut k = Knowledge::new(Witness(1));
+        let (body, subject) = planet(star, "one");
+        k.found_planet(star, body, 0.7, 1.0, 0.0);
+        assert_eq!(k.name_of(subject).as_deref(), Some("? b"), "its star is not written down");
+        k.sighted(star, sighting(1, DVec3::ZERO, DVec3::X, 1.0));
+        let designation = designation(DVec3::X);
+        assert_eq!(k.name_of(subject), Some(format!("{designation} b")));
+    }
+
+    #[test]
+    fn stars_are_what_a_map_draws_and_members_are_what_belongs_to_them() {
+        let star = star_id(47);
+        let mut k = Knowledge::new(Witness(1));
+        k.sighted(star, sighting(1, DVec3::ZERO, DVec3::X, 0.0));
+        let (body, subject) = planet(star, "one");
+        k.found_planet(star, body, 0.7, 1.0, 1.0);
+        assert_eq!(k.len(), 2, "the star and its planet");
+        assert_eq!(k.stars().count(), 1);
+        assert_eq!(k.members(star).map(|(s, _)| s).collect::<Vec<_>>(), vec![subject]);
     }
 
     #[test]

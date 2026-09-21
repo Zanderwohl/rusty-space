@@ -140,7 +140,9 @@ pub struct Reported {
     #[serde(default)]
     pub idem: MessageKey,
     pub sealed: bool,
-    /// The serialized report. `None` when this receiver may not read it.
+    /// The serialized report, as `lc_world::knowledge::Report` writes it. Its shape is part of
+    /// this protocol even though it travels as a string: a change to it is a version bump.
+    /// `None` when this receiver may not read it.
     pub body: Option<String>,
 }
 

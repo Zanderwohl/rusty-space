@@ -342,9 +342,18 @@ expected to have, and leaves gaps for the members it has not found:
    expected, and nobody has to fill them.
 4. **Too few is resolved by a second letter.** A planet whose nearest slot is taken is placed
    between that slot's holder and its neighbour on the side it falls, with a letter appended:
-   between `b` and `c` go `ba`, `bb`, …, in order outward, and the rule recurses if it has to.
-   Alphabetical order is orbital order at every depth.
+   between `b` and `c` go `bb`, `bc`, …, in order outward, and the rule recurses if it has to
+   — between `b` and `bb` is `bab`. Alphabetical order is orbital order at every depth.
 5. **Inside `b`** is `ab`, `ac`, …, the same rule with `a` as the letter before `b`.
+
+A second letter starts at `b`, never `a`, for the same reason the first one does: `a` is kept
+free at every depth to mean "inside the first", the way it means the star at the top. Without
+it, nothing could ever be inserted between `b` and `ba`.
+
+The spacing lives in `lc_world::knowledge::names::SPACING`, a table by luminosity. Its one row
+today is measured from the generator — innermost orbit `0.70 sqrt(L)` AU, neighbours `1.83`
+apart — and lettering eight thousand generated planets in random discovery order needs a second
+letter for about one in fifteen.
 
 A little silly, and real catalogues have been sillier. What matters is that the rule is
 deterministic given what the assigning craft knew, so two craft with the same data agree, and

@@ -320,8 +320,8 @@ fn push_local_system(build: &mut Build, session: &Session) {
 /// sky view is where it is visible, and the telescope is what fixes it.
 fn push_stars(build: &mut Build, session: &Session, eye_ly: DVec3) {
     let here = session.system.as_ref().map(|s| s.star);
-    for belief in session.knowledge.beliefs() {
-        if Some(belief.star) == here {
+    for (id, belief) in session.knowledge.stars() {
+        if Some(id) == here {
             continue;
         }
         let Some(position_ly) = belief.distance.position_ly() else {
@@ -330,8 +330,8 @@ fn push_stars(build: &mut Build, session: &Session, eye_ly: DVec3) {
         if position_ly.distance(eye_ly) > REACH_LY {
             continue;
         }
-        let star = session.star(belief.star);
-        let name = session.name_of(belief.star);
+        let star = session.star(id);
+        let name = session.name_of(id);
         // Radius and mass are not observed quantities here; they come from the same catalogue
         // the truth does, and are what the mark is *sized* by rather than what it claims.
         let (radius_m, mass_solar) = star
@@ -339,7 +339,7 @@ fn push_stars(build: &mut Build, session: &Session, eye_ly: DVec3) {
             .unwrap_or((6.957e8, 1.0));
         build.push(
             MapItem::body(
-                ItemKey::from_id("star", belief.star.get()),
+                ItemKey::from_id("star", id.get()),
                 name.clone(),
                 ItemKind::Star,
                 position_ly,
@@ -347,7 +347,7 @@ fn push_stars(build: &mut Build, session: &Session, eye_ly: DVec3) {
                 DVec3::Z,
             )
             .weighing(mass_solar * SOLAR_MASS_KG),
-            Some(Subject::Star(belief.star, name)),
+            Some(Subject::Star(id, name)),
         );
     }
 }

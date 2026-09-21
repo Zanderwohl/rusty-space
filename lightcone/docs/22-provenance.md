@@ -288,7 +288,10 @@ In `lc-world::knowledge`, engine-free and tested:
 
 | module | holds |
 |---|---|
-| `knowledge` | `Witness`, `Hop`, `Sighting`, `Sample`, `Series`, `Claim`, `Naming`, `Belief`, `Knowledge`, `Report` |
+| `knowledge` | `File`, `Belief`, `Knowledge`, and `Report` with its `Entry` per system and `Part` per subject |
+| `knowledge::record` | `Witness`, `Hop`, `Sighting`, `Sample`, `Series`, `Claim`, `Naming`, `Orbit` |
+| `knowledge::subject` | `Subject` — star, body, population, craft — and `BodyId` |
+| `knowledge::names` | designations, discovery designations, and planet letters against the `SPACING` table |
 | `knowledge::astrometry` | bearings, centroid precision, the triangulation, `Distance` |
 | `knowledge::survey` | `Optics`, detection and glare, the `Sweep` and its field order, `Duty` |
 
