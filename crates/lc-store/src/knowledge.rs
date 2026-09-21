@@ -29,6 +29,16 @@ pub struct LogRow {
     pub sigma: f64,
 }
 
+/// Samples of one series read and thrown away: everything observed at or before `through_s`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Discarded {
+    pub ship_id: i64,
+    pub subject: Vec<u8>,
+    pub witness: i64,
+    pub band: i16,
+    pub through_s: f64,
+}
+
 /// Write files, replacing whatever each craft had for each subject. One statement whatever the
 /// count.
 pub async fn save_files(client: &Client, files: &[Filed]) -> Result<u64, Error> {
@@ -97,6 +107,28 @@ pub async fn save_samples(client: &Client, rows: &[LogRow]) -> Result<u64, Error
                                   $5::float8[], $6::bigint[], $7::float8[], $8::float8[])
              ON CONFLICT DO NOTHING",
             &[&ships, &subjects, &witnesses, &bands, &observed, &learnt, &deficits, &sigmas],
+        )
+        .await
+}
+
+/// Delete samples that have been read into conclusions. One statement whatever the count.
+pub async fn delete_samples(client: &Client, discarded: &[Discarded]) -> Result<u64, Error> {
+    if discarded.is_empty() {
+        return Ok(0);
+    }
+    let ships: Vec<i64> = discarded.iter().map(|d| d.ship_id).collect();
+    let subjects: Vec<Vec<u8>> = discarded.iter().map(|d| d.subject.clone()).collect();
+    let witnesses: Vec<i64> = discarded.iter().map(|d| d.witness).collect();
+    let bands: Vec<i16> = discarded.iter().map(|d| d.band).collect();
+    let through: Vec<f64> = discarded.iter().map(|d| d.through_s).collect();
+    client
+        .execute(
+            "DELETE FROM lc_samples s
+             USING unnest($1::bigint[], $2::bytea[], $3::bigint[], $4::smallint[], $5::float8[])
+                 AS d(ship_id, subject, witness, band, through_s)
+             WHERE s.ship_id = d.ship_id AND s.subject = d.subject AND s.witness = d.witness
+               AND s.band = d.band AND s.observed_s <= d.through_s",
+            &[&ships, &subjects, &witnesses, &bands, &through],
         )
         .await
 }
@@ -187,6 +219,13 @@ mod tests {
             load_samples(&client).await.unwrap().into_iter().filter(|r| r.ship_id == band).collect();
         assert_eq!(read, vec![row(10.0, 0.1), row(20.000_000_1, -1.8149592025296526e-22)]);
         assert_eq!(read[0].witness as u64, u64::MAX);
+
+        // Read into a conclusion: the first goes, the later one stays.
+        let discarded = Discarded { ship_id: band, subject: b"star".to_vec(), witness: u64::MAX as i64, band: 1, through_s: 10.0 };
+        assert_eq!(delete_samples(&client, &[discarded]).await.unwrap(), 1);
+        let left: Vec<LogRow> =
+            load_samples(&client).await.unwrap().into_iter().filter(|r| r.ship_id == band).collect();
+        assert_eq!(left, vec![row(20.000_000_1, -1.8149592025296526e-22)]);
     }
 
     #[tokio::test]
@@ -194,5 +233,6 @@ mod tests {
         let Some(client) = store().await else { return };
         assert_eq!(save_files(&client, &[]).await.unwrap(), 0);
         assert_eq!(save_samples(&client, &[]).await.unwrap(), 0);
+        assert_eq!(delete_samples(&client, &[]).await.unwrap(), 0);
     }
 }

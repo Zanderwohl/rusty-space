@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 30;
+pub const PROTOCOL_VERSION: u32 = 31;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -374,6 +374,9 @@ pub enum Order {
     SetDuty { duty: Duty, integration_s: f64 },
     /// Call something by a name of this craft's own. Appended last.
     NameIt { subject: Subject, name: String },
+    /// Keep a subject's raw logs whatever the shard concludes from them, or stop keeping them.
+    /// Appended last.
+    RetainRaw { subject: Subject, keep: bool },
 }
 
 /// A client's request. Never authoritative about anything.

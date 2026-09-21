@@ -307,6 +307,7 @@ async fn checkpoint(
     let remembered = server.take_knowledge();
     lc_store::knowledge::save_files(client, &remembered.files).await?;
     lc_store::knowledge::save_samples(client, &remembered.samples).await?;
+    lc_store::knowledge::delete_samples(client, &remembered.discarded).await?;
     lc_store::ships::save_shard(client, shard_id, lc_store::ships::Shard {
         now_t: taken.now_t,
         next_ship: taken.next_ship,

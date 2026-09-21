@@ -692,6 +692,10 @@ fn fold(
                 }
                 // What it did arrives in the next `Learnt`, with everything else it knows.
                 Order::NameIt { .. } => None,
+                Order::RetainRaw { subject, keep } => {
+                    game.0.knowledge.retain_raw(lc_world::knowledge::Subject::from(*subject), *keep);
+                    None
+                }
                 Order::SetCourse { course, accel_g, max_beta } => {
                     let course: lc_world::navigation::Course = course.clone().into();
                     match game.0.set_course_at(at_s, &course, *accel_g, *max_beta) {

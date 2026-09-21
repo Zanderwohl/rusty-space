@@ -12,6 +12,7 @@ use lc_proto::{Order, Outbound, Refusal, ShipId};
 use lc_world::craft::CraftId;
 use lc_world::knowledge::observatory::{self, CHARTED_LY, Observatory, Sky, Station};
 use lc_world::knowledge::survey::Duty;
+use lc_world::knowledge::transit::Prior;
 use lc_world::knowledge::{ENTRIES_PER_REPORT, Knowledge, Report, Reporting, Subject, Witness};
 use lc_world::motion::LIGHT_US_PER_LY;
 
@@ -24,6 +25,10 @@ use crate::world::{Event, Scheduled};
 /// thoroughly surveyed sky is thousands, so it arrives over a few ticks rather than as one
 /// message the size of the catalogue.
 const PAGE: usize = 256;
+
+/// Logs read per tick across the whole shard. Reading one is a search over thousands of
+/// periods, so the shard takes them in turn rather than all at once.
+const READS_PER_TICK: usize = 1;
 
 /// What one craft holds and is doing with its instruments.
 #[derive(Clone, Debug)]
@@ -49,12 +54,18 @@ pub(crate) struct Instruments {
     /// Built from the world's stars the first time anything looks at them, and shared by every
     /// craft: a star's output and its emission model do not depend on who is looking.
     sky: Option<Sky>,
+    /// What the generator's planets look like across the world's stars, which is what a log is
+    /// read against. Measured once, like the sky.
+    prior: Option<Prior>,
+    /// The craft whose log was read last, so the next read goes to the one after it.
+    reader: Option<CraftId>,
     landings: Vec<Landing>,
 }
 
 impl Instruments {
     pub(crate) fn forget_sky(&mut self) {
         self.sky = None;
+        self.prior = None;
     }
 }
 
@@ -112,6 +123,29 @@ impl<J: Journal> Server<J> {
             let sky = instruments.sky.get_or_insert_with(|| Sky::new(stars));
             let Some(aboard) = instruments.aboard.get_mut(&id) else { continue };
             aboard.observatory.tick(sky, &mut aboard.knowledge, at, now_s);
+        }
+        self.read_logs(now_s);
+    }
+
+    /// Read the logs that are due, a few a tick, taking the craft in turn.
+    fn read_logs(&mut self, now_s: f64) {
+        let mut ids: Vec<CraftId> = self.instruments.aboard.keys().copied().collect();
+        ids.sort_unstable_by_key(|id| id.0);
+        let after = self.instruments.reader.map_or(0, |r| ids.partition_point(|id| id.0 <= r.0));
+        ids.rotate_left(after);
+        let mut reads = 0;
+        for id in ids {
+            if reads == READS_PER_TICK {
+                break;
+            }
+            let Some(&(subject, observer)) = self.instruments.aboard[&id].knowledge.due().first() else { continue };
+            let stars = self.world.stars();
+            let instruments = &mut self.instruments;
+            let prior = instruments.prior.get_or_insert_with(|| Prior::measure(stars.iter()));
+            let Some(aboard) = instruments.aboard.get_mut(&id) else { continue };
+            aboard.knowledge.read_log(subject, observer, prior, now_s);
+            instruments.reader = Some(id);
+            reads += 1;
         }
     }
 
@@ -213,6 +247,14 @@ impl<J: Journal> Server<J> {
                 }
                 knowledge.name_it(subject, name, at_s);
                 Ok(Order::NameIt { subject: subject.into(), name: name.to_string() })
+            }
+            Order::RetainRaw { subject, keep } => {
+                let knowledge = &mut self.aboard(id).knowledge;
+                if !knowledge.knows(Subject::from(*subject)) {
+                    return Err(Refusal::Impossible);
+                }
+                knowledge.retain_raw(Subject::from(*subject), *keep);
+                Ok(order.clone())
             }
             _ => Err(Refusal::Impossible),
         }

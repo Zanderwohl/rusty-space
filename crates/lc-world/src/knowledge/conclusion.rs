@@ -21,10 +21,19 @@ pub const TRANSITS_TO_SETTLE: u32 = 3;
 /// How strongly a log has to argue against a planet before "nothing there" is settled: the data
 /// disfavouring one twentyfold, not merely a small prior. Without this a short log would
 /// settle as quiet on the prior alone.
+///
+/// And quiet also waits until the log is long enough that planets at periods it could not yet
+/// search are unlikely too: thrown away sooner, a log could never find a planet wider than
+/// itself.
 pub const QUIET_LN_BAYES: f64 = -3.0;
 
-/// Samples a log gains before it is read again.
+/// Samples a log gains before it is read again, at least.
 pub const READ_EVERY: usize = 96;
+
+/// And at least this fraction of what it held when last read. Reading costs as the log's length
+/// times its span, so reading at fixed intervals would cost as the square of a long watch; at
+/// geometric ones all the reads together cost a few times the last.
+pub const READ_GROWTH: f64 = 0.5;
 
 /// Folds kept for a settled planet: its period and two either side at the period's error, so
 /// later samples can still move the period.
@@ -248,7 +257,8 @@ impl Knowledge {
                     .find(|c| c.witness == self.owner && c.observer == observer)
                     .map_or(0, |c| c.evidence.samples as usize);
                 let digested = file.digests.iter().find(|d| d.observer == observer).map_or(0, |d| d.samples as usize);
-                if held + digested >= read + READ_EVERY {
+                let next = (read + READ_EVERY).max((read as f64 * (1.0 + READ_GROWTH)) as usize);
+                if held + digested >= next {
                     out.push((*subject, observer));
                 }
             }
@@ -331,7 +341,12 @@ impl Knowledge {
 
         let settled = match conclusion.leading().map(|h| (h.probability, h.kind)) {
             Some((p, Kind::Planet { transit, .. })) => p >= SETTLED && transit.transits >= TRANSITS_TO_SETTLE,
-            Some((p, Kind::Quiet)) => p >= SETTLED && ln_bayes <= QUIET_LN_BAYES,
+            Some((p, Kind::Quiet)) => {
+                p >= SETTLED
+                    && ln_bayes.is_finite()
+                    && ln_bayes <= QUIET_LN_BAYES
+                    && prior.planet_prior((periods.1, f64::MAX)) < 1.0 - SETTLED
+            }
             None => false,
         };
         let retained = self.files[&subject].retained;

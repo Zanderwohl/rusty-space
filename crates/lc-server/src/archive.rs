@@ -11,9 +11,9 @@
 use std::collections::HashMap;
 
 use em_spectra::Band;
-use lc_store::knowledge::{Filed, LogRow};
+use lc_store::knowledge::{Discarded, Filed, LogRow};
 use lc_world::craft::CraftId;
-use lc_world::knowledge::{File, Knowledge, Logged, Sample, Subject, Witness};
+use lc_world::knowledge::{Consumed, File, Knowledge, Logged, Sample, Subject, Witness};
 
 use crate::instruments::witness;
 use crate::journal::Journal;
@@ -23,7 +23,7 @@ use crate::server::Server;
 /// positional and cannot notice an older shape, so a file in any other format is refused.
 ///
 /// **Bump it when [`File`], or anything inside it, changes shape.**
-pub const KNOWLEDGE_FORMAT: i32 = 1;
+pub const KNOWLEDGE_FORMAT: i32 = 2;
 
 /// One craft's files and log, read back.
 type Written = (Vec<(Subject, File)>, Vec<Logged>);
@@ -33,6 +33,9 @@ type Written = (Vec<(Subject, File)>, Vec<Logged>);
 pub struct Remembered {
     pub files: Vec<Filed>,
     pub samples: Vec<LogRow>,
+    /// Samples read and thrown away, to delete. After `samples`: a sample taken and consumed
+    /// between two checkpoints is in neither.
+    pub discarded: Vec<Discarded>,
 }
 
 pub fn file_row(ship: CraftId, subject: Subject, file: &File, saved_t: i64) -> Filed {
@@ -42,6 +45,16 @@ pub fn file_row(ship: CraftId, subject: Subject, file: &File, saved_t: i64) -> F
         format: KNOWLEDGE_FORMAT,
         file: lc_proto::encode(file),
         saved_t,
+    }
+}
+
+pub fn discarded_row(ship: CraftId, consumed: &Consumed) -> Discarded {
+    Discarded {
+        ship_id: ship.0,
+        subject: lc_proto::encode(&consumed.subject),
+        witness: consumed.witness.0 as i64,
+        band: consumed.band.index() as i16,
+        through_s: consumed.through_s,
     }
 }
 
@@ -100,6 +113,8 @@ impl<J: Journal> Server<J> {
             let (files, logs) = aboard.knowledge.take_changes();
             remembered.files.extend(files.iter().map(|(subject, file)| file_row(*id, *subject, file, saved_t)));
             remembered.samples.extend(logs.iter().map(|logged| log_row(*id, logged)));
+            let consumed = aboard.knowledge.take_consumed();
+            remembered.discarded.extend(consumed.iter().map(|c| discarded_row(*id, c)));
         }
         remembered
     }
@@ -252,6 +267,93 @@ mod tests {
         }
         let next = server.take_knowledge();
         assert!(next.files.len() < first.files.len(), "{} files, then {}", first.files.len(), next.files.len());
+    }
+
+    /// A red dwarf five light-years along X whose innermost generated planet goes round in
+    /// under five days, and the periods of all its planets. They orbit in the ecliptic, so from
+    /// the origin they transit.
+    fn red_dwarf() -> (CatalogueStar, Vec<f64>) {
+        let template = AuthoredStars::sample().stars()[0].clone();
+        let luminosity: f64 = 0.01;
+        let teff = 5772.0 * luminosity.powf(0.13);
+        let mass = em_spectra::stellar::main_sequence_mass_solar(luminosity);
+        (100_000..)
+            .find_map(|key| {
+                let mut star = template.clone();
+                star.id = StarId::synthesise("archive-planet", key);
+                star.position_ly = DVec3::X * 5.0;
+                star.luminosity_solar = luminosity;
+                star.mass_solar = mass;
+                star.metallicity = 0.0;
+                star.star.teff_k = teff;
+                star.star.radius_m = em_spectra::stellar::radius_from_luminosity(
+                    luminosity * em_spectra::stellar::SOLAR_LUMINOSITY,
+                    teff,
+                );
+                star.star.mu = em_spectra::stellar::mu_from_mass_solar(mass);
+                let periods: Vec<f64> = lc_world::sky::generate::ladder(star.seed(), luminosity, 0.0)
+                    .iter()
+                    .map(|r| std::f64::consts::TAU * (r.semi_major_m.powi(3) / star.star.mu).sqrt())
+                    .collect();
+                (*periods.first()? < 5.0 * 86_400.0).then_some((star, periods))
+            })
+            .unwrap()
+    }
+
+    /// The whole of 11d, on the shard. A craft left staring at a star the generator gave a close
+    /// planet comes to believe in the planet, with its period, and the samples that told it are
+    /// gone — from what the craft holds and from the store.
+    #[tokio::test]
+    async fn a_watched_planet_is_concluded_and_its_samples_deleted() {
+        use lc_world::knowledge::conclusion::{Kind, SETTLED};
+
+        let (target, periods) = red_dwarf();
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.load_world(World::new(vec![target.clone()]));
+        let mut wire = Loopback::new();
+        server.admit(ClientId(1), crate::world::still(SHIP, DVec3::ZERO), 0.0);
+        let stare = Order::SetDuty { duty: lc_proto::Duty::Stare { star: target.id.get() }, integration_s: 1800.0 };
+        wire.client_says(ClientId(1), Inbound::Act(Intent { ship_id: SHIP, order: stare, issued_at_client_t: i64::MAX }));
+
+        let mut written = Remembered::default();
+        let ticks = 60 * 86_400 * 1_000_000 / crate::server::TICK_US;
+        for n in 0..ticks {
+            server.tick(&mut wire).await.unwrap();
+            if n % 500 == 0 {
+                wire.take(ClientId(1));
+                let taken = server.take_knowledge();
+                written.samples.extend(taken.samples);
+                written.discarded.extend(taken.discarded);
+            }
+        }
+        let taken = server.take_knowledge();
+        written.samples.extend(taken.samples);
+        written.discarded.extend(taken.discarded);
+
+        let knowledge = server.knowledge_of(SHIP).unwrap();
+        let conclusion = knowledge.conclusion(target.id).expect("the log was read");
+        let leading = conclusion.leading().unwrap();
+        let Kind::Planet { transit, .. } = leading.kind else { panic!("{:?}", conclusion.hypotheses) };
+        assert!(leading.probability > SETTLED, "{:?}", conclusion.hypotheses);
+        let off = periods.iter().map(|p| (transit.period_s - p).abs()).fold(f64::INFINITY, f64::min);
+        assert!(off < 3.0 * transit.period_sigma_s, "{} against {periods:?}", transit.period_s);
+
+        // What the store is left holding, once it has deleted what it was told to, is exactly
+        // what the craft still holds.
+        assert!(!written.discarded.is_empty(), "the store is told to delete what was consumed");
+        let left = written
+            .samples
+            .iter()
+            .filter(|row| {
+                !written.discarded.iter().any(|d| {
+                    (d.ship_id, &d.subject, d.witness, d.band) == (row.ship_id, &row.subject, row.witness, row.band)
+                        && row.observed_s <= d.through_s
+                })
+            })
+            .count();
+        let held: usize = knowledge.file(target.id).unwrap().series().iter().map(|s| s.len()).sum();
+        assert_eq!(left, held);
+        assert!(held < written.samples.len() / 2, "most of the log is gone: {held} of {}", written.samples.len());
     }
 
     #[test]
