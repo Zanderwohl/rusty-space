@@ -272,7 +272,8 @@ mark only moves when the shard says the transmission happened, so a refused repo
 is still owed. A craft with nothing new to say sends nothing, which is the correct amount of
 radio traffic for having learnt nothing.
 
-**Nothing is filed as a conversation.** A transcript is read long after everything in it has
+**The report itself is not filed as a conversation** — though the transcript gets a one-line
+summary of it; see [23-factions.md](23-factions.md#transcripts). A transcript is read long after everything in it has
 arrived; a report is folded the moment it lands and its content lives in the receiver's
 knowledge from then on. Putting surveys in `lc_messages` would hand every sign-in a backlog of
 megabytes of somebody else's astrometry. The cost of that decision is honest and worth naming:
@@ -299,24 +300,16 @@ server can recompute exactly what an instrument saw, which is what
 
 ## What is not, and in what order
 
-1. **Automatic forwarding.** A craft reports when a player presses the button. A faction's
-   relays should report on their own — on a schedule, or when they have learnt enough to be
-   worth the power — and the machinery is all here: the merge is idempotent, the lineage
-   accumulates, and a relay's report of somebody else's records is just its own backlog. What
-   is missing is the policy and the faction to hang it on.
-2. **Persistence.** A `Knowledge` lives in the client session and dies with it.
-   [03-world-model.md](03-world-model.md) already says where it belongs: per observer, in
-   Postgres, as a fold over received events.
-3. **Server authority.** Detection is computed client-side from the catalogue it holds. The
-   deterministic seed makes a claim checkable, and nothing checks one yet.
-4. **Navigation on beliefs.** A crossing still aims at the catalogue position. It ought to aim
-   at the believed one and arrive off by the error on it — which for a charted star is far wider
-   than the shell it is aiming into, so the crossing has to refine the fix as its own baseline
-   opens. That is a mechanic of its own: the approach where you find out the star is not quite
-   where you thought.
-5. **Instruments that are not the ship.** `Optics::joined` models a swarm acting as one and
-   nothing builds one. Telescopes as structures, with their own worldlines and their own
-   witness ids, are what turn every number here into something to spend resources on.
-6. **Bodies, swarms and craft as subjects.** Knowledge is per star today. A planet detected in
-   a light curve, a swarm inferred from a spectral knee, and a ship seen once and lost are all
-   the same shape of record and none of them have one.
+Most of what was on this list is now planned in detail as phase 11 of
+[12-buildout.md](12-buildout.md): subjects beyond stars, instruments and knowledge on the server,
+persistence, conclusions from logs ([24-standing-instruments.md](24-standing-instruments.md)),
+factions and relays ([23-factions.md](23-factions.md)). Two items are not part of it:
+
+1. **Navigation on beliefs.** Deferred by decision. A crossing still aims at the catalogue
+   position. It ought to aim at the believed one and arrive off by the error on it — which for a
+   charted star is far wider than the shell it is aiming into, so the crossing has to refine the
+   fix as its own baseline opens. That is a mechanic of its own: the approach where you find out
+   the star is not quite where you thought.
+2. **Instruments that are not the ship.** `Optics::joined` models a swarm acting as one and
+   nothing builds one. Telescopes as structures, with their own worldlines and their own witness
+   ids, are what turn every number here into something to spend resources on.

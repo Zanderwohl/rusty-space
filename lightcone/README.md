@@ -51,6 +51,8 @@ cross-reference except where a shared crate is the subject.
 | [20-solar-power.md](docs/20-solar-power.md) | hulls collect starlight: the shadow-area integral, the anchor, and segments of constant income |
 | [21-library.md](docs/21-library.md) | the shelf of public-domain books, and the ereader window that costs the player nothing |
 | [22-provenance.md](docs/22-provenance.md) | what a craft knows and how it came to know it: records, lineage, parallax, and the blind spots in a sky |
+| [23-factions.md](docs/23-factions.md) | factions as keys rather than lists, rotation and traitors, relays over a network that moves, and what anything is called |
+| [24-standing-instruments.md](docs/24-standing-instruments.md) | instruments that run while nobody is watching, what a craft's knowledge is stored as, and logs consumed into conclusions |
 
 ## Status
 

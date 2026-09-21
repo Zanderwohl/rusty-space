@@ -1,6 +1,6 @@
 # Buildout plan
 
-Ten phases. The organizing constraint is not effort but **context**: this project is larger
+Eleven phases. The organizing constraint is not effort but **context**: this project is larger
 than any one working session can hold, so each phase is written to be started cold.
 
 Every phase states what must already exist, what it delivers, how you know it is done, what it
@@ -291,6 +291,139 @@ added to it.
 
 ---
 
+## Phase 11 — What a craft knows
+
+Knowledge, factions and relays. Seven steps, in this order because each changes something the
+next one stores or sends:
+
+```
+  11a subjects ─> 11b server instruments ─> 11c persistence ─┬─> 11d conclusions
+                                                             └─> 11e factions ─> 11f relays
+                                           11g naming and notes from the map (after 11a; best after 11e)
+```
+
+The reporting, naming and survey machinery these build on already exists and is described in
+[22-provenance.md](22-provenance.md).
+
+### 11a — Subjects
+
+**Before:** `lc_world::knowledge`, keyed by `StarId`.
+
+**Deliver:** a `Subject` key — star, planet, small body, population, craft — and knowledge keyed
+by it. Assigned names as **rules** evaluated against the craft's own namings, so "Kettle b"
+follows the star when the star is renamed. Report entries carry a star's bodies with it.
+
+**Done when:** a report about a star carries its planets' namings and notes in the same entry, a
+receiver sees the planets named after *its* name for the star, and renaming the star renames
+them.
+
+**Do not:** move anything to the server, or persist. This is a change of key, and it goes first
+because every later step stores or sends it.
+
+**Read:** [22-provenance.md](22-provenance.md), and "What things are called" in
+[23-factions.md](23-factions.md).
+
+### 11b — Instruments on the server
+
+**Before:** 11a.
+
+**Deliver:** `Order::SetDuty`; duties advanced by the server for every craft each tick; each
+craft's `Knowledge` held by the server; the client's knowledge a replica fed by a report from
+itself. Naming, notes and reporting become orders. Reports are sent and folded by the server.
+
+**Done when:** a craft set to sweep, whose client then disconnects for an in-game month,
+reconnects to find the month's detections — and a report sent to it while it was away has been
+folded in.
+
+**Do not:** persist across a shard restart. That is 11c, and keeping it separate means this step
+is testable against `journal::Memory` alone.
+
+**Read:** [24-standing-instruments.md](24-standing-instruments.md), and `lc-server`'s `radio.rs`
+for how an order becomes an event.
+
+### 11c — Persistence
+
+**Before:** 11b.
+
+**Deliver:** a row per `(craft, subject)` holding the file as a versioned blob; an append-only,
+time-partitioned table of photometric samples; duties and reporting marks in the ship
+checkpoint. Everything restored on shard start.
+
+**Done when:** a shard restarted mid-sweep resumes the sweep, and a craft's map after the restart
+is the map it had before.
+
+**Do not:** consume logs. Samples accumulate until 11d.
+
+**Read:** [24-standing-instruments.md](24-standing-instruments.md), [02-event-store.md](02-event-store.md)
+for how `lc-store` applies and tests its schema.
+
+### 11d — Conclusions
+
+**Before:** 11c.
+
+**Deliver:** a processing pass that turns a subject's log into conclusions — hypotheses with
+probabilities, parameters and evidence — and keeps sufficient statistics while deleting the
+samples consumed. A per-subject "retain raw" flag. Conclusions travel in reports.
+
+**Done when:** a planet the generator placed around a nearby star comes out as the most probable
+hypothesis after enough transits, with its period within error, and the samples that produced it
+are gone.
+
+**Do not:** invent hypotheses the generator cannot produce.
+
+**Read:** [05-observation.md](05-observation.md) for the analyses, [04-stellar-photometry.md](04-stellar-photometry.md)
+for what the signals look like, [24-standing-instruments.md](24-standing-instruments.md).
+
+### 11e — Factions
+
+**Before:** 11c.
+
+**Deliver:** founding and naming a faction; key generations and rotation, each rotation sent per
+member sealed to their ship key; certificates for `invite`, `grant` and `rotate`; invitations in
+the chat log; the faction channel, redacted by generation held at arrival.
+
+**Done when:** a traitor excluded by rotation can still read everything sealed to the old
+generation, cannot read anything sealed to the new one, and a loyal member far away is seen
+sending in the old generation until the new key reaches them.
+
+**Do not:** build relays, or anything about commanding assets.
+
+**Read:** [23-factions.md](23-factions.md), [05-observation.md](05-observation.md) on keys.
+
+### 11f — Relays
+
+**Before:** 11e.
+
+**Deliver:** bundles with origin, TTL and path; manual relay of any received report; automatic
+flooding of faction bundles with echo-only-new and split horizon; custody; routing tables of
+light-time cost advertised in reports, aged as they travel.
+
+**Done when:** a report from one member reaches a member it was never in range of, through two
+relays, exactly once — and the lineage on its records names every hop.
+
+**Do not:** build contact-graph routing from predicted trajectories until distance-vector has
+been measured and found wanting.
+
+**Read:** "Relays" in [23-factions.md](23-factions.md).
+
+### 11g — Naming and notes, from anywhere
+
+**Before:** 11a; best after 11e, so notes can be shared.
+
+**Deliver:** a subject card — name, notes thread, provenance — opened from a pick in the map, the
+sky, the telescope panel or the system panel, for every kind of subject including craft outside
+the faction. Transcript lines for reports: "Kestrel: told you about 64 stars".
+
+**Done when:** a player can click a planet on the map, rename it, leave a note, and a faction
+member elsewhere sees both arrive — at light speed — with the note marked as written before they
+could have known of it.
+
+**Do not:** build dictionaries.
+
+**Read:** [23-factions.md](23-factions.md).
+
+---
+
 ## What is deferred past all of this
 
 | item | why |
@@ -300,6 +433,10 @@ added to it.
 | sharding | phase 8 does not preclude it; nothing should until measurements demand it |
 | interstellar VLBI | a late-game mechanic that needs the whole stack first |
 | superluminal travel | not built, not foreclosed; see [10-superluminal.md](10-superluminal.md) |
+| dictionaries between factions | sits on top of namings carrying their witness; see [23-factions.md](23-factions.md) |
+| key theft and forged identity | breaks the one guarantee factions keep, so it wants designing as its own mechanic |
+| commanding assets | certificates carry the capability already; there are no assets to command yet |
+| navigation on believed positions | deferred by decision; see [22-provenance.md](22-provenance.md) |
 
 ## Where a design error is most likely to surface
 
