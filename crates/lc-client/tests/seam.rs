@@ -394,3 +394,105 @@ async fn a_link_to_nothing_closes_with_a_reason() {
         }
     }
 }
+
+/// A survey crosses the socket and lands in the other ship's knowledge.
+///
+/// The one test where a report goes all the way: a client builds one out of what it holds, the
+/// bytes go through a kernel, the shard schedules it against the light cone, and the second
+/// client folds it into a `Knowledge` that had never heard of the star. Two ships admitted at
+/// the origin, so the crossing is a tick rather than a wait.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_report_crosses_the_seam_and_is_learnt_at_the_far_end() {
+    use lc_world::knowledge::{Bearing, Knowledge, Sighting, Witness};
+
+    let address = shard(true).await;
+    let mut sender = WebSocketLink::connect(&address);
+    let mut receiver = WebSocketLink::connect(&address);
+    greet(&mut sender, PROTOCOL_VERSION, "").await;
+    greet(&mut receiver, PROTOCOL_VERSION, "").await;
+    let Outbound::Welcome { ship_id: mine, .. } = hear(&mut sender, "a welcome").await else {
+        panic!("no welcome");
+    };
+    let Outbound::Welcome {
+        ship_id: theirs, ..
+    } = hear(&mut receiver, "a welcome").await
+    else {
+        panic!("no welcome");
+    };
+
+    // What the sender has: six bearings to one star, from six places, which is a parallax.
+    let star = lc_world::sky::StarId::synthesise("seam", 1);
+    let mut held = Knowledge::new(Witness(mine.0 as u64));
+    for k in 0..6u64 {
+        let at = glam::DVec3::new(k as f64 * 0.2, 0.0, 0.0);
+        held.sighted(
+            star,
+            Sighting {
+                witness: Witness(mine.0 as u64),
+                observed_s: k as f64,
+                bearing: Bearing {
+                    observer_ly: at,
+                    toward: (glam::DVec3::new(0.0, 9.0, 0.0) - at).normalize(),
+                    sigma_rad: 1e-9,
+                },
+                band: em_spectra::Band::V,
+                flux: 1e-12,
+                flux_sigma: 1e-15,
+                lineage: Vec::new(),
+            },
+        );
+    }
+    held.name_it(star, "Waystone", 6.0);
+    let report = held.report(f64::NEG_INFINITY, 0.0);
+
+    sender.send(Inbound::Act(Intent {
+        ship_id: mine,
+        order: Order::SendReport {
+            to: Some(theirs),
+            aim: lc_proto::Aim::Omni,
+            secrecy: lc_proto::Secrecy::Open,
+            report: serde_json::to_string(&report).expect("a report encodes"),
+            idem: 77,
+        },
+        issued_at_client_t: 0,
+    }));
+    let said = hear(&mut sender, "an acceptance").await;
+    assert!(matches!(said, Outbound::Accepted { .. }), "{said:?}");
+
+    // The far end: wait for the sighting to arrive and fold it as the client does.
+    let mut learnt = Knowledge::new(Witness(theirs.0 as u64));
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    while !learnt.knows(star) {
+        for message in receiver.poll() {
+            let Outbound::Sightings(cleared) = message else {
+                continue;
+            };
+            for sighting in cleared.into_iter().map(|c| c.into_inner()) {
+                if sighting.kind != lc_proto::kind::REPORT {
+                    continue;
+                }
+                let reported: lc_proto::Reported =
+                    serde_json::from_str(&sighting.payload).expect("a payload");
+                let body = reported.body.expect("an open report is readable");
+                let arrived: lc_world::knowledge::Report =
+                    serde_json::from_str(&body).expect("a report decodes");
+                learnt.receive(&arrived, sighting.arrive_t as f64 * 1e-6);
+            }
+        }
+        assert!(tokio::time::Instant::now() < deadline, "no report arrived");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    let belief = learnt.belief(star).expect("it landed");
+    assert_eq!(belief.hops, 1, "one hop: it came from over there");
+    assert_eq!(belief.witnesses, 1, "and the witness is still the sender");
+    assert!(
+        belief.triangulated,
+        "their bearings solve their parallax here"
+    );
+    assert_eq!(
+        belief.name.as_ref().map(|n| n.name.as_str()),
+        Some("Waystone"),
+        "what they call it came with it",
+    );
+}
