@@ -533,6 +533,17 @@ impl Knowledge {
     /// By what this craft *learnt* rather than by when it was measured: a report is a statement
     /// about what the sender has, and a decade-old sighting relayed yesterday is news.
     pub fn report(&self, since_s: f64, sent_s: f64) -> Report {
+        self.report_upto(since_s, sent_s, usize::MAX)
+    }
+
+    /// The same, as much of it as `limit` stars will carry.
+    ///
+    /// A surveyed sky does not fit in one transmission and a link has a data rate, so a report
+    /// is a piece of a backlog: oldest first, and the sender resumes from
+    /// [`Report::learnt_through`] next time. Ties at that instant all go in the same report
+    /// rather than being cut in half, because the sender has only one number to resume from
+    /// and anything on the wrong side of it would never be sent at all.
+    pub fn report_upto(&self, since_s: f64, sent_s: f64, limit: usize) -> Report {
         let mut entries = Vec::new();
         for (star, file) in &self.files {
             let sightings: Vec<Sighting> = file
@@ -575,6 +586,11 @@ impl Knowledge {
                     names,
                 });
             }
+        }
+        entries.sort_by(|a, b| a.learnt_through().total_cmp(&b.learnt_through()));
+        if entries.len() > limit {
+            let cut = entries[limit.saturating_sub(1)].learnt_through();
+            entries.retain(|e| e.learnt_through() <= cut);
         }
         Report {
             from: self.owner,
@@ -664,6 +680,12 @@ impl Knowledge {
     }
 }
 
+/// How many stars one transmission carries.
+///
+/// A link has a data rate and a surveyed sky has thousands of entries, so a report is a slice
+/// of a backlog rather than a snapshot. Sixty-four stars is a few tens of kilobytes.
+pub const ENTRIES_PER_REPORT: usize = 64;
+
 /// Everything one report carries about one star.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Entry {
@@ -684,9 +706,37 @@ pub struct Report {
     pub entries: Vec<Entry>,
 }
 
+impl Entry {
+    /// The most recent moment the sender learnt any of this.
+    pub fn learnt_through(&self) -> f64 {
+        let sightings = self.sightings.iter().map(Sighting::learnt_s);
+        let claims = self.claims.iter().map(|c| learnt_s(&c.lineage, c.stated_s));
+        let names = self.names.iter().map(|n| learnt_s(&n.lineage, n.stated_s));
+        let series = self
+            .series
+            .iter()
+            .filter_map(|s| s.last().map(|x| learnt_s(&s.lineage, x.observed_s)));
+        sightings
+            .chain(claims)
+            .chain(names)
+            .chain(series)
+            .fold(f64::NEG_INFINITY, f64::max)
+    }
+}
+
 impl Report {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    /// What the sender should resume from next time. `None` for a report of nothing.
+    pub fn learnt_through(&self) -> Option<f64> {
+        self.entries
+            .iter()
+            .map(Entry::learnt_through)
+            .fold(None, |best: Option<f64>, t| {
+                Some(best.map_or(t, |b| b.max(t)))
+            })
     }
 
     pub fn stars(&self) -> usize {
@@ -1056,6 +1106,33 @@ mod tests {
         probe.sighted(star, sighting(2, DVec3::ZERO, DVec3::X, 100.0));
         assert!(probe.report(200.0, 300.0).is_empty(), "nothing since then");
         assert_eq!(probe.report(50.0, 300.0).stars(), 1);
+    }
+
+    /// A report is a slice of a backlog: oldest first, resumed from where the last one ended,
+    /// and never cut through the middle of one instant.
+    #[test]
+    fn a_capped_report_drains_the_backlog_in_order() {
+        let mut probe = Knowledge::new(Witness(2));
+        for k in 0..10u64 {
+            probe.sighted(star_id(k), sighting(2, DVec3::ZERO, DVec3::X, k as f64));
+        }
+        let first = probe.report_upto(f64::NEG_INFINITY, 100.0, 4);
+        assert_eq!(first.stars(), 4);
+        let through = first.learnt_through().unwrap();
+        assert_eq!(through, 3.0, "the four oldest");
+
+        let second = probe.report_upto(through, 200.0, 4);
+        assert_eq!(second.stars(), 4);
+        assert_eq!(second.learnt_through(), Some(7.0));
+        assert_eq!(probe.report_upto(7.0, 300.0, 4).stars(), 2, "and the rest");
+
+        // Everything learnt at the same instant rides in the same report; the sender has one
+        // number to resume from and anything left on the far side of it would never be sent.
+        let mut tied = Knowledge::new(Witness(2));
+        for k in 0..10u64 {
+            tied.sighted(star_id(k), sighting(2, DVec3::ZERO, DVec3::X, 5.0));
+        }
+        assert_eq!(tied.report_upto(f64::NEG_INFINITY, 100.0, 4).stars(), 10);
     }
 
     #[test]
