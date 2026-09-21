@@ -100,6 +100,8 @@ pub enum Action {
     SurveyAhead,
     /// Add the selected star to the watch rotation, or drop it from one.
     WatchSelected,
+    /// Call the selected star something. A name is this ship's, not the star's.
+    NameSelected(String),
     /// Stop whatever the telescope is committed to.
     StopSurvey,
 
@@ -338,13 +340,10 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::SelectTarget(id) => {
             ui.selected = id;
             session.point_at(id);
-            match id
-                .and_then(|i| session.star(i))
-                .and_then(|s| s.name.clone())
-            {
+            match id.filter(|i| session.knows(*i)).map(|i| session.name_of(i)) {
                 Some(name) => effects.push(Effect::Notify(format!("watching {name}"))),
                 None if id.is_some() => {
-                    effects.push(Effect::Notify("watching an unnamed star".into()))
+                    effects.push(Effect::Notify("watching an undetected source".into()))
                 }
                 None => {}
             }
@@ -367,6 +366,13 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 "surveying: a pass every {hours:.1} hours"
             )));
         }
+        Action::NameSelected(name) => match ui.selected {
+            Some(id) if session.name_star(id, &name) => {
+                effects.push(Effect::Notify(format!("noted: {}", session.name_of(id))));
+            }
+            Some(_) => effects.push(Effect::Notify("nothing detected there to name".into())),
+            None => effects.push(Effect::Notify("nothing selected to name".into())),
+        },
         Action::WatchSelected => match ui.selected {
             Some(id) => {
                 let mut targets = match &session.duty {
@@ -755,10 +761,7 @@ fn fly(ui: &mut UiState, session: &mut Session, id: Option<StarId>, effects: &mu
         effects.push(Effect::Notify("that star is not loaded".into()));
         return;
     };
-    let name = star
-        .name
-        .clone()
-        .unwrap_or_else(|| "an unnamed star".into());
+    let name = session.name_of(id);
 
     // A crossing stops short of a star, so a ship already inside a system is nearer than one
     // would leave it. Said here rather than sent, because the answer would come back as a bare
@@ -1373,6 +1376,42 @@ mod tests {
             "pointing at a star should model it"
         );
         assert!(s.observe(1.0e4).is_some());
+    }
+
+    /// A name is this ship's, not the star's — and it belongs to something detected. Naming a
+    /// light nobody has picked up is naming nothing.
+    #[test]
+    fn naming_a_star_is_this_ship_saying_so() {
+        let (mut ui, mut s) = fixture();
+        let id = s.stars[0].id;
+        apply(Action::SelectTarget(Some(id)), &mut ui, &mut s);
+        apply(Action::NameSelected("The Kettle".into()), &mut ui, &mut s);
+        assert_eq!(s.name_of(id), "The Kettle");
+        let naming = s.belief(id).unwrap().name.clone().unwrap();
+        assert_eq!(
+            naming.witness, s.knowledge.owner,
+            "ours, not the catalogue's"
+        );
+        assert!(naming.lineage.is_empty(), "nobody told us this one");
+
+        let unknown = lc_world::sky::StarId::synthesise("absent", 7);
+        ui.selected = Some(unknown);
+        let effects = apply(Action::NameSelected("Nowhere".into()), &mut ui, &mut s);
+        assert!(
+            matches!(effects.as_slice(), [Effect::Notify(t)] if t.contains("nothing detected"))
+        );
+    }
+
+    /// The charts a ship launches with carry the charting office's names, with the office's
+    /// name on them. Nothing reads a name off the catalogue.
+    #[test]
+    fn a_charted_star_is_called_what_the_office_called_it() {
+        let (_, s) = fixture();
+        let id = s.stars[0].id;
+        let naming = s.belief(id).unwrap().name.clone().unwrap();
+        assert_ne!(naming.witness, s.knowledge.owner);
+        assert_eq!(naming.lineage.len(), 1, "one hop: somebody handed it over");
+        assert_eq!(s.name_of(id), naming.name);
     }
 
     #[test]

@@ -52,10 +52,9 @@ fn main() {
         eprintln!("crossing: nothing to fly to");
         std::process::exit(1);
     };
-    let name = session
-        .star(target)
-        .and_then(|s| s.name.clone())
-        .unwrap_or_else(|| "target".into());
+    // Charted, because an example that flies somewhere needs something to call it.
+    session.issue_charts(lc_client::session::CHARTED_LY);
+    let name = session.name_of(target);
     let distance = session.distance_to(session.star(target).unwrap());
 
     session.fly_to(target);

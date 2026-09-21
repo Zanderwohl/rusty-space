@@ -710,8 +710,8 @@ fn fold(
                             let name = game
                                 .0
                                 .star_by_raw(*star)
-                                .and_then(|s| s.name.clone())
-                                .unwrap_or_else(|| "an unnamed star".into());
+                                .map(|s| game.0.name_of(s.id))
+                                .unwrap_or_else(|| "an undetected source".into());
                             match game.0.cross_to_at(at_s, to_ly, *accel_g, *max_beta) {
                                 Some(cruise) => {
                                     let years = cruise.duration_s() / crate::flight::JULIAN_YEAR_S;
@@ -1449,7 +1449,7 @@ mod tests {
         .expect("the catalogue");
         let sun = lc_world::sky::StarProvider::stars(&provider)
             .iter()
-            .find(|s| s.name.as_deref() == Some("Sol"))
+            .find(|s| s.provenance.name.as_deref() == Some("Sol"))
             .expect("the Sun");
         let mut system = lc_world::system::LocalSystem::for_star(sun).expect("the solar system");
         system.advance_to(0.0);

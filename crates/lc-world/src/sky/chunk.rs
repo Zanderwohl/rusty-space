@@ -356,7 +356,7 @@ mod tests {
         let sol = provider
             .stars()
             .iter()
-            .find(|s| s.name.as_deref() == Some("Sol"))
+            .find(|s| s.provenance.name.as_deref() == Some("Sol"))
             .unwrap();
         let direct = records()[0].assemble("hyg-v42").unwrap();
         assert_eq!(
@@ -475,7 +475,7 @@ mod equivalence {
         for (a, b) in direct.iter().zip(packed.stars()) {
             // Identity, naming and grouping must survive exactly. These are not measurements.
             assert_eq!(a.id, b.id);
-            assert_eq!(a.name, b.name);
+            assert_eq!(a.provenance.name, b.provenance.name);
             assert_eq!(a.component, b.component);
             assert_eq!(a.provenance, b.provenance);
 

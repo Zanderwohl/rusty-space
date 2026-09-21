@@ -36,13 +36,20 @@ pub fn within_budget(
 ) -> Result<Drive, Refusal> {
     let free = craft.free_j_at(at_s);
     let cost = |drive: Drive| {
-        let event = Change_ { ship: MotionId(craft.id.0), at_t: at_s, change: change(drive) };
+        let event = Change_ {
+            ship: MotionId(craft.id.0),
+            at_t: at_s,
+            change: change(drive),
+        };
         craft.cost_of(&event).map_err(refusal_for)
     };
     if cost(drive)? <= free {
         return Ok(drive);
     }
-    let with = |beta: f64| Drive { max_beta: beta, ..drive };
+    let with = |beta: f64| Drive {
+        max_beta: beta,
+        ..drive
+    };
     if cost(with(SLOWEST_BETA))? > free {
         return Err(Refusal::NoEnergy);
     }
@@ -60,7 +67,9 @@ pub fn within_budget(
 
 /// A burn that changes velocity at once, if the ship can pay for it.
 pub fn afford_burn(craft: &Craft, at_s: f64, to_beta: glam::DVec3) -> Result<(), Refusal> {
-    let Some(fitting) = craft.fitting() else { return Ok(()) };
+    let Some(fitting) = craft.fitting() else {
+        return Ok(());
+    };
     let from = lc_world::motion::state_at(&craft.motion, craft.system.as_deref(), at_s)
         .map_or(craft.motion.beta, |(_, beta)| beta);
     let rapidity = lc_world::cost::rapidity_between(from, to_beta);
@@ -69,12 +78,18 @@ pub fn afford_burn(craft: &Craft, at_s: f64, to_beta: glam::DVec3) -> Result<(),
         rapidity,
         fitting.balance.drive_efficiency,
     );
-    if cost > craft.free_j_at(at_s) { Err(Refusal::NoEnergy) } else { Ok(()) }
+    if cost > craft.free_j_at(at_s) {
+        Err(Refusal::NoEnergy)
+    } else {
+        Ok(())
+    }
 }
 
 /// Whether a craft that is flying a plan can still finish it.
 pub fn can_pay_for_its_plan(craft: &Craft, now_s: f64) -> bool {
-    let Some(fitting) = craft.fitting() else { return true };
+    let Some(fitting) = craft.fitting() else {
+        return true;
+    };
     let stored = fitting.stored_j_at(&craft.motion, now_s);
     stored > 0.0 && stored >= fitting.committed_j_at(&craft.motion, now_s)
 }
@@ -103,10 +118,22 @@ impl<J: Journal> Server<J> {
 
     /// Tell a craft's owner what its account now says.
     pub(crate) fn tell_fitted(&self, wire: &mut impl Transport, id: CraftId) {
-        let Some(craft) = self.fleet.get(id) else { return };
-        let Some(fitting) = craft.fitting() else { return };
-        let Some(owner) = self.owners.get(&id).copied() else { return };
-        wire.send(owner, Outbound::Fitted { ship_id: ShipId(id.0), fitting: fitting.into() });
+        let Some(craft) = self.fleet.get(id) else {
+            return;
+        };
+        let Some(fitting) = craft.fitting() else {
+            return;
+        };
+        let Some(owner) = self.owners.get(&id).copied() else {
+            return;
+        };
+        wire.send(
+            owner,
+            Outbound::Fitted {
+                ship_id: ShipId(id.0),
+                fitting: fitting.into(),
+            },
+        );
     }
 
     /// Begin a refit, or say why not.
@@ -119,7 +146,9 @@ impl<J: Journal> Server<J> {
         if pursuing || craft.motion.is_under_way() {
             return Err(Refusal::UnderWay);
         }
-        craft.begin_refit(target, at_s).map_err(|s| Refusal::Short(s.into()))?;
+        craft
+            .begin_refit(target, at_s)
+            .map_err(|s| Refusal::Short(s.into()))?;
         self.refitting.insert(id);
         Ok(())
     }
@@ -131,15 +160,23 @@ impl<J: Journal> Server<J> {
         let done = self.may(from, crate::ability::Act::GrantEnergy, ship)
             && joules.is_finite()
             && joules > 0.0
-            && ship.and_then(|id| self.fleet.get_mut(id)).is_some_and(|craft| {
-                let fitted = craft.fitting().is_some();
-                craft.grant(joules, now_s);
-                fitted
-            });
+            && ship
+                .and_then(|id| self.fleet.get_mut(id))
+                .is_some_and(|craft| {
+                    let fitted = craft.fitting().is_some();
+                    craft.grant(joules, now_s);
+                    fitted
+                });
         match ship {
             Some(id) if done => self.tell_fitted(wire, id),
             // The answer `Stage` gives, for the reason it gives it.
-            _ => wire.send(from, Outbound::Refused { ship_id: ShipId(0), reason: Refusal::Impossible }),
+            _ => wire.send(
+                from,
+                Outbound::Refused {
+                    ship_id: ShipId(0),
+                    reason: Refusal::Impossible,
+                },
+            ),
         }
     }
 
@@ -152,7 +189,11 @@ impl<J: Journal> Server<J> {
             .refitting
             .iter()
             .copied()
-            .filter(|id| self.fleet.get(*id).is_none_or(|craft| !craft.is_refitting(now_s)))
+            .filter(|id| {
+                self.fleet
+                    .get(*id)
+                    .is_none_or(|craft| !craft.is_refitting(now_s))
+            })
             .collect();
         for id in finished {
             self.refitting.remove(&id);
@@ -163,12 +204,22 @@ impl<J: Journal> Server<J> {
             .pursuits
             .keys()
             .copied()
-            .filter(|id| self.fleet.get(*id).is_some_and(|craft| !can_pay_for_its_plan(craft, now_s)))
+            .filter(|id| {
+                self.fleet
+                    .get(*id)
+                    .is_some_and(|craft| !can_pay_for_its_plan(craft, now_s))
+            })
             .collect();
         for id in broke {
             self.pursuits.remove(&id);
-            let Some(craft) = self.fleet.get_mut(id) else { continue };
-            let cut = Change_ { ship: MotionId(id.0), at_t: now_s, change: Change::CutDrive };
+            let Some(craft) = self.fleet.get_mut(id) else {
+                continue;
+            };
+            let cut = Change_ {
+                ship: MotionId(id.0),
+                at_t: now_s,
+                change: Change::CutDrive,
+            };
             if craft.apply(&cut).is_ok() {
                 self.tell_flying(wire, id);
             }
@@ -195,7 +246,11 @@ mod tests {
     }
 
     fn act(order: Order) -> Inbound {
-        Inbound::Act(Intent { ship_id: ShipId(1), order, issued_at_client_t: i64::MAX })
+        Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order,
+            issued_at_client_t: i64::MAX,
+        })
     }
 
     fn free(server: &Server<Memory>) -> f64 {
@@ -208,7 +263,10 @@ mod tests {
         let craft = server.fleet.get_mut(CraftId(1)).unwrap();
         craft.settle(now_s);
         let fitting = craft.fitting().unwrap().clone();
-        let empty = lc_world::fitting::Account { stored_j: 0.0, ..fitting.account() };
+        let empty = lc_world::fitting::Account {
+            stored_j: 0.0,
+            ..fitting.account()
+        };
         craft.fit(Some(Fitting::from_account(&empty, fitting.balance)));
     }
 
@@ -226,16 +284,29 @@ mod tests {
         let at_s = server.now_t() as f64 * 1.0e-6;
         // Twenty light-years: at 0.999c this is far more than the starting ship holds.
         let far = DVec3::X * 20.0;
-        let flown = within_budget(craft, at_s, drive, |drive| Change::Cross { to_ly: far, drive })
-            .expect("a slower crossing is affordable");
-        assert!(flown.max_beta < drive.max_beta && flown.max_beta > 0.3, "{}", flown.max_beta);
+        let flown = within_budget(craft, at_s, drive, |drive| Change::Cross {
+            to_ly: far,
+            drive,
+        })
+        .expect("a slower crossing is affordable");
+        assert!(
+            flown.max_beta < drive.max_beta && flown.max_beta > 0.3,
+            "{}",
+            flown.max_beta
+        );
         let event = Change_ {
             ship: MotionId(1),
             at_t: at_s,
-            change: Change::Cross { to_ly: far, drive: flown },
+            change: Change::Cross {
+                to_ly: far,
+                drive: flown,
+            },
         };
         let cost = craft.cost_of(&event).unwrap();
-        assert!(cost <= before && cost > 0.99 * before, "it did not spend what it had: {cost} of {before}");
+        assert!(
+            cost <= before && cost > 0.99 * before,
+            "it did not spend what it had: {cost} of {before}"
+        );
     }
 
     #[tokio::test]
@@ -243,11 +314,22 @@ mod tests {
         let (mut server, mut wire, from, _) = fitted_server(false);
         server.tick(&mut wire).await.unwrap();
         drain(&mut server);
-        wire.client_says(from, act(Order::Burn { beta: [1.0e-4, 0.0, 0.0] }));
+        wire.client_says(
+            from,
+            act(Order::Burn {
+                beta: [1.0e-4, 0.0, 0.0],
+            }),
+        );
         server.tick(&mut wire).await.unwrap();
         let said = replies(&mut wire);
         assert!(
-            said.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::NoEnergy, .. })),
+            said.iter().any(|m| matches!(
+                m,
+                Outbound::Refused {
+                    reason: Refusal::NoEnergy,
+                    ..
+                }
+            )),
             "{said:?}"
         );
     }
@@ -256,18 +338,41 @@ mod tests {
     async fn a_refit_is_refused_under_way_and_flying_is_refused_while_refitting() {
         let (mut server, mut wire, from, _) = fitted_server(false);
         server.tick(&mut wire).await.unwrap();
-        let target = lc_proto::Loadout { storage: 6, drones: 2, living: 2, engines: 6, slots: 20 };
+        let target = lc_proto::Loadout {
+            storage: 6,
+            drones: 2,
+            living: 2,
+            engines: 6,
+            slots: 20,
+        };
         wire.client_says(from, act(Order::Refit { target }));
         server.tick(&mut wire).await.unwrap();
         let said = replies(&mut wire);
-        assert!(said.iter().any(|m| matches!(m, Outbound::Accepted { .. })), "{said:?}");
-        assert!(said.iter().any(|m| matches!(m, Outbound::Fitted { .. })), "{said:?}");
+        assert!(
+            said.iter().any(|m| matches!(m, Outbound::Accepted { .. })),
+            "{said:?}"
+        );
+        assert!(
+            said.iter().any(|m| matches!(m, Outbound::Fitted { .. })),
+            "{said:?}"
+        );
 
-        wire.client_says(from, act(Order::Burn { beta: [1.0e-5, 0.0, 0.0] }));
+        wire.client_says(
+            from,
+            act(Order::Burn {
+                beta: [1.0e-5, 0.0, 0.0],
+            }),
+        );
         server.tick(&mut wire).await.unwrap();
         let said = replies(&mut wire);
         assert!(
-            said.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::Refitting, .. })),
+            said.iter().any(|m| matches!(
+                m,
+                Outbound::Refused {
+                    reason: Refusal::Refitting,
+                    ..
+                }
+            )),
             "{said:?}"
         );
 
@@ -277,23 +382,38 @@ mod tests {
         let now_s = server.now_t() as f64 * 1.0e-6;
         assert!(!server.ship(ShipId(1)).unwrap().is_refitting(now_s));
 
-        wire.client_says(from, act(Order::Burn { beta: [1.0e-5, 0.0, 0.0] }));
+        wire.client_says(
+            from,
+            act(Order::Burn {
+                beta: [1.0e-5, 0.0, 0.0],
+            }),
+        );
         server.tick(&mut wire).await.unwrap();
         let _ = replies(&mut wire);
         let now_s = server.now_t() as f64 * 1.0e-6;
         let craft = server.fleet.get_mut(CraftId(1)).unwrap();
         // A drift is not under way, so hold it in a crossing instead.
-        craft.apply(&Change_ {
-            ship: MotionId(1),
-            at_t: now_s,
-            change: Change::Cross { to_ly: DVec3::X * 0.01, drive: lc_world::flight::Drive::DEFAULT },
-        })
-        .unwrap();
+        craft
+            .apply(&Change_ {
+                ship: MotionId(1),
+                at_t: now_s,
+                change: Change::Cross {
+                    to_ly: DVec3::X * 0.01,
+                    drive: lc_world::flight::Drive::DEFAULT,
+                },
+            })
+            .unwrap();
         wire.client_says(from, act(Order::Refit { target }));
         server.tick(&mut wire).await.unwrap();
         let said = replies(&mut wire);
         assert!(
-            said.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::UnderWay, .. })),
+            said.iter().any(|m| matches!(
+                m,
+                Outbound::Refused {
+                    reason: Refusal::UnderWay,
+                    ..
+                }
+            )),
             "{said:?}"
         );
     }
@@ -303,14 +423,23 @@ mod tests {
         let (mut server, mut wire, from, _) = fitted_server(false);
         server.tick(&mut wire).await.unwrap();
         // Full, so taking apart storage has nowhere to put the refund.
-        let target = lc_proto::Loadout { storage: 5, drones: 2, living: 2, engines: 5, slots: 20 };
+        let target = lc_proto::Loadout {
+            storage: 5,
+            drones: 2,
+            living: 2,
+            engines: 5,
+            slots: 20,
+        };
         wire.client_says(from, act(Order::Refit { target }));
         server.tick(&mut wire).await.unwrap();
         let said = replies(&mut wire);
         assert!(
             said.iter().any(|m| matches!(
                 m,
-                Outbound::Refused { reason: Refusal::Short(lc_proto::Shortfall::Capacity), .. }
+                Outbound::Refused {
+                    reason: Refusal::Short(lc_proto::Shortfall::Capacity),
+                    ..
+                }
             )),
             "{said:?}"
         );
@@ -324,7 +453,10 @@ mod tests {
         wire.client_says(from, Inbound::Grant { joules: 1.0e26 });
         server.tick(&mut wire).await.unwrap();
         let said = replies(&mut wire);
-        assert!(said.iter().any(|m| matches!(m, Outbound::Refused { .. })), "{said:?}");
+        assert!(
+            said.iter().any(|m| matches!(m, Outbound::Refused { .. })),
+            "{said:?}"
+        );
         assert_eq!(free(&server), 0.0);
     }
 
@@ -343,8 +475,14 @@ mod tests {
         let mut wire = Loopback::new();
         use crate::ability::Level;
         let (player, admin, old, debug) = (ClientId(1), ClientId(2), ClientId(3), ClientId(4));
-        let hello = |ticket: String| Inbound::Hello { protocol: lc_proto::PROTOCOL_VERSION, ticket };
-        wire.client_says(player, hello(broker.mint_with("acct-player", "shard-1", "j1", 0)));
+        let hello = |ticket: String| Inbound::Hello {
+            protocol: lc_proto::PROTOCOL_VERSION,
+            ticket,
+        };
+        wire.client_says(
+            player,
+            hello(broker.mint_with("acct-player", "shard-1", "j1", 0)),
+        );
         wire.client_says(
             admin,
             hello(broker.mint_with("acct-admin", "shard-1", "j2", Level::ADMIN.as_i32())),
@@ -372,7 +510,10 @@ mod tests {
             let id = server.owned_by(who).unwrap();
             let craft = server.fleet.get_mut(id).unwrap();
             let fitting = craft.fitting().unwrap().clone();
-            let empty = lc_world::fitting::Account { stored_j: 0.0, ..fitting.account() };
+            let empty = lc_world::fitting::Account {
+                stored_j: 0.0,
+                ..fitting.account()
+            };
             craft.fit(Some(Fitting::from_account(&empty, fitting.balance)));
             wire.client_says(who, Inbound::Grant { joules: 1.0e26 });
         }
@@ -384,12 +525,20 @@ mod tests {
                 "{} was not granted anything",
                 level.name(),
             );
-            assert!(wire.take(who).iter().any(|m| matches!(m, Outbound::Fitted { .. })));
+            assert!(
+                wire.take(who)
+                    .iter()
+                    .any(|m| matches!(m, Outbound::Fitted { .. }))
+            );
         }
         // A player, and a ticket from a broker that had no levels yet.
         for who in [player, old] {
             assert_eq!(stored(&server, who), 0.0, "{who:?} was granted energy");
-            assert!(wire.take(who).iter().any(|m| matches!(m, Outbound::Refused { .. })));
+            assert!(
+                wire.take(who)
+                    .iter()
+                    .any(|m| matches!(m, Outbound::Refused { .. }))
+            );
         }
     }
 
@@ -401,7 +550,10 @@ mod tests {
         wire.client_says(from, Inbound::Grant { joules: 1.0e26 });
         server.tick(&mut wire).await.unwrap();
         let said = replies(&mut wire);
-        assert!(said.iter().any(|m| matches!(m, Outbound::Fitted { .. })), "{said:?}");
+        assert!(
+            said.iter().any(|m| matches!(m, Outbound::Fitted { .. })),
+            "{said:?}"
+        );
         assert!(free(&server) > 0.9e26, "{}", free(&server));
     }
 }

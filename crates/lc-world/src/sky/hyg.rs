@@ -168,7 +168,7 @@ mod tests {
         let sol = p
             .stars()
             .iter()
-            .find(|s| s.name.as_deref() == Some("Sol"))
+            .find(|s| s.provenance.name.as_deref() == Some("Sol"))
             .expect("Sol");
         assert!((sol.luminosity_solar - 1.0).abs() < 0.01);
         assert!(
@@ -187,7 +187,7 @@ mod tests {
         let sirius = p
             .stars()
             .iter()
-            .find(|s| s.name.as_deref() == Some("Sirius"))
+            .find(|s| s.provenance.name.as_deref() == Some("Sirius"))
             .expect("Sirius");
         let d = sirius.position_ly.length();
         assert!((d - 8.6).abs() < 0.2, "Sirius is {d} ly away");

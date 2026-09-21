@@ -65,6 +65,7 @@ impl GeneratedSystem {
 pub fn system_for(star: &CatalogueStar) -> GeneratedSystem {
     let seed = star.seed();
     let name = star
+        .provenance
         .name
         .clone()
         .unwrap_or_else(|| format!("Star {:016x}", star.id.get()));
@@ -87,6 +88,7 @@ pub fn system_for(star: &CatalogueStar) -> GeneratedSystem {
 pub fn binary_for(primary: &CatalogueStar, secondary: &CatalogueStar) -> GeneratedSystem {
     let mut system = system_for(primary);
     let secondary_name = secondary
+        .provenance
         .name
         .clone()
         .unwrap_or_else(|| format!("Star {:016x}", secondary.id.get()));
@@ -131,7 +133,7 @@ fn planets(seed: u64, star: &CatalogueStar) -> Vec<Planet> {
         out.push(Planet {
             name: format!(
                 "{} {}",
-                star.name.as_deref().unwrap_or("b"),
+                star.provenance.name.as_deref().unwrap_or("b"),
                 (b'b' + k as u8) as char
             ),
             semi_major_m: a,

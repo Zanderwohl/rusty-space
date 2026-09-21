@@ -32,6 +32,7 @@ Four kinds, and the distinctions between them are load-bearing.
 | sighting | something was detected in this direction, this bright | witness, arrival time, observer position, bearing and its sigma, band, flux and its sigma |
 | sample | the flux of a known source changed by this much | witness, arrival time, signed deficit, sigma |
 | claim | somebody states a distance | witness, the distance, when they said it |
+| naming | somebody calls it something | witness, the name, whether it was chosen or assigned, when |
 | lineage | how any of the above got here | a hop per handover: from, to, sent, received |
 
 A **witness** is whoever took the measurement — a ship, a probe, a telescope, a charting
@@ -149,6 +150,45 @@ per rendered frame. A measurement labelled with an integration it did not get is
 own error bars, and at the design rate a frame is two minutes of in-game time, so the difference
 is not subtle.
 
+## Nothing has a name
+
+A star does not come with a name any more than it comes with a distance. **A name is
+information about a star, with a witness on it**: somebody called it something, and may have
+told somebody else.
+
+| where a name comes from | witness | shown as |
+|---|---|---|
+| the charts a ship launched with | the charting office | what the office called it |
+| the crew | this ship | what the crew call it |
+| a report from another craft | whoever coined it, with the hops it came through | their name, until this ship picks its own |
+| nobody yet | the instrument that found it | a designation: the ecliptic bearing it was discovered along |
+
+Which name a craft goes by is a fold like any other: a name somebody *chose* beats a
+designation, this craft's own beats somebody else's, and the later statement beats the earlier.
+The others stay on file, because "they call it Hearthlight and we call it the Kettle" is a fact
+about a conversation, and losing it would lose the conversation.
+
+**A designation is written at discovery and then fixed.** It is the bearing the source was found
+along, in ecliptic degrees — recomputing it as the ship moved would give a catalogue number that
+drifted, which is no use for talking about.
+
+The catalogue's names survive exactly as its row numbers do: in
+`sky::Provenance`, next to the key, never read by anything a player sees. `CatalogueStar` has no
+`name` field to reach for by accident. When the shipped game moves to an authored galaxy, the
+catalogue's names go with the catalogue and nothing else changes — which is the same argument
+[03-world-model.md](03-world-model.md) makes about identity.
+
+Two things this leaves open, and both belong with factions rather than here:
+
+- **A faction name is a shared name.** The mechanism is already the one above: a faction
+  relaying its catalogue is a witness whose namings everyone holds. What is missing is the rule
+  about whose name wins on a shared screen, which is a question about the faction, not the star.
+- **Cross-identification.** Two craft agreeing that their records are of the same star is done
+  today by the synthetic star id, which is an engine convenience: real observers match positions
+  and brightnesses, and two crews with poor parallaxes could reasonably disagree about whether
+  they are looking at the same thing. Worth revisiting when a faction's catalogue is merged
+  rather than copied.
+
 ## Beliefs, and where they are drawn
 
 A belief is a fold over one star's records: the latest bearing, the best distance, how bright,
@@ -209,7 +249,7 @@ In `lc-world::knowledge`, engine-free and tested:
 
 | module | holds |
 |---|---|
-| `knowledge` | `Witness`, `Hop`, `Sighting`, `Sample`, `Series`, `Claim`, `Belief`, `Knowledge`, `Report` |
+| `knowledge` | `Witness`, `Hop`, `Sighting`, `Sample`, `Series`, `Claim`, `Naming`, `Belief`, `Knowledge`, `Report` |
 | `knowledge::astrometry` | bearings, centroid precision, the triangulation, `Distance` |
 | `knowledge::survey` | `Optics`, detection and glare, the `Sweep` and its field order, `Duty` |
 

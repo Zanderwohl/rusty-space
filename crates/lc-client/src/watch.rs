@@ -10,7 +10,7 @@ use std::mem;
 
 use em_spectra::Band;
 use lc_world::knowledge::survey::{self, Duty, Optics, Source, Sweep};
-use lc_world::knowledge::{Bearing, Claim, Distance, Hop, Sighting, Witness};
+use lc_world::knowledge::{Bearing, Claim, Distance, Hop, NameKind, Naming, Sighting, Witness};
 use lc_world::rng;
 use lc_world::sky::StarId;
 
@@ -215,6 +215,18 @@ impl Session {
                     lineage: vec![hop],
                 },
             );
+            if let Some(name) = star.provenance.name.clone() {
+                self.knowledge.named(
+                    star.id,
+                    Naming {
+                        witness: CHARTS,
+                        name,
+                        kind: NameKind::Given,
+                        stated_s: now,
+                        lineage: vec![hop],
+                    },
+                );
+            }
             self.knowledge.told(
                 star.id,
                 Claim {

@@ -86,7 +86,7 @@ pub fn page(stars: &[CatalogueStar], ships: &HashMap<u64, u64>, query: &Query) -
             let id = star.id.get();
             Row {
                 id,
-                name: star.name.clone(),
+                name: star.provenance.name.clone(),
                 ships: ships.get(&id).copied().unwrap_or(0),
                 objects: 0,
             }
@@ -120,7 +120,11 @@ pub fn page(stars: &[CatalogueStar], ships: &HashMap<u64, u64>, query: &Query) -
                     _ => {
                         let key = |r: &Row| r.name.as_deref().unwrap_or("").to_lowercase();
                         let by_name = key(a).cmp(&key(b));
-                        let by_name = if query.descending { by_name.reverse() } else { by_name };
+                        let by_name = if query.descending {
+                            by_name.reverse()
+                        } else {
+                            by_name
+                        };
                         by_name.then(a.id.cmp(&b.id))
                     }
                 };
@@ -128,7 +132,11 @@ pub fn page(stars: &[CatalogueStar], ships: &HashMap<u64, u64>, query: &Query) -
             Sort::Ships => a.ships.cmp(&b.ships),
             Sort::Objects => a.objects.cmp(&b.objects),
         };
-        let primary = if query.descending { primary.reverse() } else { primary };
+        let primary = if query.descending {
+            primary.reverse()
+        } else {
+            primary
+        };
         primary.then(a.id.cmp(&b.id))
     });
     Page {
@@ -150,8 +158,11 @@ mod tests {
     fn star(key: u64, name: Option<&str>, at: glam::DVec3) -> CatalogueStar {
         CatalogueStar {
             id: StarId::synthesise("test", key),
-            provenance: Provenance { source: "test".into(), key },
-            name: name.map(str::to_owned),
+            provenance: Provenance {
+                source: "test".into(),
+                key,
+                name: name.map(str::to_owned),
+            },
             position_ly: at,
             velocity: glam::DVec3::ZERO,
             star: Star {
@@ -163,7 +174,10 @@ mod tests {
             luminosity_solar: 1.0,
             mass_solar: 1.0,
             metallicity: 0.0,
-            component: StarComponent { index: 1, group: None },
+            component: StarComponent {
+                index: 1,
+                group: None,
+            },
         }
     }
 
@@ -184,7 +198,13 @@ mod tests {
     }
 
     fn query() -> Query {
-        Query { q: String::new(), sort: Sort::Name, descending: false, offset: 0, limit: 25 }
+        Query {
+            q: String::new(),
+            sort: Sort::Name,
+            descending: false,
+            offset: 0,
+            limit: 25,
+        }
     }
 
     /// A craft counts toward the system it is **in**, and one between the stars counts toward
@@ -194,16 +214,20 @@ mod tests {
         let stars = catalogue();
         let counts = tally(
             &[
-                glam::DVec3::ZERO,                        // in Sol
-                glam::DVec3::new(0.5, 0.0, 0.0),          // also in Sol
-                glam::DVec3::new(10.0, 0.0, 0.0),         // in the second system
-                glam::DVec3::new(5.0, 0.0, 0.0),          // between them, in neither
+                glam::DVec3::ZERO,                // in Sol
+                glam::DVec3::new(0.5, 0.0, 0.0),  // also in Sol
+                glam::DVec3::new(10.0, 0.0, 0.0), // in the second system
+                glam::DVec3::new(5.0, 0.0, 0.0),  // between them, in neither
             ],
             &stars,
         );
         assert_eq!(counts.get(&stars[0].id.get()), Some(&2));
         assert_eq!(counts.get(&stars[1].id.get()), Some(&1));
-        assert_eq!(counts.len(), 2, "a craft between the stars was counted: {counts:?}");
+        assert_eq!(
+            counts.len(),
+            2,
+            "a craft between the stars was counted: {counts:?}"
+        );
     }
 
     /// **Every page is disjoint and together they are the whole list — whatever order the
@@ -229,13 +253,17 @@ mod tests {
                     let mut stars = catalogue();
                     let by = turn * 3 % stars.len();
                     stars.rotate_left(by);
-                    let page = page(&stars, &counts, &Query {
-                        sort,
-                        descending,
-                        offset,
-                        limit: 3,
-                        ..query()
-                    });
+                    let page = page(
+                        &stars,
+                        &counts,
+                        &Query {
+                            sort,
+                            descending,
+                            offset,
+                            limit: 3,
+                            ..query()
+                        },
+                    );
                     assert_eq!(page.total, 10);
                     seen.extend(page.systems.into_iter().map(|r| r.id));
                 }
@@ -263,7 +291,15 @@ mod tests {
         let stars = catalogue();
         let counts = HashMap::new();
         for descending in [false, true] {
-            let page = page(&stars, &counts, &Query { descending, limit: 4, ..query() });
+            let page = page(
+                &stars,
+                &counts,
+                &Query {
+                    descending,
+                    limit: 4,
+                    ..query()
+                },
+            );
             let named = page.systems.iter().filter(|r| r.name.is_some()).count();
             assert_eq!(named, 3, "descending={descending}: {:?}", page.systems);
             assert!(
@@ -272,8 +308,23 @@ mod tests {
             );
         }
         // And the direction does reverse the named ones among themselves.
-        let up = page(&stars, &counts, &Query { limit: 3, ..query() });
-        let down = page(&stars, &counts, &Query { descending: true, limit: 3, ..query() });
+        let up = page(
+            &stars,
+            &counts,
+            &Query {
+                limit: 3,
+                ..query()
+            },
+        );
+        let down = page(
+            &stars,
+            &counts,
+            &Query {
+                descending: true,
+                limit: 3,
+                ..query()
+            },
+        );
         assert_eq!(up.systems[0].name.as_deref(), Some("Alpha Centauri"));
         assert_eq!(down.systems[0].name.as_deref(), Some("Sol"));
     }
@@ -283,7 +334,17 @@ mod tests {
     fn a_search_matches_a_name_or_an_identifier() {
         let stars = catalogue();
         let counts = HashMap::new();
-        let found = |q: &str| page(&stars, &counts, &Query { q: q.into(), ..query() }).total;
+        let found = |q: &str| {
+            page(
+                &stars,
+                &counts,
+                &Query {
+                    q: q.into(),
+                    ..query()
+                },
+            )
+            .total
+        };
 
         assert_eq!(found("sol"), 1);
         assert_eq!(found("SOL"), 1);
@@ -304,12 +365,16 @@ mod tests {
         counts.insert(stars[5].id.get(), 7);
         counts.insert(stars[2].id.get(), 3);
 
-        let page = page(&stars, &counts, &Query {
-            sort: Sort::Ships,
-            descending: true,
-            limit: 3,
-            ..query()
-        });
+        let page = page(
+            &stars,
+            &counts,
+            &Query {
+                sort: Sort::Ships,
+                descending: true,
+                limit: 3,
+                ..query()
+            },
+        );
         assert_eq!(page.systems[0].id, stars[5].id.get());
         assert_eq!(page.systems[0].ships, 7);
         assert_eq!(page.systems[1].id, stars[2].id.get());
@@ -324,7 +389,14 @@ mod tests {
     #[test]
     fn a_page_past_the_end_is_empty_and_still_counts() {
         let stars = catalogue();
-        let page = page(&stars, &HashMap::new(), &Query { offset: 500, ..query() });
+        let page = page(
+            &stars,
+            &HashMap::new(),
+            &Query {
+                offset: 500,
+                ..query()
+            },
+        );
         assert!(page.systems.is_empty());
         assert_eq!(page.total, 10);
     }

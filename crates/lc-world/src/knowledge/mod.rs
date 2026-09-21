@@ -169,6 +169,45 @@ impl Series {
     }
 }
 
+/// What somebody calls a star.
+///
+/// **Nothing has a name of its own.** A name is a thing an observer gave a star and may have
+/// passed on, so it travels like every other record: with a witness, a time and a lineage, and
+/// two crews may hold different names for the same light without either being wrong.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Naming {
+    pub witness: Witness,
+    pub name: String,
+    pub kind: NameKind,
+    pub stated_s: f64,
+    pub lineage: Lineage,
+}
+
+/// Whether a name was chosen or merely assigned.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NameKind {
+    /// Somebody decided to call it this.
+    Given,
+    /// What an instrument wrote down when it found it, so that the log has something to say.
+    /// Always beaten by a name somebody chose.
+    Designation,
+}
+
+/// A designation from the direction something was found in, ecliptic degrees.
+///
+/// Fixed at discovery rather than recomputed, because the bearing changes as the observer
+/// moves and a catalogue number that drifted would be no use for talking about.
+pub fn designation(toward: glam::DVec3) -> String {
+    let toward = toward.normalize_or(glam::DVec3::X);
+    let longitude = toward
+        .y
+        .atan2(toward.x)
+        .rem_euclid(std::f64::consts::TAU)
+        .to_degrees();
+    let latitude = toward.z.clamp(-1.0, 1.0).asin().to_degrees();
+    format!("{longitude:05.1}{latitude:+05.1}")
+}
+
 /// A distance somebody states, as opposed to bearings this craft can triangulate itself.
 ///
 /// This is how a conclusion travels when the measurements behind it do not — a charting
@@ -191,10 +230,30 @@ fn sigma_of(claim: &Claim) -> f64 {
     }
 }
 
+/// Which of two namings a craft goes by: a chosen name over a designation, its own over
+/// somebody else's, and the more recent over the older.
+fn better_name<'a>(held: Option<&'a Naming>, new: &'a Naming, owner: Witness) -> bool {
+    let rank = |n: &Naming| {
+        (
+            matches!(n.kind, NameKind::Given),
+            n.witness == owner,
+            n.stated_s,
+        )
+    };
+    match held {
+        None => true,
+        Some(held) => rank(new) > rank(held),
+    }
+}
+
 /// What is believed about one star, folded from everything held about it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Belief {
     pub star: StarId,
+    /// What this craft calls it, and who said so. `None` for something detected and not yet
+    /// written down anywhere — which the interface shows as an unnamed source rather than
+    /// inventing something.
+    pub name: Option<Naming>,
     /// The most recent bearing, from wherever that witness was.
     pub bearing: Bearing,
     pub distance: Distance,
@@ -238,6 +297,7 @@ pub struct StarFile {
     sightings: Vec<Sighting>,
     series: Vec<Series>,
     claims: Vec<Claim>,
+    names: Vec<Naming>,
 }
 
 impl StarFile {
@@ -253,11 +313,15 @@ impl StarFile {
         &self.claims
     }
 
+    pub fn names(&self) -> &[Naming] {
+        &self.names
+    }
+
     pub fn series_in(&self, band: Band) -> Option<&Series> {
         self.series.iter().find(|s| s.band == band)
     }
 
-    fn believe(&self, star: StarId) -> Option<Belief> {
+    fn believe(&self, star: StarId, owner: Witness) -> Option<Belief> {
         let latest = self
             .sightings
             .iter()
@@ -274,8 +338,15 @@ impl StarFile {
             .claims
             .iter()
             .min_by(|a, b| sigma_of(a).total_cmp(&sigma_of(b)));
+        let mut name: Option<&Naming> = None;
+        for naming in &self.names {
+            if better_name(name, naming, owner) {
+                name = Some(naming);
+            }
+        }
         Some(Belief {
             star,
+            name: name.cloned(),
             bearing: latest.bearing,
             distance: match (taken, claimed) {
                 (false, Some(claim)) => claim.distance,
@@ -408,6 +479,30 @@ impl Knowledge {
         self.refresh(star);
     }
 
+    /// File what somebody calls a star. One name per witness: renaming is stating a new one,
+    /// and the later statement is what that witness calls it now.
+    pub fn named(&mut self, star: StarId, naming: Naming) {
+        let file = self.files.entry(star).or_default();
+        match file.names.iter_mut().find(|n| n.witness == naming.witness) {
+            Some(held) if held.stated_s > naming.stated_s => {}
+            Some(held) => *held = naming,
+            None => file.names.push(naming),
+        }
+        self.refresh(star);
+    }
+
+    /// Give a star this craft's own name for it.
+    pub fn name_it(&mut self, star: StarId, name: impl Into<String>, now_s: f64) {
+        let naming = Naming {
+            witness: self.owner,
+            name: name.into(),
+            kind: NameKind::Given,
+            stated_s: now_s,
+            lineage: Lineage::new(),
+        };
+        self.named(star, naming);
+    }
+
     /// File a photometric sample this craft measured itself.
     pub fn measured(&mut self, star: StarId, witness: Witness, band: Band, sample: Sample) {
         let file = self.files.entry(star).or_default();
@@ -455,18 +550,29 @@ impl Knowledge {
                 })
                 .cloned()
                 .collect();
+            let names: Vec<Naming> = file
+                .names
+                .iter()
+                .filter(|n| learnt_s(&n.lineage, n.stated_s) > since_s)
+                .cloned()
+                .collect();
             let claims: Vec<Claim> = file
                 .claims
                 .iter()
                 .filter(|c| learnt_s(&c.lineage, c.stated_s) > since_s)
                 .cloned()
                 .collect();
-            if !sightings.is_empty() || !series.is_empty() || !claims.is_empty() {
+            if !sightings.is_empty()
+                || !series.is_empty()
+                || !claims.is_empty()
+                || !names.is_empty()
+            {
                 entries.push(Entry {
                     star: *star,
                     sightings,
                     series,
                     claims,
+                    names,
                 });
             }
         }
@@ -494,6 +600,11 @@ impl Knowledge {
                 sighting.lineage.push(hop);
                 self.file_sighting(entry.star, sighting);
             }
+            for naming in &entry.names {
+                let mut naming = naming.clone();
+                naming.lineage.push(hop);
+                self.named(entry.star, naming);
+            }
             for claim in &entry.claims {
                 let mut claim = claim.clone();
                 claim.lineage.push(hop);
@@ -520,9 +631,22 @@ impl Knowledge {
 
     fn file_sighting(&mut self, star: StarId, sighting: Sighting) {
         let witness = sighting.witness;
+        let owner = self.owner;
         let file = self.files.entry(star).or_default();
         if file.sightings.iter().any(|s| s.same_as(&sighting)) {
             return;
+        }
+        // Finding something is writing it down. A craft's own first detection gets a
+        // designation from the direction it was found in, so the log has something to call it
+        // until somebody names it properly.
+        if witness == owner && file.names.is_empty() {
+            file.names.push(Naming {
+                witness: owner,
+                name: designation(sighting.bearing.toward),
+                kind: NameKind::Designation,
+                stated_s: sighting.observed_s,
+                lineage: Lineage::new(),
+            });
         }
         file.sightings.push(sighting);
         file.decimate(witness);
@@ -530,7 +654,11 @@ impl Knowledge {
     }
 
     fn refresh(&mut self, star: StarId) {
-        if let Some(belief) = self.files.get(&star).and_then(|f| f.believe(star)) {
+        if let Some(belief) = self
+            .files
+            .get(&star)
+            .and_then(|f| f.believe(star, self.owner))
+        {
             self.beliefs.insert(star, belief);
         }
     }
@@ -544,6 +672,8 @@ pub struct Entry {
     pub series: Vec<Series>,
     /// Conclusions rather than measurements: see [`Claim`].
     pub claims: Vec<Claim>,
+    /// What the sender and whoever told them call it: see [`Naming`].
+    pub names: Vec<Naming>,
 }
 
 /// What one craft sends another. A message like any other: emitted somewhere, arriving later.
@@ -845,6 +975,77 @@ mod tests {
         assert_eq!(
             ship.belief(star).unwrap().distance.position_ly(),
             Some(DVec3::Z * 12.0)
+        );
+    }
+
+    /// Finding something is writing it down, and what gets written down is a designation —
+    /// beaten by any name a crew actually chooses.
+    #[test]
+    fn a_found_star_gets_a_designation_and_a_named_one_keeps_its_name() {
+        let star = star_id(20);
+        let mut k = Knowledge::new(Witness(1));
+        k.sighted(star, sighting(1, DVec3::ZERO, DVec3::X, 0.0));
+        let found = k.belief(star).unwrap().name.clone().unwrap();
+        assert_eq!(found.kind, NameKind::Designation);
+        assert_eq!(found.witness, Witness(1));
+        assert_eq!(found.name, designation(DVec3::X));
+
+        k.name_it(star, "Kettle", 100.0);
+        let named = k.belief(star).unwrap().name.clone().unwrap();
+        assert_eq!(named.name, "Kettle");
+        assert_eq!(named.kind, NameKind::Given);
+
+        // A later sighting does not re-designate something that has a name.
+        k.sighted(star, sighting(1, DVec3::Y * 0.1, DVec3::X, 200.0));
+        assert_eq!(
+            k.belief(star).unwrap().name.as_ref().unwrap().name,
+            "Kettle"
+        );
+    }
+
+    /// A name travels like anything else, and two crews may hold different names for the same
+    /// light. Your own wins on your own screen; theirs is still there, with their name on it.
+    #[test]
+    fn a_name_is_something_somebody_said_and_carries_who_said_it() {
+        let star = star_id(21);
+        let mut theirs = Knowledge::new(Witness(2));
+        theirs.sighted(star, sighting(2, DVec3::ZERO, DVec3::X, 0.0));
+        theirs.name_it(star, "Hearthlight", 10.0);
+
+        let mut ours = Knowledge::new(Witness(1));
+        ours.sighted(star, sighting(1, DVec3::ZERO, DVec3::X, 5.0));
+        ours.receive(&theirs.report(f64::NEG_INFINITY, 20.0), 30.0);
+
+        // Theirs is a chosen name and ours is only a designation, so theirs is what we go by.
+        let belief = ours.belief(star).unwrap();
+        assert_eq!(belief.name.as_ref().unwrap().name, "Hearthlight");
+        assert_eq!(belief.name.as_ref().unwrap().witness, Witness(2));
+        assert_eq!(
+            belief.name.as_ref().unwrap().lineage.len(),
+            1,
+            "heard, not coined"
+        );
+
+        // Until we name it ourselves, at which point ours is what we call it and theirs is
+        // still on file.
+        ours.name_it(star, "The Kettle", 40.0);
+        assert_eq!(
+            ours.belief(star).unwrap().name.as_ref().unwrap().name,
+            "The Kettle"
+        );
+        assert_eq!(ours.file(star).unwrap().names().len(), 2);
+    }
+
+    #[test]
+    fn a_designation_says_which_way_it_was_found() {
+        let along_x = designation(DVec3::X);
+        let up = designation(DVec3::Z);
+        assert_ne!(along_x, up);
+        assert!(up.contains("+90"), "{up}");
+        assert_eq!(
+            designation(DVec3::X * 3.0),
+            along_x,
+            "a direction, not a distance"
         );
     }
 

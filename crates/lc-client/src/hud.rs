@@ -123,10 +123,7 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
             // to read one number off the result is the same answer at six thousand times the
             // cost. A light-year of distance is a year of staleness by definition.
             let age = session.distance_to(star);
-            let label = star
-                .name
-                .clone()
-                .unwrap_or_else(|| format!("star {:x}", id.get()));
+            let label = session.name_of(id);
             Some(format!("{label} — {age:.2} ly"))
         }),
         mapping: name.to_uppercase(),
@@ -361,14 +358,22 @@ mod tests {
         );
     }
 
+    /// A star nobody has named still has something to call it: the designation its own
+    /// discovery wrote down. Nothing falls back to a catalogue.
     #[test]
     fn an_unnamed_star_still_gets_a_label() {
         let (mut ui, mut s) = fixture();
         let id = s.stars[0].id;
-        if let Some(star) = s.stars.iter_mut().find(|x| x.id == id) {
-            star.name = None;
-        }
+        s.knowledge = lc_world::knowledge::Knowledge::new(lc_world::knowledge::Witness(0));
+        s.point_at(Some(id));
+        s.advance(1.0);
+        s.tick_instruments(1.0);
         apply(Action::SelectTarget(Some(id)), &mut ui, &mut s);
-        assert!(lines(&s, &ui).target.unwrap().ends_with(" ly"));
+        let target = lines(&s, &ui).target.unwrap();
+        assert!(target.ends_with(" ly"));
+        assert!(
+            !target.starts_with("Authored"),
+            "a catalogue name is not a name: {target}"
+        );
     }
 }

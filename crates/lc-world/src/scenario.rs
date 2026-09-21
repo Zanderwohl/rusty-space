@@ -596,7 +596,7 @@ mod tests {
             let star: CatalogueStar = provider
                 .stars()
                 .iter()
-                .find(|s| s.name.as_deref() == Some(scene.star))
+                .find(|s| s.provenance.name.as_deref() == Some(scene.star))
                 .unwrap_or_else(|| panic!("{}: no star called {}", scene.name, scene.star))
                 .clone();
             let system = LocalSystem::for_star(&star)

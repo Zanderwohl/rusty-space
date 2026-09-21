@@ -85,6 +85,9 @@ That has one architectural consequence, and it is cheap now and expensive later:
 - **Star identity is a synthetic stable ID, never a catalogue ID.** An HYG number must not
   reach `source_id`, the event store, or the wire format. The importer assigns IDs; the
   catalogue's own numbers survive only as a provenance field.
+- **A star has no name either.** The catalogue's names sit beside its keys in the same
+  provenance field and are never shown to a player. What a player sees is what somebody called
+  it, with a witness on it; see [22-provenance.md](22-provenance.md).
 
 Neither is work. Both are migrations if skipped.
 

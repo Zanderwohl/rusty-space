@@ -17,20 +17,29 @@ use tokio_postgres::Client;
 
 async fn store() -> Option<Client> {
     let client = lc_store::connect().await.ok()?;
-    lc_store::migrate::apply(&client).await.expect("the schema applies");
+    lc_store::migrate::apply(&client)
+        .await
+        .expect("the schema applies");
     Some(client)
 }
 
 async fn clear(client: &Client, band: i64) {
     client
-        .execute("DELETE FROM ships WHERE ship_id BETWEEN $1 AND $2", &[&band, &(band + 999)])
+        .execute(
+            "DELETE FROM ships WHERE ship_id BETWEEN $1 AND $2",
+            &[&band, &(band + 999)],
+        )
         .await
         .unwrap();
 }
 
 /// A ship part-way through a crossing, which is the state with the most to lose.
 fn under_way(id: i64) -> Craft {
-    let mut craft = Craft::at(CraftId(id), Kind::Ship, DVec3::new(4.200079062537049, 0.0, 0.0));
+    let mut craft = Craft::at(
+        CraftId(id),
+        Kind::Ship,
+        DVec3::new(4.200079062537049, 0.0, 0.0),
+    );
     craft.name = Some("Ada".into());
     // The coordinate that found `serde_json`'s rounding. Kept here on purpose: this is the path
     // that has to carry it intact.
@@ -78,7 +87,10 @@ async fn a_craft_written_to_the_store_comes_back_bit_for_bit() {
         "a coordinate moved in the round trip",
     );
     // The crossing itself, re-planned from its recipe at the far end and identical to the bit.
-    assert_eq!(back.motion.motive, craft.motion.motive, "it came back on a different flight");
+    assert_eq!(
+        back.motion.motive, craft.motion.motive,
+        "it came back on a different flight"
+    );
     match (&back.motion.motive, &craft.motion.motive) {
         (Motive::Crossing(a), Motive::Crossing(b)) => {
             assert_eq!(a.to_ly.y.to_bits(), b.to_ly.y.to_bits(), "the target moved");
@@ -96,11 +108,20 @@ async fn the_newest_checkpoint_is_the_one_that_comes_back() {
     clear(&client, band).await;
 
     let mut craft = under_way(band);
-    save_ships(&client, &[save(&craft, Some("acct-again"), None, 1)]).await.unwrap();
+    save_ships(&client, &[save(&craft, Some("acct-again"), None, 1)])
+        .await
+        .unwrap();
     craft.motion.clock_s = 999_999.0;
-    save_ships(&client, &[save(&craft, Some("acct-again"), None, 2)]).await.unwrap();
+    save_ships(&client, &[save(&craft, Some("acct-again"), None, 2)])
+        .await
+        .unwrap();
 
-    let read = load_ships(&client).await.unwrap().into_iter().find(|s| s.ship_id == band).unwrap();
+    let read = load_ships(&client)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|s| s.ship_id == band)
+        .unwrap();
     assert_eq!(read.saved_t, 2);
     assert_eq!(load(&read, None).unwrap().motion.clock_s, 999_999.0);
 }
@@ -110,10 +131,16 @@ async fn the_newest_checkpoint_is_the_one_that_comes_back() {
 async fn a_shards_clock_and_counter_come_back() {
     let Some(client) = store().await else { return };
     let shard_id = 7_102_000;
-    client.execute("DELETE FROM shard_state WHERE shard_id = $1", &[&shard_id]).await.unwrap();
+    client
+        .execute("DELETE FROM shard_state WHERE shard_id = $1", &[&shard_id])
+        .await
+        .unwrap();
 
     assert_eq!(load_shard(&client, shard_id).await.unwrap(), None);
-    let state = Shard { now_t: 317_767_500_000, next_ship: 5 };
+    let state = Shard {
+        now_t: 317_767_500_000,
+        next_ship: 5,
+    };
     save_shard(&client, shard_id, state).await.unwrap();
     assert_eq!(load_shard(&client, shard_id).await.unwrap(), Some(state));
 }

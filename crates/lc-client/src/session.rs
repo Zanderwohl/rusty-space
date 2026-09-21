@@ -562,6 +562,29 @@ impl Session {
         Some(obs)
     }
 
+    /// What this ship calls a star.
+    ///
+    /// **Not the catalogue.** Nothing has a name of its own: what comes back is whatever the
+    /// crew, the charts, or somebody who told them calls it, and a star nobody aboard has
+    /// detected has no name here to give. See `lightcone/docs/22-provenance.md`.
+    pub fn name_of(&self, id: StarId) -> String {
+        match self.knowledge.belief(id).and_then(|b| b.name.as_ref()) {
+            Some(naming) => naming.name.clone(),
+            None => "unidentified source".to_string(),
+        }
+    }
+
+    /// Give a star a name of this ship's own.
+    pub fn name_star(&mut self, id: StarId, name: &str) -> bool {
+        let name = name.trim();
+        if name.is_empty() || !self.knowledge.knows(id) {
+            return false;
+        }
+        let now = self.coordinate_time_s();
+        self.knowledge.name_it(id, name, now);
+        true
+    }
+
     /// What is believed about a star, or nothing if it has never been detected.
     pub fn belief(&self, id: StarId) -> Option<&Belief> {
         self.knowledge.belief(id)

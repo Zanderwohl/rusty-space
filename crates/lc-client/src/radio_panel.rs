@@ -601,8 +601,7 @@ fn compose(
         }
         ui.add_enabled_ui(star.is_some(), |ui| {
             let name = star
-                .and_then(|id| game.star(id))
-                .and_then(|s| s.name.clone())
+                .map(|id| game.name_of(id))
                 .unwrap_or_else(|| "the selected star".into());
             ui.selectable_value(aimed, Aimed::AtTheSelectedStar, "beam star")
                 .on_hover_text(format!(

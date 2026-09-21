@@ -4,6 +4,11 @@
 //! validated, not what ships. So star data arrives through a provider, and **a catalogue's own
 //! numbering never becomes a [`StarId`]** — it survives only as provenance. Both rules are
 //! free now and are data migrations later.
+//!
+//! Its **names** are provenance too, for the same reason and one more: nothing in this game has
+//! a name of its own. A name is something an observer gave a star and may have passed on, and
+//! it lives in [`crate::knowledge`] with a witness on it. That is why [`CatalogueStar`] has no
+//! `name` field to reach for — see `lightcone/docs/22-provenance.md`.
 
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
@@ -40,12 +45,20 @@ impl StarId {
     }
 }
 
-/// Where a star's data came from. Never an identity.
+/// Where a star's data came from. Never an identity, and never what anybody calls it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Provenance {
     pub source: String,
     /// The source's own row number or designation, for tracing back to it.
     pub key: u64,
+    /// What the catalogue calls it.
+    ///
+    /// **Provenance, not a name.** Nothing in the game has a name of its own: a name is
+    /// something an observer gave a star and may have told somebody else, and it lives in
+    /// `knowledge` with a witness on it. This is here so a charting office has something to
+    /// hand a ship, and so generation can call a planet after its primary, and for no other
+    /// reason. Never show it to a player. See `lightcone/docs/22-provenance.md`.
+    pub name: Option<String>,
 }
 
 /// Which member of a multiple system a record describes.
@@ -68,7 +81,6 @@ impl Component {
 pub struct CatalogueStar {
     pub id: StarId,
     pub provenance: Provenance,
-    pub name: Option<String>,
     /// Ecliptic position in light-years, the frame the simulation uses.
     pub position_ly: DVec3,
     /// Ecliptic velocity in m/s.
@@ -138,8 +150,8 @@ impl AuthoredStars {
                 provenance: Provenance {
                     source: "authored".into(),
                     key,
+                    name: Some(format!("Authored {key}")),
                 },
-                name: Some(format!("Authored {key}")),
                 position_ly: DVec3::new(ly, 0.0, 0.0),
                 velocity: DVec3::ZERO,
                 star: Star {

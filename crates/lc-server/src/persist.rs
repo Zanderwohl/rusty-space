@@ -254,7 +254,9 @@ pub fn decode(row: &Ship) -> Result<Saved, String> {
                 fitting: None,
             })
         }
-        other => Err(format!("format {other} is not {OLDEST_FORMAT} to {SAVE_FORMAT}")),
+        other => Err(format!(
+            "format {other} is not {OLDEST_FORMAT} to {SAVE_FORMAT}"
+        )),
     }
 }
 
@@ -287,8 +289,11 @@ impl<J: Journal> Server<J> {
     /// Every craft, not the connected ones: a ship exists whether or not anyone is flying it,
     /// which is the same reason the tick advances the whole fleet.
     pub fn checkpoint(&self) -> Checkpoint {
-        let account_of: HashMap<ShipId, &str> =
-            self.by_account.iter().map(|(account, ship)| (*ship, account.as_str())).collect();
+        let account_of: HashMap<ShipId, &str> = self
+            .by_account
+            .iter()
+            .map(|(account, ship)| (*ship, account.as_str()))
+            .collect();
         Checkpoint {
             now_t: self.now_t,
             next_ship: self.next_ship,
@@ -318,15 +323,14 @@ impl<J: Journal> Server<J> {
     /// The clock resumes where it stopped rather than jumping forward by however long the
     /// process was down. A shard that fabricated the missing years would be asserting that
     /// things happened in them, when nothing was journalled and nobody was told.
-    pub fn adopt(
-        &mut self,
-        checkpoint: Checkpoint,
-    ) -> Vec<Unreadable> {
+    pub fn adopt(&mut self, checkpoint: Checkpoint) -> Vec<Unreadable> {
         self.now_t = checkpoint.now_t;
         self.next_ship = self.next_ship.max(checkpoint.next_ship);
         let mut unreadable = Vec::new();
         for row in &checkpoint.ships {
-            let system = self.position_of(row).and_then(|at| self.world.system_at(at));
+            let system = self
+                .position_of(row)
+                .and_then(|at| self.world.system_at(at));
             match load(row, system.as_deref()) {
                 Ok(mut craft) => {
                     if let Some(mut fitting) = craft.fitting().cloned() {
@@ -341,12 +345,15 @@ impl<J: Journal> Server<J> {
                     // Taken up again on the next tick, which plans as for a fresh order.
                     let pursuit = decode(row).ok().and_then(|saved| saved.pursuit);
                     if let Some(pursuit) = pursuit {
-                        self.pursuits.insert(craft.id, Pursuit {
-                            quarry: pursuit.quarry,
-                            closeness: pursuit.closeness.into(),
-                            last_plan_t: i64::MIN,
-                            last_seen: None,
-                        });
+                        self.pursuits.insert(
+                            craft.id,
+                            Pursuit {
+                                quarry: pursuit.quarry,
+                                closeness: pursuit.closeness.into(),
+                                last_plan_t: i64::MIN,
+                                last_seen: None,
+                            },
+                        );
                     }
                     self.next_ship = self.next_ship.max(craft.id.0 + 1);
                     self.fleet.insert(craft);
@@ -428,8 +435,15 @@ mod tests {
         assert_eq!(back.kind, craft.kind);
         assert_eq!(back.name, craft.name);
         assert_eq!(back.noise_floor, craft.noise_floor);
-        assert_eq!(back.length_m, craft.length_m, "the ship came back a different size");
-        assert_ne!(back.length_m, back.kind.length_m(), "premise: it is not the kind's default");
+        assert_eq!(
+            back.length_m, craft.length_m,
+            "the ship came back a different size"
+        );
+        assert_ne!(
+            back.length_m,
+            back.kind.length_m(),
+            "premise: it is not the kind's default"
+        );
         assert_eq!(back.motion.position_ly, craft.motion.position_ly);
         assert_eq!(back.motion.motive, craft.motion.motive);
     }
@@ -445,7 +459,11 @@ mod tests {
         for kind in [Kind::Ship, Kind::Probe, Kind::Relay, Kind::Beacon] {
             assert_eq!(kind_of(kind_code(kind)), Some(kind));
         }
-        assert_eq!(kind_of(4), None, "an unknown code is a refusal, not a default ship");
+        assert_eq!(
+            kind_of(4),
+            None,
+            "an unknown code is a refusal, not a default ship"
+        );
     }
 
     /// **The format is exact, and JSON was not.**
@@ -474,7 +492,11 @@ mod tests {
         // again.
         let text = serde_json::to_string(&awkward).expect("it writes");
         let json: f64 = serde_json::from_str(&text).expect("it reads");
-        assert_ne!(json.to_bits(), awkward.to_bits(), "serde_json round-trips this now; check why");
+        assert_ne!(
+            json.to_bits(),
+            awkward.to_bits(),
+            "serde_json round-trips this now; check why"
+        );
     }
 
     /// A row written by an older shape is refused, not misread. Postcard is positional and
@@ -615,8 +637,20 @@ mod tests {
     #[test]
     fn a_ships_modules_and_energy_survive_the_round_trip() {
         let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
-        craft.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, 0.0)));
-        craft.begin_refit(Loadout { engines: 7, ..Loadout::STARTING }, 10.0).unwrap();
+        craft.fit(Some(Fitting::full(
+            Loadout::STARTING,
+            Balance::DEFAULT,
+            0.0,
+        )));
+        craft
+            .begin_refit(
+                Loadout {
+                    engines: 7,
+                    ..Loadout::STARTING
+                },
+                10.0,
+            )
+            .unwrap();
         let back = load(&save(&craft, Some("acct"), None, 20_000_000), None).expect("it reads");
         assert_eq!(back.fitting(), craft.fitting());
         assert!(back.is_refitting(20.0));
@@ -655,7 +689,10 @@ mod tests {
         assert_eq!(fitting.loadout, Loadout::STARTING);
         assert!((player.length_m - 500.0).abs() < 1.0e-9);
         assert!((player.rated_drive(3.0).accel_g - 5.0).abs() < 1.0e-9);
-        assert!(load(&row(None), None).unwrap().fitting().is_none(), "a craft with no pilot is not");
+        assert!(
+            load(&row(None), None).unwrap().fitting().is_none(),
+            "a craft with no pilot is not"
+        );
     }
 
     /// A row that cannot be read is an error and never a fresh ship at the origin.
@@ -685,7 +722,9 @@ mod tests {
     fn a_drifting_ship_keeps_the_line_it_was_on() {
         let mut craft = a_craft();
         craft.motion.beta = DVec3::new(0.0, 0.1, 0.0);
-        craft.motion.resume_drifting(DVec3::new(9.0, 0.0, 0.0), 1_234.0);
+        craft
+            .motion
+            .resume_drifting(DVec3::new(9.0, 0.0, 0.0), 1_234.0);
         let back = load(&save(&craft, None, None, 5_000_000), None).expect("it reads");
         match back.motion.motive {
             Motive::Drifting { from_ly, since_t } => {

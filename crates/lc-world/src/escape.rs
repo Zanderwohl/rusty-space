@@ -128,7 +128,7 @@ mod tests {
                 .ok()?;
         let sun = crate::sky::StarProvider::stars(&provider)
             .iter()
-            .find(|s| s.name.as_deref() == Some("Sol"))?
+            .find(|s| s.provenance.name.as_deref() == Some("Sol"))?
             .clone();
         let mut system = LocalSystem::for_star(&sun)?;
         system.advance_to(0.0);

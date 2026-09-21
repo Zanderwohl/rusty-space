@@ -68,10 +68,7 @@ fn run(output: &str, catalogue: Option<&str>) -> Result<String, String> {
     // plotted against the time the light left. Without them it would be against arrival.
     session.issue_charts(lc_client::session::CHARTED_LY);
     session.point_at(Some(target));
-    let name = session
-        .star(target)
-        .and_then(|s| s.name.clone())
-        .unwrap_or_else(|| "nearest star".into());
+    let name = session.name_of(target);
 
     // Two in-game years, sampled finely enough to resolve a transit.
     let real_seconds = 2.0 * 31_557_600.0 / TIME_RATE;

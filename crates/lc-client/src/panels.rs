@@ -280,6 +280,7 @@ pub fn open_panels(
     mut revealed: Local<Option<Target>>,
     mut tab: Local<SystemTab>,
     mut draft: Local<String>,
+    mut name_draft: Local<String>,
     mut aimed: Local<crate::radio_panel::Aimed>,
     mut seal: Local<bool>,
 ) {
@@ -298,7 +299,12 @@ pub fn open_panels(
                 Panel::Settings => settings(ui, &ui_state),
                 Panel::Debug => debug(ui, &ui_state, &game, sky.as_deref(), &mut out),
                 Panel::Telescope => crate::telescope_panel::telescope(
-                    ui, &ui_state, &mut game, &mut out, &mut curve,
+                    ui,
+                    &ui_state,
+                    &mut game,
+                    &mut name_draft,
+                    &mut out,
+                    &mut curve,
                 ),
                 Panel::System => system(
                     ui,
@@ -500,7 +506,7 @@ fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Re
             ui.label("At rest.");
             match state.selected.and_then(|id| game.star(id)) {
                 Some(star) => {
-                    let name = star.name.clone().unwrap_or_else(|| "unnamed".into());
+                    let name = game.name_of(star.id);
                     ui.label(format!("{name} — {:.2} ly", game.distance_to(star)));
                     if ui.button("Fly there").clicked() {
                         ask(out, Action::FlyTo(None));

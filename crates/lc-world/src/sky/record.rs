@@ -59,8 +59,8 @@ impl StarRecord {
             provenance: Provenance {
                 source: source.into(),
                 key: self.key,
+                name: self.name.clone(),
             },
-            name: self.name.clone(),
             position_ly: self.position_ly,
             velocity: self.velocity,
             star: Star {

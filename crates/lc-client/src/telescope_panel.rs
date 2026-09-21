@@ -22,6 +22,7 @@ pub fn telescope(
     ui: &mut egui::Ui,
     state: &Ui,
     game: &mut Game,
+    draft: &mut String,
     out: &mut MessageWriter<Requested>,
     plot: &mut CurvePlot,
 ) {
@@ -62,6 +63,7 @@ pub fn telescope(
             ask(out, Action::WatchSelected);
         }
     });
+    naming(ui, state, game, draft, out);
     ui.separator();
 
     provenance(ui, game);
@@ -132,10 +134,7 @@ fn detected(game: &Game) -> Vec<Detected> {
         .knowledge
         .beliefs()
         .map(|belief| {
-            let name = game
-                .star(belief.star)
-                .and_then(|s| s.name.clone())
-                .unwrap_or_else(|| format!("{:x}", belief.star.get()));
+            let name = game.name_of(belief.star);
             let (order, distance) = match belief.distance {
                 Distance::Measured { sigma_ly, .. } => {
                     let ly = belief
@@ -160,12 +159,52 @@ fn detected(game: &Game) -> Vec<Detected> {
     lines.into_iter().map(|(_, line)| line).collect()
 }
 
+/// The field that calls a star something.
+///
+/// A name is a record like any other: this ship's, stamped with when it said so, and carried
+/// to anyone it reports to. Nothing has a name before somebody gives it one — what a row shows
+/// until then is the designation its own discovery wrote down.
+fn naming(
+    ui: &mut egui::Ui,
+    state: &Ui,
+    game: &Game,
+    draft: &mut String,
+    out: &mut MessageWriter<Requested>,
+) {
+    let Some(id) = state.selected.filter(|id| game.knows(*id)) else {
+        return;
+    };
+    ui.horizontal(|ui| {
+        ui.label("Call it");
+        let field = ui.add(
+            egui::TextEdit::singleline(draft)
+                .hint_text(game.name_of(id))
+                .desired_width(150.0),
+        );
+        let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if (entered || ui.button("Name it").clicked()) && !draft.trim().is_empty() {
+            ask(out, Action::NameSelected(std::mem::take(draft)));
+        }
+    });
+}
+
 /// Where the belief about the selected star came from, and how old it is.
 fn provenance(ui: &mut egui::Ui, game: &Game) {
     let Some(belief) = game.pointing.and_then(|id| game.belief(id)) else {
         ui.weak("Nothing detected under the crosshair yet.");
         return;
     };
+    match belief.name.as_ref() {
+        Some(naming) if naming.witness == game.knowledge.owner => {
+            ui.label(format!("Called {} by this ship.", naming.name));
+        }
+        Some(naming) => {
+            ui.label(format!("Called {} by whoever charted it.", naming.name));
+        }
+        None => {
+            ui.weak("Nobody has called it anything.");
+        }
+    }
     ui.label(format!(
         "{} bearings from {} {}",
         belief.sightings,

@@ -343,9 +343,7 @@ fn push_stars(build: &mut Build, session: &Session, eye_ly: DVec3) {
             continue;
         }
         let star = session.star(belief.star);
-        let name = star
-            .and_then(|s| s.name.clone())
-            .unwrap_or_else(|| format!("{:x}", belief.star.get()));
+        let name = session.name_of(belief.star);
         // Radius and mass are not observed quantities here; they come from the same catalogue
         // the truth does, and are what the mark is *sized* by rather than what it claims.
         let (radius_m, mass_solar) = star

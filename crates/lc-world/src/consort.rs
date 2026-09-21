@@ -212,7 +212,7 @@ mod tests {
                 .expect("the catalogue");
         let sun = crate::sky::StarProvider::stars(&provider)
             .iter()
-            .find(|s| s.name.as_deref() == Some("Sol"))
+            .find(|s| s.provenance.name.as_deref() == Some("Sol"))
             .expect("the Sun")
             .clone();
         let mut system = LocalSystem::for_star(&sun).expect("the solar system");

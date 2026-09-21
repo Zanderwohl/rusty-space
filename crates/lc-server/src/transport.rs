@@ -69,7 +69,13 @@ mod tests {
     #[test]
     fn what_goes_in_comes_out_once() {
         let mut wire = Loopback::new();
-        wire.client_says(ClientId(1), Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: String::new() });
+        wire.client_says(
+            ClientId(1),
+            Inbound::Hello {
+                protocol: PROTOCOL_VERSION,
+                ticket: String::new(),
+            },
+        );
         assert_eq!(wire.poll().len(), 1);
         assert!(wire.poll().is_empty(), "a message was delivered twice");
 
@@ -77,6 +83,9 @@ mod tests {
         assert_eq!(wire.peek(ClientId(1)).len(), 1);
         assert_eq!(wire.take(ClientId(1)).len(), 1);
         assert!(wire.take(ClientId(1)).is_empty());
-        assert!(wire.take(ClientId(2)).is_empty(), "a client nobody wrote to has nothing");
+        assert!(
+            wire.take(ClientId(2)).is_empty(),
+            "a client nobody wrote to has nothing"
+        );
     }
 }

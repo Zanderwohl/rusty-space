@@ -395,13 +395,7 @@ fn sight(
         // A light in the sky can be pointed at whether or not anybody has identified it —
         // that is how it gets identified. What it is *called* is knowledge, though, so an
         // undetected source is one until the telescope has had it.
-        let name = if game.knows(star.id) {
-            star.name
-                .clone()
-                .unwrap_or_else(|| format!("{:x}", star.id.get()))
-        } else {
-            "unidentified source".to_string()
-        };
+        let name = game.name_of(star.id);
         out.push(Sighted {
             subject: Subject::Star(star.id, name),
             clip: project(direction),

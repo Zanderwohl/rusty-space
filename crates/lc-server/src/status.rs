@@ -99,14 +99,18 @@ pub(crate) fn nearest_within_shell(
     at: glam::DVec3,
     stars: &[CatalogueStar],
 ) -> Option<&CatalogueStar> {
-    nearest(at, stars).filter(|(_, ly)| *ly < LOCAL_SHELL_LY).map(|(star, _)| star)
+    nearest(at, stars)
+        .filter(|(_, ly)| *ly < LOCAL_SHELL_LY)
+        .map(|(star, _)| star)
 }
 
 fn whereabouts(at: glam::DVec3, stars: &[CatalogueStar]) -> Whereabouts {
     let Some((star, ly)) = nearest(at, stars) else {
         return Whereabouts::Nowhere;
     };
+    // The catalogue's own name: this is the operator's status page, not a player's screen.
     let name = star
+        .provenance
         .name
         .clone()
         .unwrap_or_else(|| format!("star {}", star.id.get()));
@@ -157,8 +161,8 @@ mod tests {
             provenance: Provenance {
                 source: "test".into(),
                 key,
+                name: name.map(str::to_owned),
             },
-            name: name.map(str::to_owned),
             position_ly: at,
             velocity: glam::DVec3::ZERO,
             star: Star {

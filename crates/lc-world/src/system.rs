@@ -121,6 +121,7 @@ impl LocalSystem {
         let mut system = Self {
             star: star.id,
             star_name: star
+                .provenance
                 .name
                 .clone()
                 .unwrap_or_else(|| format!("{:x}", star.id.get())),
@@ -143,7 +144,7 @@ impl LocalSystem {
     }
 
     fn contents_for(star: &CatalogueStar) -> UniverseFileContents {
-        match star.name.as_deref() {
+        match star.provenance.name.as_deref() {
             // The one system with measured data rather than generated: two hundred and thirty
             // bodies fitted against JPL, moons and comets included.
             Some(SOL) => em_sim::presets::solar_system(),
@@ -609,7 +610,7 @@ mod tests {
         let Some(sun) = provider
             .stars()
             .iter()
-            .find(|s| s.name.as_deref() == Some(SOL))
+            .find(|s| s.provenance.name.as_deref() == Some(SOL))
         else {
             panic!("the catalogue should carry Sol")
         };
@@ -654,7 +655,7 @@ mod tests {
         let sun = provider
             .stars()
             .iter()
-            .find(|s| s.name.as_deref() == Some(SOL));
+            .find(|s| s.provenance.name.as_deref() == Some(SOL));
         let Some(sun) = sun else {
             panic!("the catalogue should carry Sol")
         };
@@ -669,7 +670,7 @@ mod tests {
         let other = provider
             .stars()
             .iter()
-            .find(|s| s.name.as_deref() != Some(SOL))
+            .find(|s| s.provenance.name.as_deref() != Some(SOL))
             .unwrap();
         let made = LocalSystem::for_star(other).expect("a generated system loads");
         assert!(!made.is_empty() && made.len() < real.len());
@@ -739,7 +740,7 @@ mod tests {
         let Some(sun) = provider
             .stars()
             .iter()
-            .find(|s| s.name.as_deref() == Some(SOL))
+            .find(|s| s.provenance.name.as_deref() == Some(SOL))
         else {
             return;
         };
@@ -788,7 +789,7 @@ mod tests {
         let Some(sun) = provider
             .stars()
             .iter()
-            .find(|s| s.name.as_deref() == Some(SOL))
+            .find(|s| s.provenance.name.as_deref() == Some(SOL))
         else {
             return;
         };
@@ -831,7 +832,7 @@ mod tests {
         let Some(sun) = provider
             .stars()
             .iter()
-            .find(|s| s.name.as_deref() == Some(SOL))
+            .find(|s| s.provenance.name.as_deref() == Some(SOL))
         else {
             return;
         };
@@ -890,7 +891,7 @@ mod tests {
         let Some(sun) = provider
             .stars()
             .iter()
-            .find(|s| s.name.as_deref() == Some(SOL))
+            .find(|s| s.provenance.name.as_deref() == Some(SOL))
         else {
             return;
         };

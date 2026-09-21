@@ -54,7 +54,10 @@ pub struct Trusted {
 
 impl Trusted {
     pub fn new(audience: &str) -> Self {
-        Self { keys: HashMap::new(), audience: audience.to_owned() }
+        Self {
+            keys: HashMap::new(),
+            audience: audience.to_owned(),
+        }
     }
 
     /// Learn a key from a JWKS document.
@@ -64,7 +67,9 @@ impl Trusted {
     /// confusion is the JWT vulnerability, and the way it happens is a verifier being
     /// accommodating.
     pub fn learn(&mut self, jwks: &serde_json::Value) -> usize {
-        let Some(keys) = jwks.get("keys").and_then(|k| k.as_array()) else { return 0 };
+        let Some(keys) = jwks.get("keys").and_then(|k| k.as_array()) else {
+            return 0;
+        };
         let mut learned = 0;
         for key in keys {
             let (Some(kid), Some(x)) = (
@@ -143,8 +148,8 @@ impl Spent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::Engine as _;
     use crate::testing::Broker;
+    use base64::Engine as _;
     use serde_json::json;
 
     const AUDIENCE: &str = "lightcone-server-1";
@@ -170,7 +175,11 @@ mod tests {
     fn a_ticket_for_another_server_is_refused() {
         let broker = Broker::new([7u8; 32]);
         let trusted = trusting(&broker);
-        assert!(trusted.check(&broker.mint("acct-1", AUDIENCE, 60, "j1")).is_ok());
+        assert!(
+            trusted
+                .check(&broker.mint("acct-1", AUDIENCE, 60, "j1"))
+                .is_ok()
+        );
         assert_eq!(
             trusted.check(&broker.mint("acct-1", "lightcone-server-2", 60, "j1")),
             Err(Rejected::NotYou),
@@ -249,25 +258,38 @@ mod tests {
 
         let mut trusted = Trusted::new(AUDIENCE);
         assert_eq!(trusted.learn(&mixed), 1, "only the Ed25519 signing key");
-        assert!(trusted.check(&broker.mint("acct-1", AUDIENCE, 60, "j1")).is_ok());
+        assert!(
+            trusted
+                .check(&broker.mint("acct-1", AUDIENCE, 60, "j1"))
+                .is_ok()
+        );
 
         // And nothing at all is an empty set, not a set that trusts everything.
         let mut empty = Trusted::new(AUDIENCE);
         assert_eq!(empty.learn(&json!({})), 0);
         assert!(empty.is_empty());
-        assert_eq!(empty.check(&broker.mint("acct-1", AUDIENCE, 60, "j1")), Err(Rejected::NotYou));
+        assert_eq!(
+            empty.check(&broker.mint("acct-1", AUDIENCE, 60, "j1")),
+            Err(Rejected::NotYou)
+        );
     }
 
     /// One ticket, one connection.
     #[test]
     fn a_ticket_opens_exactly_one_socket() {
         let broker = Broker::new([7u8; 32]);
-        let claims = trusting(&broker).check(&broker.mint("acct-1", AUDIENCE, 60, "j1")).unwrap();
+        let claims = trusting(&broker)
+            .check(&broker.mint("acct-1", AUDIENCE, 60, "j1"))
+            .unwrap();
         let now = jsonwebtoken::get_current_timestamp() as i64;
 
         let mut spent = Spent::default();
         assert_eq!(spent.claim(&claims, now), Ok(()));
-        assert_eq!(spent.claim(&claims, now), Err(Rejected::Spent), "it was replayed");
+        assert_eq!(
+            spent.claim(&claims, now),
+            Err(Rejected::Spent),
+            "it was replayed"
+        );
     }
 
     /// The record is bounded by the ticket lifetime: past the expiry a replay fails anyway, so
@@ -280,12 +302,16 @@ mod tests {
 
         let mut spent = Spent::default();
         for i in 0..50 {
-            let claims = trusted.check(&broker.mint("acct-1", AUDIENCE, 60, &format!("j{i}"))).unwrap();
+            let claims = trusted
+                .check(&broker.mint("acct-1", AUDIENCE, 60, &format!("j{i}")))
+                .unwrap();
             spent.claim(&claims, now).unwrap();
         }
         assert_eq!(spent.len(), 50);
 
-        let later = trusted.check(&broker.mint("acct-1", AUDIENCE, 60, "much-later")).unwrap();
+        let later = trusted
+            .check(&broker.mint("acct-1", AUDIENCE, 60, "much-later"))
+            .unwrap();
         spent.claim(&later, now + 3600).unwrap();
         assert_eq!(spent.len(), 1, "the old ones were kept");
     }

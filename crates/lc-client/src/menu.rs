@@ -240,8 +240,8 @@ fn backdrop_star(seed: u64, index: u64) -> CatalogueStar {
         provenance: Provenance {
             source: "menu".into(),
             key: index,
+            name: None,
         },
-        name: None,
         position_ly,
         velocity: DVec3::ZERO,
         star: Star {

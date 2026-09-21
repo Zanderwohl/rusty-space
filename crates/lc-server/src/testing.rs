@@ -42,7 +42,14 @@ impl Broker {
         self.mint_claims(sub, aud, 60, jti, Some(perm))
     }
 
-    fn mint_claims(&self, sub: &str, aud: &str, exp_in: i64, jti: &str, perm: Option<i32>) -> String {
+    fn mint_claims(
+        &self,
+        sub: &str,
+        aud: &str,
+        exp_in: i64,
+        jti: &str,
+        perm: Option<i32>,
+    ) -> String {
         use ed25519_dalek::pkcs8::EncodePrivateKey;
         let now = jsonwebtoken::get_current_timestamp() as i64;
         let der = self.signing.to_pkcs8_der().unwrap();
@@ -60,4 +67,3 @@ impl Broker {
         jsonwebtoken::encode(&header, &claims, &key).unwrap()
     }
 }
-

@@ -61,7 +61,13 @@ impl WebSocketServer {
             }
         });
 
-        Ok(Self { local_addr, inbox, joined, parted, outboxes })
+        Ok(Self {
+            local_addr,
+            inbox,
+            joined,
+            parted,
+            outboxes,
+        })
     }
 
     /// Connections opened since the last call. The caller admits them to the world.
@@ -93,7 +99,9 @@ async fn serve(
 ) {
     use futures_util::{SinkExt, StreamExt};
 
-    let Ok(socket) = tokio_tungstenite::accept_async(stream).await else { return };
+    let Ok(socket) = tokio_tungstenite::accept_async(stream).await else {
+        return;
+    };
     let (mut writer, mut reader) = socket.split();
     let (to_client, mut outbox) = unbounded_channel::<Outbound>();
     outboxes.lock().await.insert(id, to_client);
@@ -101,7 +109,11 @@ async fn serve(
 
     let writing = tokio::spawn(async move {
         while let Some(message) = outbox.recv().await {
-            if writer.send(Message::Binary(lc_proto::encode(&message))).await.is_err() {
+            if writer
+                .send(Message::Binary(lc_proto::encode(&message)))
+                .await
+                .is_err()
+            {
                 break;
             }
         }
@@ -177,7 +189,9 @@ mod tests {
     async fn a_client_connects_over_a_socket_and_is_welcomed() {
         let mut wire = WebSocketServer::bind("127.0.0.1:0").await.expect("a port");
         let url = format!("ws://{}", wire.local_addr);
-        let (mut client, _) = tokio_tungstenite::connect_async(&url).await.expect("connected");
+        let (mut client, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connected");
 
         let joined = until(|| wire.accepted()).await;
         assert_eq!(joined.len(), 1, "the connection was never seen");
@@ -202,13 +216,12 @@ mod tests {
         // Tick until the hello has come through and been answered.
         for _ in 0..200 {
             server.tick(&mut wire).await.unwrap();
-            if let Ok(Some(Ok(frame))) = tokio::time::timeout(
-                std::time::Duration::from_millis(5),
-                client.next(),
-            )
-            .await
+            if let Ok(Some(Ok(frame))) =
+                tokio::time::timeout(std::time::Duration::from_millis(5), client.next()).await
             {
-                let Message::Binary(bytes) = frame else { continue };
+                let Message::Binary(bytes) = frame else {
+                    continue;
+                };
                 let message: Outbound = lc_proto::decode(&bytes).expect("it decodes");
                 assert!(
                     matches!(message, Outbound::Welcome { client_id, ship_id, .. }
@@ -226,34 +239,35 @@ mod tests {
     async fn an_intent_crosses_the_wire_and_comes_back_as_a_sighting() {
         let mut wire = WebSocketServer::bind("127.0.0.1:0").await.expect("a port");
         let url = format!("ws://{}", wire.local_addr);
-        let (mut client, _) = tokio_tungstenite::connect_async(&url).await.expect("connected");
+        let (mut client, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connected");
         let id = until(|| wire.accepted()).await[0];
 
         let mut server = Server::new(Memory::default(), 0, 1);
         server.admit(id, still(ShipId(1), glam::DVec3::ZERO), 0.0);
 
         client
-            .send(Message::Binary(
-                lc_proto::encode(&Inbound::Act(Intent {
-                    ship_id: ShipId(1),
-                    order: Order::Transmit { power_w: 1.0e9 },
-                    issued_at_client_t: 0,
-                })),
-            ))
+            .send(Message::Binary(lc_proto::encode(&Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: Order::Transmit { power_w: 1.0e9 },
+                issued_at_client_t: 0,
+            }))))
             .await
             .unwrap();
 
         for _ in 0..200 {
             server.tick(&mut wire).await.unwrap();
-            if let Ok(Some(Ok(frame))) = tokio::time::timeout(
-                std::time::Duration::from_millis(5),
-                client.next(),
-            )
-            .await
+            if let Ok(Some(Ok(frame))) =
+                tokio::time::timeout(std::time::Duration::from_millis(5), client.next()).await
             {
-                let Message::Binary(bytes) = frame else { continue };
+                let Message::Binary(bytes) = frame else {
+                    continue;
+                };
                 let message: Outbound = lc_proto::decode(&bytes).expect("it decodes");
-                let Outbound::Sightings(list) = message else { continue };
+                let Outbound::Sightings(list) = message else {
+                    continue;
+                };
                 assert_eq!(list.len(), 1);
                 // Its own act, at its own position, so it is told at once.
                 assert_eq!(list[0].get().source_id, 1);
@@ -268,7 +282,9 @@ mod tests {
     async fn a_closed_connection_is_reported() {
         let mut wire = WebSocketServer::bind("127.0.0.1:0").await.expect("a port");
         let url = format!("ws://{}", wire.local_addr);
-        let (client, _) = tokio_tungstenite::connect_async(&url).await.expect("connected");
+        let (client, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connected");
         let id = until(|| wire.accepted()).await[0];
         drop(client);
         assert_eq!(until(|| wire.departed()).await, vec![id]);

@@ -39,12 +39,18 @@ pub struct World {
 
 impl World {
     pub fn new(stars: Vec<CatalogueStar>) -> Self {
-        Self { stars: Arc::new(stars), loaded: HashMap::new() }
+        Self {
+            stars: Arc::new(stars),
+            loaded: HashMap::new(),
+        }
     }
 
     /// So the process carries one catalogue however many readers it has.
     pub fn from_shared(stars: Arc<Vec<CatalogueStar>>) -> Self {
-        Self { stars, loaded: HashMap::new() }
+        Self {
+            stars,
+            loaded: HashMap::new(),
+        }
     }
 
     pub fn stars(&self) -> Arc<Vec<CatalogueStar>> {
@@ -61,7 +67,10 @@ impl World {
     /// star rather than a position: a client can ask for a star this shard holds and nothing
     /// else. Both ends hold the same catalogue — see the shard's `--sky`.
     pub fn star_at(&self, id: u64) -> Option<DVec3> {
-        self.stars.iter().find(|s| s.id.get() == id).map(|s| s.position_ly)
+        self.stars
+            .iter()
+            .find(|s| s.id.get() == id)
+            .map(|s| s.position_ly)
     }
 
     /// Where a star is, by the name the catalogue knows it under.
@@ -71,7 +80,7 @@ impl World {
     pub fn star_named(&self, name: &str) -> Option<DVec3> {
         self.stars
             .iter()
-            .find(|s| s.name.as_deref() == Some(name))
+            .find(|s| s.provenance.name.as_deref() == Some(name))
             .map(|s| s.position_ly)
     }
 
@@ -207,7 +216,15 @@ mod tests {
     }
 
     fn pulse(t: i64, at: DVec3, power_w: f64) -> Event {
-        Event { id: 1, source: ShipId(0), t, at, kind: 1, power_w, payload: "{}".into() }
+        Event {
+            id: 1,
+            source: ShipId(0),
+            t,
+            at,
+            kind: 1,
+            power_w,
+            payload: "{}".into(),
+        }
     }
 
     /// A light-microsecond of distance is a microsecond of delay, by definition. This is the
@@ -235,7 +252,11 @@ mod tests {
     fn an_arrival_is_never_rounded_earlier_than_it_is() {
         let observer = ship(2, DVec3::new(1_000.5, 0.0, 0.0));
         let scheduled = schedule(&pulse(0, DVec3::ZERO, 1.0), &Beam::OMNI, &observer).unwrap();
-        assert_eq!(scheduled.arrive_t, 1_001, "1000.5 became {}", scheduled.arrive_t);
+        assert_eq!(
+            scheduled.arrive_t, 1_001,
+            "1000.5 became {}",
+            scheduled.arrive_t
+        );
         assert!(scheduled.arrive_t as f64 >= 1_000.5);
     }
 
@@ -251,7 +272,10 @@ mod tests {
         let sent = pulse(0, DVec3::ZERO, 1.0);
         let a = schedule(&sent, &Beam::OMNI, &still).unwrap().arrive_t;
         let b = schedule(&sent, &Beam::OMNI, &closing).unwrap().arrive_t;
-        assert!(b < a, "closing on the source should meet its light sooner: {b} against {a}");
+        assert!(
+            b < a,
+            "closing on the source should meet its light sooner: {b} against {a}"
+        );
         // Closing at beta, the meeting is at d/(1+beta).
         assert!((b as f64 - 1_000_000.0 / 1.1).abs() < 2.0, "{b}");
     }
@@ -269,7 +293,9 @@ mod tests {
 
         let sky = AuthoredStars::sample();
         let star = sky.stars().first().expect("a star").clone();
-        let Some(system) = lc_world::system::LocalSystem::for_star(&star) else { return };
+        let Some(system) = lc_world::system::LocalSystem::for_star(&star) else {
+            return;
+        };
         let Some(body) = system.inventory().iter().find_map(|e| match &e.target {
             lc_world::navigation::Target::Body(name) => Some(name.clone()),
             _ => None,
@@ -277,8 +303,14 @@ mod tests {
             return;
         };
 
-        let course = Course::Orbit { body, altitude_radii: 2.0, plane: Plane::Equatorial };
-        let Some(waypoint) = course.resolve(&system, system.star_position_ly(), 0.0) else { return };
+        let course = Course::Orbit {
+            body,
+            altitude_radii: 2.0,
+            plane: Plane::Equatorial,
+        };
+        let Some(waypoint) = course.resolve(&system, system.star_position_ly(), 0.0) else {
+            return;
+        };
         let mut motion = lc_world::motion::ShipState::at(system.star_position_ly());
         motion.begin_holding(waypoint);
 
@@ -324,7 +356,10 @@ mod tests {
         let beside = ship(3, DVec3::new(1_000_000.0, 200_000.0, 0.0));
 
         assert!(schedule(&sent, &beam, &on_axis).is_some());
-        assert!(schedule(&sent, &beam, &beside).is_none(), "0.2 rad off a 0.05 rad beam");
+        assert!(
+            schedule(&sent, &beam, &beside).is_none(),
+            "0.2 rad off a 0.05 rad beam"
+        );
         // The same two, shouted at: both hear it. The beam is what excluded one of them.
         assert!(schedule(&sent, &Beam::OMNI, &beside).is_some());
     }
@@ -355,19 +390,27 @@ mod tests {
         let sent = pulse(0, DVec3::ZERO, 1.0);
 
         let at_it = Beam::along(away, 1.0e-3);
-        assert!(schedule(&sent, &at_it, &crossing).is_none(), "aimed where it was seen");
+        assert!(
+            schedule(&sent, &at_it, &crossing).is_none(),
+            "aimed where it was seen"
+        );
 
         // Led: the advanced solve says where it will be, and that beam lands.
-        let axis =
-            lc_world::signal::aim_at(DVec3::ZERO, 0.0, away, DVec3::new(0.0, 0.2, 0.0), 0.0)
-                .unwrap();
-        assert!(schedule(&sent, &Beam::along(axis, 1.0e-3), &crossing).is_some(), "led");
+        let axis = lc_world::signal::aim_at(DVec3::ZERO, 0.0, away, DVec3::new(0.0, 0.2, 0.0), 0.0)
+            .unwrap();
+        assert!(
+            schedule(&sent, &Beam::along(axis, 1.0e-3), &crossing).is_some(),
+            "led"
+        );
     }
 
     #[test]
     fn strength_falls_as_the_inverse_square_and_does_not_divide_by_zero() {
         assert_eq!(strength(100.0, 10.0), 1.0);
         assert_eq!(strength(100.0, 20.0), 0.25);
-        assert!(strength(100.0, 0.0).is_finite(), "a coincident source is loud, not infinite");
+        assert!(
+            strength(100.0, 0.0).is_finite(),
+            "a coincident source is loud, not infinite"
+        );
     }
 }
