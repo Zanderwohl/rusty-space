@@ -240,24 +240,50 @@ struct Burning {
 }
 
 impl Burning {
-    fn of(length_m: f64, power_w: f64, rated_w: f64, facing: DVec3, offset_m: DVec3) -> Option<Self> {
+    fn of(
+        length_m: f64,
+        power_w: f64,
+        rated_w: f64,
+        facing: DVec3,
+        offset_m: DVec3,
+    ) -> Option<Self> {
         if power_w <= 0.0 || facing == DVec3::ZERO {
             return None;
         }
         // Against what this ship's own drive would make at its rating, so a tug at full thrust
         // gets a full plume and is not measured against a warship's.
-        let throttle = if rated_w > 0.0 { power_w / rated_w } else { 1.0 };
+        let throttle = if rated_w > 0.0 {
+            power_w / rated_w
+        } else {
+            1.0
+        };
         let (long_m, throat_m, mouth_m) = extent(length_m, throttle);
-        Some(Self { offset_m, hull_m: length_m, facing, long_m, throat_m, mouth_m, power_w })
+        Some(Self {
+            offset_m,
+            hull_m: length_m,
+            facing,
+            long_m,
+            throat_m,
+            mouth_m,
+            power_w,
+        })
     }
 }
 
 /// Everything with its drive lit this frame.
-fn burning(game: &Session, uplink: &crate::uplink::Uplink, eye: &crate::hull::Eye, look: DVec3) -> Vec<(Option<ShipId>, Burning)> {
+fn burning(
+    game: &Session,
+    uplink: &crate::uplink::Uplink,
+    eye: &crate::hull::Eye,
+    look: DVec3,
+) -> Vec<(Option<ShipId>, Burning)> {
     let now = game.coordinate_time_s();
     let mut out = Vec::new();
     let mine = &game.ship;
-    let rated = mine.motion.drive.jet_power_w(mine.mass_kg_at(now), mine.motion.drive.accel_g);
+    let rated = mine
+        .motion
+        .drive
+        .jet_power_w(mine.mass_kg_at(now), mine.motion.drive.accel_g);
     if let Some(lit) = Burning::of(
         mine.length_m,
         mine.jet_power_w(now),
@@ -287,7 +313,11 @@ fn burning(game: &Session, uplink: &crate::uplink::Uplink, eye: &crate::hull::Ey
 
 /// The proxy: a closed cylinder wide enough to hold the gas, with its axis on `+y`.
 fn proxy() -> Mesh {
-    Cylinder::new(1.0, 1.0).mesh().resolution(SIDES).segments(1).build()
+    Cylinder::new(1.0, 1.0)
+        .mesh()
+        .resolution(SIDES)
+        .segments(1)
+        .build()
 }
 
 /// The rotation putting the proxy's `+y` down the exhaust, which is aft of the nose.
@@ -374,7 +404,10 @@ pub fn update_plumes(
         for (entity, _) in &existing {
             commands.entity(entity).despawn();
         }
-        let proxy = plumes.proxy.get_or_insert_with(|| meshes.add(proxy())).clone();
+        let proxy = plumes
+            .proxy
+            .get_or_insert_with(|| meshes.add(proxy()))
+            .clone();
         for (id, _) in &want {
             commands.spawn((
                 Mesh3d(proxy.clone()),
@@ -393,13 +426,14 @@ pub fn update_plumes(
     }
 
     for (mut transform, material, marker) in placed.iter_mut() {
-        let Some((_, lit)) = want.iter().find(|(id, _)| *id == marker.0) else { continue };
+        let Some((_, lit)) = want.iter().find(|(id, _)| *id == marker.0) else {
+            continue;
+        };
         let wall = lit.mouth_m * MARGIN;
         // The nozzle is at the hull's tail — half a hull aft of its center — and the proxy's
         // own center is half a plume further aft again. Measuring from the hull's center put
         // the gas half inside the ship.
-        let tail = lit.offset_m
-            - lit.facing * (lit.hull_m * 0.5 + lit.long_m * 0.5);
+        let tail = lit.offset_m - lit.facing * (lit.hull_m * 0.5 + lit.long_m * 0.5);
         transform.translation = sim_to_render(tail / UNIT_M).as_vec3();
         transform.rotation = along_exhaust(lit.facing);
         transform.scale = Vec3::new(
@@ -408,7 +442,9 @@ pub fn update_plumes(
             (wall / UNIT_M) as f32,
         );
 
-        let Some(mut asset) = materials.get_mut(&material.0) else { continue };
+        let Some(mut asset) = materials.get_mut(&material.0) else {
+            continue;
+        };
         // The eye is at the render origin, so where it sits in the proxy's own space is the
         // transform undone. The march needs it there and nowhere else.
         let eye_local = transform.to_matrix().inverse().transform_point3(Vec3::ZERO);
@@ -431,10 +467,16 @@ mod tests {
     fn the_length_answers_to_the_throttle() {
         let (full, _, _) = extent(SHIP_M, 1.0);
         let (quarter, _, _) = extent(SHIP_M, 0.25);
-        assert!((quarter / full - 0.5).abs() < 1.0e-9, "a quarter thrust is half the plume");
+        assert!(
+            (quarter / full - 0.5).abs() < 1.0e-9,
+            "a quarter thrust is half the plume"
+        );
         assert_eq!(extent(SHIP_M, 0.0).0, 0.0);
         // And it is a plume rather than a wisp or a tail: a few hull lengths.
-        assert!(full > SHIP_M && full < SHIP_M * 10.0, "{full} m off a {SHIP_M} m ship");
+        assert!(
+            full > SHIP_M && full < SHIP_M * 10.0,
+            "{full} m off a {SHIP_M} m ship"
+        );
     }
 
     /// The nozzle does not change size when the drive is throttled; only the gas goes further.
@@ -444,7 +486,10 @@ mod tests {
         let (_, quiet_throat, quiet_mouth) = extent(SHIP_M, 0.1);
         assert_eq!(throat, quiet_throat);
         assert_eq!(mouth, quiet_mouth);
-        assert!((mouth / throat - EXPANSION).abs() < 1.0e-9, "that is the expansion ratio");
+        assert!(
+            (mouth / throat - EXPANSION).abs() < 1.0e-9,
+            "that is the expansion ratio"
+        );
     }
 
     /// **The color is forced, not chosen.** The power has to go somewhere, and a blackbody of
@@ -474,7 +519,11 @@ mod tests {
             temperature_k(power, radiating_area_m2(long, throat, mouth))
         };
         assert!(at(20.0) > at(5.0));
-        assert_eq!(at(0.0), 0.0, "an unlit drive is not a cold plume, it is no plume");
+        assert_eq!(
+            at(0.0),
+            0.0,
+            "an unlit drive is not a cold plume, it is no plume"
+        );
     }
 
     /// The property every `--rate 0` photograph rests on. Two frames of a stopped clock are the
@@ -504,7 +553,10 @@ mod tests {
         let steps: Vec<f64> = rungs.iter().map(|r| at(*r)).collect();
         assert!(steps.windows(2).all(|w| w[1] > w[0] * 1.05), "{steps:?}");
         let span = steps[steps.len() - 1] / steps[0];
-        assert!(span > 4.0 && span < 20.0, "the ladder spans {span} in churn");
+        assert!(
+            span > 4.0 && span < 20.0,
+            "the ladder spans {span} in churn"
+        );
         // A streak is about `1 / CHURN_ALONG` of a lattice cell; crossing half of one in a frame
         // is where a moving pattern turns into a hissing one.
         let worst = steps[steps.len() - 1] * CHURN_ALONG as f64;
@@ -518,12 +570,17 @@ mod tests {
     #[test]
     fn every_craft_gets_its_own_streaks() {
         let period = CHURN_PERIOD as f64;
-        let seeds: Vec<f64> =
-            (0..64).map(|n| seed(Some(ShipId(n)))).chain([seed(None)]).collect();
+        let seeds: Vec<f64> = (0..64)
+            .map(|n| seed(Some(ShipId(n))))
+            .chain([seed(None)])
+            .collect();
         assert!(seeds.iter().all(|s| (0.0..period).contains(s)), "{seeds:?}");
         let mut sorted = seeds.clone();
         sorted.sort_by(f64::total_cmp);
-        assert!(sorted.windows(2).all(|w| w[0] != w[1]), "two craft share a seed");
+        assert!(
+            sorted.windows(2).all(|w| w[0] != w[1]),
+            "two craft share a seed"
+        );
         // And spread over the period rather than clustered in a corner of it.
         for eighth in 0..8 {
             let low = period * eighth as f64 / 8.0;
@@ -544,8 +601,7 @@ mod tests {
     fn a_streak_is_darker_than_the_gas_beside_it_however_hot_the_plume() {
         for kelvin in [2_000.0, 6_000.0, 50_000.0, 500_000.0] {
             let visible = |t: f64| blackbody::band_radiance(Band::ALL[2], t);
-            let ratio = visible(kelvin * SOOT_FRACTION) / visible(kelvin)
-                * SOOT_EMISSIVITY as f64;
+            let ratio = visible(kelvin * SOOT_FRACTION) / visible(kelvin) * SOOT_EMISSIVITY as f64;
             // A stop and a half down at the very least, which is a lane one can see.
             assert!(ratio < 0.35, "{kelvin} K: streaks at {ratio} of the core");
             assert!(ratio > 0.0, "{kelvin} K: streaks are not holes");
@@ -570,13 +626,18 @@ mod tests {
         }));
         let spread = |mapping: &em_spectra::BandMapping| {
             let rgb = mapping.apply(&radiance);
-            let (low, high) = rgb.iter().fold((f32::MAX, 0.0f32), |(l, h), c| (l.min(*c), h.max(*c)));
+            let (low, high) = rgb
+                .iter()
+                .fold((f32::MAX, 0.0f32), |(l, h), c| (l.min(*c), h.max(*c)));
             // Stops between the dimmest channel and the brightest.
             (high / low.max(1e-30)).log2()
         };
         let natural = spread(&em_spectra::presets::natural());
         let thermal = spread(&em_spectra::presets::thermal());
-        assert!(natural < 2.0, "natural spreads the channels {natural} stops");
+        assert!(
+            natural < 2.0,
+            "natural spreads the channels {natural} stops"
+        );
         assert!(thermal > 3.0, "thermal spreads them only {thermal} stops");
     }
 
@@ -597,7 +658,10 @@ mod tests {
         for facing in [DVec3::X, DVec3::Y, DVec3::new(1.0, -2.0, 0.5).normalize()] {
             let aft = along_exhaust(facing) * Vec3::Y;
             let want = sim_to_render(-facing.normalize()).as_vec3();
-            assert!((aft - want).length() < 1.0e-6, "{facing} sent the exhaust to {aft}");
+            assert!(
+                (aft - want).length() < 1.0e-6,
+                "{facing} sent the exhaust to {aft}"
+            );
         }
     }
 }

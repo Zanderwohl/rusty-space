@@ -63,7 +63,6 @@ pub struct Picture {
     pub subjects: Vec<(ItemKey, Subject)>,
 }
 
-
 /// A picture under construction.
 #[derive(Default)]
 struct Build {
@@ -73,7 +72,10 @@ struct Build {
 
 impl Build {
     fn with_capacity(n: usize) -> Self {
-        Self { items: Vec::with_capacity(n), subjects: Vec::with_capacity(n) }
+        Self {
+            items: Vec::with_capacity(n),
+            subjects: Vec::with_capacity(n),
+        }
     }
 
     fn push(&mut self, item: MapItem, subject: Option<Subject>) {
@@ -84,7 +86,10 @@ impl Build {
     }
 
     fn into_picture(self, snapshot: impl FnOnce(Vec<MapItem>) -> MapSnapshot) -> Picture {
-        Picture { snapshot: snapshot(self.items), subjects: self.subjects }
+        Picture {
+            snapshot: snapshot(self.items),
+            subjects: self.subjects,
+        }
     }
 }
 
@@ -125,7 +130,8 @@ pub fn observed(session: &Session, bodies: &Bodies, uplink: &Uplink, eye_ly: DVe
                 // hang a marker on.
                 contact.length_m * 0.5,
                 contact.facing,
-            ).weighing(f64::INFINITY),
+            )
+            .weighing(f64::INFINITY),
             Some(Subject::Craft(contact.ship_id, contact.name.clone())),
         );
     }
@@ -223,7 +229,6 @@ fn observer(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> MapItem {
     .weighing(f64::INFINITY)
 }
 
-
 /// A body, and the target the rest of the interface names it by.
 ///
 /// The same name `pick.rs` builds a `Target::Body` from over the sky, so a click means the
@@ -254,8 +259,10 @@ fn push_drawable(build: &mut Build, body: &lc_world::system::Drawable) {
 /// [`key_of`].
 pub fn primary(session: &Session) -> Option<ItemKey> {
     let system = session.system.as_ref()?;
-    Some(key_of(system, system.holding(session.ship.motion.position_ly,
-        session.coordinate_time_s())))
+    Some(key_of(
+        system,
+        system.holding(session.ship.motion.position_ly, session.coordinate_time_s()),
+    ))
 }
 
 /// How a body of the local system is keyed.
@@ -275,7 +282,9 @@ fn push_bodies(build: &mut Build, bodies: &Bodies) {
 /// The local system's own star and its belts. `drawables_at` returns neither: the primary is
 /// excluded by construction and a population is not a body.
 fn push_local_system(build: &mut Build, session: &Session) {
-    let Some(system) = session.system.as_ref() else { return };
+    let Some(system) = session.system.as_ref() else {
+        return;
+    };
     build.push(
         MapItem::body(
             ItemKey::from_id("star", system.star.get()),
@@ -284,12 +293,15 @@ fn push_local_system(build: &mut Build, session: &Session) {
             system.star_position_ly(),
             system.star_radius_m(),
             DVec3::Z,
-        ).weighing(system.star_mass_kg()),
+        )
+        .weighing(system.star_mass_kg()),
         Some(Subject::Star(system.star, system.star_name.clone())),
     );
     let origin = system.star_position_ly();
     for (index, population) in system.populations.iter().enumerate() {
-        let Some(extent) = population.extent() else { continue };
+        let Some(extent) = population.extent() else {
+            continue;
+        };
         let name = lc_world::navigation::band_designation(population);
         build.push(
             MapItem::annulus(
@@ -311,27 +323,45 @@ fn push_local_system(build: &mut Build, session: &Session) {
     }
 }
 
-/// Catalogue stars inside the reach, less the one this system is already drawing.
+/// Stars this ship has a position for, less the one this system is already drawing.
+///
+/// **Believed positions, not catalogue positions.** A star is on the map because somebody
+/// measured a parallax to it, and it is drawn where that measurement puts it — off by the
+/// error on the measurement, which for a charted distance is a percent of the range. A star
+/// detected but never triangulated has a direction and no place to be, so it is not here; the
+/// sky view is where it is visible, and the telescope is what fixes it.
 fn push_stars(build: &mut Build, session: &Session, eye_ly: DVec3) {
     let here = session.system.as_ref().map(|s| s.star);
-    for star in &session.stars {
-        if Some(star.id) == here {
+    for belief in session.knowledge.beliefs() {
+        if Some(belief.star) == here {
             continue;
         }
-        if star.position_ly.distance(eye_ly) > REACH_LY {
+        let Some(position_ly) = belief.distance.position_ly() else {
+            continue;
+        };
+        if position_ly.distance(eye_ly) > REACH_LY {
             continue;
         }
-        let name = star.name.clone().unwrap_or_else(|| format!("{:x}", star.id.get()));
+        let star = session.star(belief.star);
+        let name = star
+            .and_then(|s| s.name.clone())
+            .unwrap_or_else(|| format!("{:x}", belief.star.get()));
+        // Radius and mass are not observed quantities here; they come from the same catalogue
+        // the truth does, and are what the mark is *sized* by rather than what it claims.
+        let (radius_m, mass_solar) = star
+            .map(|s| (s.star.radius_m, s.mass_solar))
+            .unwrap_or((6.957e8, 1.0));
         build.push(
             MapItem::body(
-                ItemKey::from_id("star", star.id.get()),
+                ItemKey::from_id("star", belief.star.get()),
                 name.clone(),
                 ItemKind::Star,
-                star.position_ly,
-                star.star.radius_m,
+                position_ly,
+                radius_m,
                 DVec3::Z,
-            ).weighing(star.mass_solar * SOLAR_MASS_KG),
-            Some(Subject::Star(star.id, name)),
+            )
+            .weighing(mass_solar * SOLAR_MASS_KG),
+            Some(Subject::Star(belief.star, name)),
         );
     }
 }
@@ -343,8 +373,14 @@ mod tests {
     use super::*;
 
     /// The three authored stars sit at 4.2, 11 and 25 light-years along `+X`.
+    ///
+    /// Charted out to thirty, because the map draws what is *known* and a session that has
+    /// looked at nothing has an empty map — which is the rule this file now enforces and is
+    /// tested for on its own below.
     fn session() -> Session {
-        Session::new(&AuthoredStars::sample(), 3)
+        let mut session = Session::new(&AuthoredStars::sample(), 3);
+        session.issue_charts(30.0);
+        session
     }
 
     fn keys(snapshot: &MapSnapshot) -> Vec<ItemKey> {
@@ -356,9 +392,16 @@ mod tests {
     #[test]
     fn the_observer_is_in_every_snapshot() {
         let session = session();
-        let snapshot = observed(&session, &Bodies::default(), &Uplink::default(), DVec3::ZERO)
-            .snapshot;
-        let observer = snapshot.observer().expect("the observer is not on their own map");
+        let snapshot = observed(
+            &session,
+            &Bodies::default(),
+            &Uplink::default(),
+            DVec3::ZERO,
+        )
+        .snapshot;
+        let observer = snapshot
+            .observer()
+            .expect("the observer is not on their own map");
         assert_eq!(observer.position_ly, DVec3::ZERO);
         assert_eq!(snapshot.provenance, em_map::Provenance::Observed);
     }
@@ -376,11 +419,51 @@ mod tests {
                 .filter(|i| i.kind == ItemKind::Star)
                 .count()
         };
-        // From the origin all three are inside 25 ly; a light-year the other way puts the
-        // furthest one out.
-        assert_eq!(count(DVec3::ZERO), 3);
-        assert_eq!(count(DVec3::new(-1.0, 0.0, 0.0)), 2);
+        // From the origin the near two are well inside 25 ly and the third is on the line —
+        // where it falls depends on the error on its charted distance, which is the point.
+        assert!(count(DVec3::ZERO) >= 2);
+        assert_eq!(count(DVec3::new(-15.0, 0.0, 0.0)), 1);
         assert_eq!(count(DVec3::new(-100.0, 0.0, 0.0)), 0);
+    }
+
+    /// A ship that has surveyed nothing and been given no charts has nothing to draw. The map
+    /// is a record of what has been measured, not a view of the world.
+    #[test]
+    fn an_unsurveyed_sky_puts_no_stars_on_the_map() {
+        let blank = Session::new(&AuthoredStars::sample(), 3);
+        let snapshot =
+            observed(&blank, &Bodies::default(), &Uplink::default(), DVec3::ZERO).snapshot;
+        assert!(!snapshot.items.iter().any(|i| i.kind == ItemKind::Star));
+        assert!(
+            snapshot.observer().is_some(),
+            "the ship is still on its own map"
+        );
+    }
+
+    /// A charted position is somebody else's parallax, so the mark sits where they measured
+    /// it rather than where the star is.
+    #[test]
+    fn a_star_is_drawn_where_it_is_believed_to_be() {
+        let session = session();
+        let star = &session.stars[1];
+        let snapshot = observed(
+            &session,
+            &Bodies::default(),
+            &Uplink::default(),
+            DVec3::ZERO,
+        )
+        .snapshot;
+        let drawn = snapshot
+            .items
+            .iter()
+            .find(|i| i.key == ItemKey::from_id("star", star.id.get()))
+            .expect("a charted star is on the map");
+        let error = drawn.position_ly.distance(star.position_ly);
+        assert!(error > 0.0, "a measured position is not the truth");
+        assert!(
+            error < 0.05 * star.position_ly.length(),
+            "but it is close: {error} ly"
+        );
     }
 
     /// **The primary has to be a key the snapshot holds.** The star is keyed by its catalogue
@@ -404,7 +487,11 @@ mod tests {
         // At the star's, nothing closer does.
         let star_key = key_of(&system, system.holding(star.position_ly, 0.0));
         assert_eq!(star_key, ItemKey::from_id("star", system.star.get()));
-        assert_ne!(star_key, ItemKey::from_name(&system.star_name), "the star is not by name");
+        assert_ne!(
+            star_key,
+            ItemKey::from_name(&system.star_name),
+            "the star is not by name"
+        );
     }
 
     /// **This ship is named like any other.** A map that draws five ships and names four of
@@ -412,22 +499,41 @@ mod tests {
     /// rather than a word for "you".
     #[test]
     fn this_ship_is_named_and_weighed_like_a_ship() {
-        let snapshot = observed(&session(), &Bodies::default(), &Uplink::default(), DVec3::ZERO)
-            .snapshot;
-        let observer = snapshot.observer().expect("the observer is not on their own map");
+        let snapshot = observed(
+            &session(),
+            &Bodies::default(),
+            &Uplink::default(),
+            DVec3::ZERO,
+        )
+        .snapshot;
+        let observer = snapshot
+            .observer()
+            .expect("the observer is not on their own map");
         assert!(!observer.label.is_empty(), "nothing to draw");
-        assert!(observer.weight.is_infinite(), "a ship sets no bar for the names");
+        assert!(
+            observer.weight.is_infinite(),
+            "a ship sets no bar for the names"
+        );
         // The literal, not the constant: comparing a constant to itself would pass whatever
         // the word was, and the point is that a nameless ship is named rather than described.
         assert_eq!(observer.label, "Anonymous Ship");
-        assert_eq!(observer.label, crate::uplink::ANONYMOUS, "two answers to one question");
+        assert_eq!(
+            observer.label,
+            crate::uplink::ANONYMOUS,
+            "two answers to one question"
+        );
     }
 
     /// Two things sharing a key share an entity and a selection.
     #[test]
     fn nothing_shares_a_key() {
-        let snapshot = observed(&session(), &Bodies::default(), &Uplink::default(), DVec3::ZERO)
-            .snapshot;
+        let snapshot = observed(
+            &session(),
+            &Bodies::default(),
+            &Uplink::default(),
+            DVec3::ZERO,
+        )
+        .snapshot;
         let mut seen = keys(&snapshot);
         let before = seen.len();
         seen.sort_unstable();
@@ -441,10 +547,20 @@ mod tests {
     #[test]
     fn a_snapshot_is_stated_at_one_epoch() {
         let session = session();
-        let once = observed(&session, &Bodies::default(), &Uplink::default(), DVec3::ZERO)
-            .snapshot;
-        let twice = observed(&session, &Bodies::default(), &Uplink::default(), DVec3::ZERO)
-            .snapshot;
+        let once = observed(
+            &session,
+            &Bodies::default(),
+            &Uplink::default(),
+            DVec3::ZERO,
+        )
+        .snapshot;
+        let twice = observed(
+            &session,
+            &Bodies::default(),
+            &Uplink::default(),
+            DVec3::ZERO,
+        )
+        .snapshot;
         assert_eq!(once.epoch_s, session.coordinate_time_s());
         assert_eq!(once, twice);
     }
@@ -460,7 +576,11 @@ mod tests {
             let bytes = claims.as_bytes();
             let mut out = String::new();
             for chunk in bytes.chunks(3) {
-                let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+                let b = [
+                    chunk[0],
+                    *chunk.get(1).unwrap_or(&0),
+                    *chunk.get(2).unwrap_or(&0),
+                ];
                 let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
                 for i in 0..chunk.len() + 1 {
                     out.push(ALPHABET[((n >> (18 - 6 * i)) & 0x3f) as usize] as char);
@@ -474,8 +594,15 @@ mod tests {
         /// `lc_server::ability::Level::from_claim` applies.
         #[test]
         fn only_an_administrative_level_may_see_everything() {
-            for (perm, want) in [(0, false), (1, true), (2, true), (3, true), (4, false),
-                (-1, false), (99, false)] {
+            for (perm, want) in [
+                (0, false),
+                (1, true),
+                (2, true),
+                (3, true),
+                (4, false),
+                (-1, false),
+                (99, false),
+            ] {
                 let t = ticket(&format!(r#"{{"sub":"acct-1","perm":{perm}}}"#));
                 assert_eq!(may_see_everything(Some(&t)), want, "perm {perm}");
             }
@@ -500,7 +627,11 @@ mod tests {
         #[test]
         fn base64url_decodes_what_a_ticket_carries() {
             assert_eq!(base64url("aGVsbG8").unwrap(), b"hello");
-            assert_eq!(base64url("aGVsbG8=").unwrap(), b"hello", "padding is tolerated");
+            assert_eq!(
+                base64url("aGVsbG8=").unwrap(),
+                b"hello",
+                "padding is tolerated"
+            );
             assert_eq!(base64url("-_8").unwrap(), vec![0xfb, 0xff]);
             assert!(base64url("not base64!").is_none());
         }

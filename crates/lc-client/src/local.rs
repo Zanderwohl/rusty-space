@@ -30,7 +30,10 @@ pub fn start(stars: Vec<CatalogueStar>, demo: Option<String>) -> Result<String, 
     std::thread::Builder::new()
         .name("lc-local-server".into())
         .spawn(move || {
-            let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
                 Ok(runtime) => runtime,
                 Err(why) => {
                     let _ = tell.send(Err(why.to_string()));
@@ -57,7 +60,8 @@ fn shelf() -> Result<Option<lc_server::library::Library>, String> {
     if !path.exists() {
         return Ok(None);
     }
-    let text = std::fs::read_to_string(&path).map_err(|why| format!("{}: {why}", path.display()))?;
+    let text =
+        std::fs::read_to_string(&path).map_err(|why| format!("{}: {why}", path.display()))?;
     // `LC_SHELF_BASE` is the same variable a deployed shard is told its CDN with, so the server
     // in the box can be pointed at one and the client then fetches over HTTP exactly as the
     // browser build does. Unset, the shelf is the directory this catalogue was read from.

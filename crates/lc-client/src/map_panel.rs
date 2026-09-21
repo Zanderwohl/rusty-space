@@ -11,8 +11,8 @@ use bevy::camera::Viewport;
 use bevy::math::URect;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use glam::DVec3;
 use bevy_egui::{EguiContexts, egui};
+use glam::DVec3;
 
 use crate::action::Action;
 use crate::app::{Game, Ui};
@@ -67,8 +67,10 @@ const CORNER_SIDE: f32 = 190.0;
 const CORNER_INSET: f32 = 12.0;
 
 /// The whole of a texture.
-const WHOLE_TEXTURE: egui::Rect =
-    egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1.0, 1.0) };
+const WHOLE_TEXTURE: egui::Rect = egui::Rect {
+    min: egui::pos2(0.0, 0.0),
+    max: egui::pos2(1.0, 1.0),
+};
 
 /// Where the world's camera draws, in physical pixels, or the whole window when the world is
 /// what the screen is showing.
@@ -130,10 +132,26 @@ pub fn draw(
     scale_rule(&painter, rect, ui_state.map, &over);
     labels(&painter, rect, hole, ui_state.map, &map, &picked.named);
     crate::map_pick::draw(&painter, rect, hole, &over, &picked);
-    read_input(ctx, &response, rect, ViewMode::Map, ui_state.map, &map, &mut out);
+    read_input(
+        ctx,
+        &response,
+        rect,
+        ViewMode::Map,
+        ui_state.map,
+        &map,
+        &mut out,
+    );
     if mode == ViewMode::Map {
         // The square is showing the world, so it answers the world's own gesture.
-        read_input(ctx, &swap, square, ViewMode::World, ui_state.map, &map, &mut out);
+        read_input(
+            ctx,
+            &swap,
+            square,
+            ViewMode::World,
+            ui_state.map,
+            &map,
+            &mut out,
+        );
     }
 }
 
@@ -147,14 +165,19 @@ pub fn frame_world(
     mut camera: Query<&mut Camera, With<crate::app::SkyCamera>>,
 ) {
     let Ok(window) = windows.single() else { return };
-    let Ok(mut camera) = camera.single_mut() else { return };
+    let Ok(mut camera) = camera.single_mut() else {
+        return;
+    };
     let wanted = inset.0.filter(|rect| !rect.is_empty()).map(|rect| {
         let mut viewport = Viewport {
             physical_position: rect.min,
             physical_size: rect.size(),
             ..default()
         };
-        viewport.clamp_to_size(UVec2::new(window.physical_width(), window.physical_height()));
+        viewport.clamp_to_size(UVec2::new(
+            window.physical_width(),
+            window.physical_height(),
+        ));
         viewport
     });
     // Written only when it moves. A camera marked changed every frame is a frame's worth of
@@ -200,13 +223,15 @@ fn labels(
     map: &Map,
     named: &[em_map::ItemKey],
 ) {
-    let Some(frame) = map.frame.as_ref() else { return };
+    let Some(frame) = map.frame.as_ref() else {
+        return;
+    };
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
         return;
     }
     let aspect = (rect.width() / rect.height()) as f64;
-    let font = painter.ctx().style_of(egui::Theme::Dark).text_styles[&egui::TextStyle::Small]
-        .clone();
+    let font =
+        painter.ctx().style_of(egui::Theme::Dark).text_styles[&egui::TextStyle::Small].clone();
 
     let mut candidates = Vec::with_capacity(frame.placements.len());
     let mut galleys = Vec::with_capacity(frame.placements.len());
@@ -215,14 +240,19 @@ fn labels(
         if placement.label.is_empty() || named.contains(&placement.key) {
             continue;
         }
-        let Some(ndc) =
-            view.orbit.project(view.plane, placement.at.as_dvec3(), crate::map::MAP_FOV as f64,
-                aspect)
-        else {
+        let Some(ndc) = view.orbit.project(
+            view.plane,
+            placement.at.as_dvec3(),
+            crate::map::MAP_FOV as f64,
+            aspect,
+        ) else {
             continue;
         };
-        let galley = painter.layout_no_wrap(placement.label.clone(), font.clone(),
-            label_color(placement.kind));
+        let galley = painter.layout_no_wrap(
+            placement.label.clone(),
+            font.clone(),
+            label_color(placement.kind),
+        );
         let size = galley.size();
         candidates.push(em_map::label::Candidate {
             key: placement.key,
@@ -296,16 +326,20 @@ fn whole(
     let mut root = egui::Ui::new(
         ctx.clone(),
         "map mode".into(),
-        egui::UiBuilder::new().layer_id(egui::LayerId::background()).max_rect(under),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(under),
     );
-    egui::Panel::top("map controls")
-        .show(&mut root, |ui| controls(ui, ui_state, game, map.primary, out));
+    egui::Panel::top("map controls").show(&mut root, |ui| {
+        controls(ui, ui_state, game, map.primary, out)
+    });
 
     let rect = root.available_rect_before_wrap();
     let response = root.allocate_rect(rect, egui::Sense::click_and_drag());
     if let Some(texture) = map.texture {
         for piece in around(rect, hole) {
-            root.painter().image(texture, piece, uv(rect, piece), egui::Color32::WHITE);
+            root.painter()
+                .image(texture, piece, uv(rect, piece), egui::Color32::WHITE);
         }
     }
     (rect, response)
@@ -327,7 +361,8 @@ fn square_area(ctx: &egui::Context, square: egui::Rect, map: Option<&Map>) -> eg
         .show(ctx, |ui| {
             let response = ui.allocate_rect(square, egui::Sense::click_and_drag());
             if let Some(texture) = map.and_then(|map| map.texture) {
-                ui.painter().image(texture, square, WHOLE_TEXTURE, egui::Color32::WHITE);
+                ui.painter()
+                    .image(texture, square, WHOLE_TEXTURE, egui::Color32::WHITE);
             }
             // A border, so the world in the corner reads as a frame within a frame rather than
             // as the map failing to draw there.
@@ -421,7 +456,9 @@ fn scale_rule(
     view: crate::ui::MapView,
     over: &[egui::Rect],
 ) {
-    let Some(per_point) = meters_per_point(rect, view) else { return };
+    let Some(per_point) = meters_per_point(rect, view) else {
+        return;
+    };
     let max = (rect.width() * RULE_MAX_FRACTION).min(RULE_MAX_PX);
     let min = (rect.width() * RULE_MIN_FRACTION).min(RULE_MIN_PX);
     let Some(rule) = em_map::rule::choose((max * per_point) as f64, (min * per_point) as f64)
@@ -444,7 +481,10 @@ fn scale_rule(
     // The divisions, which are whole units of the label. See `em_map::rule::Rule::parts`.
     for i in 1..rule.parts {
         let at = left + length * i as f32 / rule.parts as f32;
-        painter.line_segment([egui::pos2(at, y - RULE_TICK_PX), egui::pos2(at, y)], stroke);
+        painter.line_segment(
+            [egui::pos2(at, y - RULE_TICK_PX), egui::pos2(at, y)],
+            stroke,
+        );
     }
     painter.text(
         egui::pos2(right, y - RULE_CAP_PX - 2.0),
@@ -490,9 +530,12 @@ fn meters_per_point(rect: egui::Rect, view: crate::ui::MapView) -> Option<f32> {
     let (forward, ..) = view.orbit.view_basis(view.plane);
     let eye = view.orbit.eye_ly(view.plane);
     let aspect = (rect.width() / rect.height()) as f64;
-    let direction =
-        view.orbit.ray(view.plane, glam::DVec2::new(0.0, RULE_SAMPLE_NDC_Y),
-            crate::map::MAP_FOV as f64, aspect);
+    let direction = view.orbit.ray(
+        view.plane,
+        glam::DVec2::new(0.0, RULE_SAMPLE_NDC_Y),
+        crate::map::MAP_FOV as f64,
+        aspect,
+    );
     let depth_m = match view.plane.intersect(eye, direction, view.orbit.focus_ly) {
         Some(hit) => (hit - eye).dot(forward) * em_map::snapshot::M_PER_LY,
         None => view.orbit.distance_m(),
@@ -525,7 +568,10 @@ fn controls(
 ) {
     ui.horizontal(|ui| {
         for plane in [em_map::Plane::Ecliptic, em_map::Plane::Galactic] {
-            if ui.selectable_label(state.map.plane == plane, plane.label()).clicked() {
+            if ui
+                .selectable_label(state.map.plane == plane, plane.label())
+                .clicked()
+            {
                 ask(out, Action::SetMapPlane(plane));
             }
         }
@@ -540,7 +586,8 @@ fn controls(
                 // made. A refused source is grayed and says why, because color is not the only
                 // signal.
                 if !allowed {
-                    ui.weak(source.label()).on_hover_text("needs an administrative account");
+                    ui.weak(source.label())
+                        .on_hover_text("needs an administrative account");
                     continue;
                 }
                 if ui.selectable_label(chosen, source.label()).clicked() {
@@ -585,9 +632,13 @@ fn controls(
         if centering(ui, "center on the star", star.is_some())
             && let Some(star) = star
         {
-            ask(out, Action::FocusMap(crate::ui::MapFocus::Item(
-                em_map::ItemKey::from_id("star", star.get()),
-            )));
+            ask(
+                out,
+                Action::FocusMap(crate::ui::MapFocus::Item(em_map::ItemKey::from_id(
+                    "star",
+                    star.get(),
+                ))),
+            );
         }
     });
 }
@@ -626,7 +677,8 @@ fn drag_of(shown: ViewMode, right: bool) -> Option<Drag> {
 /// control that vanishes takes the strip's other buttons out from under the cursor with it.
 fn centering(ui: &mut egui::Ui, label: &str, exists: bool) -> bool {
     if !exists {
-        ui.weak(label).on_hover_text("there is nothing here holding the ship");
+        ui.weak(label)
+            .on_hover_text("there is nothing here holding the ship");
         return false;
     }
     ui.button(label).clicked()
@@ -651,15 +703,21 @@ fn read_input(
         match drag_of(shown, response.dragged_by(egui::PointerButton::Secondary)) {
             Some(Drag::Pan) => {
                 let span = rect.width().max(rect.height()).max(1.0) as f64;
-                ask(out, Action::PanMap {
-                    right: -delta.x as f64 / span * PAN_PER_VIEWPORT,
-                    ahead: delta.y as f64 / span * PAN_PER_VIEWPORT,
-                });
+                ask(
+                    out,
+                    Action::PanMap {
+                        right: -delta.x as f64 / span * PAN_PER_VIEWPORT,
+                        ahead: delta.y as f64 / span * PAN_PER_VIEWPORT,
+                    },
+                );
             }
-            Some(Drag::Turn) => ask(out, Action::TurnMap {
-                azimuth: -delta.x as f64 * TURN_PER_POINT,
-                elevation: delta.y as f64 * TURN_PER_POINT,
-            }),
+            Some(Drag::Turn) => ask(
+                out,
+                Action::TurnMap {
+                    azimuth: -delta.x as f64 * TURN_PER_POINT,
+                    elevation: delta.y as f64 * TURN_PER_POINT,
+                },
+            ),
             Some(Drag::Look) => {
                 let (yaw, pitch) = crate::input::look_from(Vec2::new(delta.x, delta.y));
                 ask(out, Action::Look { yaw, pitch });
@@ -690,8 +748,7 @@ fn read_wheel_only(
     if scrolled == 0.0 {
         return;
     }
-    let notches =
-        crate::input::notches(bevy::input::mouse::MouseScrollUnit::Pixel, scrolled);
+    let notches = crate::input::notches(bevy::input::mouse::MouseScrollUnit::Pixel, scrolled);
     let anchor_ly = match zooms_to_cursor(view.focus) {
         true => under_cursor(ctx, rect, view, map),
         false => None,
@@ -726,7 +783,9 @@ fn under_cursor(
         (1.0 - (at.y - rect.min.y) / rect.height() * 2.0) as f64,
     );
     let aspect = (rect.width() / rect.height()) as f64;
-    let direction = view.orbit.ray(view.plane, ndc, crate::map::MAP_FOV as f64, aspect);
+    let direction = view
+        .orbit
+        .ray(view.plane, ndc, crate::map::MAP_FOV as f64, aspect);
     view.plane.intersect(
         view.orbit.eye_ly(view.plane),
         direction,
@@ -759,11 +818,18 @@ mod tests {
     /// reaching past the surface is a wgpu validation failure rather than a clipped picture.
     #[test]
     fn a_window_too_small_shrinks_the_square_rather_than_spilling_out_of_it() {
-        for size in [egui::vec2(120.0, 90.0), egui::vec2(20.0, 400.0), egui::vec2(1.0, 1.0)] {
+        for size in [
+            egui::vec2(120.0, 90.0),
+            egui::vec2(20.0, 400.0),
+            egui::vec2(1.0, 1.0),
+        ] {
             let viewport = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), size);
             let square = corner(viewport);
             assert!(square.width() >= 0.0 && square.height() >= 0.0, "{size:?}");
-            assert!(viewport.contains_rect(square), "{size:?} let the square out at {square:?}");
+            assert!(
+                viewport.contains_rect(square),
+                "{size:?} let the square out at {square:?}"
+            );
         }
     }
 
@@ -776,10 +842,19 @@ mod tests {
         let pieces = around(rect, hole);
         let area = |r: egui::Rect| r.width() * r.height();
         let covered: f32 = pieces.iter().copied().map(area).sum();
-        assert!((covered - (area(rect) - area(hole))).abs() < 0.01, "{covered} covered");
+        assert!(
+            (covered - (area(rect) - area(hole))).abs() < 0.01,
+            "{covered} covered"
+        );
         for piece in &pieces {
-            assert!(rect.contains_rect(*piece), "{piece:?} is outside the surface");
-            assert!(!piece.intersect(hole).is_positive(), "{piece:?} paints over the world");
+            assert!(
+                rect.contains_rect(*piece),
+                "{piece:?} is outside the surface"
+            );
+            assert!(
+                !piece.intersect(hole).is_positive(),
+                "{piece:?} paints over the world"
+            );
         }
     }
 
@@ -790,7 +865,10 @@ mod tests {
         let away = egui::Rect::from_min_size(egui::pos2(500.0, 500.0), egui::vec2(20.0, 20.0));
         assert_eq!(around(rect, away), vec![rect]);
         assert_eq!(around(rect, egui::Rect::NOTHING), vec![rect]);
-        assert!(around(rect, rect).is_empty(), "a hole the size of the surface leaves none");
+        assert!(
+            around(rect, rect).is_empty(),
+            "a hole the size of the surface leaves none"
+        );
     }
 
     /// The rule goes under the events box otherwise, which takes the same corner with the same
@@ -801,25 +879,47 @@ mod tests {
         let rect = egui::Rect::from_min_max(egui::pos2(0.0, 61.0), egui::pos2(1280.0, 720.0));
         let span = 885.0..1268.0;
         let bottom = rect.max.y - RULE_INSET.y;
-        assert_eq!(rule_row(rect, span.clone(), &[]), bottom, "nothing in the way");
+        assert_eq!(
+            rule_row(rect, span.clone(), &[]),
+            bottom,
+            "nothing in the way"
+        );
 
         let elsewhere = egui::Rect::from_min_size(egui::pos2(0.0, 620.0), egui::vec2(200.0, 100.0));
-        assert_eq!(rule_row(rect, span.clone(), &[elsewhere]), bottom, "not in these columns");
+        assert_eq!(
+            rule_row(rect, span.clone(), &[elsewhere]),
+            bottom,
+            "not in these columns"
+        );
 
         let events = egui::Rect::from_min_size(egui::pos2(954.0, 654.0), egui::vec2(314.0, 54.0));
-        assert!(rule_row(rect, span.clone(), &[events]) < events.min.y, "still under the box");
+        assert!(
+            rule_row(rect, span.clone(), &[events]) < events.min.y,
+            "still under the box"
+        );
 
         // **The background layer is one of these and it is the whole window.** Counted, it
         // reaches past the top of the surface, the lift has nowhere to go, and the rule stays
         // under the events box — which is what it did.
         let window = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1280.0, 720.0));
         let lifted = rule_row(rect, span.clone(), &[window, events]);
-        assert!(lifted < events.min.y, "the whole window counted as a box over the surface");
-        assert_eq!(rule_row(rect, span.clone(), &[window]), bottom, "and on its own it is not");
+        assert!(
+            lifted < events.min.y,
+            "the whole window counted as a box over the surface"
+        );
+        assert_eq!(
+            rule_row(rect, span.clone(), &[window]),
+            bottom,
+            "and on its own it is not"
+        );
 
         // A box down the whole right-hand side, which leaves the rule nowhere to go.
         let tall = egui::Rect::from_min_max(egui::pos2(900.0, 61.0), egui::pos2(1280.0, 720.0));
-        assert_eq!(rule_row(rect, span, &[tall]), bottom, "nowhere to go is a reason to stay");
+        assert_eq!(
+            rule_row(rect, span, &[tall]),
+            bottom,
+            "nowhere to go is a reason to stay"
+        );
     }
 
     /// A piece of the surface shows the matching piece of the texture. Get this wrong and the
@@ -839,22 +939,43 @@ mod tests {
     /// this says so rather than leaving the map turning on the one the sky no longer uses.
     #[test]
     fn the_look_button_turns_whichever_view_is_under_it() {
-        assert_eq!(crate::input::LOOK_BUTTON, bevy::input::mouse::MouseButton::Right);
-        assert_eq!(drag_of(ViewMode::Map, true), Some(Drag::Turn), "egui's secondary");
-        assert_eq!(drag_of(ViewMode::World, true), Some(Drag::Look), "the same one, over a ship");
+        assert_eq!(
+            crate::input::LOOK_BUTTON,
+            bevy::input::mouse::MouseButton::Right
+        );
+        assert_eq!(
+            drag_of(ViewMode::Map, true),
+            Some(Drag::Turn),
+            "egui's secondary"
+        );
+        assert_eq!(
+            drag_of(ViewMode::World, true),
+            Some(Drag::Look),
+            "the same one, over a ship"
+        );
         assert_eq!(drag_of(ViewMode::Map, false), Some(Drag::Pan));
-        assert_eq!(drag_of(ViewMode::World, false), None, "the left button is picking's");
+        assert_eq!(
+            drag_of(ViewMode::World, false),
+            None,
+            "the left button is picking's"
+        );
     }
 
     /// Every name is written in a palette color, this ship's included. Two phosphors, and no
     /// white: a craft is amber and everything else is the interface's own green.
     #[test]
     fn every_name_is_written_in_the_palette() {
-        for kind in [em_map::ItemKind::Ship, em_map::ItemKind::Station, em_map::ItemKind::Observer]
-        {
+        for kind in [
+            em_map::ItemKind::Ship,
+            em_map::ItemKind::Station,
+            em_map::ItemKind::Observer,
+        ] {
             assert_eq!(label_color(kind), color_of(em_ui::vfd::AMBER), "{kind:?}");
         }
-        assert_eq!(label_color(em_map::ItemKind::Planet), color_of(em_ui::vfd::TEXT));
+        assert_eq!(
+            label_color(em_map::ItemKind::Planet),
+            color_of(em_ui::vfd::TEXT)
+        );
     }
 
     /// The wheel does not break a lock. Zooming toward the pointer moves the focus and
@@ -863,7 +984,10 @@ mod tests {
     fn only_a_free_camera_zooms_toward_the_pointer() {
         assert!(zooms_to_cursor(MapFocus::Free));
         assert!(!zooms_to_cursor(MapFocus::Observer), "centered on the ship");
-        assert!(!zooms_to_cursor(MapFocus::Item(ItemKey::from_name("Sol"))), "on a body");
+        assert!(
+            !zooms_to_cursor(MapFocus::Item(ItemKey::from_name("Sol"))),
+            "on a body"
+        );
         assert!(
             !zooms_to_cursor(MapFocus::Primary(crate::ui::Frame::Fixed)),
             "on whatever holds the ship",

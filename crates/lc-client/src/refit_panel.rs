@@ -52,9 +52,14 @@ pub fn preview(ship: &Craft, draft: Loadout, remote: bool, now_s: f64) -> Option
     let dry_kg = balance.dry_mass_kg(&draft);
     let mass_after_kg = dry_kg + available_j.max(0.0) / lc_world::fitting::C2;
 
-    let planned = lc_world::refit::Order { from: current, target: draft, stored_j, start_s: now_s }
-        .solve(&balance)
-        .map(|refit| (refit.steps().count(), refit.duration_s()));
+    let planned = lc_world::refit::Order {
+        from: current,
+        target: draft,
+        stored_j,
+        start_s: now_s,
+    }
+    .solve(&balance)
+    .map(|refit| (refit.steps().count(), refit.duration_s()));
     let blocked = if !remote {
         Some("no server: refits are the shard's to run")
     } else if ship.is_refitting(now_s) {
@@ -75,7 +80,10 @@ pub fn preview(ship: &Craft, draft: Loadout, remote: bool, now_s: f64) -> Option
         capacity_after_j: balance.capacity_j(&draft),
         mass_after_kg,
         g_dry: balance.accel_g(&draft, dry_kg),
-        g_wet: balance.accel_g(&draft, dry_kg + balance.capacity_j(&draft) / lc_world::fitting::C2),
+        g_wet: balance.accel_g(
+            &draft,
+            dry_kg + balance.capacity_j(&draft) / lc_world::fitting::C2,
+        ),
         energy_per_km_s_j: energy_per_km_s_j(&balance, mass_after_kg),
         solar_after_w: ship.solar_w_for(balance.length_m(draft.slots), now_s),
         drain_after_w: balance.drain_w(&draft),
@@ -90,9 +98,20 @@ fn budget_j(balance: &Balance, current: Loadout, draft: Loadout, stored_j: f64) 
     let module_j = balance.module_energy_j();
     let mut budget = stored_j;
     for module in Module::ALL {
-        budget += moved(current.count(module), draft.count(module), module_j, balance.recovery);
+        budget += moved(
+            current.count(module),
+            draft.count(module),
+            module_j,
+            balance.recovery,
+        );
     }
-    budget + moved(current.slots, draft.slots, balance.slot_energy_j(), balance.recovery)
+    budget
+        + moved(
+            current.slots,
+            draft.slots,
+            balance.slot_energy_j(),
+            balance.recovery,
+        )
 }
 
 /// Whether a loadout could be ended at: every module has a slot, the builds are paid for, and
@@ -202,7 +221,11 @@ pub fn energy_per_km_s_j(balance: &Balance, mass_kg: f64) -> f64 {
 /// A rate of energy, in module-energies a game year, signed.
 pub fn me_per_year(watts: f64, module_j: f64) -> String {
     let rate = watts * lc_world::flight::JULIAN_YEAR_S / module_j;
-    if rate.abs() < 0.1 { format!("{rate:+.3} ME/yr") } else { format!("{rate:+.2} ME/yr") }
+    if rate.abs() < 0.1 {
+        format!("{rate:+.3} ME/yr")
+    } else {
+        format!("{rate:+.2} ME/yr")
+    }
 }
 
 /// An energy small enough to need an exponent, in module-energies.
@@ -212,16 +235,29 @@ fn me_small(joules: f64, module_j: f64) -> String {
 
 /// A hull length: meters, or kilometers once there are thousands of them.
 pub fn length(meters: f64) -> String {
-    if meters < 1.0e4 { format!("{meters:.0} m") } else { format!("{:.2} km", meters / 1.0e3) }
+    if meters < 1.0e4 {
+        format!("{meters:.0} m")
+    } else {
+        format!("{:.2} km", meters / 1.0e3)
+    }
 }
 
 /// A duration a refit is measured in: days, or years past a few hundred of them.
 fn span(seconds: f64) -> String {
     let days = seconds / 86_400.0;
-    if days < 400.0 { format!("{days:.1} days") } else { format!("{:.1} years", days / 365.25) }
+    if days < 400.0 {
+        format!("{days:.1} days")
+    } else {
+        format!("{:.1} years", days / 365.25)
+    }
 }
 
-pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut MessageWriter<Requested>) {
+pub fn refit(
+    ui: &mut egui::Ui,
+    state: &UiState,
+    game: &Session,
+    out: &mut MessageWriter<Requested>,
+) {
     let now = game.coordinate_time_s();
     let ship = &game.ship;
     let Some(fitting) = ship.fitting() else {
@@ -231,44 +267,60 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
     let module_j = fitting.balance.module_energy_j();
     let stored = fitting.stored_j_at(&ship.motion, now);
     let capacity = fitting.capacity_j_at(now);
-    ui.label(format!("stored {} of {}", me(stored, module_j), me(capacity, module_j)));
+    ui.label(format!(
+        "stored {} of {}",
+        me(stored, module_j),
+        me(capacity, module_j)
+    ));
     if capacity > 0.0 {
         ui.add(egui::ProgressBar::new((stored / capacity) as f32));
     }
-    egui::Grid::new("refit-stats").num_columns(2).show(ui, |ui| {
-        ui.label("mass");
-        ui.label(format!("{:.3e} kg", ship.mass_kg_at(now)));
-        ui.end_row();
-        ui.label("accel");
-        ui.label(format!("{:.1} g", fitting.rated_g_at(&ship.motion, now)));
-        ui.end_row();
-        ui.label("length");
-        ui.label(length(ship.length_m));
-        ui.end_row();
-        ui.label("energy / km/s");
-        ui.label(me_small(energy_per_km_s_j(&fitting.balance, ship.mass_kg_at(now)), module_j));
-        ui.end_row();
-        let drain = fitting.balance.drain_w(&fitting.loadout_at(now));
-        ui.label("solar");
-        ui.label(me_per_year(fitting.solar_w(), module_j));
-        ui.end_row();
-        ui.label("net");
-        ui.label(me_per_year(fitting.solar_w() - drain, module_j));
-        ui.end_row();
-    });
+    egui::Grid::new("refit-stats")
+        .num_columns(2)
+        .show(ui, |ui| {
+            ui.label("mass");
+            ui.label(format!("{:.3e} kg", ship.mass_kg_at(now)));
+            ui.end_row();
+            ui.label("accel");
+            ui.label(format!("{:.1} g", fitting.rated_g_at(&ship.motion, now)));
+            ui.end_row();
+            ui.label("length");
+            ui.label(length(ship.length_m));
+            ui.end_row();
+            ui.label("energy / km/s");
+            ui.label(me_small(
+                energy_per_km_s_j(&fitting.balance, ship.mass_kg_at(now)),
+                module_j,
+            ));
+            ui.end_row();
+            let drain = fitting.balance.drain_w(&fitting.loadout_at(now));
+            ui.label("solar");
+            ui.label(me_per_year(fitting.solar_w(), module_j));
+            ui.end_row();
+            ui.label("net");
+            ui.label(me_per_year(fitting.solar_w() - drain, module_j));
+            ui.end_row();
+        });
     ui.separator();
 
     // While the drones work there is nothing to draft: the panel is the refit's progress.
     if let Some(running) = fitting.refit().filter(|_| ship.is_refitting(now)) {
         let progress = running.at(now);
         let total = running.steps().count();
-        ui.label(format!("refit: step {} of {total}", (progress.finished + 1).min(total)));
+        ui.label(format!(
+            "refit: step {} of {total}",
+            (progress.finished + 1).min(total)
+        ));
         if let Some((step, fraction)) = progress.current {
             ui.add(egui::ProgressBar::new(fraction as f32).text(step_name(step)));
         }
         let left = running.order().start_s + running.duration_s() - now;
         ui.weak(format!("{} to go", span(left.max(0.0))));
-        if ui.button("Cancel refit").on_hover_text("the step under way is reversed").clicked() {
+        if ui
+            .button("Cancel refit")
+            .on_hover_text("the step under way is reversed")
+            .clicked()
+        {
             ask(out, Action::CancelRefit);
         }
         return;
@@ -281,15 +333,23 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
     // end at stops there. The left end stays put, so a handle does not jump as the range moves.
     ui.strong("Plan");
     let mut changed = draft;
-    let knob = |ui: &mut egui::Ui, knob: Knob, floor: u32, most: u32, value: &mut u32, name: &str| {
-        let range = reach(&balance, current, draft, stored, knob, floor..=most);
-        ui.add(egui::Slider::new(value, floor..=*range.end()).text(name));
-        *value = (*value).clamp(*range.start(), *range.end());
-    };
+    let knob =
+        |ui: &mut egui::Ui, knob: Knob, floor: u32, most: u32, value: &mut u32, name: &str| {
+            let range = reach(&balance, current, draft, stored, knob, floor..=most);
+            ui.add(egui::Slider::new(value, floor..=*range.end()).text(name));
+            *value = (*value).clamp(*range.start(), *range.end());
+        };
     for module in Module::ALL {
         let floor = if module == Module::Drone { 1 } else { 0 };
         let most = draft.slots.max(floor);
-        knob(ui, Knob::Module(module), floor, most, changed.count_mut(module), module.name());
+        knob(
+            ui,
+            Knob::Module(module),
+            floor,
+            most,
+            changed.count_mut(module),
+            module.name(),
+        );
     }
     let most = (current.slots * 2).max(40);
     knob(ui, Knob::Slots, 1, most, &mut changed.slots, "hull slots");
@@ -297,36 +357,52 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
         ask(out, Action::DraftRefit(changed));
     }
 
-    let Some(view) = preview(ship, draft, game.remote, now) else { return };
+    let Some(view) = preview(ship, draft, game.remote, now) else {
+        return;
+    };
     ui.separator();
     ui.strong("After");
-    egui::Grid::new("refit-after").num_columns(2).show(ui, |ui| {
-        let mut row = |key: &str, value: String| {
-            ui.label(key);
-            ui.label(value);
-            ui.end_row();
-        };
-        row("free slots", draft.free_slots().to_string());
-        row("length", length(balance.length_m(draft.slots)));
-        row(
-            "energy",
-            format!("{} of {}", me(view.available_j, module_j), me(view.capacity_after_j, module_j)),
-        );
-        row("mass", format!("{:.3e} kg", view.mass_after_kg));
-        row("g dry", format!("{:.1} g", view.g_dry));
-        row("g wet", format!("{:.1} g", view.g_wet));
-        row("energy / km/s", me_small(view.energy_per_km_s_j, module_j));
-        row("solar", me_per_year(view.solar_after_w, module_j));
-        row("net", me_per_year(view.solar_after_w - view.drain_after_w, module_j));
-        let (steps, days) = match view.planned {
-            Ok((steps, duration_s)) => (steps.to_string(), format!("{:.1}", duration_s / 86_400.0)),
-            Err(_) => ("—".into(), "—".into()),
-        };
-        row("steps", steps);
-        row("days", days);
-    });
+    egui::Grid::new("refit-after")
+        .num_columns(2)
+        .show(ui, |ui| {
+            let mut row = |key: &str, value: String| {
+                ui.label(key);
+                ui.label(value);
+                ui.end_row();
+            };
+            row("free slots", draft.free_slots().to_string());
+            row("length", length(balance.length_m(draft.slots)));
+            row(
+                "energy",
+                format!(
+                    "{} of {}",
+                    me(view.available_j, module_j),
+                    me(view.capacity_after_j, module_j)
+                ),
+            );
+            row("mass", format!("{:.3e} kg", view.mass_after_kg));
+            row("g dry", format!("{:.1} g", view.g_dry));
+            row("g wet", format!("{:.1} g", view.g_wet));
+            row("energy / km/s", me_small(view.energy_per_km_s_j, module_j));
+            row("solar", me_per_year(view.solar_after_w, module_j));
+            row(
+                "net",
+                me_per_year(view.solar_after_w - view.drain_after_w, module_j),
+            );
+            let (steps, days) = match view.planned {
+                Ok((steps, duration_s)) => {
+                    (steps.to_string(), format!("{:.1}", duration_s / 86_400.0))
+                }
+                Err(_) => ("—".into(), "—".into()),
+            };
+            row("steps", steps);
+            row("days", days);
+        });
     ui.horizontal(|ui| {
-        if ui.add_enabled(view.blocked.is_none(), egui::Button::new("Apply")).clicked() {
+        if ui
+            .add_enabled(view.blocked.is_none(), egui::Button::new("Apply"))
+            .clicked()
+        {
             ask(out, Action::ApplyRefit);
         }
         if ui.button("Reset").clicked() {
@@ -367,7 +443,11 @@ mod tests {
 
     fn ship() -> Craft {
         let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
-        craft.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, 0.0)));
+        craft.fit(Some(Fitting::full(
+            Loadout::STARTING,
+            Balance::DEFAULT,
+            0.0,
+        )));
         craft
     }
 
@@ -381,7 +461,11 @@ mod tests {
             ..craft.fitting().unwrap().account()
         };
         craft.fit(Some(Fitting::from_account(&account, b)));
-        let draft = Loadout { living: 0, engines: 6, ..Loadout::STARTING };
+        let draft = Loadout {
+            living: 0,
+            engines: 6,
+            ..Loadout::STARTING
+        };
         let view = preview(&craft, draft, true, 0.0).unwrap();
         let expected = view.stored_j + 2.0 * 0.95 * b.module_energy_j() - b.module_energy_j();
         assert!((view.available_j / expected - 1.0).abs() < 1.0e-12);
@@ -389,18 +473,32 @@ mod tests {
         // Two taken apart and one built: the ship is lighter by the 5% of two modules radiated.
         let mass_before = b.dry_mass_kg(&Loadout::STARTING) + view.stored_j / lc_world::fitting::C2;
         let lost = mass_before - view.mass_after_kg;
-        assert!((lost / (2.0 * 0.05 * b.module_mass_kg()) - 1.0).abs() < 1.0e-9, "{lost}");
+        assert!(
+            (lost / (2.0 * 0.05 * b.module_mass_kg()) - 1.0).abs() < 1.0e-9,
+            "{lost}"
+        );
         assert_eq!(view.blocked, None);
     }
 
     #[test]
     fn apply_says_why_it_cannot_be_pressed() {
-        let full = Loadout { storage: 5, ..Loadout::STARTING };
+        let full = Loadout {
+            storage: 5,
+            ..Loadout::STARTING
+        };
         let view = preview(&ship(), full, true, 0.0).unwrap();
         assert_eq!(view.blocked, Some(shortfall(Shortage::Capacity)));
         let same = preview(&ship(), Loadout::STARTING, true, 0.0).unwrap();
         assert_eq!(same.blocked, Some("nothing to change"));
-        let offline = preview(&ship(), Loadout { engines: 6, ..Loadout::STARTING }, false, 0.0);
+        let offline = preview(
+            &ship(),
+            Loadout {
+                engines: 6,
+                ..Loadout::STARTING
+            },
+            false,
+            0.0,
+        );
         assert!(offline.unwrap().blocked.unwrap().starts_with("no server"));
     }
 
@@ -420,7 +518,10 @@ mod tests {
         assert_eq!(*range.start(), 0);
 
         // With plenty stored it is the free slots that stop it.
-        assert_eq!(*reach(&b, start, start, 25.0 * me, engines, 0..=20).end(), 10);
+        assert_eq!(
+            *reach(&b, start, start, 25.0 * me, engines, 0..=20).end(),
+            10
+        );
 
         // Full, so living space cannot be taken apart — its refund has nowhere to go — but the
         // five free slots can all be filled.
@@ -435,7 +536,10 @@ mod tests {
 
         // Nothing inside the range is a loadout the budget cannot pay for.
         for n in range_of(reach(&b, start, start, 3.0 * me, engines, 0..=20)) {
-            let draft = Loadout { engines: n, ..start };
+            let draft = Loadout {
+                engines: n,
+                ..start
+            };
             assert!(budget_j(&b, start, draft, 3.0 * me) >= 0.0, "{n} engines");
         }
     }
@@ -463,7 +567,16 @@ mod tests {
     #[test]
     fn a_draft_between_systems_collects_nothing() {
         let b = Balance::DEFAULT;
-        let view = preview(&ship(), Loadout { living: 3, ..Loadout::STARTING }, true, 0.0).unwrap();
+        let view = preview(
+            &ship(),
+            Loadout {
+                living: 3,
+                ..Loadout::STARTING
+            },
+            true,
+            0.0,
+        )
+        .unwrap();
         assert_eq!(view.solar_after_w, 0.0);
         assert_eq!(view.drain_after_w, 3.0 * b.living_drain_w);
     }

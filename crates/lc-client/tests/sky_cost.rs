@@ -33,7 +33,10 @@ fn a_full_sky() -> AuthoredStars {
 #[test]
 fn the_sky_costs_the_same_moving_as_it_does_at_rest() {
     let mut session = Session::new(&a_full_sky(), STARS as usize);
-    assert!(session.stars.len() > 1000, "premise: a full sky, not three stars");
+    assert!(
+        session.stars.len() > 1000,
+        "premise: a full sky, not three stars"
+    );
 
     let time = |session: &Session| {
         let started = Instant::now();

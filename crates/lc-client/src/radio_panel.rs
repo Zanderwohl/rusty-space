@@ -98,8 +98,12 @@ pub(crate) fn chat(
 ) {
     // Everyone this ship has talked to, most recent first, then everyone in sight it has not.
     // The second half is how a conversation starts at all.
-    let mut parties: Vec<(lc_proto::ShipId, String)> =
-        uplink.chat.conversations().into_iter().map(|(id, c)| (id, c.name.clone())).collect();
+    let mut parties: Vec<(lc_proto::ShipId, String)> = uplink
+        .chat
+        .conversations()
+        .into_iter()
+        .map(|(id, c)| (id, c.name.clone()))
+        .collect();
     for contact in &uplink.contacts {
         if !parties.iter().any(|(id, _)| *id == contact.ship_id) {
             parties.push((contact.ship_id, contact.name.clone()));
@@ -115,32 +119,36 @@ pub(crate) fn chat(
     // is the same size with one message in it and with two hundred — which matters here more
     // than in most panels, because what fills it arrives without being asked for.
     ui.allocate_ui(egui::vec2(PANEL_WIDTH, BODY_HEIGHT), |ui| {
-    ui.horizontal_top(|ui| {
-        // `allocate_ui_with_layout`, not `allocate_ui`: a child of a horizontal layout keeps
-        // that direction, so the plain form laid the whole list out left to right — one name
-        // per column, with the separator between "Public" and the first craft standing on end.
-        ui.allocate_ui_with_layout(
-            egui::vec2(LIST_WIDTH, BODY_HEIGHT),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("chat_parties")
-                .max_height(BODY_HEIGHT)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                ui.set_min_width(LIST_WIDTH - 8.0);
-                // Justified, so every entry is the width of the column rather than the width
-                // of its own name. A list whose click targets are each a different size reads
-                // as a pile of labels; one where they line up reads as a list.
-                ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
-                if ui
-                    .selectable_label(showing == Channel::Public, "Public")
-                    .on_hover_text("broadcasts: everything said to nobody in particular")
-                    .clicked()
-                {
-                    ask(out, Action::ChatWith(Channel::Public));
-                }
-                if ui
+        ui.horizontal_top(|ui| {
+            // `allocate_ui_with_layout`, not `allocate_ui`: a child of a horizontal layout keeps
+            // that direction, so the plain form laid the whole list out left to right — one name
+            // per column, with the separator between "Public" and the first craft standing on end.
+            ui.allocate_ui_with_layout(
+                egui::vec2(LIST_WIDTH, BODY_HEIGHT),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("chat_parties")
+                        .max_height(BODY_HEIGHT)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_min_width(LIST_WIDTH - 8.0);
+                            // Justified, so every entry is the width of the column rather than the width
+                            // of its own name. A list whose click targets are each a different size reads
+                            // as a pile of labels; one where they line up reads as a list.
+                            ui.with_layout(
+                                egui::Layout::top_down_justified(egui::Align::LEFT),
+                                |ui| {
+                                    if ui
+                                        .selectable_label(showing == Channel::Public, "Public")
+                                        .on_hover_text(
+                                            "broadcasts: everything said to nobody in particular",
+                                        )
+                                        .clicked()
+                                    {
+                                        ask(out, Action::ChatWith(Channel::Public));
+                                    }
+                                    if ui
                     .selectable_label(showing == Channel::Overheard, "Overheard")
                     .on_hover_text(
                         "traffic between other craft that this ship was in range of. Open ones \
@@ -150,65 +158,93 @@ pub(crate) fn chat(
                 {
                     ask(out, Action::ChatWith(Channel::Overheard));
                 }
-                ui.separator();
-                for (id, name) in &parties {
-                    let in_sight = uplink.contacts.iter().any(|c| c.ship_id == *id);
-                    let label = ui
-                        .selectable_label(showing == Channel::With(*id), name.as_str())
-                        .on_hover_text(match in_sight {
-                            true => "in sight",
-                            // Said, because it decides whether a beam can be aimed and whether
-                            // a reply is years or minutes away.
-                            false => "out of sight; still worth writing to",
+                                    ui.separator();
+                                    for (id, name) in &parties {
+                                        let in_sight =
+                                            uplink.contacts.iter().any(|c| c.ship_id == *id);
+                                        let label = ui
+                                            .selectable_label(
+                                                showing == Channel::With(*id),
+                                                name.as_str(),
+                                            )
+                                            .on_hover_text(match in_sight {
+                                                true => "in sight",
+                                                // Said, because it decides whether a beam can be aimed and whether
+                                                // a reply is years or minutes away.
+                                                false => "out of sight; still worth writing to",
+                                            });
+                                        if label.clicked() {
+                                            ask(out, Action::ChatWith(Channel::With(*id)));
+                                        }
+                                    }
+                                    if parties.is_empty() {
+                                        ui.weak(match game.remote {
+                                            true => "nobody yet",
+                                            false => "no server",
+                                        });
+                                    }
+                                },
+                            );
                         });
-                    if label.clicked() {
-                        ask(out, Action::ChatWith(Channel::With(*id)));
+                },
+            );
+            ui.separator();
+            ui.vertical(|ui| match showing {
+                Channel::Overheard => overheard_log(ui, uplink),
+                Channel::Public => {
+                    let star = state.0.selected;
+                    // No craft to aim at, so that choice is not offered: a beam at one ship is not
+                    // a broadcast, whatever the panel is showing.
+                    if *aimed == Aimed::AtThem
+                        || (*aimed == Aimed::AtTheSelectedStar && star.is_none())
+                    {
+                        *aimed = Aimed::Omni;
                     }
+                    public_log(ui, uplink, &own, out);
+                    compose(
+                        ui,
+                        game,
+                        uplink,
+                        None,
+                        star,
+                        false,
+                        aim_of(*aimed, None, star),
+                        draft,
+                        aimed,
+                        seal,
+                        out,
+                    );
                 }
-                if parties.is_empty() {
-                    ui.weak(match game.remote {
-                        true => "nobody yet",
-                        false => "no server",
-                    });
+                Channel::With(with) => {
+                    let star = state.0.selected;
+                    let in_sight = uplink.contacts.iter().any(|c| c.ship_id == with);
+                    // Corrected once, here, so the log's resend button and the composer's send
+                    // button cannot disagree about where a message is pointed. A choice the panel
+                    // offered and the world has since withdrawn — the contact left, or the
+                    // telescope moved — falls back to a shout rather than a beam at nothing.
+                    if (*aimed == Aimed::AtThem && !in_sight)
+                        || (*aimed == Aimed::AtTheSelectedStar && star.is_none())
+                    {
+                        *aimed = Aimed::Omni;
+                    }
+                    let aim = aim_of(*aimed, Some(with), star);
+                    conversation(ui, uplink, with, &own, aim, out);
+                    compose(
+                        ui,
+                        game,
+                        uplink,
+                        Some(with),
+                        star,
+                        in_sight,
+                        aim,
+                        draft,
+                        aimed,
+                        seal,
+                        out,
+                    );
                 }
-                });
             });
-        },
-        );
-        ui.separator();
-        ui.vertical(|ui| match showing {
-            Channel::Overheard => overheard_log(ui, uplink),
-            Channel::Public => {
-                let star = state.0.selected;
-                // No craft to aim at, so that choice is not offered: a beam at one ship is not
-                // a broadcast, whatever the panel is showing.
-                if *aimed == Aimed::AtThem || (*aimed == Aimed::AtTheSelectedStar && star.is_none())
-                {
-                    *aimed = Aimed::Omni;
-                }
-                public_log(ui, uplink, &own, out);
-                compose(ui, game, uplink, None, star, false, aim_of(*aimed, None, star), draft, aimed, seal, out);
-            }
-            Channel::With(with) => {
-                let star = state.0.selected;
-                let in_sight = uplink.contacts.iter().any(|c| c.ship_id == with);
-                // Corrected once, here, so the log's resend button and the composer's send
-                // button cannot disagree about where a message is pointed. A choice the panel
-                // offered and the world has since withdrawn — the contact left, or the
-                // telescope moved — falls back to a shout rather than a beam at nothing.
-                if (*aimed == Aimed::AtThem && !in_sight)
-                    || (*aimed == Aimed::AtTheSelectedStar && star.is_none())
-                {
-                    *aimed = Aimed::Omni;
-                }
-                let aim = aim_of(*aimed, Some(with), star);
-                conversation(ui, uplink, with, &own, aim, out);
-                compose(
-                    ui, game, uplink, Some(with), star, in_sight, aim, draft, aimed, seal, out,
-                );
-            }
         });
-    });
     });
 }
 
@@ -251,10 +287,7 @@ fn public_log(
 /// **The encrypted ones are here too**, and that is deliberate: the fact of a signal is real
 /// whether or not it can be read, and a run of traffic between two craft says something even
 /// when none of it says anything.
-fn overheard_log(
-    ui: &mut egui::Ui,
-    uplink: &crate::uplink::Uplink,
-) {
+fn overheard_log(ui: &mut egui::Ui, uplink: &crate::uplink::Uplink) {
     let lines = uplink.chat.overheard();
     log_area(ui, "chat_overheard", BODY_HEIGHT, |ui| {
         if lines.is_empty() {
@@ -307,7 +340,6 @@ fn overheard_log(
     });
 }
 
-
 /// One craft's conversation, both halves.
 fn conversation(
     ui: &mut egui::Ui,
@@ -348,19 +380,22 @@ fn conversation(
                             );
                         }
                         false if unacknowledged(ui, line.event_ids.len()).clicked() => {
-                            ask(out, Action::Say {
-                                to: Some(with),
-                                aim,
-                                // The original's, never the panel's. A message sent encrypted
-                                // must not become one sent in the open by a second click.
-                                secrecy: match line.sealed {
-                                    true => lc_proto::Secrecy::Sealed,
-                                    false => lc_proto::Secrecy::Open,
+                            ask(
+                                out,
+                                Action::Say {
+                                    to: Some(with),
+                                    aim,
+                                    // The original's, never the panel's. A message sent encrypted
+                                    // must not become one sent in the open by a second click.
+                                    secrecy: match line.sealed {
+                                        true => lc_proto::Secrecy::Sealed,
+                                        false => lc_proto::Secrecy::Open,
+                                    },
+                                    body: line.body.clone().unwrap_or_default(),
+                                    // What makes this the same message rather than a second one.
+                                    idem: Some(line.idem),
                                 },
-                                body: line.body.clone().unwrap_or_default(),
-                                // What makes this the same message rather than a second one.
-                                idem: Some(line.idem),
-                            });
+                            );
                         }
                         false => {}
                     }
@@ -396,7 +431,11 @@ fn log_area(ui: &mut egui::Ui, id: &str, height: f32, add: impl FnOnce(&mut egui
 /// does something to the line, and a log is prose. This is the name itself, underlined while
 /// the cursor is on it — which is the oldest affordance there is for "this goes somewhere" and
 /// is the one thing a label can do without becoming a widget.
-pub(crate) fn clickable_name(ui: &mut egui::Ui, text: &str, color: egui::Color32) -> egui::Response {
+pub(crate) fn clickable_name(
+    ui: &mut egui::Ui,
+    text: &str,
+    color: egui::Color32,
+) -> egui::Response {
     let face = logged(ui);
     let response = ui.add(
         egui::Label::new(egui::RichText::new(text).color(color).font(face))
@@ -422,7 +461,11 @@ fn speaker(ui: &mut egui::Ui, name: &str, mine: bool) {
         false => RADIO,
     };
     let face = logged(ui);
-    ui.label(egui::RichText::new(format!("{name}:")).color(color).font(face));
+    ui.label(
+        egui::RichText::new(format!("{name}:"))
+            .color(color)
+            .font(face),
+    );
 }
 
 /// What a message's tooltip says: when this ship learnt of it, and how loud it was.
@@ -434,9 +477,15 @@ fn reception(line: &crate::chat::Line) -> String {
     let Some(arrived) = line.arrive_s else {
         return "Sent. Nothing here can see it land.".to_string();
     };
-    let when = format!("Received T + {:.2} years", arrived / crate::flight::JULIAN_YEAR_S);
+    let when = format!(
+        "Received T + {:.2} years",
+        arrived / crate::flight::JULIAN_YEAR_S
+    );
     match line.decibels() {
-        Some(db) => format!("{when}\n{db:.1} dB, after {} in flight", duration((arrived - line.sent_s).max(0.0))),
+        Some(db) => format!(
+            "{when}\n{db:.1} dB, after {} in flight",
+            duration((arrived - line.sent_s).max(0.0))
+        ),
         // Only a message recorded before the store kept the reading, now that it does.
         None => format!("{when}\nsignal strength not recorded"),
     }
@@ -489,12 +538,19 @@ fn unacknowledged(ui: &mut egui::Ui, sends: usize) -> egui::Response {
         egui::pos2(c.x - w, c.y + h),
     ];
     let painter = ui.painter();
-    painter.add(egui::Shape::convex_polygon(points, amber, egui::Stroke::NONE));
+    painter.add(egui::Shape::convex_polygon(
+        points,
+        amber,
+        egui::Stroke::NONE,
+    ));
     // The bar and dot of an exclamation mark, in the window's own background color so the
     // triangle reads as a warning sign rather than a plain arrowhead.
     let ink = ui.visuals().window_fill;
     painter.line_segment(
-        [egui::pos2(c.x, c.y - h * 0.35), egui::pos2(c.x, c.y + h * 0.35)],
+        [
+            egui::pos2(c.x, c.y - h * 0.35),
+            egui::pos2(c.x, c.y + h * 0.35),
+        ],
         egui::Stroke::new(1.6_f32, ink),
     );
     painter.circle_filled(egui::pos2(c.x, c.y + h * 0.65), 0.9, ink);
@@ -527,15 +583,20 @@ fn compose(
 
     ui.horizontal(|ui| {
         ui.selectable_value(aimed, Aimed::Omni, "omni")
-            .on_hover_text("every direction: heard by everyone in range, and it says where you are");
+            .on_hover_text(
+                "every direction: heard by everyone in range, and it says where you are",
+            );
         // Not offered at all on the public channel: aiming a broadcast at one ship is not a
         // broadcast, and an option that contradicts the channel is worse than a missing one.
         if with.is_some() {
             ui.add_enabled_ui(in_sight, |ui| {
-                ui.selectable_value(aimed, Aimed::AtThem, "beam").on_hover_text(match in_sight {
-                    true => "aimed where they are predicted to be; a craft under thrust is missed",
-                    false => "nothing in sight to aim at",
-                });
+                ui.selectable_value(aimed, Aimed::AtThem, "beam")
+                    .on_hover_text(match in_sight {
+                        true => {
+                            "aimed where they are predicted to be; a craft under thrust is missed"
+                        }
+                        false => "nothing in sight to aim at",
+                    });
             });
         }
         ui.add_enabled_ui(star.is_some(), |ui| {
@@ -543,22 +604,24 @@ fn compose(
                 .and_then(|id| game.star(id))
                 .and_then(|s| s.name.clone())
                 .unwrap_or_else(|| "the selected star".into());
-            ui.selectable_value(aimed, Aimed::AtTheSelectedStar, "beam star").on_hover_text(
-                format!("{name}: the whole system, for when you do not know where in it they are"),
-            );
+            ui.selectable_value(aimed, Aimed::AtTheSelectedStar, "beam star")
+                .on_hover_text(format!(
+                    "{name}: the whole system, for when you do not know where in it they are"
+                ));
         });
     });
     ui.horizontal(|ui| {
         ui.add_enabled_ui(holds_key, |ui| {
-            ui.checkbox(seal, "encrypt").on_hover_text(match (with, holds_key) {
-                (_, true) => "Encrypt message to prevent others from understanding message.",
-                (Some(_), false) => "Can't encrypt; don't have key",
-                // Kept apart from the missing-key wording, because on a broadcast it would be
-                // false: there is no key to be had, not a key this ship is short of. Nobody is
-                // the addressee, so there is nobody to encrypt it for — and the server refuses
-                // the combination rather than quietly sending it in the open.
-                (None, false) => "Can't encrypt a broadcast; it is addressed to nobody",
-            });
+            ui.checkbox(seal, "encrypt")
+                .on_hover_text(match (with, holds_key) {
+                    (_, true) => "Encrypt message to prevent others from understanding message.",
+                    (Some(_), false) => "Can't encrypt; don't have key",
+                    // Kept apart from the missing-key wording, because on a broadcast it would be
+                    // false: there is no key to be had, not a key this ship is short of. Nobody is
+                    // the addressee, so there is nobody to encrypt it for — and the server refuses
+                    // the combination rather than quietly sending it in the open.
+                    (None, false) => "Can't encrypt a broadcast; it is addressed to nobody",
+                });
         });
         if !holds_key {
             *seal = false;
@@ -599,16 +662,19 @@ fn compose(
         );
         let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         if (ui.button("send").clicked() || entered) && !draft.trim().is_empty() {
-            ask(out, Action::Say {
-                to: with,
-                aim,
-                secrecy: match *seal {
-                    true => lc_proto::Secrecy::Sealed,
-                    false => lc_proto::Secrecy::Open,
+            ask(
+                out,
+                Action::Say {
+                    to: with,
+                    aim,
+                    secrecy: match *seal {
+                        true => lc_proto::Secrecy::Sealed,
+                        false => lc_proto::Secrecy::Open,
+                    },
+                    body: std::mem::take(draft),
+                    idem: None,
                 },
-                body: std::mem::take(draft),
-                idem: None,
-            });
+            );
             field.request_focus();
         }
     });

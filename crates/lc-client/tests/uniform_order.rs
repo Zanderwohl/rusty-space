@@ -30,7 +30,10 @@ fn the_starfield_uniform_is_declared_in_one_order() {
     let in_shader = fields(shader, "struct StarfieldUniform {");
     let in_host = fields(host, "pub struct RelativisticStarfieldUniform {");
 
-    assert!(in_shader.len() > 10, "the parse found almost nothing: {in_shader:?}");
+    assert!(
+        in_shader.len() > 10,
+        "the parse found almost nothing: {in_shader:?}"
+    );
     assert_eq!(
         in_shader, in_host,
         "the shader and the host disagree about the uniform's layout",
@@ -48,7 +51,10 @@ fn the_population_uniform_is_declared_in_one_order() {
     let in_shader = fields(shader, "struct PopulationUniform {");
     let in_host = fields(host, "pub struct PopulationUniform {");
 
-    assert!(in_shader.len() > 8, "the parse found almost nothing: {in_shader:?}");
+    assert!(
+        in_shader.len() > 8,
+        "the parse found almost nothing: {in_shader:?}"
+    );
     assert_eq!(
         in_shader, in_host,
         "the shader and the host disagree about the uniform's layout",
@@ -65,7 +71,10 @@ fn the_body_surface_uniform_is_declared_in_one_order() {
     let in_shader = fields(shader, "struct BodySurfaceUniform {");
     let in_host = fields(host, "pub struct BodySurfaceUniform {");
 
-    assert!(in_shader.len() >= 5, "the parse found almost nothing: {in_shader:?}");
+    assert!(
+        in_shader.len() >= 5,
+        "the parse found almost nothing: {in_shader:?}"
+    );
     assert_eq!(
         in_shader, in_host,
         "the shader and the host disagree about the uniform's layout",
@@ -83,7 +92,10 @@ fn the_plume_uniform_is_declared_in_one_order() {
     let in_shader = fields(shader, "struct PlumeUniform {");
     let in_host = fields(host, "pub struct PlumeUniform {");
 
-    assert!(in_shader.len() >= 6, "the parse found almost nothing: {in_shader:?}");
+    assert!(
+        in_shader.len() >= 6,
+        "the parse found almost nothing: {in_shader:?}"
+    );
     assert_eq!(
         in_shader, in_host,
         "the shader and the host disagree about the uniform's layout",

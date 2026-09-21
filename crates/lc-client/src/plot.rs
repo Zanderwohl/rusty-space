@@ -53,8 +53,11 @@ impl CurvePlot {
                 match &mut self.texture {
                     Some(handle) => handle.set(image, egui::TextureOptions::LINEAR),
                     None => {
-                        self.texture =
-                            Some(ui.ctx().load_texture("light-curve", image, egui::TextureOptions::LINEAR))
+                        self.texture = Some(ui.ctx().load_texture(
+                            "light-curve",
+                            image,
+                            egui::TextureOptions::LINEAR,
+                        ))
                     }
                 }
                 self.drawn = Some(now);
@@ -79,27 +82,54 @@ pub fn render(samples: &[(f64, f64)], width: u32, height: u32) -> Option<egui::C
     }
     // Relative flux, not the deficit: with re-emission a measurement can land above the
     // unobscured star, and a plot of "how much is missing" cannot show that at all.
-    let flux: Vec<(f64, f64)> =
-        samples.iter().map(|(t, d)| (t / YEAR_S, 1.0 - d)).collect();
+    let flux: Vec<(f64, f64)> = samples.iter().map(|(t, d)| (t / YEAR_S, 1.0 - d)).collect();
 
     let span = (flux[0].0, flux[flux.len() - 1].0);
-    let span = if span.1 > span.0 { span } else { (span.0, span.0 + 1e-9) };
+    let span = if span.1 > span.0 {
+        span
+    } else {
+        (span.0, span.0 + 1e-9)
+    };
     // The baseline is always in frame. A curve auto-scaled to its own noise looks like a
     // detection even when the star is doing nothing.
-    let extent = flux.iter().fold((1.0f64, 1.0f64), |r, (_, f)| (r.0.min(*f), r.1.max(*f)));
+    let extent = flux
+        .iter()
+        .fold((1.0f64, 1.0f64), |r, (_, f)| (r.0.min(*f), r.1.max(*f)));
 
     let metrics = raster::BitmapMetrics;
-    let style = Style { axis: FG, text_size: 11.0, series: SERIES, ..Style::default() };
-    let area = Rect { x: 8.0, y: 8.0, width: width as f32 - 16.0, height: height as f32 - 26.0 };
+    let style = Style {
+        axis: FG,
+        text_size: 11.0,
+        series: SERIES,
+        ..Style::default()
+    };
+    let area = Rect {
+        x: 8.0,
+        y: 8.0,
+        width: width as f32 - 16.0,
+        height: height as f32 - 26.0,
+    };
 
-    let x = Axis { scale: Scale::Linear, range: span, ticks: 5 };
-    let y = Axis { scale: Scale::Linear, range: Scale::Linear.pad(extent, 0.2), ticks: 4 };
+    let x = Axis {
+        scale: Scale::Linear,
+        range: span,
+        ticks: 5,
+    };
+    let y = Axis {
+        scale: Scale::Linear,
+        range: Scale::Linear.pad(extent, 0.2),
+        ticks: 4,
+    };
     let mut chart = Chart::new(area, x, y, &metrics);
     chart.style = style;
     // Measured with the style it will be drawn with: a flux axis wants several decimals, and a
     // fixed margin clips the leading digits off the left edge.
     let margin = chart.y_label_width() + 12.0;
-    chart.area = Rect { x: margin, width: width as f32 - margin - 12.0, ..area };
+    chart.area = Rect {
+        x: margin,
+        width: width as f32 - margin - 12.0,
+        ..area
+    };
 
     let mut layers = vec![chart.frame()];
     let mut baseline = chart.series(&[(span.0, 1.0), (span.1, 1.0)]);
@@ -130,8 +160,7 @@ mod tests {
 
     #[test]
     fn a_curve_rasterises_to_the_size_it_was_asked_for() {
-        let image = render(&curve(400, |k| (k % 40) as f64 * 1e-4), 520, 190)
-            .expect("an image");
+        let image = render(&curve(400, |k| (k % 40) as f64 * 1e-4), 520, 190).expect("an image");
         assert_eq!(image.size, [520, 190]);
         assert_eq!(image.pixels.len(), 520 * 190);
     }
@@ -149,7 +178,10 @@ mod tests {
     fn a_curve_that_never_moves_still_draws() {
         let flat = vec![(0.0, 0.0); 64];
         let image = render(&flat, 400, 150).expect("a flat curve is still a curve");
-        assert!(image.pixels.iter().any(|p| *p != image.pixels[0]), "the frame should be drawn");
+        assert!(
+            image.pixels.iter().any(|p| *p != image.pixels[0]),
+            "the frame should be drawn"
+        );
     }
 
     /// The bug this guards: a curve scaled to its own noise looks like a detection. Whatever
@@ -159,8 +191,15 @@ mod tests {
         for offset in [-0.4, -1e-6, 0.0, 1e-6, 0.4] {
             let samples = curve(64, |_| offset);
             let image = render(&samples, 400, 150).expect("an image");
-            let lit = image.pixels.iter().filter(|p| p.r() > 90 || p.g() > 90).count();
-            assert!(lit > 100, "offset {offset} drew almost nothing: {lit} lit pixels");
+            let lit = image
+                .pixels
+                .iter()
+                .filter(|p| p.r() > 90 || p.g() > 90)
+                .count();
+            assert!(
+                lit > 100,
+                "offset {offset} drew almost nothing: {lit} lit pixels"
+            );
         }
     }
 
@@ -178,7 +217,10 @@ mod tests {
     #[test]
     fn the_band_is_named_in_text_beside_the_picture() {
         assert!(caption(Band::ThermalIr).contains("ThermalIr"));
-        assert!(caption(Band::V).contains("emission year"), "say what the axis is");
+        assert!(
+            caption(Band::V).contains("emission year"),
+            "say what the axis is"
+        );
     }
 
     /// A million samples is a real case: the curve holds thousands and the plot is hundreds of

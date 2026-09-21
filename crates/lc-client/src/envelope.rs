@@ -19,8 +19,8 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_mesh::{Indices, PrimitiveTopology};
 use em_render::population_material::{
-    ATTRIBUTE_SHELL_DENSITY, PROFILE_LATITUDE, PROFILE_RADIAL, PROFILE_SAMPLES,
-    PopulationMaterial, PopulationUniform,
+    ATTRIBUTE_SHELL_DENSITY, PROFILE_LATITUDE, PROFILE_RADIAL, PROFILE_SAMPLES, PopulationMaterial,
+    PopulationUniform,
 };
 use em_render::render_space::sim_to_render;
 use glam::DVec3;
@@ -128,7 +128,11 @@ pub struct Field {
 
 impl Default for Field {
     fn default() -> Self {
-        Self { inner: 0.0, slab: 1.0, reference: 1.0 }
+        Self {
+            inner: 0.0,
+            slab: 1.0,
+            reference: 1.0,
+        }
     }
 }
 
@@ -186,7 +190,9 @@ pub fn profile_of(population: &Population) -> Profile {
     let latitude: Vec<f64> = (0..PROFILE_SAMPLES)
         .map(|i| {
             let sin_phi = slab as f64 * i as f64 / (PROFILE_SAMPLES - 1) as f64;
-            population.inclination.sky_density(sin_phi.clamp(-1.0, 1.0).asin())
+            population
+                .inclination
+                .sky_density(sin_phi.clamp(-1.0, 1.0).asin())
         })
         .collect();
     let latitude = peak_normalised(&latitude);
@@ -199,11 +205,23 @@ pub fn profile_of(population: &Population) -> Profile {
     let step = (1.0 - inner) / (PROFILE_SAMPLES - 1) as f32;
     let reference = radial.iter().sum::<f32>() * step;
 
-    Profile { latitude, radial, field: Field { inner, slab, reference } }
+    Profile {
+        latitude,
+        radial,
+        field: Field {
+            inner,
+            slab,
+            reference,
+        },
+    }
 }
 
 fn peak_normalised(values: &[f64]) -> Vec<f32> {
-    let peak = values.iter().cloned().fold(0.0f64, f64::max).max(f64::MIN_POSITIVE);
+    let peak = values
+        .iter()
+        .cloned()
+        .fold(0.0f64, f64::max)
+        .max(f64::MIN_POSITIVE);
     values.iter().map(|v| (v / peak) as f32).collect()
 }
 
@@ -252,7 +270,10 @@ fn node_spacing(nodes: &[(f64, f64)]) -> f64 {
         return 0.0;
     }
     let lo = nodes.iter().map(|(v, _)| *v).fold(f64::INFINITY, f64::min);
-    let hi = nodes.iter().map(|(v, _)| *v).fold(f64::NEG_INFINITY, f64::max);
+    let hi = nodes
+        .iter()
+        .map(|(v, _)| *v)
+        .fold(f64::NEG_INFINITY, f64::max);
     (hi - lo) / (nodes.len() - 1) as f64
 }
 
@@ -283,7 +304,11 @@ pub fn profile_image(profile: &Profile) -> Image {
         }
     }
     let mut image = Image::new(
-        Extent3d { width: PROFILE_SAMPLES as u32, height: rows.len() as u32, depth_or_array_layers: 1 },
+        Extent3d {
+            width: PROFILE_SAMPLES as u32,
+            height: rows.len() as u32,
+            depth_or_array_layers: 1,
+        },
         TextureDimension::D2,
         data,
         TextureFormat::R32Float,
@@ -330,7 +355,10 @@ pub fn build_proxy() -> Mesh {
         }
     }
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(ATTRIBUTE_SHELL_DENSITY, density);
@@ -350,7 +378,11 @@ pub const RADIAL: usize = 96;
 /// Unit scale is the outer edge, so the transform is one number.
 pub fn build_ring(rings: &lc_world::rings::RingSystem) -> Mesh {
     let (inner, outer) = (rings.inner_m(), rings.outer_m());
-    let peak = rings.bands.iter().map(|b| b.optical_depth).fold(0.0f64, f64::max);
+    let peak = rings
+        .bands
+        .iter()
+        .map(|b| b.optical_depth)
+        .fold(0.0f64, f64::max);
     let peak = peak.max(f64::MIN_POSITIVE);
 
     let mut positions = Vec::with_capacity((RADIAL + 1) * (SEGMENTS + 1));
@@ -368,7 +400,11 @@ pub fn build_ring(rings: &lc_world::rings::RingSystem) -> Mesh {
         for s in 0..=SEGMENTS {
             let theta = std::f64::consts::TAU * s as f64 / SEGMENTS as f64;
             let (st, ct) = theta.sin_cos();
-            positions.push(sim_to_render(DVec3::new(unit * ct, unit * st, 0.0)).as_vec3().to_array());
+            positions.push(
+                sim_to_render(DVec3::new(unit * ct, unit * st, 0.0))
+                    .as_vec3()
+                    .to_array(),
+            );
             // Flat: every normal is the pole.
             normals.push(pole);
             density.push(at);
@@ -384,7 +420,10 @@ pub fn build_ring(rings: &lc_world::rings::RingSystem) -> Mesh {
         }
     }
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(ATTRIBUTE_SHELL_DENSITY, density);
@@ -440,7 +479,8 @@ pub fn source_radiance(population: &Population, lighting: Lighting) -> em_spectr
     let equilibrium = population.equilibrium_temperature_under(lighting.star_luminosity_w);
     em_spectra::PerBand::new(std::array::from_fn(|i| {
         let band = em_spectra::Band::ALL[i];
-        let scattered = ALBEDO * dilution * em_spectra::blackbody::band_radiance(band, lighting.star_teff_k);
+        let scattered =
+            ALBEDO * dilution * em_spectra::blackbody::band_radiance(band, lighting.star_teff_k);
         let glow = em_spectra::blackbody::band_radiance(band, equilibrium);
         (population.band_response[band] as f64 * (scattered + glow)) as f32
     }))
@@ -464,7 +504,11 @@ fn band_columns(
 
     let displayed = lighting.mapping.apply(&source);
     let peak = displayed.iter().cloned().fold(0.0f32, f32::max);
-    let level = if peak > 0.0 { DISPLAY_LEVEL / peak } else { 0.0 };
+    let level = if peak > 0.0 {
+        DISPLAY_LEVEL / peak
+    } else {
+        0.0
+    };
 
     let covering = population.covering_fraction();
     let material = std::array::from_fn(|i| {
@@ -473,8 +517,9 @@ fn band_columns(
         // solid bodies every band gets the same answer, which is right: a meter of rock is a
         // meter of rock from B to 21 cm. Dust is where it separates.
         let response = population.band_response[band].clamp(0.0, 1.0) as f64;
-        let seen = (opacity_of(covering * response) * opacity / opacity_of(covering).max(f32::MIN_POSITIVE))
-            .clamp(0.0, 1.0);
+        let seen = (opacity_of(covering * response) * opacity
+            / opacity_of(covering).max(f32::MIN_POSITIVE))
+        .clamp(0.0, 1.0);
         // Solve for the coefficient that puts the reference ray at that opacity. Clamped short
         // of one, or a completed swarm asks for an infinite one.
         let wanted = (seen * fade).clamp(0.0, 0.98);
@@ -499,8 +544,7 @@ pub fn uniforms(
     // is *largest* in B for dust, so the test that meant to catch dust never did.
     let opacity = (opacity_of(population.covering_fraction()) * gain).clamp(0.0, 1.0);
     let fade = if inside { INSIDE_FADE } else { 1.0 };
-    let (band_to_display, band_material) =
-        band_columns(population, lighting, field, opacity, fade);
+    let (band_to_display, band_material) = band_columns(population, lighting, field, opacity, fade);
     PopulationUniform {
         // Carried rather than assumed by the shader: the pole is +Z in simulation space, and
         // `sim_to_render` is the one place that knows what that is once it is rendered.
@@ -564,7 +608,14 @@ pub fn spawn(
         .map(|(i, p)| {
             let profile = profile_of(p);
             let material = materials.add(PopulationMaterial {
-                uniforms: uniforms(p, i as f32 * 7.31 + 1.0, gain, true, profile.field, lighting),
+                uniforms: uniforms(
+                    p,
+                    i as f32 * 7.31 + 1.0,
+                    gain,
+                    true,
+                    profile.field,
+                    lighting,
+                ),
                 profile: images.add(profile_image(&profile)),
             });
             commands.spawn((
@@ -630,9 +681,10 @@ fn spawn_rings(
         };
         commands.spawn((
             Mesh3d(meshes.add(build_ring(rings.system))),
-            MeshMaterial3d(
-                materials.add(PopulationMaterial { uniforms: uniform, profile: unread.clone() }),
-            ),
+            MeshMaterial3d(materials.add(PopulationMaterial {
+                uniforms: uniform,
+                profile: unread.clone(),
+            })),
             Transform::default(),
             NoFrustumCulling,
             RingMesh {
@@ -712,7 +764,9 @@ pub fn update_envelopes(
         return;
     }
 
-    let Some(system) = session.system.as_ref() else { return };
+    let Some(system) = session.system.as_ref() else {
+        return;
+    };
     for (mut transform, shell) in placed.iter_mut().zip(&envelopes.shells) {
         transform.translation =
             sim_to_render((system.origin_ly - eye.at_ly) * M_PER_LY / UNIT_M).as_vec3();
@@ -722,7 +776,9 @@ pub fn update_envelopes(
 
     // Rings ride their body, so unlike a shell they are placed every frame.
     for (mut transform, ring) in ringed.iter_mut() {
-        let Some(body) = bodies.drawn.iter().find(|d| d.name == ring.body) else { continue };
+        let Some(body) = bodies.drawn.iter().find(|d| d.name == ring.body) else {
+            continue;
+        };
         let Some(rings) = body.rings else { continue };
         transform.translation =
             sim_to_render((body.position_ly - eye.at_ly) * M_PER_LY / UNIT_M).as_vec3();
@@ -731,12 +787,14 @@ pub fn update_envelopes(
     }
 
     // The display gain is a knob, so it has to reach the material rather than only the spawn.
-    for (shell, population) in
-        envelopes.shells.iter().zip(system.populations.iter().filter(|p| visible(p)))
+    for (shell, population) in envelopes
+        .shells
+        .iter()
+        .zip(system.populations.iter().filter(|p| visible(p)))
     {
         if let Some(mut material) = materials.get_mut(&shell.material) {
-            let inside = eye.at_ly.distance(system.origin_ly) * M_PER_LY
-                < population.thermal_radius();
+            let inside =
+                eye.at_ly.distance(system.origin_ly) * M_PER_LY < population.thermal_radius();
             let next = uniforms(
                 population,
                 material.uniforms.seed,
@@ -789,7 +847,10 @@ mod tests {
         for b in em_spectra::Band::ALL {
             response[b] = em_spectra::extinction::RATIO[b] as f32;
         }
-        Population { band_response: response, ..base }
+        Population {
+            band_response: response,
+            ..base
+        }
     }
 
     fn positions(mesh: &Mesh) -> Vec<[f32; 3]> {
@@ -843,7 +904,10 @@ mod tests {
             let f = x - i as f64;
             row[i] as f64 * (1.0 - f) + row[j] as f64 * f
         };
-        let radial = read(&profile.radial, (radius - field.inner as f64) / (1.0 - field.inner as f64));
+        let radial = read(
+            &profile.radial,
+            (radius - field.inner as f64) / (1.0 - field.inner as f64),
+        );
         // The pole is +Z in simulation space, and the field is built in those terms.
         let sin_phi = (at.z / radius).abs();
         let latitude = read(&profile.latitude, sin_phi / field.slab as f64);
@@ -875,8 +939,16 @@ mod tests {
         let mut last = f64::INFINITY;
         for tenths in 0..=6 {
             let angle = 0.06 * tenths as f64;
-            let at = depth_along(&profile, from, DVec3::new(0.0, angle.cos(), angle.sin()), 4000);
-            assert!(at <= last + 1e-9, "not monotonic at {angle}: {at} after {last}");
+            let at = depth_along(
+                &profile,
+                from,
+                DVec3::new(0.0, angle.cos(), angle.sin()),
+                4000,
+            );
+            assert!(
+                at <= last + 1e-9,
+                "not monotonic at {angle}: {at} after {last}"
+            );
             last = at;
         }
     }
@@ -893,19 +965,37 @@ mod tests {
         let flat = profile_of(&population(Inclination::uniform_angle(0.0, 0.2, 12), 1e6));
         let round = profile_of(&population(Inclination::isotropic(), 1e6));
 
-        assert!(flat.field.slab < 0.25, "a belt is thin: {}", flat.field.slab);
-        assert!((round.field.slab - 1.0).abs() < 1e-6, "a cloud is not: {}", round.field.slab);
+        assert!(
+            flat.field.slab < 0.25,
+            "a belt is thin: {}",
+            flat.field.slab
+        );
+        assert!(
+            (round.field.slab - 1.0).abs() < 1e-6,
+            "a cloud is not: {}",
+            round.field.slab
+        );
 
         // The belt's density has run out well before the pole; the cloud's never does.
-        assert!(flat.latitude.last().unwrap() < &0.05, "{:?}", flat.latitude.last());
-        assert!(round.latitude.iter().all(|v| (*v - 1.0).abs() < 1e-6), "isotropic is flat");
+        assert!(
+            flat.latitude.last().unwrap() < &0.05,
+            "{:?}",
+            flat.latitude.last()
+        );
+        assert!(
+            round.latitude.iter().all(|v| (*v - 1.0).abs() < 1e-6),
+            "isotropic is flat"
+        );
 
         // Which the field then delivers: from the center, every direction out of a cloud meets
         // the same material, and that is exactly what the apple core could not do.
         let center = DVec3::ZERO;
         let plane = depth_along(&round, center, DVec3::X, 4000);
         let pole = depth_along(&round, center, DVec3::Z, 4000);
-        assert!(plane > 0.0 && (plane / pole - 1.0).abs() < 0.02, "{plane:.4} and {pole:.4}");
+        assert!(
+            plane > 0.0 && (plane / pole - 1.0).abs() < 0.02,
+            "{plane:.4} and {pole:.4}"
+        );
     }
 
     /// The invariant a change of shape has to keep: the same population paints the same light.
@@ -917,7 +1007,10 @@ mod tests {
     /// than by re-running the sum that built it, so it is a check and not a restatement.
     #[test]
     fn the_reference_ray_is_the_one_the_calibration_names() {
-        for inclination in [Inclination::uniform_angle(0.0, 0.2, 12), Inclination::isotropic()] {
+        for inclination in [
+            Inclination::uniform_angle(0.0, 0.2, 12),
+            Inclination::isotropic(),
+        ] {
             let profile = profile_of(&population(inclination, 1e6));
             let walked = depth_along(&profile, DVec3::ZERO, DVec3::X, 20000);
             let claimed = profile.field.reference as f64;
@@ -925,7 +1018,10 @@ mod tests {
                 (walked / claimed - 1.0).abs() < 0.02,
                 "walked {walked:.5} against a claimed {claimed:.5}",
             );
-            assert!(claimed > 0.0, "a population with anything in it has a reference ray");
+            assert!(
+                claimed > 0.0,
+                "a population with anything in it has a reference ray"
+            );
         }
     }
 
@@ -937,12 +1033,27 @@ mod tests {
         let extent = belt.extent().expect("an extent");
         let inner = (extent.inner_m / extent.outer_m) as f32;
         let profile = profile_of(&belt);
-        assert!((profile.field.inner - inner).abs() < 1e-4, "{} against {inner}", profile.field.inner);
+        assert!(
+            (profile.field.inner - inner).abs() < 1e-4,
+            "{} against {inner}",
+            profile.field.inner
+        );
 
-        assert_eq!(sample(&profile, DVec3::X * 1.01), 0.0, "nothing past the outer edge");
-        assert_eq!(sample(&profile, DVec3::X * (inner as f64 * 0.99)), 0.0, "nor inside the hole");
+        assert_eq!(
+            sample(&profile, DVec3::X * 1.01),
+            0.0,
+            "nothing past the outer edge"
+        );
+        assert_eq!(
+            sample(&profile, DVec3::X * (inner as f64 * 0.99)),
+            0.0,
+            "nor inside the hole"
+        );
         let mid = ((inner as f64) + 1.0) * 0.5;
-        assert!(sample(&profile, DVec3::X * mid) > 0.1, "and something in between");
+        assert!(
+            sample(&profile, DVec3::X * mid) > 0.1,
+            "and something in between"
+        );
     }
 
     /// The nodes are quadrature, not a catalogue. Nine semi-major axes summed straight paint
@@ -957,7 +1068,10 @@ mod tests {
             .sum::<f32>()
             / (row.len() - 2) as f32;
         assert!(ripple < 0.01, "the radial profile is lumpy: {ripple}");
-        assert!(row.iter().cloned().fold(0.0f32, f32::max) > 0.99, "peak-normalised");
+        assert!(
+            row.iter().cloned().fold(0.0f32, f32::max) > 0.99,
+            "peak-normalised"
+        );
     }
 
     /// The thing the sensor presets are named for. A meter of rock is a meter of rock from B to
@@ -969,7 +1083,11 @@ mod tests {
     #[test]
     fn a_band_the_material_barely_meets_is_a_band_it_barely_blocks() {
         let mapping = em_spectra::presets::natural();
-        let field = Field { inner: 0.3, slab: 0.2, reference: 0.3 };
+        let field = Field {
+            inner: 0.3,
+            slab: 0.2,
+            reference: 0.3,
+        };
         let extinction = |p: &Population| {
             let u = uniforms(p, 0.0, OPACITY_GAIN, false, field, sunlike(&mapping));
             em_spectra::Band::ALL.map(|b| u.band_material[b.index()].y)
@@ -983,14 +1101,26 @@ mod tests {
             "solid bodies are gray across the bands: {rock:?}",
         );
 
-        let dust = extinction(&dusty(population(Inclination::uniform_angle(0.0, 0.2, 12), 1e9)));
-        let (blue, radio) = (dust[em_spectra::Band::B.index()], dust[em_spectra::Band::Radio.index()]);
+        let dust = extinction(&dusty(population(
+            Inclination::uniform_angle(0.0, 0.2, 12),
+            1e9,
+        )));
+        let (blue, radio) = (
+            dust[em_spectra::Band::B.index()],
+            dust[em_spectra::Band::Radio.index()],
+        );
         assert!(blue > 0.0, "dust is opaque in the blue: {blue}");
-        assert!(radio < blue * 0.05, "and all but transparent at 21 cm: {radio} against {blue}");
+        assert!(
+            radio < blue * 0.05,
+            "and all but transparent at 21 cm: {radio} against {blue}"
+        );
         // Monotonic the whole way out, which is what makes stepping through the sensors read as
         // one cloud thinning rather than as six unrelated pictures.
         for pair in dust.windows(2) {
-            assert!(pair[1] <= pair[0] + 1.0e-9, "not monotonic across the bands: {dust:?}");
+            assert!(
+                pair[1] <= pair[0] + 1.0e-9,
+                "not monotonic across the bands: {dust:?}"
+            );
         }
     }
 
@@ -1021,7 +1151,10 @@ mod tests {
             natural.iter().cloned().fold(0.0f32, f32::max),
             natural.iter().cloned().fold(f32::MAX, f32::min),
         );
-        assert!(hi / lo < 2.0, "a sun-lit belt is not strongly colored in the optical: {natural:?}");
+        assert!(
+            hi / lo < 2.0,
+            "a sun-lit belt is not strongly colored in the optical: {natural:?}"
+        );
 
         // Thermal puts ten microns in red, and a two-hundred-kelvin belt against a sun-like
         // reference has nothing anywhere else.
@@ -1035,7 +1168,10 @@ mod tests {
         // legible in a band its light barely reaches and still says which band that is.
         for (name, mapping) in em_spectra::presets::all() {
             let peak = displayed(&mapping).iter().cloned().fold(0.0f32, f32::max);
-            assert!((peak - DISPLAY_LEVEL).abs() < 1.0e-3, "{name} peaks at {peak}");
+            assert!(
+                (peak - DISPLAY_LEVEL).abs() < 1.0e-3,
+                "{name} peaks at {peak}"
+            );
         }
     }
 
@@ -1049,7 +1185,10 @@ mod tests {
         let swarm = opacity_of(0.4);
         assert!(belt < kuiper && kuiper < swarm, "{belt} {kuiper} {swarm}");
         assert!(belt > 0.0 && belt < 0.01, "a belt is a trace: {belt}");
-        assert!(kuiper > 0.005 && kuiper < 0.05, "a Kuiper belt is a haze: {kuiper}");
+        assert!(
+            kuiper > 0.005 && kuiper < 0.05,
+            "a Kuiper belt is a haze: {kuiper}"
+        );
         assert!(swarm > 0.5, "a swarm is a structure: {swarm}");
     }
 
@@ -1066,11 +1205,17 @@ mod tests {
         let p = population(Inclination::uniform_angle(0.0, 0.2, 12), 1e6);
         let star = DVec3::new(1.0, 2.0, -0.5);
         let at_star = transform(star, star, &p);
-        assert!(at_star.translation.length() < 1e-6, "the ship at the star sees it centered");
+        assert!(
+            at_star.translation.length() < 1e-6,
+            "the ship at the star sees it centered"
+        );
         assert!((at_star.scale.x - (p.thermal_radius() / UNIT_M) as f32).abs() < 1e-3);
 
         let away = transform(star, star + DVec3::X * 1e-4, &p);
-        assert!(away.translation.length() > 0.0, "and moving the ship moves the shell");
+        assert!(
+            away.translation.length() > 0.0,
+            "and moving the ship moves the shell"
+        );
     }
 
     #[test]
@@ -1078,7 +1223,10 @@ mod tests {
         let flat = orientation(DVec3::Z);
         let tipped = orientation(DVec3::X);
         assert!(flat.is_finite() && tipped.is_finite());
-        assert!(flat.angle_between(tipped) > 1.0, "a different pole is a different orientation");
+        assert!(
+            flat.angle_between(tipped) > 1.0,
+            "a different pole is a different orientation"
+        );
         assert_eq!(orientation(DVec3::ZERO), Quat::IDENTITY);
     }
 
@@ -1090,8 +1238,14 @@ mod tests {
         let out = uniforms(&p, 0.0, OPACITY_GAIN, false, field, sunlike(&mapping));
         let inside = uniforms(&p, 0.0, OPACITY_GAIN, true, field, sunlike(&mapping));
         assert_eq!(out.inside_fade, 1.0);
-        assert!(inside.inside_fade < 0.5, "inside, a shell covers the whole sky");
-        assert_eq!(out.opacity, inside.opacity, "only the fade differs, not the physics");
+        assert!(
+            inside.inside_fade < 0.5,
+            "inside, a shell covers the whole sky"
+        );
+        assert_eq!(
+            out.opacity, inside.opacity,
+            "only the fade differs, not the physics"
+        );
     }
 
     #[test]
@@ -1100,7 +1254,10 @@ mod tests {
         let mesh = build_ring(saturn);
         let d = densities(&mesh);
         assert!(d.iter().any(|v| *v > 0.99), "the B ring is the peak");
-        assert!(d.iter().any(|v| *v < 0.1 && *v > 0.0), "and the division is thin, not empty");
+        assert!(
+            d.iter().any(|v| *v < 0.1 && *v > 0.0),
+            "and the division is thin, not empty"
+        );
 
         // Walking outward, the profile must rise, fall into the division and rise again.
         let row = SEGMENTS + 1;
@@ -1109,8 +1266,14 @@ mod tests {
         let peak_at = profile.iter().position(|v| *v == peak).unwrap();
         let after = &profile[peak_at..];
         let dip = after.iter().cloned().fold(f32::MAX, f32::min);
-        assert!(dip < peak / 5.0, "there should be a division past the B ring: {dip} vs {peak}");
-        assert!(after.iter().rev().take(10).any(|v| *v > dip * 3.0), "and an A ring past that");
+        assert!(
+            dip < peak / 5.0,
+            "there should be a division past the B ring: {dip} vs {peak}"
+        );
+        assert!(
+            after.iter().rev().take(10).any(|v| *v > dip * 3.0),
+            "and an A ring past that"
+        );
     }
 
     #[test]
@@ -1119,8 +1282,14 @@ mod tests {
         let ring = normals(&build_ring(saturn));
         let proxy = normals(&build_proxy());
         let first = ring[0];
-        assert!(ring.iter().all(|n| *n == first), "every ring normal is the pole");
-        assert!(proxy.iter().any(|n| *n != proxy[0]), "a sphere's normals point everywhere");
+        assert!(
+            ring.iter().all(|n| *n == first),
+            "every ring normal is the pole"
+        );
+        assert!(
+            proxy.iter().any(|n| *n != proxy[0]),
+            "a sphere's normals point everywhere"
+        );
     }
 
     /// The proxy has to contain the material it stands for, or the march starts inside the
@@ -1141,11 +1310,24 @@ mod tests {
             let r = lc_world::rings::for_body(id).unwrap();
             opacity_of(r.cross_section_m2() / (std::f64::consts::PI * r.outer_m().powi(2)))
         };
-        let (saturn, uranus, neptune, jupiter) =
-            (drawn("Saturn"), drawn("Uranus"), drawn("Neptune"), drawn("Jupiter"));
-        assert!(saturn > 0.5, "Saturn's rings are the thing you see: {saturn}");
-        assert!(uranus < saturn * 0.5 && uranus > 0.05, "Uranus's are faint but real: {uranus}");
+        let (saturn, uranus, neptune, jupiter) = (
+            drawn("Saturn"),
+            drawn("Uranus"),
+            drawn("Neptune"),
+            drawn("Jupiter"),
+        );
+        assert!(
+            saturn > 0.5,
+            "Saturn's rings are the thing you see: {saturn}"
+        );
+        assert!(
+            uranus < saturn * 0.5 && uranus > 0.05,
+            "Uranus's are faint but real: {uranus}"
+        );
         assert!(neptune < uranus, "Neptune's fainter still: {neptune}");
-        assert!(jupiter < 0.05, "and Jupiter's took Voyager to find: {jupiter}");
+        assert!(
+            jupiter < 0.05,
+            "and Jupiter's took Voyager to find: {jupiter}"
+        );
     }
 }

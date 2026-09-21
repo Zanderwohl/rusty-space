@@ -213,27 +213,32 @@ impl Sweep {
         self
     }
 
-    /// Fields per ring of polar angle, and where each ring starts in the visiting order.
-    fn rings(&self) -> Vec<(u64, u64)> {
+    /// The visiting order, laid out once.
+    ///
+    /// Worth holding on to: a tick asks which field each of several thousand stars is in, and
+    /// the ring table is the same for all of them.
+    pub fn plan(&self) -> Plan {
         let count = (self.radius_rad / self.field_rad).ceil().max(1.0) as u64;
         let mut rings = Vec::with_capacity(count as usize);
-        let mut offset = 0;
+        let mut fields = 0;
         for j in 0..count {
             let middle = (j as f64 + 0.5) * self.field_rad;
             let around = (std::f64::consts::TAU * middle.sin() / self.field_rad).round();
             let n = (around as u64).max(1);
-            rings.push((offset, n));
-            offset += n;
+            rings.push((fields, n));
+            fields += n;
         }
-        rings
+        Plan {
+            sweep: *self,
+            rings,
+            fields,
+            basis: self.center.any_orthonormal_pair(),
+        }
     }
 
     /// Fields in one pass over the region.
     pub fn fields(&self) -> u64 {
-        self.rings()
-            .last()
-            .map(|(offset, n)| offset + n)
-            .unwrap_or(1)
+        self.plan().fields
     }
 
     /// Coordinate seconds one pass takes.
@@ -248,15 +253,49 @@ impl Sweep {
 
     /// Which field a direction falls in, or `None` outside the region.
     pub fn field_of(&self, toward: DVec3) -> Option<u64> {
+        self.plan().field_of(toward)
+    }
+
+    /// When a direction's field was last finished inside `(from_s, to_s]`, if it was.
+    pub fn observed_between(&self, toward: DVec3, from_s: f64, to_s: f64) -> Option<f64> {
+        self.plan().observed_between(toward, from_s, to_s)
+    }
+
+    /// Completed passes, and how far through the current one the sweep is.
+    pub fn progress(&self, now_s: f64) -> (u64, f64) {
+        let passes = ((now_s - self.started_s) / self.pass_s()).max(0.0);
+        (passes as u64, passes.fract())
+    }
+}
+
+/// A sweep with its field layout resolved.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Plan {
+    sweep: Sweep,
+    /// Where each ring of polar angle starts in the order, and how many fields it holds.
+    rings: Vec<(u64, u64)>,
+    fields: u64,
+    basis: (DVec3, DVec3),
+}
+
+impl Plan {
+    pub fn sweep(&self) -> &Sweep {
+        &self.sweep
+    }
+
+    pub fn fields(&self) -> u64 {
+        self.fields
+    }
+
+    pub fn field_of(&self, toward: DVec3) -> Option<u64> {
         let toward = toward.normalize_or_zero();
-        let polar = toward.dot(self.center).clamp(-1.0, 1.0).acos();
-        if polar > self.radius_rad {
+        let polar = toward.dot(self.sweep.center).clamp(-1.0, 1.0).acos();
+        if polar > self.sweep.radius_rad {
             return None;
         }
-        let rings = self.rings();
-        let j = ((polar / self.field_rad) as usize).min(rings.len() - 1);
-        let (offset, n) = rings[j];
-        let (x, y) = self.center.any_orthonormal_pair();
+        let j = ((polar / self.sweep.field_rad) as usize).min(self.rings.len() - 1);
+        let (offset, n) = self.rings[j];
+        let (x, y) = self.basis;
         let azimuth = toward
             .dot(y)
             .atan2(toward.dot(x))
@@ -271,25 +310,86 @@ impl Sweep {
     /// exposure it reports actually exists.
     pub fn observed_between(&self, toward: DVec3, from_s: f64, to_s: f64) -> Option<f64> {
         let field = self.field_of(toward)?;
-        let per_pass = self.fields() as f64;
-        let elapsed = (from_s - self.started_s) / self.dwell_s;
+        let per_pass = self.fields as f64;
+        let elapsed = (from_s - self.sweep.started_s) / self.sweep.dwell_s;
         let first = ((elapsed - field as f64 - 1.0) / per_pass).floor();
         for pass in [first - 1.0, first, first + 1.0] {
             if pass < 0.0 {
                 continue;
             }
-            let at = self.started_s + (pass * per_pass + field as f64 + 1.0) * self.dwell_s;
+            let at =
+                self.sweep.started_s + (pass * per_pass + field as f64 + 1.0) * self.sweep.dwell_s;
             if at > from_s {
                 return (at <= to_s).then_some(at);
             }
         }
         None
     }
+}
 
-    /// Completed passes, and how far through the current one the sweep is.
-    pub fn progress(&self, now_s: f64) -> (u64, f64) {
-        let passes = ((now_s - self.started_s) / self.pass_s()).max(0.0);
-        (passes as u64, passes.fract())
+/// What a telescope is committed to.
+///
+/// One instrument does one thing at a time, and what it is doing decides what its owner can
+/// learn: a stare deepens one star's curve, a sweep finds stars nobody has looked at, and a
+/// watch trades depth for keeping several systems under observation at once.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub enum Duty {
+    #[default]
+    Idle,
+    Stare(StarId),
+    Sweep(Sweep),
+    /// A rotation: each target in turn, for `dwell_s` apiece, for as long as it is left on.
+    ///
+    /// This is what watches a swarm of systems over years — every target gets a sample every
+    /// `dwell_s * targets` of coordinate time, which is a light curve with gaps in it, and
+    /// gaps are what the period finders in `05-observation.md` are written to survive.
+    Watch {
+        targets: Vec<StarId>,
+        dwell_s: f64,
+        started_s: f64,
+    },
+}
+
+impl Duty {
+    /// Which star the instrument is on at this moment, if it is on one.
+    pub fn target_at(&self, now_s: f64) -> Option<StarId> {
+        match self {
+            Self::Stare(id) => Some(*id),
+            Self::Watch { targets, .. } => targets
+                .get(self.slot_at(now_s)? as usize % targets.len())
+                .copied(),
+            _ => None,
+        }
+    }
+
+    /// Which turn of a watch rotation `now_s` falls in.
+    pub fn slot_at(&self, now_s: f64) -> Option<i64> {
+        match self {
+            Self::Watch {
+                targets,
+                dwell_s,
+                started_s,
+            } if !targets.is_empty() => {
+                Some(((now_s - started_s) / dwell_s.max(1.0)).floor() as i64)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn sweep(&self) -> Option<&Sweep> {
+        match self {
+            Self::Sweep(sweep) => Some(sweep),
+            _ => None,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Stare(_) => "staring",
+            Self::Sweep(_) => "sweeping",
+            Self::Watch { .. } => "watching",
+        }
     }
 }
 
@@ -498,6 +598,23 @@ mod tests {
             hidden_by(&sky, 1, lone.resolution_rad(Band::V)),
             Some(sky[0].star)
         );
+    }
+
+    #[test]
+    fn a_watch_gives_each_target_its_turn() {
+        let ids: Vec<StarId> = (0..3).map(|k| StarId::synthesise("test", k)).collect();
+        let duty = Duty::Watch {
+            targets: ids.clone(),
+            dwell_s: 100.0,
+            started_s: 0.0,
+        };
+        assert_eq!(duty.target_at(50.0), Some(ids[0]));
+        assert_eq!(duty.target_at(150.0), Some(ids[1]));
+        assert_eq!(duty.target_at(250.0), Some(ids[2]));
+        assert_eq!(duty.target_at(350.0), Some(ids[0]), "and round again");
+        assert_ne!(duty.slot_at(50.0), duty.slot_at(150.0));
+        assert_eq!(Duty::Idle.target_at(0.0), None);
+        assert_eq!(Duty::Stare(ids[0]).target_at(1e9), Some(ids[0]));
     }
 
     #[test]

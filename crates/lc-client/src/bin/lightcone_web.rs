@@ -77,7 +77,9 @@ fn main() {
                 // Its warning is about loading URLs from untrusted places, and the answer is that
                 // this client never receives one: it receives a base from its own shard and a
                 // bare file name, and `Shelf::where_to_fetch` puts them together.
-                .set(bevy::asset::io::web::WebAssetPlugin { silence_startup_warning: true })
+                .set(bevy::asset::io::web::WebAssetPlugin {
+                    silence_startup_warning: true,
+                })
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "Lightcone Frontier".into(),

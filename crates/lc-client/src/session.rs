@@ -8,8 +8,13 @@ use glam::{DVec3, Vec3};
 use lc_spacetime::{Coord, Micros, frame::SystemFrame, units::Span};
 use lc_world::craft::{Craft, CraftId, Fleet, Kind};
 use lc_world::instrument::Instrument;
+use lc_world::knowledge::survey::{self, Duty, Optics, Source, Sweep};
+use lc_world::knowledge::{
+    Bearing, Belief, Claim, Distance, Hop, Knowledge, Sample, Sighting, Witness,
+};
 use lc_world::motion::{self, Motive};
 use lc_world::observation::{Observation, Target, observe};
+use lc_world::rng;
 use lc_world::sky::{CatalogueStar, StarId, StarProvider, generate};
 
 use crate::curve::LightCurve;
@@ -32,6 +37,17 @@ const LY_PER_LUS: f64 = 299.792458 / 9.460_730_472_580_8e15;
 /// its own 290 K housing glows straight into the band a swarm lives in. A ship that is a mind
 /// with no eyes builds the sensor it needs.
 pub const SHIP_SENSOR: Instrument = Instrument::SHIP;
+
+/// Who the charts a ship launches with came from. Not this ship, and not any craft it will
+/// ever meet: a name for "somebody else measured this and we are taking their word".
+pub const CHARTS: Witness = Witness(u64::MAX);
+
+/// Fractional error on a charted distance. One percent at the edge of the charted volume,
+/// which is a good office and still visible as a scatter on the map.
+pub const CHART_ERROR: f64 = 0.01;
+
+/// How far the charts a ship starts with reach, light-years. Past this, the sky is unsurveyed.
+pub const CHARTED_LY: f64 = 20.0;
 
 /// How many nearby stars get a generated system and a full emission model.
 ///
@@ -93,8 +109,15 @@ pub struct Session {
     pub telescope: Instrument,
     pub mapping: BandMapping,
     pub tone: ToneMap,
-    pub curve: LightCurve,
+    /// Which band the telescope's curve is read in. Every band the sensor has is recorded
+    /// whatever this says; it decides what is *shown*.
+    pub curve_band: Band,
     pub pointing: Option<StarId>,
+    /// What this ship has seen, and what it has been told. Nothing else is knowledge: a star
+    /// absent from here is one nobody aboard has ever detected.
+    pub knowledge: Knowledge,
+    /// What the telescope is committed to doing.
+    pub duty: Duty,
     /// The ship: where it is, how fast, and which of the four ways it is moving.
     ///
     /// `lc-world`'s, not the client's. The server is authoritative over this and the client
@@ -120,6 +143,16 @@ pub struct Session {
     /// correcting is `lightcone/docs/17-reconciliation.md`, and is a later piece of work.
     pub remote: bool,
     targets: HashMap<StarId, Target>,
+    /// Coordinate time the last photometric sample was taken at, and the last time the sweep
+    /// was asked what it had covered. Both are how a duty turns elapsed time into exposure
+    /// rather than producing one measurement per rendered frame.
+    sampled_s: f64,
+    swept_s: f64,
+    /// Which turn of a watch rotation the last sample came from.
+    slot: i64,
+    /// Band luminosity per star, watts, in the survey band. A star's own output does not
+    /// change; only the distance to it does, so this is computed once and divided by `r^2`.
+    luminosity: HashMap<StarId, f64>,
 }
 
 impl Session {
@@ -140,14 +173,20 @@ impl Session {
             telescope: SHIP_SENSOR,
             mapping: presets::natural(),
             tone: ToneMap::default(),
-            curve: LightCurve::new(Band::V, 4000),
+            curve_band: Band::V,
             pointing: None,
+            knowledge: Knowledge::new(Witness(0)),
+            duty: Duty::Idle,
             ship: Craft::at(CraftId(0), Kind::Ship, DVec3::ZERO),
             scene: Scene::default(),
             system: None,
             fleet: Fleet::new(),
             remote: false,
             targets,
+            sampled_s: 0.0,
+            swept_s: 0.0,
+            slot: i64::MIN,
+            luminosity: HashMap::new(),
         };
         session.retune();
         session.auto_expose();
@@ -156,7 +195,9 @@ impl Session {
 
     /// The star whose system the ship is inside, if it is inside one.
     pub fn local_star(&self) -> Option<&CatalogueStar> {
-        self.stars.iter().find(|s| self.distance_to(s) < crate::starfield::LOCAL_SHELL_LY)
+        self.stars
+            .iter()
+            .find(|s| self.distance_to(s) < crate::starfield::LOCAL_SHELL_LY)
     }
 
     /// Load or drop the local system, and propagate it to now.
@@ -213,7 +254,11 @@ impl Session {
 
     /// How fast the ship is going, meters a second, world frame.
     pub fn velocity_m_s(&self) -> DVec3 {
-        motion::velocity_m_s(&self.ship.motion, self.system.as_deref(), self.coordinate_time_s())
+        motion::velocity_m_s(
+            &self.ship.motion,
+            self.system.as_deref(),
+            self.coordinate_time_s(),
+        )
     }
 
     /// The crossing under way, if there is one.
@@ -298,7 +343,12 @@ impl Session {
     pub fn fly_to(&mut self, id: StarId) -> Option<&Cruise> {
         let to_ly = self.star(id)?.position_ly;
         let drive = self.ship.motion.drive;
-        self.cross_to_at(self.coordinate_time_s(), to_ly, drive.accel_g, drive.max_beta)
+        self.cross_to_at(
+            self.coordinate_time_s(),
+            to_ly,
+            drive.accel_g,
+            drive.max_beta,
+        )
     }
 
     /// Cross to a coordinate at a stated time and acceleration.
@@ -337,7 +387,12 @@ impl Session {
     /// star itself.
     pub fn set_course(&mut self, course: &crate::navigation::Course) -> Option<String> {
         let drive = self.ship.motion.drive;
-        self.set_course_at(self.coordinate_time_s(), course, drive.accel_g, drive.max_beta)
+        self.set_course_at(
+            self.coordinate_time_s(),
+            course,
+            drive.accel_g,
+            drive.max_beta,
+        )
     }
 
     /// Set a course at a stated time and acceleration.
@@ -359,12 +414,14 @@ impl Session {
         let event = motion::Event {
             ship: motion::ShipId(0),
             at_t: at_s,
-            change: motion::Change::SetCourse { course: course.clone(), drive },
+            change: motion::Change::SetCourse {
+                course: course.clone(),
+                drive,
+            },
         };
         self.ship.apply(&event).ok()?;
         self.ship.motion.bound_for().map(|w| w.label())
     }
-
 
     /// Put the ship back as the server has it — where, how fast, how old, and **what it is
     /// doing**.
@@ -451,26 +508,303 @@ impl Session {
     /// scales with the field; the telescope looks at one star, and there is no reason a player
     /// should be unable to point it at the thirteenth-nearest.
     pub fn point_at(&mut self, id: Option<StarId>) {
-        if self.pointing != id {
-            self.curve.clear();
-        }
+        self.sampled_s = self.coordinate_time_s();
+        self.duty = match id {
+            Some(id) => Duty::Stare(id),
+            None => Duty::Idle,
+        };
+        self.aim(id);
+    }
+
+    /// Aim without saying what the instrument is doing there, which a rotation needs: a watch
+    /// points at each target in turn and is still a watch.
+    fn aim(&mut self, id: Option<StarId>) {
         self.pointing = id;
-        if let Some(id) = id {
-            if !self.targets.contains_key(&id) {
-                if let Some(star) = self.stars.iter().find(|s| s.id == id) {
-                    let target = build_target(star);
-                    self.targets.insert(id, target);
+        if let Some(id) = id
+            && !self.targets.contains_key(&id)
+            && let Some(star) = self.stars.iter().find(|s| s.id == id)
+        {
+            let target = build_target(star);
+            self.targets.insert(id, target);
+        }
+    }
+
+    /// Put the telescope on a duty, starting its clock now.
+    pub fn take_up(&mut self, duty: Duty) {
+        let now = self.coordinate_time_s();
+        self.sampled_s = now;
+        self.swept_s = now;
+        self.slot = i64::MIN;
+        if let Some(id) = duty.target_at(now) {
+            self.point_at(Some(id));
+        }
+        self.duty = duty;
+    }
+
+    /// Take one measurement of whatever the telescope is on.
+    ///
+    /// The measurement goes into [`Session::knowledge`], keyed by star and band, so pointing
+    /// somewhere else and coming back finds the curve where it was left. Nothing here forgets.
+    pub fn observe(&mut self, exposure_s: f64) -> Option<Observation> {
+        let id = self.pointing?;
+        let target = self.targets.get(&id)?;
+        let obs = observe(target, self.observer, &self.telescope, exposure_s, 0x10c)?;
+        let now = self.coordinate_time_s();
+        let witness = self.knowledge.owner;
+        for band in Band::ALL {
+            let Some(m) = obs.band(band) else { continue };
+            let sample = Sample {
+                observed_s: now,
+                deficit: m.measured_deficit,
+                sigma: m.uncertainty,
+            };
+            self.knowledge.measured(id, witness, band, sample);
+        }
+        Some(obs)
+    }
+
+    /// What the ship looks through, and how far apart its elements are.
+    ///
+    /// One hull, so the baseline is the mirror. A swarm of telescopes flying in formation is
+    /// [`Optics::joined`], and the difference is what it can see next to something bright.
+    pub fn optics(&self) -> Optics {
+        Optics::of(self.telescope)
+    }
+
+    /// Every star as a point source arriving here, in the band the survey works in.
+    ///
+    /// Order matches [`Session::stars`], because a detection is indexed into this and the
+    /// glare test needs the whole sky to compare against.
+    fn sky_sources(&mut self, band: Band) -> Vec<Source> {
+        let stars = std::mem::take(&mut self.stars);
+        let here = self.ship.motion.position_ly;
+        let sources = stars
+            .iter()
+            .map(|star| {
+                let luminosity = *self.luminosity.entry(star.id).or_insert_with(|| {
+                    let unit = survey::flux_from(&star.star, band, M_PER_LY);
+                    4.0 * std::f64::consts::PI * M_PER_LY * M_PER_LY * unit
+                });
+                let offset = star.position_ly - here;
+                let distance_m = offset.length() * M_PER_LY;
+                let flux = if distance_m > 0.0 {
+                    luminosity / (4.0 * std::f64::consts::PI * distance_m * distance_m)
+                } else {
+                    0.0
+                };
+                Source {
+                    star: star.id,
+                    toward: offset.normalize_or_zero(),
+                    flux_w_m2: flux,
                 }
+            })
+            .collect();
+        self.stars = stars;
+        sources
+    }
+
+    /// Run whatever the telescope is committed to, for however much coordinate time has passed.
+    ///
+    /// Exposure is elapsed coordinate time, not a number typed into a panel: a measurement
+    /// labelled with an integration it did not get is a lie about its own error bars. At the
+    /// design rate a rendered frame is a couple of minutes of it, so a sample lands whenever
+    /// the integration is actually complete.
+    pub fn tick_instruments(&mut self, integration_s: f64) {
+        let now = self.coordinate_time_s();
+        match self.duty.clone() {
+            Duty::Idle => {}
+            Duty::Stare(id) => {
+                let elapsed = now - self.sampled_s;
+                if elapsed >= integration_s.max(1.0) {
+                    self.aim(Some(id));
+                    self.observe(elapsed);
+                    self.fix_position(id, elapsed, now);
+                    self.sampled_s = now;
+                }
+            }
+            duty @ Duty::Watch { .. } => {
+                let Duty::Watch { dwell_s, .. } = duty else {
+                    return;
+                };
+                let Some(slot) = duty.slot_at(now) else {
+                    return;
+                };
+                let previous = std::mem::replace(&mut self.slot, slot);
+                // The turn that just ended is the only one with a full dwell behind it, and
+                // on the first tick there is no such turn.
+                if previous != slot && previous != i64::MIN {
+                    if let Some(id) = duty.target_at(now - dwell_s.max(1.0)) {
+                        self.aim(Some(id));
+                        self.observe(dwell_s);
+                        self.fix_position(id, dwell_s, now);
+                    }
+                }
+                self.aim(duty.target_at(now));
+            }
+            Duty::Sweep(sweep) => {
+                self.sweep(&sweep, self.swept_s, now);
+                self.swept_s = now;
             }
         }
     }
 
-    /// Take one measurement of whatever the telescope is on.
-    pub fn observe(&mut self, exposure_s: f64) -> Option<Observation> {
-        let target = self.targets.get(&self.pointing?)?;
-        let obs = observe(target, self.observer, &self.telescope, exposure_s, 0x10c)?;
-        self.curve.record(&obs);
-        Some(obs)
+    /// File a bearing to a star the telescope is already pointed at.
+    ///
+    /// A stare measures where something is as well as how bright it is, which is why watching
+    /// one star from a moving ship eventually gives its distance without any survey at all.
+    fn fix_position(&mut self, id: StarId, exposure_s: f64, now_s: f64) {
+        let Some(band) = self.optics().band() else {
+            return;
+        };
+        let sky = self.sky_sources(band);
+        let Some(index) = sky.iter().position(|s| s.star == id) else {
+            return;
+        };
+        let optics = self.optics();
+        let seen = survey::look(
+            &optics,
+            &sky,
+            index,
+            exposure_s,
+            self.ship.motion.position_ly,
+            now_s,
+            self.knowledge.owner,
+        );
+        if let Some(seen) = seen {
+            self.knowledge.sighted(id, seen);
+        }
+    }
+
+    /// Collect whatever fields the sweep finished between two coordinate times.
+    fn sweep(&mut self, sweep: &Sweep, from_s: f64, to_s: f64) {
+        let Some(band) = self.optics().band() else {
+            return;
+        };
+        let plan = sweep.plan();
+        let here = self.ship.motion.position_ly;
+        let due: Vec<(usize, f64)> = self
+            .stars
+            .iter()
+            .enumerate()
+            .filter_map(|(i, star)| {
+                let toward = (star.position_ly - here).normalize_or_zero();
+                plan.observed_between(toward, from_s, to_s)
+                    .map(|at| (i, at))
+            })
+            .collect();
+        if due.is_empty() {
+            return;
+        }
+        let sky = self.sky_sources(band);
+        let optics = self.optics();
+        let witness = self.knowledge.owner;
+        for (index, at) in due {
+            if let Some(seen) =
+                survey::look(&optics, &sky, index, sweep.exposure_s(), here, at, witness)
+            {
+                self.knowledge.sighted(sky[index].star, seen);
+            }
+        }
+    }
+
+    /// Issue the charts a ship leaves port with.
+    ///
+    /// A craft does not start from nothing — it starts from somebody else's parallax
+    /// programme, which is exactly as good as whoever ran it and does not extend past where
+    /// they were looking. So the nearby sky arrives as [`Claim`]s from a charting office the
+    /// ship has never met, held on that office's word until the ship measures one for itself,
+    /// and everything beyond `reach_ly` is sky nobody aboard has ever detected.
+    ///
+    /// [`Claim`]: lc_world::knowledge::Claim
+    pub fn issue_charts(&mut self, reach_ly: f64) {
+        let Some(band) = self.optics().band() else {
+            return;
+        };
+        let now = self.coordinate_time_s();
+        let from = self.ship.motion.position_ly;
+        let hop = Hop {
+            from: CHARTS,
+            to: self.knowledge.owner,
+            sent_s: now,
+            received_s: now,
+        };
+        let sources = self.sky_sources(band);
+        let stars = std::mem::take(&mut self.stars);
+        for (star, source) in stars.iter().zip(sources.iter()) {
+            let offset = star.position_ly - from;
+            let distance = offset.length();
+            if distance > reach_ly || distance <= 0.0 {
+                continue;
+            }
+            // A catalogue distance is a parallax like any other, so its error grows with
+            // range; a percent at the far edge of the charted volume is a generous office.
+            let sigma_ly = CHART_ERROR * distance;
+            let slip = rng::gaussian(rng::hash(&[star.id.get(), 0x0_c_4_a_7]));
+            self.knowledge.sighted(
+                star.id,
+                Sighting {
+                    witness: CHARTS,
+                    observed_s: now,
+                    bearing: Bearing {
+                        observer_ly: from,
+                        toward: source.toward,
+                        sigma_rad: sigma_ly / distance,
+                    },
+                    band,
+                    flux: source.flux_w_m2,
+                    flux_sigma: source.flux_w_m2 * CHART_ERROR,
+                    lineage: vec![hop],
+                },
+            );
+            self.knowledge.told(
+                star.id,
+                Claim {
+                    witness: CHARTS,
+                    distance: Distance::Measured {
+                        position_ly: from + offset.normalize() * (distance + slip * sigma_ly),
+                        sigma_ly,
+                    },
+                    stated_s: now,
+                    lineage: vec![hop],
+                },
+            );
+        }
+        self.stars = stars;
+    }
+
+    /// What is believed about a star, or nothing if it has never been detected.
+    pub fn belief(&self, id: StarId) -> Option<&Belief> {
+        self.knowledge.belief(id)
+    }
+
+    pub fn knows(&self, id: StarId) -> bool {
+        self.knowledge.knows(id)
+    }
+
+    /// Where a star is *believed* to be, which is not where it is.
+    ///
+    /// `None` for a star only ever seen from one place: a bearing with no parallax behind it
+    /// puts nothing on a map.
+    pub fn believed_position(&self, id: StarId) -> Option<DVec3> {
+        self.knowledge.belief(id)?.distance.position_ly()
+    }
+
+    /// The telescope's curve for what it is pointed at, in the displayed band.
+    pub fn curve(&self) -> LightCurve {
+        let Some(id) = self.pointing else {
+            return LightCurve::of(self.curve_band, &[], None);
+        };
+        let light_age = self.knowledge.belief(id).and_then(|b| b.light_age_s());
+        match self.knowledge.own_series(id, self.curve_band) {
+            Some(series) => LightCurve::of(self.curve_band, series.samples(), light_age),
+            None => LightCurve::of(self.curve_band, &[], light_age),
+        }
+    }
+
+    /// Read the curve in another band. The old band's samples are still there; a band is a
+    /// column of the same record, not a different record.
+    pub fn set_curve_band(&mut self, band: Band) {
+        self.curve_band = band;
     }
 
     /// Observed over emitted frequency for one star, given the ship's velocity.
@@ -561,8 +895,11 @@ impl Session {
     /// a couple of hundred pixels across it outweighs six thousand stars together and takes
     /// the exposure with it, which is what a photograph of a planet looks like.
     pub fn expose_to_percentile(&mut self, fraction: f32) {
-        let point_sr =
-            if self.scene.point_sr > 0.0 { self.scene.point_sr } else { NOMINAL_POINT_SR };
+        let point_sr = if self.scene.point_sr > 0.0 {
+            self.scene.point_sr
+        } else {
+            NOMINAL_POINT_SR
+        };
         let mut samples: Vec<(f32, f32)> =
             Vec::with_capacity(self.stars.len() + self.scene.points.len() + self.scene.discs.len());
         let mut push = |brightness: f32, weight: f32| {
@@ -580,7 +917,10 @@ impl Session {
             // Floored at a point's weight: a body at the crossover is drawn at a pixel or two
             // whatever its true angle, and metering it at less than that would let a
             // just-resolved body count for nothing while being fully visible.
-            push(luminance_of(&disc.radiance, &self.mapping), disc.solid_angle_sr.max(point_sr));
+            push(
+                luminance_of(&disc.radiance, &self.mapping),
+                disc.solid_angle_sr.max(point_sr),
+            );
         }
         if samples.is_empty() {
             return;
@@ -687,14 +1027,22 @@ fn spectrum_at(teff_k: f64) -> PerBand<f32> {
 /// a large shift the observer's V band samples what left the system somewhere else entirely.
 /// Correcting it needs the emission model evaluated at shifted band centers, which the world
 /// crate does not expose yet.
-fn received(observation: &Observation, teff_k: f64, radius_m: f64, distance_m: f64) -> PerBand<f32> {
+fn received(
+    observation: &Observation,
+    teff_k: f64,
+    radius_m: f64,
+    distance_m: f64,
+) -> PerBand<f32> {
     let g = geometry(radius_m, distance_m);
     PerBand::new(std::array::from_fn(|i| {
         let band = Band::ALL[i];
         let full = blackbody::band_radiance(band, teff_k) * g;
         // Relative flux, not one minus the deficit: a warm population adds where a cold one
         // only subtracts, and in the thermal infrared the sum can exceed the bare star.
-        let relative = observation.band(band).map(|m| m.relative_flux()).unwrap_or(1.0);
+        let relative = observation
+            .band(band)
+            .map(|m| m.relative_flux())
+            .unwrap_or(1.0);
         (full * relative) as f32
     }))
 }
@@ -764,7 +1112,10 @@ mod tests {
         let mut s = session();
         s.advance(3600.0);
         let years = s.coordinate_time_s() / 31_557_600.0;
-        assert!((years - 1.0).abs() < 1e-6, "an hour should be {years} years");
+        assert!(
+            (years - 1.0).abs() < 1e-6,
+            "an hour should be {years} years"
+        );
     }
 
     #[test]
@@ -806,14 +1157,28 @@ mod tests {
         stars.insert(0, sun);
 
         let s = Session::new(&AuthoredStars::new("many", stars), 201);
-        let visible = s.sky().iter().filter(|x| point_color(&x.shaded).length() > 0.0).count();
-        assert!(visible > 150, "only {visible} of 201 stars survived the exposure");
+        let visible = s
+            .sky()
+            .iter()
+            .filter(|x| point_color(&x.shaded).length() > 0.0)
+            .count();
+        assert!(
+            visible > 150,
+            "only {visible} of 201 stars survived the exposure"
+        );
 
         // Exposing for the maximum instead is the failure: the field goes out.
         let mut naive = Session::new(&AuthoredStars::new("many", s.stars.clone()), 201);
         naive.expose_to_percentile(1.0);
-        let left = naive.sky().iter().filter(|x| point_color(&x.shaded).length() > 0.0).count();
-        assert!(left < 5, "{left} stars should have survived exposing for the Sun");
+        let left = naive
+            .sky()
+            .iter()
+            .filter(|x| point_color(&x.shaded).length() > 0.0)
+            .count();
+        assert!(
+            left < 5,
+            "{left} stars should have survived exposing for the Sun"
+        );
     }
 
     // The world model moved to `lc-world`; these two stayed, because what they check is the
@@ -832,10 +1197,16 @@ mod tests {
             64,
         );
         session.sync_system();
-        assert!(session.system.is_some(), "the ship starts inside the solar system");
+        assert!(
+            session.system.is_some(),
+            "the ship starts inside the solar system"
+        );
 
-        let course =
-            lc_world::navigation::Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: lc_world::navigation::Plane::Equatorial };
+        let course = lc_world::navigation::Course::Orbit {
+            body: "Earth".into(),
+            altitude_radii: 2.0,
+            plane: lc_world::navigation::Plane::Equatorial,
+        };
         let label = session.set_course(&course).expect("a course to Earth");
         assert_eq!(label, "orbit of Earth");
         assert!(session.cruise().is_some(), "and a crossing to fly it");
@@ -852,30 +1223,46 @@ mod tests {
         // Nothing holds it but itself: arriving turned the crossing into the station it was
         // flown for, and `advance` reads the place every step. This used to need a helper here
         // that did by hand what the model does.
-        assert!(session.station().is_some(), "arriving did not become holding");
+        assert!(
+            session.station().is_some(),
+            "arriving did not become holding"
+        );
         // Earth read at the same instant as the ship. Reading it out of the arena, which no
         // longer advances, put the "altitude" at six hundred planetary radii.
         let altitude = |session: &Session| {
             let now = session.coordinate_time_s();
-            let earth =
-                session.system.as_ref().unwrap().body_position_at("Earth", now).unwrap();
+            let earth = session
+                .system
+                .as_ref()
+                .unwrap()
+                .body_position_at("Earth", now)
+                .unwrap();
             session.ship.motion.position_ly.distance(earth) * lc_world::system::M_PER_LY / 6.371e6
         };
-        assert!((altitude(&session) - 3.0).abs() < 0.05, "arrived at {}", altitude(&session));
+        assert!(
+            (altitude(&session) - 3.0).abs() < 0.05,
+            "arrived at {}",
+            altitude(&session)
+        );
 
         // And an hour later, with Earth thirty thousand kilometers further round its year.
         for _ in 0..40 {
             session.advance(0.1);
         }
-        assert!((altitude(&session) - 3.0).abs() < 0.05, "drifted to {}", altitude(&session));
+        assert!(
+            (altitude(&session) - 3.0).abs() < 0.05,
+            "drifted to {}",
+            altitude(&session)
+        );
     }
 
-/// The whole of it through the session: fly a course, cut the engine partway, and end up
+    /// The whole of it through the session: fly a course, cut the engine partway, and end up
     /// on a real orbit that is then held without thrust.
     #[test]
     fn canceling_a_crossing_leaves_the_ship_on_a_conic() {
-        let provider =
-            lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv");
+        let provider = lc_world::sky::hyg::HygProvider::load(
+            "../../assets/catalogs/hygdata_v42_dist_sort.csv",
+        );
         let Ok(provider) = provider else { return };
         let mut session = Session::new(&provider, 64);
         session.sync_system();
@@ -908,10 +1295,12 @@ mod tests {
         for _ in 0..20 {
             session.advance(0.05);
         }
-        assert!(session.ship.motion.position_ly != before, "a coasting ship is not parked");
+        assert!(
+            session.ship.motion.position_ly != before,
+            "a coasting ship is not parked"
+        );
         assert!(session.coast().is_some(), "and it is still on an arc");
     }
-
 
     /// A sky with nothing in it but stars must meter exactly as a count percentile did: every
     /// point carries the same weight, so the solid angle divides out of both the samples and
@@ -924,7 +1313,10 @@ mod tests {
         let coarse = s.tone.reference;
         s.scene.point_sr = NOMINAL_POINT_SR * 1000.0;
         s.auto_expose();
-        assert_eq!(s.tone.reference, coarse, "a point reference cannot depend on the zoom");
+        assert_eq!(
+            s.tone.reference, coarse,
+            "a point reference cannot depend on the zoom"
+        );
         assert!(
             (s.tone.surface_reference * s.scene.point_sr / s.tone.reference - 1.0).abs() < 1e-5,
             "and the two references are one metering, a solid angle apart",
@@ -944,7 +1336,10 @@ mod tests {
             s.scene = Scene {
                 point_sr: NOMINAL_POINT_SR,
                 points: vec![faint; crowd],
-                discs: vec![Disc { radiance: bright, solid_angle_sr: sr }],
+                discs: vec![Disc {
+                    radiance: bright,
+                    solid_angle_sr: sr,
+                }],
             };
             s.auto_expose();
             s.tone.surface_reference
@@ -954,8 +1349,14 @@ mod tests {
         let edge = (crowd + s.stars.len()) as f32 * (1.0 / 0.98 - 1.0) * NOMINAL_POINT_SR;
         let small = meter(&mut s, edge * 0.5);
         let large = meter(&mut s, edge * 2.0);
-        assert!(small < bright[Band::V], "a body under the line leaves the field exposed");
-        assert!(large > small * 1.0e6, "and over it the body is what is exposed for");
+        assert!(
+            small < bright[Band::V],
+            "a body under the line leaves the field exposed"
+        );
+        assert!(
+            large > small * 1.0e6,
+            "and over it the body is what is exposed for"
+        );
     }
 
     /// Faint points are still points: a body that has not resolved yet is metered by the flux
@@ -972,7 +1373,10 @@ mod tests {
         let one_bright_point = s.tone.reference;
         s.scene.points = vec![PerBand::splat(1.0e3f32); 3];
         s.auto_expose();
-        assert!(s.tone.reference >= one_bright_point, "more bright points, not a brighter one");
+        assert!(
+            s.tone.reference >= one_bright_point,
+            "more bright points, not a brighter one"
+        );
         assert!(s.tone.reference.is_finite() && s.tone.reference > 0.0);
     }
 
@@ -980,12 +1384,18 @@ mod tests {
     fn auto_exposure_puts_the_brightest_star_at_the_top_of_the_window() {
         let s = session();
         let sky = s.sky();
-        assert!(sky.iter().any(|x| x.shaded.color().length() > 0.0), "something must be visible");
+        assert!(
+            sky.iter().any(|x| x.shaded.color().length() > 0.0),
+            "something must be visible"
+        );
         let brightest = sky
             .iter()
             .map(|x| x.shaded.color().max_element())
             .fold(0.0f32, f32::max);
-        assert!(brightest > 0.99, "the brightest should fill the window, got {brightest}");
+        assert!(
+            brightest > 0.99,
+            "the brightest should fill the window, got {brightest}"
+        );
     }
 
     /// The bug this exists for: a fixed reference of 1.0 is thirty stops above a star's
@@ -1002,15 +1412,19 @@ mod tests {
         assert!(s.sky().iter().any(|x| x.shaded.color().length() > 0.0));
     }
 
+    /// The bug this replaces: the telescope kept one curve, so looking at anything else threw
+    /// away however long you had spent on the last thing.
     #[test]
-    fn pointing_somewhere_new_discards_the_old_curve() {
+    fn a_curve_belongs_to_its_star_and_outlives_looking_elsewhere() {
         let mut s = session();
         let (a, b) = (s.stars[0].id, s.stars[1].id);
         s.point_at(Some(a));
         s.observe(1e4);
-        assert!(!s.curve.is_empty());
+        assert_eq!(s.curve().len(), 1);
         s.point_at(Some(b));
-        assert!(s.curve.is_empty(), "a curve belongs to one target");
+        assert!(s.curve().is_empty(), "a curve belongs to one target");
+        s.point_at(Some(a));
+        assert_eq!(s.curve().len(), 1, "and is still there on coming back");
     }
 
     #[test]
@@ -1023,15 +1437,21 @@ mod tests {
     #[test]
     fn a_modeled_system_accumulates_a_curve_over_time() {
         let mut s = session();
-        s.telescope = s.telescope.with_aperture(1e4).with_bands(em_spectra::BandMask::ALL);
+        s.telescope = s
+            .telescope
+            .with_aperture(1e4)
+            .with_bands(em_spectra::BandMask::ALL);
         s.point_at(Some(s.stars[0].id));
         for _ in 0..200 {
             s.advance(6.0);
             s.observe(1e3);
         }
-        assert_eq!(s.curve.len(), 200);
-        let (first, last) = s.curve.span().unwrap();
-        assert!(last > first, "the curve should advance through emission time");
+        assert_eq!(s.curve().len(), 200);
+        let (first, last) = s.curve().span().unwrap();
+        assert!(
+            last > first,
+            "the curve should advance through emission time"
+        );
     }
 
     /// Enough real seconds to finish any crossing in the sample sky.
@@ -1053,6 +1473,121 @@ mod tests {
     }
 
     #[test]
+    fn a_new_ship_knows_nothing_at_all() {
+        let s = spread();
+        assert!(
+            s.knowledge.is_empty(),
+            "the catalogue is the world, not what is known of it"
+        );
+        assert!(s.belief(s.stars[0].id).is_none());
+        assert!(s.believed_position(s.stars[0].id).is_none());
+    }
+
+    #[test]
+    fn the_charts_cover_what_they_cover_and_no_further() {
+        let mut s = spread();
+        s.issue_charts(5.0);
+        assert_eq!(s.knowledge.len(), 3, "everything inside 5 ly is charted");
+        let belief = s.belief(s.stars[0].id).unwrap();
+        assert!(!belief.measured_here, "a chart is somebody's word");
+        assert_eq!(belief.hops, 1, "and it says so");
+        let believed = s.believed_position(s.stars[0].id).unwrap();
+        assert!(
+            believed.distance(s.stars[0].position_ly) > 0.0,
+            "a measurement, not the truth"
+        );
+
+        let mut narrow = spread();
+        narrow.issue_charts(1.0);
+        assert!(narrow.knowledge.is_empty(), "nothing inside a light-year");
+    }
+
+    /// The sweep is what finds a star nobody has charted, and it finds it when it gets round
+    /// to that patch of sky rather than when the player opens a panel.
+    #[test]
+    fn a_sweep_finds_stars_field_by_field() {
+        let mut s = spread();
+        let now = s.coordinate_time_s();
+        s.take_up(Duty::Sweep(Sweep::all_sky(now)));
+        assert!(s.knowledge.is_empty());
+
+        // An all-sky pass at a minute a field is about a week of coordinate time.
+        let pass_s = match &s.duty {
+            Duty::Sweep(sweep) => sweep.pass_s(),
+            _ => unreachable!(),
+        };
+        let mut found = Vec::new();
+        for _ in 0..40 {
+            s.advance(pass_s / TIME_RATE / 20.0);
+            s.tick_instruments(1.0);
+            found.push(s.knowledge.len());
+        }
+        assert_eq!(s.knowledge.len(), 3, "two passes reach every field");
+        assert!(
+            found.windows(2).all(|w| w[1] >= w[0]),
+            "a sweep only ever adds"
+        );
+        assert!(
+            found[..10].iter().any(|n| *n < 3),
+            "and it takes time to get there"
+        );
+    }
+
+    /// One place gives a direction. A second place, far enough from the first, gives a
+    /// distance — and that is the whole of how a ship learns where anything is.
+    #[test]
+    fn a_distance_of_its_own_comes_from_having_moved() {
+        let mut s = spread();
+        let id = s.stars[0].id;
+        s.point_at(Some(id));
+        for _ in 0..4 {
+            s.advance(1.0);
+            s.tick_instruments(1.0);
+        }
+        let belief = s.belief(id).expect("staring at a star detects it");
+        assert!(!belief.measured_here, "a ship at rest measures no parallax");
+        assert!(belief.sightings >= 2);
+
+        for k in 1..6 {
+            s.place_at(DVec3::Z * 0.02 * k as f64);
+            s.advance(1.0);
+            s.tick_instruments(1.0);
+        }
+        let belief = s.belief(id).expect("still detected");
+        assert!(belief.measured_here, "{:?}", belief.distance);
+        let position = belief.distance.position_ly().unwrap();
+        assert!(
+            position.distance(s.stars[0].position_ly) < 0.1,
+            "{position}"
+        );
+    }
+
+    /// A watch is what puts several systems under observation at once, at the cost of depth
+    /// on each: every target gets its turn and the curve of each one has gaps in it.
+    #[test]
+    fn a_watch_samples_each_of_its_targets_in_turn() {
+        let mut s = spread();
+        let ids: Vec<StarId> = s.stars.iter().map(|x| x.id).collect();
+        let started_s = s.coordinate_time_s();
+        s.take_up(Duty::Watch {
+            targets: ids.clone(),
+            dwell_s: 4000.0,
+            started_s,
+        });
+        for _ in 0..30 {
+            s.advance(1.0);
+            s.tick_instruments(1.0);
+        }
+        for id in &ids {
+            let series = s
+                .knowledge
+                .own_series(*id, Band::V)
+                .expect("every target gets its turn");
+            assert!(!series.is_empty());
+        }
+    }
+
+    #[test]
     fn flying_to_a_star_arrives_at_the_standoff_and_stops() {
         let mut s = session();
         let id = s.stars[0].id;
@@ -1061,9 +1596,16 @@ mod tests {
         s.advance(LONG_ENOUGH);
         let after = s.distance_to(s.star(id).unwrap());
         assert!(after < before, "{before} -> {after} ly");
-        assert!((after - STANDOFF_LY).abs() < 1e-6, "stopped {after} ly out, wanted {STANDOFF_LY}");
+        assert!(
+            (after - STANDOFF_LY).abs() < 1e-6,
+            "stopped {after} ly out, wanted {STANDOFF_LY}"
+        );
         assert!(s.cruise().is_none(), "the crossing should have ended");
-        assert_eq!(s.ship.motion.beta, DVec3::ZERO, "and the ship should be at rest");
+        assert_eq!(
+            s.ship.motion.beta,
+            DVec3::ZERO,
+            "and the ship should be at rest"
+        );
     }
 
     /// The grid is what retarded time is solved against, so it has to follow the ship.
@@ -1073,7 +1615,11 @@ mod tests {
         assert_eq!((s.observer.x, s.observer.y, s.observer.z), (0, 0, 0));
         s.fly_to(s.stars[0].id);
         s.advance(LONG_ENOUGH);
-        let grid = DVec3::new(s.observer.x as f64, s.observer.y as f64, s.observer.z as f64);
+        let grid = DVec3::new(
+            s.observer.x as f64,
+            s.observer.y as f64,
+            s.observer.z as f64,
+        );
         let want = s.ship.motion.position_ly * LUS_PER_LY;
         // One light-microsecond of rounding, on a number of order 1e14.
         assert!((grid - want).max_element() < 2.0, "{grid:?} vs {want:?}");
@@ -1084,11 +1630,21 @@ mod tests {
     fn the_light_from_the_destination_gets_fresher() {
         let mut s = session();
         let id = s.stars[0].id;
-        let age = |s: &Session| s.sky().into_iter().find(|x| x.id == id).unwrap().light_age_s;
+        let age = |s: &Session| {
+            s.sky()
+                .into_iter()
+                .find(|x| x.id == id)
+                .unwrap()
+                .light_age_s
+        };
         let before = age(&s);
         s.fly_to(id);
         s.advance(LONG_ENOUGH);
-        assert!(age(&s) < before / 100.0, "{} should be far under {before}", age(&s));
+        assert!(
+            age(&s) < before / 100.0,
+            "{} should be far under {before}",
+            age(&s)
+        );
     }
 
     #[test]
@@ -1097,10 +1653,20 @@ mod tests {
         let (ahead, abeam) = (s.stars[0].id, s.stars[1].id);
         s.fly_to(ahead);
         s.advance(8_000.0);
-        assert!(s.ship.motion.beta.length() > 0.5, "should be moving fast, got {}", s.ship.motion.beta.length());
-        let (front, side) = (s.doppler_to(s.star(ahead).unwrap()), s.doppler_to(s.star(abeam).unwrap()));
+        assert!(
+            s.ship.motion.beta.length() > 0.5,
+            "should be moving fast, got {}",
+            s.ship.motion.beta.length()
+        );
+        let (front, side) = (
+            s.doppler_to(s.star(ahead).unwrap()),
+            s.doppler_to(s.star(abeam).unwrap()),
+        );
         assert!(front > 1.0, "the destination must blueshift, got {front}");
-        assert!(side < front, "a star abeam must shift less than one dead ahead: {side} vs {front}");
+        assert!(
+            side < front,
+            "a star abeam must shift less than one dead ahead: {side} vs {front}"
+        );
     }
 
     /// Pins the rule the shift is implemented by: a blackbody seen with Doppler factor D is
@@ -1126,7 +1692,10 @@ mod tests {
         // Closing the distance brightens it as well; divide that out first.
         let closing = (distance_before / s.distance_to(s.star(id).unwrap())).powi(2);
         let ratio = radio(&s) / (at_rest * closing);
-        assert!((ratio / d - 1.0).abs() < 1e-3, "radio band rose {ratio}x, wanted D = {d}");
+        assert!(
+            (ratio / d - 1.0).abs() < 1e-3,
+            "radio band rose {ratio}x, wanted D = {d}"
+        );
     }
 
     /// The sky compresses toward the bow. At speed a star abeam appears ahead of abeam.
@@ -1140,7 +1709,10 @@ mod tests {
         let star = s.sky().into_iter().find(|x| x.id == other).unwrap();
         let true_angle = star.offset_ly.normalize().dot(bow).acos();
         let seen_angle = star.apparent_dir.dot(bow).acos();
-        assert!(seen_angle < true_angle, "{seen_angle} should be inside {true_angle}");
+        assert!(
+            seen_angle < true_angle,
+            "{seen_angle} should be inside {true_angle}"
+        );
     }
 
     #[test]
@@ -1156,7 +1728,10 @@ mod tests {
         assert!(s.cruise().is_none() && s.station().is_none());
         // Not exactly: the velocity goes out through meters a second and comes back, and a
         // multiply by `c` followed by a divide by `c` is not the identity in binary.
-        assert!((s.ship.motion.beta - beta).length() < beta.length() * 1e-12, "cutting the engine is a brake");
+        assert!(
+            (s.ship.motion.beta - beta).length() < beta.length() * 1e-12,
+            "cutting the engine is a brake"
+        );
 
         // Between stars there is no conic to fall onto, so it is a straight line at the speed
         // it had. A light-year is a year at `c`, so the distance is the beta times the years.
@@ -1188,9 +1763,15 @@ mod tests {
         };
         let (coarse, want) = crossing(4);
         let (fine, _) = crossing(4000);
-        assert!((coarse - fine).abs() < 1.0, "{coarse} against {fine} seconds");
+        assert!(
+            (coarse - fine).abs() < 1.0,
+            "{coarse} against {fine} seconds"
+        );
         // And both must agree with the closed form, not merely with each other.
-        assert!((coarse - want).abs() / want < 1e-6, "{coarse} against {want}");
+        assert!(
+            (coarse - want).abs() / want < 1e-6,
+            "{coarse} against {want}"
+        );
     }
 
     #[test]
@@ -1202,7 +1783,10 @@ mod tests {
         assert!(after_one > 0.0);
         s.fly_to(s.stars[1].id);
         s.advance(LONG_ENOUGH);
-        assert!(s.ship.motion.clock_s > after_one, "the clock must not restart at zero");
+        assert!(
+            s.ship.motion.clock_s > after_one,
+            "the clock must not restart at zero"
+        );
     }
 
     #[test]
@@ -1215,7 +1799,10 @@ mod tests {
     #[test]
     fn flying_somewhere_that_is_not_in_the_sky_does_nothing() {
         let mut s = session();
-        assert!(s.fly_to(lc_world::sky::StarId::synthesise("absent", 1)).is_none());
+        assert!(
+            s.fly_to(lc_world::sky::StarId::synthesise("absent", 1))
+                .is_none()
+        );
         assert!(s.cruise().is_none());
     }
 

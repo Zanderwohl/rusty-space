@@ -57,7 +57,9 @@ pub(crate) fn survey(
     out: &mut MessageWriter<Requested>,
 ) -> Picked {
     let mut picked = Picked::default();
-    let Some(frame) = map.frame.as_ref() else { return picked };
+    let Some(frame) = map.frame.as_ref() else {
+        return picked;
+    };
     let viewport = Vec2::new(rect.width(), rect.height());
     if viewport.x <= 0.0 || viewport.y <= 0.0 {
         return picked;
@@ -68,7 +70,9 @@ pub(crate) fn survey(
     // egui gives the pointer to whatever is on top, so `hover_pos` is already `None` over a
     // panel or the corner square and nothing has to be excluded here.
     let whole = Frame::bare(reticle::safe_rect(viewport, 0.0));
-    let cursor = response.hover_pos().map(|at| Vec2::new(at.x, at.y) - origin);
+    let cursor = response
+        .hover_pos()
+        .map(|at| Vec2::new(at.x, at.y) - origin);
 
     // Only what is on the surface can be under the cursor. Something off it is placed on the
     // border, and taking that as a position would make the edges pick whatever is out there.
@@ -90,7 +94,12 @@ pub(crate) fn survey(
         if let Some((at, radius_px)) = at
             && whole.safe.contains(at)
         {
-            candidates.push(Candidate { id: index as u64, at, radius_px, rank: thing.rank });
+            candidates.push(Candidate {
+                id: index as u64,
+                at,
+                radius_px,
+                rank: thing.rank,
+            });
         }
     }
 
@@ -139,8 +148,11 @@ pub(crate) fn draw(
         .filter(|taken| taken.is_positive() && !taken.contains_rect(rect))
         .map(|taken| local(*taken, origin))
         .collect();
-    let bounds = Frame::with(reticle::safe_rect(viewport, reticle::EDGE_INSET_PX), &occupied,
-        pick::ARROW_PX);
+    let bounds = Frame::with(
+        reticle::safe_rect(viewport, reticle::EDGE_INSET_PX),
+        &occupied,
+        pick::ARROW_PX,
+    );
 
     // The selection first, so hovering what is already selected shows both marks.
     for (mark, color, bracketed) in [
@@ -192,7 +204,10 @@ fn nearest_sample(outline: &[Vec<Vec4>], viewport: Vec2, toward: Vec2) -> Option
         .filter(|clip| clip.w > 0.0)
         .map(|clip| {
             let ndc = Vec2::new(clip.x / clip.w, clip.y / clip.w);
-            let at = Vec2::new((ndc.x + 1.0) * 0.5 * viewport.x, (1.0 - ndc.y) * 0.5 * viewport.y);
+            let at = Vec2::new(
+                (ndc.x + 1.0) * 0.5 * viewport.x,
+                (1.0 - ndc.y) * 0.5 * viewport.y,
+            );
             (toward.distance(at), *clip)
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -267,7 +282,12 @@ fn outline_of(placement: &Placement, view: &MapView, aspect: f64) -> Option<Vec<
     Some(
         curves
             .into_iter()
-            .map(|curve| curve.into_iter().map(|at| clip_of(view, at, aspect)).collect())
+            .map(|curve| {
+                curve
+                    .into_iter()
+                    .map(|at| clip_of(view, at, aspect))
+                    .collect()
+            })
             .collect(),
     )
 }
@@ -275,7 +295,9 @@ fn outline_of(placement: &Placement, view: &MapView, aspect: f64) -> Option<Vec<
 /// A camera-relative offset in clip space: the projection applied, the divide not, so
 /// something behind the camera still says which way it lies.
 fn clip_of(view: &MapView, offset: DVec3, aspect: f64) -> Vec4 {
-    view.orbit.clip(view.plane, offset, MAP_FOV as f64, aspect).as_vec4()
+    view.orbit
+        .clip(view.plane, offset, MAP_FOV as f64, aspect)
+        .as_vec4()
 }
 
 /// A window rectangle in the surface's own coordinates.
@@ -318,7 +340,11 @@ mod tests {
             foot: bevy::math::Vec3::ZERO,
             radius: 0.0,
             angular_radius: 0.0,
-            annulus: Some(em_map::Annulus { inner: 2.0, outer: 3.0, half_angle_rad: 0.2 }),
+            annulus: Some(em_map::Annulus {
+                inner: 2.0,
+                outer: 3.0,
+                half_angle_rad: 0.2,
+            }),
             pole: bevy::math::Vec3::Z,
         };
         let view = MapView {
@@ -329,7 +355,11 @@ mod tests {
         assert_eq!(curves.len(), 2 + em_map::outline::CROSS_SECTIONS);
         assert!(curves.iter().all(|curve| curve.len() > 2));
 
-        let body = Placement { annulus: None, kind: ItemKind::Planet, ..placement };
+        let body = Placement {
+            annulus: None,
+            kind: ItemKind::Planet,
+            ..placement
+        };
         assert!(outline_of(&body, &view, 1.6).is_none());
     }
 
@@ -349,7 +379,10 @@ mod tests {
         let frame = Frame::bare(reticle::safe_rect(viewport, reticle::EDGE_INSET_PX));
         match reticle::place(clip, 0.0, viewport, frame) {
             Marker::Off { at, direction } => {
-                assert!(direction.x > 0.0, "the arrow points away from the thing: {direction:?}");
+                assert!(
+                    direction.x > 0.0,
+                    "the arrow points away from the thing: {direction:?}"
+                );
                 assert!(at.x > viewport.x * 0.5, "{at:?}");
             }
             other => panic!("behind the camera should be an edge marker, got {other:?}"),

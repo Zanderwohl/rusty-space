@@ -11,7 +11,6 @@
 use std::collections::BTreeMap;
 
 use em_spectra::Band;
-use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
 use crate::sky::StarId;
@@ -170,6 +169,28 @@ impl Series {
     }
 }
 
+/// A distance somebody states, as opposed to bearings this craft can triangulate itself.
+///
+/// This is how a conclusion travels when the measurements behind it do not — a charting
+/// office's parallax programme, a faction's shared catalogue, a probe with more data than
+/// bandwidth. It is believed because of who said it, which is the honest way to hold it, and
+/// a craft's own triangulation overrides it the moment it has one.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Claim {
+    pub witness: Witness,
+    pub distance: Distance,
+    /// Coordinate seconds the claimant stated it.
+    pub stated_s: f64,
+    pub lineage: Lineage,
+}
+
+fn sigma_of(claim: &Claim) -> f64 {
+    match claim.distance {
+        Distance::Measured { sigma_ly, .. } => sigma_ly,
+        _ => f64::INFINITY,
+    }
+}
+
 /// What is believed about one star, folded from everything held about it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Belief {
@@ -177,6 +198,8 @@ pub struct Belief {
     /// The most recent bearing, from wherever that witness was.
     pub bearing: Bearing,
     pub distance: Distance,
+    /// Whether that distance is this craft's own triangulation rather than somebody's word.
+    pub measured_here: bool,
     pub band: Band,
     pub flux: f64,
     /// Coordinate seconds the most recent light held arrived — at its witness, not here.
@@ -214,6 +237,7 @@ impl Belief {
 pub struct StarFile {
     sightings: Vec<Sighting>,
     series: Vec<Series>,
+    claims: Vec<Claim>,
 }
 
 impl StarFile {
@@ -223,6 +247,10 @@ impl StarFile {
 
     pub fn series(&self) -> &[Series] {
         &self.series
+    }
+
+    pub fn claims(&self) -> &[Claim] {
+        &self.claims
     }
 
     pub fn series_in(&self, band: Band) -> Option<&Series> {
@@ -238,10 +266,22 @@ impl StarFile {
         let mut witnesses: Vec<Witness> = self.sightings.iter().map(|s| s.witness).collect();
         witnesses.sort_unstable();
         witnesses.dedup();
+        // Measured here beats stated by somebody else, whatever error bars either carries:
+        // one is a measurement this craft can check and the other is a thing it was told.
+        let measured = astrometry::triangulate(&bearings);
+        let taken = matches!(measured, Distance::Measured { .. });
+        let claimed = self
+            .claims
+            .iter()
+            .min_by(|a, b| sigma_of(a).total_cmp(&sigma_of(b)));
         Some(Belief {
             star,
             bearing: latest.bearing,
-            distance: astrometry::triangulate(&bearings),
+            distance: match (taken, claimed) {
+                (false, Some(claim)) => claim.distance,
+                _ => measured,
+            },
+            measured_here: taken,
             band: latest.band,
             flux: latest.flux,
             observed_s: latest.observed_s,
@@ -356,6 +396,18 @@ impl Knowledge {
         self.file_sighting(star, sighting);
     }
 
+    /// File a distance somebody states. Nothing is taken on trust that a measurement of its
+    /// own would not override.
+    pub fn told(&mut self, star: StarId, claim: Claim) {
+        let file = self.files.entry(star).or_default();
+        match file.claims.iter_mut().find(|c| c.witness == claim.witness) {
+            Some(held) if held.stated_s >= claim.stated_s => {}
+            Some(held) => *held = claim,
+            None => file.claims.push(claim),
+        }
+        self.refresh(star);
+    }
+
     /// File a photometric sample this craft measured itself.
     pub fn measured(&mut self, star: StarId, witness: Witness, band: Band, sample: Sample) {
         let file = self.files.entry(star).or_default();
@@ -403,11 +455,18 @@ impl Knowledge {
                 })
                 .cloned()
                 .collect();
-            if !sightings.is_empty() || !series.is_empty() {
+            let claims: Vec<Claim> = file
+                .claims
+                .iter()
+                .filter(|c| learnt_s(&c.lineage, c.stated_s) > since_s)
+                .cloned()
+                .collect();
+            if !sightings.is_empty() || !series.is_empty() || !claims.is_empty() {
                 entries.push(Entry {
                     star: *star,
                     sightings,
                     series,
+                    claims,
                 });
             }
         }
@@ -434,6 +493,11 @@ impl Knowledge {
                 let mut sighting = sighting.clone();
                 sighting.lineage.push(hop);
                 self.file_sighting(entry.star, sighting);
+            }
+            for claim in &entry.claims {
+                let mut claim = claim.clone();
+                claim.lineage.push(hop);
+                self.told(entry.star, claim);
             }
             for series in &entry.series {
                 let file = self.files.entry(entry.star).or_default();
@@ -478,6 +542,8 @@ pub struct Entry {
     pub star: StarId,
     pub sightings: Vec<Sighting>,
     pub series: Vec<Series>,
+    /// Conclusions rather than measurements: see [`Claim`].
+    pub claims: Vec<Claim>,
 }
 
 /// What one craft sends another. A message like any other: emitted somewhere, arriving later.
@@ -500,6 +566,8 @@ impl Report {
 
 #[cfg(test)]
 mod tests {
+    use glam::DVec3;
+
     use super::*;
 
     const AU_LY: f64 = 1.581_250_7e-5;
@@ -698,6 +766,86 @@ mod tests {
             panic!("a four light-year baseline is a parallax of a degree at 400 ly");
         };
         assert!(position_ly.distance(truth) < 1.0, "{position_ly}");
+    }
+
+    /// A chart is somebody's word, and one look of your own does not overturn it — but a
+    /// parallax does.
+    #[test]
+    fn a_measurement_of_your_own_beats_a_distance_you_were_told() {
+        let star = star_id(11);
+        let truth = DVec3::new(0.0, 0.0, 6.0);
+        let mut k = Knowledge::new(Witness(1));
+        k.sighted(star, sighting(1, DVec3::ZERO, truth, 0.0));
+        k.told(
+            star,
+            Claim {
+                witness: Witness(99),
+                distance: Distance::Measured {
+                    position_ly: DVec3::new(0.0, 0.0, 9.0),
+                    sigma_ly: 1.0,
+                },
+                stated_s: -1.0e6,
+                lineage: vec![Hop {
+                    from: Witness(99),
+                    to: Witness(1),
+                    sent_s: -1.0e6,
+                    received_s: 0.0,
+                }],
+            },
+        );
+        let belief = k.belief(star).unwrap();
+        assert!(!belief.measured_here, "held on somebody's word");
+        assert_eq!(
+            belief.distance.position_ly(),
+            Some(DVec3::new(0.0, 0.0, 9.0))
+        );
+
+        for s in looks(1, truth, 8, 1.0) {
+            k.sighted(star, s);
+        }
+        let belief = k.belief(star).unwrap();
+        assert!(belief.measured_here);
+        assert!(
+            belief.distance.position_ly().unwrap().distance(truth) < 0.05,
+            "the chart was wrong"
+        );
+    }
+
+    #[test]
+    fn a_claim_travels_on_and_says_who_said_it() {
+        let star = star_id(12);
+        let mut office = Knowledge::new(Witness(50));
+        office.sighted(star, sighting(50, DVec3::ZERO, DVec3::Z, 0.0));
+        office.told(
+            star,
+            Claim {
+                witness: Witness(50),
+                distance: Distance::Measured {
+                    position_ly: DVec3::Z * 12.0,
+                    sigma_ly: 0.1,
+                },
+                stated_s: 0.0,
+                lineage: Lineage::new(),
+            },
+        );
+        let mut ship = Knowledge::new(Witness(1));
+        ship.receive(&office.report(f64::NEG_INFINITY, 10.0), 20.0);
+        let file = ship.file(star).unwrap();
+        assert_eq!(file.claims().len(), 1);
+        assert_eq!(
+            file.claims()[0].lineage.len(),
+            1,
+            "one hop, from the office"
+        );
+        assert_eq!(
+            file.claims()[0].witness,
+            Witness(50),
+            "and it is still the office's claim"
+        );
+        assert_eq!(
+            ship.belief(star).unwrap().distance.position_ly(),
+            Some(DVec3::Z * 12.0)
+        );
     }
 
     #[test]

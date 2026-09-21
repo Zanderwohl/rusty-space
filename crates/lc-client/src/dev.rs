@@ -112,16 +112,26 @@ pub(crate) fn place_on_station(
         return;
     };
     let now = game.coordinate_time_s();
-    let Some(system) = game.system.clone() else { return };
+    let Some(system) = game.system.clone() else {
+        return;
+    };
     let here = game.ship.motion.position_ly;
-    let Some(waypoint) = course.resolve(&system, here, now) else { return };
+    let Some(waypoint) = course.resolve(&system, here, now) else {
+        return;
+    };
     // Aimed at where the ship already is, so `--station` lands on the near side of an orbit
     // rather than wherever the clock had it.
     let waypoint = waypoint.nearest_to(here, &system, now);
-    let Some(at) = waypoint.place_at(&system, now) else { return };
+    let Some(at) = waypoint.place_at(&system, now) else {
+        return;
+    };
     let label = waypoint.label();
     // Not over a `--focus`: this flag says where the ship is, that one says what is selected.
-    if !dev.actions.iter().any(|action| matches!(action, Action::FocusTarget(_))) {
+    if !dev
+        .actions
+        .iter()
+        .any(|action| matches!(action, Action::FocusTarget(_)))
+    {
         ui.focus = course.target();
     }
 
@@ -132,13 +142,17 @@ pub(crate) fn place_on_station(
             ui.look = look;
         }
         game.0.place_at(at);
-        ui.notify(format!("{label}, lifted {degrees:.0} degrees"), game.coordinate_time_s());
+        ui.notify(
+            format!("{label}, lifted {degrees:.0} degrees"),
+            game.coordinate_time_s(),
+        );
         *done = true;
         return;
     }
 
-    if let Some(look) =
-        waypoint.focus(&system, now).and_then(|f| crate::ui::Look::aimed_at(f - at))
+    if let Some(look) = waypoint
+        .focus(&system, now)
+        .and_then(|f| crate::ui::Look::aimed_at(f - at))
     {
         ui.look = look;
     }
@@ -160,7 +174,9 @@ fn lifted(at: DVec3, star: DVec3, degrees: f64) -> DVec3 {
     }
     // The simulation's pole is +Z; the in-plane part of the offset is what gets tipped.
     let flat = DVec3::new(out.x, out.y, 0.0);
-    let Some(along) = flat.try_normalize() else { return at };
+    let Some(along) = flat.try_normalize() else {
+        return at;
+    };
     let (sin, cos) = degrees.to_radians().sin_cos();
     star + (along * cos + DVec3::Z * sin) * radius
 }
@@ -225,13 +241,18 @@ pub(crate) fn place_at_body(
         return;
     }
     let Some(want) = &dev.at_body else { return };
-    let Some(body) = bodies.drawn.iter().find(|d| &d.name == want) else { return };
+    let Some(body) = bodies.drawn.iter().find(|d| &d.name == want) else {
+        return;
+    };
     // Far enough out that the body is a disc rather than a wall. Rings reach a couple of
     // planetary radii, so this has to clear them.
     let stand_off = body.radius_m * 12.0 / crate::system::M_PER_LY;
-    let origin = game.system.as_ref().map(|s| s.origin_ly).unwrap_or_default();
-    let from_star = (body.position_ly - origin)
-        .normalize_or_zero();
+    let origin = game
+        .system
+        .as_ref()
+        .map(|s| s.origin_ly)
+        .unwrap_or_default();
+    let from_star = (body.position_ly - origin).normalize_or_zero();
     // Off to the side and a little sunward, so the body shows a terminator. Straight out from
     // the star is the night side, which is a correct view of nothing.
     let across = from_star.cross(DVec3::Z).normalize_or_zero();
@@ -280,7 +301,11 @@ pub(crate) fn frame_the_cast(
     if anchored.is_some() {
         bearing += (game.ship.motion.position_ly - here).normalize_or_zero();
     }
-    for contact in uplink.contacts.iter().filter(|c| Some(c.ship_id) != anchored) {
+    for contact in uplink
+        .contacts
+        .iter()
+        .filter(|c| Some(c.ship_id) != anchored)
+    {
         bearing += (contact.position_ly - here).normalize_or_zero();
     }
     if let Some(look) = crate::ui::Look::aimed_at(bearing) {
@@ -299,11 +324,15 @@ pub(crate) fn open_the_radio(
     mut out: MessageWriter<Requested>,
     mut done: Local<bool>,
 ) {
-    let Some(words) = dev.say.as_ref() else { return };
+    let Some(words) = dev.say.as_ref() else {
+        return;
+    };
     if *done {
         return;
     }
-    let Some(contact) = uplink.contacts.first() else { return };
+    let Some(contact) = uplink.contacts.first() else {
+        return;
+    };
     *done = true;
     out.write(Requested(Action::OpenChat(contact.ship_id)));
     out.write(Requested(Action::Say {
@@ -321,7 +350,9 @@ pub(crate) fn open_the_radio(
 /// camera — an arriving crossing, a snap to a target, a hand on the mouse — is overruled on the
 /// frame after it, so there is nothing left for a shot to race.
 pub(crate) fn pin_camera(dev: Res<DevEntry>, mut ui: ResMut<Ui>) {
-    let Some((yaw_deg, pitch_deg, booms)) = dev.camera else { return };
+    let Some((yaw_deg, pitch_deg, booms)) = dev.camera else {
+        return;
+    };
     ui.look.yaw = yaw_deg.to_radians();
     ui.look.pitch = pitch_deg.to_radians();
     ui.boom_lengths = booms;
@@ -386,7 +417,9 @@ pub(crate) fn pin_view(dev: Res<DevEntry>, mut ui: ResMut<Ui>) {
 
 /// The same, for the map. See [`DevEntry::map_camera`].
 pub(crate) fn pin_map_camera(dev: Res<DevEntry>, mut ui: ResMut<Ui>) {
-    let Some((azimuth_deg, elevation_deg, au)) = dev.map_camera else { return };
+    let Some((azimuth_deg, elevation_deg, au)) = dev.map_camera else {
+        return;
+    };
     ui.map.orbit.azimuth = azimuth_deg.to_radians();
     // Through `turn` from zero rather than written, so the two clamps apply: a pinned
     // elevation of zero is a view in the plane, and the camera is never in the plane.
@@ -418,7 +451,11 @@ pub(crate) fn photograph(
         // stopped at frame n and frame n+1 have accumulated different wall time and are not
         // consecutive at all.
         let index = *frames - dev.after_frames;
-        let at = if burst > 1 { numbered(path, index) } else { path.clone() };
+        let at = if burst > 1 {
+            numbered(path, index)
+        } else {
+            path.clone()
+        };
         commands
             .spawn(bevy::render::view::screenshot::Screenshot::primary_window())
             .observe(bevy::render::view::screenshot::save_to_disk(at));
@@ -428,7 +465,6 @@ pub(crate) fn photograph(
         exit.write(AppExit::Success);
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -449,7 +485,10 @@ mod tests {
                 "{degrees} degrees changed the radius",
             );
             let latitude = ((moved - star).z / radius).asin().to_degrees();
-            assert!((latitude - degrees).abs() < 1.0e-9, "{latitude} for {degrees}");
+            assert!(
+                (latitude - degrees).abs() < 1.0e-9,
+                "{latitude} for {degrees}"
+            );
         }
         // A ship already on the pole has no plane direction to tip, and is left where it is.
         let polar = star + DVec3::Z;

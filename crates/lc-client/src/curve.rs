@@ -3,6 +3,7 @@
 use std::collections::VecDeque;
 
 use em_spectra::Band;
+use lc_world::knowledge::Sample;
 use lc_world::observation::Observation;
 
 /// A rolling window of measurements in one band.
@@ -12,11 +13,44 @@ pub struct LightCurve {
     capacity: usize,
     samples: VecDeque<(f64, f64)>,
     uncertainty: f64,
+    dated: bool,
 }
 
 impl LightCurve {
     pub fn new(band: Band, capacity: usize) -> Self {
-        Self { band, capacity: capacity.max(2), samples: VecDeque::new(), uncertainty: 0.0 }
+        Self {
+            band,
+            capacity: capacity.max(2),
+            samples: VecDeque::new(),
+            uncertainty: 0.0,
+            dated: true,
+        }
+    }
+
+    /// A view over what a witness has actually measured.
+    ///
+    /// `light_age_s` dates the samples: subtracting it puts the curve against the time the
+    /// light *left*, which is what it describes. Without a distance there is no light age, so
+    /// the curve is against arrival and [`LightCurve::dated`] says so — a curve of unknown
+    /// epoch is still a curve, and a transit in it is still a transit.
+    pub fn of(band: Band, samples: &[Sample], light_age_s: Option<f64>) -> Self {
+        let shift = light_age_s.unwrap_or(0.0);
+        Self {
+            band,
+            capacity: samples.len().max(2),
+            samples: samples
+                .iter()
+                .map(|s| (s.observed_s - shift, s.deficit))
+                .collect(),
+            uncertainty: samples.last().map(|s| s.sigma).unwrap_or(0.0),
+            dated: light_age_s.is_some(),
+        }
+    }
+
+    /// Whether the x axis is emission time. False when the distance is not known and it is
+    /// arrival time instead.
+    pub fn dated(&self) -> bool {
+        self.dated
     }
 
     /// Record a measurement, dropping the oldest once full.
@@ -24,11 +58,14 @@ impl LightCurve {
     /// Time is the **emission** time, not the observation time: a curve describes the system
     /// that produced it, and plotting it against arrival would smear anything that moved.
     pub fn record(&mut self, observation: &Observation) {
-        let Some(m) = observation.band(self.band) else { return };
+        let Some(m) = observation.band(self.band) else {
+            return;
+        };
         while self.samples.len() >= self.capacity {
             self.samples.pop_front();
         }
-        self.samples.push_back((observation.retarded_time * 1e-6, m.measured_deficit));
+        self.samples
+            .push_back((observation.retarded_time * 1e-6, m.measured_deficit));
         self.uncertainty = m.uncertainty;
     }
 
@@ -92,8 +129,8 @@ mod tests {
     use lc_world::distribution::{Distribution, Inclination};
     use lc_world::emission::{Body, CircularOrbit, EmissionModel};
     use lc_world::instrument::Instrument;
-    use lc_world::occluder::Occluder;
     use lc_world::observation::{Target, observe};
+    use lc_world::occluder::Occluder;
     use lc_world::population::Population;
     use lc_world::star::Star;
 
@@ -103,7 +140,10 @@ mod tests {
     const LY_US: f64 = 3.155_760e13;
 
     fn scope() -> Instrument {
-        Instrument::BASELINE.with_aperture(1e4).with_bands(BandMask::ALL).cooled_to(40.0)
+        Instrument::BASELINE
+            .with_aperture(1e4)
+            .with_bands(BandMask::ALL)
+            .cooled_to(40.0)
     }
 
     fn target_with_planet() -> Target {
@@ -111,9 +151,15 @@ mod tests {
         let mut model = EmissionModel::new(star, 1);
         model.bodies.push(Body {
             occluder: Occluder::new(6.371e6),
-            motion: Box::new(CircularOrbit { radius_m: AU, pole: DVec3::Z, phase0: 0.0, mu: star.mu }),
+            motion: Box::new(CircularOrbit {
+                radius_m: AU,
+                pole: DVec3::Z,
+                phase0: 0.0,
+                mu: star.mu,
+            }),
         });
-        let frame = SystemFrame::new(Coord::new(Micros::ORIGIN, (30.0 * LY_US) as i64, 0, 0).unwrap());
+        let frame =
+            SystemFrame::new(Coord::new(Micros::ORIGIN, (30.0 * LY_US) as i64, 0, 0).unwrap());
         Target::new(frame, model)
     }
 
@@ -143,7 +189,11 @@ mod tests {
             curve.record(&observe(&target, at, &scope(), 1.0, 2).unwrap());
         }
         assert_eq!(curve.len(), 4000);
-        assert!((curve.deepest() - 1.0186e-4).abs() < 2e-5, "deepest {}", curve.deepest());
+        assert!(
+            (curve.deepest() - 1.0186e-4).abs() < 2e-5,
+            "deepest {}",
+            curve.deepest()
+        );
         assert!(curve.uncertainty() > 0.0);
     }
 
@@ -184,7 +234,8 @@ mod tests {
             band_response: PerBand::splat(1.0),
             radiating_ratio: Population::SPHERICAL,
         });
-        let frame = SystemFrame::new(Coord::new(Micros::ORIGIN, (30.0 * LY_US) as i64, 0, 0).unwrap());
+        let frame =
+            SystemFrame::new(Coord::new(Micros::ORIGIN, (30.0 * LY_US) as i64, 0, 0).unwrap());
         let target = Target::new(frame, model);
         let mut curve = LightCurve::new(Band::V, 500);
         for k in 0..500 {
@@ -192,6 +243,10 @@ mod tests {
             let at = Coord::new(Micros::new(t as i64), 0, 0, 0).unwrap();
             curve.record(&observe(&target, at, &scope(), 1e5, 9).unwrap());
         }
-        assert!(curve.deepest() > 1e-6, "the swarm should be measurable: {}", curve.deepest());
+        assert!(
+            curve.deepest() > 1e-6,
+            "the swarm should be measurable: {}",
+            curve.deepest()
+        );
     }
 }

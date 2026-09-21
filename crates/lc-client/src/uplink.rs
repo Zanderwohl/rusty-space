@@ -160,7 +160,11 @@ impl Contact {
 
 /// Reckon every contact against this frame's clock and ship.
 pub fn reckon_contacts(game: Res<crate::app::Game>, mut uplink: ResMut<Uplink>) {
-    uplink.reckon(game.0.system.as_deref(), game.0.ship.motion.position_ly, game.0.coordinate_time_s());
+    uplink.reckon(
+        game.0.system.as_deref(),
+        game.0.ship.motion.position_ly,
+        game.0.coordinate_time_s(),
+    );
 }
 
 /// Where the server is, if there is one.
@@ -314,7 +318,9 @@ impl Uplink {
     /// Idempotent, and called both when the welcome arrives and again whenever the session is
     /// rebuilt. Does nothing offline, which is the single-process game.
     pub fn place(&self, session: &mut crate::session::Session) {
-        let Some(placement) = self.placement.as_ref() else { return };
+        let Some(placement) = self.placement.as_ref() else {
+            return;
+        };
         session.set_coordinate_time_us(placement.now_t);
         session.restore(&(&placement.ship).into());
         session.remote = true;
@@ -352,7 +358,12 @@ impl Uplink {
             .iter()
             .find(|c| c.ship_id == who)
             .map(|c| c.name.clone())
-            .or_else(|| self.chat.get(who).map(|c| c.name.clone()).filter(|n| !n.is_empty()))
+            .or_else(|| {
+                self.chat
+                    .get(who)
+                    .map(|c| c.name.clone())
+                    .filter(|n| !n.is_empty())
+            })
             .unwrap_or_else(|| format!("ship {}", who.0))
     }
 
@@ -373,7 +384,10 @@ impl Uplink {
     /// Bring every contact up to what `observer_ly` sees at `now_s`.
     pub fn reckon(&mut self, system: Option<&LocalSystem>, observer_ly: DVec3, now_s: f64) {
         for contact in &mut self.contacts {
-            let drives = self.drives.get(&contact.ship_id).map_or(&[][..], Vec::as_slice);
+            let drives = self
+                .drives
+                .get(&contact.ship_id)
+                .map_or(&[][..], Vec::as_slice);
             contact.reckon(system, observer_ly, now_s, drives);
         }
     }
@@ -466,8 +480,10 @@ pub fn pump(
     let now_s = time.elapsed_secs_f64();
     for message in uplink.take() {
         // An answer to an order stops the clock on it, whether the answer was yes or no.
-        if matches!(message, Outbound::Accepted { .. } | Outbound::Refused { .. })
-            && let Some(asked_at) = uplink.asked_at.take()
+        if matches!(
+            message,
+            Outbound::Accepted { .. } | Outbound::Refused { .. }
+        ) && let Some(asked_at) = uplink.asked_at.take()
         {
             uplink.round_trip_s = Some((now_s - asked_at).max(0.0));
         }
@@ -555,14 +571,19 @@ fn fold(
             // Taken, not reconciled. This is the authority saying what this ship is doing,
             // about a solve the client has no way to reproduce — it cannot see the quarry the
             // way the server can, which is the whole reason the server flies the policy.
-            if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
+            if uplink
+                .joined()
+                .is_some_and(|joined| joined.ship_id == ship_id)
+            {
                 game.0.restore(&(&ship).into());
             }
         }
         Outbound::Present(cleared) => {
             let system = game.0.system.as_deref();
-            uplink.contacts =
-                cleared.into_iter().map(|c| Contact::seen(c.into_inner(), system)).collect();
+            uplink.contacts = cleared
+                .into_iter()
+                .map(|c| Contact::seen(c.into_inner(), system))
+                .collect();
             // The server drops a pursuit when its quarry goes out of sight and does not say
             // so — saying so would be a message about somewhere this client can no longer see.
             // Losing the contact is the same fact arriving the only way it can.
@@ -579,12 +600,15 @@ fn fold(
                 .iter()
                 .filter(|s| matches!(s.kind, lc_proto::kind::MESSAGE | lc_proto::kind::KEY))
             {
-                let Ok(spoken) = serde_json::from_str::<lc_proto::Spoken>(&sighting.payload)
-                else {
+                let Ok(spoken) = serde_json::from_str::<lc_proto::Spoken>(&sighting.payload) else {
                     continue;
                 };
                 let from = ShipId(sighting.source_id);
-                let name = uplink.contacts.iter().find(|c| c.ship_id == from).map(|c| c.name.clone());
+                let name = uplink
+                    .contacts
+                    .iter()
+                    .find(|c| c.ship_id == from)
+                    .map(|c| c.name.clone());
                 let key = sighting.kind == lc_proto::kind::KEY;
                 // Said before it is folded, because what the box shows is what this craft can
                 // read — which for somebody else's sealed mail is the fact of it and no more.
@@ -624,7 +648,8 @@ fn fold(
                 }
             }
             for sighting in seen.iter().filter(|s| s.kind == lc_proto::kind::DRIVE) {
-                let Ok(change) = serde_json::from_str::<lc_proto::DriveChange>(&sighting.payload) else {
+                let Ok(change) = serde_json::from_str::<lc_proto::DriveChange>(&sighting.payload)
+                else {
                     continue;
                 };
                 let drives = uplink.drives.entry(ShipId(sighting.source_id)).or_default();
@@ -638,7 +663,12 @@ fn fold(
             let excess = uplink.seen.len().saturating_sub(REMEMBERED);
             uplink.seen.drain(..excess);
         }
-        Outbound::Accepted { ship_id, event_id, at_t, order } => {
+        Outbound::Accepted {
+            ship_id,
+            event_id,
+            at_t,
+            order,
+        } => {
             // **Applied at the server's time, with the server's numbers.** Both are clamped
             // and neither is what was sent, so folding what was sent instead is how a client
             // ends up somewhere the server does not have it.
@@ -647,19 +677,30 @@ fn fold(
             // interface shows is over too.
             if matches!(
                 order,
-                Order::SetCourse { .. } | Order::Cross { .. } | Order::CutDrive | Order::Burn { .. }
+                Order::SetCourse { .. }
+                    | Order::Cross { .. }
+                    | Order::CutDrive
+                    | Order::Burn { .. }
             ) {
                 uplink.chasing = None;
             }
             let said = match &order {
-                Order::SetCourse { course, accel_g, max_beta } => {
+                Order::SetCourse {
+                    course,
+                    accel_g,
+                    max_beta,
+                } => {
                     let course: lc_world::navigation::Course = course.clone().into();
                     match game.0.set_course_at(at_s, &course, *accel_g, *max_beta) {
                         Some(label) => Some(format!("course: {label} at {accel_g:.0} g")),
                         None => Some("that course could not be flown".into()),
                     }
                 }
-                Order::Cross { star, accel_g, max_beta } => {
+                Order::Cross {
+                    star,
+                    accel_g,
+                    max_beta,
+                } => {
                     // Resolved here too, against this client's own catalogue — the same one
                     // the shard was given, which is what makes an id mean one thing on both
                     // ends. A star this build does not hold is a shard and a client that were
@@ -673,10 +714,9 @@ fn fold(
                                 .unwrap_or_else(|| "an unnamed star".into());
                             match game.0.cross_to_at(at_s, to_ly, *accel_g, *max_beta) {
                                 Some(cruise) => {
-                                    let years =
-                                        cruise.duration_s() / crate::flight::JULIAN_YEAR_S;
-                                    let aboard = cruise.proper_duration_s()
-                                        / crate::flight::JULIAN_YEAR_S;
+                                    let years = cruise.duration_s() / crate::flight::JULIAN_YEAR_S;
+                                    let aboard =
+                                        cruise.proper_duration_s() / crate::flight::JULIAN_YEAR_S;
                                     Some(format!(
                                         "{name}: {years:.2} years out, {aboard:.2} aboard"
                                     ))
@@ -701,7 +741,10 @@ fn fold(
                 // — so the client is told the approach its ship is flying rather than working
                 // one out from a quarry it can only see the past of.
                 Order::Intercept { ship_id, closeness } => {
-                    uplink.chasing = Some(lc_proto::Pursuit { quarry: *ship_id, closeness: *closeness });
+                    uplink.chasing = Some(lc_proto::Pursuit {
+                        quarry: *ship_id,
+                        closeness: *closeness,
+                    });
                     Some(format!("closing on {}", ship_id.0))
                 }
                 // The server cut the drive of a ship that was flying the pursuit, and this folds
@@ -722,7 +765,13 @@ fn fold(
                 // Recorded against the identifier the server minted, which is the only thing
                 // an acknowledgement will ever name it by. Not shown in the events box: that
                 // box is for what happened *to* this ship, and the chat window already has it.
-                Order::Say { to, secrecy, body, idem, .. } => {
+                Order::Say {
+                    to,
+                    secrecy,
+                    body,
+                    idem,
+                    ..
+                } => {
                     let name = to
                         .and_then(|t| uplink.contacts.iter().find(|c| c.ship_id == t))
                         .map(|c| c.name.clone());
@@ -742,7 +791,9 @@ fn fold(
                     let name = to
                         .and_then(|t| uplink.contacts.iter().find(|c| c.ship_id == t))
                         .map(|c| c.name.clone());
-                    uplink.chat.sent(*to, name.as_deref(), event_id, 0, None, false, true, at_s);
+                    uplink
+                        .chat
+                        .sent(*to, name.as_deref(), event_id, 0, None, false, true, at_s);
                     None
                 }
             };
@@ -788,7 +839,10 @@ fn fold(
             warn!(retry_after_ticks, "throttled");
         }
         Outbound::Pursuing { ship_id, pursuit } => {
-            if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
+            if uplink
+                .joined()
+                .is_some_and(|joined| joined.ship_id == ship_id)
+            {
                 uplink.chasing = Some(pursuit);
             }
         }
@@ -798,7 +852,10 @@ fn fold(
         Outbound::Reading(marks) => uplink.bookmarks = Some(marks),
         // Taken whole, like `Flying`: the authority's account, settled.
         Outbound::Fitted { ship_id, fitting } => {
-            if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
+            if uplink
+                .joined()
+                .is_some_and(|joined| joined.ship_id == ship_id)
+            {
                 uplink.fitting = Some(fitting);
                 game.0.ship.fit(Some((&fitting).into()));
             }
@@ -865,7 +922,10 @@ impl Plugin for UplinkPlugin {
         app
             // Not gated on a state. The socket is not the game, and a connection that only
             // lived inside one screen would drop every time the player opened a menu.
-            .add_systems(Update, (connect, pump).chain().in_set(crate::app::Stage::Link));
+            .add_systems(
+                Update,
+                (connect, pump).chain().in_set(crate::app::Stage::Link),
+            );
     }
 }
 
@@ -880,7 +940,14 @@ mod tests {
     }
 
     fn welcome_at(now_t: i64, ship_at: [f64; 3]) -> Outbound {
-        welcome_doing(now_t, ship_at, lc_proto::Motive::Drifting { from_ly: ship_at, since_t: 0.0 })
+        welcome_doing(
+            now_t,
+            ship_at,
+            lc_proto::Motive::Drifting {
+                from_ly: ship_at,
+                since_t: 0.0,
+            },
+        )
     }
 
     /// A welcome for a ship that is *doing* something, which is what a reconnect finds.
@@ -961,7 +1028,11 @@ mod tests {
         let out_there = [4.2, -1.5, 0.25];
         fold(&mut uplink, &mut game, &mut ui, welcome_at(0, out_there));
         let at = game.0.ship.motion.position_ly;
-        assert_eq!([at.x, at.y, at.z], out_there, "the client kept its own position");
+        assert_eq!(
+            [at.x, at.y, at.z],
+            out_there,
+            "the client kept its own position"
+        );
         // And the observer follows the ship, or the sky is drawn from the old place.
         assert!(game.0.observer.x != 0, "the observer was left behind");
     }
@@ -984,7 +1055,11 @@ mod tests {
             &mut uplink,
             &mut game,
             &mut ui,
-            welcome_doing(0, [4.2, 0.0, 0.0], lc_proto::Motive::Holding(station.clone())),
+            welcome_doing(
+                0,
+                [4.2, 0.0, 0.0],
+                lc_proto::Motive::Holding(station.clone()),
+            ),
         );
 
         let expected = lc_world::resume::Snapshot::from(&lc_proto::Motion {
@@ -1015,15 +1090,27 @@ mod tests {
     #[test]
     fn a_rebuild_keeps_the_motive_and_not_only_the_position() {
         let (mut uplink, mut game, mut ui) = app();
-        let doing = lc_proto::Motive::Drifting { from_ly: [1.0, 0.0, 0.0], since_t: 12.0 };
-        fold(&mut uplink, &mut game, &mut ui, welcome_doing(0, [4.2, 0.0, 0.0], doing));
+        let doing = lc_proto::Motive::Drifting {
+            from_ly: [1.0, 0.0, 0.0],
+            since_t: 12.0,
+        };
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            welcome_doing(0, [4.2, 0.0, 0.0], doing),
+        );
 
         game.0 = crate::session::Session::new(&lc_world::sky::AuthoredStars::sample(), 3);
         uplink.place(&mut game.0);
 
         match game.0.ship.motion.motive {
             lc_world::motion::Motive::Drifting { from_ly, since_t } => {
-                assert_eq!(from_ly, glam::DVec3::new(1.0, 0.0, 0.0), "the line was redrawn");
+                assert_eq!(
+                    from_ly,
+                    glam::DVec3::new(1.0, 0.0, 0.0),
+                    "the line was redrawn"
+                );
                 assert_eq!(since_t, 12.0);
             }
             other => unreachable!("{other:?}"),
@@ -1038,7 +1125,12 @@ mod tests {
     #[test]
     fn a_session_rebuilt_after_a_welcome_is_still_the_servers() {
         let (mut uplink, mut game, mut ui) = app();
-        fold(&mut uplink, &mut game, &mut ui, welcome_at(9_000_000, [4.2, 0.0, 0.0]));
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            welcome_at(9_000_000, [4.2, 0.0, 0.0]),
+        );
 
         // What `enter_game` does when the sky arrives.
         game.0 = crate::session::Session::new(&lc_world::sky::AuthoredStars::sample(), 3);
@@ -1048,9 +1140,20 @@ mod tests {
         uplink.place(&mut game.0);
 
         let at = game.0.ship.motion.position_ly;
-        assert_eq!([at.x, at.y, at.z], [4.2, 0.0, 0.0], "the rebuild kept the origin");
-        assert_eq!(game.0.coordinate_time_s(), 9.0, "the rebuild kept its own clock");
-        assert!(game.0.remote, "it went back to flying locally while saying LINKED");
+        assert_eq!(
+            [at.x, at.y, at.z],
+            [4.2, 0.0, 0.0],
+            "the rebuild kept the origin"
+        );
+        assert_eq!(
+            game.0.coordinate_time_s(),
+            9.0,
+            "the rebuild kept its own clock"
+        );
+        assert!(
+            game.0.remote,
+            "it went back to flying locally while saying LINKED"
+        );
     }
 
     /// Offline, a rebuild is left alone — that is the single-process game and nobody has said
@@ -1060,7 +1163,10 @@ mod tests {
         let (uplink, mut game, mut _ui) = app();
         game.0.place_at(glam::DVec3::new(1.0, 2.0, 3.0));
         uplink.place(&mut game.0);
-        assert_eq!(game.0.ship.motion.position_ly, glam::DVec3::new(1.0, 2.0, 3.0));
+        assert_eq!(
+            game.0.ship.motion.position_ly,
+            glam::DVec3::new(1.0, 2.0, 3.0)
+        );
         assert!(!game.0.remote);
     }
 
@@ -1078,7 +1184,10 @@ mod tests {
         let (mut uplink, mut game, mut ui) = app();
         // Sixty: what the offline default used to be, and what `--rate 60` still does.
         ui.0.time_rate = 60.0;
-        assert!(ui.0.time_rate > SERVER_RATE, "premise: this outruns the server");
+        assert!(
+            ui.0.time_rate > SERVER_RATE,
+            "premise: this outruns the server"
+        );
 
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
 
@@ -1092,12 +1201,18 @@ mod tests {
     fn a_client_runs_at_the_rate_the_welcome_states() {
         for rate in [SERVER_RATE, 60.0, 0.5] {
             let (mut uplink, mut game, mut ui) = app();
-            let drifting = lc_proto::Motive::Drifting { from_ly: [0.0; 3], since_t: 0.0 };
+            let drifting = lc_proto::Motive::Drifting {
+                from_ly: [0.0; 3],
+                since_t: 0.0,
+            };
             let said = welcome_running_at(rate, 0, [0.0; 3], drifting);
 
             fold(&mut uplink, &mut game, &mut ui, said);
 
-            assert_eq!(ui.0.time_rate, rate, "the client did not take the stated rate");
+            assert_eq!(
+                ui.0.time_rate, rate,
+                "the client did not take the stated rate"
+            );
         }
     }
 
@@ -1106,12 +1221,23 @@ mod tests {
     fn a_restated_rate_is_adopted_without_a_second_welcome() {
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
-        assert_eq!(ui.0.time_rate, SERVER_RATE, "premise: joined at the design rate");
+        assert_eq!(
+            ui.0.time_rate, SERVER_RATE,
+            "premise: joined at the design rate"
+        );
 
         let now_t = (game.0.coordinate_time_s() * 1e6) as i64;
-        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t, rate: 60.0 });
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            Outbound::Clock { now_t, rate: 60.0 },
+        );
 
-        assert_eq!(ui.0.time_rate, 60.0, "the client kept the rate it joined at");
+        assert_eq!(
+            ui.0.time_rate, 60.0,
+            "the client kept the rate it joined at"
+        );
     }
 
     /// **The correction storm.** At sixty times the design rate one server tick is seven
@@ -1120,18 +1246,38 @@ mod tests {
     #[test]
     fn a_fast_clock_is_not_corrected_by_every_statement() {
         let (mut uplink, mut game, mut ui) = app();
-        let drifting = lc_proto::Motive::Drifting { from_ly: [0.0; 3], since_t: 0.0 };
-        fold(&mut uplink, &mut game, &mut ui, welcome_running_at(60.0, 0, [0.0; 3], drifting));
+        let drifting = lc_proto::Motive::Drifting {
+            from_ly: [0.0; 3],
+            since_t: 0.0,
+        };
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            welcome_running_at(60.0, 0, [0.0; 3], drifting),
+        );
 
         let before = game.0.coordinate_time_s();
         // One tick of a world running at sixty, which is what a healthy statement is behind by.
         let tick_us = (50.0 * 8766.0 * 1_000.0 * 60.0) as i64;
-        assert!(tick_us > CLOCK_SLACK_US, "premise: a tick outruns the fixed slack");
+        assert!(
+            tick_us > CLOCK_SLACK_US,
+            "premise: a tick outruns the fixed slack"
+        );
         let now_t = (before * 1e6) as i64 + tick_us;
 
-        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t, rate: 60.0 });
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            Outbound::Clock { now_t, rate: 60.0 },
+        );
 
-        assert_eq!(game.0.coordinate_time_s(), before, "a healthy offset moved the clock");
+        assert_eq!(
+            game.0.coordinate_time_s(),
+            before,
+            "a healthy offset moved the clock"
+        );
         assert!(uplink.applied.is_none(), "it complained about nothing");
     }
 
@@ -1158,15 +1304,32 @@ mod tests {
     #[test]
     fn a_clock_in_step_is_left_alone() {
         let (mut uplink, mut game, mut ui) = app();
-        fold(&mut uplink, &mut game, &mut ui, welcome_at(10 * CLOCK_SLACK_US, [0.0; 3]));
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            welcome_at(10 * CLOCK_SLACK_US, [0.0; 3]),
+        );
         let before = game.0.coordinate_time_s();
 
         // A statement a fraction of the slack away, which is what a healthy connection looks
         // like: the message spent a tick and a network hop getting here.
         let close = (before * 1e6) as i64 - CLOCK_SLACK_US / 4;
-        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: close, rate: SERVER_RATE });
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            Outbound::Clock {
+                now_t: close,
+                rate: SERVER_RATE,
+            },
+        );
 
-        assert_eq!(game.0.coordinate_time_s(), before, "a healthy offset moved the clock");
+        assert_eq!(
+            game.0.coordinate_time_s(),
+            before,
+            "a healthy offset moved the clock"
+        );
         assert!(uplink.applied.is_none(), "it complained about nothing");
     }
 
@@ -1180,10 +1343,25 @@ mod tests {
         // A day of coordinate time ahead of the server, which a warp reaches in seconds.
         let server_t = 0;
         game.0.correct_coordinate_time_us(24 * CLOCK_SLACK_US);
-        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: server_t, rate: SERVER_RATE });
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            Outbound::Clock {
+                now_t: server_t,
+                rate: SERVER_RATE,
+            },
+        );
 
-        assert_eq!(game.0.coordinate_time_s(), 0.0, "the client kept its own clock");
-        let said = uplink.applied.clone().expect("a jump nobody explained reads as a bug");
+        assert_eq!(
+            game.0.coordinate_time_s(),
+            0.0,
+            "the client kept its own clock"
+        );
+        let said = uplink
+            .applied
+            .clone()
+            .expect("a jump nobody explained reads as a bug");
         assert!(said.contains("clock corrected"), "{said}");
     }
 
@@ -1197,7 +1375,15 @@ mod tests {
         game.0.ship.motion.clock_s = 12_345.0;
 
         game.0.correct_coordinate_time_us(24 * CLOCK_SLACK_US);
-        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: 0, rate: SERVER_RATE });
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            Outbound::Clock {
+                now_t: 0,
+                rate: SERVER_RATE,
+            },
+        );
 
         assert_eq!(game.0.ship.motion.clock_s, 12_345.0, "the crew was un-aged");
     }
@@ -1219,9 +1405,16 @@ mod tests {
             arrive_t: 1_000_000,
         };
         let cleared = lc_proto::Cleared::<lc_proto::Presence>::clear(presence, 1_000_000).unwrap();
-        fold(&mut uplink, &mut game, &mut ui, Outbound::Present(vec![cleared]));
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            Outbound::Present(vec![cleared]),
+        );
 
-        let [contact] = uplink.contacts.as_slice() else { panic!("{:?}", uplink.contacts) };
+        let [contact] = uplink.contacts.as_slice() else {
+            panic!("{:?}", uplink.contacts)
+        };
         assert_eq!(contact.name, "Vela");
         assert_eq!(contact.length_m, 1_200.0);
         assert_eq!(contact.position_ly, glam::DVec3::new(1.0, 2.0, 3.0));
@@ -1231,7 +1424,12 @@ mod tests {
         assert_eq!(contact.jet_power_w, 4.2e17, "it was seen burning");
 
         // Replaced wholesale, not merged: a contact missing from a statement is gone.
-        fold(&mut uplink, &mut game, &mut ui, Outbound::Present(Vec::new()));
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            Outbound::Present(Vec::new()),
+        );
         assert!(uplink.contacts.is_empty(), "a dropped contact was kept");
     }
 
@@ -1245,19 +1443,23 @@ mod tests {
         use lc_world::navigation::{Course, Plane};
         use lc_world::system::M_PER_LY;
 
-        let provider =
-            lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
-                .expect("the catalogue");
+        let provider = lc_world::sky::hyg::HygProvider::load(
+            "../../assets/catalogs/hygdata_v42_dist_sort.csv",
+        )
+        .expect("the catalogue");
         let sun = lc_world::sky::StarProvider::stars(&provider)
             .iter()
             .find(|s| s.name.as_deref() == Some("Sol"))
             .expect("the Sun");
         let mut system = lc_world::system::LocalSystem::for_star(sun).expect("the solar system");
         system.advance_to(0.0);
-        let station =
-            Course::Orbit { body: "Jupiter".into(), altitude_radii: 0.5, plane: Plane::Equatorial }
-                .resolve(&system, DVec3::ZERO, 0.0)
-                .expect("an orbit");
+        let station = Course::Orbit {
+            body: "Jupiter".into(),
+            altitude_radii: 0.5,
+            plane: Plane::Equatorial,
+        }
+        .resolve(&system, DVec3::ZERO, 0.0)
+        .expect("an orbit");
 
         let standoff = DVec3::new(900.0, -1_200.0, 0.0) / M_PER_LY;
         let observer_at = |t: f64| station.place_at(&system, t).unwrap() + standoff;
@@ -1324,14 +1526,29 @@ mod tests {
             body: Some("are you there".into()),
             acks: Vec::new(),
         };
-        fold(&mut uplink, &mut game, &mut ui, heard(99, 2, spoken, lc_proto::kind::MESSAGE));
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            heard(99, 2, spoken, lc_proto::kind::MESSAGE),
+        );
 
-        let conversation = uplink.chat.get(ShipId(2)).expect("a conversation with the sender");
+        let conversation = uplink
+            .chat
+            .get(ShipId(2))
+            .expect("a conversation with the sender");
         assert_eq!(conversation.lines.len(), 1);
         assert_eq!(conversation.lines[0].body.as_deref(), Some("are you there"));
 
-        let note = ui.0.notifications.last().expect("nothing in the events box");
-        assert_eq!(note.from, Some(ShipId(2)), "the notice does not open anything");
+        let note =
+            ui.0.notifications
+                .last()
+                .expect("nothing in the events box");
+        assert_eq!(
+            note.from,
+            Some(ShipId(2)),
+            "the notice does not open anything"
+        );
         assert!(note.text.contains("are you there"));
     }
 
@@ -1341,16 +1558,20 @@ mod tests {
     fn a_sealed_message_for_somebody_else_is_still_noticed() {
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
-        let spoken =
-            lc_proto::Spoken {
-                to: Some(99),
-                beamed: false,
-                idem: 12,
-                sealed: true,
-                body: None,
-                acks: Vec::new(),
-            };
-        fold(&mut uplink, &mut game, &mut ui, heard(98, 2, spoken, lc_proto::kind::MESSAGE));
+        let spoken = lc_proto::Spoken {
+            to: Some(99),
+            beamed: false,
+            idem: 12,
+            sealed: true,
+            body: None,
+            acks: Vec::new(),
+        };
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            heard(98, 2, spoken, lc_proto::kind::MESSAGE),
+        );
 
         // Somebody else's mail, so it is overheard rather than a conversation with the sender.
         let overheard = uplink.chat.overheard();
@@ -1358,8 +1579,15 @@ mod tests {
         assert!(heard.line.sealed);
         assert_eq!(heard.line.body, None);
         assert_eq!(heard.to, Some(ShipId(99)), "it forgot who it was for");
-        assert!(uplink.chat.get(ShipId(2)).is_none(), "it became a conversation with the sender");
-        assert!(ui.0.notifications.last().is_some_and(|n| n.from == Some(ShipId(2))));
+        assert!(
+            uplink.chat.get(ShipId(2)).is_none(),
+            "it became a conversation with the sender"
+        );
+        assert!(
+            ui.0.notifications
+                .last()
+                .is_some_and(|n| n.from == Some(ShipId(2)))
+        );
     }
 
     /// **Overheard traffic is announced, not quoted.** That two other craft are talking is the
@@ -1377,11 +1605,27 @@ mod tests {
             body: Some("rendezvous at the third moon".into()),
             acks: Vec::new(),
         };
-        fold(&mut uplink, &mut game, &mut ui, heard(97, 2, spoken, lc_proto::kind::MESSAGE));
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            heard(97, 2, spoken, lc_proto::kind::MESSAGE),
+        );
 
-        let note = ui.0.notifications.last().expect("nothing in the events box");
-        assert!(!note.text.contains("rendezvous"), "it quoted somebody else's mail: {}", note.text);
-        assert!(note.text.contains("->"), "it did not say who was talking to whom: {}", note.text);
+        let note =
+            ui.0.notifications
+                .last()
+                .expect("nothing in the events box");
+        assert!(
+            !note.text.contains("rendezvous"),
+            "it quoted somebody else's mail: {}",
+            note.text
+        );
+        assert!(
+            note.text.contains("->"),
+            "it did not say who was talking to whom: {}",
+            note.text
+        );
         // And it still opens somewhere: the craft that transmitted it.
         assert_eq!(note.from, Some(ShipId(2)));
     }
@@ -1394,24 +1638,36 @@ mod tests {
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
         let before = ui.0.notifications.len();
-        fold(&mut uplink, &mut game, &mut ui, Outbound::Accepted {
-            ship_id: ShipId(7),
-            event_id: 4242,
-            at_t: 2_000_000,
-            order: Order::Say {
-                to: Some(ShipId(2)),
-                aim: lc_proto::Aim::Omni,
-                secrecy: lc_proto::Secrecy::Open,
-                body: "hello".into(),
-                idem: 4242,
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            Outbound::Accepted {
+                ship_id: ShipId(7),
+                event_id: 4242,
+                at_t: 2_000_000,
+                order: Order::Say {
+                    to: Some(ShipId(2)),
+                    aim: lc_proto::Aim::Omni,
+                    secrecy: lc_proto::Secrecy::Open,
+                    body: "hello".into(),
+                    idem: 4242,
+                },
             },
-        });
+        );
         let conversation = uplink.chat.get(ShipId(2)).expect("a conversation");
         assert_eq!(conversation.lines[0].event_ids, vec![4242]);
         assert!(conversation.lines[0].mine);
         let sent = conversation.lines[0].clone();
-        assert!(!conversation.delivered(&sent), "unanswered, so not acknowledged");
-        assert_eq!(ui.0.notifications.len(), before, "a sent message reported itself as news");
+        assert!(
+            !conversation.delivered(&sent),
+            "unanswered, so not acknowledged"
+        );
+        assert_eq!(
+            ui.0.notifications.len(),
+            before,
+            "a sent message reported itself as news"
+        );
 
         // And the acknowledgement, when it comes back, names it.
         let spoken = lc_proto::Spoken {
@@ -1422,7 +1678,12 @@ mod tests {
             body: Some("got it".into()),
             acks: vec![4242],
         };
-        fold(&mut uplink, &mut game, &mut ui, heard(43, 2, spoken, lc_proto::kind::MESSAGE));
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            heard(43, 2, spoken, lc_proto::kind::MESSAGE),
+        );
         assert!(uplink.chat.get(ShipId(2)).unwrap().delivered(&sent));
     }
 
@@ -1441,9 +1702,17 @@ mod tests {
             body: Some(String::new()),
             acks: Vec::new(),
         };
-        fold(&mut uplink, &mut game, &mut ui, heard(50, 2, spoken, lc_proto::kind::KEY));
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            heard(50, 2, spoken, lc_proto::kind::KEY),
+        );
         assert!(uplink.chat.holds_key(ShipId(2)));
-        assert!(uplink.chat.get(ShipId(2)).unwrap().lines[0].key, "it is in the transcript too");
+        assert!(
+            uplink.chat.get(ShipId(2)).unwrap().lines[0].key,
+            "it is in the transcript too"
+        );
     }
 
     /// A flight order ends a standing intercept on the server, so the interface stops showing
@@ -1452,14 +1721,32 @@ mod tests {
     fn an_accepted_flight_order_ends_the_pursuit_shown() {
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
-        let accepted = |order| Outbound::Accepted { ship_id: ShipId(7), event_id: 1, at_t: 0, order };
-        let pursuit = lc_proto::Pursuit { quarry: ShipId(2), closeness: lc_proto::Closeness::Company };
+        let accepted = |order| Outbound::Accepted {
+            ship_id: ShipId(7),
+            event_id: 1,
+            at_t: 0,
+            order,
+        };
+        let pursuit = lc_proto::Pursuit {
+            quarry: ShipId(2),
+            closeness: lc_proto::Closeness::Company,
+        };
 
         uplink.chasing = Some(pursuit);
-        fold(&mut uplink, &mut game, &mut ui, accepted(Order::Transmit { power_w: 1.0 }));
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            accepted(Order::Transmit { power_w: 1.0 }),
+        );
         assert_eq!(uplink.chasing, Some(pursuit), "a transmission ended it");
 
-        for order in [Order::CutDrive, Order::Burn { beta: [0.0, 1e-3, 0.0] }] {
+        for order in [
+            Order::CutDrive,
+            Order::Burn {
+                beta: [0.0, 1e-3, 0.0],
+            },
+        ] {
             uplink.chasing = Some(pursuit);
             fold(&mut uplink, &mut game, &mut ui, accepted(order.clone()));
             assert_eq!(uplink.chasing, None, "{order:?} left the pursuit showing");
@@ -1487,12 +1774,17 @@ mod tests {
         };
         let present = |p: lc_proto::Presence| {
             let arrive_t = p.arrive_t;
-            Outbound::Present(vec![Cleared::<lc_proto::Presence>::clear(p, arrive_t).unwrap()])
+            Outbound::Present(vec![
+                Cleared::<lc_proto::Presence>::clear(p, arrive_t).unwrap(),
+            ])
         };
         fold(&mut uplink, &mut game, &mut ui, present(presence.clone()));
 
         let drive = |event_id, at_s: f64, power_w| {
-            let change = lc_proto::DriveChange { power_w, facing: [1.0, 0.0, 0.0] };
+            let change = lc_proto::DriveChange {
+                power_w,
+                facing: [1.0, 0.0, 0.0],
+            };
             let sighting = Sighting {
                 event_id,
                 source_id: 2,
@@ -1517,9 +1809,18 @@ mod tests {
         assert_eq!(power_at(&mut uplink, 170.0), burning, "after it");
 
         // A statement newer than every event is the latest word, and survives the next one.
-        let later = lc_proto::Presence { jet_power_w: 0.0, emitted_t: 400_000_000, arrive_t: 400_000_000, ..presence };
+        let later = lc_proto::Presence {
+            jet_power_w: 0.0,
+            emitted_t: 400_000_000,
+            arrive_t: 400_000_000,
+            ..presence
+        };
         fold(&mut uplink, &mut game, &mut ui, present(later));
-        assert_eq!(power_at(&mut uplink, 410.0), 0.0, "an older event outranked a newer statement");
+        assert_eq!(
+            power_at(&mut uplink, 410.0),
+            0.0,
+            "an older event outranked a newer statement"
+        );
     }
 
     #[test]
@@ -1591,7 +1892,12 @@ mod tests {
                 payload: String::new(),
             };
             let cleared = Cleared::<Sighting>::clear(sighting, i64::MAX, 0.0).unwrap();
-            fold(&mut uplink, &mut game, &mut ui, Outbound::Sightings(vec![cleared]));
+            fold(
+                &mut uplink,
+                &mut game,
+                &mut ui,
+                Outbound::Sightings(vec![cleared]),
+            );
         }
         assert_eq!(uplink.seen.len(), REMEMBERED);
         assert_eq!(
@@ -1655,9 +1961,16 @@ mod tests {
     #[test]
     fn only_a_dead_or_missing_link_is_out_of_reach() {
         let address = Some("wss://shard.example");
-        assert_eq!(out_of_reach(&State::Offline, address), None, "connect has not run yet");
+        assert_eq!(
+            out_of_reach(&State::Offline, address),
+            None,
+            "connect has not run yet"
+        );
         assert_eq!(out_of_reach(&State::Connecting, address), None);
-        assert!(out_of_reach(&State::Offline, None).is_some(), "no shard is never going to connect");
+        assert!(
+            out_of_reach(&State::Offline, None).is_some(),
+            "no shard is never going to connect"
+        );
         let refused = out_of_reach(&State::Refused("no ticket".into()), address).unwrap();
         assert!(refused.contains("no ticket"), "{refused}");
         let lost = out_of_reach(&State::Lost("connection reset".into()), address).unwrap();

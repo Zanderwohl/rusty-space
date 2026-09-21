@@ -59,7 +59,12 @@ const PLATE_TEXELS: u32 = 1400;
 const PLATE_CACHE: usize = 12;
 /// The bezel below the page, where the buttons are.
 pub(crate) const KEYS_HEIGHT: f32 = 30.0;
-pub(crate) const SCREEN_MARGIN: Margin = Margin { left: 30, right: 30, top: 26, bottom: 22 };
+pub(crate) const SCREEN_MARGIN: Margin = Margin {
+    left: 30,
+    right: 30,
+    top: 26,
+    bottom: 22,
+};
 
 pub(crate) struct Setting {
     pub body: FontId,
@@ -143,9 +148,17 @@ impl Measure for Setter<'_> {
         };
         if let Block::Image { path, .. } = block {
             let drawn = plate_size(self.plates.get(path), width, self.ceiling - PLATE_GAP * 2.0);
-            return Measured { lead, rows: vec![Row { height: drawn.y + PLATE_GAP * 2.0, offset: 0 }] };
+            return Measured {
+                lead,
+                rows: vec![Row {
+                    height: drawn.y + PLATE_GAP * 2.0,
+                    offset: 0,
+                }],
+            };
         }
-        let galley = self.ctx.fonts_mut(|f| f.layout_job(job(block, width, self.setting)));
+        let galley = self
+            .ctx
+            .fonts_mut(|f| f.layout_job(job(block, width, self.setting)));
         let mut rows = Vec::with_capacity(galley.rows.len());
         let mut at = 0;
         for (i, placed) in galley.rows.iter().enumerate() {
@@ -156,7 +169,10 @@ impl Measure for Setter<'_> {
                 Some(next) => next.pos.y,
                 None => galley.rect.height(),
             };
-            rows.push(Row { height: bottom - placed.pos.y, offset: at });
+            rows.push(Row {
+                height: bottom - placed.pos.y,
+                offset: at,
+            });
             at += placed.row.char_count_excluding_newline().0 + placed.ends_with_newline as usize;
         }
         Measured { lead, rows }
@@ -192,25 +208,36 @@ fn inset(block: &Block) -> f32 {
 
 fn job(block: &Block, width: f32, setting: &Setting) -> LayoutJob {
     let mut job = LayoutJob {
-        wrap: TextWrapping { max_width: (width - inset(block)).max(32.0), ..Default::default() },
+        wrap: TextWrapping {
+            max_width: (width - inset(block)).max(32.0),
+            ..Default::default()
+        },
         break_on_newline: true,
         halign: Align::LEFT,
         ..Default::default()
     };
     if let Block::Item { ordered, .. } = block {
         let marker = if *ordered { "— " } else { "• " };
-        job.append(marker, 0.0, TextFormat {
-            font_id: setting.body.clone(),
-            color: FAINT,
-            ..Default::default()
-        });
+        job.append(
+            marker,
+            0.0,
+            TextFormat {
+                font_id: setting.body.clone(),
+                color: FAINT,
+                ..Default::default()
+            },
+        );
     }
     if let Block::Rule = block {
-        job.append("* * *", 0.0, TextFormat {
-            font_id: setting.body.clone(),
-            color: FAINT,
-            ..Default::default()
-        });
+        job.append(
+            "* * *",
+            0.0,
+            TextFormat {
+                font_id: setting.body.clone(),
+                color: FAINT,
+                ..Default::default()
+            },
+        );
         return job;
     }
     let Some(text) = block.text() else { return job };
@@ -222,18 +249,28 @@ fn job(block: &Block, width: f32, setting: &Setting) -> LayoutJob {
             Block::Heading { .. } => (setting.title().clone(), false),
             _ if quote => (setting.italic.clone(), setting.sheared),
             _ => {
-                let style = lc_books::Style { italic: run.style.italic, ..run.style };
-                (setting.face_for(style).clone(), setting.sheared && run.style.italic)
+                let style = lc_books::Style {
+                    italic: run.style.italic,
+                    ..run.style
+                };
+                (
+                    setting.face_for(style).clone(),
+                    setting.sheared && run.style.italic,
+                )
             }
         };
-        job.append(&run.text, 0.0, TextFormat {
-            font_id: font,
-            color: if quote { FAINT } else { INK },
-            // Only when there is no italic cut to use: shearing one that exists would slant it
-            // twice.
-            italics: sheared,
-            ..Default::default()
-        });
+        job.append(
+            &run.text,
+            0.0,
+            TextFormat {
+                font_id: font,
+                color: if quote { FAINT } else { INK },
+                // Only when there is no italic cut to use: shearing one that exists would slant it
+                // twice.
+                italics: sheared,
+                ..Default::default()
+            },
+        );
     }
     job
 }
@@ -254,7 +291,10 @@ fn settle_face(
     match &shelf.face {
         Face::Settled => {}
         Face::Unasked => {
-            let asked = FACES.iter().map(|(name, path)| (*name, assets.load(*path))).collect();
+            let asked = FACES
+                .iter()
+                .map(|(name, path)| (*name, assets.load(*path)))
+                .collect();
             shelf.face = Face::Waiting(asked);
         }
         Face::Waiting(asked) => {
@@ -273,7 +313,9 @@ fn settle_face(
             let installed: Vec<(String, Vec<u8>, As)> = asked
                 .iter()
                 .filter_map(|(name, handle)| {
-                    loaded.get(handle).map(|face| ((*name).to_owned(), face.0.clone(), As::Alone))
+                    loaded
+                        .get(handle)
+                        .map(|face| ((*name).to_owned(), face.0.clone(), As::Alone))
                 })
                 .collect();
             let names: Vec<String> = installed.iter().map(|(name, ..)| name.clone()).collect();
@@ -337,7 +379,10 @@ pub fn draw(
             let inside = ui.available_height();
             head(ui, &shelf, reading, &mut open, &mut out);
             let taken = ui.min_rect().height();
-            let paper = (inside - taken - KEYS_HEIGHT - SCREEN_MARGIN.top as f32
+            let paper = (inside
+                - taken
+                - KEYS_HEIGHT
+                - SCREEN_MARGIN.top as f32
                 - SCREEN_MARGIN.bottom as f32)
                 .max(80.0);
             let screen = egui::Frame {
@@ -353,12 +398,7 @@ pub fn draw(
                     ui.set_width(ui.available_width());
                     match (reading, state.reading.contents) {
                         (false, _) => crate::bookshelf::paper(
-                            ui,
-                            &shelf,
-                            &setting,
-                            &mut query,
-                            &mut order,
-                            &mut out,
+                            ui, &shelf, &setting, &mut query, &mut order, &mut out,
                         ),
                         (true, true) => {
                             contents(ui, &shelf, &mut books, &setting, &mut out);
@@ -417,7 +457,11 @@ fn head(
 ) {
     ui.horizontal(|ui| {
         ui.add_space(4.0);
-        let name = if reading { shelf.title.to_uppercase() } else { "BOOKSHELF".to_owned() };
+        let name = if reading {
+            shelf.title.to_uppercase()
+        } else {
+            "BOOKSHELF".to_owned()
+        };
         ui.add(engraved(name, 10.0, LABEL));
         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
             if key(ui, "×", "put it away").clicked() {
@@ -477,8 +521,10 @@ pub(crate) fn key(ui: &mut egui::Ui, label: &str, hint: &str) -> egui::Response 
     widgets.inactive.corner_radius = CornerRadius::same(4);
     widgets.hovered.corner_radius = CornerRadius::same(4);
     widgets.active.corner_radius = CornerRadius::same(4);
-    ui.add(egui::Button::new(egui::RichText::new(label).size(12.0).color(LABEL)))
-        .on_hover_text(hint)
+    ui.add(egui::Button::new(
+        egui::RichText::new(label).size(12.0).color(LABEL),
+    ))
+    .on_hover_text(hint)
 }
 
 /// The page itself: lay it out where the reader is, turn it if they asked, then paint it.
@@ -520,11 +566,22 @@ fn page(
     // Cloned because it is an `Arc` inside and the alternative is holding a borrow of the `Ui`
     // across everything below, which is the one thing a `Ui` will not allow.
     let ctx = ui.ctx().clone();
-    let setter = Setter { ctx: &ctx, setting, plates: &shelf.plates, ceiling: height };
+    let setter = Setter {
+        ctx: &ctx,
+        setting,
+        plates: &shelf.plates,
+        ceiling: height,
+    };
 
     // A page turn is spent here rather than in `action::apply`, because turning one means
     // laying it out and this is the only place with the fonts to do that.
-    let mut cursor = resume(doc, &setter, frame, state.reading.block, state.reading.offset);
+    let mut cursor = resume(
+        doc,
+        &setter,
+        frame,
+        state.reading.block,
+        state.reading.offset,
+    );
     let mut current = paginate::page_at(doc, &setter, frame, cursor);
     let turns = std::mem::take(&mut state.reading.turn);
     // A turn is the player moving, and where they moved to is written down at once rather than
@@ -587,7 +644,10 @@ fn page(
     // A plate with a page to itself sits in the middle of it, the way a printed one does. Only
     // when it is alone: centring a plate that text follows would open a gap above the text.
     let lone_plate = current.slices.len() == 1
-        && matches!(doc.blocks[current.slices[0].block].block, Block::Image { .. });
+        && matches!(
+            doc.blocks[current.slices[0].block].block,
+            Block::Image { .. }
+        );
     let mut y = rect.top();
     if lone_plate {
         let drawn = setter.measure(&doc.blocks[current.slices[0].block].block, width);
@@ -602,10 +662,15 @@ fn page(
         if let Block::Image { path, alt } = block {
             let drawn = plate_size(shelf.plates.get(path), width, height - PLATE_GAP * 2.0);
             let band = Rect::from_min_size(
-                egui::pos2(rect.left() + (width - drawn.x).max(0.0) / 2.0, y + PLATE_GAP),
+                egui::pos2(
+                    rect.left() + (width - drawn.x).max(0.0) / 2.0,
+                    y + PLATE_GAP,
+                ),
                 drawn,
             );
-            plate(&painter, &ctx, band, path, alt, shelf, books, plates, setting);
+            plate(
+                &painter, &ctx, band, path, alt, shelf, books, plates, setting,
+            );
             y += drawn.y + PLATE_GAP * 2.0;
             continue;
         }
@@ -633,7 +698,15 @@ fn page(
     }
     // The folio is ruled across the page rather than across the column: it is furniture of the
     // sheet, not of the text.
-    folio(ui, outer.with_max_y(rect.max.y), *spine, shelf, setting, folio_number, counted.pages);
+    folio(
+        ui,
+        outer.with_max_y(rect.max.y),
+        *spine,
+        shelf,
+        setting,
+        folio_number,
+        counted.pages,
+    );
 }
 
 /// Where the reader resumes: the block it was on if it still holds that place, and the offset
@@ -651,7 +724,10 @@ pub(crate) fn resume<M: Measure>(
 ) -> Cursor {
     // The end of the chapter, which is what turning back into one asks for.
     if offset == usize::MAX {
-        return Cursor { block: doc.blocks.len(), row: 0 };
+        return Cursor {
+            block: doc.blocks.len(),
+            row: 0,
+        };
     }
     let known = block.filter(|i| {
         doc.blocks.get(*i).is_some_and(|located| {
@@ -666,7 +742,11 @@ pub(crate) fn resume<M: Measure>(
     };
     let within = offset - doc.blocks[block].offset;
     let measured = measure.measure(&doc.blocks[block].block, frame.width);
-    let row = measured.rows.iter().rposition(|r| r.offset <= within).unwrap_or(0);
+    let row = measured
+        .rows
+        .iter()
+        .rposition(|r| r.offset <= within)
+        .unwrap_or(0);
     Cursor { block, row }
 }
 
@@ -705,7 +785,11 @@ fn plate(
                 Stroke::new(1.0_f32, RULE),
                 egui::StrokeKind::Inside,
             );
-            let words = if alt.is_empty() { "plate".to_owned() } else { alt.to_owned() };
+            let words = if alt.is_empty() {
+                "plate".to_owned()
+            } else {
+                alt.to_owned()
+            };
             painter.text(
                 band.center(),
                 egui::Align2::CENTER_CENTER,
@@ -824,7 +908,11 @@ fn waiting(ui: &mut egui::Ui, shelf: &Shelf, setting: &Setting) {
             Some(why) => why.clone(),
             None => "opening the book".to_owned(),
         };
-        ui.label(egui::RichText::new(words).color(FAINT).font(setting.body.clone()));
+        ui.label(
+            egui::RichText::new(words)
+                .color(FAINT)
+                .font(setting.body.clone()),
+        );
     });
 }
 
@@ -847,8 +935,13 @@ fn contents(
             let indent = 14.0 * entry.depth as f32;
             ui.horizontal(|ui| {
                 ui.add_space(indent);
-                let label = egui::RichText::new(&entry.label).font(setting.body.clone()).color(INK);
-                if ui.add(egui::Button::new(label).fill(PAPER).frame(false)).clicked() {
+                let label = egui::RichText::new(&entry.label)
+                    .font(setting.body.clone())
+                    .color(INK);
+                if ui
+                    .add(egui::Button::new(label).fill(PAPER).frame(false))
+                    .clicked()
+                {
                     jump = Some(entry.clone());
                 }
             });
@@ -892,10 +985,17 @@ mod tests {
         let mut offset = 0;
         let mut drawn: Vec<(usize, usize)> = Vec::new();
         for turn in 0..12 {
-            let page = paginate::page_at(&doc, &Grid, frame, resume(&doc, &Grid, frame, block, offset));
-            drawn.extend(page.slices.iter().flat_map(|s| {
-                (s.first_row..s.first_row + s.rows).map(move |row| (s.block, row))
-            }));
+            let page = paginate::page_at(
+                &doc,
+                &Grid,
+                frame,
+                resume(&doc, &Grid, frame, block, offset),
+            );
+            drawn.extend(
+                page.slices.iter().flat_map(|s| {
+                    (s.first_row..s.first_row + s.rows).map(move |row| (s.block, row))
+                }),
+            );
             if page.next.block >= doc.blocks.len() {
                 break;
             }
@@ -925,11 +1025,17 @@ mod tests {
         let frame = Grid::frame(40, 6);
         // The plates and the paragraph after them all begin at the same character. This is why
         // the block index exists, and what a saved bookmark is resolved against on its own.
-        let plate = doc.blocks.iter().position(|b| matches!(b.block, lc_books::Block::Image { .. }));
+        let plate = doc
+            .blocks
+            .iter()
+            .position(|b| matches!(b.block, lc_books::Block::Image { .. }));
         let at = doc.blocks[plate.unwrap()].offset;
         assert_eq!(resume(&doc, &Grid, frame, None, at).block, plate.unwrap());
         // With a block to go on, the same offset means the block it was taken from.
-        assert_eq!(resume(&doc, &Grid, frame, Some(plate.unwrap() + 1), at).block, plate.unwrap() + 1);
+        assert_eq!(
+            resume(&doc, &Grid, frame, Some(plate.unwrap() + 1), at).block,
+            plate.unwrap() + 1
+        );
     }
 
     #[test]

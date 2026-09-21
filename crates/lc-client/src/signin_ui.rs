@@ -60,7 +60,10 @@ pub struct Form {
 
 /// What a background task has to say.
 enum Report {
-    Granted { grant: String, identity: Identity },
+    Granted {
+        grant: String,
+        identity: Identity,
+    },
     Failed(String),
     /// The grant we had is no good. Distinct from a failure, because only this clears the vault.
     Rejected,
@@ -143,8 +146,12 @@ fn config_dir() -> PathBuf {
 /// The grant is what makes a sixty-second ticket workable: a returning player is signed in
 /// before they reach the menu, and never sees this module at all.
 fn resume(mut signin: ResMut<Signin>) {
-    let Some(broker) = signin.broker.clone() else { return };
-    let Ok(Some(grant)) = signin.vault.read() else { return };
+    let Some(broker) = signin.broker.clone() else {
+        return;
+    };
+    let Ok(Some(grant)) = signin.vault.read() else {
+        return;
+    };
     signin.grant = Some(grant.clone());
     signin.session = Session::Working;
     let to_main = signin.to_main.clone();
@@ -172,11 +179,7 @@ fn resume(mut signin: ResMut<Signin>) {
 ///
 /// Read from the same `Requested` stream everything else is, rather than through the action
 /// fold: these need a socket, a browser and the vault, none of which belong in a pure fold.
-fn handle(
-    mut requests: MessageReader<Requested>,
-    mut signin: ResMut<Signin>,
-    mut ui: ResMut<Ui>,
-) {
+fn handle(mut requests: MessageReader<Requested>, mut signin: ResMut<Signin>, mut ui: ResMut<Ui>) {
     for request in requests.read() {
         match &request.0 {
             Action::SignIn => begin(&mut signin),
@@ -209,7 +212,9 @@ fn open_dev_form(dev: Res<crate::dev::DevEntry>, mut signin: ResMut<Signin>) {
 /// Take what the background tasks have said.
 fn collect(mut signin: ResMut<Signin>) {
     let reports: Vec<Report> = {
-        let Ok(from_tasks) = signin.from_tasks.lock() else { return };
+        let Ok(from_tasks) = signin.from_tasks.lock() else {
+            return;
+        };
         from_tasks.try_iter().collect()
     };
     for report in reports {
@@ -235,29 +240,43 @@ fn collect(mut signin: ResMut<Signin>) {
 
 /// Watch the loopback for the browser coming back.
 fn listen(mut signin: ResMut<Signin>) {
-    let Session::Waiting { loopback, .. } = &signin.session else { return };
-    let Some(answer) = loopback.poll() else { return };
-    let Some(broker) = signin.broker.clone() else { return };
+    let Session::Waiting { loopback, .. } = &signin.session else {
+        return;
+    };
+    let Some(answer) = loopback.poll() else {
+        return;
+    };
+    let Some(broker) = signin.broker.clone() else {
+        return;
+    };
 
     let code = match answer {
         Ok(code) => code,
         Err(why) => {
-            signin.session = Session::Failed(format!("that sign-in did not come back right: {why:?}"));
+            signin.session =
+                Session::Failed(format!("that sign-in did not come back right: {why:?}"));
             return;
         }
     };
-    let Session::Waiting { loopback, .. } = std::mem::replace(&mut signin.session, Session::Working)
+    let Session::Waiting { loopback, .. } =
+        std::mem::replace(&mut signin.session, Session::Working)
     else {
         return;
     };
-    let return_to = format!("http://127.0.0.1:{}{}", loopback.port, crate::auth::RETURN_PATH);
+    let return_to = format!(
+        "http://127.0.0.1:{}{}",
+        loopback.port,
+        crate::auth::RETURN_PATH
+    );
     let label = machine_name();
     let to_main = signin.to_main.clone();
     IoTaskPool::get()
         .spawn(async move {
             let _ = match broker.redeem(&code, &return_to, &label) {
-                Ok(granted) => to_main
-                    .send(Report::Granted { grant: granted.grant, identity: granted.identity }),
+                Ok(granted) => to_main.send(Report::Granted {
+                    grant: granted.grant,
+                    identity: granted.identity,
+                }),
                 Err(why) => to_main.send(Report::Failed(why.to_string())),
             };
         })
@@ -281,7 +300,9 @@ fn machine_name() -> String {
 
 /// Begin: open the browser, listen on loopback.
 pub fn begin(signin: &mut Signin) {
-    let Some(broker) = signin.broker.clone() else { return };
+    let Some(broker) = signin.broker.clone() else {
+        return;
+    };
     let bound = match crate::auth::Bound::open() {
         Ok(bound) => bound,
         Err(why) => {
@@ -305,7 +326,10 @@ pub fn begin(signin: &mut Signin) {
     if let Err(why) = webbrowser::open(&url) {
         warn!("could not open a browser ({why}); the address is on screen");
     }
-    signin.session = Session::Waiting { loopback: bound.listen(pending), url };
+    signin.session = Session::Waiting {
+        loopback: bound.listen(pending),
+        url,
+    };
 }
 
 /// Send what was typed.
@@ -313,11 +337,19 @@ pub fn begin(signin: &mut Signin) {
 /// Doc 16 records why this form exists and why it is an argument against the password provider
 /// reaching production: it teaches a player to type a credential into a game window.
 fn password_submit(signin: &mut Signin) {
-    let Some(broker) = signin.broker.clone() else { return };
-    let Some(form) = signin.form.take() else { return };
+    let Some(broker) = signin.broker.clone() else {
+        return;
+    };
+    let Some(form) = signin.form.take() else {
+        return;
+    };
     let register_as = form.registering.then(|| {
         let typed = form.display_name.trim();
-        if typed.is_empty() { "Traveller".to_string() } else { typed.to_string() }
+        if typed.is_empty() {
+            "Traveller".to_string()
+        } else {
+            typed.to_string()
+        }
     });
     let label = machine_name();
     let to_main = signin.to_main.clone();
@@ -327,8 +359,10 @@ fn password_submit(signin: &mut Signin) {
             let asked =
                 broker.with_password(&form.email, &form.password, &label, register_as.as_deref());
             let _ = match asked {
-                Ok(granted) => to_main
-                    .send(Report::Granted { grant: granted.grant, identity: granted.identity }),
+                Ok(granted) => to_main.send(Report::Granted {
+                    grant: granted.grant,
+                    identity: granted.identity,
+                }),
                 Err(why) => to_main.send(Report::Failed(why.to_string())),
             };
         })
@@ -340,7 +374,9 @@ fn form(mut contexts: EguiContexts, mut signin: ResMut<Signin>, ui_state: Res<Ui
     if ui_state.menu_page != MenuPage::SignIn || signin.form.is_none() {
         return;
     }
-    let Ok(context) = contexts.ctx_mut() else { return };
+    let Ok(context) = contexts.ctx_mut() else {
+        return;
+    };
 
     let mut submit = false;
     let mut cancel = false;
@@ -371,30 +407,36 @@ fn form(mut contexts: EguiContexts, mut signin: ResMut<Signin>, ui_state: Res<Ui
             ui.visuals_mut().extreme_bg_color = egui::Color32::from_rgb(4, 14, 8);
             ui.visuals_mut().widgets.inactive.bg_stroke =
                 egui::Stroke::new(1.0_f32, color(em_ui::vfd::TEXT_DIM));
-            let Some(form) = signin.form.as_mut() else { return };
+            let Some(form) = signin.form.as_mut() else {
+                return;
+            };
             ui.set_min_width(320.0);
             ui.heading("Password");
             ui.add_space(6.0);
-            egui::Grid::new("credentials").num_columns(2).show(ui, |ui| {
-                ui.label("Email");
-                ui.text_edit_singleline(&mut form.email);
-                ui.end_row();
-                ui.label("Password");
-                // `password(true)` is not decoration: this is on screen in a game, which is
-                // more likely to be streamed or screenshotted than a browser is.
-                ui.add(egui::TextEdit::singleline(&mut form.password).password(true));
-                ui.end_row();
-                if form.registering {
-                    ui.label("Name");
-                    ui.text_edit_singleline(&mut form.display_name);
+            egui::Grid::new("credentials")
+                .num_columns(2)
+                .show(ui, |ui| {
+                    ui.label("Email");
+                    ui.text_edit_singleline(&mut form.email);
                     ui.end_row();
-                }
-            });
+                    ui.label("Password");
+                    // `password(true)` is not decoration: this is on screen in a game, which is
+                    // more likely to be streamed or screenshotted than a browser is.
+                    ui.add(egui::TextEdit::singleline(&mut form.password).password(true));
+                    ui.end_row();
+                    if form.registering {
+                        ui.label("Name");
+                        ui.text_edit_singleline(&mut form.display_name);
+                        ui.end_row();
+                    }
+                });
             ui.checkbox(&mut form.registering, "Create an account");
             ui.separator();
             ui.horizontal(|ui| {
                 let ready = !form.email.trim().is_empty() && !form.password.is_empty();
-                submit = ui.add_enabled(ready, egui::Button::new("Sign in")).clicked();
+                submit = ui
+                    .add_enabled(ready, egui::Button::new("Sign in"))
+                    .clicked();
                 cancel = ui.button("Cancel").clicked();
             });
         });
@@ -473,7 +515,10 @@ fn draw(
     // Opaque, unlike an ordinary panel. The menu is still there behind it, dimmed, and two
     // translucent panels of the same size at the same place read as one muddled thing rather
     // than as one in front of the other.
-    let theme = MenuTheme { panel_bg: MenuTheme::VFD.panel_bg.with_alpha(1.0), ..MenuTheme::VFD };
+    let theme = MenuTheme {
+        panel_bg: MenuTheme::VFD.panel_bg.with_alpha(1.0),
+        ..MenuTheme::VFD
+    };
     // No wordmark: the heading here is "SIGN IN", not the game's name, so the title falls
     // back to the interface face like every other line on the screen.
     let mut menu = MenuUi::new(&mut commands, theme)
@@ -534,7 +579,10 @@ struct Modal(Shown);
 #[derive(Component)]
 pub struct Emit(pub Action);
 
-pub fn press(buttons: Query<(&Interaction, &Emit), Changed<Interaction>>, mut out: MessageWriter<Requested>) {
+pub fn press(
+    buttons: Query<(&Interaction, &Emit), Changed<Interaction>>,
+    mut out: MessageWriter<Requested>,
+) {
     for (interaction, emit) in &buttons {
         if *interaction == Interaction::Pressed {
             out.write(Requested(emit.0.clone()));
@@ -595,7 +643,11 @@ mod tests {
     #[test]
     fn the_modal_is_rebuilt_only_when_its_contents_change() {
         let signed_out = Shown::of(&Session::SignedOut, false);
-        assert_eq!(signed_out, Shown::of(&Session::SignedOut, false), "the same state differs");
+        assert_eq!(
+            signed_out,
+            Shown::of(&Session::SignedOut, false),
+            "the same state differs"
+        );
 
         // Opening the form changes it, and so does every step of signing in.
         assert_ne!(signed_out, Shown::of(&Session::SignedOut, true));
@@ -607,11 +659,17 @@ mod tests {
         );
         assert_ne!(
             Shown::of(
-                &Session::SignedIn(Identity { account_id: "a".into(), display_name: "Ada".into() }),
+                &Session::SignedIn(Identity {
+                    account_id: "a".into(),
+                    display_name: "Ada".into()
+                }),
                 false,
             ),
             Shown::of(
-                &Session::SignedIn(Identity { account_id: "a".into(), display_name: "Grace".into() }),
+                &Session::SignedIn(Identity {
+                    account_id: "a".into(),
+                    display_name: "Grace".into()
+                }),
                 false,
             ),
         );
@@ -621,7 +679,11 @@ mod tests {
     /// the session — so it does not redraw as the sign-in progresses underneath.
     #[test]
     fn the_form_owns_the_screen_whatever_the_session_says() {
-        for session in [Session::SignedOut, Session::Working, Session::Failed("x".into())] {
+        for session in [
+            Session::SignedOut,
+            Session::Working,
+            Session::Failed("x".into()),
+        ] {
             assert_eq!(Shown::of(&session, true), Shown::Backdrop);
         }
     }
@@ -640,7 +702,10 @@ mod tests {
             "macOS does not keep this in {said}",
         );
         #[cfg(target_os = "windows")]
-        assert!(said.contains("AppData"), "Windows does not keep this in {said}");
+        assert!(
+            said.contains("AppData"),
+            "Windows does not keep this in {said}"
+        );
         #[cfg(target_os = "linux")]
         assert!(
             said.contains(".config") || said.contains("XDG"),

@@ -131,7 +131,11 @@ fn build(
     match page {
         MenuPage::Root => {
             ui.button(panel, "Observe", Emit(observe));
-            ui.button(panel, "Settings", Emit(Action::GoToMenuPage(MenuPage::Settings)));
+            ui.button(
+                panel,
+                "Settings",
+                Emit(Action::GoToMenuPage(MenuPage::Settings)),
+            );
             ui.button(panel, "Quit", Emit(Action::Quit));
         }
         // Returned above; the sign-in owns the screen while it is up.
@@ -143,7 +147,10 @@ fn build(
     }
 }
 
-fn press(buttons: Query<(&Interaction, &Emit), Changed<Interaction>>, mut out: MessageWriter<Requested>) {
+fn press(
+    buttons: Query<(&Interaction, &Emit), Changed<Interaction>>,
+    mut out: MessageWriter<Requested>,
+) {
     for (interaction, emit) in &buttons {
         if *interaction == Interaction::Pressed {
             out.write(Requested(emit.0.clone()));
@@ -230,7 +237,10 @@ fn backdrop_star(seed: u64, index: u64) -> CatalogueStar {
 
     CatalogueStar {
         id: StarId::synthesise("menu", index),
-        provenance: Provenance { source: "menu".into(), key: index },
+        provenance: Provenance {
+            source: "menu".into(),
+            key: index,
+        },
         name: None,
         position_ly,
         velocity: DVec3::ZERO,
@@ -243,7 +253,10 @@ fn backdrop_star(seed: u64, index: u64) -> CatalogueStar {
         luminosity_solar,
         mass_solar: mass,
         metallicity: 0.0,
-        component: StarComponent { index: 1, group: None },
+        component: StarComponent {
+            index: 1,
+            group: None,
+        },
     }
 }
 
@@ -284,7 +297,14 @@ mod tests {
         let stars = <AuthoredStars as lc_world::sky::StarProvider>::stars(&sky);
         let dwarfs = stars.iter().filter(|s| s.mass_solar < 1.0).count();
         let giants = stars.iter().filter(|s| s.mass_solar > 8.0).count();
-        assert!(dwarfs * 10 > stars.len() * 8, "only {dwarfs} of {} are dwarfs", stars.len());
-        assert!(giants < stars.len() / 100, "{giants} stars above eight solar masses");
+        assert!(
+            dwarfs * 10 > stars.len() * 8,
+            "only {dwarfs} of {} are dwarfs",
+            stars.len()
+        );
+        assert!(
+            giants < stars.len() / 100,
+            "{giants} stars above eight solar masses"
+        );
     }
 }

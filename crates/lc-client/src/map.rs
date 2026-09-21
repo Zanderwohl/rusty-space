@@ -10,8 +10,8 @@
 //! needs a different range — see [`LINE_COLOR_SCALE`].
 
 use bevy::asset::RenderAssetUsages;
-use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::camera::RenderTarget;
+use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureFormat, TextureUsages};
@@ -275,7 +275,10 @@ impl Plugin for MapPlugin {
             // whenever the ship was under way.
             .add_systems(
                 Update,
-                (survey, resize, place).chain().in_set(Stage::Scene).after(crate::app::Placed),
+                (survey, resize, place)
+                    .chain()
+                    .in_set(Stage::Scene)
+                    .after(crate::app::Placed),
             );
     }
 }
@@ -300,9 +303,19 @@ fn setup(
         primary: None,
         frame: None,
         sphere: meshes.add(wire_mesh::generate_latlon_sphere(&[], BASE_TUBE_RADIUS, 4)),
-        point: meshes.add(wire_mesh::ring_tube(POINT_SEGMENTS, BASE_TUBE_RADIUS, 4, 1.0)),
+        point: meshes.add(wire_mesh::ring_tube(
+            POINT_SEGMENTS,
+            BASE_TUBE_RADIUS,
+            4,
+            1.0,
+        )),
         dot: meshes.add(wire_mesh::disc(POINT_SEGMENTS, 1.0)),
-        ring: meshes.add(wire_mesh::ring_tube(RING_SEGMENTS, BASE_TUBE_RADIUS, 4, 1.0)),
+        ring: meshes.add(wire_mesh::ring_tube(
+            RING_SEGMENTS,
+            BASE_TUBE_RADIUS,
+            4,
+            1.0,
+        )),
         spokes: meshes.add(wire_mesh::plane_spokes(
             PLANE_SPOKES,
             SPOKE_INNER / SPOKE_REACH,
@@ -332,7 +345,10 @@ fn setup(
             clear_color: ClearColorConfig::Custom(Color::BLACK),
             ..default()
         },
-        Projection::Perspective(PerspectiveProjection { fov: MAP_FOV, ..default() }),
+        Projection::Perspective(PerspectiveProjection {
+            fov: MAP_FOV,
+            ..default()
+        }),
         // See the module doc.
         Tonemapping::None,
         Transform::default(),
@@ -359,12 +375,20 @@ fn target_image(size: UVec2) -> Image {
 /// Reallocate the target when the surface drawing it has changed size, and not otherwise:
 /// resizing an `Image` asset reallocates a GPU texture.
 fn resize(mut map: ResMut<Map>, mut images: ResMut<Assets<Image>>) {
-    let wanted = map.wanted.clamp(UVec2::splat(MIN_SIDE), UVec2::splat(MAX_SIDE));
+    let wanted = map
+        .wanted
+        .clamp(UVec2::splat(MIN_SIDE), UVec2::splat(MAX_SIDE));
     if wanted == map.size {
         return;
     }
-    let Some(mut image) = images.get_mut(&map.image) else { return };
-    image.resize(Extent3d { width: wanted.x, height: wanted.y, ..default() });
+    let Some(mut image) = images.get_mut(&map.image) else {
+        return;
+    };
+    image.resize(Extent3d {
+        width: wanted.x,
+        height: wanted.y,
+        ..default()
+    });
     map.size = wanted;
 }
 
@@ -400,29 +424,78 @@ fn place(
     mut camera: Query<(&mut Transform, &mut Projection), (With<MapCamera>, Without<MapDrawn>)>,
     existing: Query<Entity, With<MapDrawn>>,
     mut items: Query<
-        (&MapItemOf, &mut Transform, &mut Mesh3d, &MeshMaterial3d<BodyWireframeMaterial>),
-        (Without<MapCamera>, Without<MapDropOf>, Without<MapRingOf>, Without<MapAnnulusOf>, Without<MapSpokes>),
+        (
+            &MapItemOf,
+            &mut Transform,
+            &mut Mesh3d,
+            &MeshMaterial3d<BodyWireframeMaterial>,
+        ),
+        (
+            Without<MapCamera>,
+            Without<MapDropOf>,
+            Without<MapRingOf>,
+            Without<MapAnnulusOf>,
+            Without<MapSpokes>,
+        ),
     >,
     mut drops: Query<
-        (&MapDropOf, &mut Transform, &mut Mesh3d, &MeshMaterial3d<BodyWireframeMaterial>),
-        (Without<MapCamera>, Without<MapItemOf>, Without<MapRingOf>, Without<MapSpokes>, Without<MapAnnulusOf>),
+        (
+            &MapDropOf,
+            &mut Transform,
+            &mut Mesh3d,
+            &MeshMaterial3d<BodyWireframeMaterial>,
+        ),
+        (
+            Without<MapCamera>,
+            Without<MapItemOf>,
+            Without<MapRingOf>,
+            Without<MapSpokes>,
+            Without<MapAnnulusOf>,
+        ),
     >,
     mut rings: Query<
-        (&MapRingOf, &mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
-        (Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>, Without<MapSpokes>, Without<MapAnnulusOf>),
+        (
+            &MapRingOf,
+            &mut Transform,
+            &MeshMaterial3d<BodyWireframeMaterial>,
+        ),
+        (
+            Without<MapCamera>,
+            Without<MapItemOf>,
+            Without<MapDropOf>,
+            Without<MapSpokes>,
+            Without<MapAnnulusOf>,
+        ),
     >,
     mut spokes: Query<
         (&mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
-        (With<MapSpokes>, Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>,
-            Without<MapRingOf>, Without<MapAnnulusOf>),
+        (
+            With<MapSpokes>,
+            Without<MapCamera>,
+            Without<MapItemOf>,
+            Without<MapDropOf>,
+            Without<MapRingOf>,
+            Without<MapAnnulusOf>,
+        ),
     >,
     mut annuli: Query<
-        (&MapAnnulusOf, &mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
-        (Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>, Without<MapRingOf>,
-            Without<MapSpokes>),
+        (
+            &MapAnnulusOf,
+            &mut Transform,
+            &MeshMaterial3d<BodyWireframeMaterial>,
+        ),
+        (
+            Without<MapCamera>,
+            Without<MapItemOf>,
+            Without<MapDropOf>,
+            Without<MapRingOf>,
+            Without<MapSpokes>,
+        ),
     >,
 ) {
-    let Ok((mut transform, mut projection)) = camera.single_mut() else { return };
+    let Ok((mut transform, mut projection)) = camera.single_mut() else {
+        return;
+    };
     if !map.shown {
         for entity in &existing {
             commands.entity(entity).despawn();
@@ -436,12 +509,17 @@ fn place(
     // Follow the selection, not a remembered position: Saturn moves. Written back rather than
     // applied to a copy, because every action that moves the camera starts from the
     // interface's own `focus_ly`, and a stale one makes the first frame of a drag jump.
-    follow(ui.map.focus, &map.snapshot, map.primary, &mut ui.map.orbit.focus_ly);
+    follow(
+        ui.map.focus,
+        &map.snapshot,
+        map.primary,
+        &mut ui.map.orbit.focus_ly,
+    );
     // After the follow: the line is measured from where the camera is now looking.
     spin(&mut ui.map, &map.snapshot, map.primary);
     let view = ui.map;
-    let meters_per_unit = crate::view::ScaleTier::for_distance(view.orbit.distance_m())
-        .meters_per_unit();
+    let meters_per_unit =
+        crate::view::ScaleTier::for_distance(view.orbit.distance_m()).meters_per_unit();
     let frame = compose(&map.snapshot, &view.orbit, view.plane, meters_per_unit);
 
     // The depth range is written from the stand-off every frame rather than fixed. The sky's
@@ -470,7 +548,15 @@ fn place(
         for entity in &existing {
             commands.entity(entity).despawn();
         }
-        spawn_scene(&mut commands, &map, &frame, standoff, view, &mut meshes, &mut materials);
+        spawn_scene(
+            &mut commands,
+            &map,
+            &frame,
+            standoff,
+            view,
+            &mut meshes,
+            &mut materials,
+        );
         map.drawn = wanted;
         map.rings_drawn = frame.rings.len();
         map.frame = Some(frame);
@@ -478,7 +564,9 @@ fn place(
     }
 
     for (of, mut at, mut mesh, material) in items.iter_mut() {
-        let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
+        let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else {
+            continue;
+        };
         *at = item_transform(placement, view);
         // Crossing the threshold does not change the set that is drawn, so the level of
         // detail is a handle swap rather than a respawn.
@@ -486,11 +574,20 @@ fn place(
         if mesh.0 != *wanted {
             mesh.0 = wanted.clone();
         }
-        set_thickness(&mut materials, material, at.scale.max_element(), view.rad_per_px,
-            at.translation.length(), fraction, LINE_PX);
+        set_thickness(
+            &mut materials,
+            material,
+            at.scale.max_element(),
+            view.rad_per_px,
+            at.translation.length(),
+            fraction,
+            LINE_PX,
+        );
     }
     for (of, mut at, mut mesh, material) in drops.iter_mut() {
-        let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
+        let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else {
+            continue;
+        };
         *at = drop_transform(placement);
         // Drifting off the plane gains dashes, not longer ones, so the mesh changes.
         let dashes = dash_count(at.scale.y, at.translation.length(), rad_per_px);
@@ -498,29 +595,62 @@ fn place(
         if mesh.0 != *wanted {
             mesh.0 = wanted.clone();
         }
-        set_thickness(&mut materials, material, 1.0, rad_per_px, at.translation.length(),
-            LINE_TUBE_FRACTION, SCALE_PX);
+        set_thickness(
+            &mut materials,
+            material,
+            1.0,
+            rad_per_px,
+            at.translation.length(),
+            LINE_TUBE_FRACTION,
+            SCALE_PX,
+        );
     }
     for (of, mut at, material) in rings.iter_mut() {
-        let Some(ring) = frame.rings.get(of.0) else { continue };
+        let Some(ring) = frame.rings.get(of.0) else {
+            continue;
+        };
         *at = ring_transform(&frame, ring.radius);
-        set_thickness(&mut materials, material, ring.radius, rad_per_px,
-            at.translation.length().max(ring.radius), LINE_TUBE_FRACTION, SCALE_PX);
+        set_thickness(
+            &mut materials,
+            material,
+            ring.radius,
+            rad_per_px,
+            at.translation.length().max(ring.radius),
+            LINE_TUBE_FRACTION,
+            SCALE_PX,
+        );
     }
     for (of, mut at, material) in annuli.iter_mut() {
-        let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
-        let Some(annulus) = placement.annulus else { continue };
+        let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else {
+            continue;
+        };
+        let Some(annulus) = placement.annulus else {
+            continue;
+        };
         *at = annulus_transform(placement, annulus);
-        set_thickness(&mut materials, material, annulus.outer, rad_per_px,
-            nearest_reach(at.translation.length(), annulus, standoff), LINE_TUBE_FRACTION,
-            LINE_PX);
+        set_thickness(
+            &mut materials,
+            material,
+            annulus.outer,
+            rad_per_px,
+            nearest_reach(at.translation.length(), annulus, standoff),
+            LINE_TUBE_FRACTION,
+            LINE_PX,
+        );
     }
     if let Ok((mut at, material)) = spokes.single_mut() {
         *at = ring_transform(&frame, standoff * SPOKE_REACH);
         // Against the transform's scale, not the stand-off: the shader displaces in mesh
         // space, so any other number is wrong by that ratio. Sized at the near end.
-        set_thickness(&mut materials, material, standoff * SPOKE_REACH, rad_per_px, standoff,
-            LINE_TUBE_FRACTION, SCALE_PX);
+        set_thickness(
+            &mut materials,
+            material,
+            standoff * SPOKE_REACH,
+            rad_per_px,
+            standoff,
+            LINE_TUBE_FRACTION,
+            SCALE_PX,
+        );
     }
     map.frame = Some(frame);
 }
@@ -565,8 +695,11 @@ pub fn focus_position(
 /// against it: the ship keeps its place on screen and the rest of the system goes round. What
 /// is written is the *change* in the line's bearing, so the camera's azimuth stays the one
 /// number a drag, a ray and a label are all measured in.
-pub fn spin(view: &mut crate::ui::MapView, snapshot: &MapSnapshot, primary: Option<ItemKey>)
-    -> bool {
+pub fn spin(
+    view: &mut crate::ui::MapView,
+    snapshot: &MapSnapshot,
+    primary: Option<ItemKey>,
+) -> bool {
     let line = match view.focus {
         crate::ui::MapFocus::Primary(crate::ui::Frame::Local) => reference_line(snapshot, primary),
         _ => None,
@@ -696,17 +829,28 @@ fn item_transform(placement: &Placement, view: Viewport) -> Transform {
         Form::Circle | Form::Dot => Transform {
             translation: at,
             rotation: face_camera(at),
-            scale: Vec3::splat(point_radius(at.length(), view.rad_per_px, view.mark_px(placement))),
+            scale: Vec3::splat(point_radius(
+                at.length(),
+                view.rad_per_px,
+                view.mark_px(placement),
+            )),
         },
     }
 }
 
 /// The mesh a form is drawn with, and the cap its tube is sized under.
-fn mesh_for<'a>(form: Form, placement: &Placement, map: &'a Map, view: Viewport)
-    -> (&'a Handle<Mesh>, f32) {
+fn mesh_for<'a>(
+    form: Form,
+    placement: &Placement,
+    map: &'a Map,
+    view: Viewport,
+) -> (&'a Handle<Mesh>, f32) {
     match form {
         Form::Sphere => (&map.sphere, SPHERE_TUBE_FRACTION),
-        Form::Circle => (&map.point, view.point_tube_fraction(view.mark_px(placement))),
+        Form::Circle => (
+            &map.point,
+            view.point_tube_fraction(view.mark_px(placement)),
+        ),
         Form::Dot => (&map.dot, DOT_TUBE_FRACTION),
     }
 }
@@ -753,8 +897,13 @@ fn ring_transform(frame: &MapFrame, radius: f32) -> Transform {
 /// and the answer is the wanted world width over the scale. Shared by the spawn and the
 /// per-frame update: a spawn that took the material's default and let the next frame correct
 /// it put the camera inside a spoke's tube for that frame.
-pub fn tube_target(scale: f32, rad_per_px: f32, distance: f32, max_fraction: f32,
-    width_px: f32) -> f32 {
+pub fn tube_target(
+    scale: f32,
+    rad_per_px: f32,
+    distance: f32,
+    max_fraction: f32,
+    width_px: f32,
+) -> f32 {
     let world = (distance * rad_per_px * width_px).max(f32::MIN_POSITIVE);
     match scale > f32::MIN_POSITIVE {
         true => (world / scale).min(max_fraction),
@@ -772,7 +921,9 @@ fn set_thickness(
     max_fraction: f32,
     width_px: f32,
 ) {
-    let Some(mut asset) = materials.get_mut(&material.0) else { return };
+    let Some(mut asset) = materials.get_mut(&material.0) else {
+        return;
+    };
     asset.target_tube_radius = tube_target(scale, rad_per_px, distance, max_fraction, width_px);
 }
 
@@ -790,8 +941,13 @@ fn spawn_scene(
 
     for (index, ring) in frame.rings.iter().enumerate() {
         let at = ring_transform(frame, ring.radius);
-        let target = tube_target(ring.radius, rad_per_px,
-            at.translation.length().max(ring.radius), LINE_TUBE_FRACTION, SCALE_PX);
+        let target = tube_target(
+            ring.radius,
+            rad_per_px,
+            at.translation.length().max(ring.radius),
+            LINE_TUBE_FRACTION,
+            SCALE_PX,
+        );
         commands.spawn((
             Mesh3d(map.ring.clone()),
             MeshMaterial3d(materials.add(line_material(RING, target, SCALE_COLOR_SCALE))),
@@ -825,8 +981,13 @@ fn spawn_scene(
             Mesh3d(mesh.clone()),
             MeshMaterial3d(materials.add(line_material(
                 color_of(placement.kind),
-                tube_target(at.scale.max_element(), view.rad_per_px, at.translation.length(),
-                    fraction, LINE_PX),
+                tube_target(
+                    at.scale.max_element(),
+                    view.rad_per_px,
+                    at.translation.length(),
+                    fraction,
+                    LINE_PX,
+                ),
                 LINE_COLOR_SCALE,
             ))),
             at,
@@ -837,13 +998,16 @@ fn spawn_scene(
         ));
         if let Some(annulus) = placement.annulus {
             let at = annulus_transform(placement, annulus);
-            let target = tube_target(annulus.outer, rad_per_px,
-                nearest_reach(at.translation.length(), annulus, standoff), LINE_TUBE_FRACTION,
-                LINE_PX);
+            let target = tube_target(
+                annulus.outer,
+                rad_per_px,
+                nearest_reach(at.translation.length(), annulus, standoff),
+                LINE_TUBE_FRACTION,
+                LINE_PX,
+            );
             commands.spawn((
                 Mesh3d(meshes.add(annulus_mesh(annulus))),
-                MeshMaterial3d(materials.add(line_material(POPULATION, target,
-                    LINE_COLOR_SCALE))),
+                MeshMaterial3d(materials.add(line_material(POPULATION, target, LINE_COLOR_SCALE))),
                 at,
                 NoFrustumCulling,
                 layer.clone(),
@@ -853,8 +1017,13 @@ fn spawn_scene(
         }
         if placement.has_drop_line() {
             let at = drop_transform(placement);
-            let target = tube_target(1.0, rad_per_px, at.translation.length(),
-                LINE_TUBE_FRACTION, SCALE_PX);
+            let target = tube_target(
+                1.0,
+                rad_per_px,
+                at.translation.length(),
+                LINE_TUBE_FRACTION,
+                SCALE_PX,
+            );
             let dashes = dash_count(at.scale.y, at.translation.length(), rad_per_px);
             commands.spawn((
                 Mesh3d(map.drops[dashes - 1].clone()),
@@ -869,8 +1038,7 @@ fn spawn_scene(
     }
 }
 
-fn line_material(color: Color, target_tube_radius: f32, color_scale: f32)
-    -> BodyWireframeMaterial {
+fn line_material(color: Color, target_tube_radius: f32, color_scale: f32) -> BodyWireframeMaterial {
     let rgba = color.to_linear();
     BodyWireframeMaterial {
         base_color: LinearRgba::new(
@@ -915,12 +1083,27 @@ mod tests {
     use glam::DVec3;
 
     fn snapshot() -> MapSnapshot {
-        MapSnapshot::observed(0.0, vec![
-            MapItem::body(ItemKey::from_name("observer"), "Anonymous Ship", ItemKind::Observer,
-                DVec3::new(1.0, 2.0, 3.0), 100.0, DVec3::Z),
-            MapItem::body(ItemKey::from_id("star", 7), "Sol", ItemKind::Star,
-                DVec3::new(4.0, 5.0, 6.0), 7.0e8, DVec3::Z),
-        ])
+        MapSnapshot::observed(
+            0.0,
+            vec![
+                MapItem::body(
+                    ItemKey::from_name("observer"),
+                    "Anonymous Ship",
+                    ItemKind::Observer,
+                    DVec3::new(1.0, 2.0, 3.0),
+                    100.0,
+                    DVec3::Z,
+                ),
+                MapItem::body(
+                    ItemKey::from_id("star", 7),
+                    "Sol",
+                    ItemKind::Star,
+                    DVec3::new(4.0, 5.0, 6.0),
+                    7.0e8,
+                    DVec3::Z,
+                ),
+            ],
+        )
     }
 
     /// The observer needs a focus state of its own. `None` has to mean "leave the camera
@@ -945,10 +1128,17 @@ mod tests {
         let snapshot = snapshot();
         let ship = DVec3::new(1.0, 2.0, 3.0);
         let mut orbit = em_map::Orbit::framing(DVec3::ZERO, em_map::snapshot::M_PER_AU * 40.0);
-        assert_eq!(orbit.focus_ly, DVec3::ZERO, "premise: it starts at the origin");
+        assert_eq!(
+            orbit.focus_ly,
+            DVec3::ZERO,
+            "premise: it starts at the origin"
+        );
 
         follow(MapFocus::Observer, &snapshot, None, &mut orbit.focus_ly);
-        assert_eq!(orbit.focus_ly, ship, "following did not reach the interface's copy");
+        assert_eq!(
+            orbit.focus_ly, ship,
+            "following did not reach the interface's copy"
+        );
 
         // Now the drag. A small pan has to leave the camera near the ship, not near zero.
         orbit.pan(em_map::Plane::Ecliptic, 0.05, 0.0);
@@ -966,9 +1156,18 @@ mod tests {
     fn following_the_same_place_twice_writes_once() {
         let snapshot = snapshot();
         let mut at = DVec3::ZERO;
-        assert!(follow(MapFocus::Observer, &snapshot, None, &mut at), "the first call should move it");
-        assert!(!follow(MapFocus::Observer, &snapshot, None, &mut at), "the second should not");
-        assert!(!follow(MapFocus::Free, &snapshot, None, &mut at), "free never moves it");
+        assert!(
+            follow(MapFocus::Observer, &snapshot, None, &mut at),
+            "the first call should move it"
+        );
+        assert!(
+            !follow(MapFocus::Observer, &snapshot, None, &mut at),
+            "the second should not"
+        );
+        assert!(
+            !follow(MapFocus::Free, &snapshot, None, &mut at),
+            "free never moves it"
+        );
     }
 
     /// **Every mark is drawn in the palette, and the palette has no white in it.** A color
@@ -992,7 +1191,10 @@ mod tests {
             ItemKind::Station,
             ItemKind::Observer,
         ] {
-            assert!(palette.contains(&color_of(kind)), "{kind:?} is drawn off the palette");
+            assert!(
+                palette.contains(&color_of(kind)),
+                "{kind:?} is drawn off the palette"
+            );
         }
     }
 
@@ -1009,19 +1211,44 @@ mod tests {
         );
         // Nothing holding it, and a body that is no longer in the snapshot: both leave the
         // camera where it is rather than moving it to nowhere.
-        assert_eq!(focus_position(MapFocus::Primary(Frame::Fixed), &snapshot, None), None);
-        assert_eq!(focus_position(MapFocus::Primary(Frame::Fixed), &snapshot, Some(ItemKey(999))), None);
+        assert_eq!(
+            focus_position(MapFocus::Primary(Frame::Fixed), &snapshot, None),
+            None
+        );
+        assert_eq!(
+            focus_position(
+                MapFocus::Primary(Frame::Fixed),
+                &snapshot,
+                Some(ItemKey(999))
+            ),
+            None
+        );
     }
 
     /// A ship at `bearing` radians round its primary, a light-year out.
     fn ship_at(bearing: f64) -> MapSnapshot {
         let star = DVec3::new(4.0, 5.0, 6.0);
-        MapSnapshot::observed(0.0, vec![
-            MapItem::body(ItemKey::from_name("observer"), "Anonymous Ship", ItemKind::Observer,
-                star + DVec3::new(bearing.cos(), bearing.sin(), 0.0), 100.0, DVec3::Z),
-            MapItem::body(ItemKey::from_id("star", 7), "Sol", ItemKind::Star, star, 7.0e8,
-                DVec3::Z),
-        ])
+        MapSnapshot::observed(
+            0.0,
+            vec![
+                MapItem::body(
+                    ItemKey::from_name("observer"),
+                    "Anonymous Ship",
+                    ItemKind::Observer,
+                    star + DVec3::new(bearing.cos(), bearing.sin(), 0.0),
+                    100.0,
+                    DVec3::Z,
+                ),
+                MapItem::body(
+                    ItemKey::from_id("star", 7),
+                    "Sol",
+                    ItemKind::Star,
+                    star,
+                    7.0e8,
+                    DVec3::Z,
+                ),
+            ],
+        )
     }
 
     /// The shortest turn from `a` to `b`. An azimuth is stored wrapped into a circle, so
@@ -1053,12 +1280,18 @@ mod tests {
             let mut view = locked_on(frame);
             let was = view.orbit.azimuth;
             // The first call has nothing to measure against, so it turns nothing.
-            assert!(!spin(&mut view, &ship_at(0.0), star), "{frame:?} turned on the first frame");
+            assert!(
+                !spin(&mut view, &ship_at(0.0), star),
+                "{frame:?} turned on the first frame"
+            );
             assert_eq!(view.orbit.azimuth, was);
 
             spin(&mut view, &ship_at(FRAC_PI_2), star);
             let by = apart(was, view.orbit.azimuth);
-            assert!((by - expected).abs() < 1.0e-9, "{frame:?} turned by {by}, wanted {expected}");
+            assert!(
+                (by - expected).abs() < 1.0e-9,
+                "{frame:?} turned by {by}, wanted {expected}"
+            );
         }
     }
 
@@ -1094,13 +1327,19 @@ mod tests {
         let held = view.orbit.azimuth;
 
         view.focus = MapFocus::Primary(Frame::Fixed);
-        assert!(!spin(&mut view, &ship_at(2.0), star), "the fixed frame turned the camera");
+        assert!(
+            !spin(&mut view, &ship_at(2.0), star),
+            "the fixed frame turned the camera"
+        );
         assert_eq!(view.orbit.azimuth, held);
         assert_eq!(view.bearing, None, "nothing is being tracked");
 
         // Back, from a line that has moved a long way since.
         view.focus = MapFocus::Primary(Frame::Local);
-        assert!(!spin(&mut view, &ship_at(3.0), star), "coming back turned the camera");
+        assert!(
+            !spin(&mut view, &ship_at(3.0), star),
+            "coming back turned the camera"
+        );
         assert_eq!(view.orbit.azimuth, held);
     }
 
@@ -1112,8 +1351,14 @@ mod tests {
         spin(&mut view, &ship_at(0.0), Some(ItemKey::from_id("star", 7)));
         let held = view.orbit.azimuth;
         assert!(!spin(&mut view, &ship_at(1.0), None), "no primary, no line");
-        assert!(!spin(&mut view, &MapSnapshot::observed(0.0, Vec::new()),
-            Some(ItemKey::from_id("star", 7))), "no ship, no line");
+        assert!(
+            !spin(
+                &mut view,
+                &MapSnapshot::observed(0.0, Vec::new()),
+                Some(ItemKey::from_id("star", 7))
+            ),
+            "no ship, no line"
+        );
         assert_eq!(view.orbit.azimuth, held);
         assert_eq!(view.bearing, None);
     }
@@ -1133,9 +1378,16 @@ mod tests {
     /// Following something out of range stops following it rather than moving the view.
     #[test]
     fn following_something_that_is_gone_holds_still() {
-        assert_eq!(focus_position(MapFocus::Item(ItemKey(999)), &snapshot(), None), None);
         assert_eq!(
-            focus_position(MapFocus::Observer, &MapSnapshot::observed(0.0, Vec::new()), None),
+            focus_position(MapFocus::Item(ItemKey(999)), &snapshot(), None),
+            None
+        );
+        assert_eq!(
+            focus_position(
+                MapFocus::Observer,
+                &MapSnapshot::observed(0.0, Vec::new()),
+                None
+            ),
             None,
         );
     }
@@ -1197,7 +1449,11 @@ mod tests {
         let distance = 40.0;
         // A body sitting exactly on the threshold, and one a hair under it.
         let on = view.point_px * 0.5 * view.rad_per_px * distance;
-        assert_eq!(form_of(&body_at(distance, on * 1.01), view), Form::Sphere, "just over");
+        assert_eq!(
+            form_of(&body_at(distance, on * 1.01), view),
+            Form::Sphere,
+            "just over"
+        );
         let under = body_at(distance, on * 0.99);
         assert_eq!(form_of(&under, view), Form::Circle, "just under");
 
@@ -1217,11 +1473,25 @@ mod tests {
             placement.symbol_scale = scale;
             view.mark_px(&placement)
         };
-        assert!(marked(1.0) > marked(0.5), "half the scale should draw smaller");
-        assert!(marked(0.5) >= POINT_FLOOR_PX, "and never under a shape's worth of pixels");
-        assert_eq!(marked(1.0), view.point_px, "and a full weight is the surface's own size");
+        assert!(
+            marked(1.0) > marked(0.5),
+            "half the scale should draw smaller"
+        );
+        assert!(
+            marked(0.5) >= POINT_FLOOR_PX,
+            "and never under a shape's worth of pixels"
+        );
+        assert_eq!(
+            marked(1.0),
+            view.point_px,
+            "and a full weight is the surface's own size"
+        );
         for scale in [em_map::weight::MIN_SCALE, 0.0, 1.0e-9] {
-            assert!(marked(scale) >= POINT_FLOOR_PX, "{scale} drew {}", marked(scale));
+            assert!(
+                marked(scale) >= POINT_FLOOR_PX,
+                "{scale} drew {}",
+                marked(scale)
+            );
         }
         // And the line thickens to match, or a small mark is a hairline ring nobody can see.
         assert!(
@@ -1240,7 +1510,11 @@ mod tests {
         for scale in [1.0f32, 0.5, em_map::weight::MIN_SCALE] {
             let mut under = body_at(distance, on * 0.99);
             under.symbol_scale = scale;
-            assert_eq!(form_of(&under, view), Form::Circle, "{scale} should be a mark");
+            assert_eq!(
+                form_of(&under, view),
+                Form::Circle,
+                "{scale} should be a mark"
+            );
             let drawn = item_transform(&under, view).scale.x;
             assert!(
                 drawn <= on * 1.001,
@@ -1265,9 +1539,15 @@ mod tests {
         // honest answer is a dot.
         for height in [0u32, 1, 64, 159] {
             let px = Viewport::new(height, fov).point_px;
-            assert!((px - POINT_FLOOR_PX).abs() < 1.0e-6, "{height} px drew a symbol of {px}");
+            assert!(
+                (px - POINT_FLOOR_PX).abs() < 1.0e-6,
+                "{height} px drew a symbol of {px}"
+            );
         }
-        assert!(POINT_FLOOR_PX <= 2.0 * LINE_PX, "the floor is twice a line and no more");
+        assert!(
+            POINT_FLOOR_PX <= 2.0 * LINE_PX,
+            "the floor is twice a line and no more"
+        );
     }
 
     /// A disc comes out the size the transform says. Its vertices share one normal, so the
@@ -1277,8 +1557,7 @@ mod tests {
         let view = viewport();
         for distance in [1.0e-3f32, 1.0, 40.0, 1.0e5] {
             let scale = point_radius(distance, view.rad_per_px, view.point_px);
-            let target =
-                tube_target(scale, view.rad_per_px, distance, DOT_TUBE_FRACTION, LINE_PX);
+            let target = tube_target(scale, view.rad_per_px, distance, DOT_TUBE_FRACTION, LINE_PX);
             assert!(
                 (target - BASE_TUBE_RADIUS).abs() < 1.0e-9,
                 "at {distance:e} the disc would shift by {}",
@@ -1303,7 +1582,10 @@ mod tests {
         // Drawn at the symbol's own size, like every other mark.
         let at = item_transform(&huge, view);
         let px = 2.0 * at.scale.x / (at.translation.length() * view.rad_per_px);
-        assert!((px / view.point_px - 1.0).abs() < 1.0e-3, "a ship drew {px} px across");
+        assert!(
+            (px / view.point_px - 1.0).abs() < 1.0e-3,
+            "a ship drew {px} px across"
+        );
     }
 
     /// And it holds that size at every distance, so the far one reads as well as the near.
@@ -1389,7 +1671,10 @@ mod tests {
         for height in [0.0f32, -1.0, 1.0e-9, 1.0e9, f32::INFINITY, f32::NAN] {
             for distance in [0.0f32, 1.0e-6, 40.0, 1.0e5] {
                 let n = dash_count(height, distance, rad_per_px);
-                assert!((1..=MAX_DASHES).contains(&n), "{height} at {distance} gave {n}");
+                assert!(
+                    (1..=MAX_DASHES).contains(&n),
+                    "{height} at {distance} gave {n}"
+                );
             }
         }
     }
@@ -1401,17 +1686,55 @@ mod tests {
         let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
         let cases = [
             // The Oort cloud, as the solar system's generator actually produces it.
-            (em_map::Annulus { inner: 6.33e2, outer: 1.81e5, half_angle_rad: 1.57 }, 59.2, 60.0),
+            (
+                em_map::Annulus {
+                    inner: 6.33e2,
+                    outer: 1.81e5,
+                    half_angle_rad: 1.57,
+                },
+                59.2,
+                60.0,
+            ),
             // The asteroid belt, seen from outside and from within.
-            (em_map::Annulus { inner: 2.1, outer: 3.3, half_angle_rad: 0.2 }, 59.2, 60.0),
-            (em_map::Annulus { inner: 2.1, outer: 3.3, half_angle_rad: 0.2 }, 0.5, 1.0),
+            (
+                em_map::Annulus {
+                    inner: 2.1,
+                    outer: 3.3,
+                    half_angle_rad: 0.2,
+                },
+                59.2,
+                60.0,
+            ),
+            (
+                em_map::Annulus {
+                    inner: 2.1,
+                    outer: 3.3,
+                    half_angle_rad: 0.2,
+                },
+                0.5,
+                1.0,
+            ),
             // And a camera sitting inside the band itself.
-            (em_map::Annulus { inner: 2.1, outer: 3.3, half_angle_rad: 0.2 }, 2.7, 3.0),
+            (
+                em_map::Annulus {
+                    inner: 2.1,
+                    outer: 3.3,
+                    half_angle_rad: 0.2,
+                },
+                2.7,
+                3.0,
+            ),
         ];
         for (annulus, center_at, standoff) in cases {
             let reach = nearest_reach(center_at, annulus, standoff);
             let world = annulus.outer
-                * tube_target(annulus.outer, rad_per_px, reach, LINE_TUBE_FRACTION, LINE_PX);
+                * tube_target(
+                    annulus.outer,
+                    rad_per_px,
+                    reach,
+                    LINE_TUBE_FRACTION,
+                    LINE_PX,
+                );
             assert!(
                 world < reach,
                 "outer {:e}: tube {world:e} against a reach of {reach:e}",
@@ -1423,7 +1746,11 @@ mod tests {
     /// And the reach is the near edge.
     #[test]
     fn the_reach_is_measured_to_the_near_edge() {
-        let shell = em_map::Annulus { inner: 600.0, outer: 1.0e5, half_angle_rad: 1.57 };
+        let shell = em_map::Annulus {
+            inner: 600.0,
+            outer: 1.0e5,
+            half_angle_rad: 1.57,
+        };
         // Inside the cavity: the near edge is the inner one.
         assert!((nearest_reach(60.0, shell, 60.0) - 540.0).abs() < 1.0);
         // Outside it altogether: the near edge is the outer one.
@@ -1457,7 +1784,10 @@ mod tests {
         };
         for scale in [1.0f32, 1.0e2, 1.0e4] {
             let px = width_px(scale, scale);
-            assert!((px - SCALE_PX).abs() < 1.0e-3, "{scale:e} units drew {px} px");
+            assert!(
+                (px - SCALE_PX).abs() < 1.0e-3,
+                "{scale:e} units drew {px} px"
+            );
         }
     }
 }

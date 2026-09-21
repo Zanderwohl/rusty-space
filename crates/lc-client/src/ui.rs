@@ -75,7 +75,9 @@ impl Panel {
 
     /// A panel by the name a development flag would use.
     pub fn named(name: &str) -> Option<Self> {
-        Panel::ALL.into_iter().find(|p| p.title().to_lowercase().starts_with(name))
+        Panel::ALL
+            .into_iter()
+            .find(|p| p.title().to_lowercase().starts_with(name))
     }
 
     pub fn title(&self) -> &'static str {
@@ -239,7 +241,10 @@ impl Look {
         if d == DVec3::ZERO {
             return None;
         }
-        Some(Self { yaw: d.y.atan2(d.x), pitch: d.z.clamp(-1.0, 1.0).asin() })
+        Some(Self {
+            yaw: d.y.atan2(d.x),
+            pitch: d.z.clamp(-1.0, 1.0).asin(),
+        })
     }
 }
 
@@ -351,7 +356,13 @@ pub fn rate_step(rate: f64, up: bool) -> f64 {
         .iter()
         .position(|(r, _)| (r - rate).abs() < 1e-9)
         // A rate from outside the ladder steps to the nearest rung that moves the right way.
-        .unwrap_or_else(|| RATE_LADDER.iter().filter(|(r, _)| *r < rate).count().saturating_sub(1));
+        .unwrap_or_else(|| {
+            RATE_LADDER
+                .iter()
+                .filter(|(r, _)| *r < rate)
+                .count()
+                .saturating_sub(1)
+        });
     let next = if up { at + 1 } else { at.saturating_sub(1) };
     RATE_LADDER[next.min(RATE_LADDER.len() - 1)].0
 }
@@ -537,13 +548,21 @@ impl UiState {
     }
 
     pub fn notify(&mut self, text: impl Into<String>, at: f64) {
-        self.raise(Notification { text: text.into(), at, from: None });
+        self.raise(Notification {
+            text: text.into(),
+            at,
+            from: None,
+        });
     }
 
     /// Somebody said something. Shown in the events box in the color the interface reserves
     /// for it, and clicking it opens the conversation.
     pub fn heard(&mut self, from: lc_proto::ShipId, text: impl Into<String>, at: f64) {
-        self.raise(Notification { text: text.into(), at, from: Some(from) });
+        self.raise(Notification {
+            text: text.into(),
+            at,
+            from: Some(from),
+        });
     }
 
     fn raise(&mut self, note: Notification) {
@@ -583,7 +602,11 @@ mod tests {
             ui.notify(format!("event {k}"), k as f64);
         }
         assert_eq!(ui.notifications.len(), NOTIFICATION_LIMIT);
-        assert_eq!(ui.notifications.last().unwrap().text, "event 19", "the newest survive");
+        assert_eq!(
+            ui.notifications.last().unwrap().text,
+            "event 19",
+            "the newest survive"
+        );
     }
 
     #[test]
@@ -599,7 +622,10 @@ mod tests {
     fn a_rate_off_the_ladder_is_still_a_period() {
         assert_eq!(rate_label(0.05), "7 minutes / second");
         assert_eq!(rate_label(20.0), "1 year / 3 minutes");
-        assert!(!rate_label(0.05).starts_with('0'), "a slow clock read as a stopped one");
+        assert!(
+            !rate_label(0.05).starts_with('0'),
+            "a slow clock read as a stopped one"
+        );
         // Nothing may divide by a rate that is not one.
         assert_eq!(rate_label(0.0), "stopped");
         assert_eq!(rate_label(-1.0), "stopped");
@@ -612,5 +638,4 @@ mod tests {
             assert_eq!(rate_label(rate), name, "{rate}");
         }
     }
-
 }

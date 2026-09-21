@@ -94,7 +94,10 @@ pub const MOUSE_SENSITIVITY: f64 = 0.003;
 /// Shared, because the sky reads it off a locked cursor and the map's corner square off an
 /// ordinary drag: the same movement has to mean the same turn on both.
 pub fn look_from(delta: Vec2) -> (f64, f64) {
-    (-delta.x as f64 * MOUSE_SENSITIVITY, -delta.y as f64 * MOUSE_SENSITIVITY)
+    (
+        -delta.x as f64 * MOUSE_SENSITIVITY,
+        -delta.y as f64 * MOUSE_SENSITIVITY,
+    )
 }
 
 /// Notches of zoom per line of wheel. A pixel-precision wheel — a trackpad — reports pixels
@@ -125,7 +128,9 @@ pub fn grab_cursor(
     mut looking: ResMut<Looking>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
-    let Ok(mut cursor) = cursor.single_mut() else { return };
+    let Ok(mut cursor) = cursor.single_mut() else {
+        return;
+    };
     let want = grab_transition(
         looking.0,
         buttons.just_pressed(LOOK_BUTTON),
@@ -134,7 +139,11 @@ pub fn grab_cursor(
     );
     let Some(grab) = want else { return };
     looking.0 = grab;
-    cursor.grab_mode = if grab { CursorGrabMode::Locked } else { CursorGrabMode::None };
+    cursor.grab_mode = if grab {
+        CursorGrabMode::Locked
+    } else {
+        CursorGrabMode::None
+    };
     cursor.visible = !grab;
 }
 
@@ -144,7 +153,9 @@ pub fn release_cursor(
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     looking.0 = false;
-    let Ok(mut cursor) = cursor.single_mut() else { return };
+    let Ok(mut cursor) = cursor.single_mut() else {
+        return;
+    };
     cursor.grab_mode = CursorGrabMode::None;
     cursor.visible = true;
 }
@@ -304,19 +315,38 @@ mod tests {
         let flying = bindings_in_force(false, false);
         let reading = bindings_in_force(true, true);
         let acts = |table: &[(KeyCode, Action)], key: KeyCode| {
-            table.iter().find(|(k, _)| *k == key).map(|(_, a)| a.clone())
+            table
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, a)| a.clone())
         };
 
         // The keys a book needs are the book's.
-        assert_eq!(acts(&reading, KeyCode::ArrowRight), Some(Action::TurnPage(1)));
+        assert_eq!(
+            acts(&reading, KeyCode::ArrowRight),
+            Some(Action::TurnPage(1))
+        );
         assert_eq!(acts(&reading, KeyCode::KeyB), Some(Action::CloseBook));
         // And `Escape` is not one of them: it closes the top panel here as it does anywhere.
-        assert_eq!(acts(&reading, KeyCode::Escape), acts(&flying, KeyCode::Escape));
+        assert_eq!(
+            acts(&reading, KeyCode::Escape),
+            acts(&flying, KeyCode::Escape)
+        );
 
         // Every other panel still opens while one is being read. This is the whole point: a
         // panel added later must not have to be remembered in two places to keep working.
-        for key in [KeyCode::KeyT, KeyCode::KeyY, KeyCode::F3, KeyCode::KeyF, KeyCode::Digit1] {
-            assert_eq!(acts(&reading, key), acts(&flying, key), "{key:?} was eaten by the reader");
+        for key in [
+            KeyCode::KeyT,
+            KeyCode::KeyY,
+            KeyCode::F3,
+            KeyCode::KeyF,
+            KeyCode::Digit1,
+        ] {
+            assert_eq!(
+                acts(&reading, key),
+                acts(&flying, key),
+                "{key:?} was eaten by the reader"
+            );
         }
         // Precisely: the only keys that behave differently are the ones the reader names.
         let claimed: Vec<KeyCode> = reading_bindings(true).iter().map(|(k, _)| *k).collect();
@@ -324,7 +354,11 @@ mod tests {
             if claimed.contains(key) {
                 continue;
             }
-            assert_eq!(acts(&reading, *key).as_ref(), Some(action), "{key:?} changed meaning");
+            assert_eq!(
+                acts(&reading, *key).as_ref(),
+                Some(action),
+                "{key:?} changed meaning"
+            );
         }
         for (key, _) in &reading {
             assert!(
@@ -337,7 +371,10 @@ mod tests {
     #[test]
     fn the_shelf_claims_nothing_at_all() {
         // No pages to turn and no book to leave, so every key means what it meant before.
-        assert_eq!(bindings_in_force(true, false), bindings_in_force(false, false));
+        assert_eq!(
+            bindings_in_force(true, false),
+            bindings_in_force(false, false)
+        );
     }
 
     #[test]
@@ -348,7 +385,11 @@ mod tests {
             let before = keys.len();
             keys.sort_by_key(|k| format!("{k:?}"));
             keys.dedup();
-            assert_eq!(keys.len(), before, "a key is bound twice at ({reading}, {book})");
+            assert_eq!(
+                keys.len(),
+                before,
+                "a key is bound twice at ({reading}, {book})"
+            );
         }
     }
 
@@ -408,15 +449,23 @@ mod tests {
     }
 
     fn press(app: &mut App) {
-        app.world_mut().resource_mut::<ButtonInput<MouseButton>>().press(LOOK_BUTTON);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(LOOK_BUTTON);
     }
 
     fn release(app: &mut App) {
-        app.world_mut().resource_mut::<ButtonInput<MouseButton>>().release(LOOK_BUTTON);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .release(LOOK_BUTTON);
     }
 
     fn cursor(app: &App, window: Entity) -> CursorOptions {
-        app.world().entity(window).get::<CursorOptions>().unwrap().clone()
+        app.world()
+            .entity(window)
+            .get::<CursorOptions>()
+            .unwrap()
+            .clone()
     }
 
     #[test]
@@ -432,7 +481,10 @@ mod tests {
         release(&mut app);
         app.update();
         assert_eq!(cursor(&app, window).grab_mode, CursorGrabMode::None);
-        assert!(cursor(&app, window).visible, "a hidden cursor nobody can free is a force-quit");
+        assert!(
+            cursor(&app, window).visible,
+            "a hidden cursor nobody can free is a force-quit"
+        );
     }
 
     /// The failure this guards: losing focus mid-drag leaves the button never released, and a
@@ -443,7 +495,9 @@ mod tests {
         press(&mut app);
         app.update();
         // Not a release -- the input resource simply stops reporting the button as held.
-        app.world_mut().resource_mut::<ButtonInput<MouseButton>>().reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .reset_all();
         app.update();
         assert_eq!(cursor(&app, window).grab_mode, CursorGrabMode::None);
         assert!(cursor(&app, window).visible);
@@ -451,7 +505,11 @@ mod tests {
 
     #[test]
     fn a_right_drag_on_a_panel_does_not_take_the_view() {
-        assert_eq!(grab_transition(false, true, true, true), None, "egui had the pointer");
+        assert_eq!(
+            grab_transition(false, true, true, true),
+            None,
+            "egui had the pointer"
+        );
         assert_eq!(grab_transition(false, true, true, false), Some(true));
     }
 
@@ -459,8 +517,16 @@ mod tests {
     /// panel must not release itself part-way through.
     #[test]
     fn a_turn_already_under_way_is_not_interrupted_by_a_panel() {
-        assert_eq!(grab_transition(true, false, true, true), None, "must stay grabbed");
-        assert_eq!(grab_transition(true, false, false, true), Some(false), "and release on let go");
+        assert_eq!(
+            grab_transition(true, false, true, true),
+            None,
+            "must stay grabbed"
+        );
+        assert_eq!(
+            grab_transition(true, false, false, true),
+            Some(false),
+            "and release on let go"
+        );
     }
 
     #[test]
@@ -473,9 +539,14 @@ mod tests {
     fn the_mouse_only_turns_the_view_while_it_is_held() {
         let (mut app, _) = harness();
         let nudge = |app: &mut App| {
-            app.world_mut().resource_mut::<AccumulatedMouseMotion>().delta = Vec2::new(10.0, 0.0);
+            app.world_mut()
+                .resource_mut::<AccumulatedMouseMotion>()
+                .delta = Vec2::new(10.0, 0.0);
             app.update();
-            app.world_mut().resource_mut::<Messages<Requested>>().drain().count()
+            app.world_mut()
+                .resource_mut::<Messages<Requested>>()
+                .drain()
+                .count()
         };
         assert_eq!(nudge(&mut app), 0, "a loose mouse must not turn the view");
         press(&mut app);
@@ -489,11 +560,21 @@ mod tests {
     #[test]
     fn the_arrow_keys_turn_the_view_without_the_mouse() {
         let (mut app, _) = harness();
-        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ArrowLeft);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowLeft);
         app.update();
-        app.world_mut().resource_mut::<Messages<Requested>>().clear();
+        app.world_mut()
+            .resource_mut::<Messages<Requested>>()
+            .clear();
         app.update();
-        assert_eq!(app.world_mut().resource_mut::<Messages<Requested>>().drain().count(), 1);
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<Requested>>()
+                .drain()
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -504,12 +585,19 @@ mod tests {
         let mut state = app.world_mut().resource_mut::<crate::app::Ui>();
         state.open(Panel::Reader);
         state.reading.book = Some("something".to_owned());
-        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ArrowLeft);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowLeft);
         app.update();
-        app.world_mut().resource_mut::<Messages<Requested>>().clear();
+        app.world_mut()
+            .resource_mut::<Messages<Requested>>()
+            .clear();
         app.update();
         assert_eq!(
-            app.world_mut().resource_mut::<Messages<Requested>>().drain().count(),
+            app.world_mut()
+                .resource_mut::<Messages<Requested>>()
+                .drain()
+                .count(),
             0,
             "the view turned while a page was being read"
         );

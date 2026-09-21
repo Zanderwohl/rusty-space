@@ -21,13 +21,20 @@ fn main() {
                 // Its warning is about loading URLs from untrusted places, and the answer is that
                 // this client never receives one: it receives a base from its own shard and a
                 // bare file name, and `Shelf::where_to_fetch` puts them together.
-                .set(bevy::asset::io::web::WebAssetPlugin { silence_startup_warning: true })
+                .set(bevy::asset::io::web::WebAssetPlugin {
+                    silence_startup_warning: true,
+                })
                 .set(WindowPlugin {
-                    primary_window: Some(Window { title: "Lightcone Frontier".into(), ..default() }),
+                    primary_window: Some(Window {
+                        title: "Lightcone Frontier".into(),
+                        ..default()
+                    }),
                     ..default()
                 })
                 .set(AssetPlugin {
-                    file_path: lc_client::entry::asset_root().to_string_lossy().into_owned(),
+                    file_path: lc_client::entry::asset_root()
+                        .to_string_lossy()
+                        .into_owned(),
                     // No asset here has a `.meta` sidecar, and the default is to probe for one
                     // beside every asset loaded. On a filesystem that is a wasted stat; a
                     // desktop client fetching a book from the shelf's CDN makes it a round trip
@@ -40,9 +47,11 @@ fn main() {
         .insert_resource(Catalogue(entry.catalogue))
         // `--local` wins over `--server`: asking for one in this process is the more specific
         // request, and its address is not known until the socket is bound.
-        .insert_resource(lc_client::uplink::ServerAddress(
-            if entry.local { None } else { entry.server },
-        ))
+        .insert_resource(lc_client::uplink::ServerAddress(if entry.local {
+            None
+        } else {
+            entry.server
+        }))
         .insert_resource(lc_client::uplink::LocalShard(entry.local))
         .insert_resource(lc_client::uplink::Demo(entry.demo))
         .insert_resource(entry.dev)

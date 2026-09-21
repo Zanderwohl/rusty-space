@@ -64,17 +64,16 @@ impl Vault {
 
     pub fn read(&self) -> Result<Option<String>, VaultError> {
         match self {
-            Vault::Keychain => match keyring::Entry::new(SERVICE, ACCOUNT)
-                .and_then(|entry| entry.get_password())
-            {
-                Ok(secret) => Ok(Some(secret)),
-                Err(keyring::Error::NoEntry) => Ok(None),
-                Err(why) => Err(VaultError::Unavailable(why.to_string())),
-            },
+            Vault::Keychain => {
+                match keyring::Entry::new(SERVICE, ACCOUNT).and_then(|entry| entry.get_password()) {
+                    Ok(secret) => Ok(Some(secret)),
+                    Err(keyring::Error::NoEntry) => Ok(None),
+                    Err(why) => Err(VaultError::Unavailable(why.to_string())),
+                }
+            }
             Vault::File(path) => match std::fs::read_to_string(path) {
-                Ok(secret) => Ok(Some(secret.trim().to_owned())).map(|s: Option<String>| {
-                    s.filter(|secret| !secret.is_empty())
-                }),
+                Ok(secret) => Ok(Some(secret.trim().to_owned()))
+                    .map(|s: Option<String>| s.filter(|secret| !secret.is_empty())),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
                 Err(e) => Err(VaultError::Io(e.to_string())),
             },
@@ -183,7 +182,9 @@ mod tests {
         let vault = Vault::file(dir.clone());
         vault.write("a-device-grant").unwrap();
 
-        let Vault::File(path) = &vault else { unreachable!() };
+        let Vault::File(path) = &vault else {
+            unreachable!()
+        };
         let mode = std::fs::metadata(path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "mode was {:o}", mode & 0o777);
         let _ = std::fs::remove_dir_all(dir);

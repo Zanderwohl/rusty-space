@@ -21,16 +21,14 @@ const ROW_GAP: f32 = 9.0;
 const ROW_HOT: egui::Color32 = egui::Color32::from_rgb(232, 228, 217);
 
 /// The foot of the case while the shelf is showing: how many books, and how they are ordered.
-pub(crate) fn keys(
-    ui: &mut egui::Ui,
-    found: usize,
-    total: usize,
-    order: &mut Order,
-) {
+pub(crate) fn keys(ui: &mut egui::Ui, found: usize, total: usize, order: &mut Order) {
     ui.horizontal(|ui| {
         ui.add_space(4.0);
-        let words =
-            if found == total { format!("{total} books") } else { format!("{found} of {total}") };
+        let words = if found == total {
+            format!("{total} books")
+        } else {
+            format!("{found} of {total}")
+        };
         ui.add(engraved(words, 10.0, FAINT));
         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
             // Reversed, because a right-to-left layout places the first thing rightmost and the
@@ -72,7 +70,9 @@ pub(crate) fn paper(
     if shelf.catalogue.books.is_empty() {
         ui.add(
             egui::Label::new(
-                egui::RichText::new("the shelf is empty").font(setting.body.clone()).color(FAINT),
+                egui::RichText::new("the shelf is empty")
+                    .font(setting.body.clone())
+                    .color(FAINT),
             )
             .selectable(false),
         );
@@ -92,30 +92,35 @@ pub(crate) fn paper(
         return 0;
     }
 
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        for (i, entry) in found.iter().enumerate() {
-            if i > 0 {
-                ui.add_space(ROW_GAP);
-                let y = ui.cursor().top() - ROW_GAP / 2.0;
-                ui.painter().line_segment(
-                    [
-                        egui::pos2(ui.max_rect().left(), y),
-                        egui::pos2(ui.max_rect().right(), y),
-                    ],
-                    Stroke::new(1.0_f32, RULE),
-                );
-            }
-            if book(ui, entry, setting, shelf).clicked() {
-                ask(out, Action::OpenBook(entry.id.clone()));
-                // Opened where it was left. Two messages rather than one, because where a book
-                // opens is a different fact from which book it is, and a client with no shard
-                // has the first and not the second.
-                if let Some(mark) = shelf.mark_for(&entry.id) {
-                    ask(out, Action::GoTo(mark.spine as usize, mark.char_offset as usize));
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for (i, entry) in found.iter().enumerate() {
+                if i > 0 {
+                    ui.add_space(ROW_GAP);
+                    let y = ui.cursor().top() - ROW_GAP / 2.0;
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(ui.max_rect().left(), y),
+                            egui::pos2(ui.max_rect().right(), y),
+                        ],
+                        Stroke::new(1.0_f32, RULE),
+                    );
+                }
+                if book(ui, entry, setting, shelf).clicked() {
+                    ask(out, Action::OpenBook(entry.id.clone()));
+                    // Opened where it was left. Two messages rather than one, because where a book
+                    // opens is a different fact from which book it is, and a client with no shard
+                    // has the first and not the second.
+                    if let Some(mark) = shelf.mark_for(&entry.id) {
+                        ask(
+                            out,
+                            Action::GoTo(mark.spine as usize, mark.char_offset as usize),
+                        );
+                    }
                 }
             }
-        }
-    });
+        });
     found.len()
 }
 
@@ -132,7 +137,9 @@ fn book(ui: &mut egui::Ui, entry: &Entry, setting: &Setting, shelf: &Shelf) -> e
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.add(
                 egui::Label::new(
-                    egui::RichText::new(&entry.title).font(setting.listing()).color(INK),
+                    egui::RichText::new(&entry.title)
+                        .font(setting.listing())
+                        .color(INK),
                 )
                 .selectable(false),
             );
@@ -158,7 +165,9 @@ fn book(ui: &mut egui::Ui, entry: &Entry, setting: &Setting, shelf: &Shelf) -> e
         if !line.is_empty() {
             ui.add(
                 egui::Label::new(
-                    egui::RichText::new(line).font(setting.small.clone()).color(FAINT),
+                    egui::RichText::new(line)
+                        .font(setting.small.clone())
+                        .color(FAINT),
                 )
                 .selectable(false),
             );
@@ -174,7 +183,11 @@ fn book(ui: &mut egui::Ui, entry: &Entry, setting: &Setting, shelf: &Shelf) -> e
     if response.hovered() || reading {
         ui.painter().set(
             tint,
-            egui::Shape::rect_filled(row.expand2(Vec2::new(6.0, 0.0)), CornerRadius::same(3), ROW_HOT),
+            egui::Shape::rect_filled(
+                row.expand2(Vec2::new(6.0, 0.0)),
+                CornerRadius::same(3),
+                ROW_HOT,
+            ),
         );
     }
     if response.hovered() {
@@ -203,7 +216,10 @@ fn search(ui: &mut egui::Ui, setting: &Setting, query: &mut String) {
     let response = ui.add(field);
     let y = response.rect.bottom() + 3.0;
     ui.painter().line_segment(
-        [egui::pos2(response.rect.left(), y), egui::pos2(response.rect.right(), y)],
+        [
+            egui::pos2(response.rect.left(), y),
+            egui::pos2(response.rect.right(), y),
+        ],
         Stroke::new(1.0_f32, RULE),
     );
     ui.add_space(4.0);
