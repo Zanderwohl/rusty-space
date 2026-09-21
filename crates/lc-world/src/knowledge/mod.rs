@@ -16,13 +16,16 @@ use serde::{Deserialize, Serialize};
 use crate::sky::StarId;
 
 pub mod astrometry;
+pub mod conclusion;
 pub mod names;
 pub mod observatory;
 pub mod record;
 pub mod subject;
 pub mod survey;
+pub mod transit;
 
 pub use astrometry::{Bearing, Distance};
+pub use conclusion::{Conclusion, Consumed, Digest};
 pub use names::designation;
 pub use record::{
     Claim, Hop, Lineage, NameKind, Naming, Orbit, SAMPLES_KEPT, Sample, Series, Sighting, Witness,
@@ -117,6 +120,11 @@ pub struct File {
     claims: Vec<Claim>,
     names: Vec<Naming>,
     orbits: Vec<Orbit>,
+    conclusions: Vec<Conclusion>,
+    /// This craft's own: what is left of logs it has consumed. Never transmitted.
+    digests: Vec<Digest>,
+    /// Keep this subject's logs whatever the pipeline concludes. This craft's own choice.
+    retained: bool,
 }
 
 impl File {
@@ -138,6 +146,14 @@ impl File {
 
     pub fn orbits(&self) -> &[Orbit] {
         &self.orbits
+    }
+
+    pub fn conclusions(&self) -> &[Conclusion] {
+        &self.conclusions
+    }
+
+    pub fn digests(&self) -> &[Digest] {
+        &self.digests
     }
 
     pub fn series_in(&self, band: Band) -> Option<&Series> {
@@ -238,6 +254,7 @@ impl File {
             claims: self.claims.iter().filter(|c| fresh(&c.lineage, c.stated_s)).cloned().collect(),
             names: self.names.iter().filter(|n| fresh(&n.lineage, n.stated_s)).cloned().collect(),
             orbits: self.orbits.iter().filter(|o| fresh(&o.lineage, o.stated_s)).cloned().collect(),
+            conclusions: self.conclusions.iter().filter(|c| c.learnt_s() > since_s).cloned().collect(),
         };
         (!part.is_empty()).then_some(part)
     }
@@ -265,6 +282,7 @@ pub struct Knowledge {
     /// knowledge — so equality ignores them.
     changed: std::collections::BTreeSet<Subject>,
     unsaved: Vec<Logged>,
+    consumed: Vec<Consumed>,
 }
 
 impl PartialEq for Knowledge {
@@ -281,6 +299,7 @@ impl Knowledge {
             beliefs: BTreeMap::new(),
             changed: Default::default(),
             unsaved: Vec::new(),
+            consumed: Vec::new(),
         }
     }
 
@@ -357,6 +376,11 @@ impl Knowledge {
             file.names.iter_mut().for_each(|n| swap(&mut n.witness));
             file.claims.iter_mut().for_each(|c| swap(&mut c.witness));
             file.orbits.iter_mut().for_each(|o| swap(&mut o.witness));
+            for c in &mut file.conclusions {
+                swap(&mut c.witness);
+                swap(&mut c.observer);
+            }
+            file.digests.iter_mut().for_each(|d| swap(&mut d.observer));
             // Hops name the ends of a handover, so a craft that has renamed itself must not
             // keep telling people its old name.
             for hop in file
@@ -367,6 +391,7 @@ impl Knowledge {
                 .chain(file.names.iter_mut().flat_map(|n| n.lineage.iter_mut()))
                 .chain(file.claims.iter_mut().flat_map(|c| c.lineage.iter_mut()))
                 .chain(file.orbits.iter_mut().flat_map(|o| o.lineage.iter_mut()))
+                .chain(file.conclusions.iter_mut().flat_map(|c| c.lineage.iter_mut()))
             {
                 swap(&mut hop.from);
                 swap(&mut hop.to);
@@ -640,6 +665,21 @@ impl Knowledge {
                 let lineage = heard(&orbit.lineage);
                 self.orbits(subject, Orbit { lineage, ..orbit.clone() });
             }
+            for conclusion in &part.conclusions {
+                // A replica follows its original in throwing a log away, so that it does not
+                // hold samples the craft itself no longer has.
+                if hop.is_none()
+                    && let Some(through_s) = conclusion.discarded_s
+                    && let Some(file) = self.files.get_mut(&subject)
+                {
+                    file.series
+                        .iter_mut()
+                        .filter(|s| s.witness == conclusion.observer)
+                        .for_each(|s| s.consume_through(through_s));
+                }
+                let lineage = heard(&conclusion.lineage);
+                self.concluded(subject, Conclusion { lineage, ..conclusion.clone() });
+            }
             for series in &part.series {
                 let file = self.files.entry(subject).or_default();
                 let (taken, lineage) =
@@ -711,11 +751,13 @@ pub struct Part {
     /// What the sender and whoever told them call it: see [`Naming`].
     pub names: Vec<Naming>,
     pub orbits: Vec<Orbit>,
+    pub conclusions: Vec<Conclusion>,
 }
 
 impl Part {
     fn is_empty(&self) -> bool {
-        self.sightings.is_empty()
+        self.conclusions.is_empty()
+            && self.sightings.is_empty()
             && self.series.is_empty()
             && self.claims.is_empty()
             && self.names.is_empty()
@@ -727,9 +769,10 @@ impl Part {
         let claims = self.claims.iter().map(|c| learnt_s(&c.lineage, c.stated_s));
         let names = self.names.iter().map(|n| learnt_s(&n.lineage, n.stated_s));
         let orbits = self.orbits.iter().map(|o| learnt_s(&o.lineage, o.stated_s));
+        let conclusions = self.conclusions.iter().map(Conclusion::learnt_s);
         let series =
             self.series.iter().filter_map(|s| s.last().map(|x| learnt_s(&s.lineage, x.observed_s)));
-        sightings.chain(claims).chain(names).chain(orbits).chain(series).fold(f64::NEG_INFINITY, f64::max)
+        sightings.chain(claims).chain(names).chain(orbits).chain(conclusions).chain(series).fold(f64::NEG_INFINITY, f64::max)
     }
 }
 

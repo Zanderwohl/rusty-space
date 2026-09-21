@@ -97,11 +97,22 @@ pub fn binary_for(primary: &CatalogueStar, secondary: &CatalogueStar) -> Generat
     system
 }
 
-fn planets(seed: u64, star: &CatalogueStar) -> Vec<Planet> {
+/// One planet's place in a system, before it is given an orbit's other elements. What the
+/// photometry's priors are measured from, so they are the generator's own distribution.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rung {
+    pub semi_major_m: f64,
+    pub rocky: bool,
+    pub mass_earths: f64,
+    pub radius_earths: f64,
+}
+
+/// The planets a star with this seed, luminosity and metallicity is given, innermost first.
+pub fn ladder(seed: u64, luminosity_solar: f64, metallicity: f64) -> Vec<Rung> {
     let count = (rng::uniform(rng::hash(&[seed, 0x9001])) * 9.0) as usize;
-    let factor = metallicity::solid_mass_factor(star.metallicity);
+    let factor = metallicity::solid_mass_factor(metallicity);
     // The habitable-ish scale moves out with luminosity, so hotter stars get wider systems.
-    let scale = AU * star.luminosity_solar.max(1e-4).sqrt();
+    let scale = AU * luminosity_solar.max(1e-4).sqrt();
 
     let mut out = Vec::with_capacity(count);
     let mut a = scale * rng::uniform_in(rng::hash(&[seed, 0x9002]), 0.2, 0.6);
@@ -118,17 +129,28 @@ fn planets(seed: u64, star: &CatalogueStar) -> Vec<Planet> {
         // Rocky bodies scale as M^0.27, gas giants barely at all.
         let radius_earths =
             if rocky { mass_earths.powf(0.27) } else { 4.0 * mass_earths.powf(0.08) };
-        out.push(Planet {
-            name: format!("{} {}", star.provenance.name.as_deref().unwrap_or("b"), (b'b' + k as u8) as char),
-            semi_major_m: a,
-            eccentricity: rng::uniform_in(h(4), 0.0, 0.12),
-            inclination_deg: rng::gaussian(h(5)) * 2.0,
-            mean_anomaly_deg: rng::uniform_in(h(6), 0.0, 360.0),
-            radius_m: radius_earths * EARTH_RADIUS,
-            mass_kg: mass_earths * EARTH_MASS,
-        });
+        out.push(Rung { semi_major_m: a, rocky, mass_earths, radius_earths });
     }
     out
+}
+
+fn planets(seed: u64, star: &CatalogueStar) -> Vec<Planet> {
+    ladder(seed, star.luminosity_solar, star.metallicity)
+        .into_iter()
+        .enumerate()
+        .map(|(k, rung)| {
+            let h = |tag: u64| rng::hash(&[seed, 0x91a4, k as u64, tag]);
+            Planet {
+                name: format!("{} {}", star.provenance.name.as_deref().unwrap_or("b"), (b'b' + k as u8) as char),
+                semi_major_m: rung.semi_major_m,
+                eccentricity: rng::uniform_in(h(4), 0.0, 0.12),
+                inclination_deg: rng::gaussian(h(5)) * 2.0,
+                mean_anomaly_deg: rng::uniform_in(h(6), 0.0, 360.0),
+                radius_m: rung.radius_earths * EARTH_RADIUS,
+                mass_kg: rung.mass_earths * EARTH_MASS,
+            }
+        })
+        .collect()
 }
 
 /// The belt, Kuiper analogue and Oort cloud every system gets.

@@ -79,6 +79,9 @@ pub struct Series {
     pub band: Band,
     pub lineage: Lineage,
     samples: Vec<Sample>,
+    /// Everything observed at or before this was read and thrown away, and is not taken back
+    /// however it arrives.
+    consumed_s: f64,
 }
 
 impl Series {
@@ -88,6 +91,7 @@ impl Series {
             band,
             lineage: Lineage::new(),
             samples: Vec::new(),
+            consumed_s: f64::NEG_INFINITY,
         }
     }
 
@@ -109,10 +113,11 @@ impl Series {
 
     /// Add a sample at the end. False if it was older than the last one held, and so not added.
     pub fn push(&mut self, sample: Sample) -> bool {
-        if self
-            .samples
-            .last()
-            .is_some_and(|s| sample.observed_s < s.observed_s)
+        if sample.observed_s <= self.consumed_s
+            || self
+                .samples
+                .last()
+                .is_some_and(|s| sample.observed_s < s.observed_s)
         {
             return false;
         }
@@ -135,12 +140,23 @@ impl Series {
             .samples
             .last()
             .map(|s| s.observed_s)
-            .unwrap_or(f64::NEG_INFINITY);
+            .unwrap_or(f64::NEG_INFINITY)
+            .max(self.consumed_s);
         let taken: Vec<Sample> = other.samples.iter().filter(|s| s.observed_s > from).copied().collect();
         for sample in &taken {
             self.push(*sample);
         }
         taken
+    }
+
+    /// Drop every sample observed at or before `through_s`, for good.
+    pub fn consume_through(&mut self, through_s: f64) {
+        self.samples.retain(|s| s.observed_s > through_s);
+        self.consumed_s = self.consumed_s.max(through_s);
+    }
+
+    pub fn consumed_s(&self) -> f64 {
+        self.consumed_s
     }
 
     /// The series with its samples taken out: what a stored file holds, the samples being
