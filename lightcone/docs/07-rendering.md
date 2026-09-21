@@ -857,6 +857,14 @@ at all. Above about ten thousand kelvin the visible band is on the Rayleigh-Jean
 peak, where radiance goes as `T` and not as `T⁴`, and a streak six per cent down is a plume with
 no streaks in it.
 
+The noise is `assets/textures/plume.tgraph`, baked once at load into a 192³ volume that repeats
+on every axis and is shared by every plume; each craft's own streaks come from its phase. Its
+period is 32 cells on every axis, where the host wraps the phase: one repeating cube is what
+texture-graph bakes, and across the plume 32 cells is wider than the lanes reach. It was 64
+along the flow when the shader hashed it per sample, which only moves how often the streaks
+repeat, from every forty-odd plume lengths of flow to every twenty. Measured against the graph
+evaluated exactly, the bake keeps the lanes within about one per cent.
+
 Two things about the noise, both found the hard way:
 
 - It is sampled on the cross-section **in units of the local radius**, not on the point. That
