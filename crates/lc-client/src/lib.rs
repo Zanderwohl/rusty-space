@@ -49,6 +49,7 @@ pub mod session;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod signin_ui;
 pub mod sky_asset;
+pub mod surfaces;
 pub mod starfield;
 pub mod tonemap;
 pub mod ui;

@@ -1,11 +1,9 @@
-// A resolved body's surface, generated rather than stored.
+// A resolved body's surface.
 //
-// No textures and no authored appearance. What a body looks like follows from what it is --
-// see lc_world::surface -- and everything past that is a seed. Two families cover the solar
-// system: latitude bands for anything gaseous, and mottling for everything solid.
-//
-// The noise is sampled on the body-fixed direction, which is what the mesh's local position
-// already is, so the pattern turns with the body and does not swim with the camera.
+// The pattern is a texture graph baked onto a cubemap -- see lc-client's surfaces module for
+// which graph -- and the palette is the body's class's, from lc_world::surface. The cubemap is
+// sampled on the body-fixed direction, which is what the mesh's local position already is, so
+// the pattern turns with the body and does not swim with the camera.
 
 #import bevy_pbr::{
     mesh_functions,
@@ -31,7 +29,7 @@ struct BodySurfaceUniform {
     light: vec4<f32>,
     /// World direction to the star. `w` is the ambient floor on the night side.
     to_star: vec4<f32>,
-    /// `(unused, contrast, seed, banded)`.
+    /// `(unused, contrast, unused, unused)`.
     params: vec4<f32>,
     /// Starlight the surface reflects, as linear display light before the tone map.
     reflected: vec4<f32>,
@@ -45,57 +43,8 @@ struct BodySurfaceUniform {
 const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: BodySurfaceUniform;
-
-fn hash31(p: vec3<f32>) -> f32 {
-    var q = fract(p * 0.1031);
-    q = q + dot(q, q.zyx + 31.32);
-    return fract((q.x + q.y) * q.z);
-}
-
-fn value_noise(p: vec3<f32>) -> f32 {
-    let i = floor(p);
-    let f = fract(p);
-    let w = f * f * (3.0 - 2.0 * f);
-    let x00 = mix(hash31(i), hash31(i + vec3<f32>(1.0, 0.0, 0.0)), w.x);
-    let x10 = mix(hash31(i + vec3<f32>(0.0, 1.0, 0.0)), hash31(i + vec3<f32>(1.0, 1.0, 0.0)), w.x);
-    let x01 = mix(hash31(i + vec3<f32>(0.0, 0.0, 1.0)), hash31(i + vec3<f32>(1.0, 0.0, 1.0)), w.x);
-    let x11 = mix(hash31(i + vec3<f32>(0.0, 1.0, 1.0)), hash31(i + vec3<f32>(1.0, 1.0, 1.0)), w.x);
-    return mix(mix(x00, x10, w.y), mix(x01, x11, w.y), w.z);
-}
-
-fn fbm(p: vec3<f32>, octaves: u32) -> f32 {
-    var sum = 0.0;
-    var amplitude = 0.5;
-    var frequency = 1.0;
-    var total = 0.0;
-    for (var i = 0u; i < octaves; i = i + 1u) {
-        sum = sum + amplitude * value_noise(p * frequency);
-        total = total + amplitude;
-        frequency = frequency * 2.13;
-        amplitude = amplitude * 0.5;
-    }
-    return sum / max(total, 1e-6);
-}
-
-/// Where on the palette this point of the surface sits, `[0, 1]`.
-fn surface(direction: vec3<f32>, seed: f32, banded: bool) -> f32 {
-    let offset = vec3<f32>(seed, seed * 1.7, seed * 2.9);
-    if (banded) {
-        // Bands in latitude, warped by turbulence so they are not stripes. The warp has to stay
-        // well under the band spacing: at a quarter of a period it stops perturbing the bands
-        // and starts destroying them, and the surface reads as blobs.
-        let spacing = 18.0;
-        let turbulence = fbm(direction * 3.1 + offset, 4u) - 0.5;
-        let drift = (fbm(direction * 1.1 + offset, 2u) - 0.5) * 0.9;
-        let bands = sin((direction.y + turbulence * 0.055) * spacing + drift);
-        // Sharpened, because a fluid's bands have edges rather than a sinusoid's gradient.
-        return clamp(0.5 + 0.62 * bands, 0.0, 1.0);
-    }
-    // Solid: mottling, with a sharper high-frequency term for the look of relief.
-    let broad = fbm(direction * 2.2 + offset, 5u);
-    let fine = fbm(direction * 9.0 + offset, 3u);
-    return clamp(broad * 0.75 + fine * 0.25, 0.0, 1.0);
-}
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var pattern: texture_cube<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var pattern_sampler: sampler;
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
@@ -113,10 +62,8 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let contrast = material.params.y;
-    let seed = material.params.z;
-    let banded = material.params.w > 0.5;
-
-    let t = mix(0.5, surface(in.local_direction, seed, banded), contrast);
+    let surface = textureSample(pattern, pattern_sampler, in.local_direction).r;
+    let t = mix(0.5, surface, contrast);
     let albedo = mix(material.dark.rgb, material.light.rgb, t);
 
     // Lambert, with a soft terminator. A hard one is a straight line across the disc and reads

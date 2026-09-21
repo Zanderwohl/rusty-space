@@ -1,0 +1,18 @@
+# Which texture graph draws a resolved body's surface pattern. TOML.
+#
+# A body named under [bodies] takes that graph; every other body takes its class's. Paths are
+# under textures/. The graph is the pattern only, in [0, 1]: the palette and contrast stay the
+# class's, from lc_world::surface, and each body's seed is its name's.
+#
+# Surfaces are baked on a sphere, so a graph here may use only Color, Noise, Coordinate, Mix,
+# MinMax and Wave.
+
+[classes]
+GasGiant = "surfaces/gas_giant.tgraph"
+IceGiant = "surfaces/ice_giant.tgraph"
+Ice = "surfaces/ice.tgraph"
+Rock = "surfaces/rock.tgraph"
+Weathered = "surfaces/weathered.tgraph"
+Scorched = "surfaces/scorched.tgraph"
+
+[bodies]

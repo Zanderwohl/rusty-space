@@ -320,14 +320,11 @@ fn uniforms(
 ) -> BodySurfaceUniform {
     let (dark, light, contrast) = body.surface.palette();
     let to_star = sim_to_render((star_ly - body.position_ly).normalize_or_zero()).as_vec3();
-    // Stable per body and independent of everything else, so a world looks the same every time
-    // it is approached.
-    let seed = (crate::system::name_seed(&body.name) % 100_000) as f32 * 1.0e-2;
     BodySurfaceUniform {
         dark: Vec4::new(dark[0], dark[1], dark[2], 1.0),
         light: Vec4::new(light[0], light[1], light[2], 1.0),
         to_star: to_star.extend(NIGHT),
-        params: Vec4::new(0.0, contrast, seed, if body.surface.is_banded() { 1.0 } else { 0.0 }),
+        params: Vec4::new(0.0, contrast, 0.0, 0.0),
         reflected: reflected.extend(0.0),
         // `w` is how far the pattern inverts in the body's own light. See [`INVERSION`].
         emitted: emitted.extend(if body.surface.is_banded() { INVERSION } else { 0.0 }),
@@ -344,6 +341,8 @@ pub fn update_resolved(
     mut resolved: ResMut<Resolved>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodySurfaceMaterial>>,
+    mut surfaces: ResMut<crate::surfaces::Surfaces>,
+    mut images: ResMut<Assets<Image>>,
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     existing: Query<(Entity, &ResolvedBody)>,
     mut placed: Query<(&mut Transform, &MeshMaterial3d<BodySurfaceMaterial>, &ResolvedBody)>,
@@ -382,6 +381,7 @@ pub fn update_resolved(
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(materials.add(BodySurfaceMaterial {
                     uniforms: uniforms(body, star_ly, &session.tone, reflected, emitted),
+                    pattern: surfaces.pattern(&body.name, body.surface, &mut images),
                 })),
                 Transform::default(),
                 NoFrustumCulling,

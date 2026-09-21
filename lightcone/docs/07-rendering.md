@@ -450,10 +450,10 @@ wrong the moment a body has a shape. It is why Saturn's rings had nothing in the
 A resolved body is the only thing in this renderer that writes depth, which is what puts the far
 half of a ring behind its planet and the near half in front.
 
-**No textures and no authored appearance.** What a body looks like follows from its radius, mass
-and equilibrium temperature, which every body in every system already carries, and everything
-past that is a seed. `lc_world::surface` sorts the solar system the way a person would, and two
-of its thresholds are set between specific pairs rather than chosen:
+**A body's class comes from what it is.** Its radius, mass and equilibrium temperature, which
+every body in every system already carries, choose its class, and the class chooses its palette
+and its pattern. `lc_world::surface` sorts the solar system the way a person would, and two of
+its thresholds are set between specific pairs rather than chosen:
 
 | | | |
 |---|---|---|
@@ -466,6 +466,16 @@ Uranus. True about its temperature and wrong about everything a person would rec
 Two families of surface cover it: latitude bands for anything gaseous, mottling for everything
 solid. The band warp has to stay well under the band spacing — at a quarter of a period it stops
 perturbing the bands and starts destroying them, and the planet reads as blobs.
+
+**The pattern is a texture graph, baked onto a cubemap.** `assets/textures/surfaces.lcsurfaces`
+routes each class to a graph under `textures/surfaces/`, and a body named there to a graph of its
+own — so an Earth that looks like Earth, without being a map of it, is a file and a line. The
+client bakes a body's graph the first time the body is resolved, with the body's name as the
+seed, into six 512² single-channel faces, and keeps it for the session. The graph is sampled on
+the sphere, so what it may use is limited to what means the same thing there: Color, Noise,
+Coordinate, Mix, MinMax and Wave. The shipped class graphs are the two families above expressed
+as graphs, and a test holds each to the formula the shader used to evaluate, so only the noise
+underneath them is new. `src/surfaces.rs` is the routing; `src/procedural.rs` the bake.
 
 The classification also supplies a per-body albedo, which replaces the flat 0.3 the photometry
 had been using. Ice reflects six times what bare rock does.

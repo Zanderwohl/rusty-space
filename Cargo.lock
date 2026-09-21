@@ -7697,7 +7697,7 @@ dependencies = [
 [[package]]
 name = "texture-graph-core"
 version = "0.1.0"
-source = "git+ssh://git@github.com/Zanderwohl/texture-graph.git?rev=0a1eaf5#0a1eaf5209a5a5eb45d0f6ff3931819795934bc6"
+source = "git+ssh://git@github.com/Zanderwohl/texture-graph.git?rev=36960c5#36960c508e7e2d66d69402d4a9b10ccab096d2c2"
 dependencies = [
  "palette",
  "ron 0.8.1",
@@ -7708,7 +7708,7 @@ dependencies = [
 [[package]]
 name = "texture-graph-gpu"
 version = "0.1.0"
-source = "git+ssh://git@github.com/Zanderwohl/texture-graph.git?rev=0a1eaf5#0a1eaf5209a5a5eb45d0f6ff3931819795934bc6"
+source = "git+ssh://git@github.com/Zanderwohl/texture-graph.git?rev=36960c5#36960c508e7e2d66d69402d4a9b10ccab096d2c2"
 dependencies = [
  "bytemuck",
  "glam",

@@ -381,6 +381,7 @@ pub fn update_hulls(
     mut hulls: ResMut<Hulls>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodySurfaceMaterial>>,
+    surfaces: Res<crate::surfaces::Surfaces>,
     existing: Query<(Entity, &Hull)>,
     mut placed: Query<(&mut Transform, &MeshMaterial3d<BodySurfaceMaterial>, &Hull)>,
 ) {
@@ -402,6 +403,7 @@ pub fn update_hulls(
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(materials.add(BodySurfaceMaterial {
                     uniforms: BodySurfaceUniform::default(),
+                    pattern: surfaces.flat.clone(),
                 })),
                 Transform::default(),
                 // The same reason a resolved body carries it: these are placed by hand at a
