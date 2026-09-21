@@ -1,0 +1,48 @@
+TextureGraphFile(
+    format_version: 2,
+    metadata: FileMetadata(
+        name: "population grain",
+        description: Some("Granularity of belts, swarms and rings. One unsigned field, sampled as a repeating volume: it must tile on the unit cube, so the value kernel with period == frequency on every axis. The client treats one repeat as 16 grains; change frequency and period together."),
+        authors: [
+            "Alexander Lowry",
+        ],
+        modified: "2026-09-20T00:00:00Z",
+        written_by: "texture-graph-core 0a1eaf5",
+    ),
+    graph: Graph(
+        layers: [
+            Layer(
+                id: 2,
+                name: "grain",
+                kind: Noise(Noise(
+                    dims: D3,
+                    seed_offset: 0,
+                    frequency: 16.0,
+                    range: Unsigned,
+                    output: Grayscale,
+                    kernel: Value,
+                    period: (16, 16, 16),
+                    fractal: Fractal(
+                        octaves: 1,
+                        lacunarity: 2.0,
+                        gain: 0.5,
+                        mode: Standard,
+                        normalize: true,
+                    ),
+                )),
+            ),
+        ],
+        list_order: [
+            2,
+        ],
+        canvases: {},
+        output: Output(
+            color: Some(2),
+            roughness: Const(0.5),
+            metallic: Const(0.0),
+            normal: None,
+        ),
+        params: {},
+        next_id: 3,
+    ),
+)
