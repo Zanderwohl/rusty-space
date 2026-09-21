@@ -78,13 +78,18 @@ pub fn opacity_of(covering: f64) -> f32 {
 }
 
 #[derive(Component)]
-pub struct EnvelopeMesh;
+pub struct EnvelopeMesh(pub usize);
 
 /// A ring system, which unlike a population is attached to a body and therefore moves.
 #[derive(Component)]
 pub struct RingMesh {
-    /// The body's name, to find it again in this frame's drawables.
-    pub body: String,
+    /// The body's place in this frame's drawables.
+    ///
+    /// An index rather than the name it could be found by: `drawables_at` walks the arena in a
+    /// fixed order and only ever drops a body, so while the list is the same length it holds
+    /// the same bodies in the same places. [`Envelopes::ringed_bodies`] is what makes that
+    /// true — a list that changed shape respawns these rather than moving them all by one.
+    pub body: usize,
     /// Outer radius in render units.
     pub radius: f32,
 }
@@ -93,6 +98,9 @@ pub struct RingMesh {
 pub struct Shell {
     pub mesh: Handle<Mesh>,
     pub material: Handle<PopulationMaterial>,
+    /// Which of the system's populations this draws, so the gain can reach its material
+    /// without rebuilding the filter that chose it.
+    pub population: usize,
     /// Radius in render units, and the rotation taking `+Z` to the population's pole.
     pub radius: f32,
     pub orientation: Quat,
@@ -557,37 +565,35 @@ pub fn spawn(
     // One proxy for all of them: it carries nothing about any population, so there is nothing
     // to build per population.
     let mesh = meshes.add(build_proxy());
-    populations
-        .iter()
-        .enumerate()
-        .filter(|(_, p)| visible(p))
-        .map(|(i, p)| {
-            let profile = profile_of(p);
-            let material = materials.add(PopulationMaterial {
-                uniforms: uniforms(p, i as f32 * 7.31 + 1.0, gain, true, profile.field, lighting),
-                profile: images.add(profile_image(&profile)),
-            });
-            commands.spawn((
-                Mesh3d(mesh.clone()),
-                MeshMaterial3d(material.clone()),
-                Transform::default(),
-                // An Oort shell is a hundred thousand units across and the ship is inside it;
-                // its bounds say nothing useful about whether it is on screen.
-                NoFrustumCulling,
-                EnvelopeMesh,
-            ));
-            Shell {
-                mesh: mesh.clone(),
-                material,
-                // The field is normalised to the outer edge, so that is what scales it. The
-                // thermal radius is where the light comes from, which is a different number
-                // and is what the interface names the band by.
-                radius: (p.extent().map(|e| e.outer_m).unwrap_or(0.0) / UNIT_M) as f32,
-                orientation: orientation(p.pole),
-                field: profile.field,
-            }
-        })
-        .collect()
+    let mut shells = Vec::new();
+    for (i, p) in populations.iter().enumerate().filter(|(_, p)| visible(p)) {
+        let profile = profile_of(p);
+        let material = materials.add(PopulationMaterial {
+            uniforms: uniforms(p, i as f32 * 7.31 + 1.0, gain, true, profile.field, lighting),
+            profile: images.add(profile_image(&profile)),
+        });
+        commands.spawn((
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            Transform::default(),
+            // An Oort shell is a hundred thousand units across and the ship is inside it;
+            // its bounds say nothing useful about whether it is on screen.
+            NoFrustumCulling,
+            EnvelopeMesh(shells.len()),
+        ));
+        shells.push(Shell {
+            mesh: mesh.clone(),
+            material,
+            population: i,
+            // The field is normalised to the outer edge, so that is what scales it. The
+            // thermal radius is where the light comes from, which is a different number
+            // and is what the interface names the band by.
+            radius: (p.extent().map(|e| e.outer_m).unwrap_or(0.0) / UNIT_M) as f32,
+            orientation: orientation(p.pole),
+            field: profile.field,
+        });
+    }
+    shells
 }
 
 /// Spawn a ring for every body in the system that has one.
@@ -636,7 +642,7 @@ fn spawn_rings(
             Transform::default(),
             NoFrustumCulling,
             RingMesh {
-                body: body.name.clone(),
+                body: i,
                 radius: (rings.system.outer_m() / UNIT_M) as f32,
             },
         ));
@@ -663,6 +669,8 @@ fn lighting_of<'a>(
 pub struct Envelopes {
     pub star: Option<lc_world::sky::StarId>,
     pub shells: Vec<Shell>,
+    /// How many drawables the ring entities' indices were taken against. See [`RingMesh::body`].
+    pub ringed_bodies: usize,
 }
 
 /// Spawn the envelopes of the system the ship is in, and keep them placed.
@@ -677,15 +685,16 @@ pub fn update_envelopes(
     mut materials: ResMut<Assets<PopulationMaterial>>,
     mut images: ResMut<Assets<Image>>,
     existing: Query<Entity, Or<(With<EnvelopeMesh>, With<RingMesh>)>>,
-    mut placed: Query<&mut Transform, (With<EnvelopeMesh>, Without<RingMesh>)>,
+    mut placed: Query<(&mut Transform, &EnvelopeMesh), Without<RingMesh>>,
     mut ringed: Query<(&mut Transform, &RingMesh), Without<EnvelopeMesh>>,
 ) {
     let here = session.system.as_ref().map(|s| s.star);
-    if envelopes.star != here {
+    if envelopes.star != here || envelopes.ringed_bodies != bodies.drawn.len() {
         for entity in &existing {
             commands.entity(entity).despawn();
         }
         envelopes.star = here;
+        envelopes.ringed_bodies = bodies.drawn.len();
         envelopes.shells = match session.system.as_ref() {
             Some(system) => {
                 spawn_rings(
@@ -713,7 +722,8 @@ pub fn update_envelopes(
     }
 
     let Some(system) = session.system.as_ref() else { return };
-    for (mut transform, shell) in placed.iter_mut().zip(&envelopes.shells) {
+    for (mut transform, of) in placed.iter_mut() {
+        let Some(shell) = envelopes.shells.get(of.0) else { continue };
         transform.translation =
             sim_to_render((system.origin_ly - eye.at_ly) * M_PER_LY / UNIT_M).as_vec3();
         transform.rotation = shell.orientation;
@@ -722,7 +732,7 @@ pub fn update_envelopes(
 
     // Rings ride their body, so unlike a shell they are placed every frame.
     for (mut transform, ring) in ringed.iter_mut() {
-        let Some(body) = bodies.drawn.iter().find(|d| d.name == ring.body) else { continue };
+        let Some(body) = bodies.drawn.get(ring.body) else { continue };
         let Some(rings) = body.rings else { continue };
         transform.translation =
             sim_to_render((body.position_ly - eye.at_ly) * M_PER_LY / UNIT_M).as_vec3();
@@ -731,9 +741,8 @@ pub fn update_envelopes(
     }
 
     // The display gain is a knob, so it has to reach the material rather than only the spawn.
-    for (shell, population) in
-        envelopes.shells.iter().zip(system.populations.iter().filter(|p| visible(p)))
-    {
+    for shell in &envelopes.shells {
+        let Some(population) = system.populations.get(shell.population) else { continue };
         if let Some(mut material) = materials.get_mut(&shell.material) {
             let inside = eye.at_ly.distance(system.origin_ly) * M_PER_LY
                 < population.thermal_radius();

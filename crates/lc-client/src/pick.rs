@@ -253,10 +253,13 @@ pub(crate) fn selected(ui: &Ui) -> Option<Subject> {
 }
 
 /// What a subject is called on screen.
-fn label_of(seen: &Sighted) -> String {
+///
+/// Borrowed: the contact list asks this of every craft in sight every frame, only to compare it
+/// against the hovered one's.
+fn label_of(seen: &Sighted) -> &str {
     match &seen.subject {
-        Subject::Body(name) => name.clone(),
-        Subject::Star(_, name) | Subject::Swarm(_, name) | Subject::Craft(_, name) => name.clone(),
+        Subject::Body(name) => name,
+        Subject::Star(_, name) | Subject::Swarm(_, name) | Subject::Craft(_, name) => name,
     }
 }
 
@@ -269,7 +272,7 @@ fn mark(seen: &Sighted, viewport: Vec2, toward: Vec2) -> Mark {
     Mark {
         clip,
         radius_px: seen.radius_px,
-        label: label_of(seen),
+        label: label_of(seen).to_string(),
         outline: seen.outline.clone(),
     }
 }
@@ -445,9 +448,12 @@ pub(crate) fn screen_runs(outline: &[Vec<Vec4>], viewport: Vec2) -> Vec<Vec<Vec2
 }
 
 /// Paint the marks.
-fn draw(mut contexts: EguiContexts, picked: Res<Picked>, windows: Query<&Window, With<PrimaryWindow>>) {
+fn draw(
+    mut contexts: EguiContexts,
+    picked: Res<Picked>,
+    window: Single<&Window, With<PrimaryWindow>>,
+) {
     let Ok(context) = contexts.ctx_mut() else { return };
-    let Ok(window) = windows.single() else { return };
     let viewport = Vec2::new(window.width(), window.height());
 
     // The part of the window the sky is visible through, less the border. Not the whole window:

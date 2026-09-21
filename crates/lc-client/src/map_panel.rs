@@ -143,11 +143,9 @@ pub fn draw(
 /// reaching past the surface is a wgpu validation failure rather than a clipped picture.
 pub fn frame_world(
     inset: Res<WorldInset>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    mut camera: Query<&mut Camera, With<crate::app::SkyCamera>>,
+    window: Single<&Window, With<PrimaryWindow>>,
+    mut camera: Single<&mut Camera, With<crate::app::SkyCamera>>,
 ) {
-    let Ok(window) = windows.single() else { return };
-    let Ok(mut camera) = camera.single_mut() else { return };
     let wanted = inset.0.filter(|rect| !rect.is_empty()).map(|rect| {
         let mut viewport = Viewport {
             physical_position: rect.min,
@@ -209,7 +207,9 @@ fn labels(
         .clone();
 
     let mut candidates = Vec::with_capacity(frame.placements.len());
-    let mut galleys = Vec::with_capacity(frame.placements.len());
+    // Keyed, because the layout hands back whichever names fit in whatever order it settled
+    // them, and matching them up by scanning made that quadratic in the number of names.
+    let mut galleys = std::collections::HashMap::with_capacity(frame.placements.len());
     for placement in &frame.placements {
         // A mark names what it is on; naming it here too would write it twice.
         if placement.label.is_empty() || named.contains(&placement.key) {
@@ -235,7 +235,7 @@ fn labels(
             ),
             size: glam::Vec2::new(size.x, size.y),
         });
-        galleys.push((placement.key, galley));
+        galleys.insert(placement.key, galley);
     }
 
     // Clear of the mark and centered on it. The mark is sized against the texture and the
@@ -251,7 +251,7 @@ fn labels(
     };
     let viewport = glam::Vec2::new(rect.width(), rect.height());
     for placed in em_map::label::lay_out(candidates, viewport, layout) {
-        let Some((_, galley)) = galleys.iter().find(|(key, _)| *key == placed.key) else {
+        let Some(galley) = galleys.get(&placed.key) else {
             continue;
         };
         let at = rect.min + egui::vec2(placed.at.x, placed.at.y);
